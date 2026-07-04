@@ -101,7 +101,9 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
   - `bun run lint`
   - `bun run build`
 - For `apps/` changes, inspect the available Python tooling first and run the narrowest relevant check:
-  - `apps/.venv/bin/python -m compileall apps/nexaflow apps/tests apps/main.py`
-  - From `apps/`: `.venv/bin/python -m tests.smoke_identity_workspace` for the identity/workspace backend smoke.
+  - `apps/.venv/bin/python -m compileall apps/nexaflow apps/main.py`
+  - From `apps/`: `.venv/bin/python -m nexaflow.identity.test`
+  - From `apps/`: `.venv/bin/python -m nexaflow.workspaces.test`
+  - From `apps/`: `.venv/bin/python -m nexaflow.teams.test`
   - From `apps/`: run Alembic against the target database, or a temporary explicit test database when only validating migration syntax.
 - If a check cannot be run, say exactly why in the final response.
