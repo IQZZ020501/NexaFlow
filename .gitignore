@@ -39,3 +39,9 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# docs
+docs/MVP_TASK_PLAN.md
+
+# code graph
+.codegraph
