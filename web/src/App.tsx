@@ -1,19 +1,2355 @@
-import { Button } from "@/components/ui/button"
+import * as React from "react"
+import {
+  ChevronDownIcon,
+  CircleCheckIcon,
+  CircleOffIcon,
+  Building2Icon,
+  LockIcon,
+  LoaderCircleIcon,
+  LogOutIcon,
+  MonitorIcon,
+  MoonIcon,
+  PencilIcon,
+  PlusIcon,
+  SearchIcon,
+  SettingsIcon,
+  ShieldCheckIcon,
+  SunIcon,
+  Trash2Icon,
+  UserCogIcon,
+  UsersIcon,
+} from "lucide-react"
 
-export function App() {
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { useTheme } from "@/components/theme-provider"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import {
+  ApiError,
+  changePassword,
+  createTeam,
+  createUser,
+  createWorkspace,
+  deleteUser,
+  getMe,
+  listTeams,
+  listUsers,
+  listWorkspaces,
+  login,
+  resetUserPassword,
+  type MeResponse,
+  type Team,
+  type User,
+  type Workspace,
+  type WorkspaceCreateResponse,
+  updateUser,
+} from "@/lib/api"
+import { isEventFromDropdownMenu } from "@/lib/dom"
+import { pages, type FeaturePageConfig, type PageKey } from "@/lib/pages"
+import { cn } from "@/lib/utils"
+
+const TOKEN_KEY = "nexaflow.accessToken"
+const WORKSPACE_KEY = "nexaflow.workspaceId"
+const STATUS_LABELS: Record<string, string> = {
+  active: "已启用",
+  archived: "已归档",
+}
+type ThemePreference = "system" | "light" | "dark"
+const themeOptions: Array<{
+  value: ThemePreference
+  label: string
+  icon: typeof MonitorIcon
+}> = [
+  { value: "system", label: "跟随系统", icon: MonitorIcon },
+  { value: "light", label: "白色", icon: SunIcon },
+  { value: "dark", label: "暗色", icon: MoonIcon },
+]
+type SystemTabKey = "workspaces" | "teams" | "users" | "account"
+
+type AppRoute = {
+  page: PageKey
+  systemTab: SystemTabKey
+}
+
+const PAGE_PATHS: Record<PageKey, string> = {
+  apps: "/apps",
+  knowledge: "/knowledge",
+  models: "/models",
+  tools: "/tools",
+  system: "/system/workspaces",
+}
+
+const SYSTEM_TAB_PATHS: Record<SystemTabKey, string> = {
+  workspaces: "/system/workspaces",
+  teams: "/system/teams",
+  users: "/system/users",
+  account: "/system/account",
+}
+
+function routeFromPath(pathname = window.location.pathname): AppRoute {
+  const path = pathname.replace(/\/+$/, "") || "/"
+
+  switch (path) {
+    case "/":
+    case "/apps":
+      return { page: "apps", systemTab: "workspaces" }
+    case "/knowledge":
+      return { page: "knowledge", systemTab: "workspaces" }
+    case "/models":
+      return { page: "models", systemTab: "workspaces" }
+    case "/tools":
+      return { page: "tools", systemTab: "workspaces" }
+    case "/system":
+    case "/system/workspaces":
+      return { page: "system", systemTab: "workspaces" }
+    case "/system/teams":
+      return { page: "system", systemTab: "teams" }
+    case "/system/users":
+      return { page: "system", systemTab: "users" }
+    case "/system/account":
+      return { page: "system", systemTab: "account" }
+    default:
+      return { page: "apps", systemTab: "workspaces" }
+  }
+}
+
+function pathForRoute(route: AppRoute) {
+  if (route.page === "system") {
+    return SYSTEM_TAB_PATHS[route.systemTab]
+  }
+
+  return PAGE_PATHS[route.page]
+}
+
+type LoginForm = {
+  usernameOrEmail: string
+  password: string
+}
+
+type ChangePasswordForm = {
+  newPassword: string
+  confirmPassword: string
+}
+
+type WorkspaceForm = {
+  name: string
+  slug: string
+  adminUsername: string
+  adminEmail: string
+  adminName: string
+}
+
+type TeamForm = {
+  name: string
+  slug: string
+}
+
+type UserCreateForm = {
+  username: string
+  email: string
+  name: string
+  isGlobalAdmin: boolean
+  workspaceId: string
+  teamIds: string[]
+}
+
+type UserForm = {
+  id: string
+  username: string
+  email: string
+  name: string
+  isGlobalAdmin: boolean
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.message
+  }
+
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return "请求失败"
+}
+
+function initials(name: string) {
+  const value = name.trim() || "NexaFlow"
+  return value.slice(0, 2).toUpperCase()
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("sv-SE", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(value))
+}
+
+type DefaultNamedScope = {
+  name: string
+  is_default: boolean
+}
+
+function displayWorkspaceName(workspace: DefaultNamedScope) {
+  if (workspace.is_default && workspace.name === "Default Workspace") {
+    return "默认工作空间"
+  }
+
+  return workspace.name
+}
+
+function displayTeamName(team: DefaultNamedScope) {
+  if (team.is_default && team.name === "Default Team") {
+    return "默认团队"
+  }
+
+  return team.name
+}
+
+function formatUserWorkspaces(user: User) {
+  if (!user.workspaces.length) {
+    return "-"
+  }
+
+  return user.workspaces
+    .map((workspace) => displayWorkspaceName(workspace))
+    .join("、")
+}
+
+function formatUserTeams(user: User) {
+  if (!user.teams.length) {
+    return "-"
+  }
+
+  return user.teams.map((team) => displayTeamName(team)).join("、")
+}
+
+function getUserRoleLabel(user: User) {
+  if (user.is_global_admin) {
+    return "全局管理员"
+  }
+
+  if (user.workspaces.some((workspace) => workspace.role === "owner")) {
+    return "公司管理员"
+  }
+
+  if (user.workspaces.some((workspace) => workspace.role === "admin")) {
+    return "公司管理员"
+  }
+
+  if (user.teams.some((team) => team.role === "admin")) {
+    return "部门管理员"
+  }
+
+  return "普通用户"
+}
+
+function getUserRoleClass(user: User) {
+  const role = getUserRoleLabel(user)
+
+  if (role === "全局管理员" || role === "公司管理员") {
+    return "border-amber-300/60 bg-amber-100 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300"
+  }
+
+  if (role === "部门管理员") {
+    return "border-red-300/60 bg-red-100 text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300"
+  }
+
+  return "border-border bg-muted text-muted-foreground"
+}
+
+function displaySlug(slug: string, isDefault: boolean) {
+  if (isDefault && slug === "default") {
+    return "默认"
+  }
+
+  return slug
+}
+
+function getMembershipRole(me: MeResponse | null, workspaceId: string | null) {
+  if (!me || !workspaceId) {
+    return null
+  }
+
   return (
-    <div className="flex min-h-svh p-6">
-      <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-        <div>
-          <h1 className="font-medium">NexaFlow Web</h1>
-          <p>React + Vite + TypeScript + shadcn/ui is ready.</p>
-          <p>Backend stays in the app directory; frontend starts here.</p>
-          <Button className="mt-2">Start building</Button>
+    me.memberships.find((membership) => membership.workspace_id === workspaceId)
+      ?.role ?? null
+  )
+}
+
+function LoginScreen({
+  onLogin,
+}: {
+  onLogin: (token: string, mustChangePassword: boolean) => void
+}) {
+  const [form, setForm] = React.useState<LoginForm>({
+    usernameOrEmail: "",
+    password: "",
+  })
+  const [error, setError] = React.useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = React.useState(false)
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+    setIsSubmitting(true)
+
+    try {
+      const payload = await login(form.usernameOrEmail, form.password)
+      onLogin(payload.access_token, payload.must_change_password)
+    } catch (error) {
+      setError(getErrorMessage(error))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <main className="flex min-h-svh items-center justify-center bg-muted/30 p-6">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle>NexaFlow</CardTitle>
+          <CardDescription>登录到你的工作空间</CardDescription>
+        </CardHeader>
+        <form onSubmit={handleSubmit}>
+          <CardContent>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="usernameOrEmail">账号或邮箱</FieldLabel>
+                <Input
+                  id="usernameOrEmail"
+                  autoComplete="username"
+                  value={form.usernameOrEmail}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      usernameOrEmail: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="password">密码</FieldLabel>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={form.password}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      password: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              {error ? (
+                <p className="text-sm text-destructive">{error}</p>
+              ) : null}
+            </FieldGroup>
+          </CardContent>
+          <CardFooter className="pt-6">
+            <Button className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <LoaderCircleIcon data-icon="inline-start" />
+              ) : null}
+              登录
+            </Button>
+          </CardFooter>
+        </form>
+      </Card>
+    </main>
+  )
+}
+
+function ChangePasswordDialog({
+  open,
+  token,
+  onChanged,
+}: {
+  open: boolean
+  token: string
+  onChanged: () => void
+}) {
+  const [form, setForm] = React.useState<ChangePasswordForm>({
+    newPassword: "",
+    confirmPassword: "",
+  })
+  const [error, setError] = React.useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = React.useState(false)
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+
+    if (form.newPassword !== form.confirmPassword) {
+      setError("两次输入的新密码不一致")
+      return
+    }
+
+    if (form.newPassword.length < 6 || !/[A-Z]/.test(form.newPassword)) {
+      setError("密码至少 6 位，并且包含一个大写字母")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await changePassword(token, form.newPassword)
+      setForm({ newPassword: "", confirmPassword: "" })
+      onChanged()
+    } catch (error) {
+      setError(getErrorMessage(error))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog open={open}>
+      <DialogContent
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>修改初始密码</DialogTitle>
+          <DialogDescription>设置新密码后继续使用 NexaFlow</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit}>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="newPassword">新密码</FieldLabel>
+              <Input
+                id="newPassword"
+                type="password"
+                autoComplete="new-password"
+                minLength={6}
+                value={form.newPassword}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    newPassword: event.target.value,
+                  }))
+                }
+                required
+              />
+              <FieldDescription>
+                至少 6 位，并且包含一个大写字母
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="confirmPassword">确认密码</FieldLabel>
+              <Input
+                id="confirmPassword"
+                type="password"
+                autoComplete="new-password"
+                minLength={6}
+                value={form.confirmPassword}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    confirmPassword: event.target.value,
+                  }))
+                }
+                required
+              />
+            </Field>
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          </FieldGroup>
+          <DialogFooter className="pt-4">
+            <Button className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <LoaderCircleIcon data-icon="inline-start" />
+              ) : null}
+              保存
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function TopBar({
+  me,
+  activePage,
+  onPageChange,
+  onLogout,
+}: {
+  me: MeResponse
+  activePage: PageKey
+  onPageChange: (page: PageKey) => void
+  onLogout: () => void
+}) {
+  const { theme, setTheme } = useTheme()
+  const activeThemeOption =
+    themeOptions.find((option) => option.value === theme) ?? themeOptions[0]
+  const ActiveThemeIcon = activeThemeOption.icon
+
+  return (
+    <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
+      <div className="flex h-14 w-full items-center gap-3 px-4 sm:px-6 lg:px-8">
+        <button
+          type="button"
+          className="shrink-0 text-left text-base font-semibold"
+          onClick={() => onPageChange("apps")}
+        >
+          NexaFlow
+        </button>
+        <nav className="flex min-w-0 flex-1 justify-center gap-2 overflow-x-auto">
+          {pages.map((page) => {
+            const Icon = page.icon
+            const isActive = activePage === page.key
+
+            return (
+              <Button
+                key={page.key}
+                type="button"
+                variant={isActive ? "secondary" : "ghost"}
+                onClick={() => onPageChange(page.key)}
+                className="h-10 min-w-28 px-4 text-sm"
+              >
+                <Icon data-icon="inline-start" />
+                <span className="hidden sm:inline">{page.label}</span>
+              </Button>
+            )
+          })}
+        </nav>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-lg"
+              className="text-muted-foreground hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
+              aria-label={`切换主题，当前为${activeThemeOption.label}`}
+            >
+              <ActiveThemeIcon className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-40">
+            <DropdownMenuLabel>主题</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              {themeOptions.map((option) => {
+                const Icon = option.icon
+                const isActive = theme === option.value
+
+                return (
+                  <DropdownMenuItem
+                    key={option.value}
+                    className="justify-between"
+                    onSelect={() => setTheme(option.value)}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon />
+                      {option.label}
+                    </span>
+                    {isActive ? (
+                      <CircleCheckIcon className="size-3.5 text-primary" />
+                    ) : null}
+                  </DropdownMenuItem>
+                )
+              })}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-lg" aria-label="打开用户菜单">
+              <Avatar>
+                <AvatarFallback>{initials(me.user.name)}</AvatarFallback>
+              </Avatar>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>
+              <div className="flex flex-col gap-1">
+                <span>{me.user.name}</span>
+                <span className="text-xs font-normal text-muted-foreground">
+                  {me.user.email}
+                </span>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={() => onPageChange("system")}>
+                <SettingsIcon />
+                系统管理
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onLogout}>
+                <LogOutIcon />
+                退出登录
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </header>
+  )
+}
+
+function FeaturePage({ page }: { page: FeaturePageConfig }) {
+  const Icon = page.icon
+  const [isDialogOpen, setIsDialogOpen] = React.useState(false)
+
+  return (
+    <>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="truncate text-2xl font-semibold">{page.label}</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            {page.description}
+          </p>
         </div>
-        <div className="font-mono text-xs text-muted-foreground">
-          (Press <kbd>d</kbd> to toggle dark mode)
+        <Button
+          type="button"
+          className="shrink-0"
+          onClick={() => setIsDialogOpen(true)}
+        >
+          <PlusIcon data-icon="inline-start" />
+          {page.actionLabel}
+        </Button>
+      </div>
+
+      <div className="rounded-lg border bg-background p-3 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 sm:w-[320px]">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input className="pl-9" placeholder={`搜索${page.label}...`} />
+          </div>
+          <Button type="button" variant="outline" className="justify-between">
+            最近更新
+            <ChevronDownIcon data-icon="inline-end" />
+          </Button>
         </div>
       </div>
+
+      <div className="rounded-lg border bg-background p-6 shadow-sm">
+        <div className="mx-auto flex min-h-[320px] max-w-xl flex-col items-center justify-center gap-4 text-center">
+          <span className="flex size-14 items-center justify-center rounded-lg bg-muted">
+            <Icon className="size-5 text-muted-foreground" />
+          </span>
+          <div className="flex flex-col gap-2">
+            <p className="text-base font-semibold">{page.emptyTitle}</p>
+            <p className="text-sm leading-6 text-muted-foreground">
+              {page.emptyDescription}
+            </p>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button type="button" onClick={() => setIsDialogOpen(true)}>
+              <PlusIcon data-icon="inline-start" />
+              {page.actionLabel}
+            </Button>
+            <Button type="button" variant="outline">
+              {page.secondaryActionLabel}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{page.actionLabel}</DialogTitle>
+            <DialogDescription>{page.dialogDescription}</DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              setIsDialogOpen(false)
+            }}
+          >
+            <FieldGroup>
+              {page.dialogFields.map((field) => (
+                <Field key={field.id}>
+                  <FieldLabel htmlFor={field.id}>{field.label}</FieldLabel>
+                  <Input
+                    id={field.id}
+                    type={field.type ?? "text"}
+                    placeholder={field.placeholder}
+                    required
+                  />
+                </Field>
+              ))}
+            </FieldGroup>
+            <DialogFooter className="pt-5">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsDialogOpen(false)}
+              >
+                取消
+              </Button>
+              <Button type="submit">{page.actionLabel}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={status === "active" ? "secondary" : "outline"}>
+      {STATUS_LABELS[status] ?? status}
+    </Badge>
+  )
+}
+
+function SystemPage({
+  me,
+  token,
+  workspaces,
+  teams,
+  selectedWorkspaceId,
+  workspaceNotice,
+  isTeamsLoading,
+  teamsError,
+  activeSystemTab,
+  onSelectWorkspace,
+  onSystemTabChange,
+  onWorkspaceCreated,
+  onTeamCreated,
+}: {
+  me: MeResponse
+  token: string
+  workspaces: Workspace[]
+  teams: Team[]
+  selectedWorkspaceId: string | null
+  workspaceNotice: WorkspaceCreateResponse | null
+  isTeamsLoading: boolean
+  teamsError: string | null
+  activeSystemTab: SystemTabKey
+  onSelectWorkspace: (workspaceId: string) => void
+  onSystemTabChange: (tab: SystemTabKey) => void
+  onWorkspaceCreated: (payload: WorkspaceCreateResponse) => void
+  onTeamCreated: (team: Team) => void
+}) {
+  const [workspaceForm, setWorkspaceForm] = React.useState<WorkspaceForm>({
+    name: "",
+    slug: "",
+    adminUsername: "",
+    adminEmail: "",
+    adminName: "",
+  })
+  const [teamForm, setTeamForm] = React.useState<TeamForm>({
+    name: "",
+    slug: "",
+  })
+  const [userCreateForm, setUserCreateForm] =
+    React.useState<UserCreateForm>({
+      username: "",
+      email: "",
+      name: "",
+      isGlobalAdmin: false,
+      workspaceId: selectedWorkspaceId ?? "",
+      teamIds: [],
+    })
+  const [workspaceError, setWorkspaceError] = React.useState<string | null>(
+    null
+  )
+  const [teamError, setTeamError] = React.useState<string | null>(null)
+  const [users, setUsers] = React.useState<User[]>([])
+  const [usersError, setUsersError] = React.useState<string | null>(null)
+  const [usersNotice, setUsersNotice] = React.useState<string | null>(null)
+  const [userCreateError, setUserCreateError] = React.useState<string | null>(
+    null
+  )
+  const [userForm, setUserForm] = React.useState<UserForm | null>(null)
+  const [userCreateTeams, setUserCreateTeams] = React.useState<Team[]>([])
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = React.useState(false)
+  const [isCreatingTeam, setIsCreatingTeam] = React.useState(false)
+  const [isCreatingUser, setIsCreatingUser] = React.useState(false)
+  const [isUserCreateTeamsLoading, setIsUserCreateTeamsLoading] =
+    React.useState(false)
+  const [isUsersLoading, setIsUsersLoading] = React.useState(false)
+  const [isSavingUser, setIsSavingUser] = React.useState(false)
+  const [isWorkspaceDialogOpen, setIsWorkspaceDialogOpen] =
+    React.useState(false)
+  const [isTeamDialogOpen, setIsTeamDialogOpen] = React.useState(false)
+  const [isUserCreateDialogOpen, setIsUserCreateDialogOpen] =
+    React.useState(false)
+  const userCreateTeamsRequestId = React.useRef(0)
+
+  const selectedWorkspace =
+    workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null
+  const activeWorkspaces = workspaces.filter(
+    (workspace) => workspace.status === "active"
+  )
+  const userCreateWorkspace =
+    activeWorkspaces.find(
+      (workspace) => workspace.id === userCreateForm.workspaceId
+    ) ?? null
+  const selectedRole = getMembershipRole(me, selectedWorkspaceId)
+  const canManageWorkspace =
+    me.user.is_global_admin ||
+    selectedRole === "owner" ||
+    selectedRole === "admin"
+  const canCreateWorkspace = me.user.is_global_admin
+  const systemTabs: {
+    key: SystemTabKey
+    label: string
+    meta: string
+    icon: React.ElementType
+  }[] = [
+    {
+      key: "workspaces",
+      label: "工作空间",
+      meta: `${workspaces.length} 个`,
+      icon: Building2Icon,
+    },
+    {
+      key: "teams",
+      label: "团队",
+      meta: `${teams.length} 个`,
+      icon: UsersIcon,
+    },
+    ...(me.user.is_global_admin
+      ? [
+          {
+            key: "users" as const,
+            label: "用户管理",
+            meta: `${users.length} 个`,
+            icon: UserCogIcon,
+          },
+        ]
+      : []),
+    {
+      key: "account",
+      label: "账号",
+      meta: me.user.is_global_admin ? "管理员" : "成员",
+      icon: ShieldCheckIcon,
+    },
+  ]
+
+  const loadUsers = React.useCallback(async () => {
+    setUsersError(null)
+    setIsUsersLoading(true)
+
+    try {
+      setUsers(await listUsers(token))
+    } catch (error) {
+      setUsers([])
+      setUsersError(getErrorMessage(error))
+    } finally {
+      setIsUsersLoading(false)
+    }
+  }, [token])
+
+  const loadUserCreateTeams = React.useCallback(
+    async (workspaceId: string) => {
+      const requestId = userCreateTeamsRequestId.current + 1
+      userCreateTeamsRequestId.current = requestId
+      setUserCreateTeams([])
+      setIsUserCreateTeamsLoading(true)
+
+      try {
+        const nextTeams = await listTeams(token, workspaceId)
+        if (requestId === userCreateTeamsRequestId.current) {
+          setUserCreateTeams(nextTeams)
+          setUserCreateError(null)
+        }
+      } catch (error) {
+        if (requestId === userCreateTeamsRequestId.current) {
+          setUserCreateError(getErrorMessage(error))
+        }
+      } finally {
+        if (requestId === userCreateTeamsRequestId.current) {
+          setIsUserCreateTeamsLoading(false)
+        }
+      }
+    },
+    [token]
+  )
+
+  React.useEffect(() => {
+    if (activeSystemTab !== "users" || !me.user.is_global_admin) {
+      return
+    }
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadUsers()
+  }, [activeSystemTab, loadUsers, me.user.is_global_admin])
+
+  function updateUserInList(user: User) {
+    setUsers((current) =>
+      current.map((item) => (item.id === user.id ? user : item))
+    )
+  }
+
+  function handleOpenCreateUser() {
+    const workspaceId =
+      activeWorkspaces.find((workspace) => workspace.id === selectedWorkspaceId)
+        ?.id ?? ""
+    setUserCreateForm({
+      username: "",
+      email: "",
+      name: "",
+      isGlobalAdmin: false,
+      workspaceId,
+      teamIds: [],
+    })
+    setUserCreateError(null)
+    setIsUserCreateDialogOpen(true)
+    if (workspaceId) {
+      void loadUserCreateTeams(workspaceId)
+    } else {
+      userCreateTeamsRequestId.current += 1
+      setUserCreateTeams([])
+      setIsUserCreateTeamsLoading(false)
+    }
+  }
+
+  function handleUserCreateWorkspaceChange(workspaceId: string) {
+    setUserCreateForm((current) => ({
+      ...current,
+      workspaceId,
+      teamIds: [],
+    }))
+    setUserCreateError(null)
+    if (workspaceId) {
+      void loadUserCreateTeams(workspaceId)
+    } else {
+      userCreateTeamsRequestId.current += 1
+      setUserCreateTeams([])
+      setIsUserCreateTeamsLoading(false)
+    }
+  }
+
+  async function handleCreateWorkspace(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault()
+    setWorkspaceError(null)
+    setIsCreatingWorkspace(true)
+
+    try {
+      const payload = await createWorkspace(token, {
+        name: workspaceForm.name,
+        slug: workspaceForm.slug,
+        admin: {
+          username: workspaceForm.adminUsername,
+          email: workspaceForm.adminEmail,
+          name: workspaceForm.adminName,
+        },
+      })
+      setWorkspaceForm({
+        name: "",
+        slug: "",
+        adminUsername: "",
+        adminEmail: "",
+        adminName: "",
+      })
+      onWorkspaceCreated(payload)
+    } catch (error) {
+      setWorkspaceError(getErrorMessage(error))
+    } finally {
+      setIsCreatingWorkspace(false)
+    }
+  }
+
+  async function handleCreateTeam(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!selectedWorkspaceId) {
+      return
+    }
+
+    setTeamError(null)
+    setIsCreatingTeam(true)
+
+    try {
+      const team = await createTeam(token, selectedWorkspaceId, teamForm)
+      setTeamForm({ name: "", slug: "" })
+      onTeamCreated(team)
+      setIsTeamDialogOpen(false)
+    } catch (error) {
+      setTeamError(getErrorMessage(error))
+    } finally {
+      setIsCreatingTeam(false)
+    }
+  }
+
+  async function handleCreateUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setUserCreateError(null)
+    setUsersNotice(null)
+    setIsCreatingUser(true)
+
+    try {
+      const payload = await createUser(token, {
+        username: userCreateForm.username,
+        email: userCreateForm.email,
+        name: userCreateForm.name,
+        is_global_admin: userCreateForm.isGlobalAdmin,
+        workspace_id: userCreateForm.workspaceId || null,
+        team_ids: userCreateForm.teamIds,
+      })
+      setUsers((current) => [...current, payload.user])
+      setUsersNotice(
+        `${payload.user.name} 的临时密码：${payload.initial_password}`
+      )
+      setIsUserCreateDialogOpen(false)
+      setUserCreateForm({
+        username: "",
+        email: "",
+        name: "",
+        isGlobalAdmin: false,
+        workspaceId: "",
+        teamIds: [],
+      })
+      setUserCreateTeams([])
+    } catch (error) {
+      setUserCreateError(getErrorMessage(error))
+    } finally {
+      setIsCreatingUser(false)
+    }
+  }
+
+  async function handleToggleUser(user: User) {
+    setUsersError(null)
+    setUsersNotice(null)
+
+    try {
+      updateUserInList(
+        await updateUser(token, user.id, { is_active: !user.is_active })
+      )
+    } catch (error) {
+      setUsersError(getErrorMessage(error))
+    }
+  }
+
+  function handleOpenEditUser(user: User) {
+    setUsersError(null)
+    setUsersNotice(null)
+    setUserForm({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      name: user.name,
+      isGlobalAdmin: user.is_global_admin,
+    })
+  }
+
+  async function handleUpdateUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!userForm) {
+      return
+    }
+
+    setUsersError(null)
+    setUsersNotice(null)
+    setIsSavingUser(true)
+
+    try {
+      const user = await updateUser(token, userForm.id, {
+        username: userForm.username,
+        email: userForm.email,
+        name: userForm.name,
+        is_global_admin: userForm.isGlobalAdmin,
+      })
+      updateUserInList(user)
+      setUserForm(null)
+    } catch (error) {
+      setUsersError(getErrorMessage(error))
+    } finally {
+      setIsSavingUser(false)
+    }
+  }
+
+  async function handleResetUserPassword(user: User) {
+    if (!window.confirm(`重置 ${user.name} 的密码？`)) {
+      return
+    }
+
+    setUsersError(null)
+    setUsersNotice(null)
+
+    try {
+      const payload = await resetUserPassword(token, user.id)
+      updateUserInList(payload.user)
+      setUsersNotice(`${user.name} 的临时密码：${payload.initial_password}`)
+    } catch (error) {
+      setUsersError(getErrorMessage(error))
+    }
+  }
+
+  async function handleDeleteUser(user: User) {
+    if (!window.confirm(`停用 ${user.name}？`)) {
+      return
+    }
+
+    setUsersError(null)
+    setUsersNotice(null)
+
+    try {
+      await deleteUser(token, user.id)
+      updateUserInList({ ...user, is_active: false })
+      setUsersNotice(`${user.name} 已停用`)
+    } catch (error) {
+      setUsersError(getErrorMessage(error))
+    }
+  }
+
+  return (
+    <div className="grid min-w-0 gap-4 lg:h-[calc(100svh-9.25rem)] lg:grid-cols-[240px_minmax(0,1fr)]">
+      <aside className="lg:sticky lg:top-20 lg:h-full lg:self-start">
+        <div
+          role="tablist"
+          aria-label="系统管理"
+          className="flex gap-1 overflow-x-auto rounded-lg border bg-background p-1 shadow-sm lg:h-full lg:flex-col lg:overflow-visible"
+        >
+          {systemTabs.map((tab) => {
+            const Icon = tab.icon
+            const isActive = activeSystemTab === tab.key
+
+            return (
+              <button
+                key={tab.key}
+                id={`system-tab-${tab.key}`}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={`system-panel-${tab.key}`}
+                className={cn(
+                  "flex min-w-32 items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0",
+                  isActive &&
+                    "bg-foreground text-background shadow-sm hover:bg-foreground hover:text-background"
+                )}
+                onClick={() => onSystemTabChange(tab.key)}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <Icon className="size-4 shrink-0" />
+                  <span>{tab.label}</span>
+                </span>
+                <span className="text-xs opacity-70">{tab.meta}</span>
+              </button>
+            )
+          })}
+        </div>
+      </aside>
+
+      <div className="min-w-0 lg:h-full lg:overflow-hidden">
+        {activeSystemTab === "workspaces" ? (
+          <div
+            id="system-panel-workspaces"
+            role="tabpanel"
+            aria-labelledby="system-tab-workspaces"
+            className="grid gap-4 lg:h-full lg:overflow-y-auto lg:pr-1"
+          >
+            <Card className="min-w-0 gap-3 border-border/70 py-4 shadow-sm lg:min-h-full">
+              <CardHeader className="flex-row items-start justify-between gap-4 px-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
+                    <Building2Icon className="size-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <CardTitle>工作空间</CardTitle>
+                    <CardDescription>当前租户范围</CardDescription>
+                  </div>
+                </div>
+                <span className="flex shrink-0 items-center gap-2">
+                  <Badge variant="outline">{workspaces.length} 个</Badge>
+                  {canCreateWorkspace ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => setIsWorkspaceDialogOpen(true)}
+                    >
+                      <PlusIcon data-icon="inline-start" />
+                      新建工作空间
+                    </Button>
+                  ) : null}
+                </span>
+              </CardHeader>
+              <CardContent className="min-w-0 px-4">
+                {workspaces.length ? (
+                  <div className="flex flex-col gap-2">
+                    {workspaces.map((workspace) => {
+                      const isSelected = workspace.id === selectedWorkspaceId
+
+                      return (
+                        <button
+                          key={workspace.id}
+                          type="button"
+                          className={cn(
+                            "flex w-full items-center justify-between gap-3 rounded-lg border bg-background px-4 py-2.5 text-left text-sm shadow-xs transition-colors hover:border-foreground/30 hover:bg-muted/50",
+                            isSelected &&
+                              "border-foreground bg-muted/60 shadow-sm"
+                          )}
+                          onClick={() => onSelectWorkspace(workspace.id)}
+                        >
+                          <span className="flex min-w-0 flex-col gap-1">
+                            <span className="truncate font-medium">
+                              {displayWorkspaceName(workspace)}
+                            </span>
+                            <span className="truncate text-muted-foreground">
+                              {displaySlug(workspace.slug, workspace.is_default)}
+                            </span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-2">
+                            {workspace.is_default ? (
+                              <Badge variant="outline">默认</Badge>
+                            ) : null}
+                            <StatusBadge status={workspace.status} />
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
+                    <p className="text-sm text-muted-foreground">暂无工作空间</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        ) : null}
+
+        {activeSystemTab === "teams" ? (
+          <div
+            id="system-panel-teams"
+            role="tabpanel"
+            aria-labelledby="system-tab-teams"
+            className="grid gap-4 lg:h-full lg:overflow-y-auto lg:pr-1"
+          >
+            <Card className="min-w-0 gap-4 border-border/70 py-5 shadow-sm lg:min-h-full">
+              <CardHeader className="flex-row items-start justify-between gap-4 px-5">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
+                    <UsersIcon className="size-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <CardTitle>团队</CardTitle>
+                    <CardDescription>
+                      {selectedWorkspace
+                        ? displayWorkspaceName(selectedWorkspace)
+                        : "未选择工作空间"}
+                    </CardDescription>
+                  </div>
+                </div>
+                <span className="flex shrink-0 items-center gap-2">
+                  <Badge variant="outline">{teams.length} 个</Badge>
+                  {canManageWorkspace ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!selectedWorkspaceId}
+                      onClick={() => setIsTeamDialogOpen(true)}
+                    >
+                      <PlusIcon data-icon="inline-start" />
+                      新建团队
+                    </Button>
+                  ) : null}
+                </span>
+              </CardHeader>
+              <CardContent className="min-w-0 px-5">
+                {teamsError ? (
+                  <p className="text-sm text-destructive">{teamsError}</p>
+                ) : isTeamsLoading ? (
+                  <div className="flex min-h-28 items-center justify-center">
+                    <LoaderCircleIcon className="animate-spin text-muted-foreground" />
+                  </div>
+                ) : teams.length ? (
+                  <div className="flex flex-col gap-2">
+                    {teams.map((team) => (
+                      <div
+                        key={team.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border bg-background px-4 py-2.5 text-sm shadow-xs"
+                      >
+                        <span className="flex min-w-0 flex-col gap-1">
+                          <span className="truncate font-medium">
+                            {displayTeamName(team)}
+                          </span>
+                          <span className="truncate text-muted-foreground">
+                            {displaySlug(team.slug, team.is_default)}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          {team.is_default ? (
+                            <Badge variant="outline">默认</Badge>
+                          ) : null}
+                          <StatusBadge status={team.status} />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
+                    <p className="text-sm text-muted-foreground">暂无团队</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        ) : null}
+
+        {activeSystemTab === "users" && me.user.is_global_admin ? (
+          <div
+            id="system-panel-users"
+            role="tabpanel"
+            aria-labelledby="system-tab-users"
+            className="grid min-w-0 gap-4 lg:h-full lg:overflow-y-auto lg:pr-1"
+          >
+            <Card className="min-w-0 overflow-hidden gap-3 border-border/70 py-4 shadow-sm lg:min-h-full">
+              <CardHeader className="flex-row items-start justify-between gap-4 px-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
+                    <UserCogIcon className="size-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <CardTitle>用户管理</CardTitle>
+                    <CardDescription>全局账号</CardDescription>
+                  </div>
+                </div>
+                <span className="flex shrink-0 items-center gap-2">
+                  <Badge variant="outline">{users.length} 个</Badge>
+                  <Button type="button" size="sm" onClick={handleOpenCreateUser}>
+                    <PlusIcon data-icon="inline-start" />
+                    新建用户
+                  </Button>
+                </span>
+              </CardHeader>
+              <CardContent className="min-w-0 px-4">
+                {usersNotice ? (
+                  <div className="mb-3 rounded-lg border bg-muted p-3 text-sm">
+                    {usersNotice}
+                  </div>
+                ) : null}
+                {usersError ? (
+                  <p className="text-sm text-destructive">{usersError}</p>
+                ) : isUsersLoading ? (
+                  <div className="flex min-h-28 items-center justify-center">
+                    <LoaderCircleIcon className="animate-spin text-muted-foreground" />
+                  </div>
+                ) : users.length ? (
+                  <div className="min-w-0 overflow-x-auto rounded-lg border bg-background">
+                    <div
+                      role="table"
+                      aria-label="用户列表"
+                      className="min-w-[1700px] text-sm"
+                    >
+                      <div
+                        role="row"
+                        className="grid grid-cols-[150px_140px_260px_240px_220px_130px_120px_180px_160px] border-b bg-muted/40 px-4 py-3 text-sm font-semibold text-muted-foreground"
+                      >
+                        <span role="columnheader">用户名</span>
+                        <span role="columnheader">账号</span>
+                        <span role="columnheader">邮箱</span>
+                        <span role="columnheader">所属工作空间</span>
+                        <span role="columnheader">所属团队</span>
+                        <span role="columnheader">用户角色</span>
+                        <span role="columnheader">状态</span>
+                        <span role="columnheader">创建时间</span>
+                        <span role="columnheader" className="text-right">
+                          操作
+                        </span>
+                      </div>
+                      {users.map((user, index) => {
+                        const workspaceNames = formatUserWorkspaces(user)
+                        const teamNames = formatUserTeams(user)
+                        const roleLabel = getUserRoleLabel(user)
+
+                        return (
+                          <div
+                            key={user.id}
+                            role="row"
+                            className={cn(
+                              "grid grid-cols-[150px_140px_260px_240px_220px_130px_120px_180px_160px] items-center border-b px-4 py-4 last:border-b-0 hover:bg-muted/40",
+                              index % 2 === 1 && "bg-muted/20"
+                            )}
+                          >
+                            <span
+                              role="cell"
+                              className="truncate font-medium"
+                              title={user.name}
+                            >
+                              {user.name}
+                            </span>
+                            <span
+                              role="cell"
+                              className="truncate text-muted-foreground"
+                              title={user.username}
+                            >
+                              {user.username}
+                            </span>
+                            <span
+                              role="cell"
+                              className="truncate text-muted-foreground"
+                              title={user.email}
+                            >
+                              {user.email}
+                            </span>
+                            <span
+                              role="cell"
+                              className="truncate"
+                              title={workspaceNames}
+                            >
+                              {workspaceNames}
+                            </span>
+                            <span
+                              role="cell"
+                              className="truncate"
+                              title={teamNames}
+                            >
+                              {teamNames}
+                            </span>
+                            <span role="cell">
+                              <span
+                                className={cn(
+                                  "inline-flex rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+                                  getUserRoleClass(user)
+                                )}
+                              >
+                                {roleLabel}
+                              </span>
+                            </span>
+                            <span
+                              role="cell"
+                              className="flex items-center gap-2 whitespace-nowrap"
+                            >
+                              {user.is_active ? (
+                                <CircleCheckIcon className="size-4 text-green-600" />
+                              ) : (
+                                <CircleOffIcon className="size-4 text-muted-foreground" />
+                              )}
+                              <span>{user.is_active ? "已启用" : "已停用"}</span>
+                            </span>
+                            <span
+                              role="cell"
+                              className="whitespace-nowrap text-muted-foreground"
+                            >
+                              {formatDateTime(user.created_at)}
+                            </span>
+                            <span
+                              role="cell"
+                              className="flex items-center justify-end gap-2 whitespace-nowrap"
+                            >
+                              <button
+                                type="button"
+                                className={cn(
+                                  "flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors",
+                                  user.is_active ? "bg-primary" : "bg-muted"
+                                )}
+                                disabled={user.id === me.user.id}
+                                onClick={() => void handleToggleUser(user)}
+                                title={
+                                  user.id === me.user.id
+                                    ? "不能停用当前账号"
+                                    : "切换用户状态"
+                                }
+                                aria-label="切换用户状态"
+                              >
+                                <span
+                                  className={cn(
+                                    "size-5 rounded-full bg-background shadow-sm transition-transform",
+                                    user.is_active && "translate-x-5"
+                                  )}
+                                />
+                              </button>
+                              <span className="h-5 w-px bg-border" />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => handleOpenEditUser(user)}
+                                title="编辑用户"
+                                aria-label="编辑用户"
+                              >
+                                <PencilIcon />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() =>
+                                  void handleResetUserPassword(user)
+                                }
+                                title="重置密码"
+                                aria-label="重置密码"
+                              >
+                                <LockIcon />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={user.id === me.user.id}
+                                onClick={() => void handleDeleteUser(user)}
+                                title={
+                                  user.id === me.user.id
+                                    ? "不能删除当前账号"
+                                    : "停用用户"
+                                }
+                                aria-label="停用用户"
+                              >
+                                <Trash2Icon />
+                              </Button>
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
+                    <p className="text-sm text-muted-foreground">暂无用户</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        ) : null}
+
+        {activeSystemTab === "account" ? (
+          <Card
+            id="system-panel-account"
+            role="tabpanel"
+            aria-labelledby="system-tab-account"
+            className="min-w-0 gap-0 border-border/70 py-0 shadow-sm lg:h-full lg:overflow-y-auto"
+          >
+            <CardContent className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
+                  <ShieldCheckIcon className="size-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">账号</p>
+                  <h2 className="truncate text-base font-semibold">
+                    {me.user.name}
+                  </h2>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {me.user.username}
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-2 text-sm sm:grid-cols-2 lg:min-w-[420px]">
+                <div className="rounded-lg border bg-background px-3 py-1.5">
+                  <p className="text-xs text-muted-foreground">邮箱</p>
+                  <p className="truncate font-medium">{me.user.email}</p>
+                </div>
+                <div className="rounded-lg border bg-background px-3 py-1.5">
+                  <p className="text-xs text-muted-foreground">权限</p>
+                  <p className="font-medium">
+                    {me.user.is_global_admin ? "全局管理员" : "成员"}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
+
+      <Dialog
+        open={isUserCreateDialogOpen}
+        onOpenChange={(open) => {
+          setIsUserCreateDialogOpen(open)
+          if (!open) {
+            setUserCreateError(null)
+          }
+        }}
+      >
+        <DialogContent
+          side="right"
+          onInteractOutside={(event) => {
+            if (isEventFromDropdownMenu(event)) {
+              event.preventDefault()
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>新建用户</DialogTitle>
+            <DialogDescription>创建账号并分配工作空间与团队</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateUser}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="newUserName">姓名</FieldLabel>
+                <Input
+                  id="newUserName"
+                  value={userCreateForm.name}
+                  onChange={(event) =>
+                    setUserCreateForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="newUserUsername">账号</FieldLabel>
+                <Input
+                  id="newUserUsername"
+                  value={userCreateForm.username}
+                  onChange={(event) =>
+                    setUserCreateForm((current) => ({
+                      ...current,
+                      username: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="newUserEmail">邮箱</FieldLabel>
+                <Input
+                  id="newUserEmail"
+                  type="email"
+                  value={userCreateForm.email}
+                  onChange={(event) =>
+                    setUserCreateForm((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="size-4"
+                  checked={userCreateForm.isGlobalAdmin}
+                  onChange={(event) =>
+                    setUserCreateForm((current) => ({
+                      ...current,
+                      isGlobalAdmin: event.target.checked,
+                    }))
+                  }
+                />
+                全局管理员
+              </label>
+              <Field>
+                <FieldLabel id="newUserWorkspaceLabel">工作空间</FieldLabel>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      id="newUserWorkspace"
+                      type="button"
+                      variant="outline"
+                      className="h-9 w-full justify-between px-3 font-normal"
+                      aria-labelledby="newUserWorkspaceLabel newUserWorkspace"
+                    >
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate text-left",
+                          !userCreateWorkspace && "text-muted-foreground"
+                        )}
+                      >
+                        {userCreateWorkspace
+                          ? displayWorkspaceName(userCreateWorkspace)
+                          : "不指定工作空间"}
+                      </span>
+                      <ChevronDownIcon data-icon="inline-end" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="start"
+                    className="w-(--radix-dropdown-menu-trigger-width)"
+                  >
+                    <DropdownMenuItem
+                      onSelect={() => handleUserCreateWorkspaceChange("")}
+                    >
+                      不指定工作空间
+                    </DropdownMenuItem>
+                    {activeWorkspaces.map((workspace) => (
+                      <DropdownMenuItem
+                        key={workspace.id}
+                        className="justify-between"
+                        onSelect={() =>
+                          handleUserCreateWorkspaceChange(workspace.id)
+                        }
+                      >
+                        <span className="min-w-0 truncate">
+                          {displayWorkspaceName(workspace)}
+                        </span>
+                        {workspace.is_default ? (
+                          <Badge variant="outline">默认</Badge>
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </Field>
+              <Field>
+                <FieldLabel>团队</FieldLabel>
+                {!userCreateForm.workspaceId ? (
+                  <FieldDescription>
+                    选择工作空间后可分配该空间下的团队
+                  </FieldDescription>
+                ) : isUserCreateTeamsLoading ? (
+                  <div className="flex h-16 items-center justify-center rounded-lg border border-dashed">
+                    <LoaderCircleIcon className="animate-spin text-muted-foreground" />
+                  </div>
+                ) : userCreateTeams.length ? (
+                  <div className="grid gap-2 rounded-lg border p-2">
+                    {userCreateTeams.map((team) => (
+                      <label
+                        key={team.id}
+                        className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted"
+                      >
+                        <input
+                          type="checkbox"
+                          className="size-4"
+                          checked={userCreateForm.teamIds.includes(team.id)}
+                          onChange={(event) =>
+                            setUserCreateForm((current) => ({
+                              ...current,
+                              teamIds: event.target.checked
+                                ? [...current.teamIds, team.id]
+                                : current.teamIds.filter(
+                                    (teamId) => teamId !== team.id
+                                  ),
+                            }))
+                          }
+                        />
+                        <span className="min-w-0 truncate">
+                          {displayTeamName(team)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <FieldDescription>该工作空间下暂无团队</FieldDescription>
+                )}
+              </Field>
+              {userCreateError ? (
+                <p className="text-sm text-destructive">{userCreateError}</p>
+              ) : null}
+            </FieldGroup>
+            <DialogFooter className="pt-5">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsUserCreateDialogOpen(false)}
+              >
+                取消
+              </Button>
+              <Button disabled={isCreatingUser}>
+                {isCreatingUser ? (
+                  <LoaderCircleIcon data-icon="inline-start" />
+                ) : (
+                  <PlusIcon data-icon="inline-start" />
+                )}
+                新建
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(userForm)}
+        onOpenChange={(open) => !open && setUserForm(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑用户</DialogTitle>
+            <DialogDescription>更新账号基础信息</DialogDescription>
+          </DialogHeader>
+          {userForm ? (
+            <form onSubmit={handleUpdateUser}>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="userName">姓名</FieldLabel>
+                  <Input
+                    id="userName"
+                    value={userForm.name}
+                    onChange={(event) =>
+                      setUserForm((current) =>
+                        current
+                          ? { ...current, name: event.target.value }
+                          : current
+                      )
+                    }
+                    required
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="userUsername">账号</FieldLabel>
+                  <Input
+                    id="userUsername"
+                    value={userForm.username}
+                    onChange={(event) =>
+                      setUserForm((current) =>
+                        current
+                          ? { ...current, username: event.target.value }
+                          : current
+                      )
+                    }
+                    required
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="userEmail">邮箱</FieldLabel>
+                  <Input
+                    id="userEmail"
+                    type="email"
+                    value={userForm.email}
+                    onChange={(event) =>
+                      setUserForm((current) =>
+                        current
+                          ? { ...current, email: event.target.value }
+                          : current
+                      )
+                    }
+                    required
+                  />
+                </Field>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="size-4"
+                    checked={userForm.isGlobalAdmin}
+                    disabled={userForm.id === me.user.id}
+                    onChange={(event) =>
+                      setUserForm((current) =>
+                        current
+                          ? {
+                              ...current,
+                              isGlobalAdmin: event.target.checked,
+                            }
+                          : current
+                      )
+                    }
+                  />
+                  全局管理员
+                </label>
+              </FieldGroup>
+              <DialogFooter className="pt-5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setUserForm(null)}
+                >
+                  取消
+                </Button>
+                <Button disabled={isSavingUser}>
+                  {isSavingUser ? (
+                    <LoaderCircleIcon data-icon="inline-start" />
+                  ) : null}
+                  保存
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isWorkspaceDialogOpen}
+        onOpenChange={setIsWorkspaceDialogOpen}
+      >
+        <DialogContent side="right">
+          <DialogHeader>
+            <DialogTitle>新建工作空间</DialogTitle>
+            <DialogDescription>创建租户和负责人</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateWorkspace}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="workspaceName">名称</FieldLabel>
+                <Input
+                  id="workspaceName"
+                  value={workspaceForm.name}
+                  onChange={(event) =>
+                    setWorkspaceForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="workspaceSlug">标识</FieldLabel>
+                <Input
+                  id="workspaceSlug"
+                  value={workspaceForm.slug}
+                  onChange={(event) =>
+                    setWorkspaceForm((current) => ({
+                      ...current,
+                      slug: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="adminName">负责人姓名</FieldLabel>
+                <Input
+                  id="adminName"
+                  value={workspaceForm.adminName}
+                  onChange={(event) =>
+                    setWorkspaceForm((current) => ({
+                      ...current,
+                      adminName: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="adminUsername">负责人账号</FieldLabel>
+                <Input
+                  id="adminUsername"
+                  value={workspaceForm.adminUsername}
+                  onChange={(event) =>
+                    setWorkspaceForm((current) => ({
+                      ...current,
+                      adminUsername: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="adminEmail">负责人邮箱</FieldLabel>
+                <Input
+                  id="adminEmail"
+                  type="email"
+                  value={workspaceForm.adminEmail}
+                  onChange={(event) =>
+                    setWorkspaceForm((current) => ({
+                      ...current,
+                      adminEmail: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              {workspaceError ? (
+                <p className="text-sm text-destructive">{workspaceError}</p>
+              ) : null}
+              {workspaceNotice ? (
+                <div className="rounded-lg border bg-muted p-3 text-sm">
+                  <div className="font-medium">
+                    已创建 {workspaceNotice.workspace.name}
+                  </div>
+                  {workspaceNotice.admin_initial_password ? (
+                    <div className="mt-1 font-mono text-xs">
+                      {workspaceNotice.admin_initial_password}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </FieldGroup>
+            <DialogFooter className="pt-5">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsWorkspaceDialogOpen(false)}
+              >
+                取消
+              </Button>
+              <Button disabled={isCreatingWorkspace}>
+                {isCreatingWorkspace ? (
+                  <LoaderCircleIcon data-icon="inline-start" />
+                ) : (
+                  <PlusIcon data-icon="inline-start" />
+                )}
+                新建
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
+        <DialogContent side="right">
+          <DialogHeader>
+            <DialogTitle>新建团队</DialogTitle>
+            <DialogDescription>
+              {selectedWorkspace
+                ? displayWorkspaceName(selectedWorkspace)
+                : "先选择工作空间"}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateTeam}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="teamName">名称</FieldLabel>
+                <Input
+                  id="teamName"
+                  value={teamForm.name}
+                  onChange={(event) =>
+                    setTeamForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="teamSlug">标识</FieldLabel>
+                <Input
+                  id="teamSlug"
+                  value={teamForm.slug}
+                  onChange={(event) =>
+                    setTeamForm((current) => ({
+                      ...current,
+                      slug: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+              {teamError ? (
+                <p className="text-sm text-destructive">{teamError}</p>
+              ) : null}
+            </FieldGroup>
+            <DialogFooter className="pt-5">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsTeamDialogOpen(false)}
+              >
+                取消
+              </Button>
+              <Button disabled={!selectedWorkspaceId || isCreatingTeam}>
+                {isCreatingTeam ? (
+                  <LoaderCircleIcon data-icon="inline-start" />
+                ) : (
+                  <PlusIcon data-icon="inline-start" />
+                )}
+                新建
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+export function App() {
+  const [token, setToken] = React.useState<string | null>(() =>
+    localStorage.getItem(TOKEN_KEY)
+  )
+  const [mustChangePassword, setMustChangePassword] = React.useState(false)
+  const [me, setMe] = React.useState<MeResponse | null>(null)
+  const [workspaces, setWorkspaces] = React.useState<Workspace[]>([])
+  const [teams, setTeams] = React.useState<Team[]>([])
+  const [activePage, setActivePage] = React.useState<PageKey>(
+    () => routeFromPath().page
+  )
+  const [activeSystemTab, setActiveSystemTab] = React.useState<SystemTabKey>(
+    () => routeFromPath().systemTab
+  )
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<
+    string | null
+  >(() => localStorage.getItem(WORKSPACE_KEY))
+  const [workspaceNotice, setWorkspaceNotice] =
+    React.useState<WorkspaceCreateResponse | null>(null)
+  const [isSessionLoading, setIsSessionLoading] = React.useState(Boolean(token))
+  const [isTeamsLoading, setIsTeamsLoading] = React.useState(false)
+  const [sessionError, setSessionError] = React.useState<string | null>(null)
+  const [teamsError, setTeamsError] = React.useState<string | null>(null)
+
+  const logout = React.useCallback(() => {
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(WORKSPACE_KEY)
+    setToken(null)
+    setMustChangePassword(false)
+    setMe(null)
+    setWorkspaces([])
+    setTeams([])
+    setSelectedWorkspaceId(null)
+    setWorkspaceNotice(null)
+    setSessionError(null)
+    setTeamsError(null)
+    setActivePage("apps")
+    setActiveSystemTab("workspaces")
+    window.history.pushState(null, "", PAGE_PATHS.apps)
+  }, [])
+
+  const loadSession = React.useCallback(
+    async (nextToken: string) => {
+      try {
+        const nextMe = await getMe(nextToken)
+        setMe(nextMe)
+        setMustChangePassword(nextMe.user.must_change_password)
+        setSessionError(null)
+
+        if (nextMe.user.must_change_password) {
+          setWorkspaces([])
+          setTeams([])
+          setIsTeamsLoading(false)
+          return
+        }
+
+        const nextWorkspaces = await listWorkspaces(nextToken)
+        const storedWorkspaceId = localStorage.getItem(WORKSPACE_KEY)
+        const nextWorkspaceId =
+          nextWorkspaces.find((workspace) => workspace.id === storedWorkspaceId)
+            ?.id ??
+          nextMe.memberships[0]?.workspace_id ??
+          nextWorkspaces[0]?.id ??
+          null
+
+        setWorkspaces(nextWorkspaces)
+        setTeams([])
+        setTeamsError(null)
+        setIsTeamsLoading(Boolean(nextWorkspaceId))
+        setSelectedWorkspaceId(nextWorkspaceId)
+
+        if (nextWorkspaceId) {
+          localStorage.setItem(WORKSPACE_KEY, nextWorkspaceId)
+        } else {
+          localStorage.removeItem(WORKSPACE_KEY)
+        }
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          logout()
+          return
+        }
+
+        setSessionError(getErrorMessage(error))
+      } finally {
+        setIsSessionLoading(false)
+      }
+    },
+    [logout]
+  )
+
+  React.useEffect(() => {
+    function handlePopState() {
+      const route = routeFromPath()
+      setActivePage(route.page)
+      setActiveSystemTab(route.systemTab)
+    }
+
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [])
+
+  React.useEffect(() => {
+    if (!token) {
+      return
+    }
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadSession(token)
+  }, [token, loadSession])
+
+  React.useEffect(() => {
+    if (
+      isSessionLoading ||
+      !token ||
+      !selectedWorkspaceId ||
+      mustChangePassword
+    ) {
+      return
+    }
+
+    let isCurrent = true
+
+    listTeams(token, selectedWorkspaceId)
+      .then((payload) => {
+        if (isCurrent) {
+          setTeams(payload)
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCurrent) {
+          setTeams([])
+          setTeamsError(getErrorMessage(error))
+        }
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setIsTeamsLoading(false)
+        }
+      })
+
+    return () => {
+      isCurrent = false
+    }
+  }, [token, selectedWorkspaceId, mustChangePassword, isSessionLoading])
+
+  function handleLogin(nextToken: string, nextMustChangePassword: boolean) {
+    localStorage.setItem(TOKEN_KEY, nextToken)
+    setSessionError(null)
+    setIsSessionLoading(true)
+    setToken(nextToken)
+    setMustChangePassword(nextMustChangePassword)
+  }
+
+  function navigateToRoute(route: AppRoute) {
+    const path = pathForRoute(route)
+
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, "", path)
+    }
+
+    setActivePage(route.page)
+    setActiveSystemTab(route.systemTab)
+  }
+
+  function handlePageChange(page: PageKey) {
+    navigateToRoute({
+      page,
+      systemTab: page === "system" ? activeSystemTab : "workspaces",
+    })
+  }
+
+  function handleSystemTabChange(tab: SystemTabKey) {
+    navigateToRoute({ page: "system", systemTab: tab })
+  }
+
+  function handleSelectWorkspace(workspaceId: string) {
+    if (workspaceId === selectedWorkspaceId) {
+      return
+    }
+
+    localStorage.setItem(WORKSPACE_KEY, workspaceId)
+    setTeams([])
+    setTeamsError(null)
+    setIsTeamsLoading(true)
+    setSelectedWorkspaceId(workspaceId)
+    setWorkspaceNotice(null)
+  }
+
+  function handleWorkspaceCreated(payload: WorkspaceCreateResponse) {
+    setWorkspaces((current) => [...current, payload.workspace])
+    handleSelectWorkspace(payload.workspace.id)
+    setWorkspaceNotice(payload)
+  }
+
+  function handleTeamCreated(team: Team) {
+    setTeams((current) => [...current, team])
+  }
+
+  async function handlePasswordChanged() {
+    setIsSessionLoading(true)
+    setSessionError(null)
+    setMustChangePassword(false)
+    if (token) {
+      await loadSession(token)
+    }
+  }
+
+  if (!token) {
+    return <LoginScreen onLogin={handleLogin} />
+  }
+
+  if (isSessionLoading && !me) {
+    return (
+      <main className="flex min-h-svh items-center justify-center bg-background">
+        <LoaderCircleIcon className="animate-spin text-muted-foreground" />
+      </main>
+    )
+  }
+
+  if (!me) {
+    return (
+      <main className="flex min-h-svh items-center justify-center bg-muted/30 p-6">
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle>无法加载账号</CardTitle>
+            <CardDescription>{sessionError ?? "请重新登录"}</CardDescription>
+          </CardHeader>
+          <CardFooter>
+            <Button className="w-full" onClick={logout}>
+              重新登录
+            </Button>
+          </CardFooter>
+        </Card>
+      </main>
+    )
+  }
+
+  const activePageConfig = pages.find((page) => page.key === activePage)
+  const activePageTitle = activePageConfig?.label ?? "系统管理"
+
+  return (
+    <div className="min-h-svh overflow-x-hidden bg-muted/20">
+      <TopBar
+        me={me}
+        activePage={activePage}
+        onPageChange={handlePageChange}
+        onLogout={logout}
+      />
+      <main className="flex w-full min-w-0 flex-col gap-4 overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8">
+        {sessionError ? (
+          <p className="text-sm text-destructive">{sessionError}</p>
+        ) : null}
+
+        {activePage === "system" ? (
+          <>
+            <div className="flex min-w-0 flex-col gap-1">
+              <h1 className="truncate text-xl font-semibold">
+                {activePageTitle}
+              </h1>
+            </div>
+            <SystemPage
+              me={me}
+              token={token}
+              workspaces={workspaces}
+              teams={teams}
+              selectedWorkspaceId={selectedWorkspaceId}
+              workspaceNotice={workspaceNotice}
+              isTeamsLoading={isTeamsLoading}
+              teamsError={teamsError}
+              activeSystemTab={activeSystemTab}
+              onSelectWorkspace={handleSelectWorkspace}
+              onSystemTabChange={handleSystemTabChange}
+              onWorkspaceCreated={handleWorkspaceCreated}
+              onTeamCreated={handleTeamCreated}
+            />
+          </>
+        ) : (
+          <FeaturePage page={activePageConfig ?? pages[0]} />
+        )}
+      </main>
+      <ChangePasswordDialog
+        open={mustChangePassword}
+        token={token}
+        onChanged={() => void handlePasswordChanged()}
+      />
     </div>
   )
 }
