@@ -154,7 +154,7 @@ function pathForRoute(route: AppRoute) {
 }
 
 type LoginForm = {
-  usernameOrEmail: string
+  username: string
   password: string
 }
 
@@ -320,7 +320,7 @@ function LoginScreen({
   onLogin: (token: string, mustChangePassword: boolean) => void
 }) {
   const [form, setForm] = React.useState<LoginForm>({
-    usernameOrEmail: "",
+    username: "",
     password: "",
   })
   const [error, setError] = React.useState<string | null>(null)
@@ -332,7 +332,7 @@ function LoginScreen({
     setIsSubmitting(true)
 
     try {
-      const payload = await login(form.usernameOrEmail, form.password)
+      const payload = await login(form.username, form.password)
       onLogin(payload.access_token, payload.must_change_password)
     } catch (error) {
       setError(getErrorMessage(error))
@@ -352,15 +352,15 @@ function LoginScreen({
           <CardContent>
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="usernameOrEmail">账号或邮箱</FieldLabel>
+                <FieldLabel htmlFor="username">用户名</FieldLabel>
                 <Input
-                  id="usernameOrEmail"
+                  id="username"
                   autoComplete="username"
-                  value={form.usernameOrEmail}
+                  value={form.username}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      usernameOrEmail: event.target.value,
+                      username: event.target.value,
                     }))
                   }
                   required

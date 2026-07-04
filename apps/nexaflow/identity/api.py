@@ -43,7 +43,7 @@ async def login(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    return await authenticate_user(db, payload.username_or_email, payload.password, settings)
+    return await authenticate_user(db, payload.username, payload.password, settings)
 
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)

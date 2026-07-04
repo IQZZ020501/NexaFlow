@@ -32,10 +32,16 @@ jobs:
         run: uv sync --dev --frozen
 
       - name: Compile Python
-        run: uv run python -m compileall nexaflow tests main.py
+        run: uv run python -m compileall nexaflow main.py
 
-      - name: Run backend smoke test
-        run: uv run python -m tests.smoke_identity_workspace
+      - name: Run identity tests
+        run: uv run python -m nexaflow.identity.test
+
+      - name: Run workspace tests
+        run: uv run python -m nexaflow.workspaces.test
+
+      - name: Run team tests
+        run: uv run python -m nexaflow.teams.test
 
   frontend:
     name: Frontend

@@ -275,15 +275,14 @@ async def deactivate_user(db: AsyncSession, user: User, actor: User) -> None:
 
 async def authenticate_user(
     db: AsyncSession,
-    username_or_email: str,
+    username: str,
     password: str,
     settings: Settings,
 ) -> TokenResponse:
-    identifier = username_or_email.strip()
-    normalized_email = identifier.lower()
+    username = normalize_username(username)
     user = await db.scalar(
         select(User).where(
-            or_(User.username == identifier, User.email == normalized_email),
+            User.username == username,
             User.is_active.is_(True),
         )
     )
