@@ -159,11 +159,11 @@ async function request<T>(path: string, options: RequestOptions = {}) {
   return payload as T
 }
 
-export function login(usernameOrEmail: string, password: string) {
+export function login(username: string, password: string) {
   return request<LoginResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify({
-      username_or_email: usernameOrEmail,
+      username,
       password,
     }),
   })

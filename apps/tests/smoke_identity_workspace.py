@@ -58,7 +58,7 @@ def main() -> None:
     with TestClient(app) as client:
         login = client.post(
             "/auth/login",
-            json={"username_or_email": "admin", "password": BOOTSTRAP_ADMIN_PASSWORD},
+            json={"username": "admin", "password": BOOTSTRAP_ADMIN_PASSWORD},
         )
         assert login.status_code == 200, login.text
         admin_token = login.json()["access_token"]
@@ -94,7 +94,7 @@ def main() -> None:
 
         login = client.post(
             "/auth/login",
-            json={"username_or_email": "admin", "password": "NexaFlow@12345."},
+            json={"username": "admin", "password": "NexaFlow@12345."},
         )
         assert login.status_code == 200, login.text
         admin_token = login.json()["access_token"]
@@ -162,7 +162,7 @@ def main() -> None:
         research_login = client.post(
             "/auth/login",
             json={
-                "username_or_email": "research-admin",
+                "username": "research-admin",
                 "password": temp_password,
             },
         )
@@ -180,7 +180,7 @@ def main() -> None:
         research_login = client.post(
             "/auth/login",
             json={
-                "username_or_email": "research-admin",
+                "username": "research-admin",
                 "password": "Research@12345.",
             },
         )
