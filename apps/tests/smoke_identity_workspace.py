@@ -1,13 +1,29 @@
 import asyncio
+import os
 
 from fastapi.testclient import TestClient
+
+BOOTSTRAP_ADMIN_PASSWORD = "NexaFlow@123."
+os.environ.update(
+    {
+        "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
+        "JWT_SECRET_KEY": "test-secret-for-nexaflow-smoke-suite",
+        "BOOTSTRAP_ADMIN_USERNAME": "admin",
+        "BOOTSTRAP_ADMIN_EMAIL": "admin@nexaflow.local",
+        "BOOTSTRAP_ADMIN_NAME": "NexaFlow Admin",
+        "BOOTSTRAP_ADMIN_PASSWORD": BOOTSTRAP_ADMIN_PASSWORD,
+        "DEFAULT_WORKSPACE_NAME": "Default Workspace",
+        "DEFAULT_WORKSPACE_SLUG": "default",
+        "DEFAULT_TEAM_NAME": "Default Team",
+        "DEFAULT_TEAM_SLUG": "default",
+        "ENVIRONMENT": "test",
+    }
+)
 
 from nexaflow.core.config import Settings
 from nexaflow.db.base import Base
 from nexaflow.db.session import get_engine
 from nexaflow.main import create_app
-
-BOOTSTRAP_ADMIN_PASSWORD = "NexaFlow@123."
 
 
 def auth_headers(token: str, workspace_id: str | None = None) -> dict[str, str]:
