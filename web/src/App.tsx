@@ -13,7 +13,6 @@ import {
   PlusIcon,
   SearchIcon,
   SettingsIcon,
-  ShieldCheckIcon,
   SunIcon,
   Trash2Icon,
   UserCogIcon,
@@ -96,7 +95,7 @@ const themeOptions: Array<{
   { value: "light", label: "白色", icon: SunIcon },
   { value: "dark", label: "暗色", icon: MoonIcon },
 ]
-type SystemTabKey = "workspaces" | "teams" | "users" | "account"
+type SystemTabKey = "workspaces" | "teams" | "users"
 
 type AppRoute = {
   page: PageKey
@@ -115,7 +114,6 @@ const SYSTEM_TAB_PATHS: Record<SystemTabKey, string> = {
   workspaces: "/system/workspaces",
   teams: "/system/teams",
   users: "/system/users",
-  account: "/system/account",
 }
 
 function routeFromPath(pathname = window.location.pathname): AppRoute {
@@ -139,7 +137,7 @@ function routeFromPath(pathname = window.location.pathname): AppRoute {
     case "/system/users":
       return { page: "system", systemTab: "users" }
     case "/system/account":
-      return { page: "system", systemTab: "account" }
+      return { page: "system", systemTab: "workspaces" }
     default:
       return { page: "apps", systemTab: "workspaces" }
   }
@@ -404,10 +402,18 @@ function LoginScreen({
 function ChangePasswordDialog({
   open,
   token,
+  title = "修改初始密码",
+  description = "设置新密码后继续使用 NexaFlow",
+  canDismiss = false,
+  onOpenChange,
   onChanged,
 }: {
   open: boolean
   token: string
+  title?: string
+  description?: string
+  canDismiss?: boolean
+  onOpenChange?: (open: boolean) => void
   onChanged: () => void
 }) {
   const [form, setForm] = React.useState<ChangePasswordForm>({
@@ -416,6 +422,20 @@ function ChangePasswordDialog({
   })
   const [error, setError] = React.useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+
+  function resetForm() {
+    setForm({ newPassword: "", confirmPassword: "" })
+    setError(null)
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (nextOpen || !canDismiss) {
+      return
+    }
+
+    resetForm()
+    onOpenChange?.(false)
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -434,7 +454,7 @@ function ChangePasswordDialog({
     setIsSubmitting(true)
     try {
       await changePassword(token, form.newPassword)
-      setForm({ newPassword: "", confirmPassword: "" })
+      resetForm()
       onChanged()
     } catch (error) {
       setError(getErrorMessage(error))
@@ -444,14 +464,18 @@ function ChangePasswordDialog({
   }
 
   return (
-    <Dialog open={open}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        onEscapeKeyDown={(event) => event.preventDefault()}
-        onPointerDownOutside={(event) => event.preventDefault()}
+        onEscapeKeyDown={
+          canDismiss ? undefined : (event) => event.preventDefault()
+        }
+        onPointerDownOutside={
+          canDismiss ? undefined : (event) => event.preventDefault()
+        }
       >
         <DialogHeader>
-          <DialogTitle>修改初始密码</DialogTitle>
-          <DialogDescription>设置新密码后继续使用 NexaFlow</DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <FieldGroup>
@@ -512,11 +536,13 @@ function TopBar({
   me,
   activePage,
   onPageChange,
+  onChangePassword,
   onLogout,
 }: {
   me: MeResponse
   activePage: PageKey
   onPageChange: (page: PageKey) => void
+  onChangePassword: () => void
   onLogout: () => void
 }) {
   const { theme, setTheme } = useTheme()
@@ -604,12 +630,20 @@ function TopBar({
               <div className="flex flex-col gap-1">
                 <span>{me.user.name}</span>
                 <span className="text-xs font-normal text-muted-foreground">
+                  {me.user.username} /{" "}
+                  {me.user.is_global_admin ? "全局管理员" : "成员"}
+                </span>
+                <span className="text-xs font-normal text-muted-foreground">
                   {me.user.email}
                 </span>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={onChangePassword}>
+                <LockIcon />
+                修改密码
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => onPageChange("system")}>
                 <SettingsIcon />
                 系统管理
@@ -853,12 +887,6 @@ function SystemPage({
           },
         ]
       : []),
-    {
-      key: "account",
-      label: "账号",
-      meta: me.user.is_global_admin ? "管理员" : "成员",
-      icon: ShieldCheckIcon,
-    },
   ]
 
   const loadUsers = React.useCallback(async () => {
@@ -1542,43 +1570,6 @@ function SystemPage({
           </div>
         ) : null}
 
-        {activeSystemTab === "account" ? (
-          <Card
-            id="system-panel-account"
-            role="tabpanel"
-            aria-labelledby="system-tab-account"
-            className="min-w-0 gap-0 border-border/70 py-0 shadow-sm lg:h-full lg:overflow-y-auto"
-          >
-            <CardContent className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
-                  <ShieldCheckIcon className="size-4" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">账号</p>
-                  <h2 className="truncate text-base font-semibold">
-                    {me.user.name}
-                  </h2>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {me.user.username}
-                  </p>
-                </div>
-              </div>
-              <div className="grid gap-2 text-sm sm:grid-cols-2 lg:min-w-[420px]">
-                <div className="rounded-lg border bg-background px-3 py-1.5">
-                  <p className="text-xs text-muted-foreground">邮箱</p>
-                  <p className="truncate font-medium">{me.user.email}</p>
-                </div>
-                <div className="rounded-lg border bg-background px-3 py-1.5">
-                  <p className="text-xs text-muted-foreground">权限</p>
-                  <p className="font-medium">
-                    {me.user.is_global_admin ? "全局管理员" : "成员"}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
       </div>
 
       <Dialog
@@ -2070,6 +2061,8 @@ export function App() {
     localStorage.getItem(TOKEN_KEY)
   )
   const [mustChangePassword, setMustChangePassword] = React.useState(false)
+  const [isPasswordDialogOpen, setIsPasswordDialogOpen] =
+    React.useState(false)
   const [me, setMe] = React.useState<MeResponse | null>(null)
   const [workspaces, setWorkspaces] = React.useState<Workspace[]>([])
   const [teams, setTeams] = React.useState<Team[]>([])
@@ -2094,6 +2087,7 @@ export function App() {
     localStorage.removeItem(WORKSPACE_KEY)
     setToken(null)
     setMustChangePassword(false)
+    setIsPasswordDialogOpen(false)
     setMe(null)
     setWorkspaces([])
     setTeams([])
@@ -2267,6 +2261,7 @@ export function App() {
     setIsSessionLoading(true)
     setSessionError(null)
     setMustChangePassword(false)
+    setIsPasswordDialogOpen(false)
     if (token) {
       await loadSession(token)
     }
@@ -2304,6 +2299,8 @@ export function App() {
 
   const activePageConfig = pages.find((page) => page.key === activePage)
   const activePageTitle = activePageConfig?.label ?? "系统管理"
+  const isChangePasswordDialogOpen =
+    mustChangePassword || isPasswordDialogOpen
 
   return (
     <div className="min-h-svh overflow-x-hidden bg-muted/20">
@@ -2311,6 +2308,7 @@ export function App() {
         me={me}
         activePage={activePage}
         onPageChange={handlePageChange}
+        onChangePassword={() => setIsPasswordDialogOpen(true)}
         onLogout={logout}
       />
       <main className="flex w-full min-w-0 flex-col gap-4 overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8">
@@ -2346,8 +2344,16 @@ export function App() {
         )}
       </main>
       <ChangePasswordDialog
-        open={mustChangePassword}
+        open={isChangePasswordDialogOpen}
         token={token}
+        title={mustChangePassword ? "修改初始密码" : "修改密码"}
+        description={
+          mustChangePassword
+            ? "设置新密码后继续使用 NexaFlow"
+            : "设置一个新的登录密码"
+        }
+        canDismiss={!mustChangePassword}
+        onOpenChange={setIsPasswordDialogOpen}
         onChanged={() => void handlePasswordChanged()}
       />
     </div>
