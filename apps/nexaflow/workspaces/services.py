@@ -1,15 +1,17 @@
 import secrets
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException, status
 
+from nexaflow.audit.services import record_audit_log
 from nexaflow.core.validation import normalize_email, normalize_name, normalize_slug, normalize_username
 from nexaflow.identity.models import User
 from nexaflow.identity.security import hash_password
 from nexaflow.identity.services import find_user_by_identity, user_to_response
+from nexaflow.teams.models import Team, TeamMembership
 from nexaflow.workspaces.models import Workspace, WorkspaceMembership
 from nexaflow.workspaces.schemas import (
     WorkspaceCreateRequest,
@@ -65,7 +67,11 @@ async def get_workspace_for_user(db: AsyncSession, workspace_id: str, user: User
     return workspace
 
 
-async def create_workspace(db: AsyncSession, payload: WorkspaceCreateRequest) -> WorkspaceCreateResponse:
+async def create_workspace(
+    db: AsyncSession,
+    payload: WorkspaceCreateRequest,
+    actor: User,
+) -> WorkspaceCreateResponse:
     username = normalize_username(payload.admin.username)
     email = normalize_email(payload.admin.email)
     admin_name = normalize_name(payload.admin.name)
@@ -89,16 +95,25 @@ async def create_workspace(db: AsyncSession, payload: WorkspaceCreateRequest) ->
 
     workspace = Workspace(name=workspace_name, slug=workspace_slug, status=ACTIVE_STATUS)
     db.add(workspace)
-    await db.flush()
-    db.add(
-        WorkspaceMembership(
-            workspace_id=workspace.id,
-            user_id=admin.id,
-            role="owner",
-        )
-    )
 
     try:
+        await db.flush()
+        db.add(
+            WorkspaceMembership(
+                workspace_id=workspace.id,
+                user_id=admin.id,
+                role="owner",
+            )
+        )
+        record_audit_log(
+            db,
+            actor,
+            "workspace.create",
+            "workspace",
+            workspace.id,
+            workspace.name,
+            {"slug": workspace.slug},
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -118,7 +133,9 @@ async def update_workspace(
     db: AsyncSession,
     workspace: Workspace,
     payload: WorkspaceUpdateRequest,
+    actor: User,
 ) -> WorkspaceResponse:
+    details = payload.model_dump(exclude_none=True)
     if payload.name is not None:
         workspace.name = normalize_name(payload.name)
     if payload.slug is not None:
@@ -126,7 +143,16 @@ async def update_workspace(
     if payload.status is not None:
         if payload.status not in WORKSPACE_STATUSES:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid workspace status.")
+        if workspace.is_default and payload.status == ARCHIVED_STATUS:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Default workspace cannot be archived.")
         workspace.status = payload.status
+
+    action = "workspace.update"
+    if set(details) == {"status"} and payload.status == ARCHIVED_STATUS:
+        action = "workspace.archive"
+    elif set(details) == {"status"} and payload.status == ACTIVE_STATUS:
+        action = "workspace.restore"
+    record_audit_log(db, actor, action, "workspace", workspace.id, workspace.name, details)
 
     try:
         await db.commit()
@@ -138,8 +164,28 @@ async def update_workspace(
     return workspace_to_response(workspace)
 
 
-async def archive_workspace(db: AsyncSession, workspace: Workspace) -> None:
+async def delete_workspace_permanently(
+    db: AsyncSession,
+    workspace: Workspace,
+    actor: User,
+) -> None:
     if workspace.is_default:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Default workspace cannot be archived.")
-    workspace.status = ARCHIVED_STATUS
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Default workspace cannot be deleted.")
+
+    record_audit_log(
+        db,
+        actor,
+        "workspace.delete",
+        "workspace",
+        workspace.id,
+        workspace.name,
+        {"slug": workspace.slug},
+    )
+    team_ids = select(Team.id).where(Team.workspace_id == workspace.id)
+    await db.execute(delete(TeamMembership).where(TeamMembership.team_id.in_(team_ids)))
+    await db.execute(
+        delete(WorkspaceMembership).where(WorkspaceMembership.workspace_id == workspace.id)
+    )
+    await db.execute(delete(Team).where(Team.workspace_id == workspace.id))
+    await db.execute(delete(Workspace).where(Workspace.id == workspace.id))
     await db.commit()

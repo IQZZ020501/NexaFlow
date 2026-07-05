@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexaflow.core.config import Settings
@@ -37,13 +37,28 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 users_router = APIRouter(prefix="/users", tags=["users"])
 
 
+def get_request_ip(request: Request) -> str | None:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    ip_address = forwarded_for.split(",", 1)[0].strip()
+    if ip_address:
+        return ip_address
+    return request.client.host if request.client else None
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(
     payload: LoginRequest,
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    return await authenticate_user(db, payload.username, payload.password, settings)
+    return await authenticate_user(
+        db,
+        payload.username,
+        payload.password,
+        settings,
+        ip_address=get_request_ip(request),
+    )
 
 
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
@@ -52,7 +67,7 @@ async def change_current_password(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
-    await change_password(db, user, payload.new_password)
+    await change_password(db, user, payload.new_password, payload.current_password)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -79,10 +94,10 @@ async def list_all_users(
 )
 async def create_new_user(
     payload: UserCreateRequest,
-    _: Annotated[User, Depends(require_global_admin)],
+    actor: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserPasswordResetResponse:
-    return await create_user(db, payload)
+    return await create_user(db, payload, actor)
 
 
 @users_router.patch("/{user_id}", response_model=UserResponse)
@@ -102,11 +117,11 @@ async def patch_user(
 )
 async def reset_password(
     user_id: str,
-    _: Annotated[User, Depends(require_global_admin)],
+    actor: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserPasswordResetResponse:
     user = await get_user(db, user_id)
-    return await reset_user_password(db, user)
+    return await reset_user_password(db, user, actor)
 
 
 @users_router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

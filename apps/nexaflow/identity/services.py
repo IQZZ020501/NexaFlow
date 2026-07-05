@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException, status
 
+from nexaflow.audit.services import record_audit_log
 from nexaflow.core.config import Settings
 from nexaflow.core.validation import normalize_email, normalize_name, normalize_username
 from nexaflow.identity.models import User
@@ -21,6 +22,7 @@ from nexaflow.identity.schemas import (
     UserWorkspaceResponse,
 )
 from nexaflow.identity.security import create_access_token, hash_password, verify_password
+from nexaflow.system_logs.services import record_system_log
 from nexaflow.teams.models import Team, TeamMembership
 from nexaflow.workspaces.models import Workspace, WorkspaceMembership
 
@@ -140,6 +142,7 @@ async def get_user(db: AsyncSession, user_id: str) -> User:
 async def create_user(
     db: AsyncSession,
     payload: UserCreateRequest,
+    actor: User,
 ) -> UserPasswordResetResponse:
     team_ids = list(dict.fromkeys(payload.team_ids))
     if team_ids and not payload.workspace_id:
@@ -193,6 +196,21 @@ async def create_user(
             )
         for team in teams:
             db.add(TeamMembership(team_id=team.id, user_id=user.id, role="member"))
+        record_audit_log(
+            db,
+            actor,
+            "user.create",
+            "user",
+            user.id,
+            user.name,
+            {
+                "username": user.username,
+                "email": user.email,
+                "is_global_admin": user.is_global_admin,
+                "workspace_id": workspace.id if workspace else None,
+                "team_ids": [team.id for team in teams],
+            },
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -214,6 +232,7 @@ async def update_user(
     actor: User,
     payload: UserUpdateRequest,
 ) -> UserResponse:
+    details = payload.model_dump(exclude_none=True)
     if payload.username is not None:
         user.username = normalize_username(payload.username)
     if payload.email is not None:
@@ -235,6 +254,8 @@ async def update_user(
             )
         user.is_active = payload.is_active
 
+    record_audit_log(db, actor, "user.update", "user", user.id, user.name, details)
+
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -251,10 +272,12 @@ async def update_user(
 async def reset_user_password(
     db: AsyncSession,
     user: User,
+    actor: User,
 ) -> UserPasswordResetResponse:
     initial_password = secrets.token_urlsafe(18)
     user.password_hash = hash_password(initial_password)
     user.must_change_password = True
+    record_audit_log(db, actor, "user.reset_password", "user", user.id, user.name)
     await db.commit()
     await db.refresh(user)
     return UserPasswordResetResponse(
@@ -270,6 +293,7 @@ async def deactivate_user(db: AsyncSession, user: User, actor: User) -> None:
             "Current user cannot be deleted.",
         )
     user.is_active = False
+    record_audit_log(db, actor, "user.deactivate", "user", user.id, user.name)
     await db.commit()
 
 
@@ -278,6 +302,7 @@ async def authenticate_user(
     username: str,
     password: str,
     settings: Settings,
+    ip_address: str | None = None,
 ) -> TokenResponse:
     username = normalize_username(username)
     user = await db.scalar(
@@ -287,6 +312,20 @@ async def authenticate_user(
         )
     )
     if user is None or not verify_password(password, user.password_hash):
+        record_system_log(
+            db,
+            level="warning",
+            event="auth.login_failed",
+            message="Login failed.",
+            path="/auth/login",
+            method="POST",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            user_id=user.id if user else None,
+            username=username,
+            ip_address=ip_address,
+            details={"username": username},
+        )
+        await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials.")
 
     return TokenResponse(
@@ -295,9 +334,16 @@ async def authenticate_user(
     )
 
 
-async def change_password(db: AsyncSession, user: User, new_password: str) -> None:
-    if not user.must_change_password:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Password change is not required.")
+async def change_password(
+    db: AsyncSession,
+    user: User,
+    new_password: str,
+    current_password: str | None = None,
+) -> None:
+    if not user.must_change_password and not (
+        current_password and verify_password(current_password, user.password_hash)
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is invalid.")
     if verify_password(new_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "New password must be different.")
 

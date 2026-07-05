@@ -87,6 +87,28 @@ def main() -> None:
         assert updated.status_code == 200, updated.text
         assert updated.json()["slug"] == "applied-research"
 
+        archived = client.patch(
+            f"/teams/{team_id}",
+            headers=auth_headers(research_token, research_workspace_id),
+            json={"status": "archived"},
+        )
+        assert archived.status_code == 200, archived.text
+        assert archived.json()["status"] == "archived"
+
+        restored = client.patch(
+            f"/teams/{team_id}",
+            headers=auth_headers(research_token, research_workspace_id),
+            json={"status": "active"},
+        )
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["status"] == "active"
+
+        delete_default = client.delete(
+            f"/teams/{default_team_id}",
+            headers=auth_headers(admin_token, default_workspace_id),
+        )
+        assert delete_default.status_code == 400, delete_default.text
+
         deleted = client.delete(
             f"/teams/{team_id}",
             headers=auth_headers(research_token, research_workspace_id),
@@ -98,7 +120,13 @@ def main() -> None:
             headers=auth_headers(research_token, research_workspace_id),
         )
         assert teams.status_code == 200, teams.text
-        assert teams.json()[0]["status"] == "archived"
+        assert teams.json() == []
+
+        audit_logs = client.get("/audit-logs", headers=auth_headers(admin_token))
+        assert audit_logs.status_code == 200, audit_logs.text
+        actions = [item["action"] for item in audit_logs.json()]
+        assert "team.archive" in actions
+        assert "team.delete" in actions
 
 
 if __name__ == "__main__":

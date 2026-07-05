@@ -16,6 +16,7 @@ class TokenResponse(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=6, max_length=255)
+    current_password: str | None = Field(default=None, min_length=1, max_length=255)
 
     @field_validator("new_password")
     @classmethod

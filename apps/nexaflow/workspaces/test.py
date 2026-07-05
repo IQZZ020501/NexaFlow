@@ -70,11 +70,45 @@ def main() -> None:
         assert updated.status_code == 200, updated.text
         assert updated.json()["slug"] == "research-lab"
 
+        archived = client.patch(
+            f"/workspaces/{research_workspace_id}",
+            headers=auth_headers(research_token),
+            json={"status": "archived"},
+        )
+        assert archived.status_code == 200, archived.text
+        assert archived.json()["status"] == "archived"
+
+        restored = client.patch(
+            f"/workspaces/{research_workspace_id}",
+            headers=auth_headers(research_token),
+            json={"status": "active"},
+        )
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["status"] == "active"
+
         delete_default = client.delete(
             f"/workspaces/{default_workspace_id}",
             headers=auth_headers(admin_token),
         )
         assert delete_default.status_code == 400, delete_default.text
+
+        deleted = client.delete(
+            f"/workspaces/{research_workspace_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert deleted.status_code == 204, deleted.text
+
+        missing = client.get(
+            f"/workspaces/{research_workspace_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert missing.status_code == 404, missing.text
+
+        audit_logs = client.get("/audit-logs", headers=auth_headers(admin_token))
+        assert audit_logs.status_code == 200, audit_logs.text
+        actions = [item["action"] for item in audit_logs.json()]
+        assert "workspace.archive" in actions
+        assert "workspace.delete" in actions
 
 
 if __name__ == "__main__":
