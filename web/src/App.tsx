@@ -6,6 +6,7 @@ import {
   CircleOffIcon,
   Building2Icon,
   HistoryIcon,
+  LanguagesIcon,
   LockIcon,
   LoaderCircleIcon,
   LogOutIcon,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { useLanguage } from "@/components/language-provider"
 import { useTheme } from "@/components/theme-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -89,17 +91,27 @@ import {
   updateWorkspace,
 } from "@/lib/api"
 import { isEventFromDropdownMenu } from "@/lib/dom"
-import { pages, type FeaturePageConfig, type PageKey } from "@/lib/pages"
+import {
+  getPages,
+  type FeaturePageConfig,
+  type PageKey,
+} from "@/lib/pages"
+import {
+  languageLocales,
+  languageOptions,
+  type TFunction,
+  type TranslationKey,
+} from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 const TOKEN_KEY = "nexaflow.accessToken"
 const WORKSPACE_KEY = "nexaflow.workspaceId"
 const DEFAULT_USER_PASSWORD = "NexaFlow@123"
-const STATUS_LABELS: Record<string, string> = {
+const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
   active: "已启用",
   archived: "已归档",
 }
-const AUDIT_DETAIL_LABELS: Record<string, string> = {
+const AUDIT_DETAIL_LABEL_KEYS: Record<string, TranslationKey> = {
   email: "邮箱",
   is_active: "启用状态",
   is_global_admin: "全局管理员",
@@ -110,7 +122,7 @@ const AUDIT_DETAIL_LABELS: Record<string, string> = {
   username: "用户名",
   workspace_id: "工作空间 ID",
 }
-const AUDIT_ACTION_LABELS: Record<string, string> = {
+const AUDIT_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
   "workspace.create": "新建工作空间",
   "workspace.update": "更新工作空间",
   "workspace.archive": "归档工作空间",
@@ -131,12 +143,12 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
 type ThemePreference = "system" | "light" | "dark"
 const themeOptions: Array<{
   value: ThemePreference
-  label: string
+  labelKey: TranslationKey
   icon: typeof MonitorIcon
 }> = [
-  { value: "system", label: "跟随系统", icon: MonitorIcon },
-  { value: "light", label: "白色", icon: SunIcon },
-  { value: "dark", label: "暗色", icon: MoonIcon },
+  { value: "system", labelKey: "跟随系统", icon: MonitorIcon },
+  { value: "light", labelKey: "白色", icon: SunIcon },
+  { value: "dark", labelKey: "暗色", icon: MoonIcon },
 ]
 type SystemTabKey = "workspaces" | "teams" | "users" | "audit"
 
@@ -263,7 +275,7 @@ type AppNotification = {
   message: string
 }
 
-function getErrorMessage(error: unknown) {
+function getErrorMessage(error: unknown, t: TFunction) {
   if (error instanceof ApiError) {
     return error.message
   }
@@ -272,16 +284,20 @@ function getErrorMessage(error: unknown) {
     return error.message
   }
 
-  return "请求失败"
+  return t("请求失败")
 }
 
-function getNewPasswordError(newPassword: string, confirmPassword: string) {
+function getNewPasswordError(
+  newPassword: string,
+  confirmPassword: string,
+  t: TFunction
+) {
   if (newPassword !== confirmPassword) {
-    return "两次输入的新密码不一致"
+    return t("两次输入的新密码不一致")
   }
 
   if (newPassword.length < 6 || !/[A-Z]/.test(newPassword)) {
-    return "密码至少 6 位，并且包含一个大写字母"
+    return t("密码至少 6 位，并且包含一个大写字母")
   }
 
   return null
@@ -292,8 +308,8 @@ function initials(name: string) {
   return value.slice(0, 2).toUpperCase()
 }
 
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("sv-SE", {
+function formatDateTime(value: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -309,17 +325,17 @@ type DefaultNamedScope = {
   is_default: boolean
 }
 
-function displayWorkspaceName(workspace: DefaultNamedScope) {
+function displayWorkspaceName(workspace: DefaultNamedScope, t: TFunction) {
   if (workspace.is_default && workspace.name === "Default Workspace") {
-    return "默认工作空间"
+    return t("默认工作空间")
   }
 
   return workspace.name
 }
 
-function displayTeamName(team: DefaultNamedScope) {
+function displayTeamName(team: DefaultNamedScope, t: TFunction) {
   if (team.is_default && team.name === "Default Team") {
-    return "默认团队"
+    return t("默认团队")
   }
 
   return team.name
@@ -331,38 +347,40 @@ function hasWorkspaceMembership(me: MeResponse | null, workspaceId: string) {
   )
 }
 
-function formatUserWorkspaces(user: User) {
+function formatUserWorkspaces(user: User, t: TFunction) {
   if (!user.workspaces.length) {
     return "-"
   }
 
   return user.workspaces
-    .map((workspace) => displayWorkspaceName(workspace))
-    .join("、")
+    .map((workspace) => displayWorkspaceName(workspace, t))
+    .join(t("列表分隔符"))
 }
 
-function formatUserTeams(user: User) {
+function formatUserTeams(user: User, t: TFunction) {
   if (!user.teams.length) {
     return "-"
   }
 
-  return user.teams.map((team) => displayTeamName(team)).join("、")
+  return user.teams
+    .map((team) => displayTeamName(team, t))
+    .join(t("列表分隔符"))
 }
 
-function getUserRoleLabel(user: User) {
+function getUserRoleLabel(user: User, t: TFunction) {
   if (user.is_global_admin) {
-    return "全局管理员"
+    return t("全局管理员")
   }
 
   if (user.workspaces.some((workspace) => workspace.role === "admin")) {
-    return "工作空间管理员"
+    return t("工作空间管理员")
   }
 
   if (user.teams.some((team) => team.role === "admin")) {
-    return "团队管理员"
+    return t("团队管理员")
   }
 
-  return "普通用户"
+  return t("普通用户")
 }
 
 function getUserRoleKey(user: User): UserRoleFilter {
@@ -382,28 +400,28 @@ function getUserRoleKey(user: User): UserRoleFilter {
 }
 
 function getUserRoleClass(user: User) {
-  const role = getUserRoleLabel(user)
+  const role = getUserRoleKey(user)
 
-  if (role === "全局管理员" || role === "工作空间管理员") {
+  if (role === "global_admin" || role === "workspace_admin") {
     return "border-amber-300/60 bg-amber-100 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300"
   }
 
-  if (role === "团队管理员") {
+  if (role === "team_admin") {
     return "border-red-300/60 bg-red-100 text-red-600 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300"
   }
 
   return "border-border bg-muted text-muted-foreground"
 }
 
-function displaySlug(slug: string, isDefault: boolean) {
+function displaySlug(slug: string, isDefault: boolean, t: TFunction) {
   if (isDefault && slug === "default") {
-    return "默认"
+    return t("默认")
   }
 
   return slug
 }
 
-function formatAuditDetails(details: Record<string, unknown>) {
+function formatAuditDetails(details: Record<string, unknown>, t: TFunction) {
   const entries = Object.entries(details).filter(
     ([, value]) => value !== null && value !== undefined && value !== ""
   )
@@ -413,23 +431,31 @@ function formatAuditDetails(details: Record<string, unknown>) {
 
   return entries
     .map(([key, value]) => {
-      const label = AUDIT_DETAIL_LABELS[key] ?? key
-      return `${label}: ${formatAuditDetailValue(key, value)}`
+      const labelKey = AUDIT_DETAIL_LABEL_KEYS[key]
+      const label = labelKey ? t(labelKey) : key
+      return `${label}: ${formatAuditDetailValue(key, value, t)}`
     })
-    .join("；")
+    .join(t("详情分隔符"))
 }
 
-function formatAuditDetailValue(key: string, value: unknown): string {
+function formatAuditDetailValue(
+  key: string,
+  value: unknown,
+  t: TFunction
+): string {
   if (Array.isArray(value)) {
-    return value.map((item) => formatAuditDetailValue(key, item)).join("、")
+    return value
+      .map((item) => formatAuditDetailValue(key, item, t))
+      .join(t("列表分隔符"))
   }
 
   if (typeof value === "boolean") {
-    return value ? "是" : "否"
+    return value ? t("是") : t("否")
   }
 
   if (key === "status" && typeof value === "string") {
-    return STATUS_LABELS[value] ?? value
+    const labelKey = STATUS_LABEL_KEYS[value]
+    return labelKey ? t(labelKey) : value
   }
 
   return String(value)
@@ -501,6 +527,8 @@ function OperationNotification({
   notification: AppNotification | null
   onDismiss: () => void
 }) {
+  const { t } = useLanguage()
+
   if (!notification) {
     return null
   }
@@ -528,7 +556,7 @@ function OperationNotification({
           variant="ghost"
           size="icon-sm"
           onClick={onDismiss}
-          aria-label="关闭提示"
+          aria-label={t("关闭提示")}
         >
           <XIcon />
         </Button>
@@ -542,6 +570,7 @@ function LoginScreen({
 }: {
   onLogin: (token: string, mustChangePassword: boolean) => void
 }) {
+  const { t } = useLanguage()
   const [form, setForm] = React.useState<LoginForm>({
     username: "",
     password: "",
@@ -558,7 +587,7 @@ function LoginScreen({
       const payload = await login(form.username, form.password)
       onLogin(payload.access_token, payload.must_change_password)
     } catch (error) {
-      setError(getErrorMessage(error))
+      setError(getErrorMessage(error, t))
     } finally {
       setIsSubmitting(false)
     }
@@ -569,13 +598,13 @@ function LoginScreen({
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>NexaFlow</CardTitle>
-          <CardDescription>登录到你的工作空间</CardDescription>
+          <CardDescription>{t("登录到你的工作空间")}</CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent>
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="username">用户名</FieldLabel>
+                <FieldLabel htmlFor="username">{t("用户名")}</FieldLabel>
                 <Input
                   id="username"
                   autoComplete="username"
@@ -590,7 +619,7 @@ function LoginScreen({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="password">密码</FieldLabel>
+                <FieldLabel htmlFor="password">{t("密码")}</FieldLabel>
                 <Input
                   id="password"
                   type="password"
@@ -615,7 +644,7 @@ function LoginScreen({
               {isSubmitting ? (
                 <LoaderCircleIcon data-icon="inline-start" />
               ) : null}
-              登录
+              {t("登录")}
             </Button>
           </CardFooter>
         </form>
@@ -627,8 +656,8 @@ function LoginScreen({
 function ChangePasswordDialog({
   open,
   token,
-  title = "修改初始密码",
-  description = "设置新密码后继续使用 NexaFlow",
+  title,
+  description,
   canDismiss = false,
   requireCurrentPassword = false,
   onOpenChange,
@@ -643,6 +672,7 @@ function ChangePasswordDialog({
   onOpenChange?: (open: boolean) => void
   onChanged: () => void
 }) {
+  const { t } = useLanguage()
   const [form, setForm] = React.useState<ChangePasswordForm>({
     currentPassword: "",
     newPassword: "",
@@ -670,13 +700,14 @@ function ChangePasswordDialog({
     setError(null)
 
     if (requireCurrentPassword && !form.currentPassword) {
-      setError("请输入当前密码")
+      setError(t("请输入当前密码"))
       return
     }
 
     const passwordError = getNewPasswordError(
       form.newPassword,
-      form.confirmPassword
+      form.confirmPassword,
+      t
     )
     if (passwordError) {
       setError(passwordError)
@@ -693,7 +724,7 @@ function ChangePasswordDialog({
       resetForm()
       onChanged()
     } catch (error) {
-      setError(getErrorMessage(error))
+      setError(getErrorMessage(error, t))
     } finally {
       setIsSubmitting(false)
     }
@@ -710,14 +741,18 @@ function ChangePasswordDialog({
         }
       >
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogTitle>{title ?? t("修改初始密码")}</DialogTitle>
+          <DialogDescription>
+            {description ?? t("设置新密码后继续使用 NexaFlow")}
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <FieldGroup>
             {requireCurrentPassword ? (
               <Field>
-                <FieldLabel htmlFor="currentPassword">当前密码</FieldLabel>
+                <FieldLabel htmlFor="currentPassword">
+                  {t("当前密码")}
+                </FieldLabel>
                 <Input
                   id="currentPassword"
                   type="password"
@@ -734,7 +769,7 @@ function ChangePasswordDialog({
               </Field>
             ) : null}
             <Field>
-              <FieldLabel htmlFor="newPassword">新密码</FieldLabel>
+              <FieldLabel htmlFor="newPassword">{t("新密码")}</FieldLabel>
               <Input
                 id="newPassword"
                 type="password"
@@ -750,11 +785,13 @@ function ChangePasswordDialog({
                 required
               />
               <FieldDescription>
-                至少 6 位，并且包含一个大写字母
+                {t("至少 6 位，并且包含一个大写字母")}
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="confirmPassword">确认密码</FieldLabel>
+              <FieldLabel htmlFor="confirmPassword">
+                {t("确认密码")}
+              </FieldLabel>
               <Input
                 id="confirmPassword"
                 type="password"
@@ -777,7 +814,7 @@ function ChangePasswordDialog({
               {isSubmitting ? (
                 <LoaderCircleIcon data-icon="inline-start" />
               ) : null}
-              保存
+              {t("保存")}
             </Button>
           </DialogFooter>
         </form>
@@ -789,6 +826,7 @@ function ChangePasswordDialog({
 function TopBar({
   me,
   activePage,
+  featurePages,
   currentWorkspaceName,
   selectedWorkspaceId,
   workspaceOptions,
@@ -799,6 +837,7 @@ function TopBar({
 }: {
   me: MeResponse
   activePage: PageKey
+  featurePages: readonly FeaturePageConfig[]
   currentWorkspaceName: string
   selectedWorkspaceId: string | null
   workspaceOptions: Workspace[]
@@ -807,10 +846,15 @@ function TopBar({
   onChangePassword: () => void
   onLogout: () => void
 }) {
+  const { language, setLanguage, t } = useLanguage()
   const { theme, setTheme } = useTheme()
   const activeThemeOption =
     themeOptions.find((option) => option.value === theme) ?? themeOptions[0]
+  const activeThemeLabel = t(activeThemeOption.labelKey)
   const ActiveThemeIcon = activeThemeOption.icon
+  const activeLanguageOption =
+    languageOptions.find((option) => option.value === language) ??
+    languageOptions[0]
   const otherWorkspaces = workspaceOptions.filter(
     (workspace) => workspace.id !== selectedWorkspaceId
   )
@@ -835,14 +879,16 @@ function TopBar({
                 type="button"
                 className="flex min-w-0 max-w-[32vw] items-center gap-1 rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground sm:max-w-52"
                 title={currentWorkspaceName}
-                aria-label={`切换工作空间，当前为${currentWorkspaceName}`}
+                aria-label={t("切换工作空间，当前为 {workspace}", {
+                  workspace: currentWorkspaceName,
+                })}
               >
                 <span className="truncate">{currentWorkspaceName}</span>
                 <ChevronDownIcon className="size-3.5 shrink-0" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-56">
-              <DropdownMenuLabel>其他工作空间</DropdownMenuLabel>
+              <DropdownMenuLabel>{t("其他工作空间")}</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 {otherWorkspaces.length ? (
@@ -853,19 +899,21 @@ function TopBar({
                     >
                       <Building2Icon />
                       <span className="truncate">
-                        {displayWorkspaceName(workspace)}
+                        {displayWorkspaceName(workspace, t)}
                       </span>
                     </DropdownMenuItem>
                   ))
                 ) : (
-                  <DropdownMenuItem disabled>暂无其他工作空间</DropdownMenuItem>
+                  <DropdownMenuItem disabled>
+                    {t("暂无其他工作空间")}
+                  </DropdownMenuItem>
                 )}
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
         <nav className="flex min-w-0 flex-1 justify-center gap-2 overflow-x-auto">
-          {pages.map((page) => {
+          {featurePages.map((page) => {
             const Icon = page.icon
             const isActive = activePage === page.key
 
@@ -889,13 +937,47 @@ function TopBar({
               variant="ghost"
               size="icon-lg"
               className="text-muted-foreground hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
-              aria-label={`切换主题，当前为${activeThemeOption.label}`}
+              aria-label={t("切换语言，当前为 {language}", {
+                language: activeLanguageOption.label,
+              })}
+            >
+              <LanguagesIcon className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-40">
+            <DropdownMenuLabel>{t("语言")}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              {languageOptions.map((option) => (
+                <DropdownMenuItem
+                  key={option.value}
+                  className="justify-between"
+                  onSelect={() => setLanguage(option.value)}
+                >
+                  <span>{option.label}</span>
+                  {option.value === language ? (
+                    <CircleCheckIcon className="size-3.5 text-primary" />
+                  ) : null}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-lg"
+              className="text-muted-foreground hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
+              aria-label={t("切换主题，当前为 {theme}", {
+                theme: activeThemeLabel,
+              })}
             >
               <ActiveThemeIcon className="size-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-40">
-            <DropdownMenuLabel>主题</DropdownMenuLabel>
+            <DropdownMenuLabel>{t("主题")}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               {themeOptions.map((option) => {
@@ -910,7 +992,7 @@ function TopBar({
                   >
                     <span className="flex items-center gap-2">
                       <Icon />
-                      {option.label}
+                      {t(option.labelKey)}
                     </span>
                     {isActive ? (
                       <CircleCheckIcon className="size-3.5 text-primary" />
@@ -923,7 +1005,11 @@ function TopBar({
         </DropdownMenu>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-lg" aria-label="打开用户菜单">
+            <Button
+              variant="ghost"
+              size="icon-lg"
+              aria-label={t("打开用户菜单")}
+            >
               <Avatar>
                 <AvatarFallback>{initials(me.user.name)}</AvatarFallback>
               </Avatar>
@@ -935,7 +1021,7 @@ function TopBar({
                 <span>{me.user.name}</span>
                 <span className="text-xs font-normal text-muted-foreground">
                   {me.user.username} /{" "}
-                  {me.user.is_global_admin ? "全局管理员" : "成员"}
+                  {me.user.is_global_admin ? t("全局管理员") : t("成员")}
                 </span>
                 <span className="text-xs font-normal text-muted-foreground">
                   {me.user.email}
@@ -946,15 +1032,15 @@ function TopBar({
             <DropdownMenuGroup>
               <DropdownMenuItem onSelect={onChangePassword}>
                 <LockIcon />
-                修改密码
+                {t("修改密码")}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => onPageChange("system")}>
                 <SettingsIcon />
-                系统管理
+                {t("系统管理")}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={onLogout}>
                 <LogOutIcon />
-                退出登录
+                {t("退出登录")}
               </DropdownMenuItem>
             </DropdownMenuGroup>
           </DropdownMenuContent>
@@ -965,6 +1051,7 @@ function TopBar({
 }
 
 function FeaturePage({ page }: { page: FeaturePageConfig }) {
+  const { t } = useLanguage()
   const Icon = page.icon
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
 
@@ -991,10 +1078,13 @@ function FeaturePage({ page }: { page: FeaturePageConfig }) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative min-w-0 sm:w-[320px]">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-9" placeholder={`搜索${page.label}...`} />
+            <Input
+              className="pl-9"
+              placeholder={t("搜索{label}...", { label: page.label })}
+            />
           </div>
           <Button type="button" variant="outline" className="justify-between">
-            最近更新
+            {t("最近更新")}
             <ChevronDownIcon data-icon="inline-end" />
           </Button>
         </div>
@@ -1054,7 +1144,7 @@ function FeaturePage({ page }: { page: FeaturePageConfig }) {
                 variant="outline"
                 onClick={() => setIsDialogOpen(false)}
               >
-                取消
+                {t("取消")}
               </Button>
               <Button type="submit">{page.actionLabel}</Button>
             </DialogFooter>
@@ -1066,9 +1156,12 @@ function FeaturePage({ page }: { page: FeaturePageConfig }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const { t } = useLanguage()
+  const labelKey = STATUS_LABEL_KEYS[status]
+
   return (
     <Badge variant={status === "active" ? "secondary" : "outline"}>
-      {STATUS_LABELS[status] ?? status}
+      {labelKey ? t(labelKey) : status}
     </Badge>
   )
 }
@@ -1112,6 +1205,8 @@ function SystemPage({
   onTeamDeleted: (teamId: string) => void
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
+  const { language, t } = useLanguage()
+  const locale = languageLocales[language]
   const [workspaceForm, setWorkspaceForm] = React.useState<WorkspaceForm>({
     name: "",
     slug: "",
@@ -1210,11 +1305,11 @@ function SystemPage({
   const canCreateWorkspace = me.user.is_global_admin
   const reportError = React.useCallback(
     (error: unknown) => {
-      const message = getErrorMessage(error)
+      const message = getErrorMessage(error, t)
       onNotify("error", message)
       return message
     },
-    [onNotify]
+    [onNotify, t]
   )
   const systemTabs: {
     key: SystemTabKey
@@ -1223,19 +1318,19 @@ function SystemPage({
   }[] = [
     {
       key: "workspaces",
-      label: "工作空间",
+      label: t("工作空间"),
       icon: Building2Icon,
     },
     {
       key: "teams",
-      label: "团队",
+      label: t("团队"),
       icon: UsersIcon,
     },
     ...(canManageUsers
       ? [
           {
             key: "users" as const,
-            label: "用户管理",
+            label: t("用户管理"),
             icon: UserCogIcon,
           },
         ]
@@ -1244,7 +1339,7 @@ function SystemPage({
       ? [
           {
             key: "audit" as const,
-            label: "审计日志",
+            label: t("审计日志"),
             icon: HistoryIcon,
           },
         ]
@@ -1477,7 +1572,7 @@ function SystemPage({
         adminName: "",
       })
       onWorkspaceCreated(payload)
-      onNotify("success", "工作空间已新建")
+      onNotify("success", t("工作空间已新建"))
     } catch (error) {
       setWorkspaceError(reportError(error))
     } finally {
@@ -1507,7 +1602,7 @@ function SystemPage({
         onSelectWorkspace(team.workspace_id)
       }
       setIsTeamDialogOpen(false)
-      onNotify("success", "团队已新建")
+      onNotify("success", t("团队已新建"))
     } catch (error) {
       setTeamError(reportError(error))
     } finally {
@@ -1541,7 +1636,7 @@ function SystemPage({
       })
       onWorkspaceUpdated(workspace)
       setWorkspaceEditForm(null)
-      onNotify("success", "工作空间已更新")
+      onNotify("success", t("工作空间已更新"))
     } catch (error) {
       setWorkspaceError(reportError(error))
     } finally {
@@ -1551,9 +1646,16 @@ function SystemPage({
 
   async function handleArchiveWorkspace(workspace: Workspace) {
     const nextStatus = workspace.status === "active" ? "archived" : "active"
-    const actionLabel = nextStatus === "archived" ? "归档" : "恢复"
+    const actionLabel = nextStatus === "archived" ? t("归档") : t("恢复")
 
-    if (!window.confirm(`${actionLabel} ${displayWorkspaceName(workspace)}？`)) {
+    if (
+      !window.confirm(
+        t("{action} {name}？", {
+          action: actionLabel,
+          name: displayWorkspaceName(workspace, t),
+        })
+      )
+    ) {
       return
     }
 
@@ -1563,7 +1665,12 @@ function SystemPage({
       onWorkspaceUpdated(
         await updateWorkspace(token, workspace.id, { status: nextStatus })
       )
-      onNotify("success", `工作空间已${actionLabel}`)
+      onNotify(
+        "success",
+        nextStatus === "archived"
+          ? t("工作空间已归档")
+          : t("工作空间已恢复")
+      )
     } catch (error) {
       setWorkspaceError(reportError(error))
     }
@@ -1572,7 +1679,9 @@ function SystemPage({
   async function handleDeleteWorkspace(workspace: Workspace) {
     if (
       !window.confirm(
-        `永久删除 ${displayWorkspaceName(workspace)}？此操作不可恢复。`
+        t("永久删除 {name}？此操作不可恢复。", {
+          name: displayWorkspaceName(workspace, t),
+        })
       )
     ) {
       return
@@ -1583,7 +1692,7 @@ function SystemPage({
     try {
       await deleteWorkspace(token, workspace.id)
       onWorkspaceDeleted(workspace.id)
-      onNotify("success", "工作空间已删除")
+      onNotify("success", t("工作空间已删除"))
     } catch (error) {
       setWorkspaceError(reportError(error))
     }
@@ -1615,7 +1724,7 @@ function SystemPage({
       })
       onTeamUpdated(team)
       setTeamEditForm(null)
-      onNotify("success", "团队已更新")
+      onNotify("success", t("团队已更新"))
     } catch (error) {
       setTeamError(reportError(error))
     } finally {
@@ -1629,9 +1738,16 @@ function SystemPage({
     }
 
     const nextStatus = team.status === "active" ? "archived" : "active"
-    const actionLabel = nextStatus === "archived" ? "归档" : "恢复"
+    const actionLabel = nextStatus === "archived" ? t("归档") : t("恢复")
 
-    if (!window.confirm(`${actionLabel} ${displayTeamName(team)}？`)) {
+    if (
+      !window.confirm(
+        t("{action} {name}？", {
+          action: actionLabel,
+          name: displayTeamName(team, t),
+        })
+      )
+    ) {
       return
     }
 
@@ -1643,7 +1759,10 @@ function SystemPage({
           status: nextStatus,
         })
       )
-      onNotify("success", `团队已${actionLabel}`)
+      onNotify(
+        "success",
+        nextStatus === "archived" ? t("团队已归档") : t("团队已恢复")
+      )
     } catch (error) {
       setTeamError(reportError(error))
     }
@@ -1655,7 +1774,11 @@ function SystemPage({
     }
 
     if (
-      !window.confirm(`永久删除 ${displayTeamName(team)}？此操作不可恢复。`)
+      !window.confirm(
+        t("永久删除 {name}？此操作不可恢复。", {
+          name: displayTeamName(team, t),
+        })
+      )
     ) {
       return
     }
@@ -1665,7 +1788,7 @@ function SystemPage({
     try {
       await deleteTeam(token, selectedWorkspaceId, team.id)
       onTeamDeleted(team.id)
-      onNotify("success", "团队已删除")
+      onNotify("success", t("团队已删除"))
     } catch (error) {
       setTeamError(reportError(error))
     }
@@ -1676,7 +1799,7 @@ function SystemPage({
     setUserCreateError(null)
 
     if (!me.user.is_global_admin && !selectedWorkspaceId) {
-      setUserCreateError("请选择工作空间")
+      setUserCreateError(t("请选择工作空间"))
       return
     }
 
@@ -1715,7 +1838,7 @@ function SystemPage({
         teamIds: [],
       })
       setUserCreateTeams([])
-      onNotify("success", "用户已新建")
+      onNotify("success", t("用户已新建"))
     } catch (error) {
       setUserCreateError(reportError(error))
     } finally {
@@ -1728,7 +1851,7 @@ function SystemPage({
       updateUserInList(
         await updateUser(token, user.id, { is_active: !user.is_active })
       )
-      onNotify("success", user.is_active ? "用户已停用" : "用户已启用")
+      onNotify("success", user.is_active ? t("用户已停用") : t("用户已启用"))
     } catch (error) {
       reportError(error)
     }
@@ -1762,7 +1885,7 @@ function SystemPage({
       })
       updateUserInList(user)
       setUserForm(null)
-      onNotify("success", "用户已更新")
+      onNotify("success", t("用户已更新"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -1792,7 +1915,8 @@ function SystemPage({
 
     const passwordError = getNewPasswordError(
       userPasswordForm.newPassword,
-      userPasswordForm.confirmPassword
+      userPasswordForm.confirmPassword,
+      t
     )
     if (passwordError) {
       setUserPasswordError(passwordError)
@@ -1809,7 +1933,10 @@ function SystemPage({
       )
       updateUserInList(user)
       setUserPasswordForm(null)
-      onNotify("success", `${userPasswordForm.user.name} 的密码已修改`)
+      onNotify(
+        "success",
+        t("{name} 的密码已修改", { name: userPasswordForm.user.name })
+      )
     } catch (error) {
       setUserPasswordError(reportError(error))
     } finally {
@@ -1818,14 +1945,18 @@ function SystemPage({
   }
 
   async function handleDeleteUser(user: User) {
-    if (!window.confirm(`永久删除 ${user.name}？此操作不可恢复。`)) {
+    if (
+      !window.confirm(
+        t("永久删除 {name}？此操作不可恢复。", { name: user.name })
+      )
+    ) {
       return
     }
 
     try {
       await deleteUser(token, user.id)
       setUsers((current) => current.filter((item) => item.id !== user.id))
-      onNotify("success", "用户已删除")
+      onNotify("success", t("用户已删除"))
     } catch (error) {
       reportError(error)
     }
@@ -1836,7 +1967,7 @@ function SystemPage({
       <aside className="lg:sticky lg:top-20 lg:h-full lg:self-start">
         <div
           role="tablist"
-          aria-label="系统管理"
+          aria-label={t("系统管理")}
           className="flex gap-1 overflow-x-auto rounded-lg border bg-background p-1 shadow-sm lg:h-full lg:flex-col lg:overflow-visible"
         >
           {systemTabs.map((tab) => {
@@ -1883,8 +2014,8 @@ function SystemPage({
                     <Building2Icon className="size-4" />
                   </span>
                   <div className="min-w-0">
-                    <CardTitle>工作空间</CardTitle>
-                    <CardDescription>当前租户范围</CardDescription>
+                    <CardTitle>{t("工作空间")}</CardTitle>
+                    <CardDescription>{t("当前租户范围")}</CardDescription>
                   </div>
                 </div>
                 {canCreateWorkspace ? (
@@ -1894,7 +2025,7 @@ function SystemPage({
                     onClick={() => setIsWorkspaceDialogOpen(true)}
                   >
                     <PlusIcon data-icon="inline-start" />
-                    新建工作空间
+                    {t("新建工作空间")}
                   </Button>
                 ) : null}
               </CardHeader>
@@ -1929,20 +2060,24 @@ function SystemPage({
                             onClick={() => onSelectWorkspace(workspace.id)}
                             title={
                               canUseThisWorkspace
-                                ? "切换工作空间"
-                                : "仅系统管理，无工作空间权限"
+                                ? t("切换工作空间")
+                                : t("仅系统管理，无工作空间权限")
                             }
                           >
                             <span className="truncate font-medium">
-                              {displayWorkspaceName(workspace)}
+                              {displayWorkspaceName(workspace, t)}
                             </span>
                             <span className="truncate text-muted-foreground">
-                              {displaySlug(workspace.slug, workspace.is_default)}
+                              {displaySlug(
+                                workspace.slug,
+                                workspace.is_default,
+                                t
+                              )}
                             </span>
                           </button>
                           <span className="flex shrink-0 items-center gap-2">
                             {workspace.is_default ? (
-                              <Badge variant="outline">默认</Badge>
+                              <Badge variant="outline">{t("默认")}</Badge>
                             ) : null}
                             <StatusBadge status={workspace.status} />
                             {canManageThisWorkspace ? (
@@ -1954,8 +2089,8 @@ function SystemPage({
                                   onClick={() =>
                                     handleOpenEditWorkspace(workspace)
                                   }
-                                  title="编辑工作空间"
-                                  aria-label="编辑工作空间"
+                                  title={t("编辑工作空间")}
+                                  aria-label={t("编辑工作空间")}
                                 >
                                   <PencilIcon />
                                 </Button>
@@ -1967,9 +2102,15 @@ function SystemPage({
                                   onClick={() =>
                                     void handleArchiveWorkspace(workspace)
                                   }
-                                  title={isArchived ? "恢复工作空间" : "归档工作空间"}
+                                  title={
+                                    isArchived
+                                      ? t("恢复工作空间")
+                                      : t("归档工作空间")
+                                  }
                                   aria-label={
-                                    isArchived ? "恢复工作空间" : "归档工作空间"
+                                    isArchived
+                                      ? t("恢复工作空间")
+                                      : t("归档工作空间")
                                   }
                                 >
                                   {isArchived ? (
@@ -1989,8 +2130,8 @@ function SystemPage({
                                 onClick={() =>
                                   void handleDeleteWorkspace(workspace)
                                 }
-                                title="永久删除工作空间"
-                                aria-label="永久删除工作空间"
+                                title={t("永久删除工作空间")}
+                                aria-label={t("永久删除工作空间")}
                               >
                                 <Trash2Icon />
                               </Button>
@@ -2002,7 +2143,9 @@ function SystemPage({
                   </div>
                 ) : (
                   <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
-                    <p className="text-sm text-muted-foreground">暂无工作空间</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t("暂无工作空间")}
+                    </p>
                   </div>
                 )}
               </CardContent>
@@ -2024,11 +2167,11 @@ function SystemPage({
                     <UsersIcon className="size-4" />
                   </span>
                   <div className="min-w-0">
-                    <CardTitle>团队</CardTitle>
+                    <CardTitle>{t("团队")}</CardTitle>
                     <CardDescription>
                       {selectedWorkspace
-                        ? displayWorkspaceName(selectedWorkspace)
-                        : "未选择工作空间"}
+                        ? displayWorkspaceName(selectedWorkspace, t)
+                        : t("未选择工作空间")}
                     </CardDescription>
                   </div>
                 </div>
@@ -2039,7 +2182,7 @@ function SystemPage({
                     onClick={handleOpenCreateTeam}
                   >
                     <PlusIcon data-icon="inline-start" />
-                    新建团队
+                    {t("新建团队")}
                   </Button>
                 ) : null}
               </CardHeader>
@@ -2062,15 +2205,15 @@ function SystemPage({
                         >
                           <span className="flex min-w-0 flex-col gap-1">
                             <span className="truncate font-medium">
-                              {displayTeamName(team)}
+                              {displayTeamName(team, t)}
                             </span>
                             <span className="truncate text-muted-foreground">
-                              {displaySlug(team.slug, team.is_default)}
+                              {displaySlug(team.slug, team.is_default, t)}
                             </span>
                           </span>
                           <span className="flex shrink-0 items-center gap-2">
                             {team.is_default ? (
-                              <Badge variant="outline">默认</Badge>
+                              <Badge variant="outline">{t("默认")}</Badge>
                             ) : null}
                             <StatusBadge status={team.status} />
                             {canManageWorkspace ? (
@@ -2080,8 +2223,8 @@ function SystemPage({
                                   variant="ghost"
                                   size="icon-sm"
                                   onClick={() => handleOpenEditTeam(team)}
-                                  title="编辑团队"
-                                  aria-label="编辑团队"
+                                  title={t("编辑团队")}
+                                  aria-label={t("编辑团队")}
                                 >
                                   <PencilIcon />
                                 </Button>
@@ -2091,8 +2234,12 @@ function SystemPage({
                                   size="icon-sm"
                                   disabled={team.is_default}
                                   onClick={() => void handleArchiveTeam(team)}
-                                  title={isArchived ? "恢复团队" : "归档团队"}
-                                  aria-label={isArchived ? "恢复团队" : "归档团队"}
+                                  title={
+                                    isArchived ? t("恢复团队") : t("归档团队")
+                                  }
+                                  aria-label={
+                                    isArchived ? t("恢复团队") : t("归档团队")
+                                  }
                                 >
                                   {isArchived ? (
                                     <RotateCcwIcon />
@@ -2106,8 +2253,8 @@ function SystemPage({
                                   size="icon-sm"
                                   disabled={team.is_default}
                                   onClick={() => void handleDeleteTeam(team)}
-                                  title="永久删除团队"
-                                  aria-label="永久删除团队"
+                                  title={t("永久删除团队")}
+                                  aria-label={t("永久删除团队")}
                                 >
                                   <Trash2Icon />
                                 </Button>
@@ -2120,7 +2267,9 @@ function SystemPage({
                   </div>
                 ) : (
                   <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
-                    <p className="text-sm text-muted-foreground">暂无团队</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t("暂无团队")}
+                    </p>
                   </div>
                 )}
               </CardContent>
@@ -2142,13 +2291,13 @@ function SystemPage({
                     <UserCogIcon className="size-4" />
                   </span>
                   <div className="min-w-0">
-                    <CardTitle>用户管理</CardTitle>
-                    <CardDescription>全局账号</CardDescription>
+                    <CardTitle>{t("用户管理")}</CardTitle>
+                    <CardDescription>{t("全局账号")}</CardDescription>
                   </div>
                 </div>
                 <Button type="button" size="sm" onClick={handleOpenCreateUser}>
                   <PlusIcon data-icon="inline-start" />
-                  新建用户
+                  {t("新建用户")}
                 </Button>
               </CardHeader>
               <CardContent className="min-w-0 px-4">
@@ -2164,45 +2313,45 @@ function SystemPage({
                         <Input
                           value={userSearch}
                           onChange={(event) => setUserSearch(event.target.value)}
-                          placeholder="搜索姓名、账号、邮箱"
+                          placeholder={t("搜索姓名、账号、邮箱")}
                           className="pl-9"
                         />
                       </div>
                       <FilterDropdown
-                        ariaLabel="筛选用户状态"
+                        ariaLabel={t("筛选用户状态")}
                         value={userStatusFilter}
                         onChange={(value) =>
                           setUserStatusFilter(value as UserStatusFilter)
                         }
                         options={[
-                          { value: "all", label: "全部状态" },
-                          { value: "active", label: "已启用" },
-                          { value: "inactive", label: "已停用" },
+                          { value: "all", label: t("全部状态") },
+                          { value: "active", label: t("已启用") },
+                          { value: "inactive", label: t("已停用") },
                         ]}
                       />
                       <FilterDropdown
-                        ariaLabel="筛选用户角色"
+                        ariaLabel={t("筛选用户角色")}
                         value={userRoleFilter}
                         onChange={(value) =>
                           setUserRoleFilter(value as UserRoleFilter)
                         }
                         options={[
-                          { value: "all", label: "全部角色" },
-                          { value: "global_admin", label: "全局管理员" },
-                          { value: "workspace_admin", label: "工作空间管理员" },
-                          { value: "team_admin", label: "团队管理员" },
-                          { value: "member", label: "普通用户" },
+                          { value: "all", label: t("全部角色") },
+                          { value: "global_admin", label: t("全局管理员") },
+                          { value: "workspace_admin", label: t("工作空间管理员") },
+                          { value: "team_admin", label: t("团队管理员") },
+                          { value: "member", label: t("普通用户") },
                         ]}
                       />
                       <FilterDropdown
-                        ariaLabel="筛选工作空间"
+                        ariaLabel={t("筛选工作空间")}
                         value={userWorkspaceFilter}
                         onChange={setUserWorkspaceFilter}
                         options={[
-                          { value: "all", label: "全部工作空间" },
+                          { value: "all", label: t("全部工作空间") },
                           ...workspaces.map((workspace) => ({
                             value: workspace.id,
-                            label: displayWorkspaceName(workspace),
+                            label: displayWorkspaceName(workspace, t),
                           })),
                         ]}
                       />
@@ -2210,29 +2359,29 @@ function SystemPage({
                     <div className="min-w-0 overflow-x-auto rounded-lg border bg-background">
                       <div
                         role="table"
-                        aria-label="用户列表"
+                        aria-label={t("用户列表")}
                         className="min-w-[1700px] text-sm"
                       >
                       <div
                         role="row"
                         className="grid grid-cols-[150px_140px_260px_240px_220px_130px_120px_180px_160px] border-b bg-muted/40 px-4 py-3 text-sm font-semibold text-muted-foreground"
                       >
-                        <span role="columnheader">用户名</span>
-                        <span role="columnheader">账号</span>
-                        <span role="columnheader">邮箱</span>
-                        <span role="columnheader">所属工作空间</span>
-                        <span role="columnheader">所属团队</span>
-                        <span role="columnheader">用户角色</span>
-                        <span role="columnheader">状态</span>
-                        <span role="columnheader">创建时间</span>
+                        <span role="columnheader">{t("用户名")}</span>
+                        <span role="columnheader">{t("账号")}</span>
+                        <span role="columnheader">{t("邮箱")}</span>
+                        <span role="columnheader">{t("所属工作空间")}</span>
+                        <span role="columnheader">{t("所属团队")}</span>
+                        <span role="columnheader">{t("用户角色")}</span>
+                        <span role="columnheader">{t("状态")}</span>
+                        <span role="columnheader">{t("创建时间")}</span>
                         <span role="columnheader" className="text-right">
-                          操作
+                          {t("操作")}
                         </span>
                       </div>
                       {filteredUsers.map((user, index) => {
-                        const workspaceNames = formatUserWorkspaces(user)
-                        const teamNames = formatUserTeams(user)
-                        const roleLabel = getUserRoleLabel(user)
+                        const workspaceNames = formatUserWorkspaces(user, t)
+                        const teamNames = formatUserTeams(user, t)
+                        const roleLabel = getUserRoleLabel(user, t)
 
                         return (
                           <div
@@ -2297,13 +2446,15 @@ function SystemPage({
                               ) : (
                                 <CircleOffIcon className="size-4 text-muted-foreground" />
                               )}
-                              <span>{user.is_active ? "已启用" : "已停用"}</span>
+                              <span>
+                                {user.is_active ? t("已启用") : t("已停用")}
+                              </span>
                             </span>
                             <span
                               role="cell"
                               className="whitespace-nowrap text-muted-foreground"
                             >
-                              {formatDateTime(user.created_at)}
+                              {formatDateTime(user.created_at, locale)}
                             </span>
                             <span
                               role="cell"
@@ -2319,10 +2470,10 @@ function SystemPage({
                                 onClick={() => void handleToggleUser(user)}
                                 title={
                                   user.id === me.user.id
-                                    ? "不能停用当前账号"
-                                    : "切换用户状态"
+                                    ? t("不能停用当前账号")
+                                    : t("切换用户状态")
                                 }
-                                aria-label="切换用户状态"
+                                aria-label={t("切换用户状态")}
                               >
                                 <span
                                   className={cn(
@@ -2337,8 +2488,8 @@ function SystemPage({
                                 variant="ghost"
                                 size="icon-sm"
                                 onClick={() => handleOpenEditUser(user)}
-                                title="编辑用户"
-                                aria-label="编辑用户"
+                                title={t("编辑用户")}
+                                aria-label={t("编辑用户")}
                               >
                                 <PencilIcon />
                               </Button>
@@ -2349,8 +2500,8 @@ function SystemPage({
                                 onClick={() =>
                                   handleOpenUserPasswordDialog(user)
                                 }
-                                title="修改密码"
-                                aria-label="修改密码"
+                                title={t("修改密码")}
+                                aria-label={t("修改密码")}
                               >
                                 <LockIcon />
                               </Button>
@@ -2362,10 +2513,10 @@ function SystemPage({
                                 onClick={() => void handleDeleteUser(user)}
                                 title={
                                   user.id === me.user.id
-                                    ? "不能删除当前账号"
-                                    : "删除用户"
+                                    ? t("不能删除当前账号")
+                                    : t("删除用户")
                                 }
-                                aria-label="删除用户"
+                                aria-label={t("删除用户")}
                               >
                                 <Trash2Icon />
                               </Button>
@@ -2375,7 +2526,7 @@ function SystemPage({
                       })}
                       {!filteredUsers.length ? (
                         <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                          没有匹配的用户
+                          {t("没有匹配的用户")}
                         </div>
                       ) : null}
                       </div>
@@ -2383,7 +2534,9 @@ function SystemPage({
                   </div>
                 ) : (
                   <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
-                    <p className="text-sm text-muted-foreground">暂无用户</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t("暂无用户")}
+                    </p>
                   </div>
                 )}
               </CardContent>
@@ -2407,11 +2560,11 @@ function SystemPage({
                     <UserCogIcon className="size-4" />
                   </span>
                   <div className="min-w-0">
-                    <CardTitle>用户管理</CardTitle>
+                    <CardTitle>{t("用户管理")}</CardTitle>
                     <CardDescription>
                       {selectedWorkspace
-                        ? displayWorkspaceName(selectedWorkspace)
-                        : "未选择工作空间"}
+                        ? displayWorkspaceName(selectedWorkspace, t)
+                        : t("未选择工作空间")}
                     </CardDescription>
                   </div>
                 </div>
@@ -2422,7 +2575,7 @@ function SystemPage({
                   onClick={handleOpenCreateUser}
                 >
                   <PlusIcon data-icon="inline-start" />
-                  新建用户
+                  {t("新建用户")}
                 </Button>
               </CardHeader>
               <CardContent className="min-w-0 px-4">
@@ -2439,23 +2592,23 @@ function SystemPage({
                   <div className="min-w-0 overflow-x-auto rounded-lg border bg-background">
                     <div
                       role="table"
-                      aria-label="工作空间用户列表"
+                      aria-label={t("工作空间用户列表")}
                       className="min-w-[980px] text-sm"
                     >
                       <div
                         role="row"
                         className="grid grid-cols-[160px_150px_280px_120px_120px_150px] border-b bg-muted/40 px-4 py-3 text-sm font-semibold text-muted-foreground"
                       >
-                        <span role="columnheader">用户名</span>
-                        <span role="columnheader">账号</span>
-                        <span role="columnheader">邮箱</span>
-                        <span role="columnheader">空间角色</span>
-                        <span role="columnheader">状态</span>
-                        <span role="columnheader">创建时间</span>
+                        <span role="columnheader">{t("用户名")}</span>
+                        <span role="columnheader">{t("账号")}</span>
+                        <span role="columnheader">{t("邮箱")}</span>
+                        <span role="columnheader">{t("空间角色")}</span>
+                        <span role="columnheader">{t("状态")}</span>
+                        <span role="columnheader">{t("创建时间")}</span>
                       </div>
                       {workspaceMembers.map((member, index) => {
                         const roleLabel =
-                          member.role === "admin" ? "管理员" : "成员"
+                          member.role === "admin" ? t("管理员") : t("成员")
 
                         return (
                           <div
@@ -2502,14 +2655,16 @@ function SystemPage({
                                 <CircleOffIcon className="size-4 text-muted-foreground" />
                               )}
                               <span>
-                                {member.user.is_active ? "已启用" : "已停用"}
+                                {member.user.is_active
+                                  ? t("已启用")
+                                  : t("已停用")}
                               </span>
                             </span>
                             <span
                               role="cell"
                               className="whitespace-nowrap text-muted-foreground"
                             >
-                              {formatDateTime(member.user.created_at)}
+                              {formatDateTime(member.user.created_at, locale)}
                             </span>
                           </div>
                         )
@@ -2518,7 +2673,9 @@ function SystemPage({
                   </div>
                 ) : (
                   <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
-                    <p className="text-sm text-muted-foreground">暂无用户</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t("暂无用户")}
+                    </p>
                   </div>
                 )}
               </CardContent>
@@ -2540,8 +2697,8 @@ function SystemPage({
                     <HistoryIcon className="size-4" />
                   </span>
                   <div className="min-w-0">
-                    <CardTitle>审计日志</CardTitle>
-                    <CardDescription>系统管理写操作</CardDescription>
+                    <CardTitle>{t("审计日志")}</CardTitle>
+                    <CardDescription>{t("系统管理写操作")}</CardDescription>
                   </div>
                 </div>
               </CardHeader>
@@ -2556,15 +2713,15 @@ function SystemPage({
                   <div className="min-w-0 overflow-x-auto rounded-lg border bg-background">
                     <div
                       role="table"
-                      aria-label="审计日志"
+                      aria-label={t("审计日志")}
                       className="w-max min-w-[1700px] text-sm"
                     >
                       <div className="grid grid-cols-[180px_150px_160px_220px_minmax(950px,max-content)] border-b bg-muted/40 px-4 py-3 font-semibold text-muted-foreground">
-                        <span role="columnheader">时间</span>
-                        <span role="columnheader">操作者</span>
-                        <span role="columnheader">动作</span>
-                        <span role="columnheader">对象</span>
-                        <span role="columnheader">详情</span>
+                        <span role="columnheader">{t("时间")}</span>
+                        <span role="columnheader">{t("操作者")}</span>
+                        <span role="columnheader">{t("动作")}</span>
+                        <span role="columnheader">{t("对象")}</span>
+                        <span role="columnheader">{t("详情")}</span>
                       </div>
                       {auditLogs.map((log, index) => (
                         <div
@@ -2576,22 +2733,24 @@ function SystemPage({
                           )}
                         >
                           <span className="whitespace-nowrap text-muted-foreground">
-                            {formatDateTime(log.created_at)}
+                            {formatDateTime(log.created_at, locale)}
                           </span>
                           <span className="truncate" title={log.actor_username}>
                             {log.actor_name}
                           </span>
                           <span>
-                            {AUDIT_ACTION_LABELS[log.action] ?? log.action}
+                            {AUDIT_ACTION_LABEL_KEYS[log.action]
+                              ? t(AUDIT_ACTION_LABEL_KEYS[log.action])
+                              : log.action}
                           </span>
                           <span className="truncate" title={log.resource_name}>
                             {log.resource_name}
                           </span>
                           <span
                             className="whitespace-nowrap text-muted-foreground"
-                            title={formatAuditDetails(log.details)}
+                            title={formatAuditDetails(log.details, t)}
                           >
-                            {formatAuditDetails(log.details)}
+                            {formatAuditDetails(log.details, t)}
                           </span>
                         </div>
                       ))}
@@ -2599,7 +2758,9 @@ function SystemPage({
                   </div>
                 ) : (
                   <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
-                    <p className="text-sm text-muted-foreground">暂无审计日志</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t("暂无审计日志")}
+                    </p>
                   </div>
                 )}
               </CardContent>
@@ -2620,14 +2781,16 @@ function SystemPage({
       >
         <DialogContent side="right">
           <DialogHeader>
-            <DialogTitle>编辑工作空间</DialogTitle>
-            <DialogDescription>更新名称和标识</DialogDescription>
+            <DialogTitle>{t("编辑工作空间")}</DialogTitle>
+            <DialogDescription>{t("更新名称和标识")}</DialogDescription>
           </DialogHeader>
           {workspaceEditForm ? (
             <form onSubmit={handleUpdateWorkspace}>
               <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor="editWorkspaceName">名称</FieldLabel>
+                  <FieldLabel htmlFor="editWorkspaceName">
+                    {t("名称")}
+                  </FieldLabel>
                   <Input
                     id="editWorkspaceName"
                     value={workspaceEditForm.name}
@@ -2642,7 +2805,9 @@ function SystemPage({
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="editWorkspaceSlug">标识</FieldLabel>
+                  <FieldLabel htmlFor="editWorkspaceSlug">
+                    {t("标识")}
+                  </FieldLabel>
                   <Input
                     id="editWorkspaceSlug"
                     value={workspaceEditForm.slug}
@@ -2666,13 +2831,13 @@ function SystemPage({
                   variant="outline"
                   onClick={() => setWorkspaceEditForm(null)}
                 >
-                  取消
+                  {t("取消")}
                 </Button>
                 <Button disabled={isSavingWorkspace}>
                   {isSavingWorkspace ? (
                     <LoaderCircleIcon data-icon="inline-start" />
                   ) : null}
-                  保存
+                  {t("保存")}
                 </Button>
               </DialogFooter>
             </form>
@@ -2691,18 +2856,18 @@ function SystemPage({
       >
         <DialogContent side="right">
           <DialogHeader>
-            <DialogTitle>编辑团队</DialogTitle>
+            <DialogTitle>{t("编辑团队")}</DialogTitle>
             <DialogDescription>
               {selectedWorkspace
-                ? displayWorkspaceName(selectedWorkspace)
-                : "先选择工作空间"}
+                ? displayWorkspaceName(selectedWorkspace, t)
+                : t("先选择工作空间")}
             </DialogDescription>
           </DialogHeader>
           {teamEditForm ? (
             <form onSubmit={handleUpdateTeam}>
               <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor="editTeamName">名称</FieldLabel>
+                  <FieldLabel htmlFor="editTeamName">{t("名称")}</FieldLabel>
                   <Input
                     id="editTeamName"
                     value={teamEditForm.name}
@@ -2717,7 +2882,7 @@ function SystemPage({
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="editTeamSlug">标识</FieldLabel>
+                  <FieldLabel htmlFor="editTeamSlug">{t("标识")}</FieldLabel>
                   <Input
                     id="editTeamSlug"
                     value={teamEditForm.slug}
@@ -2741,13 +2906,13 @@ function SystemPage({
                   variant="outline"
                   onClick={() => setTeamEditForm(null)}
                 >
-                  取消
+                  {t("取消")}
                 </Button>
                 <Button disabled={!selectedWorkspaceId || isSavingTeam}>
                   {isSavingTeam ? (
                     <LoaderCircleIcon data-icon="inline-start" />
                   ) : null}
-                  保存
+                  {t("保存")}
                 </Button>
               </DialogFooter>
             </form>
@@ -2773,17 +2938,17 @@ function SystemPage({
           }}
         >
           <DialogHeader>
-            <DialogTitle>新建用户</DialogTitle>
+            <DialogTitle>{t("新建用户")}</DialogTitle>
             <DialogDescription>
               {me.user.is_global_admin
-                ? "创建账号并分配工作空间与团队"
-                : "创建普通账号并加入当前工作空间"}
+                ? t("创建账号并分配工作空间与团队")
+                : t("创建普通账号并加入当前工作空间")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateUser}>
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="newUserName">姓名</FieldLabel>
+                <FieldLabel htmlFor="newUserName">{t("姓名")}</FieldLabel>
                 <Input
                   id="newUserName"
                   value={userCreateForm.name}
@@ -2797,7 +2962,7 @@ function SystemPage({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="newUserUsername">账号</FieldLabel>
+                <FieldLabel htmlFor="newUserUsername">{t("账号")}</FieldLabel>
                 <Input
                   id="newUserUsername"
                   value={userCreateForm.username}
@@ -2811,7 +2976,7 @@ function SystemPage({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="newUserEmail">邮箱</FieldLabel>
+                <FieldLabel htmlFor="newUserEmail">{t("邮箱")}</FieldLabel>
                 <Input
                   id="newUserEmail"
                   type="email"
@@ -2826,7 +2991,7 @@ function SystemPage({
                 />
               </Field>
               <Field>
-                <FieldLabel>默认密码</FieldLabel>
+                <FieldLabel>{t("默认密码")}</FieldLabel>
                 <p className="text-sm font-medium text-foreground">
                   {DEFAULT_USER_PASSWORD}
                 </p>
@@ -2844,12 +3009,14 @@ function SystemPage({
                       }))
                     }
                   />
-                  全局管理员
+                  {t("全局管理员")}
                 </label>
               ) : null}
               {me.user.is_global_admin ? (
                 <Field>
-                  <FieldLabel id="newUserWorkspaceLabel">工作空间</FieldLabel>
+                  <FieldLabel id="newUserWorkspaceLabel">
+                    {t("工作空间")}
+                  </FieldLabel>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -2866,8 +3033,8 @@ function SystemPage({
                         )}
                       >
                         {userCreateWorkspace
-                          ? displayWorkspaceName(userCreateWorkspace)
-                          : "不指定工作空间"}
+                          ? displayWorkspaceName(userCreateWorkspace, t)
+                          : t("不指定工作空间")}
                       </span>
                       <ChevronDownIcon data-icon="inline-end" />
                     </Button>
@@ -2879,7 +3046,7 @@ function SystemPage({
                     <DropdownMenuItem
                       onSelect={() => handleUserCreateWorkspaceChange("")}
                     >
-                      不指定工作空间
+                      {t("不指定工作空间")}
                     </DropdownMenuItem>
                     {activeWorkspaces.map((workspace) => (
                       <DropdownMenuItem
@@ -2890,10 +3057,10 @@ function SystemPage({
                         }
                       >
                         <span className="min-w-0 truncate">
-                          {displayWorkspaceName(workspace)}
+                          {displayWorkspaceName(workspace, t)}
                         </span>
                         {workspace.is_default ? (
-                          <Badge variant="outline">默认</Badge>
+                          <Badge variant="outline">{t("默认")}</Badge>
                         ) : null}
                       </DropdownMenuItem>
                     ))}
@@ -2903,10 +3070,10 @@ function SystemPage({
               ) : null}
               {me.user.is_global_admin ? (
                 <Field>
-                  <FieldLabel>团队</FieldLabel>
+                  <FieldLabel>{t("团队")}</FieldLabel>
                 {!userCreateForm.workspaceId ? (
                   <FieldDescription>
-                    选择工作空间后可分配该空间下的团队
+                    {t("选择工作空间后可分配该空间下的团队")}
                   </FieldDescription>
                 ) : isUserCreateTeamsLoading ? (
                   <div className="flex h-16 items-center justify-center rounded-lg border border-dashed">
@@ -2935,13 +3102,15 @@ function SystemPage({
                           }
                         />
                         <span className="min-w-0 truncate">
-                          {displayTeamName(team)}
+                          {displayTeamName(team, t)}
                         </span>
                       </label>
                     ))}
                   </div>
                 ) : (
-                  <FieldDescription>该工作空间下暂无团队</FieldDescription>
+                  <FieldDescription>
+                    {t("该工作空间下暂无团队")}
+                  </FieldDescription>
                 )}
                 </Field>
               ) : null}
@@ -2955,7 +3124,7 @@ function SystemPage({
                 variant="outline"
                 onClick={() => setIsUserCreateDialogOpen(false)}
               >
-                取消
+                {t("取消")}
               </Button>
               <Button
                 disabled={
@@ -2968,7 +3137,7 @@ function SystemPage({
                 ) : (
                   <PlusIcon data-icon="inline-start" />
                 )}
-                新建
+                {t("新建")}
               </Button>
             </DialogFooter>
           </form>
@@ -2981,14 +3150,14 @@ function SystemPage({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>编辑用户</DialogTitle>
-            <DialogDescription>更新账号基础信息</DialogDescription>
+            <DialogTitle>{t("编辑用户")}</DialogTitle>
+            <DialogDescription>{t("更新账号基础信息")}</DialogDescription>
           </DialogHeader>
           {userForm ? (
             <form onSubmit={handleUpdateUser}>
               <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor="userName">姓名</FieldLabel>
+                  <FieldLabel htmlFor="userName">{t("姓名")}</FieldLabel>
                   <Input
                     id="userName"
                     value={userForm.name}
@@ -3003,7 +3172,7 @@ function SystemPage({
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="userUsername">账号</FieldLabel>
+                  <FieldLabel htmlFor="userUsername">{t("账号")}</FieldLabel>
                   <Input
                     id="userUsername"
                     value={userForm.username}
@@ -3018,7 +3187,7 @@ function SystemPage({
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="userEmail">邮箱</FieldLabel>
+                  <FieldLabel htmlFor="userEmail">{t("邮箱")}</FieldLabel>
                   <Input
                     id="userEmail"
                     type="email"
@@ -3050,7 +3219,7 @@ function SystemPage({
                       )
                     }
                   />
-                  全局管理员
+                  {t("全局管理员")}
                 </label>
               </FieldGroup>
               <DialogFooter className="pt-5">
@@ -3059,13 +3228,13 @@ function SystemPage({
                   variant="outline"
                   onClick={() => setUserForm(null)}
                 >
-                  取消
+                  {t("取消")}
                 </Button>
                 <Button disabled={isSavingUser}>
                   {isSavingUser ? (
                     <LoaderCircleIcon data-icon="inline-start" />
                   ) : null}
-                  保存
+                  {t("保存")}
                 </Button>
               </DialogFooter>
             </form>
@@ -3084,11 +3253,13 @@ function SystemPage({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>修改密码</DialogTitle>
+            <DialogTitle>{t("修改密码")}</DialogTitle>
             <DialogDescription>
               {userPasswordForm
-                ? `为 ${userPasswordForm.user.name} 设置新密码`
-                : "设置新密码"}
+                ? t("为 {name} 设置新密码", {
+                    name: userPasswordForm.user.name,
+                  })
+                : t("设置新密码")}
             </DialogDescription>
           </DialogHeader>
           {userPasswordForm ? (
@@ -3096,7 +3267,7 @@ function SystemPage({
               <FieldGroup>
                 <Field>
                   <FieldLabel htmlFor="managedUserNewPassword">
-                    新密码
+                    {t("新密码")}
                   </FieldLabel>
                   <Input
                     id="managedUserNewPassword"
@@ -3114,12 +3285,12 @@ function SystemPage({
                     required
                   />
                   <FieldDescription>
-                    至少 6 位，并且包含一个大写字母
+                    {t("至少 6 位，并且包含一个大写字母")}
                   </FieldDescription>
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="managedUserConfirmPassword">
-                    确认密码
+                    {t("确认密码")}
                   </FieldLabel>
                   <Input
                     id="managedUserConfirmPassword"
@@ -3152,13 +3323,13 @@ function SystemPage({
                   variant="outline"
                   onClick={() => setUserPasswordForm(null)}
                 >
-                  取消
+                  {t("取消")}
                 </Button>
                 <Button disabled={isChangingUserPassword}>
                   {isChangingUserPassword ? (
                     <LoaderCircleIcon data-icon="inline-start" />
                   ) : null}
-                  保存
+                  {t("保存")}
                 </Button>
               </DialogFooter>
             </form>
@@ -3172,13 +3343,13 @@ function SystemPage({
       >
         <DialogContent side="right">
           <DialogHeader>
-            <DialogTitle>新建工作空间</DialogTitle>
-            <DialogDescription>创建租户和负责人</DialogDescription>
+            <DialogTitle>{t("新建工作空间")}</DialogTitle>
+            <DialogDescription>{t("创建租户和负责人")}</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateWorkspace}>
             <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="workspaceName">名称</FieldLabel>
+                <FieldLabel htmlFor="workspaceName">{t("名称")}</FieldLabel>
                 <Input
                   id="workspaceName"
                   value={workspaceForm.name}
@@ -3192,7 +3363,7 @@ function SystemPage({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="workspaceSlug">标识</FieldLabel>
+                <FieldLabel htmlFor="workspaceSlug">{t("标识")}</FieldLabel>
                 <Input
                   id="workspaceSlug"
                   value={workspaceForm.slug}
@@ -3206,7 +3377,9 @@ function SystemPage({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="adminName">负责人姓名</FieldLabel>
+                <FieldLabel htmlFor="adminName">
+                  {t("负责人姓名")}
+                </FieldLabel>
                 <Input
                   id="adminName"
                   value={workspaceForm.adminName}
@@ -3220,7 +3393,9 @@ function SystemPage({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="adminUsername">负责人账号</FieldLabel>
+                <FieldLabel htmlFor="adminUsername">
+                  {t("负责人账号")}
+                </FieldLabel>
                 <Input
                   id="adminUsername"
                   value={workspaceForm.adminUsername}
@@ -3234,7 +3409,9 @@ function SystemPage({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="adminEmail">负责人邮箱</FieldLabel>
+                <FieldLabel htmlFor="adminEmail">
+                  {t("负责人邮箱")}
+                </FieldLabel>
                 <Input
                   id="adminEmail"
                   type="email"
@@ -3254,7 +3431,9 @@ function SystemPage({
               {workspaceNotice ? (
                 <div className="rounded-lg border bg-muted p-3 text-sm">
                   <div className="font-medium">
-                    已创建 {workspaceNotice.workspace.name}
+                    {t("已创建 {name}", {
+                      name: workspaceNotice.workspace.name,
+                    })}
                   </div>
                   {workspaceNotice.admin_initial_password ? (
                     <div className="mt-1 font-mono text-xs">
@@ -3270,7 +3449,7 @@ function SystemPage({
                 variant="outline"
                 onClick={() => setIsWorkspaceDialogOpen(false)}
               >
-                取消
+                {t("取消")}
               </Button>
               <Button disabled={isCreatingWorkspace}>
                 {isCreatingWorkspace ? (
@@ -3278,7 +3457,7 @@ function SystemPage({
                 ) : (
                   <PlusIcon data-icon="inline-start" />
                 )}
-                新建
+                {t("新建")}
               </Button>
             </DialogFooter>
           </form>
@@ -3288,17 +3467,19 @@ function SystemPage({
       <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
         <DialogContent side="right">
           <DialogHeader>
-            <DialogTitle>新建团队</DialogTitle>
+            <DialogTitle>{t("新建团队")}</DialogTitle>
             <DialogDescription>
               {teamWorkspace
-                ? displayWorkspaceName(teamWorkspace)
-                : "先选择工作空间"}
+                ? displayWorkspaceName(teamWorkspace, t)
+                : t("先选择工作空间")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateTeam}>
             <FieldGroup>
               <Field>
-                <FieldLabel id="teamWorkspaceLabel">工作空间</FieldLabel>
+                <FieldLabel id="teamWorkspaceLabel">
+                  {t("工作空间")}
+                </FieldLabel>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -3316,8 +3497,8 @@ function SystemPage({
                         )}
                       >
                         {teamWorkspace
-                          ? displayWorkspaceName(teamWorkspace)
-                          : "选择工作空间"}
+                          ? displayWorkspaceName(teamWorkspace, t)
+                          : t("选择工作空间")}
                       </span>
                       <ChevronDownIcon data-icon="inline-end" />
                     </Button>
@@ -3339,7 +3520,7 @@ function SystemPage({
                           className="justify-between"
                         >
                           <span className="truncate">
-                            {displayWorkspaceName(workspace)}
+                            {displayWorkspaceName(workspace, t)}
                           </span>
                           {workspace.id === teamForm.workspaceId ? (
                             <CircleCheckIcon className="text-primary" />
@@ -3351,7 +3532,7 @@ function SystemPage({
                 </DropdownMenu>
               </Field>
               <Field>
-                <FieldLabel htmlFor="teamName">名称</FieldLabel>
+                <FieldLabel htmlFor="teamName">{t("名称")}</FieldLabel>
                 <Input
                   id="teamName"
                   value={teamForm.name}
@@ -3365,7 +3546,7 @@ function SystemPage({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="teamSlug">标识</FieldLabel>
+                <FieldLabel htmlFor="teamSlug">{t("标识")}</FieldLabel>
                 <Input
                   id="teamSlug"
                   value={teamForm.slug}
@@ -3388,7 +3569,7 @@ function SystemPage({
                 variant="outline"
                 onClick={() => setIsTeamDialogOpen(false)}
               >
-                取消
+                {t("取消")}
               </Button>
               <Button disabled={!teamForm.workspaceId || isCreatingTeam}>
                 {isCreatingTeam ? (
@@ -3396,7 +3577,7 @@ function SystemPage({
                 ) : (
                   <PlusIcon data-icon="inline-start" />
                 )}
-                新建
+                {t("新建")}
               </Button>
             </DialogFooter>
           </form>
@@ -3407,6 +3588,7 @@ function SystemPage({
 }
 
 export function App() {
+  const { t } = useLanguage()
   const [token, setToken] = React.useState<string | null>(() =>
     localStorage.getItem(TOKEN_KEY)
   )
@@ -3511,12 +3693,12 @@ export function App() {
           return
         }
 
-        setSessionError(getErrorMessage(error))
+        setSessionError(getErrorMessage(error, t))
       } finally {
         setIsSessionLoading(false)
       }
     },
-    [logout]
+    [logout, t]
   )
 
   React.useEffect(() => {
@@ -3574,7 +3756,7 @@ export function App() {
       .catch((error: unknown) => {
         if (isCurrent) {
           setTeams([])
-          setTeamsError(getErrorMessage(error))
+          setTeamsError(getErrorMessage(error, t))
         }
       })
       .finally(() => {
@@ -3586,7 +3768,7 @@ export function App() {
     return () => {
       isCurrent = false
     }
-  }, [token, selectedWorkspaceId, mustChangePassword, isSessionLoading])
+  }, [token, selectedWorkspaceId, mustChangePassword, isSessionLoading, t])
 
   function handleLogin(nextToken: string, nextMustChangePassword: boolean) {
     localStorage.setItem(TOKEN_KEY, nextToken)
@@ -3715,7 +3897,7 @@ export function App() {
     if (token) {
       await loadSession(token)
     }
-    notify("success", "密码已修改")
+    notify("success", t("密码已修改"))
   }
 
   if (!token) {
@@ -3735,12 +3917,12 @@ export function App() {
       <main className="flex min-h-svh items-center justify-center bg-muted/30 p-6">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle>无法加载账号</CardTitle>
-            <CardDescription>{sessionError ?? "请重新登录"}</CardDescription>
+            <CardTitle>{t("无法加载账号")}</CardTitle>
+            <CardDescription>{sessionError ?? t("请重新登录")}</CardDescription>
           </CardHeader>
           <CardFooter>
             <Button className="w-full" onClick={logout}>
-              重新登录
+              {t("重新登录")}
             </Button>
           </CardFooter>
         </Card>
@@ -3748,15 +3930,16 @@ export function App() {
     )
   }
 
-  const activePageConfig = pages.find((page) => page.key === activePage)
-  const activePageTitle = activePageConfig?.label ?? "系统管理"
+  const featurePages = getPages(t)
+  const activePageConfig = featurePages.find((page) => page.key === activePage)
+  const activePageTitle = activePageConfig?.label ?? t("系统管理")
   const isChangePasswordDialogOpen =
     mustChangePassword || isPasswordDialogOpen
   const currentWorkspace =
     workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null
   const currentWorkspaceName = currentWorkspace
-    ? displayWorkspaceName(currentWorkspace)
-    : "未选择工作空间"
+    ? displayWorkspaceName(currentWorkspace, t)
+    : t("未选择工作空间")
   const workspaceOptions = workspaces.filter(
     (workspace) =>
       workspace.status === "active" && hasWorkspaceMembership(me, workspace.id)
@@ -3767,6 +3950,7 @@ export function App() {
       <TopBar
         me={me}
         activePage={activePage}
+        featurePages={featurePages}
         currentWorkspaceName={currentWorkspaceName}
         selectedWorkspaceId={selectedWorkspaceId}
         workspaceOptions={workspaceOptions}
@@ -3813,17 +3997,17 @@ export function App() {
             />
           </>
         ) : (
-          <FeaturePage page={activePageConfig ?? pages[0]} />
+          <FeaturePage page={activePageConfig ?? featurePages[0]} />
         )}
       </main>
       <ChangePasswordDialog
         open={isChangePasswordDialogOpen}
         token={token}
-        title={mustChangePassword ? "修改初始密码" : "修改密码"}
+        title={mustChangePassword ? t("修改初始密码") : t("修改密码")}
         description={
           mustChangePassword
-            ? "设置新密码后继续使用 NexaFlow"
-            : "设置一个新的登录密码"
+            ? t("设置新密码后继续使用 NexaFlow")
+            : t("设置一个新的登录密码")
         }
         canDismiss={!mustChangePassword}
         requireCurrentPassword={!mustChangePassword}

@@ -6,6 +6,12 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import {
+  DEFAULT_LANGUAGE,
+  translate,
+  type TFunction,
+} from "@/lib/i18n"
+
 type DialogField = {
   id: string
   label: string
@@ -26,9 +32,30 @@ type WorkspacePageConfig = {
   icon: LucideIcon
 }
 
-export const pages = [
+const pageDefinitions = [
   {
     key: "apps",
+    icon: BoxesIcon,
+  },
+  {
+    key: "knowledge",
+    icon: DatabaseIcon,
+  },
+  {
+    key: "models",
+    icon: BrainCircuitIcon,
+  },
+  {
+    key: "tools",
+    icon: WrenchIcon,
+  },
+] as const satisfies ReadonlyArray<{
+  key: "apps" | "knowledge" | "models" | "tools"
+  icon: LucideIcon
+}>
+
+const pageCopy = {
+  apps: {
     label: "应用",
     description: "编排业务流程、知识库和模型能力，构建可运行的 AI 应用。",
     actionLabel: "新建应用",
@@ -56,10 +83,8 @@ export const pages = [
         placeholder: "例如：运营团队",
       },
     ],
-    icon: BoxesIcon,
   },
-  {
-    key: "knowledge",
+  knowledge: {
     label: "知识库",
     description: "管理文档、数据源与向量索引，让应用可以检索你的业务知识。",
     actionLabel: "新建知识库",
@@ -88,10 +113,8 @@ export const pages = [
         placeholder: "例如：本地文档",
       },
     ],
-    icon: DatabaseIcon,
   },
-  {
-    key: "models",
+  models: {
     label: "模型",
     description: "接入模型供应商，配置默认模型和调用参数。",
     actionLabel: "接入模型",
@@ -120,10 +143,8 @@ export const pages = [
         placeholder: "sk-...",
       },
     ],
-    icon: BrainCircuitIcon,
   },
-  {
-    key: "tools",
+  tools: {
     label: "工具",
     description: "管理外部 API、内部服务和可被应用调用的工具能力。",
     actionLabel: "添加工具",
@@ -152,9 +173,34 @@ export const pages = [
         placeholder: "https://api.example.com/orders",
       },
     ],
-    icon: WrenchIcon,
   },
-] as const satisfies readonly WorkspacePageConfig[]
+} as const
 
-export type PageKey = (typeof pages)[number]["key"] | "system"
+export function getPages(t: TFunction): WorkspacePageConfig[] {
+  return pageDefinitions.map((page) => {
+    const copy = pageCopy[page.key]
+
+    return {
+      ...page,
+      label: t(copy.label),
+      description: t(copy.description),
+      actionLabel: t(copy.actionLabel),
+      emptyTitle: t(copy.emptyTitle),
+      emptyDescription: t(copy.emptyDescription),
+      secondaryActionLabel: t(copy.secondaryActionLabel),
+      dialogDescription: t(copy.dialogDescription),
+      dialogFields: copy.dialogFields.map((field) => ({
+        ...field,
+        label: t(field.label),
+        placeholder: t(field.placeholder),
+      })),
+    }
+  })
+}
+
+export const pages = getPages((key, values) =>
+  translate(DEFAULT_LANGUAGE, key, values)
+)
+
+export type PageKey = (typeof pageDefinitions)[number]["key"] | "system"
 export type FeaturePageConfig = (typeof pages)[number]
