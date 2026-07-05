@@ -20,7 +20,6 @@ import type { MeResponse, Workspace } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { displayWorkspaceName, getMembershipRole } from "@/app/display"
 import { StatusBadge } from "@/features/knowledge/status-badges"
-import { displaySlug } from "@/features/system/system-utils"
 
 type WorkspacesPanelProps = {
   me: MeResponse
@@ -114,7 +113,7 @@ export function WorkspacesPanel({
                         {displayWorkspaceName(workspace, t)}
                       </span>
                       <span className="truncate text-muted-foreground">
-                        {displaySlug(workspace.slug, workspace.is_default, t)}
+                        {workspace.description || "-"}
                       </span>
                     </button>
                     <span className="flex shrink-0 items-center gap-2">

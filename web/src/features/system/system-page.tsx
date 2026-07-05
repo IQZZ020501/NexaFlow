@@ -96,7 +96,7 @@ export function SystemPage({
   const locale = languageLocales[language]
   const [workspaceForm, setWorkspaceForm] = React.useState<WorkspaceForm>({
     name: "",
-    slug: "",
+    description: "",
     adminUsername: "",
     adminEmail: "",
     adminName: "",
@@ -104,7 +104,7 @@ export function SystemPage({
   const [teamForm, setTeamForm] = React.useState<TeamForm>({
     workspaceId: "",
     name: "",
-    slug: "",
+    description: "",
   })
   const [workspaceEditForm, setWorkspaceEditForm] =
     React.useState<ScopeEditForm | null>(null)
@@ -431,7 +431,7 @@ export function SystemPage({
       ""
 
     setTeamError(null)
-    setTeamForm({ workspaceId, name: "", slug: "" })
+    setTeamForm({ workspaceId, name: "", description: "" })
     setIsTeamDialogOpen(true)
   }
 
@@ -445,7 +445,7 @@ export function SystemPage({
     try {
       const payload = await createWorkspace(token, {
         name: workspaceForm.name,
-        slug: workspaceForm.slug,
+        description: workspaceForm.description,
         admin: {
           username: workspaceForm.adminUsername,
           email: workspaceForm.adminEmail,
@@ -454,7 +454,7 @@ export function SystemPage({
       })
       setWorkspaceForm({
         name: "",
-        slug: "",
+        description: "",
         adminUsername: "",
         adminEmail: "",
         adminName: "",
@@ -481,9 +481,9 @@ export function SystemPage({
     try {
       const team = await createTeam(token, teamForm.workspaceId, {
         name: teamForm.name,
-        slug: teamForm.slug,
+        description: teamForm.description,
       })
-      setTeamForm({ workspaceId: "", name: "", slug: "" })
+      setTeamForm({ workspaceId: "", name: "", description: "" })
       if (team.workspace_id === selectedWorkspaceId) {
         onTeamCreated(team)
       } else {
@@ -503,7 +503,7 @@ export function SystemPage({
     setWorkspaceEditForm({
       id: workspace.id,
       name: workspace.name,
-      slug: workspace.slug,
+      description: workspace.description,
     })
   }
 
@@ -522,7 +522,7 @@ export function SystemPage({
     try {
       const workspace = await updateWorkspace(token, workspaceEditForm.id, {
         name: workspaceEditForm.name,
-        slug: workspaceEditForm.slug,
+        description: workspaceEditForm.description,
       })
       onWorkspaceUpdated(workspace)
       setWorkspaceEditForm(null)
@@ -591,7 +591,7 @@ export function SystemPage({
     setTeamEditForm({
       id: team.id,
       name: team.name,
-      slug: team.slug,
+      description: team.description,
     })
   }
 
@@ -612,7 +612,7 @@ export function SystemPage({
         teamEditForm.id,
         {
           name: teamEditForm.name,
-          slug: teamEditForm.slug,
+          description: teamEditForm.description,
         }
       )
       onTeamUpdated(team)

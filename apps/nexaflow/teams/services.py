@@ -5,7 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from nexaflow.audit.services import record_audit_log
-from nexaflow.core.validation import normalize_name, normalize_slug
+from nexaflow.core.validation import normalize_name
+from nexaflow.db.model_utils import new_id
 from nexaflow.identity.models import User
 from nexaflow.teams.models import Team, TeamMembership
 from nexaflow.teams.schemas import TeamCreateRequest, TeamResponse, TeamUpdateRequest
@@ -20,7 +21,7 @@ def team_to_response(team: Team) -> TeamResponse:
         id=team.id,
         workspace_id=team.workspace_id,
         name=team.name,
-        slug=team.slug,
+        description=team.description,
         status=team.status,
         is_default=team.is_default,
     )
@@ -52,7 +53,8 @@ async def create_team(
     team = Team(
         workspace_id=workspace_id,
         name=normalize_name(payload.name),
-        slug=normalize_slug(payload.slug),
+        description=payload.description.strip(),
+        slug=new_id(),
         status=ACTIVE_STATUS,
     )
     db.add(team)
@@ -65,13 +67,13 @@ async def create_team(
             "team",
             team.id,
             team.name,
-            {"slug": team.slug, "workspace_id": workspace_id},
+            {"description": team.description, "workspace_id": workspace_id},
             workspace_id=workspace_id,
         )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "Team slug already exists.") from exc
+        raise HTTPException(status.HTTP_409_CONFLICT, "Team already exists.") from exc
 
     await db.refresh(team)
     return team_to_response(team)
@@ -86,8 +88,8 @@ async def update_team(
     details = payload.model_dump(exclude_none=True)
     if payload.name is not None:
         team.name = normalize_name(payload.name)
-    if payload.slug is not None:
-        team.slug = normalize_slug(payload.slug)
+    if payload.description is not None:
+        team.description = payload.description.strip()
     if payload.status is not None:
         if payload.status not in TEAM_STATUSES:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid team status.")
@@ -115,7 +117,7 @@ async def update_team(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "Team slug already exists.") from exc
+        raise HTTPException(status.HTTP_409_CONFLICT, "Team already exists.") from exc
 
     await db.refresh(team)
     return team_to_response(team)
@@ -132,7 +134,7 @@ async def delete_team_permanently(db: AsyncSession, team: Team, actor: User) -> 
         "team",
         team.id,
         team.name,
-        {"slug": team.slug, "workspace_id": team.workspace_id},
+        {"description": team.description, "workspace_id": team.workspace_id},
         workspace_id=team.workspace_id,
     )
     await db.execute(delete(TeamMembership).where(TeamMembership.team_id == team.id))

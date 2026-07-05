@@ -21,7 +21,7 @@ export function OperationNotification({
 
   return (
     <div
-      className="fixed top-4 left-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2"
+      className="fixed top-4 left-1/2 z-[60] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2"
       role={notification.kind === "error" ? "alert" : "status"}
       aria-live={notification.kind === "error" ? "assertive" : "polite"}
     >

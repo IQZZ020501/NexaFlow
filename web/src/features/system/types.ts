@@ -8,7 +8,7 @@ export type UserPasswordForm = {
 
 export type WorkspaceForm = {
   name: string
-  slug: string
+  description: string
   adminUsername: string
   adminEmail: string
   adminName: string
@@ -17,13 +17,13 @@ export type WorkspaceForm = {
 export type TeamForm = {
   workspaceId: string
   name: string
-  slug: string
+  description: string
 }
 
 export type ScopeEditForm = {
   id: string
   name: string
-  slug: string
+  description: string
 }
 
 export type UserCreateForm = {

@@ -20,7 +20,6 @@ import {
 import type { Team, Workspace } from "@/lib/api"
 import { displayTeamName, displayWorkspaceName } from "@/app/display"
 import { StatusBadge } from "@/features/knowledge/status-badges"
-import { displaySlug } from "@/features/system/system-utils"
 
 type TeamsPanelProps = {
   selectedWorkspace: Workspace | null
@@ -100,7 +99,7 @@ export function TeamsPanel({
                         {displayTeamName(team, t)}
                       </span>
                       <span className="truncate text-muted-foreground">
-                        {displaySlug(team.slug, team.is_default, t)}
+                        {team.description || "-"}
                       </span>
                     </span>
                     <span className="flex shrink-0 items-center gap-2">

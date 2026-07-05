@@ -68,7 +68,6 @@ async def user_workspaces_by_user_id(
             UserWorkspaceResponse(
                 id=workspace.id,
                 name=workspace.name,
-                slug=workspace.slug,
                 is_default=workspace.is_default,
                 role=membership.role,
             )
@@ -99,7 +98,6 @@ async def user_teams_by_user_id(
                 id=team.id,
                 workspace_id=team.workspace_id,
                 name=team.name,
-                slug=team.slug,
                 is_default=team.is_default,
                 role=membership.role,
             )

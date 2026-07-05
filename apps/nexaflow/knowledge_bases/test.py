@@ -88,7 +88,7 @@ def main() -> None:
             headers=auth_headers(admin_token),
             json={
                 "name": "Research Workspace",
-                "slug": "research",
+                "description": "研究工作空间",
                 "admin": {
                     "username": "research-admin",
                     "email": "research-admin@example.com",

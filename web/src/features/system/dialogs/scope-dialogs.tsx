@@ -67,7 +67,7 @@ export function EditWorkspaceDialog({
       <DialogContent side="right">
         <DialogHeader>
           <DialogTitle>{t("编辑工作空间")}</DialogTitle>
-          <DialogDescription>{t("更新名称和标识")}</DialogDescription>
+          <DialogDescription>{t("更新名称和描述")}</DialogDescription>
         </DialogHeader>
         {workspaceEditForm ? (
           <form onSubmit={handleUpdateWorkspace}>
@@ -88,18 +88,19 @@ export function EditWorkspaceDialog({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="editWorkspaceSlug">{t("标识")}</FieldLabel>
+                <FieldLabel htmlFor="editWorkspaceDescription">
+                  {t("描述")}
+                </FieldLabel>
                 <Input
-                  id="editWorkspaceSlug"
-                  value={workspaceEditForm.slug}
+                  id="editWorkspaceDescription"
+                  value={workspaceEditForm.description}
                   onChange={(event) =>
                     setWorkspaceEditForm((current) =>
                       current
-                        ? { ...current, slug: event.target.value }
+                        ? { ...current, description: event.target.value }
                         : current
                     )
                   }
-                  required
                 />
               </Field>
               {workspaceError ? (
@@ -189,18 +190,19 @@ export function EditTeamDialog({
                 />
               </Field>
               <Field>
-                <FieldLabel htmlFor="editTeamSlug">{t("标识")}</FieldLabel>
+                <FieldLabel htmlFor="editTeamDescription">
+                  {t("描述")}
+                </FieldLabel>
                 <Input
-                  id="editTeamSlug"
-                  value={teamEditForm.slug}
+                  id="editTeamDescription"
+                  value={teamEditForm.description}
                   onChange={(event) =>
                     setTeamEditForm((current) =>
                       current
-                        ? { ...current, slug: event.target.value }
+                        ? { ...current, description: event.target.value }
                         : current
                     )
                   }
-                  required
                 />
               </Field>
               {teamError ? (
@@ -279,17 +281,18 @@ export function CreateWorkspaceDialog({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="workspaceSlug">{t("标识")}</FieldLabel>
+              <FieldLabel htmlFor="workspaceDescription">
+                {t("描述")}
+              </FieldLabel>
               <Input
-                id="workspaceSlug"
-                value={workspaceForm.slug}
+                id="workspaceDescription"
+                value={workspaceForm.description}
                 onChange={(event) =>
                   setWorkspaceForm((current) => ({
                     ...current,
-                    slug: event.target.value,
+                    description: event.target.value,
                   }))
                 }
-                required
               />
             </Field>
             <Field>
@@ -482,17 +485,16 @@ export function CreateTeamDialog({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="teamSlug">{t("标识")}</FieldLabel>
+              <FieldLabel htmlFor="teamDescription">{t("描述")}</FieldLabel>
               <Input
-                id="teamSlug"
-                value={teamForm.slug}
+                id="teamDescription"
+                value={teamForm.description}
                 onChange={(event) =>
                   setTeamForm((current) => ({
                     ...current,
-                    slug: event.target.value,
+                    description: event.target.value,
                   }))
                 }
-                required
               />
             </Field>
             {teamError ? (

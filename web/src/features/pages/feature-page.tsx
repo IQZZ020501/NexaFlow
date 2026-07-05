@@ -16,6 +16,7 @@ import { type MeResponse } from "@/lib/api"
 import { type FeaturePageConfig } from "@/lib/pages"
 import type { AppNotification } from "@/app/notifications"
 import { KnowledgeBasePage } from "@/features/knowledge/knowledge-base-page"
+import { ModelRegistryPage } from "@/features/models/model-registry-page"
 
 export function FeaturePage({
   page,
@@ -37,6 +38,18 @@ export function FeaturePage({
   if (page.key === "knowledge") {
     return (
       <KnowledgeBasePage
+        page={page}
+        token={token}
+        me={me}
+        selectedWorkspaceId={selectedWorkspaceId}
+        onNotify={onNotify}
+      />
+    )
+  }
+
+  if (page.key === "models") {
+    return (
+      <ModelRegistryPage
         page={page}
         token={token}
         me={me}

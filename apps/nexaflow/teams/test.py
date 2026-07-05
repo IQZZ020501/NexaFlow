@@ -54,7 +54,7 @@ def main() -> None:
             headers=auth_headers(admin_token),
         )
         assert default_teams.status_code == 200, default_teams.text
-        assert [item["slug"] for item in default_teams.json()] == ["default"]
+        assert [item["name"] for item in default_teams.json()] == ["Default Team"]
         default_team_id = default_teams.json()[0]["id"]
 
         created_workspace = client.post(
@@ -62,7 +62,7 @@ def main() -> None:
             headers=auth_headers(admin_token),
             json={
                 "name": "Research Workspace",
-                "slug": "research",
+                "description": "研究工作空间",
                 "admin": {
                     "username": "research-admin",
                     "email": "research-admin@example.com",
@@ -104,10 +104,11 @@ def main() -> None:
         team = client.post(
             teams_url(research_workspace_id),
             headers=auth_headers(research_token),
-            json={"name": "Applied AI", "slug": "applied-ai"},
+            json={"name": "Applied AI", "description": "应用智能团队"},
         )
         assert team.status_code == 201, team.text
         assert team.json()["workspace_id"] == research_workspace_id
+        assert team.json()["description"] == "应用智能团队"
         team_id = team.json()["id"]
         asyncio.run(assert_cross_workspace_team_membership_denied(default_workspace_id, team_id))
 
@@ -127,10 +128,10 @@ def main() -> None:
         updated = client.patch(
             teams_url(research_workspace_id, f"/{team_id}"),
             headers=auth_headers(research_token),
-            json={"name": "Applied Research", "slug": "applied-research"},
+            json={"name": "Applied Research", "description": "应用研究团队"},
         )
         assert updated.status_code == 200, updated.text
-        assert updated.json()["slug"] == "applied-research"
+        assert updated.json()["description"] == "应用研究团队"
 
         archived = client.patch(
             teams_url(research_workspace_id, f"/{team_id}"),

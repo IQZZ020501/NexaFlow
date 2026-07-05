@@ -70,14 +70,6 @@ export function getUserRoleClass(user: User) {
   return "border-border bg-muted text-muted-foreground"
 }
 
-export function displaySlug(slug: string, isDefault: boolean, t: TFunction) {
-  if (isDefault && slug === "default") {
-    return t("默认")
-  }
-
-  return slug
-}
-
 export function formatAuditDetails(
   details: Record<string, unknown>,
   t: TFunction

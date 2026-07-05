@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from nexaflow.audit.services import record_audit_log
-from nexaflow.core.validation import normalize_email, normalize_name, normalize_slug, normalize_username
+from nexaflow.core.validation import normalize_email, normalize_name, normalize_username
+from nexaflow.db.model_utils import new_id
 from nexaflow.identity.models import User
 from nexaflow.identity.schemas import UserCreateRequest, UserPasswordResetResponse
 from nexaflow.identity.security import hash_password
@@ -33,7 +34,7 @@ def workspace_to_response(workspace: Workspace) -> WorkspaceResponse:
     return WorkspaceResponse(
         id=workspace.id,
         name=workspace.name,
-        slug=workspace.slug,
+        description=workspace.description,
         status=workspace.status,
         is_default=workspace.is_default,
     )
@@ -119,7 +120,8 @@ async def create_workspace(
     email = normalize_email(payload.admin.email)
     admin_name = normalize_name(payload.admin.name)
     workspace_name = normalize_name(payload.name)
-    workspace_slug = normalize_slug(payload.slug)
+    workspace_description = payload.description.strip()
+    workspace_slug = new_id()
 
     admin = await find_user_by_identity(db, username, email)
     admin_created = admin is None
@@ -136,7 +138,12 @@ async def create_workspace(
         )
         db.add(admin)
 
-    workspace = Workspace(name=workspace_name, slug=workspace_slug, status=ACTIVE_STATUS)
+    workspace = Workspace(
+        name=workspace_name,
+        description=workspace_description,
+        slug=workspace_slug,
+        status=ACTIVE_STATUS,
+    )
     db.add(workspace)
 
     try:
@@ -155,13 +162,13 @@ async def create_workspace(
             "workspace",
             workspace.id,
             workspace.name,
-            {"slug": workspace.slug},
+            {"description": workspace.description},
             workspace_id=workspace.id,
         )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "Workspace slug already exists.") from exc
+        raise HTTPException(status.HTTP_409_CONFLICT, "Workspace already exists.") from exc
 
     await db.refresh(workspace)
     await db.refresh(admin)
@@ -182,8 +189,8 @@ async def update_workspace(
     details = payload.model_dump(exclude_none=True)
     if payload.name is not None:
         workspace.name = normalize_name(payload.name)
-    if payload.slug is not None:
-        workspace.slug = normalize_slug(payload.slug)
+    if payload.description is not None:
+        workspace.description = payload.description.strip()
     if payload.status is not None:
         if payload.status not in WORKSPACE_STATUSES:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid workspace status.")
@@ -211,7 +218,7 @@ async def update_workspace(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "Workspace slug already exists.") from exc
+        raise HTTPException(status.HTTP_409_CONFLICT, "Workspace already exists.") from exc
 
     await db.refresh(workspace)
     return workspace_to_response(workspace)
@@ -389,7 +396,7 @@ async def delete_workspace_permanently(
         "workspace",
         workspace.id,
         workspace.name,
-        {"slug": workspace.slug},
+        {"description": workspace.description},
         workspace_id=workspace.id,
     )
     team_ids = select(Team.id).where(Team.workspace_id == workspace.id)
