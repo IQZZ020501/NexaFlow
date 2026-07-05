@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Annotated, Callable
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,14 +60,19 @@ async def require_global_admin(
     return user
 
 
-async def get_workspace_context(
+async def get_workspace_context_from_path(
+    workspace_id: str,
     user: Annotated[User, Depends(require_password_changed)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    workspace_id: Annotated[str | None, Header(alias="X-Workspace-ID")] = None,
 ) -> WorkspaceContext:
-    if not workspace_id:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "X-Workspace-ID is required.")
+    return await build_workspace_context(db, user, workspace_id)
 
+
+async def build_workspace_context(
+    db: AsyncSession,
+    user: User,
+    workspace_id: str,
+) -> WorkspaceContext:
     workspace = await db.get(Workspace, workspace_id)
     if workspace is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
@@ -80,7 +85,7 @@ async def get_workspace_context(
             WorkspaceMembership.user_id == user.id,
         )
     )
-    if membership is None and not user.is_global_admin:
+    if membership is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace access denied.")
 
     return WorkspaceContext(
@@ -90,14 +95,21 @@ async def get_workspace_context(
     )
 
 
-def require_workspace_role(roles: set[str]) -> Callable[[WorkspaceContext], WorkspaceContext]:
+def require_workspace_path_role(
+    roles: set[str],
+) -> Callable[[WorkspaceContext], WorkspaceContext]:
     async def dependency(
-        context: Annotated[WorkspaceContext, Depends(get_workspace_context)],
+        context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     ) -> WorkspaceContext:
-        if context.user.is_global_admin:
-            return context
-        if context.membership_role not in roles:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace role required.")
-        return context
+        return require_context_role(context, roles)
 
     return dependency
+
+
+def require_context_role(
+    context: WorkspaceContext,
+    roles: set[str],
+) -> WorkspaceContext:
+    if context.membership_role not in roles:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace role required.")
+    return context

@@ -1,6 +1,13 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nexaflow.db.base import Base
@@ -9,6 +16,12 @@ from nexaflow.db.model_utils import new_id, utc_now
 
 class Workspace(Base):
     __tablename__ = "workspaces"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'archived')",
+            name="ck_workspaces_status",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -32,6 +45,10 @@ class WorkspaceMembership(Base):
     __tablename__ = "workspace_memberships"
     __table_args__ = (
         UniqueConstraint("workspace_id", "user_id", name="uq_workspace_membership_user"),
+        CheckConstraint(
+            "role IN ('admin', 'member')",
+            name="ck_workspace_memberships_role",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

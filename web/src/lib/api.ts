@@ -70,14 +70,32 @@ export type WorkspaceCreateResponse = {
   admin_initial_password: string | null
 }
 
+export type WorkspaceMember = {
+  user: User
+  role: string
+}
+
 export type UserPasswordResetResponse = {
   user: User
   initial_password: string
 }
 
+export type AuditLog = {
+  id: string
+  actor_user_id: string
+  actor_username: string
+  actor_name: string
+  workspace_id: string | null
+  action: string
+  resource_type: string
+  resource_id: string
+  resource_name: string
+  details: Record<string, unknown>
+  created_at: string
+}
+
 type RequestOptions = RequestInit & {
   token?: string
-  workspaceId?: string
 }
 
 export class ApiError extends Error {
@@ -132,10 +150,6 @@ async function request<T>(path: string, options: RequestOptions = {}) {
     headers.set("Authorization", `Bearer ${options.token}`)
   }
 
-  if (options.workspaceId) {
-    headers.set("X-Workspace-ID", options.workspaceId)
-  }
-
   const response = await fetch(apiUrl(path), {
     ...options,
     headers,
@@ -169,11 +183,18 @@ export function login(username: string, password: string) {
   })
 }
 
-export function changePassword(token: string, newPassword: string) {
+export function changePassword(
+  token: string,
+  newPassword: string,
+  currentPassword?: string
+) {
   return request<void>("/auth/change-password", {
     method: "POST",
     token,
-    body: JSON.stringify({ new_password: newPassword }),
+    body: JSON.stringify({
+      new_password: newPassword,
+      current_password: currentPassword,
+    }),
   })
 }
 
@@ -221,10 +242,17 @@ export function updateUser(
   })
 }
 
-export function resetUserPassword(token: string, userId: string) {
-  return request<UserPasswordResetResponse>(`/users/${userId}/reset-password`, {
+export function changeUserPassword(
+  token: string,
+  userId: string,
+  newPassword: string
+) {
+  return request<User>(`/users/${userId}/change-password`, {
     method: "POST",
     token,
+    body: JSON.stringify({
+      new_password: newPassword,
+    }),
   })
 }
 
@@ -258,8 +286,100 @@ export function createWorkspace(
   })
 }
 
+export function updateWorkspace(
+  token: string,
+  workspaceId: string,
+  payload: {
+    name?: string
+    slug?: string
+    status?: string
+  }
+) {
+  return request<Workspace>(`/workspaces/${workspaceId}`, {
+    method: "PATCH",
+    token,
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteWorkspace(token: string, workspaceId: string) {
+  return request<void>(`/workspaces/${workspaceId}`, {
+    method: "DELETE",
+    token,
+  })
+}
+
+export function listWorkspaceMembers(token: string, workspaceId: string) {
+  return request<WorkspaceMember[]>(`/workspaces/${workspaceId}/members`, {
+    token,
+  })
+}
+
+export function addWorkspaceMember(
+  token: string,
+  workspaceId: string,
+  payload: {
+    user_id: string
+    role?: string
+  }
+) {
+  return request<WorkspaceMember>(`/workspaces/${workspaceId}/members`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createWorkspaceUser(
+  token: string,
+  workspaceId: string,
+  payload: {
+    username: string
+    email: string
+    name: string
+  }
+) {
+  return request<UserPasswordResetResponse>(
+    `/workspaces/${workspaceId}/members/users`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload),
+    }
+  )
+}
+
+export function updateWorkspaceMember(
+  token: string,
+  workspaceId: string,
+  userId: string,
+  payload: {
+    role: string
+  }
+) {
+  return request<WorkspaceMember>(
+    `/workspaces/${workspaceId}/members/${userId}`,
+    {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(payload),
+    }
+  )
+}
+
+export function removeWorkspaceMember(
+  token: string,
+  workspaceId: string,
+  userId: string
+) {
+  return request<void>(`/workspaces/${workspaceId}/members/${userId}`, {
+    method: "DELETE",
+    token,
+  })
+}
+
 export function listTeams(token: string, workspaceId: string) {
-  return request<Team[]>("/teams", { token, workspaceId })
+  return request<Team[]>(`/workspaces/${workspaceId}/teams`, { token })
 }
 
 export function createTeam(
@@ -270,10 +390,43 @@ export function createTeam(
     slug: string
   }
 ) {
-  return request<Team>("/teams", {
+  return request<Team>(`/workspaces/${workspaceId}/teams`, {
     method: "POST",
     token,
-    workspaceId,
     body: JSON.stringify(payload),
+  })
+}
+
+export function updateTeam(
+  token: string,
+  workspaceId: string,
+  teamId: string,
+  payload: {
+    name?: string
+    slug?: string
+    status?: string
+  }
+) {
+  return request<Team>(`/workspaces/${workspaceId}/teams/${teamId}`, {
+    method: "PATCH",
+    token,
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteTeam(token: string, workspaceId: string, teamId: string) {
+  return request<void>(`/workspaces/${workspaceId}/teams/${teamId}`, {
+    method: "DELETE",
+    token,
+  })
+}
+
+export function listAuditLogs(token: string) {
+  return request<AuditLog[]>("/audit-logs", { token })
+}
+
+export function listWorkspaceAuditLogs(token: string, workspaceId: string) {
+  return request<AuditLog[]>(`/workspaces/${workspaceId}/audit-logs`, {
+    token,
   })
 }

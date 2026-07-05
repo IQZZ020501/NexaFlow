@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "vite-app",
+      "name": "NexaFlow",
       "dependencies": {
         "@fontsource-variable/geist": "^5.2.9",
         "@tailwindcss/vite": "^4",
