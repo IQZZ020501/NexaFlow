@@ -9,6 +9,7 @@ class AuditLogResponse(BaseModel):
     actor_user_id: str
     actor_username: str
     actor_name: str
+    workspace_id: str | None
     action: str
     resource_type: str
     resource_id: str

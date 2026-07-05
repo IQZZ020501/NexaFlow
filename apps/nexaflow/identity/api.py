@@ -24,12 +24,12 @@ from nexaflow.identity.schemas import (
 from nexaflow.identity.services import (
     authenticate_user,
     change_password,
+    change_user_password,
     create_user,
-    deactivate_user,
+    delete_user_permanently,
     get_user,
     get_me,
     list_users,
-    reset_user_password,
     update_user,
 )
 
@@ -112,16 +112,17 @@ async def patch_user(
 
 
 @users_router.post(
-    "/{user_id}/reset-password",
-    response_model=UserPasswordResetResponse,
+    "/{user_id}/change-password",
+    response_model=UserResponse,
 )
-async def reset_password(
+async def change_managed_user_password(
     user_id: str,
+    payload: ChangePasswordRequest,
     actor: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> UserPasswordResetResponse:
+) -> UserResponse:
     user = await get_user(db, user_id)
-    return await reset_user_password(db, user, actor)
+    return await change_user_password(db, user, actor, payload.new_password)
 
 
 @users_router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -131,5 +132,5 @@ async def delete_user(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     user = await get_user(db, user_id)
-    await deactivate_user(db, user, actor)
+    await delete_user_permanently(db, user, actor)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

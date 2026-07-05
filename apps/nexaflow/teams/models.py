@@ -1,6 +1,14 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nexaflow.db.base import Base
@@ -11,6 +19,8 @@ class Team(Base):
     __tablename__ = "teams"
     __table_args__ = (
         UniqueConstraint("workspace_id", "slug", name="uq_team_workspace_slug"),
+        UniqueConstraint("workspace_id", "id", name="uq_team_workspace_id"),
+        CheckConstraint("status IN ('active', 'archived')", name="ck_teams_status"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -33,10 +43,22 @@ class TeamMembership(Base):
     __tablename__ = "team_memberships"
     __table_args__ = (
         UniqueConstraint("team_id", "user_id", name="uq_team_membership_user"),
+        ForeignKeyConstraint(
+            ["workspace_id", "team_id"],
+            ["teams.workspace_id", "teams.id"],
+            name="fk_team_membership_workspace_team",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "user_id"],
+            ["workspace_memberships.workspace_id", "workspace_memberships.user_id"],
+            name="fk_team_membership_workspace_user",
+        ),
+        CheckConstraint("role IN ('admin', 'member')", name="ck_team_memberships_role"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    team_id: Mapped[str] = mapped_column(ForeignKey("teams.id"), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    team_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

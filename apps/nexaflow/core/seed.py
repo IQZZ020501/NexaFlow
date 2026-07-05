@@ -47,11 +47,11 @@ async def seed_defaults(db: AsyncSession, settings: Settings) -> None:
             WorkspaceMembership(
                 workspace_id=workspace.id,
                 user_id=admin.id,
-                role="owner",
+                role="admin",
             )
         )
-    elif membership.role not in {"owner", "admin"}:
-        membership.role = "owner"
+    elif membership.role != "admin":
+        membership.role = "admin"
 
     team = await db.scalar(
         select(Team).where(
@@ -77,7 +77,14 @@ async def seed_defaults(db: AsyncSession, settings: Settings) -> None:
         )
     )
     if team_membership is None:
-        db.add(TeamMembership(team_id=team.id, user_id=admin.id, role="admin"))
+        db.add(
+            TeamMembership(
+                workspace_id=workspace.id,
+                team_id=team.id,
+                user_id=admin.id,
+                role="admin",
+            )
+        )
     elif team_membership.role != "admin":
         team_membership.role = "admin"
 

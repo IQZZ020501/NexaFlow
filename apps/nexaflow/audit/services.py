@@ -16,12 +16,14 @@ def record_audit_log(
     resource_id: str,
     resource_name: str,
     details: dict[str, Any] | None = None,
+    workspace_id: str | None = None,
 ) -> None:
     db.add(
         AuditLog(
             actor_user_id=actor.id,
             actor_username=actor.username,
             actor_name=actor.name,
+            workspace_id=workspace_id,
             action=action,
             resource_type=resource_type,
             resource_id=resource_id,
@@ -37,6 +39,7 @@ def audit_log_to_response(log: AuditLog) -> AuditLogResponse:
         actor_user_id=log.actor_user_id,
         actor_username=log.actor_username,
         actor_name=log.actor_name,
+        workspace_id=log.workspace_id,
         action=log.action,
         resource_type=log.resource_type,
         resource_id=log.resource_id,
@@ -49,5 +52,19 @@ def audit_log_to_response(log: AuditLog) -> AuditLogResponse:
 async def list_audit_logs(db: AsyncSession, limit: int) -> list[AuditLogResponse]:
     result = await db.scalars(
         select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)
+    )
+    return [audit_log_to_response(item) for item in result.all()]
+
+
+async def list_workspace_audit_logs(
+    db: AsyncSession,
+    workspace_id: str,
+    limit: int,
+) -> list[AuditLogResponse]:
+    result = await db.scalars(
+        select(AuditLog)
+        .where(AuditLog.workspace_id == workspace_id)
+        .order_by(AuditLog.created_at.desc())
+        .limit(limit)
     )
     return [audit_log_to_response(item) for item in result.all()]

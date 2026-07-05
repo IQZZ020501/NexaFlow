@@ -66,6 +66,7 @@ async def create_team(
             team.id,
             team.name,
             {"slug": team.slug, "workspace_id": workspace_id},
+            workspace_id=workspace_id,
         )
         await db.commit()
     except IntegrityError as exc:
@@ -99,7 +100,16 @@ async def update_team(
         action = "team.archive"
     elif set(details) == {"status"} and payload.status == ACTIVE_STATUS:
         action = "team.restore"
-    record_audit_log(db, actor, action, "team", team.id, team.name, details)
+    record_audit_log(
+        db,
+        actor,
+        action,
+        "team",
+        team.id,
+        team.name,
+        details,
+        workspace_id=team.workspace_id,
+    )
 
     try:
         await db.commit()
@@ -123,6 +133,7 @@ async def delete_team_permanently(db: AsyncSession, team: Team, actor: User) -> 
         team.id,
         team.name,
         {"slug": team.slug, "workspace_id": team.workspace_id},
+        workspace_id=team.workspace_id,
     )
     await db.execute(delete(TeamMembership).where(TeamMembership.team_id == team.id))
     await db.execute(delete(Team).where(Team.id == team.id))

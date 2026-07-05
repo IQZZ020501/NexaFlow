@@ -31,11 +31,8 @@ from nexaflow.db.session import get_engine
 from nexaflow.main import create_app
 
 
-def auth_headers(token: str, workspace_id: str | None = None) -> dict[str, str]:
-    headers = {"Authorization": f"Bearer {token}"}
-    if workspace_id:
-        headers["X-Workspace-ID"] = workspace_id
-    return headers
+def auth_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
 
 
 def settings() -> Settings:

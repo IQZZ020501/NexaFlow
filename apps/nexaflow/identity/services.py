@@ -1,6 +1,4 @@
-import secrets
-
-from sqlalchemy import or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +23,8 @@ from nexaflow.identity.security import create_access_token, hash_password, verif
 from nexaflow.system_logs.services import record_system_log
 from nexaflow.teams.models import Team, TeamMembership
 from nexaflow.workspaces.models import Workspace, WorkspaceMembership
+
+DEFAULT_USER_PASSWORD = "NexaFlow@123"
 
 
 def user_to_response(
@@ -139,6 +139,44 @@ async def get_user(db: AsyncSession, user_id: str) -> User:
     return user
 
 
+async def ensure_user_is_not_last_active_workspace_admin(
+    db: AsyncSession,
+    user: User,
+) -> None:
+    if not user.is_active:
+        return
+
+    workspace_ids = await db.scalars(
+        select(WorkspaceMembership.workspace_id).where(
+            WorkspaceMembership.user_id == user.id,
+            WorkspaceMembership.role == "admin",
+        )
+    )
+    admin_workspace_ids = workspace_ids.all()
+    if not admin_workspace_ids:
+        return
+
+    counts = await db.execute(
+        select(WorkspaceMembership.workspace_id, func.count())
+        .join(User, WorkspaceMembership.user_id == User.id)
+        .where(
+            WorkspaceMembership.workspace_id.in_(admin_workspace_ids),
+            WorkspaceMembership.role == "admin",
+            User.is_active.is_(True),
+        )
+        .group_by(WorkspaceMembership.workspace_id)
+    )
+    active_admin_counts = dict(counts.all())
+    if any(
+        active_admin_counts.get(workspace_id, 0) <= 1
+        for workspace_id in admin_workspace_ids
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Workspace must keep at least one active admin.",
+        )
+
+
 async def create_user(
     db: AsyncSession,
     payload: UserCreateRequest,
@@ -173,7 +211,7 @@ async def create_user(
                 "Teams must belong to selected workspace.",
             )
 
-    initial_password = secrets.token_urlsafe(18)
+    initial_password = DEFAULT_USER_PASSWORD
     user = User(
         username=normalize_username(payload.username),
         email=normalize_email(payload.email),
@@ -195,7 +233,14 @@ async def create_user(
                 )
             )
         for team in teams:
-            db.add(TeamMembership(team_id=team.id, user_id=user.id, role="member"))
+            db.add(
+                TeamMembership(
+                    workspace_id=team.workspace_id,
+                    team_id=team.id,
+                    user_id=user.id,
+                    role="member",
+                )
+            )
         record_audit_log(
             db,
             actor,
@@ -210,6 +255,7 @@ async def create_user(
                 "workspace_id": workspace.id if workspace else None,
                 "team_ids": [team.id for team in teams],
             },
+            workspace_id=workspace.id if workspace else None,
         )
         await db.commit()
     except IntegrityError as exc:
@@ -252,6 +298,8 @@ async def update_user(
                 status.HTTP_400_BAD_REQUEST,
                 "Current user cannot be disabled.",
             )
+        if not payload.is_active:
+            await ensure_user_is_not_last_active_workspace_admin(db, user)
         user.is_active = payload.is_active
 
     record_audit_log(db, actor, "user.update", "user", user.id, user.name, details)
@@ -269,31 +317,41 @@ async def update_user(
     return await user_to_response_with_scopes(db, user)
 
 
-async def reset_user_password(
+async def change_user_password(
     db: AsyncSession,
     user: User,
     actor: User,
-) -> UserPasswordResetResponse:
-    initial_password = secrets.token_urlsafe(18)
-    user.password_hash = hash_password(initial_password)
-    user.must_change_password = True
-    record_audit_log(db, actor, "user.reset_password", "user", user.id, user.name)
+    new_password: str,
+) -> UserResponse:
+    user.password_hash = hash_password(new_password)
+    user.must_change_password = False
+    record_audit_log(db, actor, "user.change_password", "user", user.id, user.name)
     await db.commit()
     await db.refresh(user)
-    return UserPasswordResetResponse(
-        user=await user_to_response_with_scopes(db, user),
-        initial_password=initial_password,
-    )
+    return await user_to_response_with_scopes(db, user)
 
 
-async def deactivate_user(db: AsyncSession, user: User, actor: User) -> None:
+async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> None:
     if user.id == actor.id:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Current user cannot be deleted.",
         )
-    user.is_active = False
-    record_audit_log(db, actor, "user.deactivate", "user", user.id, user.name)
+    await ensure_user_is_not_last_active_workspace_admin(db, user)
+    record_audit_log(
+        db,
+        actor,
+        "user.delete",
+        "user",
+        user.id,
+        user.name,
+        {"username": user.username, "email": user.email},
+    )
+    await db.execute(delete(TeamMembership).where(TeamMembership.user_id == user.id))
+    await db.execute(
+        delete(WorkspaceMembership).where(WorkspaceMembership.user_id == user.id)
+    )
+    await db.execute(delete(User).where(User.id == user.id))
     await db.commit()
 
 

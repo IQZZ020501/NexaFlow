@@ -102,10 +102,12 @@ def main() -> None:
         )
         assert created_user.status_code == 201, created_user.text
         payload = created_user.json()
-        assert payload["initial_password"]
+        assert payload["initial_password"] == "NexaFlow@123"
         assert payload["user"]["username"] == "analyst"
         assert payload["user"]["workspaces"] == []
         analyst_id = payload["user"]["id"]
+        analyst_login = login(client, "analyst", payload["initial_password"])
+        assert analyst_login["must_change_password"] is True
 
         updated_user = client.patch(
             f"/users/{analyst_id}",
@@ -115,13 +117,16 @@ def main() -> None:
         assert updated_user.status_code == 200, updated_user.text
         assert updated_user.json()["name"] == "Data Analyst"
 
-        reset_password = client.post(
-            f"/users/{analyst_id}/reset-password",
+        analyst_changed_password = "AnalystPass@123"
+        change_managed_password = client.post(
+            f"/users/{analyst_id}/change-password",
             headers=auth_headers(admin_token),
+            json={"new_password": analyst_changed_password},
         )
-        assert reset_password.status_code == 200, reset_password.text
-        assert reset_password.json()["initial_password"]
-        assert reset_password.json()["user"]["must_change_password"] is True
+        assert change_managed_password.status_code == 200, change_managed_password.text
+        assert change_managed_password.json()["must_change_password"] is False
+        analyst_changed_login = login(client, "analyst", analyst_changed_password)
+        assert analyst_changed_login["must_change_password"] is False
 
         self_disable = client.patch(
             f"/users/{admin_user_id}",
@@ -129,6 +134,12 @@ def main() -> None:
             json={"is_active": False},
         )
         assert self_disable.status_code == 400, self_disable.text
+
+        self_delete = client.delete(
+            f"/users/{admin_user_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert self_delete.status_code == 400, self_delete.text
 
         deleted_user = client.delete(
             f"/users/{analyst_id}",
@@ -138,16 +149,20 @@ def main() -> None:
 
         users = client.get("/users", headers=auth_headers(admin_token))
         assert users.status_code == 200, users.text
-        analyst = next(item for item in users.json() if item["id"] == analyst_id)
-        assert analyst["is_active"] is False
+        assert all(item["id"] != analyst_id for item in users.json())
+        deleted_login = client.post(
+            "/auth/login",
+            json={"username": "analyst", "password": analyst_changed_password},
+        )
+        assert deleted_login.status_code == 401, deleted_login.text
 
         audit_logs = client.get("/audit-logs", headers=auth_headers(admin_token))
         assert audit_logs.status_code == 200, audit_logs.text
         actions = [item["action"] for item in audit_logs.json()]
         assert "user.create" in actions
         assert "user.update" in actions
-        assert "user.reset_password" in actions
-        assert "user.deactivate" in actions
+        assert "user.change_password" in actions
+        assert "user.delete" in actions
 
         events = asyncio.run(get_system_log_events())
         assert "auth.login_failed" in events

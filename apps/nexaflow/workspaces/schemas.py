@@ -34,3 +34,23 @@ class WorkspaceUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     slug: str | None = Field(default=None, min_length=1, max_length=80)
     status: str | None = Field(default=None, max_length=20)
+
+
+class WorkspaceMemberResponse(BaseModel):
+    user: UserResponse
+    role: str
+
+
+class WorkspaceMemberCreateRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=36)
+    role: str = Field(default="member", min_length=1, max_length=20)
+
+
+class WorkspaceUserCreateRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    email: str = Field(min_length=3, max_length=255)
+    name: str = Field(min_length=1, max_length=120)
+
+
+class WorkspaceMemberUpdateRequest(BaseModel):
+    role: str = Field(min_length=1, max_length=20)
