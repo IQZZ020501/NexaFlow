@@ -42,12 +42,14 @@ import {
   listModelProviderBaseModels,
   listModelProviderCatalog,
   listRegisteredModels,
-  type BaseModelOption,
-  type MeResponse,
-  type ModelProviderCatalog,
-  type RegisteredModel,
   updateRegisteredModel,
-} from "@/lib/api"
+} from "@/features/llm/api"
+import type {
+  BaseModelOption,
+  ModelProviderCatalog,
+  RegisteredModel,
+} from "@/features/llm/types"
+import type { MeResponse } from "@/features/auth/types"
 import type { FeaturePageConfig } from "@/lib/pages"
 
 const MODEL_TYPE_LABELS: Record<string, string> = {
@@ -107,7 +109,7 @@ const EMPTY_MODEL_FORM: ModelForm = {
   status: "active",
 }
 
-export function ModelRegistryPage({
+export function LlmPage({
   page,
   token,
   me,
@@ -502,7 +504,7 @@ export function ModelRegistryPage({
             </div>
           </section>
 
-          <section className="rounded-lg border bg-background p-4 shadow-sm">
+          <section>
             {isModelsLoading ? (
               <div className="flex min-h-[280px] items-center justify-center">
                 <LoaderCircleIcon className="animate-spin text-muted-foreground" />

@@ -12,11 +12,11 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { type MeResponse } from "@/lib/api"
+import { type MeResponse } from "@/features/auth/types"
 import { type FeaturePageConfig } from "@/lib/pages"
 import type { AppNotification } from "@/app/notifications"
 import { KnowledgeBasePage } from "@/features/knowledge/knowledge-base-page"
-import { ModelRegistryPage } from "@/features/models/model-registry-page"
+import { LlmPage } from "@/features/llm/llm-page"
 
 export function FeaturePage({
   page,
@@ -49,7 +49,7 @@ export function FeaturePage({
 
   if (page.key === "models") {
     return (
-      <ModelRegistryPage
+      <LlmPage
         page={page}
         token={token}
         me={me}
