@@ -1,6 +1,7 @@
 import { request } from "@/lib/api-client"
 import type {
   KnowledgeBase,
+  KnowledgeDocument,
   ResourcePermission,
 } from "@/features/knowledge/types"
 
@@ -56,6 +57,36 @@ export function deleteKnowledgeBase(
     {
       method: "DELETE",
       token,
+    }
+  )
+}
+
+export function listKnowledgeDocuments(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string
+) {
+  return request<KnowledgeDocument[]>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents`,
+    { token }
+  )
+}
+
+export function uploadKnowledgeDocument(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  file: File
+) {
+  const formData = new FormData()
+  formData.append("file", file)
+
+  return request<KnowledgeDocument>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents`,
+    {
+      method: "POST",
+      token,
+      body: formData,
     }
   )
 }

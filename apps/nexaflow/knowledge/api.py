@@ -1,14 +1,20 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nexaflow.core.config import Settings
 from nexaflow.db.session import get_db
-from nexaflow.identity.dependencies import WorkspaceContext, get_workspace_context_from_path
+from nexaflow.identity.dependencies import (
+    WorkspaceContext,
+    get_settings,
+    get_workspace_context_from_path,
+)
 from nexaflow.knowledge.schemas import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
+    KnowledgeDocumentResponse,
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
 )
@@ -17,11 +23,13 @@ from nexaflow.knowledge.services import (
     delete_knowledge_base_permanently,
     get_knowledge_base,
     list_knowledge_bases,
+    list_knowledge_documents,
     list_resource_permissions,
     require_can_manage_permissions,
     require_knowledge_base_permission,
     revoke_resource_permission,
     update_knowledge_base,
+    upload_knowledge_document,
     upsert_resource_permission,
 )
 
@@ -99,6 +107,7 @@ async def patch_workspace_knowledge_base(
 async def delete_workspace_knowledge_base(
     knowledge_base_id: str,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
@@ -107,8 +116,55 @@ async def delete_workspace_knowledge_base(
         knowledge_base,
         context.user,
         context.membership_role,
+        settings,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{knowledge_base_id}/documents", response_model=list[KnowledgeDocumentResponse])
+async def list_workspace_knowledge_base_documents(
+    knowledge_base_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[KnowledgeDocumentResponse]:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"view", "edit"},
+    )
+    return await list_knowledge_documents(db, knowledge_base)
+
+
+@router.post(
+    "/{knowledge_base_id}/documents",
+    response_model=KnowledgeDocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_workspace_knowledge_base_document(
+    knowledge_base_id: str,
+    file: Annotated[UploadFile, File()],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeDocumentResponse:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    return await upload_knowledge_document(
+        db,
+        knowledge_base,
+        file,
+        context.user,
+        settings,
+    )
 
 
 @router.get("/{knowledge_base_id}/permissions", response_model=list[ResourcePermissionResponse])

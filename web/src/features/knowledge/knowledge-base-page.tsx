@@ -29,12 +29,15 @@ import {
   deleteKnowledgeBase,
   listKnowledgeBasePermissions,
   listKnowledgeBases,
+  listKnowledgeDocuments,
   revokeKnowledgeBasePermission,
   updateKnowledgeBase,
+  uploadKnowledgeDocument,
   upsertKnowledgeBasePermission,
 } from "@/features/knowledge/api"
 import type {
   KnowledgeBase,
+  KnowledgeDocument,
   ResourcePermission,
 } from "@/features/knowledge/types"
 import type { MeResponse } from "@/features/auth/types"
@@ -76,7 +79,9 @@ export function KnowledgeBasePage({
   const [knowledgeBases, setKnowledgeBases] = React.useState<KnowledgeBase[]>(
     []
   )
+  const [documents, setDocuments] = React.useState<KnowledgeDocument[]>([])
   const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
+  const [documentSearch, setDocumentSearch] = React.useState("")
   const [workspaceMembers, setWorkspaceMembers] = React.useState<
     WorkspaceMember[]
   >([])
@@ -97,8 +102,11 @@ export function KnowledgeBasePage({
     React.useState<KnowledgeBasePermissionForm | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [isLoading, setIsLoading] = React.useState(false)
+  const [isDocumentLoading, setIsDocumentLoading] = React.useState(false)
+  const [isUploadingDocument, setIsUploadingDocument] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
+  const documentInputRef = React.useRef<HTMLInputElement>(null)
 
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
   const Icon = page.icon
@@ -117,6 +125,15 @@ export function KnowledgeBasePage({
       )
     )
   }, [knowledgeBases, knowledgeSearch])
+  const filteredDocuments = React.useMemo(() => {
+    const search = documentSearch.trim().toLowerCase()
+    if (!search) {
+      return documents
+    }
+    return documents.filter((document) =>
+      document.filename.toLowerCase().includes(search)
+    )
+  }, [documents, documentSearch])
 
   const reportError = React.useCallback(
     (error: unknown) => {
@@ -147,16 +164,59 @@ export function KnowledgeBasePage({
     }
   }, [reportError, selectedWorkspaceId, token])
 
+  const loadDocuments = React.useCallback(async () => {
+    if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
+      setDocuments([])
+      return
+    }
+
+    setError(null)
+    setIsDocumentLoading(true)
+    try {
+      setDocuments(
+        await listKnowledgeDocuments(
+          token,
+          selectedWorkspaceId,
+          selectedKnowledgeBaseId
+        )
+      )
+    } catch (error) {
+      setDocuments([])
+      reportError(error)
+    } finally {
+      setIsDocumentLoading(false)
+    }
+  }, [reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token])
+
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadKnowledgeBases()
   }, [loadKnowledgeBases])
+
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadDocuments()
+  }, [loadDocuments])
 
   function canManagePermissions(knowledgeBase: KnowledgeBase) {
     return (
       workspaceRole === "admin" ||
       knowledgeBase.created_by_user_id === me.user.id
     )
+  }
+
+  function formatFileSize(sizeBytes: number) {
+    if (sizeBytes < 1024) {
+      return `${sizeBytes} B`
+    }
+    if (sizeBytes < 1024 * 1024) {
+      return `${(sizeBytes / 1024).toFixed(1)} KB`
+    }
+    return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`
+  }
+
+  function documentStatusLabel(status: string) {
+    return status === "uploaded" ? "待解析" : status
   }
 
   function resetForm() {
@@ -174,6 +234,7 @@ export function KnowledgeBasePage({
 
   function openKnowledgeBase(knowledgeBase: KnowledgeBase) {
     setActiveDetailTab("documents")
+    setDocumentSearch("")
     setSelectedKnowledgeBaseId(knowledgeBase.id)
   }
 
@@ -278,6 +339,33 @@ export function KnowledgeBasePage({
       onNotify("success", "知识库已删除")
     } catch (error) {
       reportError(error)
+    }
+  }
+
+  async function handleUploadDocument(
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0]
+    event.target.value = ""
+    if (!file || !selectedWorkspaceId || !selectedKnowledgeBase) {
+      return
+    }
+
+    setIsUploadingDocument(true)
+    setError(null)
+    try {
+      const document = await uploadKnowledgeDocument(
+        token,
+        selectedWorkspaceId,
+        selectedKnowledgeBase.id,
+        file
+      )
+      setDocuments((current) => [document, ...current])
+      onNotify("success", "文档已上传")
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsUploadingDocument(false)
     }
   }
 
@@ -431,8 +519,25 @@ export function KnowledgeBasePage({
                 <div className="flex flex-col gap-3 border-b px-4 py-4 lg:px-5 xl:flex-row xl:items-center xl:justify-between">
                   <h1 className="text-xl font-semibold">文档</h1>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" disabled>
-                      <UploadIcon data-icon="inline-start" />
+                    <input
+                      ref={documentInputRef}
+                      type="file"
+                      className="hidden"
+                      onChange={(event) => void handleUploadDocument(event)}
+                    />
+                    <Button
+                      type="button"
+                      disabled={
+                        selectedKnowledgeBase.permission !== "edit" ||
+                        isUploadingDocument
+                      }
+                      onClick={() => documentInputRef.current?.click()}
+                    >
+                      {isUploadingDocument ? (
+                        <LoaderCircleIcon data-icon="inline-start" />
+                      ) : (
+                        <UploadIcon data-icon="inline-start" />
+                      )}
                       上传文档
                     </Button>
                     <Button type="button" variant="outline" disabled>
@@ -478,9 +583,12 @@ export function KnowledgeBasePage({
                     <div className="relative sm:w-72">
                       <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
+                        value={documentSearch}
+                        onChange={(event) =>
+                          setDocumentSearch(event.target.value)
+                        }
                         className="pl-9"
                         placeholder="按名称搜索"
-                        disabled
                       />
                     </div>
                     <Button type="button" variant="outline" disabled>
@@ -492,11 +600,12 @@ export function KnowledgeBasePage({
 
                 <div className="p-4 lg:p-5">
                   <div className="overflow-x-auto rounded-lg border bg-background">
-                    <div className="min-w-[1424px]">
-                      <div className="grid grid-cols-[44px_minmax(220px,1.5fr)_120px_100px_100px_120px_150px_150px_150px_150px_120px] border-b bg-muted/30 px-3 py-3 text-sm font-medium text-muted-foreground">
+                    <div className="min-w-[1120px]">
+                      <div className="grid grid-cols-[44px_minmax(240px,1.7fr)_120px_120px_100px_100px_120px_160px_160px_96px] border-b bg-muted/30 px-3 py-3 text-sm font-medium text-muted-foreground">
                         <span />
                         <span>文件名称</span>
                         <span>文件状态</span>
+                        <span>文件大小</span>
                         <span className="flex items-center gap-1">
                           字符数
                           <ArrowUpDownIcon className="size-3.5" />
@@ -510,14 +619,6 @@ export function KnowledgeBasePage({
                           <FilterIcon className="size-3.5" />
                         </span>
                         <span className="flex items-center gap-1">
-                          标签
-                          <FilterIcon className="size-3.5" />
-                        </span>
-                        <span className="flex items-center gap-1">
-                          命中处理方式
-                          <FilterIcon className="size-3.5" />
-                        </span>
-                        <span className="flex items-center gap-1">
                           创建时间
                           <ArrowUpDownIcon className="size-3.5" />
                         </span>
@@ -527,9 +628,44 @@ export function KnowledgeBasePage({
                         </span>
                         <span>操作</span>
                       </div>
-                      <div className="flex min-h-56 items-center justify-center px-3 py-10 text-sm text-muted-foreground">
-                        暂无文档
-                      </div>
+                      {isDocumentLoading ? (
+                        <div className="flex min-h-56 items-center justify-center px-3 py-10 text-sm text-muted-foreground">
+                          <LoaderCircleIcon className="animate-spin" />
+                        </div>
+                      ) : filteredDocuments.length ? (
+                        filteredDocuments.map((document) => (
+                          <div
+                            key={document.id}
+                            className="grid grid-cols-[44px_minmax(240px,1.7fr)_120px_120px_100px_100px_120px_160px_160px_96px] items-center border-b px-3 py-3 text-sm last:border-b-0"
+                          >
+                            <FileTextIcon className="size-4 text-muted-foreground" />
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">
+                                {document.filename}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {document.content_type}
+                              </p>
+                            </div>
+                            <span>{documentStatusLabel(document.status)}</span>
+                            <span>{formatFileSize(document.size_bytes)}</span>
+                            <span>-</span>
+                            <span>-</span>
+                            <span>启用</span>
+                            <span>
+                              {formatDateTime(document.created_at, locale)}
+                            </span>
+                            <span>
+                              {formatDateTime(document.updated_at, locale)}
+                            </span>
+                            <span className="text-muted-foreground">-</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="flex min-h-56 items-center justify-center px-3 py-10 text-sm text-muted-foreground">
+                          {documents.length ? "没有匹配的文档" : "暂无文档"}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

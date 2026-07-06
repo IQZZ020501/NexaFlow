@@ -2,7 +2,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexaflow.identity.models import User
-from nexaflow.knowledge.models import KnowledgeBase
+from nexaflow.knowledge.models import KnowledgeBase, KnowledgeDocument
 from nexaflow.resource_permissions.models import ResourcePermission
 from nexaflow.workspaces.models import WorkspaceMembership
 
@@ -42,6 +42,21 @@ async def get_knowledge_base_by_id(
     knowledge_base_id: str,
 ) -> KnowledgeBase | None:
     return await db.get(KnowledgeBase, knowledge_base_id)
+
+
+async def list_knowledge_documents(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> list[KnowledgeDocument]:
+    result = await db.scalars(
+        select(KnowledgeDocument)
+        .where(
+            KnowledgeDocument.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocument.knowledge_base_id == knowledge_base.id,
+        )
+        .order_by(KnowledgeDocument.created_at.desc())
+    )
+    return list(result)
 
 
 async def get_user_grant(
@@ -99,6 +114,12 @@ async def delete_knowledge_base_graph(
     knowledge_base: KnowledgeBase,
     resource_type: str,
 ) -> None:
+    await db.execute(
+        delete(KnowledgeDocument).where(
+            KnowledgeDocument.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocument.knowledge_base_id == knowledge_base.id,
+        )
+    )
     await db.execute(
         delete(ResourcePermission).where(
             ResourcePermission.workspace_id == knowledge_base.workspace_id,

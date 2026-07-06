@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import Path
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -41,6 +42,7 @@ def settings() -> Settings:
         database_url="sqlite+aiosqlite:///:memory:",
         jwt_secret_key="test-secret-for-nexaflow-smoke-suite",
         model_secret_key="test-model-secret-for-nexaflow-smoke-suite",
+        knowledge_storage_dir=Path("/tmp/nexaflow-test-knowledge-storage"),
         bootstrap_admin_username="admin",
         bootstrap_admin_email="admin@nexaflow.local",
         bootstrap_admin_name="NexaFlow Admin",
