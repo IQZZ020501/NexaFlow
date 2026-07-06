@@ -1,12 +1,8 @@
 import asyncio
-import json
 from typing import Any
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 
 from fastapi import HTTPException, status
-from openai import APIStatusError, OpenAI, OpenAIError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +15,11 @@ from nexaflow.identity.models import User
 from nexaflow.llm.models import RegisteredModel
 from nexaflow.llm import repositories as model_repository
 from nexaflow.llm.providers import PROVIDER_CATALOG
+from nexaflow.llm.runtime import (
+    ModelProviderError,
+    ModelProviderStatusError,
+    OpenAICompatibleModelProvider,
+)
 from nexaflow.llm.schemas import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
@@ -41,7 +42,6 @@ MODEL_TYPE_ALIASES = {
     "rerank": "RERANKER",
     "reranker": "RERANKER",
 }
-MODEL_TEST_TIMEOUT_SECONDS = 20
 
 
 def provider_catalog_entry(provider: str) -> dict[str, Any]:
@@ -101,11 +101,6 @@ def validate_provider_support(entry: dict[str, Any], model_type: str) -> None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Model type is not supported by this provider.")
 
 
-def openai_compatible_base(api_base: str) -> str:
-    base = api_base.rstrip("/")
-    return base if base.endswith("/v1") else f"{base}/v1"
-
-
 def set_model_api_key(model: RegisteredModel, api_key: str, settings: Settings) -> None:
     model.api_key_ciphertext = encrypt_secret(api_key, settings.model_secret_key)
     model.api_key_hint = secret_hint(api_key)
@@ -118,58 +113,14 @@ def run_openai_compatible_model_test(
     model_name: str,
     model_type: str,
 ) -> None:
-    base = openai_compatible_base(api_base)
-    if model_type in {"LLM", "EMBEDDING"}:
-        client = OpenAI(
-            api_key=api_key,
-            base_url=base,
-            timeout=MODEL_TEST_TIMEOUT_SECONDS,
-            max_retries=0,
-        )
-        try:
-            if model_type == "EMBEDDING":
-                client.embeddings.create(model=model_name, input="Hello")
-                return
-            client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": "Hello"}],
-                max_tokens=1,
-                temperature=0,
-            )
-        except APIStatusError as exc:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                f"Model test failed with provider status {exc.status_code}.",
-            ) from exc
-        except OpenAIError as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Model test request failed.") from exc
-        return
-    elif model_type == "RERANKER":
-        path = "/rerank"
-        payload = {"model": model_name, "query": "Hello", "documents": ["Hello"]}
-    else:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Model test is not supported for this model type.")
-
-    request = Request(
-        f"{base}{path}",
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
     try:
-        with urlopen(request, timeout=MODEL_TEST_TIMEOUT_SECONDS) as response:
-            if response.status < 200 or response.status >= 300:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Model test failed.")
-            response.read(1024)
-    except HTTPError as exc:
+        OpenAICompatibleModelProvider(api_base, api_key, model_name).test(model_type)
+    except ModelProviderStatusError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Model test failed with provider status {exc.code}.",
+            f"Model test failed with provider status {exc.status_code}.",
         ) from exc
-    except (OSError, TimeoutError, URLError) as exc:
+    except ModelProviderError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Model test request failed.") from exc
 
 

@@ -10,6 +10,7 @@ from sqlalchemy import text
 from nexaflow.core.secrets import decrypt_secret
 from nexaflow.db.session import get_session_factory
 from nexaflow.llm.models import RegisteredModel
+from nexaflow.llm.runtime import build_registered_model_provider
 from nexaflow.testing import (
     activate_admin,
     activate_user,
@@ -110,6 +111,22 @@ async def assert_model_api_key(model_id: str, expected_api_key: str) -> None:
         assert decrypt_secret(model.api_key_ciphertext, settings().model_secret_key) == expected_api_key
 
 
+async def assert_registered_model_runtime_call(model_id: str, model_type: str) -> None:
+    async with get_session_factory()() as db:
+        model = await db.get(RegisteredModel, model_id)
+        assert model is not None
+        provider = build_registered_model_provider(model, settings())
+
+        if model_type == "LLM":
+            assert provider.chat([{"role": "user", "content": "Hello"}], max_tokens=1) == "ok"
+        elif model_type == "EMBEDDING":
+            assert provider.embed(["Hello"]) == [[0.0]]
+        elif model_type == "RERANKER":
+            assert provider.rerank("Hello", ["Hello"]) == [{"index": 0, "relevance_score": 1.0}]
+        else:
+            raise AssertionError(f"Unexpected model type: {model_type}")
+
+
 async def assert_model_count(expected: int) -> None:
     async with get_session_factory()() as db:
         result = await db.execute(text("select count(*) from model"))
@@ -205,6 +222,8 @@ def main() -> None:
         assert ModelTestHandler.calls[-1]["body"]["model"] == "deepseek-chat"
         assert ModelTestHandler.calls[-1]["body"]["messages"][0]["content"] == "Hello"
         asyncio.run(assert_model_api_key(model_id, "sk-deepseek-test-1234"))
+        asyncio.run(assert_registered_model_runtime_call(model_id, "LLM"))
+        assert ModelTestHandler.calls[-1]["path"] == "/v1/chat/completions"
 
         duplicate_model = client.post(
             models_url(workspace_id),
@@ -242,6 +261,8 @@ def main() -> None:
         assert embedding_model.status_code == 201, embedding_model.text
         assert ModelTestHandler.calls[-1]["path"] == "/v1/embeddings"
         embedding_model_id = embedding_model.json()["id"]
+        asyncio.run(assert_registered_model_runtime_call(embedding_model_id, "EMBEDDING"))
+        assert ModelTestHandler.calls[-1]["path"] == "/v1/embeddings"
         deleted_embedding_model = client.delete(
             models_url(workspace_id, f"/{embedding_model_id}"),
             headers=auth_headers(admin_token),
@@ -263,6 +284,8 @@ def main() -> None:
         assert reranker_model.status_code == 201, reranker_model.text
         assert ModelTestHandler.calls[-1]["path"] == "/v1/rerank"
         reranker_model_id = reranker_model.json()["id"]
+        asyncio.run(assert_registered_model_runtime_call(reranker_model_id, "RERANKER"))
+        assert ModelTestHandler.calls[-1]["path"] == "/v1/rerank"
         deleted_reranker_model = client.delete(
             models_url(workspace_id, f"/{reranker_model_id}"),
             headers=auth_headers(admin_token),
