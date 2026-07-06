@@ -17,7 +17,7 @@ from nexaflow.db.model_utils import new_id, utc_now
 
 
 class RegisteredModel(Base):
-    __tablename__ = "model_registry_models"
+    __tablename__ = "model"
     __table_args__ = (
         UniqueConstraint("workspace_id", "name", name="uq_model_registry_model_workspace_name"),
         CheckConstraint(

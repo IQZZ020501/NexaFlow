@@ -118,5 +118,7 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
   - From `apps/`: `.venv/bin/python -m nexaflow.identity.test`
   - From `apps/`: `.venv/bin/python -m nexaflow.workspaces.test`
   - From `apps/`: `.venv/bin/python -m nexaflow.teams.test`
+  - From `apps/`: `.venv/bin/python -m nexaflow.knowledge.test`
+  - From `apps/`: `.venv/bin/python -m nexaflow.llm.test`
   - From `apps/`: run Alembic against the target database, or a temporary explicit test database when only validating migration syntax.
 - If a check cannot be run, say exactly why in the final response.

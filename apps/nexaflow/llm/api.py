@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexaflow.core.config import Settings
 from nexaflow.db.session import get_db
-from nexaflow.identity.deps import (
+from nexaflow.identity.dependencies import (
     WorkspaceContext,
     get_current_user,
     get_settings,
@@ -13,7 +13,7 @@ from nexaflow.identity.deps import (
     require_workspace_path_role,
 )
 from nexaflow.identity.models import User
-from nexaflow.model_registry.schemas import (
+from nexaflow.llm.schemas import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
     ModelProviderCatalogResponse,
@@ -21,7 +21,7 @@ from nexaflow.model_registry.schemas import (
     RegisteredModelResponse,
     RegisteredModelUpdateRequest,
 )
-from nexaflow.model_registry.services import (
+from nexaflow.llm.services import (
     create_registered_model,
     delete_registered_model,
     get_model_credential_form,
@@ -34,7 +34,7 @@ from nexaflow.model_registry.services import (
     update_registered_model,
 )
 
-router = APIRouter(tags=["model-registry"])
+router = APIRouter(tags=["llm"])
 
 
 @router.get("/model-providers", response_model=list[ModelProviderCatalogResponse])

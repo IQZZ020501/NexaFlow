@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 
 from nexaflow.db.session import get_session_factory
 from nexaflow.identity.models import User
-from nexaflow.knowledge_bases.models import KnowledgeBase
+from nexaflow.knowledge.models import KnowledgeBase
 from nexaflow.resource_permissions.models import ResourcePermission
 from nexaflow.testing import (
     RESEARCH_PASSWORD,
@@ -18,7 +18,7 @@ from nexaflow.testing import (
 MEMBER_PASSWORD = "Member@12345."
 
 
-def knowledge_bases_url(workspace_id: str, suffix: str = "") -> str:
+def knowledge_url(workspace_id: str, suffix: str = "") -> str:
     return f"/workspaces/{workspace_id}/knowledge-bases{suffix}"
 
 
@@ -108,7 +108,7 @@ def main() -> None:
         )
 
         knowledge_base = client.post(
-            knowledge_bases_url(default_workspace_id),
+            knowledge_url(default_workspace_id),
             headers=auth_headers(alice_token),
             json={"name": "Product Docs", "description": "Internal product answers"},
         )
@@ -118,20 +118,20 @@ def main() -> None:
         assert knowledge_base.json()["created_by_user_id"] == alice_id
 
         bob_list = client.get(
-            knowledge_bases_url(default_workspace_id),
+            knowledge_url(default_workspace_id),
             headers=auth_headers(bob_token),
         )
         assert bob_list.status_code == 200, bob_list.text
         assert bob_list.json() == []
 
         denied_cross_workspace = client.get(
-            knowledge_bases_url(default_workspace_id),
+            knowledge_url(default_workspace_id),
             headers=auth_headers(research_token),
         )
         assert denied_cross_workspace.status_code == 403, denied_cross_workspace.text
 
         view_grant = client.put(
-            knowledge_bases_url(default_workspace_id, f"/{knowledge_base_id}/permissions/{bob_id}"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/permissions/{bob_id}"),
             headers=auth_headers(alice_token),
             json={"permission": "view"},
         )
@@ -140,28 +140,28 @@ def main() -> None:
         asyncio.run(assert_cross_workspace_permission_denied(default_workspace_id, knowledge_base_id))
 
         bob_get = client.get(
-            knowledge_bases_url(default_workspace_id, f"/{knowledge_base_id}"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(bob_token),
         )
         assert bob_get.status_code == 200, bob_get.text
         assert bob_get.json()["permission"] == "view"
 
         bob_edit_denied = client.patch(
-            knowledge_bases_url(default_workspace_id, f"/{knowledge_base_id}"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(bob_token),
             json={"description": "Bob edit attempt"},
         )
         assert bob_edit_denied.status_code == 403, bob_edit_denied.text
 
         edit_grant = client.put(
-            knowledge_bases_url(default_workspace_id, f"/{knowledge_base_id}/permissions/{bob_id}"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/permissions/{bob_id}"),
             headers=auth_headers(alice_token),
             json={"permission": "edit"},
         )
         assert edit_grant.status_code == 200, edit_grant.text
 
         bob_edit = client.patch(
-            knowledge_bases_url(default_workspace_id, f"/{knowledge_base_id}"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(bob_token),
             json={"description": "Bob can now edit"},
         )
@@ -169,13 +169,13 @@ def main() -> None:
         assert bob_edit.json()["description"] == "Bob can now edit"
 
         bob_delete_denied = client.delete(
-            knowledge_bases_url(default_workspace_id, f"/{knowledge_base_id}"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(bob_token),
         )
         assert bob_delete_denied.status_code == 403, bob_delete_denied.text
 
         permissions = client.get(
-            knowledge_bases_url(default_workspace_id, f"/{knowledge_base_id}/permissions"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/permissions"),
             headers=auth_headers(alice_token),
         )
         assert permissions.status_code == 200, permissions.text
@@ -184,18 +184,18 @@ def main() -> None:
         ]
 
         revoked = client.delete(
-            knowledge_bases_url(default_workspace_id, f"/{knowledge_base_id}/permissions/{bob_id}"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/permissions/{bob_id}"),
             headers=auth_headers(alice_token),
         )
         assert revoked.status_code == 204, revoked.text
         bob_get_denied = client.get(
-            knowledge_bases_url(default_workspace_id, f"/{knowledge_base_id}"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(bob_token),
         )
         assert bob_get_denied.status_code == 403, bob_get_denied.text
 
         deleted = client.delete(
-            knowledge_bases_url(default_workspace_id, f"/{knowledge_base_id}"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(alice_token),
         )
         assert deleted.status_code == 204, deleted.text

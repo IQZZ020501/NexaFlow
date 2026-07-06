@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from nexaflow.core.secrets import decrypt_secret
 from nexaflow.db.session import get_session_factory
-from nexaflow.model_registry.models import RegisteredModel
+from nexaflow.llm.models import RegisteredModel
 from nexaflow.testing import (
     activate_admin,
     activate_user,
@@ -112,7 +112,7 @@ async def assert_model_api_key(model_id: str, expected_api_key: str) -> None:
 
 async def assert_model_count(expected: int) -> None:
     async with get_session_factory()() as db:
-        result = await db.execute(text("select count(*) from model_registry_models"))
+        result = await db.execute(text("select count(*) from model"))
         assert result.scalar_one() == expected
 
 

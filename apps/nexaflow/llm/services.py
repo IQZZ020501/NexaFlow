@@ -7,7 +7,6 @@ from urllib.request import Request, urlopen
 
 from fastapi import HTTPException, status
 from openai import APIStatusError, OpenAI, OpenAIError
-from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,9 +16,10 @@ from nexaflow.core.secrets import decrypt_secret, encrypt_secret, secret_hint
 from nexaflow.core.validation import normalize_name
 from nexaflow.db.model_utils import utc_now
 from nexaflow.identity.models import User
-from nexaflow.model_registry.models import RegisteredModel
-from nexaflow.model_registry.providers import PROVIDER_CATALOG
-from nexaflow.model_registry.schemas import (
+from nexaflow.llm.models import RegisteredModel
+from nexaflow.llm import repositories as model_repository
+from nexaflow.llm.providers import PROVIDER_CATALOG
+from nexaflow.llm.schemas import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
     ModelProviderCatalogResponse,
@@ -273,16 +273,12 @@ def get_model_credential_form(provider: str) -> list[ModelCredentialFieldRespons
 
 
 async def list_registered_models(db: AsyncSession, workspace_id: str) -> list[RegisteredModelResponse]:
-    result = await db.scalars(
-        select(RegisteredModel)
-        .where(RegisteredModel.workspace_id == workspace_id)
-        .order_by(RegisteredModel.created_at)
-    )
-    return [model_to_response(item) for item in result.all()]
+    models = await model_repository.list_registered_models(db, workspace_id)
+    return [model_to_response(item) for item in models]
 
 
 async def get_registered_model(db: AsyncSession, workspace_id: str, model_id: str) -> RegisteredModel:
-    model = await db.get(RegisteredModel, model_id)
+    model = await model_repository.get_registered_model_by_id(db, model_id)
     if model is None or model.workspace_id != workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Model not found.")
     return model
@@ -294,13 +290,12 @@ async def assert_model_name_available(
     name: str,
     excluded_model_id: str | None = None,
 ) -> None:
-    query = select(RegisteredModel.id).where(
-        RegisteredModel.workspace_id == workspace_id,
-        RegisteredModel.name == name,
-    )
-    if excluded_model_id is not None:
-        query = query.where(RegisteredModel.id != excluded_model_id)
-    if await db.scalar(query):
+    if await model_repository.find_registered_model_id_by_name(
+        db,
+        workspace_id,
+        name,
+        excluded_model_id,
+    ):
         raise HTTPException(status.HTTP_409_CONFLICT, "Model name already exists.")
 
 
@@ -460,5 +455,5 @@ async def delete_registered_model(db: AsyncSession, model: RegisteredModel, acto
         {"provider": model.provider, "model_type": model.model_type, "model_name": model.model_name},
         workspace_id=model.workspace_id,
     )
-    await db.execute(delete(RegisteredModel).where(RegisteredModel.id == model.id))
+    await model_repository.delete_registered_model_by_id(db, model.id)
     await db.commit()

@@ -4,15 +4,15 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexaflow.db.session import get_db
-from nexaflow.identity.deps import WorkspaceContext, get_workspace_context_from_path
-from nexaflow.knowledge_bases.schemas import (
+from nexaflow.identity.dependencies import WorkspaceContext, get_workspace_context_from_path
+from nexaflow.knowledge.schemas import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
 )
-from nexaflow.knowledge_bases.services import (
+from nexaflow.knowledge.services import (
     create_knowledge_base,
     delete_knowledge_base_permanently,
     get_knowledge_base,
@@ -25,7 +25,7 @@ from nexaflow.knowledge_bases.services import (
     upsert_resource_permission,
 )
 
-router = APIRouter(prefix="/workspaces/{workspace_id}/knowledge-bases", tags=["knowledge-bases"])
+router = APIRouter(prefix="/workspaces/{workspace_id}/knowledge-bases", tags=["knowledge"])
 
 
 @router.get("", response_model=list[KnowledgeBaseResponse])

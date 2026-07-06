@@ -7,8 +7,8 @@ from nexaflow.core.config import Settings
 from nexaflow.audit.models import AuditLog  # noqa: F401
 from nexaflow.db.base import Base
 from nexaflow.identity.models import User  # noqa: F401
-from nexaflow.knowledge_bases.models import KnowledgeBase  # noqa: F401
-from nexaflow.model_registry.models import RegisteredModel  # noqa: F401
+from nexaflow.knowledge.models import KnowledgeBase  # noqa: F401
+from nexaflow.llm.models import RegisteredModel  # noqa: F401
 from nexaflow.resource_permissions.models import ResourcePermission  # noqa: F401
 from nexaflow.system_logs.models import SystemLog  # noqa: F401
 from nexaflow.teams.models import Team, TeamMembership  # noqa: F401

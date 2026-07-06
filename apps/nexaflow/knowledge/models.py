@@ -8,7 +8,7 @@ from nexaflow.db.model_utils import new_id, utc_now
 
 
 class KnowledgeBase(Base):
-    __tablename__ = "knowledge_bases"
+    __tablename__ = "knowledge"
     __table_args__ = (
         UniqueConstraint("workspace_id", "name", name="uq_knowledge_base_workspace_name"),
         UniqueConstraint("workspace_id", "id", name="uq_knowledge_base_workspace_id"),
