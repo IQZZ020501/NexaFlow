@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nexaflow.audit.schemas import AuditLogResponse
 from nexaflow.audit.services import list_workspace_audit_logs
 from nexaflow.db.session import get_db
-from nexaflow.identity.deps import (
+from nexaflow.identity.dependencies import (
     WorkspaceContext,
     get_workspace_context_from_path,
     require_global_admin,

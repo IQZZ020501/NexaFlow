@@ -1,4 +1,3 @@
-from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +7,7 @@ from nexaflow.audit.services import record_audit_log
 from nexaflow.core.config import Settings
 from nexaflow.core.validation import normalize_email, normalize_name, normalize_username
 from nexaflow.identity.models import User
+from nexaflow.identity import repositories as user_repository
 from nexaflow.identity.schemas import (
     MembershipResponse,
     MeResponse,
@@ -57,13 +57,7 @@ async def user_workspaces_by_user_id(
     if not user_ids:
         return workspaces_by_user
 
-    result = await db.execute(
-        select(WorkspaceMembership, Workspace)
-        .join(Workspace, WorkspaceMembership.workspace_id == Workspace.id)
-        .where(WorkspaceMembership.user_id.in_(user_ids))
-        .order_by(Workspace.created_at)
-    )
-    for membership, workspace in result.all():
+    for membership, workspace in await user_repository.list_workspace_scope_rows(db, user_ids):
         workspaces_by_user.setdefault(membership.user_id, []).append(
             UserWorkspaceResponse(
                 id=workspace.id,
@@ -86,13 +80,7 @@ async def user_teams_by_user_id(
     if not user_ids:
         return teams_by_user
 
-    result = await db.execute(
-        select(TeamMembership, Team)
-        .join(Team, TeamMembership.team_id == Team.id)
-        .where(TeamMembership.user_id.in_(user_ids))
-        .order_by(Team.created_at)
-    )
-    for membership, team in result.all():
+    for membership, team in await user_repository.list_team_scope_rows(db, user_ids):
         teams_by_user.setdefault(membership.user_id, []).append(
             UserTeamResponse(
                 id=team.id,
@@ -116,8 +104,7 @@ async def user_to_response_with_scopes(db: AsyncSession, user: User) -> UserResp
 
 
 async def list_users(db: AsyncSession) -> list[UserResponse]:
-    result = await db.scalars(select(User).order_by(User.created_at))
-    users = result.all()
+    users = await user_repository.list_users(db)
     workspaces_by_user = await user_workspaces_by_user_id(db, users)
     teams_by_user = await user_teams_by_user_id(db, users)
     return [
@@ -131,7 +118,7 @@ async def list_users(db: AsyncSession) -> list[UserResponse]:
 
 
 async def get_user(db: AsyncSession, user_id: str) -> User:
-    user = await db.get(User, user_id)
+    user = await user_repository.get_user_by_id(db, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
     return user
@@ -144,27 +131,14 @@ async def ensure_user_is_not_last_active_workspace_admin(
     if not user.is_active:
         return
 
-    workspace_ids = await db.scalars(
-        select(WorkspaceMembership.workspace_id).where(
-            WorkspaceMembership.user_id == user.id,
-            WorkspaceMembership.role == "admin",
-        )
-    )
-    admin_workspace_ids = workspace_ids.all()
+    admin_workspace_ids = await user_repository.list_admin_workspace_ids_for_user(db, user.id)
     if not admin_workspace_ids:
         return
 
-    counts = await db.execute(
-        select(WorkspaceMembership.workspace_id, func.count())
-        .join(User, WorkspaceMembership.user_id == User.id)
-        .where(
-            WorkspaceMembership.workspace_id.in_(admin_workspace_ids),
-            WorkspaceMembership.role == "admin",
-            User.is_active.is_(True),
-        )
-        .group_by(WorkspaceMembership.workspace_id)
+    active_admin_counts = await user_repository.active_admin_counts_by_workspace(
+        db,
+        admin_workspace_ids,
     )
-    active_admin_counts = dict(counts.all())
     if any(
         active_admin_counts.get(workspace_id, 0) <= 1
         for workspace_id in admin_workspace_ids
@@ -345,11 +319,7 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
         user.name,
         {"username": user.username, "email": user.email},
     )
-    await db.execute(delete(TeamMembership).where(TeamMembership.user_id == user.id))
-    await db.execute(
-        delete(WorkspaceMembership).where(WorkspaceMembership.user_id == user.id)
-    )
-    await db.execute(delete(User).where(User.id == user.id))
+    await user_repository.delete_user_graph(db, user.id)
     await db.commit()
 
 
@@ -361,12 +331,7 @@ async def authenticate_user(
     ip_address: str | None = None,
 ) -> TokenResponse:
     username = normalize_username(username)
-    user = await db.scalar(
-        select(User).where(
-            User.username == username,
-            User.is_active.is_(True),
-        )
-    )
+    user = await user_repository.get_active_user_by_username(db, username)
     if user is None or not verify_password(password, user.password_hash):
         record_system_log(
             db,
@@ -409,10 +374,7 @@ async def change_password(
 
 
 async def get_me(db: AsyncSession, user: User) -> MeResponse:
-    memberships = await db.scalars(
-        select(WorkspaceMembership).where(WorkspaceMembership.user_id == user.id)
-    )
-    membership_list = memberships.all()
+    membership_list = await user_repository.list_workspace_memberships_for_user(db, user.id)
     return MeResponse(
         user=user_to_response(user),
         memberships=[
@@ -425,10 +387,7 @@ async def get_me(db: AsyncSession, user: User) -> MeResponse:
 async def find_user_by_identity(db: AsyncSession, username: str, email: str) -> User | None:
     username = normalize_username(username)
     email = normalize_email(email)
-    users_result = await db.scalars(
-        select(User).where(or_(User.username == username, User.email == email))
-    )
-    users = users_result.all()
+    users = await user_repository.find_users_by_identity(db, username, email)
     if not users:
         return None
     if len(users) == 1 and users[0].username == username and users[0].email == email:

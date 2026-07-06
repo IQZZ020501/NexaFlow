@@ -1,4 +1,3 @@
-from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,7 +7,8 @@ from nexaflow.audit.services import record_audit_log
 from nexaflow.core.validation import normalize_name
 from nexaflow.db.model_utils import new_id
 from nexaflow.identity.models import User
-from nexaflow.teams.models import Team, TeamMembership
+from nexaflow.teams.models import Team
+from nexaflow.teams import repositories as team_repository
 from nexaflow.teams.schemas import TeamCreateRequest, TeamResponse, TeamUpdateRequest
 
 ACTIVE_STATUS = "active"
@@ -28,17 +28,12 @@ def team_to_response(team: Team) -> TeamResponse:
 
 
 async def list_teams(db: AsyncSession, workspace_id: str) -> list[TeamResponse]:
-    result = await db.scalars(
-        select(Team)
-        .where(Team.workspace_id == workspace_id)
-        .order_by(Team.created_at)
-    )
-    teams = result.all()
+    teams = await team_repository.list_teams(db, workspace_id)
     return [team_to_response(item) for item in teams]
 
 
 async def get_team(db: AsyncSession, workspace_id: str, team_id: str) -> Team:
-    team = await db.get(Team, team_id)
+    team = await team_repository.get_team_by_id(db, team_id)
     if team is None or team.workspace_id != workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Team not found.")
     return team
@@ -137,6 +132,5 @@ async def delete_team_permanently(db: AsyncSession, team: Team, actor: User) -> 
         {"description": team.description, "workspace_id": team.workspace_id},
         workspace_id=team.workspace_id,
     )
-    await db.execute(delete(TeamMembership).where(TeamMembership.team_id == team.id))
-    await db.execute(delete(Team).where(Team.id == team.id))
+    await team_repository.delete_team_graph(db, team.id)
     await db.commit()

@@ -1,6 +1,5 @@
 import secrets
 
-from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,8 +12,9 @@ from nexaflow.identity.models import User
 from nexaflow.identity.schemas import UserCreateRequest, UserPasswordResetResponse
 from nexaflow.identity.security import hash_password
 from nexaflow.identity.services import create_user, find_user_by_identity, user_to_response
-from nexaflow.teams.models import Team, TeamMembership
+from nexaflow.teams.models import Team
 from nexaflow.workspaces.models import Workspace, WorkspaceMembership
+from nexaflow.workspaces import repositories as workspace_repository
 from nexaflow.workspaces.schemas import (
     WorkspaceMemberResponse,
     WorkspaceUserCreateRequest,
@@ -56,14 +56,7 @@ def validate_workspace_member_role(role: str) -> None:
 
 
 async def count_workspace_admins(db: AsyncSession, workspace_id: str) -> int:
-    return await db.scalar(
-        select(func.count())
-        .select_from(WorkspaceMembership)
-        .where(
-            WorkspaceMembership.workspace_id == workspace_id,
-            WorkspaceMembership.role == "admin",
-        )
-    ) or 0
+    return await workspace_repository.count_workspace_admins(db, workspace_id)
 
 
 async def ensure_not_last_workspace_admin(
@@ -81,31 +74,20 @@ async def ensure_not_last_workspace_admin(
 
 async def list_workspaces(db: AsyncSession, user: User) -> list[WorkspaceResponse]:
     if user.is_global_admin:
-        result = await db.scalars(select(Workspace).order_by(Workspace.created_at))
+        workspaces = await workspace_repository.list_all_workspaces(db)
     else:
-        result = await db.scalars(
-            select(Workspace)
-            .join(WorkspaceMembership)
-            .where(WorkspaceMembership.user_id == user.id)
-            .order_by(Workspace.created_at)
-        )
-    workspaces = result.all()
+        workspaces = await workspace_repository.list_workspaces_for_user(db, user.id)
     return [workspace_to_response(item) for item in workspaces]
 
 
 async def get_workspace_for_user(db: AsyncSession, workspace_id: str, user: User) -> Workspace:
-    workspace = await db.get(Workspace, workspace_id)
+    workspace = await workspace_repository.get_workspace_by_id(db, workspace_id)
     if workspace is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
     if user.is_global_admin:
         return workspace
 
-    membership = await db.scalar(
-        select(WorkspaceMembership).where(
-            WorkspaceMembership.workspace_id == workspace_id,
-            WorkspaceMembership.user_id == user.id,
-        )
-    )
+    membership = await workspace_repository.get_workspace_membership(db, workspace_id, user.id)
     if membership is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace access denied.")
     return workspace
@@ -228,15 +210,9 @@ async def list_workspace_members(
     db: AsyncSession,
     workspace: Workspace,
 ) -> list[WorkspaceMemberResponse]:
-    result = await db.execute(
-        select(WorkspaceMembership, User)
-        .join(User, WorkspaceMembership.user_id == User.id)
-        .where(WorkspaceMembership.workspace_id == workspace.id)
-        .order_by(User.created_at)
-    )
     return [
         workspace_member_to_response(membership, user)
-        for membership, user in result.all()
+        for membership, user in await workspace_repository.list_workspace_member_rows(db, workspace.id)
     ]
 
 
@@ -245,15 +221,7 @@ async def get_workspace_member(
     workspace: Workspace,
     user_id: str,
 ) -> tuple[WorkspaceMembership, User]:
-    result = await db.execute(
-        select(WorkspaceMembership, User)
-        .join(User, WorkspaceMembership.user_id == User.id)
-        .where(
-            WorkspaceMembership.workspace_id == workspace.id,
-            WorkspaceMembership.user_id == user_id,
-        )
-    )
-    row = result.one_or_none()
+    row = await workspace_repository.get_workspace_member_row(db, workspace.id, user_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace member not found.")
     membership, user = row
@@ -366,18 +334,7 @@ async def remove_workspace_member(
         {"role": membership.role},
         workspace_id=workspace.id,
     )
-    await db.execute(
-        delete(TeamMembership).where(
-            TeamMembership.workspace_id == workspace.id,
-            TeamMembership.user_id == user.id,
-        )
-    )
-    await db.execute(
-        delete(WorkspaceMembership).where(
-            WorkspaceMembership.workspace_id == workspace.id,
-            WorkspaceMembership.user_id == user.id,
-        )
-    )
+    await workspace_repository.delete_workspace_member_graph(db, workspace.id, user.id)
     await db.commit()
 
 
@@ -399,11 +356,5 @@ async def delete_workspace_permanently(
         {"description": workspace.description},
         workspace_id=workspace.id,
     )
-    team_ids = select(Team.id).where(Team.workspace_id == workspace.id)
-    await db.execute(delete(TeamMembership).where(TeamMembership.team_id.in_(team_ids)))
-    await db.execute(
-        delete(WorkspaceMembership).where(WorkspaceMembership.workspace_id == workspace.id)
-    )
-    await db.execute(delete(Team).where(Team.workspace_id == workspace.id))
-    await db.execute(delete(Workspace).where(Workspace.id == workspace.id))
+    await workspace_repository.delete_workspace_graph(db, workspace.id)
     await db.commit()
