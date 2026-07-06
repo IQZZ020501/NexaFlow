@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -13,6 +14,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nexaflow.db.base import Base
 from nexaflow.db.model_utils import new_id, utc_now
+
+if TYPE_CHECKING:
+    from nexaflow.identity.models import User
+    from nexaflow.teams.models import Team
 
 
 class Workspace(Base):
