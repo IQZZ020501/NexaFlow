@@ -35,3 +35,16 @@ class ResourcePermissionResponse(BaseModel):
 
 class ResourcePermissionUpsertRequest(BaseModel):
     permission: str = Field(min_length=1, max_length=20)
+
+
+class KnowledgeDocumentResponse(BaseModel):
+    id: str
+    workspace_id: str
+    knowledge_base_id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    status: str
+    created_by_user_id: str
+    created_at: datetime
+    updated_at: datetime

@@ -13,6 +13,7 @@ dependencies = [
     "psycopg[binary]>=3.3.4",
     "pwdlib[argon2]>=0.3.0",
     "pyjwt>=2.13.0",
+    "python-multipart>=0.0.20",
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.50.0",
 ]

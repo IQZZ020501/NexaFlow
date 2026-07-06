@@ -5,13 +5,14 @@ from sqlalchemy.exc import IntegrityError
 
 from nexaflow.db.session import get_session_factory
 from nexaflow.identity.models import User
-from nexaflow.knowledge.models import KnowledgeBase
+from nexaflow.knowledge.models import KnowledgeBase, KnowledgeDocument
 from nexaflow.resource_permissions.models import ResourcePermission
 from nexaflow.testing import (
     RESEARCH_PASSWORD,
     activate_admin,
     activate_user,
     auth_headers,
+    settings as test_settings,
     test_client,
 )
 
@@ -62,6 +63,28 @@ async def assert_cross_workspace_permission_denied(
             return
 
     raise AssertionError("Cross-workspace resource permission was allowed.")
+
+
+async def assert_document_saved(document_id: str, expected_content: bytes) -> None:
+    async with get_session_factory()() as db:
+        document = await db.get(KnowledgeDocument, document_id)
+        assert document is not None
+        assert document.status == "uploaded"
+        assert document.size_bytes == len(expected_content)
+        path = test_settings().knowledge_storage_dir / document.storage_path
+        assert path.read_bytes() == expected_content
+
+
+async def assert_knowledge_base_deleted(knowledge_base_id: str, workspace_id: str) -> None:
+    async with get_session_factory()() as db:
+        assert await db.get(KnowledgeBase, knowledge_base_id) is None
+        documents = await db.execute(
+            select(KnowledgeDocument).where(
+                KnowledgeDocument.knowledge_base_id == knowledge_base_id
+            )
+        )
+        assert documents.scalars().all() == []
+    assert not (test_settings().knowledge_storage_dir / workspace_id / knowledge_base_id).exists()
 
 
 def main() -> None:
@@ -146,6 +169,34 @@ def main() -> None:
         assert bob_get.status_code == 200, bob_get.text
         assert bob_get.json()["permission"] == "view"
 
+        bob_upload_denied = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
+            headers=auth_headers(bob_token),
+            files={"file": ("denied.txt", b"nope", "text/plain")},
+        )
+        assert bob_upload_denied.status_code == 403, bob_upload_denied.text
+
+        document_content = b"Hello from product docs"
+        uploaded_document = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
+            headers=auth_headers(alice_token),
+            files={"file": ("product-guide.txt", document_content, "text/plain")},
+        )
+        assert uploaded_document.status_code == 201, uploaded_document.text
+        document_payload = uploaded_document.json()
+        document_id = document_payload["id"]
+        assert document_payload["filename"] == "product-guide.txt"
+        assert document_payload["status"] == "uploaded"
+        assert document_payload["size_bytes"] == len(document_content)
+        asyncio.run(assert_document_saved(document_id, document_content))
+
+        bob_documents = client.get(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
+            headers=auth_headers(bob_token),
+        )
+        assert bob_documents.status_code == 200, bob_documents.text
+        assert [item["id"] for item in bob_documents.json()] == [document_id]
+
         bob_edit_denied = client.patch(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(bob_token),
@@ -200,16 +251,13 @@ def main() -> None:
         )
         assert deleted.status_code == 204, deleted.text
 
-        async def assert_deleted() -> None:
-            async with get_session_factory()() as db:
-                assert await db.get(KnowledgeBase, knowledge_base_id) is None
-
-        asyncio.run(assert_deleted())
+        asyncio.run(assert_knowledge_base_deleted(knowledge_base_id, default_workspace_id))
 
         audit_logs = client.get("/audit-logs", headers=auth_headers(admin_token))
         assert audit_logs.status_code == 200, audit_logs.text
         actions = [item["action"] for item in audit_logs.json()]
         assert "knowledge_base.create" in actions
+        assert "knowledge_document.upload" in actions
         assert "resource_permission.grant" in actions
         assert "resource_permission.revoke" in actions
         assert "knowledge_base.delete" in actions

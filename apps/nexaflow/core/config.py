@@ -6,6 +6,7 @@ from pathlib import Path
 DEFAULT_JWT_SECRET_KEY = "dev-secret-change-me-please-replace"
 DEFAULT_MODEL_SECRET_KEY = "dev-model-secret-change-me-please-replace"
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+DEFAULT_KNOWLEDGE_STORAGE_DIR = Path(__file__).resolve().parents[2] / "storage" / "knowledge"
 
 
 def load_env_file(path: Path = ENV_FILE) -> None:
@@ -36,6 +37,7 @@ class Settings:
     default_team_name: str
     default_team_slug: str
     model_secret_key: str = DEFAULT_MODEL_SECRET_KEY
+    knowledge_storage_dir: Path = DEFAULT_KNOWLEDGE_STORAGE_DIR
     jwt_expires_minutes: int = 60
     cors_origins: tuple[str, ...] = ()
     environment: str = "development"
@@ -63,6 +65,9 @@ class Settings:
             default_team_name=os.getenv("DEFAULT_TEAM_NAME", ""),
             default_team_slug=os.getenv("DEFAULT_TEAM_SLUG", ""),
             model_secret_key=os.getenv("MODEL_SECRET_KEY", DEFAULT_MODEL_SECRET_KEY),
+            knowledge_storage_dir=Path(
+                os.getenv("KNOWLEDGE_STORAGE_DIR", str(DEFAULT_KNOWLEDGE_STORAGE_DIR))
+            ),
             jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "60")),
             cors_origins=origins,
             environment=os.getenv("ENVIRONMENT", "development"),
@@ -88,3 +93,5 @@ class Settings:
             raise RuntimeError("JWT_SECRET_KEY must be set in production.")
         if self.environment == "production" and self.model_secret_key == DEFAULT_MODEL_SECRET_KEY:
             raise RuntimeError("MODEL_SECRET_KEY must be set in production.")
+        if self.environment == "production" and self.knowledge_storage_dir == DEFAULT_KNOWLEDGE_STORAGE_DIR:
+            raise RuntimeError("KNOWLEDGE_STORAGE_DIR must be set in production.")

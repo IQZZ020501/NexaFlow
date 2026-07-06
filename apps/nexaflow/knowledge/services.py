@@ -1,18 +1,24 @@
+import shutil
+from pathlib import Path
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 
 from nexaflow.audit.services import record_audit_log
+from nexaflow.core.config import Settings
 from nexaflow.core.validation import normalize_name
+from nexaflow.db.model_utils import new_id
 from nexaflow.identity.models import User
 from nexaflow.identity.services import user_to_response
 from nexaflow.knowledge import repositories as knowledge_base_repository
-from nexaflow.knowledge.models import KnowledgeBase
+from nexaflow.knowledge.models import KnowledgeBase, KnowledgeDocument
 from nexaflow.knowledge.schemas import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
+    KnowledgeDocumentResponse,
     ResourcePermissionResponse,
 )
 from nexaflow.resource_permissions.models import ResourcePermission
@@ -20,13 +26,19 @@ from nexaflow.resource_permissions.models import ResourcePermission
 RESOURCE_TYPE = "knowledge_base"
 ACTIVE_STATUS = "active"
 ARCHIVED_STATUS = "archived"
+DOCUMENT_UPLOADED_STATUS = "uploaded"
+MAX_DOCUMENT_UPLOAD_BYTES = 20 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
 KNOWLEDGE_BASE_STATUSES = {ACTIVE_STATUS, ARCHIVED_STATUS}
 RESOURCE_PERMISSIONS = {"view", "edit"}
 
 
 def validate_permission(permission: str) -> None:
     if permission not in RESOURCE_PERMISSIONS:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid resource permission.")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Invalid resource permission.",
+        )
 
 
 def effective_permission(
@@ -57,6 +69,35 @@ def knowledge_base_to_response(
         updated_at=knowledge_base.updated_at,
         permission=permission,
     )
+
+
+def document_to_response(document: KnowledgeDocument) -> KnowledgeDocumentResponse:
+    return KnowledgeDocumentResponse(
+        id=document.id,
+        workspace_id=document.workspace_id,
+        knowledge_base_id=document.knowledge_base_id,
+        filename=document.filename,
+        content_type=document.content_type,
+        size_bytes=document.size_bytes,
+        status=document.status,
+        created_by_user_id=document.created_by_user_id,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+    )
+
+
+def clean_upload_filename(filename: str | None) -> str:
+    name = Path(filename or "").name.strip()
+    if not name:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Document filename is required.",
+        )
+    return name[:255]
+
+
+def knowledge_document_path(settings: Settings, storage_path: str) -> Path:
+    return settings.knowledge_storage_dir / storage_path
 
 
 def require_can_manage_permissions(
@@ -134,6 +175,92 @@ async def require_knowledge_base_permission(
     if permission == "edit" or permission in permissions:
         return permission
     raise HTTPException(status.HTTP_403_FORBIDDEN, "Knowledge base access denied.")
+
+
+async def list_knowledge_documents(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> list[KnowledgeDocumentResponse]:
+    return [
+        document_to_response(document)
+        for document in await knowledge_base_repository.list_knowledge_documents(
+            db,
+            knowledge_base,
+        )
+    ]
+
+
+async def save_upload_file(upload: UploadFile, target_path: Path) -> int:
+    size = 0
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with target_path.open("wb") as output:
+            while chunk := await upload.read(UPLOAD_CHUNK_BYTES):
+                size += len(chunk)
+                if size > MAX_DOCUMENT_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        "Document is too large.",
+                    )
+                output.write(chunk)
+    except Exception:
+        target_path.unlink(missing_ok=True)
+        raise
+
+    if size == 0:
+        target_path.unlink(missing_ok=True)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Document is empty.")
+    return size
+
+
+async def upload_knowledge_document(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    upload: UploadFile,
+    actor: User,
+    settings: Settings,
+) -> KnowledgeDocumentResponse:
+    document_id = new_id()
+    filename = clean_upload_filename(upload.filename)
+    storage_path = f"{knowledge_base.workspace_id}/{knowledge_base.id}/{document_id}/{filename}"
+    target_path = knowledge_document_path(settings, storage_path)
+    size = await save_upload_file(upload, target_path)
+    document = KnowledgeDocument(
+        id=document_id,
+        workspace_id=knowledge_base.workspace_id,
+        knowledge_base_id=knowledge_base.id,
+        filename=filename,
+        content_type=upload.content_type or "application/octet-stream",
+        size_bytes=size,
+        storage_path=storage_path,
+        status=DOCUMENT_UPLOADED_STATUS,
+        created_by_user_id=actor.id,
+    )
+    db.add(document)
+    record_audit_log(
+        db,
+        actor,
+        "knowledge_document.upload",
+        "knowledge_document",
+        document.id,
+        document.filename,
+        {
+            "workspace_id": knowledge_base.workspace_id,
+            "knowledge_base_id": knowledge_base.id,
+            "size_bytes": size,
+        },
+        workspace_id=knowledge_base.workspace_id,
+    )
+
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        target_path.unlink(missing_ok=True)
+        raise
+
+    await db.refresh(document)
+    return document_to_response(document)
 
 
 async def create_knowledge_base(
@@ -214,8 +341,10 @@ async def delete_knowledge_base_permanently(
     knowledge_base: KnowledgeBase,
     actor: User,
     workspace_role: str | None,
+    settings: Settings,
 ) -> None:
     require_can_manage_permissions(knowledge_base, actor, workspace_role)
+    storage_dir = settings.knowledge_storage_dir / knowledge_base.workspace_id / knowledge_base.id
     record_audit_log(
         db,
         actor,
@@ -232,6 +361,7 @@ async def delete_knowledge_base_permanently(
         RESOURCE_TYPE,
     )
     await db.commit()
+    shutil.rmtree(storage_dir, ignore_errors=True)
 
 
 async def list_resource_permissions(
