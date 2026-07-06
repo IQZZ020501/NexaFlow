@@ -8,7 +8,7 @@ import type {
   Workspace,
   WorkspaceCreateResponse,
   WorkspaceMember,
-} from "@/lib/api"
+} from "@/features/system/types"
 import { cn } from "@/lib/utils"
 import type { SystemTabKey } from "@/app/routing"
 import {

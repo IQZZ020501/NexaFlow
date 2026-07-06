@@ -20,7 +20,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { type MeResponse, type Workspace } from "@/lib/api"
+import { type MeResponse } from "@/features/auth/types"
+import { type Workspace } from "@/features/system/types"
 import { type FeaturePageConfig, type PageKey } from "@/lib/pages"
 import { languageOptions } from "@/lib/i18n"
 import { displayWorkspaceName, initials } from "@/app/display"

@@ -17,7 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import type { Team, Workspace } from "@/lib/api"
+import type { Team, Workspace } from "@/features/system/types"
 import { displayTeamName, displayWorkspaceName } from "@/app/display"
 import { StatusBadge } from "@/features/knowledge/status-badges"
 

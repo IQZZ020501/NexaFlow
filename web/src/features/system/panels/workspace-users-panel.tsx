@@ -14,7 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import type { Workspace, WorkspaceMember } from "@/lib/api"
+import type { Workspace, WorkspaceMember } from "@/features/system/types"
 import { cn } from "@/lib/utils"
 import { displayWorkspaceName, formatDateTime } from "@/app/display"
 

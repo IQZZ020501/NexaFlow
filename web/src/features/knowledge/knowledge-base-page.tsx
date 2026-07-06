@@ -29,15 +29,17 @@ import {
   deleteKnowledgeBase,
   listKnowledgeBasePermissions,
   listKnowledgeBases,
-  listWorkspaceMembers,
   revokeKnowledgeBasePermission,
-  type KnowledgeBase,
-  type MeResponse,
-  type ResourcePermission,
-  type WorkspaceMember,
   updateKnowledgeBase,
   upsertKnowledgeBasePermission,
-} from "@/lib/api"
+} from "@/features/knowledge/api"
+import type {
+  KnowledgeBase,
+  ResourcePermission,
+} from "@/features/knowledge/types"
+import type { MeResponse } from "@/features/auth/types"
+import { listWorkspaceMembers } from "@/features/system/api"
+import type { WorkspaceMember } from "@/features/system/types"
 import { type FeaturePageConfig } from "@/lib/pages"
 import { languageLocales } from "@/lib/i18n"
 import { cn } from "@/lib/utils"

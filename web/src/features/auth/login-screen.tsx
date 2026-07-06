@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { login } from "@/lib/api"
+import { login } from "@/features/auth/api"
 import { getErrorMessage } from "@/app/errors"
 
 type LoginForm = {

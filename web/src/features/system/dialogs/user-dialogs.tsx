@@ -24,7 +24,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import type { MeResponse, Team, Workspace } from "@/lib/api"
+import type { MeResponse, Team, Workspace } from "@/features/system/types"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import { cn } from "@/lib/utils"
 import { DEFAULT_USER_PASSWORD } from "@/app/constants"

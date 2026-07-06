@@ -7,7 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import type { AuditLog } from "@/lib/api"
+import type { AuditLog } from "@/features/system/types"
 import { cn } from "@/lib/utils"
 import { AUDIT_ACTION_LABEL_KEYS } from "@/app/constants"
 import { formatDateTime } from "@/app/display"

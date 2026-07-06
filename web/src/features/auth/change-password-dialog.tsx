@@ -17,7 +17,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { changePassword } from "@/lib/api"
+import { changePassword } from "@/features/auth/api"
 import { getErrorMessage } from "@/app/errors"
 import { getNewPasswordError } from "@/features/auth/password"
 

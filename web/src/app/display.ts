@@ -1,4 +1,4 @@
-import { type MeResponse } from "@/lib/api"
+import { type MeResponse } from "@/features/auth/types"
 import { type TFunction } from "@/lib/i18n"
 
 export function initials(name: string) {

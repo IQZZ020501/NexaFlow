@@ -10,8 +10,8 @@ import {
   changeUserPassword,
   createTeam,
   createUser,
-  createWorkspaceUser,
   createWorkspace,
+  createWorkspaceUser,
   deleteTeam,
   deleteUser,
   deleteWorkspace,
@@ -19,17 +19,19 @@ import {
   listWorkspaceMembers,
   listTeams,
   listUsers,
-  type AuditLog,
-  type MeResponse,
-  type Team,
-  type User,
-  type Workspace,
-  type WorkspaceCreateResponse,
-  type WorkspaceMember,
   updateTeam,
   updateUser,
   updateWorkspace,
-} from "@/lib/api"
+} from "@/features/system/api"
+import type {
+  AuditLog,
+  MeResponse,
+  Team,
+  User,
+  Workspace,
+  WorkspaceCreateResponse,
+  WorkspaceMember,
+} from "@/features/system/types"
 import { languageLocales } from "@/lib/i18n"
 import {
   displayTeamName,

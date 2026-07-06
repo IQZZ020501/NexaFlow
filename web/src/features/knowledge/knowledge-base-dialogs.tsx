@@ -23,7 +23,8 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import type { FeaturePageConfig } from "@/lib/pages"
-import type { ResourcePermission, WorkspaceMember } from "@/lib/api"
+import type { ResourcePermission } from "@/features/knowledge/types"
+import type { WorkspaceMember } from "@/features/system/types"
 import { cn } from "@/lib/utils"
 import { PermissionBadge } from "@/features/knowledge/status-badges"
 import type {

@@ -1,4 +1,4 @@
-import { type User } from "@/lib/api"
+import { type User } from "@/features/auth/types"
 import { type TFunction } from "@/lib/i18n"
 import { AUDIT_DETAIL_LABEL_KEYS, STATUS_LABEL_KEYS } from "@/app/constants"
 import { displayTeamName, displayWorkspaceName } from "@/app/display"

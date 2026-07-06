@@ -9,16 +9,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { getMe } from "@/features/auth/api"
+import type { MeResponse } from "@/features/auth/types"
+import { ApiError } from "@/lib/api-client"
+import { listTeams, listWorkspaces } from "@/features/system/api"
 import {
-  ApiError,
-  getMe,
-  listTeams,
-  listWorkspaces,
-  type MeResponse,
   type Team,
   type Workspace,
   type WorkspaceCreateResponse,
-} from "@/lib/api"
+} from "@/features/system/types"
 import { getPages, type PageKey } from "@/lib/pages"
 import { displayWorkspaceName, hasWorkspaceMembership } from "@/app/display"
 import { getErrorMessage } from "@/app/errors"

@@ -16,7 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import type { MeResponse, Workspace } from "@/lib/api"
+import type { MeResponse, Workspace } from "@/features/system/types"
 import { cn } from "@/lib/utils"
 import { displayWorkspaceName, getMembershipRole } from "@/app/display"
 import { StatusBadge } from "@/features/knowledge/status-badges"

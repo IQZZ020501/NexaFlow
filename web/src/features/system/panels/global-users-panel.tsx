@@ -20,7 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import type { MeResponse, User, Workspace } from "@/lib/api"
+import type { MeResponse, User, Workspace } from "@/features/system/types"
 import { formatDateTime } from "@/app/display"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
 import type { UserRoleFilter, UserStatusFilter } from "@/features/system/types"

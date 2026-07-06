@@ -24,7 +24,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import type { Workspace, WorkspaceCreateResponse } from "@/lib/api"
+import type {
+  Workspace,
+  WorkspaceCreateResponse,
+} from "@/features/system/types"
 import { cn } from "@/lib/utils"
 import { displayWorkspaceName } from "@/app/display"
 import type {

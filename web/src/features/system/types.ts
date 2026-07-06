@@ -1,4 +1,49 @@
-import type { User } from "@/lib/api"
+import type { User } from "@/features/auth/types"
+
+export type { MeResponse, User, UserPasswordResetResponse } from "@/features/auth/types"
+
+export type Workspace = {
+  id: string
+  name: string
+  description: string
+  status: string
+  is_default: boolean
+}
+
+export type Team = {
+  id: string
+  workspace_id: string
+  name: string
+  description: string
+  status: string
+  is_default: boolean
+}
+
+export type WorkspaceCreateResponse = {
+  workspace: Workspace
+  admin_user: User
+  admin_created: boolean
+  admin_initial_password: string | null
+}
+
+export type WorkspaceMember = {
+  user: User
+  role: string
+}
+
+export type AuditLog = {
+  id: string
+  actor_user_id: string
+  actor_username: string
+  actor_name: string
+  workspace_id: string | null
+  action: string
+  resource_type: string
+  resource_id: string
+  resource_name: string
+  details: Record<string, unknown>
+  created_at: string
+}
 
 export type UserPasswordForm = {
   user: User
