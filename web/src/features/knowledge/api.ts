@@ -2,6 +2,7 @@ import { request } from "@/lib/api-client"
 import type {
   KnowledgeBase,
   KnowledgeDocument,
+  KnowledgeModelTestResult,
   ResourcePermission,
 } from "@/features/knowledge/types"
 
@@ -18,6 +19,8 @@ export function createKnowledgeBase(
   payload: {
     name: string
     description: string
+    embedding_model_id?: string | null
+    reranker_model_id?: string | null
   }
 ) {
   return request<KnowledgeBase>(`/workspaces/${workspaceId}/knowledge-bases`, {
@@ -35,6 +38,8 @@ export function updateKnowledgeBase(
     name?: string
     description?: string
     status?: string
+    embedding_model_id?: string | null
+    reranker_model_id?: string | null
   }
 ) {
   return request<KnowledgeBase>(
@@ -87,6 +92,21 @@ export function uploadKnowledgeDocument(
       method: "POST",
       token,
       body: formData,
+    }
+  )
+}
+
+export function testKnowledgeBaseModels(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string
+) {
+  return request<KnowledgeModelTestResult>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/model-test`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify({ query: "Hello", documents: ["Hello"] }),
     }
   )
 }

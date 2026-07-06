@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from nexaflow.db.session import get_session_factory
 from nexaflow.identity.models import User
 from nexaflow.knowledge.models import KnowledgeBase, KnowledgeDocument
+from nexaflow.llm.test import ModelTestHandler, model_payload, model_test_server, models_url
 from nexaflow.resource_permissions.models import ResourcePermission
 from nexaflow.testing import (
     RESEARCH_PASSWORD,
@@ -88,7 +89,7 @@ async def assert_knowledge_base_deleted(knowledge_base_id: str, workspace_id: st
 
 
 def main() -> None:
-    with test_client() as client:
+    with test_client() as client, model_test_server() as model_base_url:
         admin_token, default_workspace_id = activate_admin(client)
 
         alice_id, alice_temp_password = create_workspace_user(
@@ -130,15 +131,65 @@ def main() -> None:
             RESEARCH_PASSWORD,
         )
 
+        embedding_model = client.post(
+            models_url(default_workspace_id),
+            headers=auth_headers(admin_token),
+            json={
+                **model_payload(model_base_url),
+                "name": "Knowledge Embedding",
+                "provider": "model_openai_provider",
+                "model_type": "EMBEDDING",
+                "model_name": "text-embedding-3-small",
+            },
+        )
+        assert embedding_model.status_code == 201, embedding_model.text
+        embedding_model_id = embedding_model.json()["id"]
+
+        reranker_model = client.post(
+            models_url(default_workspace_id),
+            headers=auth_headers(admin_token),
+            json={
+                **model_payload(model_base_url),
+                "name": "Knowledge Reranker",
+                "provider": "model_custom_provider",
+                "model_type": "RERANKER",
+                "model_name": "custom-reranker",
+            },
+        )
+        assert reranker_model.status_code == 201, reranker_model.text
+        reranker_model_id = reranker_model.json()["id"]
+
         knowledge_base = client.post(
             knowledge_url(default_workspace_id),
             headers=auth_headers(alice_token),
-            json={"name": "Product Docs", "description": "Internal product answers"},
+            json={
+                "name": "Product Docs",
+                "description": "Internal product answers",
+                "embedding_model_id": embedding_model_id,
+                "reranker_model_id": reranker_model_id,
+            },
         )
         assert knowledge_base.status_code == 201, knowledge_base.text
         knowledge_base_id = knowledge_base.json()["id"]
         assert knowledge_base.json()["permission"] == "edit"
         assert knowledge_base.json()["created_by_user_id"] == alice_id
+        assert knowledge_base.json()["embedding_model_id"] == embedding_model_id
+        assert knowledge_base.json()["reranker_model_id"] == reranker_model_id
+
+        model_test = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/model-test"),
+            headers=auth_headers(alice_token),
+            json={"query": "Hello", "documents": ["Hello"]},
+        )
+        assert model_test.status_code == 200, model_test.text
+        assert model_test.json() == {
+            "embedding_model_id": embedding_model_id,
+            "embedding_dimensions": 1,
+            "reranker_model_id": reranker_model_id,
+            "reranker_results": 1,
+        }
+        assert ModelTestHandler.calls[-2]["path"] == "/v1/embeddings"
+        assert ModelTestHandler.calls[-1]["path"] == "/v1/rerank"
 
         bob_list = client.get(
             knowledge_url(default_workspace_id),
@@ -168,6 +219,13 @@ def main() -> None:
         )
         assert bob_get.status_code == 200, bob_get.text
         assert bob_get.json()["permission"] == "view"
+
+        bob_model_test_denied = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/model-test"),
+            headers=auth_headers(bob_token),
+            json={"query": "Hello", "documents": ["Hello"]},
+        )
+        assert bob_model_test_denied.status_code == 403, bob_model_test_denied.text
 
         bob_upload_denied = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),

@@ -15,6 +15,8 @@ from nexaflow.knowledge.schemas import (
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
     KnowledgeDocumentResponse,
+    KnowledgeModelTestRequest,
+    KnowledgeModelTestResponse,
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
 )
@@ -28,6 +30,7 @@ from nexaflow.knowledge.services import (
     require_can_manage_permissions,
     require_knowledge_base_permission,
     revoke_resource_permission,
+    test_knowledge_base_models,
     update_knowledge_base,
     upload_knowledge_document,
     upsert_resource_permission,
@@ -78,6 +81,8 @@ async def get_workspace_knowledge_base(
         name=knowledge_base.name,
         description=knowledge_base.description,
         status=knowledge_base.status,
+        embedding_model_id=knowledge_base.embedding_model_id,
+        reranker_model_id=knowledge_base.reranker_model_id,
         created_by_user_id=knowledge_base.created_by_user_id,
         created_at=knowledge_base.created_at,
         updated_at=knowledge_base.updated_at,
@@ -165,6 +170,32 @@ async def upload_workspace_knowledge_base_document(
         context.user,
         settings,
     )
+
+
+@router.post(
+    "/{knowledge_base_id}/model-test",
+    response_model=KnowledgeModelTestResponse,
+)
+async def test_workspace_knowledge_base_models(
+    knowledge_base_id: str,
+    payload: KnowledgeModelTestRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeModelTestResponse:
+    knowledge_base = await get_knowledge_base(
+        db,
+        context.workspace.id,
+        knowledge_base_id,
+    )
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    return await test_knowledge_base_models(db, knowledge_base, payload, settings)
 
 
 @router.get("/{knowledge_base_id}/permissions", response_model=list[ResourcePermissionResponse])

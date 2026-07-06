@@ -32,7 +32,21 @@ class KnowledgeBase(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    embedding_model_id: Mapped[str | None] = mapped_column(
+        ForeignKey("model.id"),
+        nullable=True,
+        index=True,
+    )
+    reranker_model_id: Mapped[str | None] = mapped_column(
+        ForeignKey("model.id"),
+        nullable=True,
+        index=True,
+    )
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 

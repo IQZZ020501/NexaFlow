@@ -6,6 +6,8 @@ export type KnowledgeBase = {
   name: string
   description: string
   status: string
+  embedding_model_id: string | null
+  reranker_model_id: string | null
   created_by_user_id: string
   created_at: string
   updated_at: string
@@ -33,6 +35,8 @@ export type KnowledgeDocument = {
 export type KnowledgeBaseForm = {
   name: string
   description: string
+  embedding_model_id: string | null
+  reranker_model_id: string | null
 }
 
 export type KnowledgeBaseEditForm = KnowledgeBaseForm & {
@@ -47,3 +51,10 @@ export type KnowledgeBasePermissionForm = {
 
 export type KnowledgeBaseDetailTab =
   "documents" | "questions" | "hit-test" | "settings"
+
+export type KnowledgeModelTestResult = {
+  embedding_model_id: string
+  embedding_dimensions: number
+  reranker_model_id: string | null
+  reranker_results: number
+}

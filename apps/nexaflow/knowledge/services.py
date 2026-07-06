@@ -1,3 +1,4 @@
+import asyncio
 import shutil
 from pathlib import Path
 
@@ -19,7 +20,16 @@ from nexaflow.knowledge.schemas import (
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
     KnowledgeDocumentResponse,
+    KnowledgeModelTestRequest,
+    KnowledgeModelTestResponse,
     ResourcePermissionResponse,
+)
+from nexaflow.llm import repositories as model_repository
+from nexaflow.llm.models import RegisteredModel
+from nexaflow.llm.runtime import (
+    ModelProviderError,
+    ModelProviderStatusError,
+    build_registered_model_provider,
 )
 from nexaflow.resource_permissions.models import ResourcePermission
 
@@ -64,6 +74,8 @@ def knowledge_base_to_response(
         name=knowledge_base.name,
         description=knowledge_base.description,
         status=knowledge_base.status,
+        embedding_model_id=knowledge_base.embedding_model_id,
+        reranker_model_id=knowledge_base.reranker_model_id,
         created_by_user_id=knowledge_base.created_by_user_id,
         created_at=knowledge_base.created_at,
         updated_at=knowledge_base.updated_at,
@@ -98,6 +110,41 @@ def clean_upload_filename(filename: str | None) -> str:
 
 def knowledge_document_path(settings: Settings, storage_path: str) -> Path:
     return settings.knowledge_storage_dir / storage_path
+
+
+def normalize_optional_model_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
+async def get_knowledge_model(
+    db: AsyncSession,
+    workspace_id: str,
+    model_id: str | None,
+    model_type: str,
+) -> RegisteredModel | None:
+    model_id = normalize_optional_model_id(model_id)
+    if model_id is None:
+        return None
+    model = await model_repository.get_registered_model_by_id(db, model_id)
+    if model is None or model.workspace_id != workspace_id:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Knowledge model not found.",
+        )
+    if model.model_type != model_type:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Knowledge model must be {model_type}.",
+        )
+    if model.status != ACTIVE_STATUS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Knowledge model is disabled.",
+        )
+    return model
 
 
 def require_can_manage_permissions(
@@ -269,11 +316,25 @@ async def create_knowledge_base(
     payload: KnowledgeBaseCreateRequest,
     actor: User,
 ) -> KnowledgeBaseResponse:
+    embedding_model = await get_knowledge_model(
+        db,
+        workspace_id,
+        payload.embedding_model_id,
+        "EMBEDDING",
+    )
+    reranker_model = await get_knowledge_model(
+        db,
+        workspace_id,
+        payload.reranker_model_id,
+        "RERANKER",
+    )
     knowledge_base = KnowledgeBase(
         workspace_id=workspace_id,
         name=normalize_name(payload.name),
         description=payload.description.strip(),
         status=ACTIVE_STATUS,
+        embedding_model_id=embedding_model.id if embedding_model else None,
+        reranker_model_id=reranker_model.id if reranker_model else None,
         created_by_user_id=actor.id,
     )
     db.add(knowledge_base)
@@ -305,7 +366,7 @@ async def update_knowledge_base(
     payload: KnowledgeBaseUpdateRequest,
     actor: User,
 ) -> KnowledgeBaseResponse:
-    details = payload.model_dump(exclude_none=True)
+    details = payload.model_dump(exclude_unset=True)
     if payload.name is not None:
         knowledge_base.name = normalize_name(payload.name)
     if payload.description is not None:
@@ -314,6 +375,22 @@ async def update_knowledge_base(
         if payload.status not in KNOWLEDGE_BASE_STATUSES:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid knowledge base status.")
         knowledge_base.status = payload.status
+    if "embedding_model_id" in details:
+        embedding_model = await get_knowledge_model(
+            db,
+            knowledge_base.workspace_id,
+            payload.embedding_model_id,
+            "EMBEDDING",
+        )
+        knowledge_base.embedding_model_id = embedding_model.id if embedding_model else None
+    if "reranker_model_id" in details:
+        reranker_model = await get_knowledge_model(
+            db,
+            knowledge_base.workspace_id,
+            payload.reranker_model_id,
+            "RERANKER",
+        )
+        knowledge_base.reranker_model_id = reranker_model.id if reranker_model else None
 
     record_audit_log(
         db,
@@ -334,6 +411,73 @@ async def update_knowledge_base(
 
     await db.refresh(knowledge_base)
     return knowledge_base_to_response(knowledge_base, "edit")
+
+
+def run_knowledge_model_test(
+    embedding_model: RegisteredModel,
+    reranker_model: RegisteredModel | None,
+    payload: KnowledgeModelTestRequest,
+    settings: Settings,
+) -> KnowledgeModelTestResponse:
+    try:
+        embedding = build_registered_model_provider(embedding_model, settings).embed(
+            [payload.query]
+        )
+        reranker_results = []
+        if reranker_model is not None:
+            reranker_results = build_registered_model_provider(
+                reranker_model,
+                settings,
+            ).rerank(payload.query, payload.documents)
+    except ModelProviderStatusError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Knowledge model test failed with provider status {exc.status_code}.",
+        ) from exc
+    except ModelProviderError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Knowledge model test request failed.",
+        ) from exc
+
+    return KnowledgeModelTestResponse(
+        embedding_model_id=embedding_model.id,
+        embedding_dimensions=len(embedding[0]) if embedding else 0,
+        reranker_model_id=reranker_model.id if reranker_model else None,
+        reranker_results=len(reranker_results),
+    )
+
+
+async def test_knowledge_base_models(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    payload: KnowledgeModelTestRequest,
+    settings: Settings,
+) -> KnowledgeModelTestResponse:
+    embedding_model = await get_knowledge_model(
+        db,
+        knowledge_base.workspace_id,
+        knowledge_base.embedding_model_id,
+        "EMBEDDING",
+    )
+    if embedding_model is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Embedding model is required.",
+        )
+    reranker_model = await get_knowledge_model(
+        db,
+        knowledge_base.workspace_id,
+        knowledge_base.reranker_model_id,
+        "RERANKER",
+    )
+    return await asyncio.to_thread(
+        run_knowledge_model_test,
+        embedding_model,
+        reranker_model,
+        payload,
+        settings,
+    )
 
 
 async def delete_knowledge_base_permanently(

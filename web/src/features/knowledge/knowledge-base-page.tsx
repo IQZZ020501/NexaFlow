@@ -31,6 +31,7 @@ import {
   listKnowledgeBases,
   listKnowledgeDocuments,
   revokeKnowledgeBasePermission,
+  testKnowledgeBaseModels,
   updateKnowledgeBase,
   uploadKnowledgeDocument,
   upsertKnowledgeBasePermission,
@@ -41,6 +42,8 @@ import type {
   ResourcePermission,
 } from "@/features/knowledge/types"
 import type { MeResponse } from "@/features/auth/types"
+import { listRegisteredModels } from "@/features/llm/api"
+import type { RegisteredModel } from "@/features/llm/types"
 import { listWorkspaceMembers } from "@/features/system/api"
 import type { WorkspaceMember } from "@/features/system/types"
 import { type FeaturePageConfig } from "@/lib/pages"
@@ -80,6 +83,9 @@ export function KnowledgeBasePage({
     []
   )
   const [documents, setDocuments] = React.useState<KnowledgeDocument[]>([])
+  const [registeredModels, setRegisteredModels] = React.useState<
+    RegisteredModel[]
+  >([])
   const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
   const [documentSearch, setDocumentSearch] = React.useState("")
   const [workspaceMembers, setWorkspaceMembers] = React.useState<
@@ -94,6 +100,8 @@ export function KnowledgeBasePage({
   const [form, setForm] = React.useState<KnowledgeBaseForm>({
     name: "",
     description: "",
+    embedding_model_id: null,
+    reranker_model_id: null,
   })
   const [editForm, setEditForm] = React.useState<KnowledgeBaseEditForm | null>(
     null
@@ -104,6 +112,7 @@ export function KnowledgeBasePage({
   const [isLoading, setIsLoading] = React.useState(false)
   const [isDocumentLoading, setIsDocumentLoading] = React.useState(false)
   const [isUploadingDocument, setIsUploadingDocument] = React.useState(false)
+  const [isTestingModels, setIsTestingModels] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const documentInputRef = React.useRef<HTMLInputElement>(null)
@@ -112,6 +121,14 @@ export function KnowledgeBasePage({
   const Icon = page.icon
   const selectedKnowledgeBase =
     knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId) ?? null
+  const selectedEmbeddingModel =
+    registeredModels.find(
+      (model) => model.id === selectedKnowledgeBase?.embedding_model_id
+    ) ?? null
+  const selectedRerankerModel =
+    registeredModels.find(
+      (model) => model.id === selectedKnowledgeBase?.reranker_model_id
+    ) ?? null
   const filteredKnowledgeBases = React.useMemo(() => {
     const search = knowledgeSearch.trim().toLowerCase()
 
@@ -148,6 +165,7 @@ export function KnowledgeBasePage({
   const loadKnowledgeBases = React.useCallback(async () => {
     if (!selectedWorkspaceId) {
       setKnowledgeBases([])
+      setRegisteredModels([])
       setSelectedKnowledgeBaseId(null)
       return
     }
@@ -155,9 +173,15 @@ export function KnowledgeBasePage({
     setError(null)
     setIsLoading(true)
     try {
-      setKnowledgeBases(await listKnowledgeBases(token, selectedWorkspaceId))
+      const [knowledgeBases, models] = await Promise.all([
+        listKnowledgeBases(token, selectedWorkspaceId),
+        listRegisteredModels(token, selectedWorkspaceId),
+      ])
+      setKnowledgeBases(knowledgeBases)
+      setRegisteredModels(models)
     } catch (error) {
       setKnowledgeBases([])
+      setRegisteredModels([])
       reportError(error)
     } finally {
       setIsLoading(false)
@@ -219,8 +243,17 @@ export function KnowledgeBasePage({
     return status === "uploaded" ? "待解析" : status
   }
 
+  function registeredModelLabel(model: RegisteredModel | null) {
+    return model ? `${model.name} / ${model.model_name}` : "未配置"
+  }
+
   function resetForm() {
-    setForm({ name: "", description: "" })
+    setForm({
+      name: "",
+      description: "",
+      embedding_model_id: null,
+      reranker_model_id: null,
+    })
     setError(null)
   }
 
@@ -276,6 +309,8 @@ export function KnowledgeBasePage({
         await updateKnowledgeBase(token, selectedWorkspaceId, editForm.id, {
           name: editForm.name,
           description: editForm.description,
+          embedding_model_id: editForm.embedding_model_id,
+          reranker_model_id: editForm.reranker_model_id,
         })
       )
       setEditForm(null)
@@ -311,6 +346,30 @@ export function KnowledgeBasePage({
       )
     } catch (error) {
       reportError(error)
+    }
+  }
+
+  async function handleTestKnowledgeModels() {
+    if (!selectedWorkspaceId || !selectedKnowledgeBase) {
+      return
+    }
+
+    setIsTestingModels(true)
+    setError(null)
+    try {
+      const result = await testKnowledgeBaseModels(
+        token,
+        selectedWorkspaceId,
+        selectedKnowledgeBase.id
+      )
+      onNotify(
+        "success",
+        `模型测试通过：Embedding ${result.embedding_dimensions} 维，Rerank ${result.reranker_results} 条`
+      )
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsTestingModels(false)
     }
   }
 
@@ -704,6 +763,24 @@ export function KnowledgeBasePage({
                   <p className="mt-2 text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
                     {selectedKnowledgeBase.description || "-"}
                   </p>
+                  <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+                    <div className="min-w-0 rounded-md border p-3">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Embedding 模型
+                      </p>
+                      <p className="mt-1 truncate font-medium">
+                        {registeredModelLabel(selectedEmbeddingModel)}
+                      </p>
+                    </div>
+                    <div className="min-w-0 rounded-md border p-3">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Rerank 模型
+                      </p>
+                      <p className="mt-1 truncate font-medium">
+                        {registeredModelLabel(selectedRerankerModel)}
+                      </p>
+                    </div>
+                  </div>
                   <div className="mt-5 flex flex-wrap gap-2">
                     {selectedKnowledgeBase.permission === "edit" ? (
                       <Button
@@ -714,11 +791,33 @@ export function KnowledgeBasePage({
                             id: selectedKnowledgeBase.id,
                             name: selectedKnowledgeBase.name,
                             description: selectedKnowledgeBase.description,
+                            embedding_model_id:
+                              selectedKnowledgeBase.embedding_model_id,
+                            reranker_model_id:
+                              selectedKnowledgeBase.reranker_model_id,
                           })
                         }
                       >
                         <PencilIcon data-icon="inline-start" />
                         编辑
+                      </Button>
+                    ) : null}
+                    {selectedKnowledgeBase.permission === "edit" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={
+                          isTestingModels ||
+                          !selectedKnowledgeBase.embedding_model_id
+                        }
+                        onClick={() => void handleTestKnowledgeModels()}
+                      >
+                        {isTestingModels ? (
+                          <LoaderCircleIcon data-icon="inline-start" />
+                        ) : (
+                          <TargetIcon data-icon="inline-start" />
+                        )}
+                        测试模型
                       </Button>
                     ) : null}
                     {canManagePermissions(selectedKnowledgeBase) ? (
@@ -750,6 +849,7 @@ export function KnowledgeBasePage({
           setPermissionForm={setPermissionForm}
           shareTargets={shareTargets}
           permissions={permissions}
+          registeredModels={registeredModels}
           isDialogOpen={isDialogOpen}
           setIsDialogOpen={setIsDialogOpen}
           isSaving={isSaving}
@@ -864,6 +964,10 @@ export function KnowledgeBasePage({
                                     id: knowledgeBase.id,
                                     name: knowledgeBase.name,
                                     description: knowledgeBase.description,
+                                    embedding_model_id:
+                                      knowledgeBase.embedding_model_id,
+                                    reranker_model_id:
+                                      knowledgeBase.reranker_model_id,
                                   })
                                 }}
                               >
@@ -967,6 +1071,7 @@ export function KnowledgeBasePage({
         setPermissionForm={setPermissionForm}
         shareTargets={shareTargets}
         permissions={permissions}
+        registeredModels={registeredModels}
         isDialogOpen={isDialogOpen}
         setIsDialogOpen={setIsDialogOpen}
         isSaving={isSaving}
