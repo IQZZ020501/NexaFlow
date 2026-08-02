@@ -407,4 +407,8 @@ async def delete_registered_model(db: AsyncSession, model: RegisteredModel, acto
         workspace_id=model.workspace_id,
     )
     await model_repository.delete_registered_model_by_id(db, model.id)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Model is in use.") from exc

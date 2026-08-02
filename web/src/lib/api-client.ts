@@ -48,7 +48,11 @@ function errorMessage(payload: unknown, fallback: string) {
 export async function request<T>(path: string, options: RequestOptions = {}) {
   const headers = new Headers(options.headers)
 
-  if (options.body && !headers.has("Content-Type")) {
+  if (
+    options.body &&
+    !(options.body instanceof FormData) &&
+    !headers.has("Content-Type")
+  ) {
     headers.set("Content-Type", "application/json")
   }
 

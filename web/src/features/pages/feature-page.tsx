@@ -23,12 +23,18 @@ export function FeaturePage({
   token,
   me,
   selectedWorkspaceId,
+  activeKnowledgeBaseId,
+  onOpenKnowledgeBase,
+  onCloseKnowledgeBase,
   onNotify,
 }: {
   page: FeaturePageConfig
   token: string
   me: MeResponse
   selectedWorkspaceId: string | null
+  activeKnowledgeBaseId: string | null
+  onOpenKnowledgeBase: (knowledgeBaseId: string) => void
+  onCloseKnowledgeBase: () => void
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
   const { t } = useLanguage()
@@ -42,6 +48,9 @@ export function FeaturePage({
         token={token}
         me={me}
         selectedWorkspaceId={selectedWorkspaceId}
+        activeKnowledgeBaseId={activeKnowledgeBaseId}
+        onOpenKnowledgeBase={onOpenKnowledgeBase}
+        onCloseKnowledgeBase={onCloseKnowledgeBase}
         onNotify={onNotify}
       />
     )

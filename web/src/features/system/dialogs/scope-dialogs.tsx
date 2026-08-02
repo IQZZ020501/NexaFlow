@@ -41,8 +41,6 @@ type EditWorkspaceDialogProps = {
   setWorkspaceEditForm: React.Dispatch<
     React.SetStateAction<ScopeEditForm | null>
   >
-  workspaceError: string | null
-  setWorkspaceError: React.Dispatch<React.SetStateAction<string | null>>
   isSavingWorkspace: boolean
   handleUpdateWorkspace: React.FormEventHandler<HTMLFormElement>
 }
@@ -50,8 +48,6 @@ type EditWorkspaceDialogProps = {
 export function EditWorkspaceDialog({
   workspaceEditForm,
   setWorkspaceEditForm,
-  workspaceError,
-  setWorkspaceError,
   isSavingWorkspace,
   handleUpdateWorkspace,
 }: EditWorkspaceDialogProps) {
@@ -63,7 +59,6 @@ export function EditWorkspaceDialog({
       onOpenChange={(open) => {
         if (!open) {
           setWorkspaceEditForm(null)
-          setWorkspaceError(null)
         }
       }}
     >
@@ -106,9 +101,6 @@ export function EditWorkspaceDialog({
                   }
                 />
               </Field>
-              {workspaceError ? (
-                <p className="text-sm text-destructive">{workspaceError}</p>
-              ) : null}
             </FieldGroup>
             <DialogFooter className="pt-5">
               <Button
@@ -135,8 +127,6 @@ export function EditWorkspaceDialog({
 type EditTeamDialogProps = {
   teamEditForm: ScopeEditForm | null
   setTeamEditForm: React.Dispatch<React.SetStateAction<ScopeEditForm | null>>
-  teamError: string | null
-  setTeamError: React.Dispatch<React.SetStateAction<string | null>>
   selectedWorkspace: Workspace | null
   selectedWorkspaceId: string | null
   isSavingTeam: boolean
@@ -146,8 +136,6 @@ type EditTeamDialogProps = {
 export function EditTeamDialog({
   teamEditForm,
   setTeamEditForm,
-  teamError,
-  setTeamError,
   selectedWorkspace,
   selectedWorkspaceId,
   isSavingTeam,
@@ -161,7 +149,6 @@ export function EditTeamDialog({
       onOpenChange={(open) => {
         if (!open) {
           setTeamEditForm(null)
-          setTeamError(null)
         }
       }}
     >
@@ -208,9 +195,6 @@ export function EditTeamDialog({
                   }
                 />
               </Field>
-              {teamError ? (
-                <p className="text-sm text-destructive">{teamError}</p>
-              ) : null}
             </FieldGroup>
             <DialogFooter className="pt-5">
               <Button
@@ -239,7 +223,6 @@ type CreateWorkspaceDialogProps = {
   setIsWorkspaceDialogOpen: React.Dispatch<React.SetStateAction<boolean>>
   workspaceForm: WorkspaceForm
   setWorkspaceForm: React.Dispatch<React.SetStateAction<WorkspaceForm>>
-  workspaceError: string | null
   workspaceNotice: WorkspaceCreateResponse | null
   isCreatingWorkspace: boolean
   handleCreateWorkspace: React.FormEventHandler<HTMLFormElement>
@@ -250,7 +233,6 @@ export function CreateWorkspaceDialog({
   setIsWorkspaceDialogOpen,
   workspaceForm,
   setWorkspaceForm,
-  workspaceError,
   workspaceNotice,
   isCreatingWorkspace,
   handleCreateWorkspace,
@@ -341,21 +323,14 @@ export function CreateWorkspaceDialog({
                 required
               />
             </Field>
-            {workspaceError ? (
-              <p className="text-sm text-destructive">{workspaceError}</p>
-            ) : null}
-            {workspaceNotice ? (
+            {workspaceNotice?.admin_initial_password ? (
               <div className="rounded-lg border bg-muted p-3 text-sm">
-                <div className="font-medium">
-                  {t("已创建 {name}", {
-                    name: workspaceNotice.workspace.name,
-                  })}
-                </div>
-                {workspaceNotice.admin_initial_password ? (
-                  <div className="mt-1 font-mono text-xs">
+                <Field>
+                  <FieldLabel>{t("默认密码")}</FieldLabel>
+                  <p className="font-mono text-xs">
                     {workspaceNotice.admin_initial_password}
-                  </div>
-                ) : null}
+                  </p>
+                </Field>
               </div>
             ) : null}
           </FieldGroup>
@@ -389,7 +364,6 @@ type CreateTeamDialogProps = {
   manageableWorkspaces: Workspace[]
   teamForm: TeamForm
   setTeamForm: React.Dispatch<React.SetStateAction<TeamForm>>
-  teamError: string | null
   isCreatingTeam: boolean
   handleCreateTeam: React.FormEventHandler<HTMLFormElement>
 }
@@ -401,7 +375,6 @@ export function CreateTeamDialog({
   manageableWorkspaces,
   teamForm,
   setTeamForm,
-  teamError,
   isCreatingTeam,
   handleCreateTeam,
 }: CreateTeamDialogProps) {
@@ -500,9 +473,6 @@ export function CreateTeamDialog({
                 }
               />
             </Field>
-            {teamError ? (
-              <p className="text-sm text-destructive">{teamError}</p>
-            ) : null}
           </FieldGroup>
           <DialogFooter className="pt-5">
             <Button

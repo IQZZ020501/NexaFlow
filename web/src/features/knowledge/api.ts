@@ -1,13 +1,18 @@
 import { request } from "@/lib/api-client"
 import type {
   KnowledgeBase,
+  KnowledgeDocument,
+  KnowledgeDocumentChunk,
+  KnowledgeModelTestResult,
+  KnowledgeQueryHit,
+  KnowledgeTask,
   ResourcePermission,
 } from "@/features/knowledge/types"
 
 export function listKnowledgeBases(token: string, workspaceId: string) {
   return request<KnowledgeBase[]>(
     `/workspaces/${workspaceId}/knowledge-bases`,
-    { token }
+    { token },
   )
 }
 
@@ -17,7 +22,9 @@ export function createKnowledgeBase(
   payload: {
     name: string
     description: string
-  }
+    embedding_model_id?: string | null
+    reranker_model_id?: string | null
+  },
 ) {
   return request<KnowledgeBase>(`/workspaces/${workspaceId}/knowledge-bases`, {
     method: "POST",
@@ -34,7 +41,9 @@ export function updateKnowledgeBase(
     name?: string
     description?: string
     status?: string
-  }
+    embedding_model_id?: string | null
+    reranker_model_id?: string | null
+  },
 ) {
   return request<KnowledgeBase>(
     `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}`,
@@ -42,32 +51,204 @@ export function updateKnowledgeBase(
       method: "PATCH",
       token,
       body: JSON.stringify(payload),
-    }
+    },
   )
 }
 
 export function deleteKnowledgeBase(
   token: string,
   workspaceId: string,
-  knowledgeBaseId: string
+  knowledgeBaseId: string,
 ) {
   return request<void>(
     `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}`,
     {
       method: "DELETE",
       token,
-    }
+    },
+  )
+}
+
+export function listKnowledgeDocuments(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  options: { includeStaged?: boolean } = {},
+) {
+  const query = options.includeStaged ? "?include_staged=true" : ""
+  return request<KnowledgeDocument[]>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents${query}`,
+    { token },
+  )
+}
+
+export function uploadKnowledgeDocument(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  file: File,
+  options: { autoParse?: boolean } = {},
+) {
+  const formData = new FormData()
+  formData.append("file", file)
+  formData.append("auto_parse", String(options.autoParse ?? true))
+
+  return request<KnowledgeDocument>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents`,
+    {
+      method: "POST",
+      token,
+      body: formData,
+    },
+  )
+}
+
+export function parseKnowledgeDocument(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId: string,
+  payload?: {
+    chunk_size: number
+    chunk_overlap: number
+    split_separator?: string
+    cleaning_rules: string[]
+    auto_index: boolean
+  },
+) {
+  return request<KnowledgeTask>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/parse`,
+    {
+      method: "POST",
+      token,
+      body: payload ? JSON.stringify(payload) : undefined,
+    },
+  )
+}
+
+export function indexKnowledgeDocument(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId: string,
+) {
+  return request<KnowledgeTask>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/index`,
+    {
+      method: "POST",
+      token,
+    },
+  )
+}
+
+export function deleteKnowledgeDocument(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId: string,
+) {
+  return request<void>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`,
+    {
+      method: "DELETE",
+      token,
+    },
+  )
+}
+
+export function listKnowledgeDocumentChunks(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId: string,
+) {
+  return request<KnowledgeDocumentChunk[]>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/chunks`,
+    { token },
+  )
+}
+
+export function listKnowledgeTasks(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId?: string,
+) {
+  const path = documentId
+    ? `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/tasks`
+    : `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/tasks`
+
+  return request<KnowledgeTask[]>(path, { token })
+}
+
+export function retryKnowledgeTask(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  taskId: string,
+) {
+  return request<KnowledgeTask>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/tasks/${taskId}/retry`,
+    {
+      method: "POST",
+      token,
+    },
+  )
+}
+
+export function rebuildKnowledgeIndex(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+) {
+  return request<KnowledgeTask>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/rebuild-index`,
+    {
+      method: "POST",
+      token,
+    },
+  )
+}
+
+export function queryKnowledgeBase(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  payload: { query: string; limit: number },
+) {
+  return request<KnowledgeQueryHit[]>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/query`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export function testKnowledgeBaseModels(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+) {
+  return request<KnowledgeModelTestResult>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/model-test`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify({ query: "Hello", documents: ["Hello"] }),
+    },
   )
 }
 
 export function listKnowledgeBasePermissions(
   token: string,
   workspaceId: string,
-  knowledgeBaseId: string
+  knowledgeBaseId: string,
 ) {
   return request<ResourcePermission[]>(
     `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/permissions`,
-    { token }
+    { token },
   )
 }
 
@@ -76,7 +257,7 @@ export function upsertKnowledgeBasePermission(
   workspaceId: string,
   knowledgeBaseId: string,
   userId: string,
-  permission: "view" | "edit"
+  permission: "view" | "edit",
 ) {
   return request<ResourcePermission>(
     `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/permissions/${userId}`,
@@ -84,7 +265,7 @@ export function upsertKnowledgeBasePermission(
       method: "PUT",
       token,
       body: JSON.stringify({ permission }),
-    }
+    },
   )
 }
 
@@ -92,13 +273,13 @@ export function revokeKnowledgeBasePermission(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  userId: string
+  userId: string,
 ) {
   return request<void>(
     `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/permissions/${userId}`,
     {
       method: "DELETE",
       token,
-    }
+    },
   )
 }

@@ -53,6 +53,9 @@ export function App() {
   const [activeSystemTab, setActiveSystemTab] = React.useState<SystemTabKey>(
     () => routeFromPath().systemTab
   )
+  const [activeKnowledgeBaseId, setActiveKnowledgeBaseId] = React.useState<
+    string | null
+  >(() => routeFromPath().knowledgeBaseId ?? null)
   const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<
     string | null
   >(() => localStorage.getItem(WORKSPACE_KEY))
@@ -61,7 +64,6 @@ export function App() {
   const [isSessionLoading, setIsSessionLoading] = React.useState(Boolean(token))
   const [isTeamsLoading, setIsTeamsLoading] = React.useState(false)
   const [sessionError, setSessionError] = React.useState<string | null>(null)
-  const [teamsError, setTeamsError] = React.useState<string | null>(null)
   const [notification, setNotification] =
     React.useState<AppNotification | null>(null)
 
@@ -77,9 +79,9 @@ export function App() {
     setSelectedWorkspaceId(null)
     setWorkspaceNotice(null)
     setSessionError(null)
-    setTeamsError(null)
     setActivePage("apps")
     setActiveSystemTab("workspaces")
+    setActiveKnowledgeBaseId(null)
     window.history.pushState(null, "", PAGE_PATHS.apps)
   }, [])
 
@@ -126,7 +128,6 @@ export function App() {
 
         setWorkspaces(nextWorkspaces)
         setTeams([])
-        setTeamsError(null)
         setIsTeamsLoading(Boolean(nextWorkspaceId))
         setSelectedWorkspaceId(nextWorkspaceId)
 
@@ -141,12 +142,14 @@ export function App() {
           return
         }
 
-        setSessionError(getErrorMessage(error, t))
+        const message = getErrorMessage(error, t)
+        setSessionError(message)
+        notify("error", message)
       } finally {
         setIsSessionLoading(false)
       }
     },
-    [logout, t]
+    [logout, notify, t]
   )
 
   React.useEffect(() => {
@@ -154,6 +157,7 @@ export function App() {
       const route = routeFromPath()
       setActivePage(route.page)
       setActiveSystemTab(route.systemTab)
+      setActiveKnowledgeBaseId(route.knowledgeBaseId ?? null)
     }
 
     window.addEventListener("popstate", handlePopState)
@@ -204,7 +208,7 @@ export function App() {
       .catch((error: unknown) => {
         if (isCurrent) {
           setTeams([])
-          setTeamsError(getErrorMessage(error, t))
+          notify("error", getErrorMessage(error, t))
         }
       })
       .finally(() => {
@@ -216,7 +220,7 @@ export function App() {
     return () => {
       isCurrent = false
     }
-  }, [token, selectedWorkspaceId, mustChangePassword, isSessionLoading, t])
+  }, [token, selectedWorkspaceId, mustChangePassword, isSessionLoading, notify, t])
 
   function handleLogin(nextToken: string, nextMustChangePassword: boolean) {
     localStorage.setItem(TOKEN_KEY, nextToken)
@@ -235,17 +239,35 @@ export function App() {
 
     setActivePage(route.page)
     setActiveSystemTab(route.systemTab)
+    setActiveKnowledgeBaseId(route.knowledgeBaseId ?? null)
   }
 
   function handlePageChange(page: PageKey) {
     navigateToRoute({
       page,
       systemTab: page === "system" ? activeSystemTab : "workspaces",
+      knowledgeBaseId: null,
     })
   }
 
   function handleSystemTabChange(tab: SystemTabKey) {
-    navigateToRoute({ page: "system", systemTab: tab })
+    navigateToRoute({ page: "system", systemTab: tab, knowledgeBaseId: null })
+  }
+
+  function handleOpenKnowledgeBase(knowledgeBaseId: string) {
+    navigateToRoute({
+      page: "knowledge",
+      systemTab: "workspaces",
+      knowledgeBaseId,
+    })
+  }
+
+  function handleCloseKnowledgeBase() {
+    navigateToRoute({
+      page: "knowledge",
+      systemTab: "workspaces",
+      knowledgeBaseId: null,
+    })
   }
 
   function handleSelectWorkspace(workspaceId: string) {
@@ -266,7 +288,6 @@ export function App() {
 
     localStorage.setItem(WORKSPACE_KEY, workspaceId)
     setTeams([])
-    setTeamsError(null)
     setIsTeamsLoading(true)
     setSelectedWorkspaceId(workspaceId)
     setWorkspaceNotice(null)
@@ -275,7 +296,6 @@ export function App() {
   function clearSelectedWorkspace() {
     localStorage.removeItem(WORKSPACE_KEY)
     setTeams([])
-    setTeamsError(null)
     setIsTeamsLoading(false)
     setSelectedWorkspaceId(null)
     setWorkspaceNotice(null)
@@ -350,7 +370,15 @@ export function App() {
   }
 
   if (!token) {
-    return <LoginScreen onLogin={handleLogin} />
+    return (
+      <>
+        <LoginScreen onLogin={handleLogin} onNotify={notify} />
+        <OperationNotification
+          notification={notification}
+          onDismiss={() => setNotification(null)}
+        />
+      </>
+    )
   }
 
   if (isSessionLoading && !me) {
@@ -363,19 +391,27 @@ export function App() {
 
   if (!me) {
     return (
-      <main className="flex min-h-svh items-center justify-center bg-muted/30 p-6">
-        <Card className="w-full max-w-sm">
-          <CardHeader>
-            <CardTitle>{t("无法加载账号")}</CardTitle>
-            <CardDescription>{sessionError ?? t("请重新登录")}</CardDescription>
-          </CardHeader>
-          <CardFooter>
-            <Button className="w-full" onClick={logout}>
-              {t("重新登录")}
-            </Button>
-          </CardFooter>
-        </Card>
-      </main>
+      <>
+        <main className="flex min-h-svh items-center justify-center bg-muted/30 p-6">
+          <Card className="w-full max-w-sm">
+            <CardHeader>
+              <CardTitle>{t("无法加载账号")}</CardTitle>
+              <CardDescription>
+                {sessionError ?? t("请重新登录")}
+              </CardDescription>
+            </CardHeader>
+            <CardFooter>
+              <Button className="w-full" onClick={logout}>
+                {t("重新登录")}
+              </Button>
+            </CardFooter>
+          </Card>
+        </main>
+        <OperationNotification
+          notification={notification}
+          onDismiss={() => setNotification(null)}
+        />
+      </>
     )
   }
 
@@ -412,10 +448,6 @@ export function App() {
         onDismiss={() => setNotification(null)}
       />
       <main className="flex w-full min-w-0 flex-col gap-4 overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8">
-        {sessionError ? (
-          <p className="text-sm text-destructive">{sessionError}</p>
-        ) : null}
-
         {activePage === "system" ? (
           <>
             <div className="flex min-w-0 flex-col gap-1">
@@ -431,7 +463,6 @@ export function App() {
               selectedWorkspaceId={selectedWorkspaceId}
               workspaceNotice={workspaceNotice}
               isTeamsLoading={isTeamsLoading}
-              teamsError={teamsError}
               activeSystemTab={activeSystemTab}
               onSelectWorkspace={handleSelectWorkspace}
               onSystemTabChange={handleSystemTabChange}
@@ -450,6 +481,9 @@ export function App() {
             token={token}
             me={me}
             selectedWorkspaceId={selectedWorkspaceId}
+            activeKnowledgeBaseId={activeKnowledgeBaseId}
+            onOpenKnowledgeBase={handleOpenKnowledgeBase}
+            onCloseKnowledgeBase={handleCloseKnowledgeBase}
             onNotify={notify}
           />
         )}
@@ -466,6 +500,7 @@ export function App() {
         canDismiss={!mustChangePassword}
         requireCurrentPassword={!mustChangePassword}
         onOpenChange={setIsPasswordDialogOpen}
+        onNotify={notify}
         onChanged={() => void handlePasswordChanged()}
       />
     </div>

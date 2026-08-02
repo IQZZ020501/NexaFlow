@@ -15,14 +15,12 @@ import { formatAuditDetails } from "@/features/system/system-utils"
 
 type AuditPanelProps = {
   auditLogs: AuditLog[]
-  auditError: string | null
   isAuditLoading: boolean
   locale: string
 }
 
 export function AuditPanel({
   auditLogs,
-  auditError,
   isAuditLoading,
   locale,
 }: AuditPanelProps) {
@@ -48,9 +46,7 @@ export function AuditPanel({
           </div>
         </CardHeader>
         <CardContent className="min-w-0 px-4">
-          {auditError ? (
-            <p className="text-sm text-destructive">{auditError}</p>
-          ) : isAuditLoading ? (
+          {isAuditLoading ? (
             <div className="flex min-h-28 items-center justify-center">
               <LoaderCircleIcon className="animate-spin text-muted-foreground" />
             </div>

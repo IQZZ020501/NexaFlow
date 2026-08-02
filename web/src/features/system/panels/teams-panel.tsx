@@ -24,7 +24,6 @@ import { StatusBadge } from "@/features/knowledge/status-badges"
 type TeamsPanelProps = {
   selectedWorkspace: Workspace | null
   teams: Team[]
-  teamsError: string | null
   isTeamsLoading: boolean
   canCreateTeam: boolean
   canManageWorkspace: boolean
@@ -37,7 +36,6 @@ type TeamsPanelProps = {
 export function TeamsPanel({
   selectedWorkspace,
   teams,
-  teamsError,
   isTeamsLoading,
   canCreateTeam,
   canManageWorkspace,
@@ -78,9 +76,7 @@ export function TeamsPanel({
           ) : null}
         </CardHeader>
         <CardContent className="min-w-0 px-5">
-          {teamsError ? (
-            <p className="text-sm text-destructive">{teamsError}</p>
-          ) : isTeamsLoading ? (
+          {isTeamsLoading ? (
             <div className="flex min-h-28 items-center justify-center">
               <LoaderCircleIcon className="animate-spin text-muted-foreground" />
             </div>

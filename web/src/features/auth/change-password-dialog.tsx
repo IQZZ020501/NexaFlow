@@ -17,11 +17,13 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { changePassword } from "@/features/auth/api"
+import { changePassword, login } from "@/features/auth/api"
 import { getErrorMessage } from "@/app/errors"
+import type { AppNotification } from "@/app/notifications"
 import { getNewPasswordError } from "@/features/auth/password"
 
 type ChangePasswordForm = {
+  username: string
   currentPassword: string
   newPassword: string
   confirmPassword: string
@@ -35,29 +37,35 @@ export function ChangePasswordDialog({
   canDismiss = false,
   requireCurrentPassword = false,
   onOpenChange,
+  onNotify,
   onChanged,
 }: {
   open: boolean
-  token: string
+  token?: string
   title?: string
   description?: string
   canDismiss?: boolean
   requireCurrentPassword?: boolean
   onOpenChange?: (open: boolean) => void
+  onNotify: (kind: AppNotification["kind"], message: string) => void
   onChanged: () => void
 }) {
   const { t } = useLanguage()
   const [form, setForm] = React.useState<ChangePasswordForm>({
+    username: "",
     currentPassword: "",
     newPassword: "",
     confirmPassword: "",
   })
-  const [error, setError] = React.useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
 
   function resetForm() {
-    setForm({ currentPassword: "", newPassword: "", confirmPassword: "" })
-    setError(null)
+    setForm({
+      username: "",
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    })
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -71,10 +79,9 @@ export function ChangePasswordDialog({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setError(null)
 
     if (requireCurrentPassword && !form.currentPassword) {
-      setError(t("请输入当前密码"))
+      onNotify("error", t("请输入当前密码"))
       return
     }
 
@@ -84,21 +91,23 @@ export function ChangePasswordDialog({
       t
     )
     if (passwordError) {
-      setError(passwordError)
+      onNotify("error", passwordError)
       return
     }
 
     setIsSubmitting(true)
     try {
+      const accessToken =
+        token ?? (await login(form.username, form.currentPassword)).access_token
       await changePassword(
-        token,
+        accessToken,
         form.newPassword,
         requireCurrentPassword ? form.currentPassword : undefined
       )
       resetForm()
       onChanged()
     } catch (error) {
-      setError(getErrorMessage(error, t))
+      onNotify("error", getErrorMessage(error, t))
     } finally {
       setIsSubmitting(false)
     }
@@ -122,6 +131,25 @@ export function ChangePasswordDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <FieldGroup>
+            {!token ? (
+              <Field>
+                <FieldLabel htmlFor="changePasswordUsername">
+                  {t("用户名")}
+                </FieldLabel>
+                <Input
+                  id="changePasswordUsername"
+                  autoComplete="username"
+                  value={form.username}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      username: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </Field>
+            ) : null}
             {requireCurrentPassword ? (
               <Field>
                 <FieldLabel htmlFor="currentPassword">
@@ -179,7 +207,6 @@ export function ChangePasswordDialog({
                 required
               />
             </Field>
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
           </FieldGroup>
           <DialogFooter className="pt-4">
             <Button className="w-full" disabled={isSubmitting}>

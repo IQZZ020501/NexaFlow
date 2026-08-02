@@ -22,6 +22,7 @@ function DropdownMenuTrigger({
 
 function DropdownMenuContent({
   className,
+  onWheelCapture,
   sideOffset = 4,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
@@ -31,9 +32,33 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 min-w-56 origin-(--radix-dropdown-menu-content-transform-origin) overflow-hidden rounded-lg border bg-popover p-1 text-popover-foreground shadow-md",
+          "z-50 min-w-56 origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden rounded-lg border bg-popover p-1 text-popover-foreground shadow-md",
           className
         )}
+        onWheelCapture={(event) => {
+          onWheelCapture?.(event)
+          if (event.defaultPrevented) {
+            return
+          }
+
+          const content = event.currentTarget
+          const maxScrollTop = content.scrollHeight - content.clientHeight
+          if (maxScrollTop <= 0) {
+            return
+          }
+
+          const nextScrollTop = Math.max(
+            0,
+            Math.min(maxScrollTop, content.scrollTop + event.deltaY)
+          )
+          if (nextScrollTop === content.scrollTop) {
+            return
+          }
+
+          event.preventDefault()
+          event.stopPropagation()
+          content.scrollTop = nextScrollTop
+        }}
         {...props}
       />
     </DropdownMenuPrimitive.Portal>

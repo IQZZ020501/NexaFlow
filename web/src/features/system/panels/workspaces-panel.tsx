@@ -25,7 +25,6 @@ type WorkspacesPanelProps = {
   me: MeResponse
   workspaces: Workspace[]
   selectedWorkspaceId: string | null
-  workspaceError: string | null
   canCreateWorkspace: boolean
   onSelectWorkspace: (workspaceId: string) => void
   onOpenCreateWorkspace: () => void
@@ -38,7 +37,6 @@ export function WorkspacesPanel({
   me,
   workspaces,
   selectedWorkspaceId,
-  workspaceError,
   canCreateWorkspace,
   onSelectWorkspace,
   onOpenCreateWorkspace,
@@ -78,9 +76,6 @@ export function WorkspacesPanel({
           ) : null}
         </CardHeader>
         <CardContent className="min-w-0 px-4">
-          {workspaceError ? (
-            <p className="mb-3 text-sm text-destructive">{workspaceError}</p>
-          ) : null}
           {workspaces.length ? (
             <div className="flex flex-col gap-2">
               {workspaces.map((workspace) => {

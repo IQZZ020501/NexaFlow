@@ -63,7 +63,6 @@ export function SystemPage({
   selectedWorkspaceId,
   workspaceNotice,
   isTeamsLoading,
-  teamsError,
   activeSystemTab,
   onSelectWorkspace,
   onSystemTabChange,
@@ -82,7 +81,6 @@ export function SystemPage({
   selectedWorkspaceId: string | null
   workspaceNotice: WorkspaceCreateResponse | null
   isTeamsLoading: boolean
-  teamsError: string | null
   activeSystemTab: SystemTabKey
   onSelectWorkspace: (workspaceId: string) => void
   onSystemTabChange: (tab: SystemTabKey) => void
@@ -121,28 +119,14 @@ export function SystemPage({
     workspaceId: selectedWorkspaceId ?? "",
     teamIds: [],
   })
-  const [workspaceError, setWorkspaceError] = React.useState<string | null>(
-    null
-  )
-  const [teamError, setTeamError] = React.useState<string | null>(null)
   const [users, setUsers] = React.useState<User[]>([])
   const [workspaceMembers, setWorkspaceMembers] = React.useState<
     WorkspaceMember[]
   >([])
   const [auditLogs, setAuditLogs] = React.useState<AuditLog[]>([])
-  const [auditError, setAuditError] = React.useState<string | null>(null)
-  const [workspaceMembersError, setWorkspaceMembersError] = React.useState<
-    string | null
-  >(null)
-  const [userCreateError, setUserCreateError] = React.useState<string | null>(
-    null
-  )
   const [userForm, setUserForm] = React.useState<UserForm | null>(null)
   const [userPasswordForm, setUserPasswordForm] =
     React.useState<UserPasswordForm | null>(null)
-  const [userPasswordError, setUserPasswordError] = React.useState<
-    string | null
-  >(null)
   const [userSearch, setUserSearch] = React.useState("")
   const [userStatusFilter, setUserStatusFilter] =
     React.useState<UserStatusFilter>("all")
@@ -250,14 +234,13 @@ export function SystemPage({
 
   const loadWorkspaceMembers = React.useCallback(
     async (workspaceId: string) => {
-      setWorkspaceMembersError(null)
       setIsWorkspaceMembersLoading(true)
 
       try {
         setWorkspaceMembers(await listWorkspaceMembers(token, workspaceId))
       } catch (error) {
         setWorkspaceMembers([])
-        setWorkspaceMembersError(reportError(error))
+        reportError(error)
       } finally {
         setIsWorkspaceMembersLoading(false)
       }
@@ -266,14 +249,13 @@ export function SystemPage({
   )
 
   const loadAuditLogs = React.useCallback(async () => {
-    setAuditError(null)
     setIsAuditLoading(true)
 
     try {
       setAuditLogs(await listAuditLogs(token))
     } catch (error) {
       setAuditLogs([])
-      setAuditError(reportError(error))
+      reportError(error)
     } finally {
       setIsAuditLoading(false)
     }
@@ -290,11 +272,10 @@ export function SystemPage({
         const nextTeams = await listTeams(token, workspaceId)
         if (requestId === userCreateTeamsRequestId.current) {
           setUserCreateTeams(nextTeams)
-          setUserCreateError(null)
         }
       } catch (error) {
         if (requestId === userCreateTeamsRequestId.current) {
-          setUserCreateError(reportError(error))
+          reportError(error)
         }
       } finally {
         if (requestId === userCreateTeamsRequestId.current) {
@@ -397,7 +378,6 @@ export function SystemPage({
       workspaceId,
       teamIds: [],
     })
-    setUserCreateError(null)
     setIsUserCreateDialogOpen(true)
     if (me.user.is_global_admin && workspaceId) {
       void loadUserCreateTeams(workspaceId)
@@ -414,7 +394,6 @@ export function SystemPage({
       workspaceId,
       teamIds: [],
     }))
-    setUserCreateError(null)
     if (workspaceId) {
       void loadUserCreateTeams(workspaceId)
     } else {
@@ -432,7 +411,6 @@ export function SystemPage({
       manageableWorkspaces[0]?.id ??
       ""
 
-    setTeamError(null)
     setTeamForm({ workspaceId, name: "", description: "" })
     setIsTeamDialogOpen(true)
   }
@@ -441,7 +419,6 @@ export function SystemPage({
     event: React.FormEvent<HTMLFormElement>
   ) {
     event.preventDefault()
-    setWorkspaceError(null)
     setIsCreatingWorkspace(true)
 
     try {
@@ -464,7 +441,7 @@ export function SystemPage({
       onWorkspaceCreated(payload)
       onNotify("success", t("工作空间已新建"))
     } catch (error) {
-      setWorkspaceError(reportError(error))
+      reportError(error)
     } finally {
       setIsCreatingWorkspace(false)
     }
@@ -477,7 +454,6 @@ export function SystemPage({
       return
     }
 
-    setTeamError(null)
     setIsCreatingTeam(true)
 
     try {
@@ -494,14 +470,13 @@ export function SystemPage({
       setIsTeamDialogOpen(false)
       onNotify("success", t("团队已新建"))
     } catch (error) {
-      setTeamError(reportError(error))
+      reportError(error)
     } finally {
       setIsCreatingTeam(false)
     }
   }
 
   function handleOpenEditWorkspace(workspace: Workspace) {
-    setWorkspaceError(null)
     setWorkspaceEditForm({
       id: workspace.id,
       name: workspace.name,
@@ -518,7 +493,6 @@ export function SystemPage({
       return
     }
 
-    setWorkspaceError(null)
     setIsSavingWorkspace(true)
 
     try {
@@ -530,7 +504,7 @@ export function SystemPage({
       setWorkspaceEditForm(null)
       onNotify("success", t("工作空间已更新"))
     } catch (error) {
-      setWorkspaceError(reportError(error))
+      reportError(error)
     } finally {
       setIsSavingWorkspace(false)
     }
@@ -551,8 +525,6 @@ export function SystemPage({
       return
     }
 
-    setWorkspaceError(null)
-
     try {
       onWorkspaceUpdated(
         await updateWorkspace(token, workspace.id, { status: nextStatus })
@@ -562,7 +534,7 @@ export function SystemPage({
         nextStatus === "archived" ? t("工作空间已归档") : t("工作空间已恢复")
       )
     } catch (error) {
-      setWorkspaceError(reportError(error))
+      reportError(error)
     }
   }
 
@@ -577,19 +549,16 @@ export function SystemPage({
       return
     }
 
-    setWorkspaceError(null)
-
     try {
       await deleteWorkspace(token, workspace.id)
       onWorkspaceDeleted(workspace.id)
       onNotify("success", t("工作空间已删除"))
     } catch (error) {
-      setWorkspaceError(reportError(error))
+      reportError(error)
     }
   }
 
   function handleOpenEditTeam(team: Team) {
-    setTeamError(null)
     setTeamEditForm({
       id: team.id,
       name: team.name,
@@ -604,7 +573,6 @@ export function SystemPage({
       return
     }
 
-    setTeamError(null)
     setIsSavingTeam(true)
 
     try {
@@ -621,7 +589,7 @@ export function SystemPage({
       setTeamEditForm(null)
       onNotify("success", t("团队已更新"))
     } catch (error) {
-      setTeamError(reportError(error))
+      reportError(error)
     } finally {
       setIsSavingTeam(false)
     }
@@ -646,8 +614,6 @@ export function SystemPage({
       return
     }
 
-    setTeamError(null)
-
     try {
       onTeamUpdated(
         await updateTeam(token, selectedWorkspaceId, team.id, {
@@ -659,7 +625,7 @@ export function SystemPage({
         nextStatus === "archived" ? t("团队已归档") : t("团队已恢复")
       )
     } catch (error) {
-      setTeamError(reportError(error))
+      reportError(error)
     }
   }
 
@@ -678,23 +644,20 @@ export function SystemPage({
       return
     }
 
-    setTeamError(null)
-
     try {
       await deleteTeam(token, selectedWorkspaceId, team.id)
       onTeamDeleted(team.id)
       onNotify("success", t("团队已删除"))
     } catch (error) {
-      setTeamError(reportError(error))
+      reportError(error)
     }
   }
 
   async function handleCreateUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setUserCreateError(null)
 
     if (!me.user.is_global_admin && !selectedWorkspaceId) {
-      setUserCreateError(t("请选择工作空间"))
+      onNotify("error", t("请选择工作空间"))
       return
     }
 
@@ -735,7 +698,7 @@ export function SystemPage({
       setUserCreateTeams([])
       onNotify("success", t("用户已新建"))
     } catch (error) {
-      setUserCreateError(reportError(error))
+      reportError(error)
     } finally {
       setIsCreatingUser(false)
     }
@@ -789,7 +752,6 @@ export function SystemPage({
   }
 
   function handleOpenUserPasswordDialog(user: User) {
-    setUserPasswordError(null)
     setUserPasswordForm({
       user,
       newPassword: "",
@@ -806,15 +768,12 @@ export function SystemPage({
       return
     }
 
-    setUserPasswordError(null)
-
     const passwordError = getNewPasswordError(
       userPasswordForm.newPassword,
       userPasswordForm.confirmPassword,
       t
     )
     if (passwordError) {
-      setUserPasswordError(passwordError)
       onNotify("error", passwordError)
       return
     }
@@ -833,7 +792,7 @@ export function SystemPage({
         t("{name} 的密码已修改", { name: userPasswordForm.user.name })
       )
     } catch (error) {
-      setUserPasswordError(reportError(error))
+      reportError(error)
     } finally {
       setIsChangingUserPassword(false)
     }
@@ -865,7 +824,6 @@ export function SystemPage({
       me={me}
       workspaces={workspaces}
       selectedWorkspaceId={selectedWorkspaceId}
-      workspaceError={workspaceError}
       canCreateWorkspace={canCreateWorkspace}
       onSelectWorkspace={onSelectWorkspace}
       setIsWorkspaceDialogOpen={setIsWorkspaceDialogOpen}
@@ -874,7 +832,6 @@ export function SystemPage({
       handleDeleteWorkspace={handleDeleteWorkspace}
       selectedWorkspace={selectedWorkspace}
       teams={teams}
-      teamsError={teamsError}
       isTeamsLoading={isTeamsLoading}
       canCreateTeam={canCreateTeam}
       canManageWorkspace={canManageWorkspace}
@@ -900,28 +857,21 @@ export function SystemPage({
       handleOpenUserPasswordDialog={handleOpenUserPasswordDialog}
       handleDeleteUser={handleDeleteUser}
       workspaceMembers={workspaceMembers}
-      workspaceMembersError={workspaceMembersError}
       isWorkspaceMembersLoading={isWorkspaceMembersLoading}
       auditLogs={auditLogs}
-      auditError={auditError}
       isAuditLoading={isAuditLoading}
       workspaceEditForm={workspaceEditForm}
       setWorkspaceEditForm={setWorkspaceEditForm}
-      setWorkspaceError={setWorkspaceError}
       isSavingWorkspace={isSavingWorkspace}
       handleUpdateWorkspace={handleUpdateWorkspace}
       teamEditForm={teamEditForm}
       setTeamEditForm={setTeamEditForm}
-      teamError={teamError}
-      setTeamError={setTeamError}
       isSavingTeam={isSavingTeam}
       handleUpdateTeam={handleUpdateTeam}
       isUserCreateDialogOpen={isUserCreateDialogOpen}
       setIsUserCreateDialogOpen={setIsUserCreateDialogOpen}
       userCreateForm={userCreateForm}
       setUserCreateForm={setUserCreateForm}
-      userCreateError={userCreateError}
-      setUserCreateError={setUserCreateError}
       userCreateWorkspace={userCreateWorkspace}
       userCreateTeams={userCreateTeams}
       isUserCreateTeamsLoading={isUserCreateTeamsLoading}
@@ -935,8 +885,6 @@ export function SystemPage({
       handleUpdateUser={handleUpdateUser}
       userPasswordForm={userPasswordForm}
       setUserPasswordForm={setUserPasswordForm}
-      userPasswordError={userPasswordError}
-      setUserPasswordError={setUserPasswordError}
       isChangingUserPassword={isChangingUserPassword}
       handleChangeUserPassword={handleChangeUserPassword}
       isWorkspaceDialogOpen={isWorkspaceDialogOpen}

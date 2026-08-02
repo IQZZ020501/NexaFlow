@@ -27,6 +27,7 @@ import type { ResourcePermission } from "@/features/knowledge/types"
 import type { WorkspaceMember } from "@/features/system/types"
 import { cn } from "@/lib/utils"
 import { PermissionBadge } from "@/features/knowledge/status-badges"
+import type { RegisteredModel } from "@/features/llm/types"
 import type {
   KnowledgeBaseEditForm,
   KnowledgeBaseForm,
@@ -48,6 +49,7 @@ type KnowledgeBaseDialogsProps = {
   >
   shareTargets: WorkspaceMember[]
   permissions: ResourcePermission[]
+  registeredModels: RegisteredModel[]
   isDialogOpen: boolean
   setIsDialogOpen: React.Dispatch<React.SetStateAction<boolean>>
   isSaving: boolean
@@ -67,6 +69,7 @@ export function KnowledgeBaseDialogs({
   setPermissionForm,
   shareTargets,
   permissions,
+  registeredModels,
   isDialogOpen,
   setIsDialogOpen,
   isSaving,
@@ -76,6 +79,12 @@ export function KnowledgeBaseDialogs({
   handleRevokePermission,
 }: KnowledgeBaseDialogsProps) {
   const { t } = useLanguage()
+  const embeddingModels = registeredModels.filter(
+    (model) => model.model_type === "EMBEDDING" && model.status === "active"
+  )
+  const rerankerModels = registeredModels.filter(
+    (model) => model.model_type === "RERANKER" && model.status === "active"
+  )
   const selectedPermissionTarget = permissionForm
     ? shareTargets.find((member) => member.user.id === permissionForm.userId)
     : null
@@ -122,6 +131,29 @@ export function KnowledgeBaseDialogs({
                   }
                 />
               </Field>
+              <KnowledgeModelSelect
+                label="Embedding 模型"
+                value={form.embedding_model_id}
+                models={embeddingModels}
+                onChange={(modelId) =>
+                  setForm((current) => ({
+                    ...current,
+                    embedding_model_id: modelId,
+                  }))
+                }
+              />
+              <KnowledgeModelSelect
+                label="Rerank 模型"
+                value={form.reranker_model_id}
+                models={rerankerModels}
+                optional
+                onChange={(modelId) =>
+                  setForm((current) => ({
+                    ...current,
+                    reranker_model_id: modelId,
+                  }))
+                }
+              />
             </FieldGroup>
             <DialogFooter className="pt-5">
               <Button
@@ -188,6 +220,31 @@ export function KnowledgeBaseDialogs({
                     }
                   />
                 </Field>
+                <KnowledgeModelSelect
+                  label="Embedding 模型"
+                  value={editForm.embedding_model_id}
+                  models={embeddingModels}
+                  onChange={(modelId) =>
+                    setEditForm((current) =>
+                      current
+                        ? { ...current, embedding_model_id: modelId }
+                        : current
+                    )
+                  }
+                />
+                <KnowledgeModelSelect
+                  label="Rerank 模型"
+                  value={editForm.reranker_model_id}
+                  models={rerankerModels}
+                  optional
+                  onChange={(modelId) =>
+                    setEditForm((current) =>
+                      current
+                        ? { ...current, reranker_model_id: modelId }
+                        : current
+                    )
+                  }
+                />
               </FieldGroup>
               <DialogFooter className="pt-5">
                 <Button
@@ -381,4 +438,77 @@ export function KnowledgeBaseDialogs({
       </Dialog>
     </>
   )
+}
+
+function KnowledgeModelSelect({
+  label,
+  value,
+  models,
+  optional = false,
+  onChange,
+}: {
+  label: string
+  value: string | null
+  models: RegisteredModel[]
+  optional?: boolean
+  onChange: (modelId: string | null) => void
+}) {
+  const selected = models.find((model) => model.id === value)
+  const placeholder = optional ? `不使用 ${label}` : `选择 ${label}`
+
+  return (
+    <Field>
+      <FieldLabel>{label}</FieldLabel>
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full justify-between px-3 font-normal"
+            disabled={!models.length && !optional}
+          >
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-left",
+                !selected && "text-muted-foreground"
+              )}
+            >
+              {selected ? modelLabel(selected) : placeholder}
+            </span>
+            <ChevronDownIcon data-icon="inline-end" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          className="w-(--radix-dropdown-menu-trigger-width)"
+        >
+          {optional ? (
+            <DropdownMenuItem
+              className="justify-between"
+              onSelect={() => onChange(null)}
+            >
+              不使用
+              {!value ? <CircleCheckIcon className="text-primary" /> : null}
+            </DropdownMenuItem>
+          ) : null}
+          {models.map((model) => (
+            <DropdownMenuItem
+              key={model.id}
+              className="justify-between"
+              onSelect={() => onChange(model.id)}
+            >
+              <span className="min-w-0 truncate">{modelLabel(model)}</span>
+              {model.id === value ? (
+                <CircleCheckIcon className="text-primary" />
+              ) : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </Field>
+  )
+}
+
+function modelLabel(model: RegisteredModel) {
+  return `${model.name} / ${model.model_name}`
 }
