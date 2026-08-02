@@ -2,10 +2,10 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-from nexaflow.db.base import Base
-from nexaflow.db.session import get_engine
-from nexaflow.main import create_app
-from nexaflow.testing import settings as testing_settings
+from app.core.base import Base
+from app.core.session import get_engine
+from app.main import create_app
+from tests.support import settings as testing_settings
 
 
 def main() -> None:

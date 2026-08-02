@@ -8,9 +8,9 @@ frontend pages and components (Next.js)
         ↓
 frontend API client modules (frontend/lib/api)
         ↓
-backend HTTP layer (backend/nexaflow/api) — /api/v1
+backend HTTP layer (backend/app/api) — /api/v1
         ↓
-backend business layer (backend/nexaflow/services)
+backend business layer (backend/app/services)
         ↓
 models / schemas / LLM providers / Celery tasks
         ↓
@@ -43,23 +43,22 @@ Generated directories such as `.git/`, `.codegraph/`, `backend/.venv/`,
 ```text
 backend/
 ├── alembic/              Database migration environment and versions
-├── nexaflow/             Importable FastAPI application package
+├── app/             Importable FastAPI application package
 │   ├── main.py           App factory, middleware, router registration
-│   ├── testing.py        Shared test database and application helpers
 │   ├── api/              HTTP layer: auth dependencies (deps.py) and v1 routers
 │   │   └── v1/
 │   │       ├── api.py    /api/v1 router aggregation
 │   │       ├── endpoints/  Platform-facing routers (auth, workspaces, teams,
 │   │       │              knowledge, models, ...)
 │   │       └── admin/    Global-admin routers (users, audit logs)
-│   ├── core/             Configuration, secrets, validation, seed data, Celery
-│   ├── db/               SQLAlchemy base, sessions, and model helpers
+│   ├── core/             Configuration, security, DB session, seed data, Celery
 │   ├── llm/              Provider catalogs and model runtime
 │   ├── models/           SQLAlchemy persistence models by domain
 │   ├── schemas/          Pydantic request and response contracts by domain
 │   ├── services/         Business workflows, repositories, knowledge pipeline
-│   ├── tasks/            Celery task entry points
-│   └── tests/            Executable regression suites (python -m tests.<suite>)
+│   └── tasks/            Celery task entry points
+├── tests/            Executable regression suites (python -m tests.<suite>)
+│   └── support.py        Shared test database and application helpers
 ├── .env.example          Runtime configuration template
 ├── alembic.ini           Alembic configuration
 ├── main.py               Compatibility ASGI entry point

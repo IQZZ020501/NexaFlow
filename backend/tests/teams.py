@@ -3,10 +3,10 @@ import asyncio
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from nexaflow.db.session import get_session_factory
-from nexaflow.models.user import User
-from nexaflow.models.team import TeamMembership
-from nexaflow.testing import (
+from app.core.session import get_session_factory
+from app.models.user import User
+from app.models.team import TeamMembership
+from tests.support import (
     RESEARCH_PASSWORD,
     activate_admin,
     activate_user,

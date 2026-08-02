@@ -32,7 +32,7 @@ jobs:
         run: uv sync --dev --frozen
 
       - name: Compile Python
-        run: uv run python -m compileall nexaflow tests main.py
+        run: uv run python -m compileall app tests main.py
 
       - name: Run identity tests
         run: uv run python -m tests.identity

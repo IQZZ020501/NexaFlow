@@ -12,10 +12,10 @@ RUN uv sync --no-dev --frozen
 
 FROM base
 COPY --from=builder /app/.venv /app/.venv
-COPY nexaflow ./nexaflow
+COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 COPY main.py ./main.py
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
-CMD ["uvicorn", "nexaflow.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

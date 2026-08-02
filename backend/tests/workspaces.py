@@ -1,4 +1,4 @@
-from nexaflow.testing import (
+from tests.support import (
     RESEARCH_PASSWORD,
     activate_admin,
     activate_user,

@@ -20,19 +20,19 @@ Correctness, safety, evidence, and validation take priority over speed.
 ## 2. Project Notes
 
 - `backend/` is a Python project using `pyproject.toml`, Python `>=3.11`, and
-  `uv.lock`. `backend/nexaflow/` contains the FastAPI backend package.
+  `uv.lock`. `backend/app/` contains the FastAPI backend package.
 - Backend routes are async FastAPI with SQLAlchemy `AsyncSession`; do not add
   new synchronous database access paths.
 - Backend code follows a layer-first layout: HTTP routers live in
-  `backend/nexaflow/api/v1/endpoints/` (platform-facing) and
-  `backend/nexaflow/api/v1/admin/` (global-admin), aggregated under the
-  `/api/v1` prefix in `backend/nexaflow/api/v1/api.py`. Pydantic schemas live in
-  `backend/nexaflow/schemas/`, SQLAlchemy models in `backend/nexaflow/models/`,
-  business logic and repositories in `backend/nexaflow/services/`, and Celery
-  tasks in `backend/nexaflow/tasks/`. Shared infrastructure stays in
-  `backend/nexaflow/core/` and `backend/nexaflow/db/`; the LLM runtime and
-  provider catalogs stay in `backend/nexaflow/llm/`.
-- Hand-written SQL goes under `backend/nexaflow/sql/<feature>/` for explicit
+  `backend/app/api/v1/endpoints/` (platform-facing) and
+  `backend/app/api/v1/admin/` (global-admin), aggregated under the
+  `/api/v1` prefix in `backend/app/api/v1/api.py`. Pydantic schemas live in
+  `backend/app/schemas/`, SQLAlchemy models in `backend/app/models/`,
+  business logic and repositories in `backend/app/services/`, and Celery
+  tasks in `backend/app/tasks/`. Shared infrastructure (configuration,
+  security, database session, seed data, Celery) stays in `backend/app/core/`;
+  the LLM runtime and provider catalogs stay in `backend/app/llm/`.
+- Hand-written SQL goes under `backend/app/sql/<feature>/` for explicit
   write workflows, seed data, and complex queries; keep parameter binding in
   Python services.
 - `backend/.env.example` documents initialization env keys. Real `.env` files are

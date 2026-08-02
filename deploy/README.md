@@ -46,8 +46,8 @@ internal network and expose only the proxy.
 ## Building images manually
 
 ```bash
-docker build -f deploy/dockerfiles/backend.Dockerfile -t nexaflow/backend .
-docker build -f deploy/dockerfiles/frontend.Dockerfile -t nexaflow/frontend .
+docker build -f deploy/dockerfiles/backend.Dockerfile -t app/backend .
+docker build -f deploy/dockerfiles/frontend.Dockerfile -t app/frontend .
 ```
 
 ## Migrations

@@ -2,15 +2,15 @@ import asyncio
 
 from sqlalchemy import select
 
-from nexaflow.testing import (
+from tests.support import (
     ADMIN_PASSWORD,
     BOOTSTRAP_ADMIN_PASSWORD,
     auth_headers,
     login,
     test_client,
 )
-from nexaflow.db.session import get_session_factory
-from nexaflow.models.system_log import SystemLog
+from app.core.session import get_session_factory
+from app.models.system_log import SystemLog
 
 
 async def get_system_log_events() -> list[str]:

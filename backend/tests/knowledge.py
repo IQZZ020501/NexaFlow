@@ -9,27 +9,27 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from nexaflow.db.session import get_session_factory
-from nexaflow.models.user import User
-from nexaflow.models.knowledge import (
+from app.core.session import get_session_factory
+from app.models.user import User
+from app.models.knowledge import (
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeTask,
 )
-from nexaflow.api.v1.endpoints import knowledge as knowledge_api
-from nexaflow.services import knowledge_retrieval as knowledge_retrieval
-from nexaflow.services.knowledge_pipeline import VectorHit, clean_text, split_text
-from nexaflow.services.knowledge_processing import (
+from app.api.v1.endpoints import knowledge as knowledge_api
+from app.services import knowledge_retrieval as knowledge_retrieval
+from app.services.knowledge_pipeline import VectorHit, clean_text, split_text
+from app.services.knowledge_processing import (
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
 )
-from nexaflow.services.knowledge_task_runner import recover_knowledge_tasks
-from nexaflow.tasks.knowledge import mark_task_dispatch_failed
-from nexaflow.schemas.knowledge import KnowledgeQueryRequest
+from app.services.knowledge_task_runner import recover_knowledge_tasks
+from app.tasks.knowledge import mark_task_dispatch_failed
+from app.schemas.knowledge import KnowledgeQueryRequest
 from tests.llm import ModelTestHandler, model_payload, model_test_server, models_url
-from nexaflow.models.resource_permission import ResourcePermission
-from nexaflow.testing import (
+from app.models.resource_permission import ResourcePermission
+from tests.support import (
     RESEARCH_PASSWORD,
     activate_admin,
     activate_user,

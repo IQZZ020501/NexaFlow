@@ -2,13 +2,13 @@ services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
-      POSTGRES_USER: ${POSTGRES_USER:-nexaflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexaflow}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexaflow} -d ${POSTGRES_DB:-nexaflow}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -29,7 +29,7 @@ services:
       dockerfile: deploy/dockerfiles/backend.Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nexaflow}:${POSTGRES_PASSWORD:-nexaflow}@db:5432/${POSTGRES_DB:-nexaflow}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
       CELERY_BROKER_URL: redis://redis:6379/0
       KNOWLEDGE_STORAGE_DIR: /data/knowledge
       CHROMA_PERSIST_DIR: /data/chroma
@@ -47,10 +47,10 @@ services:
     build:
       context: ..
       dockerfile: deploy/dockerfiles/backend.Dockerfile
-    command: celery -A nexaflow.core.celery:celery_app worker --loglevel=INFO
+    command: celery -A app.core.celery:celery_app worker --loglevel=INFO
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nexaflow}:${POSTGRES_PASSWORD:-nexaflow}@db:5432/${POSTGRES_DB:-nexaflow}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
       CELERY_BROKER_URL: redis://redis:6379/0
       KNOWLEDGE_STORAGE_DIR: /data/knowledge
       CHROMA_PERSIST_DIR: /data/chroma
@@ -66,7 +66,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/dockerfiles/backend.Dockerfile
-    command: celery -A nexaflow.core.celery:celery_app beat --loglevel=INFO
+    command: celery -A app.core.celery:celery_app beat --loglevel=INFO
     env_file: .env
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0

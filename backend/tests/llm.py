@@ -7,11 +7,11 @@ from threading import Thread
 
 from sqlalchemy import text
 
-from nexaflow.core.secrets import decrypt_secret
-from nexaflow.db.session import get_session_factory
-from nexaflow.models.model import RegisteredModel
-from nexaflow.llm.runtime import build_registered_model_provider
-from nexaflow.testing import (
+from app.core.secrets import decrypt_secret
+from app.core.session import get_session_factory
+from app.models.model import RegisteredModel
+from app.llm.runtime import build_registered_model_provider
+from tests.support import (
     activate_admin,
     activate_user,
     auth_headers,
