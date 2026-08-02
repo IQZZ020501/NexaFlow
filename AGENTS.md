@@ -1,147 +1,200 @@
 # AGENTS.md
 
-Instructions for coding agents working in this repository.
+Instructions for coding agents working in this repository. This file adds
+repository-specific rules to the applicable global instructions. It applies to
+the entire repository unless a more specific `AGENTS.md` exists in a
+subdirectory.
 
-## Scope
+Correctness, safety, evidence, and validation take priority over speed.
 
-This file applies to the whole repository unless a deeper `AGENTS.md` overrides it.
+## 1. Required Skills
 
-## Required Development Skills
+- Backend work must read and follow `fastapi`, `fastapi-python`, and
+  `fastapi-templates` before implementation.
+- Frontend work must read and follow `react-templates`,
+  `vercel-react-best-practices`, `vercel-react-native-skills`, and
+  `vercel-react-view-transitions` before implementation.
+- If a required skill is unavailable, surface that before coding instead of
+  silently proceeding.
 
-- Backend work must read and follow `fastapi` before implementation.
-- Frontend work must read and follow `react-templates` and `vercel-react-best-practices` before implementation.
-- If a required skill is unavailable in the current agent environment, surface that before coding instead of silently proceeding.
+## 2. Project Notes
 
-## Behavioral Guidelines
-
-### Think Before Coding
-
-- State assumptions explicitly before implementing.
-- If multiple interpretations exist, surface them instead of picking silently.
-- Ask when a requirement is unclear and a reasonable assumption would be risky.
-- Prefer the simpler approach when it fully satisfies the request.
-
-### Simplicity First
-
-- Write the minimum code that solves the problem.
-- Do not add speculative features, configurability, abstractions, or scaffolding.
-- Reuse existing helpers, patterns, and dependencies before adding new code.
-- Prefer standard library and platform features over new dependencies.
-
-### Trilingual i18n (Simplified Chinese, Traditional Chinese, English)
-
-- Every user-facing string must go through `t()` from `@/lib/i18n` — never hardcode Chinese text in components or utilities.
-- New UI copy must be added to all three dictionaries in `web/src/lib/i18n.ts` (`zhHans`, `zhHant`, `en`) in the same change; the dictionaries are type-checked to stay in sync, so missing keys fail the build.
-- This applies to components, hooks, utilities, labels, aria-labels, and notification messages.`
-
-### Surgical Changes
-
-- Touch only files required by the task.
-- Match existing style, even if you would choose differently.
-- Do not refactor adjacent code or reformat unrelated files.
-- Remove only imports, variables, or functions made unused by your own changes.
-- Mention unrelated dead code or issues instead of changing them.
-
-### Goal-Driven Execution
-
-- Convert each task into a verifiable goal before editing.
-- For bug fixes, identify the root cause and check callers before patching.
-- Add or update the smallest relevant test/check for non-trivial logic.
-- Keep looping until the change is implemented and verified, or clearly explain the blocker.
-
-### Production Implementation Expectations
-
-- Treat MVP tasks as production slices, not throwaway demos or local-only prototypes.
-- Before implementing a feature, identify every required completion point: data model and migrations, backend API/service behavior, authorization and tenant isolation, frontend/API client behavior, validation and error states, tests/checks, documentation updates, and deployment or operations impact.
-- Do not default to temporary storage, in-memory state, SQLite, mock data, or local-only shortcuts for production features unless the user explicitly approves that tradeoff.
-- If the repository is missing production foundation required by the task, stop and surface the decision instead of silently implementing around it.
-- "Simplicity First" still applies: avoid speculative features, but do not omit required production behavior just to keep the diff small.
-
-### File Size Guidelines
-
-- Treat line counts as soft maintainability signals, not hard rules.
-- Prefer files in the `100-250` line range when the responsibility is naturally small.
-- Files in the `250-400` line range are acceptable when they still own one clear responsibility.
-- Reconsider the structure around `400-600` lines, especially for React pages and backend services.
-- Split files over `600` lines when a clear module, component, hook, service, or helper boundary exists.
-- Avoid `1000+` line source files unless the file is generated, mostly static data, or there is no clean split yet.
-- For React, prefer ordinary components around `50-200` lines, page containers around `200-500` lines, and hooks/utilities around `50-150` lines.
-- For backend code, prefer FastAPI `api.py` files around `100-300` lines, `services.py` around `150-400` lines, and `schemas.py` / `models.py` around `100-300` lines.
-- Test files may be longer when a workflow is easier to read together; `300-600` lines is acceptable if setup stays clear.
-- Split by responsibility first, then by length. Do not create abstractions or tiny files just to satisfy a line-count target.
-
-## Python Guidelines
-
-- Keep Python features modular: put cohesive business logic in focused functions, classes, or modules that can be reused by callers.
-- Avoid duplicating logic. When the same behavior appears in multiple places, reuse an existing helper or extract the smallest shared helper that fits the current need.
-- Do not create abstractions only to appear modular. Prefer direct code until reuse, testing, or readability clearly benefits.
-- Keep module boundaries clear: serializers, views, services, models, and utilities should not absorb responsibilities from each other.
-- Prefer pure functions for reusable transformations and calculations when they do not need database, network, or framework state.
-- Use explicit names and type hints for public functions, service methods, and non-obvious data structures.
-- Keep side effects at the edges of a workflow. Separate validation, transformation, persistence, and external calls when practical.
-- Prefer standard library features and existing project utilities before adding new helpers or dependencies.
-- Add the narrowest relevant test/check for shared helpers, branching logic, parsers, and bug fixes.
-
-## React Guidelines
-
-- Keep React components focused and reusable: split a component when it owns a distinct responsibility, not just because it is long.
-- Reuse existing components, hooks, utilities, shadcn/ui primitives, and Tailwind patterns before creating new ones.
-- Avoid duplicating UI logic. Extract the smallest shared component or hook only when reuse is real or the current component becomes hard to read.
-- Keep state as local as possible. Lift state only when multiple components need to coordinate around the same value.
-- Derive values during render when possible instead of storing duplicate derived state in `useState`.
-- Put side effects in `useEffect` only when they synchronize with something outside React, such as network, storage, subscriptions, timers, or browser APIs.
-- Keep custom hooks focused on reusable behavior, not one-off component plumbing.
-- Use TypeScript types for component props, API data, and non-obvious state. Avoid `any` unless the boundary is genuinely unknown and documented.
-- Prefer semantic HTML and accessible shadcn/ui primitives. Preserve keyboard navigation, labels, focus states, and ARIA attributes when changing interactive UI.
-- Avoid unnecessary memoization. Use `useMemo`, `useCallback`, and `React.memo` only for expensive work, stable dependencies, or measured render issues.
-- Keep bundle size in mind: avoid large imports for small tasks and prefer direct imports when the package supports them.
-- Add or update the smallest relevant check for shared components, custom hooks, complex conditional rendering, and bug fixes.
-
-## Project Notes
-
-- `apps/` is a Python project using `pyproject.toml`, Python `>=3.11`, and `uv.lock`.
-- `apps/nexaflow/` contains the FastAPI backend package.
-- The FastAPI app serves the built web frontend at `/` when `web/dist` exists
-  (see `WEB_DIST_DIR`), with client-side route fallback so deep links work;
-  API routes always take precedence over frontend files.
-- The web app calls the API same-origin by default. Dev mode proxies API
-  prefixes (`/auth`, `/users`, `/workspaces`, `/audit-logs`,
-  `/model-providers`, `/health`) to `http://localhost:8000` via
-  `web/vite.config.ts`; split hosting can override with `VITE_API_BASE_URL`.
-- Backend application code should use async FastAPI routes, async dependencies, and SQLAlchemy `AsyncSession`; avoid adding new synchronous database access paths.
-- Backend business code follows a DRF-like app layout. Add new feature modules as their own package under `apps/nexaflow/<feature>/`, with local `api.py`, `models.py`, `schemas.py`, and `services.py` files when needed.
-- Keep shared infrastructure in `apps/nexaflow/core/` and `apps/nexaflow/db/`; do not recreate global `api/`, `models/`, `schemas/`, or `services/` folders that collect every feature.
-- Put hand-written SQL under `apps/nexaflow/sql/<feature>/`. Use SQL files for explicit database write workflows, seed/bootstrap data, complex queries, or any database operation that is clearer or not practical through the ORM; keep parameter binding in Python services and do not inline dynamic values into SQL strings.
-- `apps/.env.example` documents initialization env keys. Real `apps/.env` files are local-only and ignored by git; bootstrap admin credentials must come from env values, not Python constants.
-- `apps/alembic/` contains backend database migrations; production data is PostgreSQL-backed.
-- Knowledge document parsing and indexing are dispatched through Celery with Redis; API and worker instances must share `KNOWLEDGE_STORAGE_DIR` and `CHROMA_PERSIST_DIR`.
-- `web/` is a React + TypeScript + Vite app using Bun, shadcn/ui, and Tailwind CSS.
+- `backend/` is a Python project using `pyproject.toml`, Python `>=3.11`, and
+  `uv.lock`. `backend/nexaflow/` contains the FastAPI backend package.
+- Backend routes are async FastAPI with SQLAlchemy `AsyncSession`; do not add
+  new synchronous database access paths.
+- Business code follows a DRF-like app layout: new features live in
+  `backend/nexaflow/<feature>/` with local `api.py`, `models.py`, `schemas.py`,
+  and `services.py`. Shared infrastructure stays in `backend/nexaflow/core/` and
+  `backend/nexaflow/db/`.
+- Hand-written SQL goes under `backend/nexaflow/sql/<feature>/` for explicit
+  write workflows, seed data, and complex queries; keep parameter binding in
+  Python services.
+- `backend/.env.example` documents initialization env keys. Real `.env` files are
+  local-only and gitignored; bootstrap admin credentials must come from env
+  values, not Python constants.
+- `backend/alembic/` contains database migrations; production data is
+  PostgreSQL-backed.
+- Knowledge parsing and indexing run through Celery with Redis; API and
+  worker instances must share `KNOWLEDGE_STORAGE_DIR` and `CHROMA_PERSIST_DIR`.
+- `frontend/` is a React + TypeScript + Vite app using Bun, shadcn/ui, and
+  Tailwind CSS.
 - `docs/` stores project planning and product/engineering documentation.
-- Use `rg` / `rg --files` for code search.
-- Do not invent project commands; inspect local scripts first.
+- Use `rg` / `rg --files` for code search. Do not invent project commands;
+  inspect local scripts first.
 
-## Keeping This File Current
+## 3. Implementation
 
-- Update this file in the same change when repository structure, build/test commands, dependencies, or conventions change.
-- If a top-level directory is added, removed, or repurposed, update `Project Notes`.
-- If scripts or tooling change, update `Verification`.
-- Before finishing a task, check whether your changes made any instruction here stale.
+- Treat MVP tasks as production slices, not throwaway demos: identify data
+  model, backend behavior, authorization and tenant isolation, frontend
+  behavior, validation and error states, checks, and deployment impact. If
+  production foundation is missing, stop and surface the decision instead of
+  working around it.
+- Fix the root cause at the narrowest shared boundary; check callers before
+  patching.
+- Reuse existing helpers and patterns before adding new code or dependencies.
+- Keep diffs small and focused: no unrelated refactoring or reformatting;
+  remove only code made obsolete by your own change.
+- File size is a soft signal, not a hard rule: prefer focused files, and
+  split when a file grows long enough that a clear module or component
+  boundary exists; avoid very large source files unless they are generated or
+  mostly static data.
+- Prefer pure functions for reusable transformations; keep side effects at
+  workflow edges.
 
-## Verification
+### Trilingual i18n
 
-- For `web/` changes, use the smallest relevant Bun script from `web/package.json`:
-  - `bun run typecheck`
-  - `bun run lint`
-  - `bun run test`
-  - `bun run build`
-- For `apps/` changes, inspect the available Python tooling first and run the narrowest relevant check:
-  - `apps/.venv/bin/python -m compileall apps/nexaflow apps/main.py`
-  - From `apps/`: `.venv/bin/python -m nexaflow.identity.test`
-  - From `apps/`: `.venv/bin/python -m nexaflow.workspaces.test`
-  - From `apps/`: `.venv/bin/python -m nexaflow.teams.test`
-  - From `apps/`: `.venv/bin/python -m nexaflow.knowledge.test`
-  - From `apps/`: `.venv/bin/python -m nexaflow.llm.test`
-  - From `apps/`: `.venv/bin/python -m nexaflow.main_test`
-  - For Celery wiring: `.venv/bin/python -c 'from nexaflow.core.celery import celery_app; celery_app.loader.import_default_modules(); assert "nexaflow.knowledge.run_task" in celery_app.tasks'`
-  - From `apps/`: run Alembic against the target database, or a temporary explicit test database when only validating migration syntax.
+- Every user-facing string must go through `t()` from `@/lib/i18n` — never
+  hardcode Chinese text in components or utilities.
+- New UI copy must be added to all three dictionaries (`zhHans`, `zhHant`,
+  `en`) in the same change; the dictionaries are type-checked to stay in
+  sync, so missing keys fail the build.
+- Applies to components, hooks, utilities, labels, aria-labels, and
+  notification messages.
+
+## 4. Subagents
+
+Use subagents for broad exploration that splits into independent,
+non-overlapping objectives. Work directly when the task is targeted or
+sequential. Keep exploration read-only unless implementation is explicitly
+delegated, never assign overlapping edits, and verify material findings
+against the cited files and lines before relying on them.
+
+## 5. Planning
+
+- Use a short plan before editing for multi-step, cross-module, uncertain, or
+  high-risk work. Simple, low-risk changes do not need one.
+- Plans should state goal, scope, non-goals, steps, acceptance criteria, and
+  validation; include risks and a rollback path when material.
+- If implementation materially changes user-visible scope, public behavior,
+  risk, or cost, stop and request direction.
+
+## 6. Workflow
+
+- `main` is protected: every change lands via a pull request; direct pushes
+  are rejected.
+- Start each change from an up-to-date `main` on a short-lived feature
+  branch. Branch names are free-form; existing history uses
+  `codex/<topic>`.
+- Commit messages follow Conventional Commits (`<type>(<scope>): <summary>`),
+  matching the PR title style, so history stays readable.
+- Once ready: push the branch, open a PR (title and description per
+  Pull Request Guidelines), wait for CI to pass, then merge; delete the
+  branch after merging.
+- Merges use merge commits, as in existing history; sync `main` into the
+  branch and resolve conflicts before merging.
+
+## 7. Pull Request Guidelines
+
+All changes to `main` must go through a pull request (branch protection).
+
+### PR Title Format
+
+Use a Conventional Commits style title in English:
+
+```text
+<type>(<scope>): <summary>
+```
+
+Use these types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
+`build`, `ci`, `chore`, `revert`. Omit the `scope` when the affected area is
+unclear.
+
+Rules:
+
+- Lowercase `type` and `scope`; keep the summary short, specific, and
+  action-oriented.
+- Do not end the title with a period.
+- For breaking changes, add `!` after the type or scope.
+
+Examples:
+
+```text
+feat(knowledge): support re-segment options
+fix(web): keep dropdowns open on trigger click
+docs(readme): update deployment steps
+```
+
+### PR Description Template
+
+```markdown
+## 背景
+
+说明为什么需要这个改动。
+
+## 改动内容
+
+-
+
+## 验证方式
+
+- [ ] 本地测试通过
+- [ ] 相关页面/接口已验证
+- [ ] 无需验证，原因：
+
+## 风险与影响
+
+说明可能影响的模块、兼容性、回滚方式。
+
+## 关联信息
+
+关联 issue、需求、缺陷或上下游 PR。
+```
+
+Fill every section with facts; if verification was not run, say so plainly.
+If risk is low, state the reason.
+
+### Release Tag Naming
+
+Use Semantic Versioning: `v<major>.<minor>.<patch>`, with `-alpha.N` /
+`-beta.N` / `-rc.N` suffixes for prereleases. Prefer annotated tags:
+
+```bash
+git tag -a v1.2.3 -m "Release v1.2.3"
+git push origin v1.2.3
+```
+
+## 8. Validation
+
+Run the smallest relevant checks first, then broaden only when impact is
+broad. Never claim a check passed unless it completed successfully.
+
+- `frontend/` changes: use the smallest relevant Bun script from `frontend/package.json`
+  (typecheck, lint, test, build as applicable).
+- `backend/` changes: use the project's Python tooling. Run `compileall` over the
+  touched packages and the affected feature's test module — each feature owns
+  a `test` module; inspect the current layout rather than assuming a fixed
+  list. For migration changes, run Alembic against the target database or a
+  temporary explicit test database. For Celery wiring changes, verify the
+  expected tasks register on `celery_app`.
 - If a check cannot be run, say exactly why in the final response.
+
+## 9. Keeping This File Current
+
+- Update this file in the same change when repository structure, build/test
+  commands, dependencies, or conventions change.
+- If a top-level directory is added, removed, or repurposed, update
+  `Project Notes`.
+- If scripts or tooling change, update `Validation`.
+- Before finishing a task, check whether your changes made any instruction
+  here stale.

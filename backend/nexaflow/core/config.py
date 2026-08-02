@@ -9,7 +9,7 @@ ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 DEFAULT_KNOWLEDGE_STORAGE_DIR = Path(__file__).resolve().parents[2] / "storage" / "knowledge"
 DEFAULT_CHROMA_PERSIST_DIR = Path(__file__).resolve().parents[2] / "storage" / "chroma"
 DEFAULT_CELERY_BROKER_URL = "redis://localhost:6379/0"
-DEFAULT_WEB_DIST_DIR = Path(__file__).resolve().parents[3] / "web" / "dist"
+DEFAULT_WEB_DIST_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
 
 def load_env_file(path: Path = ENV_FILE) -> None:

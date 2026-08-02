@@ -36,6 +36,8 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { IconButton } from "@/components/ui/icon-button"
+import { Spec } from "@/components/ui/spec"
 import {
   createRegisteredModel,
   deleteRegisteredModel,
@@ -511,7 +513,7 @@ export function LlmPage({
                   )
 
                   return (
-                    <div key={model.id} className="rounded-md border p-3">
+                    <div key={model.id} className="rounded-md border p-3 min-h-40">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 gap-3">
                           <ProviderIcon
@@ -943,29 +945,6 @@ function ModelDialog({
   )
 }
 
-function IconButton({
-  label,
-  children,
-  onClick,
-}: {
-  label: string
-  children: React.ReactNode
-  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void
-}) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      title={label}
-      onClick={onClick}
-    >
-      {children}
-      <span className="sr-only">{label}</span>
-    </Button>
-  )
-}
-
 function EmptyState({
   icon: Icon,
   title,
@@ -999,17 +978,6 @@ function StatusBadge({ status }: { status: string }) {
     <Badge variant={status === "active" ? "secondary" : "outline"}>
       {t(status === "active" ? "已启用" : "已停用")}
     </Badge>
-  )
-}
-
-function Spec({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-1 truncate font-medium" title={value}>
-        {value}
-      </dd>
-    </div>
   )
 }
 

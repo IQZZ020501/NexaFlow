@@ -4,6 +4,7 @@ import {
   CircleOffIcon,
   LockIcon,
   LoaderCircleIcon,
+  MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
   SearchIcon,
@@ -19,6 +20,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import type { MeResponse, User, Workspace } from "@/features/system/types"
 import { formatDateTime } from "@/app/display"
@@ -178,7 +186,10 @@ export function GlobalUsersPanel({
                     <span role="columnheader">{t("用户角色")}</span>
                     <span role="columnheader">{t("状态")}</span>
                     <span role="columnheader">{t("创建时间")}</span>
-                    <span role="columnheader" className="text-right">
+                    <span
+                      role="columnheader"
+                      className="sticky right-0 flex h-full items-center border-l bg-background px-4"
+                    >
                       {t("操作")}
                     </span>
                   </div>
@@ -262,31 +273,8 @@ export function GlobalUsersPanel({
                         </span>
                         <span
                           role="cell"
-                          className="flex items-center justify-end gap-2 whitespace-nowrap"
+                          className="sticky right-0 flex h-full items-center gap-2 border-l bg-background px-4 whitespace-nowrap"
                         >
-                          <button
-                            type="button"
-                            className={cn(
-                              "flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors",
-                              user.is_active ? "bg-primary" : "bg-muted"
-                            )}
-                            disabled={user.id === me.user.id}
-                            onClick={() => void handleToggleUser(user)}
-                            title={
-                              user.id === me.user.id
-                                ? t("不能停用当前账号")
-                                : t("切换用户状态")
-                            }
-                            aria-label={t("切换用户状态")}
-                          >
-                            <span
-                              className={cn(
-                                "size-5 rounded-full bg-background shadow-sm transition-transform",
-                                user.is_active && "translate-x-5"
-                              )}
-                            />
-                          </button>
-                          <span className="h-5 w-px bg-border" />
                           <Button
                             type="button"
                             variant="ghost"
@@ -307,21 +295,43 @@ export function GlobalUsersPanel({
                           >
                             <LockIcon />
                           </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            disabled={user.id === me.user.id}
-                            onClick={() => void handleDeleteUser(user)}
-                            title={
-                              user.id === me.user.id
-                                ? t("不能删除当前账号")
-                                : t("删除用户")
-                            }
-                            aria-label={t("删除用户")}
-                          >
-                            <Trash2Icon />
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={t("操作 {value}", {
+                                  value: user.name,
+                                })}
+                                title={t("操作 {value}", { value: user.name })}
+                              >
+                                <MoreHorizontalIcon />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                disabled={user.id === me.user.id}
+                                onSelect={() => void handleToggleUser(user)}
+                              >
+                                {user.is_active ? (
+                                  <CircleOffIcon />
+                                ) : (
+                                  <CircleCheckIcon />
+                                )}
+                                {t(user.is_active ? "停用" : "启用")}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                disabled={user.id === me.user.id}
+                                onSelect={() => void handleDeleteUser(user)}
+                              >
+                                <Trash2Icon />
+                                {t("删除")}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </span>
                       </div>
                     )

@@ -8,6 +8,7 @@ import {
   ArrowUpIcon,
   CircleCheckIcon,
   DownloadIcon,
+  ExternalLinkIcon,
   FileTextIcon,
   FlaskConicalIcon,
   LoaderCircleIcon,
@@ -25,6 +26,8 @@ import {
 } from "lucide-react"
 import { useLanguage } from "@/components/language-provider"
 import { Button } from "@/components/ui/button"
+import { IconButton } from "@/components/ui/icon-button"
+import { Spec } from "@/components/ui/spec"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -2155,126 +2158,154 @@ export function KnowledgeBasePage({
           ) : knowledgeBases.length ? (
             <>
               {filteredKnowledgeBases.length ? (
-                <div className="flex flex-wrap gap-3">
-                  {filteredKnowledgeBases.map((knowledgeBase) => (
-                    <div
-                      key={knowledgeBase.id}
-                      role="button"
-                      tabIndex={0}
-                      className="flex min-h-44 w-full min-w-0 cursor-pointer flex-col justify-between rounded-lg border bg-background p-3 shadow-sm transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring sm:w-[19rem]"
-                      onClick={() => openKnowledgeBase(knowledgeBase)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault()
-                          openKnowledgeBase(knowledgeBase)
-                        }
-                      }}
-                    >
-                      <div className="min-w-0 space-y-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">
-                            {knowledgeBase.name}
-                          </p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {formatDateTime(knowledgeBase.updated_at, locale)}
-                          </p>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                  {filteredKnowledgeBases.map((knowledgeBase) => {
+                    const embeddingModel =
+                      registeredModels.find(
+                        (model) =>
+                          model.id === knowledgeBase.embedding_model_id
+                      ) ?? null
+                    const rerankerModel =
+                      registeredModels.find(
+                        (model) =>
+                          model.id === knowledgeBase.reranker_model_id
+                      ) ?? null
+
+                    return (
+                      <div
+                        key={knowledgeBase.id}
+                        role="button"
+                        tabIndex={0}
+                        className="rounded-md border p-3 min-h-40 cursor-pointer transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => openKnowledgeBase(knowledgeBase)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault()
+                            openKnowledgeBase(knowledgeBase)
+                          }
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 gap-3">
+                            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
+                              <Icon className="size-5 text-muted-foreground" />
+                            </span>
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h2 className="truncate text-sm font-semibold">
+                                  {knowledgeBase.name}
+                                </h2>
+                                <StatusBadge
+                                  status={knowledgeBase.status}
+                                />
+                                <PermissionBadge
+                                  permission={knowledgeBase.permission}
+                                />
+                              </div>
+                              <p className="mt-1 truncate text-sm text-muted-foreground">
+                                {knowledgeBase.description ||
+                                  formatDateTime(
+                                    knowledgeBase.updated_at,
+                                    locale
+                                  )}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex gap-1">
+                            <IconButton
+                              label={t("详情")}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openKnowledgeBase(knowledgeBase)
+                              }}
+                            >
+                              <ExternalLinkIcon className="size-4" />
+                            </IconButton>
+                            {knowledgeBase.permission === "edit" ? (
+                              <>
+                                <IconButton
+                                  label={t("编辑知识库")}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    setEditForm({
+                                      id: knowledgeBase.id,
+                                      name: knowledgeBase.name,
+                                      description:
+                                        knowledgeBase.description,
+                                      embedding_model_id:
+                                        knowledgeBase.embedding_model_id,
+                                      reranker_model_id:
+                                        knowledgeBase.reranker_model_id,
+                                    })
+                                  }}
+                                >
+                                  <PencilIcon className="size-4" />
+                                </IconButton>
+                                <IconButton
+                                  label={t(
+                                    knowledgeBase.status === "active"
+                                      ? "归档知识库"
+                                      : "恢复知识库"
+                                  )}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    void handleToggleStatus(knowledgeBase)
+                                  }}
+                                >
+                                  {knowledgeBase.status === "active" ? (
+                                    <ArchiveIcon className="size-4" />
+                                  ) : (
+                                    <RotateCcwIcon className="size-4" />
+                                  )}
+                                </IconButton>
+                              </>
+                            ) : null}
+                            {canManagePermissions(knowledgeBase) ? (
+                              <>
+                                <IconButton
+                                  label={t("资源授权")}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    void handleOpenPermissions(
+                                      knowledgeBase
+                                    )
+                                  }}
+                                >
+                                  <UsersIcon className="size-4" />
+                                </IconButton>
+                                <IconButton
+                                  label={t("永久删除知识库")}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    void handleDelete(knowledgeBase)
+                                  }}
+                                >
+                                  <Trash2Icon className="size-4" />
+                                </IconButton>
+                              </>
+                            ) : null}
+                          </div>
                         </div>
-                        <p className="line-clamp-3 text-xs leading-5 text-muted-foreground">
-                          {knowledgeBase.description || "-"}
-                        </p>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 flex-wrap gap-1.5">
-                          <PermissionBadge
-                            permission={knowledgeBase.permission}
+
+                        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                          <Spec
+                            label={t("Embedding 模型")}
+                            value={registeredModelLabel(
+                              embeddingModel,
+                              t
+                            )}
                           />
-                          <StatusBadge status={knowledgeBase.status} />
-                        </div>
-                        <div className="flex shrink-0 justify-end gap-1">
-                          {knowledgeBase.permission === "edit" ? (
-                            <>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                title={t("编辑知识库")}
-                                aria-label={t("编辑知识库")}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  setEditForm({
-                                    id: knowledgeBase.id,
-                                    name: knowledgeBase.name,
-                                    description: knowledgeBase.description,
-                                    embedding_model_id:
-                                      knowledgeBase.embedding_model_id,
-                                    reranker_model_id:
-                                      knowledgeBase.reranker_model_id,
-                                  })
-                                }}
-                              >
-                                <PencilIcon />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                title={t(
-                                  knowledgeBase.status === "active"
-                                    ? "归档知识库"
-                                    : "恢复知识库"
-                                )}
-                                aria-label={t(
-                                  knowledgeBase.status === "active"
-                                    ? "归档知识库"
-                                    : "恢复知识库"
-                                )}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  void handleToggleStatus(knowledgeBase)
-                                }}
-                              >
-                                {knowledgeBase.status === "active" ? (
-                                  <ArchiveIcon />
-                                ) : (
-                                  <RotateCcwIcon />
-                                )}
-                              </Button>
-                            </>
-                          ) : null}
-                          {canManagePermissions(knowledgeBase) ? (
-                            <>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                title={t("资源授权")}
-                                aria-label={t("资源授权")}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  void handleOpenPermissions(knowledgeBase)
-                                }}
-                              >
-                                <UsersIcon />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                title={t("永久删除知识库")}
-                                aria-label={t("永久删除知识库")}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  void handleDelete(knowledgeBase)
-                                }}
-                              >
-                                <Trash2Icon />
-                              </Button>
-                            </>
-                          ) : null}
-                        </div>
+                          <Spec
+                            label={t("Rerank 模型")}
+                            value={registeredModelLabel(
+                              rerankerModel,
+                              t
+                            )}
+                          />
+                        </dl>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="rounded-lg border bg-background p-8 text-center text-sm text-muted-foreground shadow-sm">
