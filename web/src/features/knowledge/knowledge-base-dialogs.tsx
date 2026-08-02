@@ -117,7 +117,7 @@ export function KnowledgeBaseDialogs({
               </Field>
               <Field>
                 <FieldLabel htmlFor="knowledge-base-description">
-                  描述
+                  {t("描述")}
                 </FieldLabel>
                 <textarea
                   id="knowledge-base-description"
@@ -132,7 +132,7 @@ export function KnowledgeBaseDialogs({
                 />
               </Field>
               <KnowledgeModelSelect
-                label="Embedding 模型"
+                label={t("Embedding 模型")}
                 value={form.embedding_model_id}
                 models={embeddingModels}
                 onChange={(modelId) =>
@@ -143,7 +143,7 @@ export function KnowledgeBaseDialogs({
                 }
               />
               <KnowledgeModelSelect
-                label="Rerank 模型"
+                label={t("Rerank 模型")}
                 value={form.reranker_model_id}
                 models={rerankerModels}
                 optional
@@ -177,8 +177,8 @@ export function KnowledgeBaseDialogs({
       <Dialog open={Boolean(editForm)} onOpenChange={() => setEditForm(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>编辑知识库</DialogTitle>
-            <DialogDescription>更新知识库名称和描述。</DialogDescription>
+            <DialogTitle>{t("编辑知识库")}</DialogTitle>
+            <DialogDescription>{t("更新知识库名称和描述。")}</DialogDescription>
           </DialogHeader>
           {editForm ? (
             <form onSubmit={handleUpdate}>
@@ -202,7 +202,7 @@ export function KnowledgeBaseDialogs({
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="knowledge-base-edit-description">
-                    描述
+                    {t("描述")}
                   </FieldLabel>
                   <textarea
                     id="knowledge-base-edit-description"
@@ -221,7 +221,7 @@ export function KnowledgeBaseDialogs({
                   />
                 </Field>
                 <KnowledgeModelSelect
-                  label="Embedding 模型"
+                  label={t("Embedding 模型")}
                   value={editForm.embedding_model_id}
                   models={embeddingModels}
                   onChange={(modelId) =>
@@ -233,7 +233,7 @@ export function KnowledgeBaseDialogs({
                   }
                 />
                 <KnowledgeModelSelect
-                  label="Rerank 模型"
+                  label={t("Rerank 模型")}
                   value={editForm.reranker_model_id}
                   models={rerankerModels}
                   optional
@@ -272,7 +272,7 @@ export function KnowledgeBaseDialogs({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>资源授权</DialogTitle>
+            <DialogTitle>{t("资源授权")}</DialogTitle>
             <DialogDescription>
               {permissionForm?.knowledgeBase.name ?? ""}
             </DialogDescription>
@@ -283,7 +283,7 @@ export function KnowledgeBaseDialogs({
                 <FieldGroup>
                   <Field>
                     <FieldLabel htmlFor="knowledge-base-permission-user">
-                      用户
+                      {t("用户")}
                     </FieldLabel>
                     <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild>
@@ -303,7 +303,7 @@ export function KnowledgeBaseDialogs({
                           >
                             {selectedPermissionTarget
                               ? `${selectedPermissionTarget.user.name} / ${selectedPermissionTarget.user.username}`
-                              : "选择用户"}
+                              : t("选择用户")}
                           </span>
                           <ChevronDownIcon data-icon="inline-end" />
                         </Button>
@@ -337,7 +337,7 @@ export function KnowledgeBaseDialogs({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="knowledge-base-permission">
-                      权限
+                      {t("权限")}
                     </FieldLabel>
                     <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild>
@@ -348,8 +348,8 @@ export function KnowledgeBaseDialogs({
                           className="h-10 w-full justify-between px-3 font-normal"
                         >
                           {permissionForm.permission === "edit"
-                            ? "可编辑"
-                            : "可查看"}
+                            ? t("可编辑")
+                            : t("可查看")}
                           <ChevronDownIcon data-icon="inline-end" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -358,8 +358,8 @@ export function KnowledgeBaseDialogs({
                         className="w-(--radix-dropdown-menu-trigger-width)"
                       >
                         {[
-                          { value: "view", label: "可查看" },
-                          { value: "edit", label: "可编辑" },
+                          { value: "view", label: t("可查看") },
+                          { value: "edit", label: t("可编辑") },
                         ].map((option) => (
                           <DropdownMenuItem
                             key={option.value}
@@ -394,7 +394,7 @@ export function KnowledgeBaseDialogs({
                     {isSaving ? (
                       <LoaderCircleIcon data-icon="inline-start" />
                     ) : null}
-                    保存授权
+                    {t("保存授权")}
                   </Button>
                 </DialogFooter>
               </form>
@@ -418,8 +418,8 @@ export function KnowledgeBaseDialogs({
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        title="撤销授权"
-                        aria-label="撤销授权"
+                        title={t("撤销授权")}
+                        aria-label={t("撤销授权")}
                         onClick={() =>
                           void handleRevokePermission(item.user.id)
                         }
@@ -429,7 +429,9 @@ export function KnowledgeBaseDialogs({
                     </div>
                   ))
                 ) : (
-                  <p className="p-3 text-sm text-muted-foreground">暂无授权</p>
+                  <p className="p-3 text-sm text-muted-foreground">
+                    {t("暂无授权")}
+                  </p>
                 )}
               </div>
             </>
@@ -453,8 +455,11 @@ function KnowledgeModelSelect({
   optional?: boolean
   onChange: (modelId: string | null) => void
 }) {
+  const { t } = useLanguage()
   const selected = models.find((model) => model.id === value)
-  const placeholder = optional ? `不使用 ${label}` : `选择 ${label}`
+  const placeholder = optional
+    ? t("不使用 {value}", { value: label })
+    : t("选择 {value}", { value: label })
 
   return (
     <Field>
@@ -487,7 +492,7 @@ function KnowledgeModelSelect({
               className="justify-between"
               onSelect={() => onChange(null)}
             >
-              不使用
+              {t("不使用")}
               {!value ? <CircleCheckIcon className="text-primary" /> : null}
             </DropdownMenuItem>
           ) : null}

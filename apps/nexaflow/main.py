@@ -90,6 +90,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(knowledge_legacy_api.legacy_router)
     app.include_router(llm_api.router)
     app.include_router(audit_api.router)
+
+    if settings.web_dist_dir.is_dir():
+        # Low-priority routes: API routes win, then static files, then
+        # the index.html fallback for client-side page routes.
+        app.frontend("/", directory=settings.web_dist_dir, check_dir=False)
+    else:
+        logger.warning(
+            "Web frontend build not found at %s; serving API only.",
+            settings.web_dist_dir,
+        )
     return app
 
 

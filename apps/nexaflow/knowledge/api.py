@@ -43,6 +43,9 @@ from nexaflow.knowledge.processing import (
     list_knowledge_tasks,
     retry_knowledge_task,
 )
+from nexaflow.knowledge.repositories import (
+    count_document_chunks,
+)
 from nexaflow.knowledge.services import (
     create_knowledge_base,
     delete_knowledge_base_permanently,
@@ -176,11 +179,16 @@ async def list_workspace_knowledge_base_documents(
         context.membership_role,
         {"edit"} if include_staged else {"view", "edit"},
     )
-    return await list_knowledge_documents(
+    documents = await list_knowledge_documents(
         db,
         knowledge_base,
         include_staged=include_staged,
     )
+    chunk_counts = await count_document_chunks(db, knowledge_base)
+    return [
+        document_to_response(document, chunk_count=chunk_counts.get(document.id, 0))
+        for document in documents
+    ]
 
 
 @router.post(

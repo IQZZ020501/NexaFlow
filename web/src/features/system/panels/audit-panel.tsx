@@ -79,7 +79,14 @@ export function AuditPanel({
                     <span className="truncate" title={log.actor_username}>
                       {log.actor_name}
                     </span>
-                    <span>
+                    <span
+                      className="truncate"
+                      title={
+                        AUDIT_ACTION_LABEL_KEYS[log.action]
+                          ? t(AUDIT_ACTION_LABEL_KEYS[log.action])
+                          : log.action
+                      }
+                    >
                       {AUDIT_ACTION_LABEL_KEYS[log.action]
                         ? t(AUDIT_ACTION_LABEL_KEYS[log.action])
                         : log.action}

@@ -27,4 +27,25 @@ describe("app routing", () => {
       "/knowledge"
     )
   })
+
+  test("round trips knowledge document detail routes", () => {
+    expect(routeFromPath("/knowledge/kb_123/documents/doc_456")).toEqual({
+      page: "knowledge",
+      systemTab: "workspaces",
+      knowledgeBaseId: "kb_123",
+      documentId: "doc_456",
+    })
+    expect(
+      pathForRoute({
+        page: "knowledge",
+        systemTab: "workspaces",
+        knowledgeBaseId: "kb_123",
+        documentId: "doc_456",
+      })
+    ).toBe("/knowledge/kb_123/documents/doc_456")
+    expect(routeFromPath("/knowledge/kb_123/documents")).toEqual({
+      page: "apps",
+      systemTab: "workspaces",
+    })
+  })
 })

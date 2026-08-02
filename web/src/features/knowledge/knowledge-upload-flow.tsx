@@ -33,14 +33,15 @@ import {
   parseKnowledgeDocument,
   uploadKnowledgeDocument,
 } from "@/features/knowledge/api"
-import { findChunkOverlapLength } from "@/features/knowledge/chunk-overlap"
+import { ChunkPreviewList } from "@/features/knowledge/chunk-preview-list"
 import type {
   KnowledgeBase,
   KnowledgeDocument,
   KnowledgeDocumentChunk,
 } from "@/features/knowledge/types"
-import { MarkdownContent } from "@/features/knowledge/markdown-content"
+import type { TFunction, TranslationKey } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
+import { formatBytes } from "@/features/knowledge/status-labels"
 
 type UploadStep = "files" | "segment"
 type SegmentMode = "smart" | "advanced"
@@ -48,18 +49,6 @@ type SegmentMode = "smart" | "advanced"
 type UploadedDocument = KnowledgeDocument & {
   chunks: KnowledgeDocumentChunk[]
 }
-
-const CLEANING_RULES = [
-  { value: "trim_lines", label: "去除行首尾空白" },
-  { value: "remove_empty_lines", label: "删除空行" },
-  { value: "collapse_spaces", label: "合并连续空白" },
-]
-const SPLIT_SEPARATORS = [
-  { value: "\n\n", label: "空行（段落）" },
-  { value: "\n", label: "换行" },
-  { value: "。", label: "中文句号（。）" },
-  { value: ".", label: "英文句号（.）" },
-]
 
 const UNPARSED_STATUS = "uploaded"
 const PARSING_STATUSES = new Set(["parse_queued", "parsing"])
@@ -71,11 +60,6 @@ const SMART_CLEANING_RULES = ["trim_lines", "remove_empty_lines"]
 const SMART_SPLIT_SEPARATOR = "\n\n"
 const PREVIEW_POLL_INTERVAL_MS = 1200
 const PREVIEW_POLL_TIMEOUT_MS = 60_000
-const CHUNK_OVERLAP_HIGHLIGHT_NAME = "knowledge-chunk-overlap"
-const CHUNK_OVERLAP_HIGHLIGHT_STYLE = `::highlight(${CHUNK_OVERLAP_HIGHLIGHT_NAME}) {
-  background-color: var(--chunk-overlap-highlight);
-  color: inherit;
-}`
 
 export function KnowledgeUploadFlow({
   token,
@@ -93,6 +77,17 @@ export function KnowledgeUploadFlow({
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
   const { t } = useLanguage()
+  const cleaningRuleOptions = [
+    { value: "trim_lines", label: t("去除行首尾空白") },
+    { value: "remove_empty_lines", label: t("删除空行") },
+    { value: "collapse_spaces", label: t("合并连续空白") },
+  ]
+  const splitSeparatorOptions = [
+    { value: "\n\n", label: t("空行（段落）") },
+    { value: "\n", label: t("换行") },
+    { value: "。", label: t("中文句号（。）") },
+    { value: ".", label: t("英文句号（.）") },
+  ]
   const [step, setStep] = React.useState<UploadStep>("files")
   const [files, setFiles] = React.useState<File[]>([])
   const [uploadedDocuments, setUploadedDocuments] = React.useState<
@@ -251,10 +246,13 @@ export function KnowledgeUploadFlow({
     const limitedFiles = supportedFiles.slice(0, MAX_FILE_COUNT)
     setFiles(limitedFiles)
     if (supportedFiles.length !== nextFiles.length) {
-      onNotify("error", "已忽略不支持的文件格式")
+      onNotify("error", t("已忽略不支持的文件格式"))
     }
     if (supportedFiles.length > MAX_FILE_COUNT) {
-      onNotify("error", `每次最多上传 ${MAX_FILE_COUNT} 个文件`)
+      onNotify(
+        "error",
+        t("每次最多上传 {value} 个文件", { value: MAX_FILE_COUNT }),
+      )
     }
   }
 
@@ -359,7 +357,7 @@ export function KnowledgeUploadFlow({
         document.status.endsWith("_failed"),
       )
       if (hasOpenPreviewTask(nextDocuments)) {
-        onNotify("error", "分段任务仍在处理中，请稍后刷新预览")
+        onNotify("error", t("分段任务仍在处理中，请稍后刷新预览"))
         return
       }
 
@@ -367,8 +365,12 @@ export function KnowledgeUploadFlow({
         onNotify(
           "error",
           failedDocuments.length === 1
-            ? `${failedDocuments[0].filename} 分段失败`
-            : `${failedDocuments.length} 个文档分段失败`,
+            ? t("{value} 分段失败", {
+                value: failedDocuments[0].filename,
+              })
+            : t("{value} 个文档分段失败", {
+                value: failedDocuments.length,
+              }),
         )
         return
       }
@@ -380,8 +382,12 @@ export function KnowledgeUploadFlow({
         onNotify(
           "error",
           emptyPreviewDocuments.length === 1
-            ? `${emptyPreviewDocuments[0].filename} 未返回分段片段`
-            : `${emptyPreviewDocuments.length} 个文档未返回分段片段`,
+            ? t("{value} 未返回分段片段", {
+                value: emptyPreviewDocuments[0].filename,
+              })
+            : t("{value} 个文档未返回分段片段", {
+                value: emptyPreviewDocuments.length,
+              }),
         )
         return
       }
@@ -390,7 +396,7 @@ export function KnowledgeUploadFlow({
       pendingPreviewOptionsSignatureRef.current = null
 
       if (options.announceSuccess) {
-        onNotify("success", "已生成分段预览")
+        onNotify("success", t("已生成分段预览"))
       }
     } catch (error) {
       reportError(error)
@@ -445,8 +451,11 @@ export function KnowledgeUploadFlow({
       onNotify(
         failedCount ? "error" : "success",
         failedCount
-          ? `已上传 ${documents.length} 个文件，${failedCount} 个上传失败`
-          : `已上传 ${documents.length} 个文件`,
+          ? t("已上传 {uploaded} 个文件，{failed} 个上传失败", {
+              uploaded: documents.length,
+              failed: failedCount,
+            })
+          : t("已上传 {value} 个文件", { value: documents.length }),
       )
       await generatePreviewForDocuments(nextDocuments, {
         announceSuccess: false,
@@ -501,8 +510,11 @@ export function KnowledgeUploadFlow({
       onNotify(
         failedCount ? "error" : "success",
         failedCount
-          ? `已提交 ${succeededCount} 个向量化任务，${failedCount} 个提交失败`
-          : `已提交 ${succeededCount} 个向量化任务`,
+          ? t("已提交 {submitted} 个向量化任务，{failed} 个提交失败", {
+              submitted: succeededCount,
+              failed: failedCount,
+            })
+          : t("已提交 {value} 个向量化任务", { value: succeededCount }),
       )
       await onDone()
     } catch (error) {
@@ -531,14 +543,14 @@ export function KnowledgeUploadFlow({
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label="返回知识库"
+              aria-label={t("返回知识库")}
               onClick={onBack}
             >
               <ArrowLeftIcon />
             </Button>
             <div className="min-w-0">
               <p className="text-xs font-medium text-muted-foreground">
-                知识库导入
+                {t("知识库导入")}
               </p>
               <h1 className="truncate text-xl font-semibold text-foreground">
                 {knowledgeBase.name}
@@ -556,8 +568,10 @@ export function KnowledgeUploadFlow({
                 <div className="border-b px-5 py-4">
                   <SectionTitle
                     icon={UploadIcon}
-                    title="选择导入材料"
-                    description="文件会先上传暂存，确认分段效果后再进入向量化。"
+                    title={t("选择导入材料")}
+                    description={t(
+                      "文件会先上传暂存，确认分段效果后再进入向量化。",
+                    )}
                   />
                 </div>
 
@@ -604,10 +618,12 @@ export function KnowledgeUploadFlow({
                   </span>
                   <div className="mt-5 space-y-2">
                     <p className="text-lg font-semibold text-foreground">
-                      拖入文件或文件夹
+                      {t("拖入文件或文件夹")}
                     </p>
                     <p className="mx-auto max-w-xl text-sm leading-6 text-muted-foreground">
-                      保留文档标题和段落结构，表格会在预览阶段转换为 Markdown。
+                      {t(
+                        "保留文档标题和段落结构，表格会在预览阶段转换为 Markdown。",
+                      )}
                     </p>
                   </div>
                   <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
@@ -616,7 +632,7 @@ export function KnowledgeUploadFlow({
                       onClick={() => fileInputRef.current?.click()}
                     >
                       <FilesIcon data-icon="inline-start" />
-                      选择文件
+                      {t("选择文件")}
                     </Button>
                     <Button
                       type="button"
@@ -624,7 +640,7 @@ export function KnowledgeUploadFlow({
                       onClick={() => folderInputRef.current?.click()}
                     >
                       <FolderOpenIcon data-icon="inline-start" />
-                      选择文件夹
+                      {t("选择文件夹")}
                     </Button>
                   </div>
                 </div>
@@ -638,14 +654,15 @@ export function KnowledgeUploadFlow({
             <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted-foreground">
                 {files.length
-                  ? `已选择 ${files.length} 个文件，合计 ${formatBytes(
-                      selectedFileBytes,
-                    )}`
-                  : "等待选择文件"}
+                  ? t("已选择 {count} 个文件，合计 {size}", {
+                      count: files.length,
+                      size: formatBytes(selectedFileBytes),
+                    })
+                  : t("等待选择文件")}
               </p>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={onBack}>
-                  取消
+                  {t("取消")}
                 </Button>
                 <Button
                   type="button"
@@ -660,7 +677,7 @@ export function KnowledgeUploadFlow({
                   ) : (
                     <UploadIcon data-icon="inline-start" />
                   )}
-                  上传并继续
+                  {t("上传并继续")}
                 </Button>
               </div>
             </div>
@@ -673,21 +690,25 @@ export function KnowledgeUploadFlow({
               <section className="rounded-lg border bg-background p-4 shadow-sm">
                 <SectionTitle
                   icon={ScissorsIcon}
-                  title="分段规则"
-                  description="先用智能规则生成预览，需要时再精调。"
+                  title={t("分段规则")}
+                  description={t("先用智能规则生成预览，需要时再精调。")}
                 />
 
                 <div className="mt-4 space-y-3">
                   <SegmentModeOption
                     checked={segmentMode === "smart"}
-                    title="智能分段"
-                    description="按常见文档结构自动设置长度、重叠和清洗规则。"
+                    title={t("智能分段")}
+                    description={t(
+                      "按常见文档结构自动设置长度、重叠和清洗规则。",
+                    )}
                     onSelect={() => setSegmentMode("smart")}
                   />
                   <SegmentModeOption
                     checked={segmentMode === "advanced"}
-                    title="高级分段"
-                    description="手动控制片段字符数、重叠字符和文本清洗规则。"
+                    title={t("高级分段")}
+                    description={t(
+                      "手动控制片段字符数、重叠字符和文本清洗规则。",
+                    )}
                     onSelect={() => setSegmentMode("advanced")}
                   />
                 </div>
@@ -697,7 +718,7 @@ export function KnowledgeUploadFlow({
                     <div className="grid grid-cols-2 gap-3">
                       <Field>
                         <FieldLabel htmlFor="knowledge-chunk-size">
-                          片段字符
+                          {t("片段字符")}
                         </FieldLabel>
                         <Input
                           id="knowledge-chunk-size"
@@ -714,7 +735,7 @@ export function KnowledgeUploadFlow({
                       </Field>
                       <Field>
                         <FieldLabel htmlFor="knowledge-chunk-overlap">
-                          重叠字符
+                          {t("重叠字符")}
                         </FieldLabel>
                         <Input
                           id="knowledge-chunk-overlap"
@@ -730,7 +751,7 @@ export function KnowledgeUploadFlow({
                     </div>
                     <Field>
                       <FieldLabel htmlFor="knowledge-split-separator">
-                        切分字符
+                        {t("切分字符")}
                       </FieldLabel>
                       <select
                         id="knowledge-split-separator"
@@ -740,7 +761,7 @@ export function KnowledgeUploadFlow({
                           setSplitSeparator(event.target.value)
                         }
                       >
-                        {SPLIT_SEPARATORS.map((separator) => (
+                        {splitSeparatorOptions.map((separator) => (
                           <option key={separator.value} value={separator.value}>
                             {separator.label}
                           </option>
@@ -749,13 +770,13 @@ export function KnowledgeUploadFlow({
                     </Field>
                     {isSegmentInvalid ? (
                       <FieldDescription className="text-destructive">
-                        重叠字符必须小于片段字符
+                        {t("重叠字符必须小于片段字符")}
                       </FieldDescription>
                     ) : null}
                     <Field>
-                      <FieldLabel>清洗规则</FieldLabel>
+                      <FieldLabel>{t("清洗规则")}</FieldLabel>
                       <div className="space-y-2">
-                        {CLEANING_RULES.map((rule) => (
+                        {cleaningRuleOptions.map((rule) => (
                           <label
                             key={rule.value}
                             className="flex min-h-9 items-center gap-2 text-sm"
@@ -799,32 +820,32 @@ export function KnowledgeUploadFlow({
                     <ScissorsIcon data-icon="inline-start" />
                   )}
                   {isPreviewRunning
-                    ? "正在生成预览"
+                    ? t("正在生成预览")
                     : totalChunks
-                      ? "重新生成预览"
-                      : "生成分段预览"}
+                      ? t("重新生成预览")
+                      : t("生成分段预览")}
                 </Button>
               </section>
 
               <section className="rounded-lg border bg-background p-4 shadow-sm">
                 <SectionTitle
                   icon={DatabaseIcon}
-                  title="入库状态"
-                  description="预览无误后提交向量化任务。"
+                  title={t("入库状态")}
+                  description={t("预览无误后提交向量化任务。")}
                 />
                 <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3">
                   <MetricItem
-                    label="文档"
+                    label={t("文档")}
                     value={`${uploadedDocuments.length}`}
                   />
-                  <MetricItem label="片段" value={`${totalChunks}`} />
+                  <MetricItem label={t("片段")} value={`${totalChunks}`} />
                   <MetricItem
-                    label="规则"
-                    value={segmentMode === "smart" ? "智能" : "高级"}
+                    label={t("规则")}
+                    value={segmentMode === "smart" ? t("智能") : t("高级")}
                   />
                   <MetricItem
-                    label="状态"
-                    value={canStartIndex ? "可入库" : "待预览"}
+                    label={t("状态")}
+                    value={canStartIndex ? t("可入库") : t("待预览")}
                   />
                 </dl>
               </section>
@@ -834,8 +855,8 @@ export function KnowledgeUploadFlow({
               <div className="flex shrink-0 flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <SectionTitle
                   icon={FileTextIcon}
-                  title="分段预览"
-                  description="按文件查看解析后的片段内容。"
+                  title={t("分段预览")}
+                  description={t("按文件查看解析后的片段内容。")}
                 />
                 <Button
                   type="button"
@@ -852,7 +873,7 @@ export function KnowledgeUploadFlow({
                   ) : (
                     <RotateCcwIcon data-icon="inline-start" />
                   )}
-                  刷新
+                  {t("刷新")}
                 </Button>
               </div>
 
@@ -885,21 +906,24 @@ export function KnowledgeUploadFlow({
             <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-muted-foreground">
                 {canStartIndex
-                  ? `${uploadedDocuments.length} 个文档、${totalChunks} 个片段可入库`
+                  ? t("{documents} 个文档、{chunks} 个片段可入库", {
+                      documents: uploadedDocuments.length,
+                      chunks: totalChunks,
+                    })
                   : hasStalePreview && totalChunks
-                    ? "分段规则已修改，请重新生成预览后再入库"
-                    : "生成预览并确认片段后才能入库"}
+                    ? t("分段规则已修改，请重新生成预览后再入库")
+                    : t("生成预览并确认片段后才能入库")}
               </p>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={onBack}>
-                  取消
+                  {t("取消")}
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setStep("files")}
                 >
-                  上一步
+                  {t("上一步")}
                 </Button>
                 <Button
                   type="button"
@@ -914,7 +938,7 @@ export function KnowledgeUploadFlow({
                   ) : (
                     <CheckCircle2Icon data-icon="inline-start" />
                   )}
-                  开始入库
+                  {t("开始入库")}
                 </Button>
               </div>
             </div>
@@ -1013,6 +1037,7 @@ function FileList({
   files: File[]
   onRemove: (index: number) => void
 }) {
+  const { t } = useLanguage()
   if (!files.length) {
     return null
   }
@@ -1022,10 +1047,12 @@ function FileList({
       <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
         <SectionTitle
           icon={FilesIcon}
-          title="待上传队列"
-          description="确认这些文件后继续进入分段预览。"
+          title={t("待上传队列")}
+          description={t("确认这些文件后继续进入分段预览。")}
         />
-        <Badge variant="outline">{files.length} 个</Badge>
+        <Badge variant="outline">
+          {t("{value} 个", { value: files.length })}
+        </Badge>
       </div>
       <div className="divide-y">
         {files.map((file, index) => (
@@ -1046,7 +1073,7 @@ function FileList({
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label={`移除 ${file.name}`}
+              aria-label={t("移除 {value}", { value: file.name })}
               onClick={() => onRemove(index)}
             >
               <XIcon />
@@ -1058,87 +1085,13 @@ function FileList({
   )
 }
 
-function createLeadingTextRange(root: HTMLElement, charCount: number) {
-  const walker = window.document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  const firstNode = walker.nextNode() as Text | null
-  if (!firstNode) {
-    return null
-  }
-
-  const range = new Range()
-  range.setStart(firstNode, 0)
-  let currentNode: Text | null = firstNode
-  let remainingChars = charCount
-
-  while (currentNode) {
-    if (remainingChars <= currentNode.length) {
-      range.setEnd(currentNode, remainingChars)
-      return range
-    }
-    remainingChars -= currentNode.length
-    const nextNode: Text | null = walker.nextNode() as Text | null
-    if (!nextNode) {
-      range.setEnd(currentNode, currentNode.length)
-      return range
-    }
-    currentNode = nextNode
-  }
-
-  return null
-}
-
 function PreviewPane({ document }: { document: UploadedDocument | null }) {
-  const previewRef = React.useRef<HTMLDivElement>(null)
-  const chunks = document?.chunks
-  const overlapLengths = React.useMemo(() => {
-    if (!chunks) {
-      return []
-    }
-    return chunks.map((chunk, index) =>
-      index === 0
-        ? 0
-        : findChunkOverlapLength(chunks[index - 1].content, chunk.content),
-    )
-  }, [chunks])
-
-  React.useEffect(() => {
-    const previewRoot = previewRef.current
-    if (!previewRoot || typeof Highlight === "undefined" || !CSS.highlights) {
-      return
-    }
-
-    const ranges = overlapLengths.flatMap((overlapLength, index) => {
-      if (!overlapLength) {
-        return []
-      }
-      const chunkContent = previewRoot.querySelector<HTMLElement>(
-        `[data-overlap-chunk="${index}"]`,
-      )
-      const range = chunkContent
-        ? createLeadingTextRange(chunkContent, overlapLength)
-        : null
-      return range ? [range] : []
-    })
-
-    if (!ranges.length) {
-      CSS.highlights.delete(CHUNK_OVERLAP_HIGHLIGHT_NAME)
-      return
-    }
-
-    const highlight = new Highlight(...ranges)
-    CSS.highlights.set(CHUNK_OVERLAP_HIGHLIGHT_NAME, highlight)
-    return () => {
-      if (CSS.highlights.get(CHUNK_OVERLAP_HIGHLIGHT_NAME) === highlight) {
-        CSS.highlights.delete(CHUNK_OVERLAP_HIGHLIGHT_NAME)
-      }
-    }
-  }, [overlapLengths])
-
+  const { t } = useLanguage()
   if (!document) {
     return (
       <div className="mt-4 flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed px-4 text-center text-sm text-muted-foreground">
         <FolderOpenIcon className="mb-2 size-5" />
-        暂无文件
+        {t("暂无文件")}
       </div>
     )
   }
@@ -1161,63 +1114,32 @@ function PreviewPane({ document }: { document: UploadedDocument | null }) {
           <ScissorsIcon className="mb-2 size-5" />
         )}
         {document.last_error ??
-          (isParsing ? "正在生成分段预览" : "生成分段预览后查看片段内容")}
+          (isParsing ? t("正在生成分段预览") : t("生成分段预览后查看片段内容"))}
       </div>
     )
   }
 
   return (
-    <>
-      <style>{CHUNK_OVERLAP_HIGHLIGHT_STYLE}</style>
-      <div ref={previewRef} className="mt-4 space-y-3">
-        <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-4 py-3">
-          <h2 className="truncate text-base font-semibold text-foreground">
-            {document.filename}
-          </h2>
-          <Badge
-            variant={
-              document.status.endsWith("_failed") ? "destructive" : "outline"
-            }
-          >
-            {documentStatusLabel(document.status)}
-          </Badge>
-        </div>
-        {document.chunks.map((chunk, index) => {
-          const overlapLength = overlapLengths[index] ?? 0
-          return (
-            <article
-              key={chunk.id}
-              className="overflow-hidden rounded-lg border bg-background"
-            >
-              <div className="flex items-center justify-between gap-3 border-b bg-muted/20 px-4 py-2">
-                <h3 className="truncate text-sm font-semibold text-foreground">
-                  分段 {chunk.chunk_index + 1}
-                </h3>
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                  {overlapLength ? (
-                    <Badge variant="secondary">重叠 {overlapLength} 字符</Badge>
-                  ) : null}
-                  <span className="text-xs text-muted-foreground">
-                    {chunk.char_count} 字符 / {chunk.token_count} tokens
-                  </span>
-                </div>
-              </div>
-              <div data-overlap-chunk={index}>
-                <MarkdownContent
-                  content={chunk.content}
-                  className="px-4 py-3 text-[15px] leading-7"
-                />
-              </div>
-            </article>
-          )
-        })}
+    <div className="mt-4 space-y-3">
+      <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-4 py-3">
+        <h2 className="truncate text-base font-semibold text-foreground">
+          {document.filename}
+        </h2>
+        <Badge
+          variant={
+            document.status.endsWith("_failed") ? "destructive" : "outline"
+          }
+        >
+          {documentStatusLabel(document.status, t)}
+        </Badge>
       </div>
-    </>
+      <ChunkPreviewList chunks={document.chunks} />
+    </div>
   )
 }
 
-function documentStatusLabel(status: string) {
-  const labels: Record<string, string> = {
+function documentStatusLabel(status: string, t: TFunction) {
+  const labels: Record<string, TranslationKey> = {
     uploaded: "待分段",
     parse_queued: "分段排队中",
     parsing: "分段中",
@@ -1229,15 +1151,6 @@ function documentStatusLabel(status: string) {
     index_failed: "向量化失败",
   }
 
-  return labels[status] ?? status
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) {
-    return `${bytes} B`
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`
-  }
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  const labelKey = labels[status]
+  return labelKey ? t(labelKey) : status
 }

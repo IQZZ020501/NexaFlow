@@ -50,9 +50,10 @@ import type {
   RegisteredModel,
 } from "@/features/llm/types"
 import type { MeResponse } from "@/features/auth/types"
+import type { TFunction, TranslationKey } from "@/lib/i18n"
 import type { FeaturePageConfig } from "@/lib/pages"
 
-const MODEL_TYPE_LABELS: Record<string, string> = {
+const MODEL_TYPE_LABELS: Record<string, TranslationKey> = {
   LLM: "大语言模型",
   EMBEDDING: "向量模型",
   RERANKER: "重排模型",
@@ -371,7 +372,7 @@ export function LlmPage({
         setModels((current) =>
           current.map((item) => (item.id === model.id ? model : item))
         )
-        onNotify("success", "模型测试通过，模型已更新")
+        onNotify("success", t("模型测试通过，模型已更新"))
       } else {
         const model = await createRegisteredModel(
           token,
@@ -379,7 +380,7 @@ export function LlmPage({
           payload
         )
         setModels((current) => [...current, model])
-        onNotify("success", "模型测试通过，模型已添加")
+        onNotify("success", t("模型测试通过，模型已添加"))
       }
       setIsDialogOpen(false)
       setIsProviderPickerOpen(false)
@@ -396,14 +397,14 @@ export function LlmPage({
     if (!selectedWorkspaceId) {
       return
     }
-    if (!window.confirm(`删除模型 ${model.name}？`)) {
+    if (!window.confirm(t("删除模型 {value}？", { value: model.name }))) {
       return
     }
 
     try {
       await deleteRegisteredModel(token, selectedWorkspaceId, model.id)
       setModels((current) => current.filter((item) => item.id !== model.id))
-      onNotify("success", "模型已删除")
+      onNotify("success", t("模型已删除"))
     } catch (error) {
       reportError(error)
     }
@@ -415,7 +416,7 @@ export function LlmPage({
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold">{page.label}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            按模型维度接入供应商、基础模型和 API Key，保存前会先测试真实调用。
+            {t("按模型维度接入供应商、基础模型和 API Key，保存前会先测试真实调用。")}
           </p>
         </div>
         {canManage ? (
@@ -429,8 +430,8 @@ export function LlmPage({
       {!selectedWorkspaceId ? (
         <EmptyState
           icon={BrainCircuitIcon}
-          title="未选择工作空间"
-          description="选择工作空间后管理可被应用和 Agent 调用的模型。"
+          title={t("未选择工作空间")}
+          description={t("选择工作空间后管理可被应用和 Agent 调用的模型。")}
         />
       ) : (
         <>
@@ -442,7 +443,7 @@ export function LlmPage({
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   className="pl-9"
-                  placeholder="搜索模型、供应商或 API URL..."
+                  placeholder={t("搜索模型、供应商或 API URL...")}
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -456,7 +457,7 @@ export function LlmPage({
                       <span className="min-w-0 flex-1 truncate text-left">
                         {selectedProvider
                           ? providerLabel(providerCatalog, selectedProvider)
-                          : "全部供应商"}
+                          : t("全部供应商")}
                       </span>
                       <ChevronDownIcon data-icon="inline-end" />
                     </Button>
@@ -469,7 +470,7 @@ export function LlmPage({
                       className="justify-between"
                       onSelect={() => setSelectedProvider("")}
                     >
-                      全部供应商
+                      {t("全部供应商")}
                       {!selectedProvider ? (
                         <CircleCheckIcon className="text-primary" />
                       ) : null}
@@ -529,7 +530,7 @@ export function LlmPage({
                               </h2>
                               <StatusBadge status={model.status} />
                               <Badge variant="outline">
-                                {modelTypeLabel(model.model_type)}
+                                {modelTypeLabel(model.model_type, t)}
                               </Badge>
                             </div>
                             <p className="mt-1 truncate text-sm text-muted-foreground">
@@ -541,13 +542,13 @@ export function LlmPage({
                         {canManage ? (
                           <div className="flex gap-1">
                             <IconButton
-                              label="编辑"
+                              label={t("编辑")}
                               onClick={() => openEditModel(model)}
                             >
                               <PencilIcon className="size-4" />
                             </IconButton>
                             <IconButton
-                              label="删除"
+                              label={t("删除")}
                               onClick={() => void handleDeleteModel(model)}
                             >
                               <Trash2Icon className="size-4" />
@@ -560,7 +561,7 @@ export function LlmPage({
                         <Spec label="API URL" value={model.api_base} />
                         <Spec
                           label="API Key"
-                          value={model.api_key_hint ?? "未配置"}
+                          value={model.api_key_hint ?? t("未配置")}
                         />
                       </dl>
                     </div>
@@ -571,7 +572,7 @@ export function LlmPage({
               <EmptyState
                 icon={BrainCircuitIcon}
                 title={page.emptyTitle}
-                description="添加模型后，应用和 Agent 才能选择它进行对话、检索增强和工具调用。"
+                description={t("添加模型后，应用和 Agent 才能选择它进行对话、检索增强和工具调用。")}
                 action={
                   canManage ? (
                     <Button type="button" onClick={openCreateModel}>
@@ -624,12 +625,13 @@ function ProviderPickerDialog({
   onOpenChange: (open: boolean) => void
   onSelect: (provider: string) => void
 }) {
+  const { t } = useLanguage()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>选择供应商</DialogTitle>
-          <DialogDescription>选择后继续填写模型和凭据。</DialogDescription>
+          <DialogTitle>{t("选择供应商")}</DialogTitle>
+          <DialogDescription>{t("选择后继续填写模型和凭据。")}</DialogDescription>
         </DialogHeader>
 
         <div className="max-h-[56svh] overflow-auto pr-1">
@@ -660,7 +662,7 @@ function ProviderPickerDialog({
             </div>
           ) : (
             <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-              暂无可用供应商
+              {t("暂无可用供应商")}
             </div>
           )}
         </div>
@@ -740,16 +742,15 @@ function ModelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent side="right">
         <DialogHeader>
-          <DialogTitle>{isEditing ? "编辑模型" : t("接入模型")}</DialogTitle>
+          <DialogTitle>{t(isEditing ? "编辑模型" : "接入模型")}</DialogTitle>
           <DialogDescription>
-            选择供应商和基础模型，填写 API URL 与 API
-            Key；保存前会测试模型调用。
+            {t("选择供应商和基础模型，填写 API URL 与 API Key；保存前会测试模型调用。")}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit}>
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="model-name">名称</FieldLabel>
+              <FieldLabel htmlFor="model-name">{t("名称")}</FieldLabel>
               <Input
                 id="model-name"
                 value={form.name}
@@ -757,17 +758,17 @@ function ModelDialog({
                   onFormChange({ ...form, name: event.target.value })
                 }
                 placeholder={
-                  firstBaseModel?.desc ?? selectedProvider?.name ?? "模型名称"
+                  firstBaseModel?.desc ?? selectedProvider?.name ?? t("模型名称")
                 }
                 maxLength={120}
                 required
               />
-              <FieldDescription>应用内显示的模型名称。</FieldDescription>
+              <FieldDescription>{t("应用内显示的模型名称。")}</FieldDescription>
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field>
-                <FieldLabel htmlFor="model-provider">供应商</FieldLabel>
+                <FieldLabel htmlFor="model-provider">{t("供应商")}</FieldLabel>
                 <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -778,7 +779,7 @@ function ModelDialog({
                       disabled={!providerCatalog.length}
                     >
                       <span className="min-w-0 flex-1 truncate text-left">
-                        {selectedProvider?.name ?? "选择供应商"}
+                        {selectedProvider?.name ?? t("选择供应商")}
                       </span>
                       <ChevronDownIcon data-icon="inline-end" />
                     </Button>
@@ -806,7 +807,7 @@ function ModelDialog({
               </Field>
 
               <Field>
-                <FieldLabel htmlFor="model-type">模型类型</FieldLabel>
+                <FieldLabel htmlFor="model-type">{t("模型类型")}</FieldLabel>
                 <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -817,7 +818,7 @@ function ModelDialog({
                       disabled={!modelTypeOptions.length}
                     >
                       <span className="min-w-0 flex-1 truncate text-left">
-                        {modelTypeLabel(form.model_type)}
+                        {modelTypeLabel(form.model_type, t)}
                       </span>
                       <ChevronDownIcon data-icon="inline-end" />
                     </Button>
@@ -832,7 +833,7 @@ function ModelDialog({
                         className="justify-between"
                         onSelect={() => onModelTypeChange(modelType)}
                       >
-                        {modelTypeLabel(modelType)}
+                        {modelTypeLabel(modelType, t)}
                         {modelType === form.model_type ? (
                           <CircleCheckIcon className="text-primary" />
                         ) : null}
@@ -844,7 +845,7 @@ function ModelDialog({
             </div>
 
             <Field>
-              <FieldLabel htmlFor="base-model">基础模型</FieldLabel>
+              <FieldLabel htmlFor="base-model">{t("基础模型")}</FieldLabel>
               <Input
                 id="base-model"
                 value={form.model_name}
@@ -852,7 +853,7 @@ function ModelDialog({
                   onFormChange({ ...form, model_name: event.target.value })
                 }
                 list="base-model-options"
-                placeholder={firstBaseModel?.name ?? "输入模型名"}
+                placeholder={firstBaseModel?.name ?? t("输入模型名")}
                 maxLength={160}
                 required
               />
@@ -865,8 +866,8 @@ function ModelDialog({
               </datalist>
               <FieldDescription>
                 {isBaseModelsLoading
-                  ? "正在加载基础模型..."
-                  : "可以从列表选择，也可以直接输入未列出的模型名。"}
+                  ? t("正在加载基础模型...")
+                  : t("可以从列表选择，也可以直接输入未列出的模型名。")}
               </FieldDescription>
             </Field>
 
@@ -892,19 +893,19 @@ function ModelDialog({
                 onChange={(event) =>
                   onFormChange({ ...form, api_key: event.target.value })
                 }
-                placeholder={isEditing ? "留空则保留当前 API Key" : "sk-..."}
+                placeholder={isEditing ? t("留空则保留当前 API Key") : "sk-..."}
                 required={!isEditing}
               />
               <FieldDescription>
                 {isEditing && form.api_key_hint
-                  ? `当前密钥：${form.api_key_hint}`
-                  : "保存后只显示脱敏尾号，不会返回明文。"}
+                  ? t("当前密钥：{value}", { value: form.api_key_hint })
+                  : t("保存后只显示脱敏尾号，不会返回明文。")}
               </FieldDescription>
             </Field>
 
             {isEditing ? (
               <Field>
-                <FieldLabel htmlFor="model-status">状态</FieldLabel>
+                <FieldLabel htmlFor="model-status">{t("状态")}</FieldLabel>
                 <select
                   id="model-status"
                   className="h-9 rounded-md border bg-background px-3 text-sm"
@@ -930,7 +931,7 @@ function ModelDialog({
             </Button>
             <Button type="submit" disabled={isSaving}>
               {isSaving
-                ? "测试并保存中..."
+                ? t("测试并保存中...")
                 : isEditing
                   ? t("保存")
                   : t("接入模型")}
@@ -993,9 +994,10 @@ function EmptyState({
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const { t } = useLanguage()
   return (
     <Badge variant={status === "active" ? "secondary" : "outline"}>
-      {status === "active" ? "已启用" : "已停用"}
+      {t(status === "active" ? "已启用" : "已停用")}
     </Badge>
   )
 }
@@ -1017,8 +1019,9 @@ function providerLabel(providers: ModelProviderCatalog[], value: string) {
   )
 }
 
-function modelTypeLabel(value: string) {
-  return MODEL_TYPE_LABELS[value] ?? value
+function modelTypeLabel(value: string, t: TFunction) {
+  const labelKey = MODEL_TYPE_LABELS[value]
+  return labelKey ? t(labelKey) : value
 }
 
 function providerDisplayIndex(provider: string) {

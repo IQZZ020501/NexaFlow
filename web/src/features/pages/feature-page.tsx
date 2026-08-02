@@ -26,6 +26,7 @@ export function FeaturePage({
   activeKnowledgeBaseId,
   onOpenKnowledgeBase,
   onCloseKnowledgeBase,
+  onOpenDocument,
   onNotify,
 }: {
   page: FeaturePageConfig
@@ -35,6 +36,7 @@ export function FeaturePage({
   activeKnowledgeBaseId: string | null
   onOpenKnowledgeBase: (knowledgeBaseId: string) => void
   onCloseKnowledgeBase: () => void
+  onOpenDocument: (documentId: string) => void
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
   const { t } = useLanguage()
@@ -51,6 +53,7 @@ export function FeaturePage({
         activeKnowledgeBaseId={activeKnowledgeBaseId}
         onOpenKnowledgeBase={onOpenKnowledgeBase}
         onCloseKnowledgeBase={onCloseKnowledgeBase}
+        onOpenDocument={onOpenDocument}
         onNotify={onNotify}
       />
     )

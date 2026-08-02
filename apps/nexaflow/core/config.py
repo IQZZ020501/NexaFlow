@@ -9,6 +9,7 @@ ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 DEFAULT_KNOWLEDGE_STORAGE_DIR = Path(__file__).resolve().parents[2] / "storage" / "knowledge"
 DEFAULT_CHROMA_PERSIST_DIR = Path(__file__).resolve().parents[2] / "storage" / "chroma"
 DEFAULT_CELERY_BROKER_URL = "redis://localhost:6379/0"
+DEFAULT_WEB_DIST_DIR = Path(__file__).resolve().parents[3] / "web" / "dist"
 
 
 def load_env_file(path: Path = ENV_FILE) -> None:
@@ -42,6 +43,7 @@ class Settings:
     knowledge_storage_dir: Path = DEFAULT_KNOWLEDGE_STORAGE_DIR
     chroma_persist_dir: Path = DEFAULT_CHROMA_PERSIST_DIR
     celery_broker_url: str = DEFAULT_CELERY_BROKER_URL
+    web_dist_dir: Path = DEFAULT_WEB_DIST_DIR
     celery_task_always_eager: bool = False
     jwt_expires_minutes: int = 60
     cors_origins: tuple[str, ...] = ()
@@ -77,6 +79,7 @@ class Settings:
                 os.getenv("CHROMA_PERSIST_DIR", str(DEFAULT_CHROMA_PERSIST_DIR))
             ),
             celery_broker_url=os.getenv("CELERY_BROKER_URL", DEFAULT_CELERY_BROKER_URL),
+            web_dist_dir=Path(os.getenv("WEB_DIST_DIR", str(DEFAULT_WEB_DIST_DIR))),
             celery_task_always_eager=os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower()
             in {"1", "true", "yes"},
             jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "60")),

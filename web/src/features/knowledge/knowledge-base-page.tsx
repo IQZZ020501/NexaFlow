@@ -1,12 +1,15 @@
 import * as React from "react"
 import {
+  AlertCircleIcon,
   ArchiveIcon,
+  ArrowDownIcon,
   ArrowLeftIcon,
   ArrowUpDownIcon,
-  ChevronDownIcon,
+  ArrowUpIcon,
+  CircleCheckIcon,
+  DownloadIcon,
   FileTextIcon,
-  FilterIcon,
-  HelpCircleIcon,
+  FlaskConicalIcon,
   LoaderCircleIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -15,7 +18,6 @@ import {
   SearchIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
-  TagIcon,
   TargetIcon,
   Trash2Icon,
   UploadIcon,
@@ -32,13 +34,22 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import {
   createKnowledgeBase,
   deleteKnowledgeDocument,
   deleteKnowledgeBase,
+  downloadKnowledgeDocument,
   indexKnowledgeDocument,
   listKnowledgeBasePermissions,
   listKnowledgeBases,
-  listKnowledgeDocumentChunks,
   listKnowledgeDocuments,
   listKnowledgeTasks,
   parseKnowledgeDocument,
@@ -46,14 +57,15 @@ import {
   rebuildKnowledgeIndex,
   retryKnowledgeTask,
   revokeKnowledgeBasePermission,
+  setKnowledgeDocumentActive,
   testKnowledgeBaseModels,
   updateKnowledgeBase,
   upsertKnowledgeBasePermission,
 } from "@/features/knowledge/api"
 import type {
   KnowledgeBase,
-  KnowledgeDocumentChunk,
   KnowledgeDocument,
+  KnowledgeModelTestResult,
   KnowledgeQueryHit,
   KnowledgeTask,
   ResourcePermission,
@@ -64,7 +76,7 @@ import type { RegisteredModel } from "@/features/llm/types"
 import { listWorkspaceMembers } from "@/features/system/api"
 import type { WorkspaceMember } from "@/features/system/types"
 import { type FeaturePageConfig } from "@/lib/pages"
-import { languageLocales } from "@/lib/i18n"
+import { languageLocales, type TFunction, type TranslationKey } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { formatDateTime, getMembershipRole } from "@/app/display"
 import { getErrorMessage } from "@/app/errors"
@@ -72,6 +84,14 @@ import type { AppNotification } from "@/app/notifications"
 import { KnowledgeBaseDialogs } from "@/features/knowledge/knowledge-base-dialogs"
 import { MarkdownContent } from "@/features/knowledge/markdown-content"
 import { KnowledgeUploadFlow } from "@/features/knowledge/knowledge-upload-flow"
+import {
+  documentStatusDotClassName,
+  documentStatusLabel,
+  formatBytes,
+  taskStatusDotClassName,
+  taskStatusLabel,
+  taskTypeLabel,
+} from "@/features/knowledge/status-labels"
 import {
   PermissionBadge,
   StatusBadge,
@@ -83,6 +103,88 @@ import type {
   KnowledgeBasePermissionForm,
 } from "@/features/knowledge/types"
 
+type DocumentSortKey =
+  | "name"
+  | "size_bytes"
+  | "chunk_count"
+  | "created_at"
+  | "updated_at"
+
+const DOCUMENT_SORT_OPTIONS: Array<{
+  key: DocumentSortKey
+  label: TranslationKey
+}> = [
+  { key: "name", label: "名称" },
+  { key: "size_bytes", label: "大小" },
+  { key: "chunk_count", label: "分段数" },
+  { key: "created_at", label: "创建时间" },
+  { key: "updated_at", label: "更新时间" },
+]
+
+const DOCUMENT_SORT_FIELDS: Record<DocumentSortKey, keyof KnowledgeDocument> = {
+  name: "filename",
+  size_bytes: "size_bytes",
+  chunk_count: "chunk_count",
+  created_at: "created_at",
+  updated_at: "updated_at",
+}
+
+const PROCESSING_DOCUMENT_STATUSES: Record<string, true> = {
+  parse_queued: true,
+  parsing: true,
+  index_queued: true,
+  indexing: true,
+}
+
+const DOCUMENT_PAGE_SIZE = 20
+
+const SMART_CHUNK_SIZE = 1200
+const SMART_CHUNK_OVERLAP = 150
+const SMART_CLEANING_RULES = ["trim_lines", "remove_empty_lines"]
+const SMART_SPLIT_SEPARATOR = "\n\n"
+
+const CLEANING_RULE_OPTIONS: Array<{
+  value: string
+  labelKey: "去除行首尾空白" | "删除空行" | "合并连续空白"
+}> = [
+  { value: "trim_lines", labelKey: "去除行首尾空白" },
+  { value: "remove_empty_lines", labelKey: "删除空行" },
+  { value: "collapse_spaces", labelKey: "合并连续空白" },
+]
+
+const SPLIT_SEPARATOR_OPTIONS: Array<{
+  value: string
+  labelKey: "换行" | "空行（段落）" | "中文句号（。）" | "英文句号（.）"
+}> = [
+  { value: "\n", labelKey: "换行" },
+  { value: "\n\n", labelKey: "空行（段落）" },
+  { value: "。", labelKey: "中文句号（。）" },
+  { value: ".", labelKey: "英文句号（.）" },
+]
+
+function documentStatusText(
+  document: KnowledgeDocument,
+  tasks: KnowledgeTask[],
+  t: TFunction
+) {
+  if (document.status === "indexing") {
+    const indexTask = tasks.find(
+      (task) =>
+        task.document_id === document.id &&
+        task.task_type === "index" &&
+        task.total_items > 0
+    )
+    if (indexTask) {
+      return t("向量化中 {done}/{total}", {
+        done: indexTask.processed_items,
+        total: indexTask.total_items,
+      })
+    }
+  }
+
+  return documentStatusLabel(document.status, t)
+}
+
 export function KnowledgeBasePage({
   page,
   token,
@@ -91,6 +193,7 @@ export function KnowledgeBasePage({
   activeKnowledgeBaseId,
   onOpenKnowledgeBase,
   onCloseKnowledgeBase,
+  onOpenDocument,
   onNotify,
 }: {
   page: FeaturePageConfig
@@ -100,6 +203,7 @@ export function KnowledgeBasePage({
   activeKnowledgeBaseId: string | null
   onOpenKnowledgeBase: (knowledgeBaseId: string) => void
   onCloseKnowledgeBase: () => void
+  onOpenDocument: (documentId: string) => void
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
   const { language, t } = useLanguage()
@@ -108,12 +212,6 @@ export function KnowledgeBasePage({
     []
   )
   const [documents, setDocuments] = React.useState<KnowledgeDocument[]>([])
-  const [selectedPreviewDocumentId, setSelectedPreviewDocumentId] =
-    React.useState<string | null>(null)
-  const [documentChunks, setDocumentChunks] = React.useState<
-    KnowledgeDocumentChunk[]
-  >([])
-  const [documentTasks, setDocumentTasks] = React.useState<KnowledgeTask[]>([])
   const [knowledgeTasks, setKnowledgeTasks] = React.useState<KnowledgeTask[]>(
     []
   )
@@ -128,6 +226,12 @@ export function KnowledgeBasePage({
   >([])
   const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
   const [documentSearch, setDocumentSearch] = React.useState("")
+  const [documentPage, setDocumentPage] = React.useState(1)
+  const [documentSortKey, setDocumentSortKey] =
+    React.useState<DocumentSortKey>("created_at")
+  const [documentSortDirection, setDocumentSortDirection] = React.useState<
+    "asc" | "desc"
+  >("desc")
   const [workspaceMembers, setWorkspaceMembers] = React.useState<
     WorkspaceMember[]
   >([])
@@ -147,15 +251,31 @@ export function KnowledgeBasePage({
     React.useState<KnowledgeBasePermissionForm | null>(null)
   const [isLoading, setIsLoading] = React.useState(false)
   const [isDocumentLoading, setIsDocumentLoading] = React.useState(false)
-  const [isDocumentDetailLoading, setIsDocumentDetailLoading] =
-    React.useState(false)
   const [isKnowledgeTaskLoading, setIsKnowledgeTaskLoading] =
     React.useState(false)
   const [isSubmittingDocumentTask, setIsSubmittingDocumentTask] =
     React.useState(false)
+  const [segmentDialogDocument, setSegmentDialogDocument] =
+    React.useState<KnowledgeDocument | null>(null)
+  const [segmentMode, setSegmentMode] = React.useState<"smart" | "advanced">(
+    "smart"
+  )
+  const [chunkSize, setChunkSize] = React.useState(SMART_CHUNK_SIZE)
+  const [chunkOverlap, setChunkOverlap] = React.useState(SMART_CHUNK_OVERLAP)
+  const [splitSeparator, setSplitSeparator] = React.useState(
+    SMART_SPLIT_SEPARATOR
+  )
+  const [cleaningRules, setCleaningRules] = React.useState<string[]>(
+    SMART_CLEANING_RULES
+  )
   const [isRetryingTask, setIsRetryingTask] = React.useState(false)
   const [isQuerying, setIsQuerying] = React.useState(false)
   const [isTestingModels, setIsTestingModels] = React.useState(false)
+  const [modelTestResult, setModelTestResult] =
+    React.useState<KnowledgeModelTestResult | null>(null)
+  const [modelTestError, setModelTestError] = React.useState<string | null>(
+    null
+  )
   const [isSaving, setIsSaving] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [isUploadFlowOpen, setIsUploadFlowOpen] = React.useState(false)
@@ -190,26 +310,52 @@ export function KnowledgeBasePage({
   }, [knowledgeBases, knowledgeSearch])
   const filteredDocuments = React.useMemo(() => {
     const search = documentSearch.trim().toLowerCase()
-    if (!search) {
-      return documents
+    const matched = search
+      ? documents.filter((document) =>
+          document.filename.toLowerCase().includes(search)
+        )
+      : documents
+    const direction = documentSortDirection === "asc" ? 1 : -1
+    const sortField = DOCUMENT_SORT_FIELDS[documentSortKey]
+    return [...matched].sort((left, right) => {
+      const leftValue = left[sortField]
+      const rightValue = right[sortField]
+      if (typeof leftValue === "string") {
+        return leftValue.localeCompare(String(rightValue)) * direction
+      }
+      return (Number(leftValue) - Number(rightValue)) * direction
+    })
+  }, [documents, documentSearch, documentSortDirection, documentSortKey])
+
+  function cycleDocumentSort(key: DocumentSortKey) {
+    if (documentSortKey === key) {
+      setDocumentSortDirection((current) =>
+        current === "asc" ? "desc" : "asc"
+      )
+      return
     }
-    return documents.filter((document) =>
-      document.filename.toLowerCase().includes(search)
-    )
-  }, [documents, documentSearch])
+    setDocumentSortKey(key)
+    setDocumentSortDirection(key === "name" ? "asc" : "desc")
+    setDocumentPage(1)
+  }
   const selectedDocuments = documents.filter((document) =>
     selectedDocumentIds.includes(document.id)
   )
-  const selectedPreviewDocument =
-    documents.find((document) => document.id === selectedPreviewDocumentId) ??
-    null
   const selectedDocumentCount = selectedDocuments.length
+  const visibleDocuments = filteredDocuments.slice(
+    (documentPage - 1) * DOCUMENT_PAGE_SIZE,
+    documentPage * DOCUMENT_PAGE_SIZE
+  )
+  const documentPageCount = Math.max(
+    1,
+    Math.ceil(filteredDocuments.length / DOCUMENT_PAGE_SIZE)
+  )
   const isAllFilteredDocumentsSelected =
-    filteredDocuments.length > 0 &&
-    filteredDocuments.every((document) =>
+    visibleDocuments.length > 0 &&
+    visibleDocuments.every((document) =>
       selectedDocumentIds.includes(document.id)
     )
-  const isSomeFilteredDocumentSelected = filteredDocuments.some((document) =>
+  const isSomeFilteredDocumentSelected = visibleDocuments.some((document) =>
     selectedDocumentIds.includes(document.id)
   )
 
@@ -253,16 +399,15 @@ export function KnowledgeBasePage({
     }
   }, [reportError, selectedWorkspaceId, token])
 
-  const loadDocuments = React.useCallback(async () => {
+  const loadDocuments = React.useCallback(async (silent = false) => {
     if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
       setDocuments([])
-      setSelectedPreviewDocumentId(null)
-      setDocumentChunks([])
-      setDocumentTasks([])
       return
     }
 
-    setIsDocumentLoading(true)
+    if (!silent) {
+      setIsDocumentLoading(true)
+    }
     try {
       setDocuments(
         await listKnowledgeDocuments(
@@ -272,66 +417,39 @@ export function KnowledgeBasePage({
         )
       )
     } catch (error) {
-      setDocuments([])
-      reportError(error)
+      if (!silent) {
+        setDocuments([])
+        reportError(error)
+      }
     } finally {
-      setIsDocumentLoading(false)
+      if (!silent) {
+        setIsDocumentLoading(false)
+      }
     }
   }, [reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token])
 
-  const loadDocumentDetails = React.useCallback(
-    async (documentId: string) => {
-      if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
-        setDocumentChunks([])
-        setDocumentTasks([])
-        return
-      }
-
-      setIsDocumentDetailLoading(true)
-      try {
-        const [chunks, tasks] = await Promise.all([
-          listKnowledgeDocumentChunks(
-            token,
-            selectedWorkspaceId,
-            selectedKnowledgeBaseId,
-            documentId
-          ),
-          listKnowledgeTasks(
-            token,
-            selectedWorkspaceId,
-            selectedKnowledgeBaseId,
-            documentId
-          ),
-        ])
-        setDocumentChunks(chunks)
-        setDocumentTasks(tasks)
-      } catch (error) {
-        setDocumentChunks([])
-        setDocumentTasks([])
-        reportError(error)
-      } finally {
-        setIsDocumentDetailLoading(false)
-      }
-    },
-    [reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token]
-  )
-
-  const loadKnowledgeTasks = React.useCallback(async () => {
+  const loadKnowledgeTasks = React.useCallback(async (silent = false) => {
     if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
       setKnowledgeTasks([])
       return
     }
 
-    setIsKnowledgeTaskLoading(true)
+    if (!silent) {
+      setIsKnowledgeTaskLoading(true)
+    }
     try {
       setKnowledgeTasks(
         await listKnowledgeTasks(token, selectedWorkspaceId, selectedKnowledgeBaseId)
       )
     } catch (error) {
-      setKnowledgeTasks([])
-      reportError(error)
+      if (!silent) {
+        setKnowledgeTasks([])
+        reportError(error)
+      }
     } finally {
-      setIsKnowledgeTaskLoading(false)
+      if (!silent) {
+        setIsKnowledgeTaskLoading(false)
+      }
     }
   }, [reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token])
 
@@ -346,15 +464,6 @@ export function KnowledgeBasePage({
   }, [loadDocuments])
 
   React.useEffect(() => {
-    if (!selectedPreviewDocumentId) {
-      return
-    }
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadDocumentDetails(selectedPreviewDocumentId)
-  }, [loadDocumentDetails, selectedPreviewDocumentId])
-
-  React.useEffect(() => {
     if (activeDetailTab !== "tasks") {
       return
     }
@@ -362,6 +471,22 @@ export function KnowledgeBasePage({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadKnowledgeTasks()
   }, [activeDetailTab, loadKnowledgeTasks])
+
+  const hasProcessingDocuments = documents.some(
+    (document) => PROCESSING_DOCUMENT_STATUSES[document.status]
+  )
+
+  React.useEffect(() => {
+    if (!hasProcessingDocuments) {
+      return
+    }
+
+    const timer = window.setInterval(() => {
+      void loadDocuments(true)
+      void loadKnowledgeTasks(true)
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [hasProcessingDocuments, loadDocuments, loadKnowledgeTasks])
 
   function toggleDocumentSelection(documentId: string, checked: boolean) {
     setSelectedDocumentIds((current) =>
@@ -374,11 +499,11 @@ export function KnowledgeBasePage({
   }
 
   function toggleAllFilteredDocuments(checked: boolean) {
-    const filteredDocumentIds = filteredDocuments.map((document) => document.id)
+    const visibleDocumentIds = visibleDocuments.map((document) => document.id)
     setSelectedDocumentIds((current) =>
       checked
-        ? Array.from(new Set([...current, ...filteredDocumentIds]))
-        : current.filter((id) => !filteredDocumentIds.includes(id))
+        ? Array.from(new Set([...current, ...visibleDocumentIds]))
+        : current.filter((id) => !visibleDocumentIds.includes(id))
     )
   }
 
@@ -389,94 +514,12 @@ export function KnowledgeBasePage({
     )
   }
 
-  function documentStatusLabel(status: string) {
-    const labels: Record<string, string> = {
-      uploaded: "待解析",
-      parse_queued: "解析排队中",
-      parsing: "解析中",
-      parsed: "待向量化",
-      index_queued: "向量化排队中",
-      indexing: "向量化中",
-      preview: "预览",
-      indexed: "已向量化",
-      parse_failed: "解析失败",
-      index_failed: "向量化失败",
-    }
-
-    return labels[status] ?? status
-  }
-
-  function documentStatusDotClassName(status: string) {
-    if (status.endsWith("_failed")) {
-      return "bg-destructive"
-    }
-    if (
-      status.endsWith("_queued") ||
-      status === "parsing" ||
-      status === "indexing"
-    ) {
-      return "bg-primary"
-    }
-    if (status === "parsed" || status === "indexed") {
-      return "bg-primary"
-    }
-    return "bg-muted-foreground"
-  }
-
-  function taskTypeLabel(taskType: string) {
-    const labels: Record<string, string> = {
-      parse: "解析",
-      index: "向量化",
-      rebuild_index: "重建索引",
-    }
-
-    return labels[taskType] ?? taskType
-  }
-
-  function taskStatusLabel(status: string) {
-    const labels: Record<string, string> = {
-      queued: "排队中",
-      running: "运行中",
-      succeeded: "成功",
-      failed: "失败",
-    }
-
-    return labels[status] ?? status
-  }
-
-  function taskStatusDotClassName(status: string) {
-    if (status === "failed") {
-      return "bg-destructive"
-    }
-    if (status === "queued" || status === "running") {
-      return "bg-primary"
-    }
-    if (status === "succeeded") {
-      return "bg-primary"
-    }
-    return "bg-muted-foreground"
-  }
-
-  function taskProgressText(task: KnowledgeTask) {
-    return `${task.processed_items}/${task.total_items}`
-  }
-
-  function formatBytes(bytes: number) {
-    if (bytes < 1024) {
-      return `${bytes} B`
-    }
-    if (bytes < 1024 * 1024) {
-      return `${(bytes / 1024).toFixed(1)} KB`
-    }
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  }
-
   function formatDistance(distance: number | null) {
     return distance === null ? "-" : distance.toFixed(4)
   }
 
-  function registeredModelLabel(model: RegisteredModel | null) {
-    return model ? `${model.name} / ${model.model_name}` : "未配置"
+  function registeredModelLabel(model: RegisteredModel | null, t: TFunction) {
+    return model ? `${model.name} / ${model.model_name}` : t("未配置")
   }
 
   function resetForm() {
@@ -500,9 +543,6 @@ export function KnowledgeBasePage({
     setActiveDetailTab("documents")
     setDocumentSearch("")
     setSelectedDocumentIds([])
-    setSelectedPreviewDocumentId(null)
-    setDocumentChunks([])
-    setDocumentTasks([])
     setKnowledgeTasks([])
     setQueryHits([])
     setQueryText("")
@@ -512,9 +552,6 @@ export function KnowledgeBasePage({
 
   function closeKnowledgeBase() {
     setIsUploadFlowOpen(false)
-    setSelectedPreviewDocumentId(null)
-    setDocumentChunks([])
-    setDocumentTasks([])
     setKnowledgeTasks([])
     onCloseKnowledgeBase()
   }
@@ -535,7 +572,7 @@ export function KnowledgeBasePage({
       setKnowledgeBases((current) => [...current, knowledgeBase])
       resetForm()
       setIsDialogOpen(false)
-      onNotify("success", "知识库已新建")
+      onNotify("success", t("知识库已新建"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -560,7 +597,7 @@ export function KnowledgeBasePage({
         })
       )
       setEditForm(null)
-      onNotify("success", "知识库已更新")
+      onNotify("success", t("知识库已更新"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -587,7 +624,7 @@ export function KnowledgeBasePage({
       )
       onNotify(
         "success",
-        nextStatus === "active" ? "知识库已恢复" : "知识库已归档"
+        t(nextStatus === "active" ? "知识库已恢复" : "知识库已归档")
       )
     } catch (error) {
       reportError(error)
@@ -600,18 +637,17 @@ export function KnowledgeBasePage({
     }
 
     setIsTestingModels(true)
+    setModelTestError(null)
     try {
       const result = await testKnowledgeBaseModels(
         token,
         selectedWorkspaceId,
         selectedKnowledgeBase.id
       )
-      onNotify(
-        "success",
-        `模型测试通过：Embedding ${result.embedding_dimensions} 维，Rerank ${result.reranker_results} 条`
-      )
+      setModelTestResult(result)
     } catch (error) {
-      reportError(error)
+      setModelTestResult(null)
+      setModelTestError(getErrorMessage(error, t))
     } finally {
       setIsTestingModels(false)
     }
@@ -638,13 +674,13 @@ export function KnowledgeBasePage({
       if (selectedKnowledgeBaseId === knowledgeBase.id) {
         closeKnowledgeBase()
       }
-      onNotify("success", "知识库已删除")
+      onNotify("success", t("知识库已删除"))
     } catch (error) {
       reportError(error)
     }
   }
 
-  async function handleParseDocument(document: KnowledgeDocument) {
+  async function handleParseDocumentWithOptions(document: KnowledgeDocument) {
     if (!selectedWorkspaceId || !selectedKnowledgeBase) {
       return
     }
@@ -656,19 +692,26 @@ export function KnowledgeBasePage({
         selectedWorkspaceId,
         selectedKnowledgeBase.id,
         document.id,
-        {
-          chunk_size: 1200,
-          chunk_overlap: 150,
-          cleaning_rules: [],
-          auto_index: false,
-        }
+        segmentMode === "smart"
+          ? {
+              chunk_size: SMART_CHUNK_SIZE,
+              chunk_overlap: SMART_CHUNK_OVERLAP,
+              cleaning_rules: SMART_CLEANING_RULES,
+              split_separator: SMART_SPLIT_SEPARATOR,
+              auto_index: true,
+            }
+          : {
+              chunk_size: chunkSize,
+              chunk_overlap: chunkOverlap,
+              cleaning_rules: cleaningRules,
+              split_separator: splitSeparator,
+              auto_index: true,
+            }
       )
+      setSegmentDialogDocument(null)
       await loadDocuments()
-      await Promise.all([
-        loadKnowledgeTasks(),
-        loadDocumentDetails(document.id),
-      ])
-      onNotify("success", "已提交解析任务")
+      await loadKnowledgeTasks()
+      onNotify("success", t("已提交解析任务"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -695,18 +738,98 @@ export function KnowledgeBasePage({
       )
       await loadDocuments()
       await loadKnowledgeTasks()
-      if (
-        selectedPreviewDocumentId &&
-        targetDocuments.some((document) => document.id === selectedPreviewDocumentId)
-      ) {
-        await loadDocumentDetails(selectedPreviewDocumentId)
-      }
       onNotify(
         "success",
         targetDocuments.length === 1
-          ? "已提交向量化任务"
-          : `已提交 ${targetDocuments.length} 个向量化任务`
+          ? t("已提交向量化任务")
+          : t("已提交 {value} 个向量化任务", {
+              value: targetDocuments.length,
+            })
       )
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsSubmittingDocumentTask(false)
+    }
+  }
+
+  async function handleDownloadDocument(document: KnowledgeDocument) {
+    if (!selectedWorkspaceId || !selectedKnowledgeBase) {
+      return
+    }
+
+    try {
+      await downloadKnowledgeDocument(
+        token,
+        selectedWorkspaceId,
+        selectedKnowledgeBase.id,
+        document.id,
+        document.filename
+      )
+    } catch (error) {
+      reportError(error)
+    }
+  }
+
+  async function handleToggleDocumentActive(document: KnowledgeDocument) {
+    if (!selectedWorkspaceId || !selectedKnowledgeBase) {
+      return
+    }
+
+    setIsSubmittingDocumentTask(true)
+    try {
+      const updated = await setKnowledgeDocumentActive(
+        token,
+        selectedWorkspaceId,
+        selectedKnowledgeBase.id,
+        document.id,
+        !document.is_active
+      )
+      setDocuments((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item))
+      )
+      onNotify("success", t(updated.is_active ? "文档已启用" : "文档已停用"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsSubmittingDocumentTask(false)
+    }
+  }
+
+  async function handleDeleteSelectedDocuments() {
+    if (!selectedWorkspaceId || !selectedKnowledgeBase || !selectedDocuments.length) {
+      return
+    }
+
+    if (
+      !window.confirm(
+        t("永久删除选中的 {value} 个文档？此操作不可恢复。", {
+          value: selectedDocuments.length,
+        })
+      )
+    ) {
+      return
+    }
+
+    setIsSubmittingDocumentTask(true)
+    try {
+      await Promise.all(
+        selectedDocuments.map((document) =>
+          deleteKnowledgeDocument(
+            token,
+            selectedWorkspaceId,
+            selectedKnowledgeBase.id,
+            document.id
+          )
+        )
+      )
+      const deletedIds = new Set(selectedDocuments.map((document) => document.id))
+      setDocuments((current) =>
+        current.filter((item) => !deletedIds.has(item.id))
+      )
+      setSelectedDocumentIds([])
+      await loadKnowledgeTasks()
+      onNotify("success", t("已删除 {value} 个文档", { value: selectedDocuments.length }))
     } catch (error) {
       reportError(error)
     } finally {
@@ -727,7 +850,7 @@ export function KnowledgeBasePage({
         selectedKnowledgeBase.id
       )
       await loadKnowledgeTasks()
-      onNotify("success", "已提交重建索引任务")
+      onNotify("success", t("已提交重建索引任务"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -751,9 +874,8 @@ export function KnowledgeBasePage({
       await Promise.all([
         loadDocuments(),
         loadKnowledgeTasks(),
-        task.document_id ? loadDocumentDetails(task.document_id) : Promise.resolve(),
       ])
-      onNotify("success", "已重新提交任务")
+      onNotify("success", t("已重新提交任务"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -788,10 +910,6 @@ export function KnowledgeBasePage({
     }
   }
 
-  function handleOpenDocumentPreview(document: KnowledgeDocument) {
-    setSelectedPreviewDocumentId(document.id)
-  }
-
   async function handleDeleteDocument(document: KnowledgeDocument) {
     if (!selectedWorkspaceId || !selectedKnowledgeBase) {
       return
@@ -818,13 +936,8 @@ export function KnowledgeBasePage({
       setSelectedDocumentIds((current) =>
         current.filter((id) => id !== document.id)
       )
-      if (selectedPreviewDocumentId === document.id) {
-        setSelectedPreviewDocumentId(null)
-        setDocumentChunks([])
-        setDocumentTasks([])
-      }
       await loadKnowledgeTasks()
-      onNotify("success", "文档已删除")
+      onNotify("success", t("文档已删除"))
     } catch (error) {
       reportError(error)
     }
@@ -881,7 +994,7 @@ export function KnowledgeBasePage({
         ...current.filter((item) => item.user.id !== grant.user.id),
         grant,
       ])
-      onNotify("success", "授权已保存")
+      onNotify("success", t("授权已保存"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -904,7 +1017,7 @@ export function KnowledgeBasePage({
       setPermissions((current) =>
         current.filter((item) => item.user.id !== userId)
       )
-      onNotify("success", "授权已撤销")
+      onNotify("success", t("授权已撤销"))
     } catch (error) {
       reportError(error)
     }
@@ -918,11 +1031,10 @@ export function KnowledgeBasePage({
     label: string
     icon: React.ElementType
   }> = [
-    { key: "documents", label: "文档", icon: FileTextIcon },
-    { key: "tasks", label: "任务", icon: RotateCcwIcon },
-    { key: "questions", label: "问题", icon: HelpCircleIcon },
-    { key: "hit-test", label: "命中测试", icon: TargetIcon },
-    { key: "settings", label: "设置", icon: SettingsIcon },
+    { key: "documents", label: t("文档"), icon: FileTextIcon },
+    { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
+    { key: "hit-test", label: t("命中测试"), icon: TargetIcon },
+    { key: "settings", label: t("设置"), icon: SettingsIcon },
   ]
 
   if (selectedKnowledgeBase && isUploadFlowOpen && selectedWorkspaceId) {
@@ -952,7 +1064,7 @@ export function KnowledgeBasePage({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label="返回"
+                aria-label={t("返回")}
                 onClick={closeKnowledgeBase}
               >
                 <ArrowLeftIcon />
@@ -998,7 +1110,7 @@ export function KnowledgeBasePage({
                       onClick={() => setIsUploadFlowOpen(true)}
                     >
                       <UploadIcon data-icon="inline-start" />
-                      上传文档
+                      {t("上传文档")}
                     </Button>
                     <Button
                       type="button"
@@ -1016,7 +1128,7 @@ export function KnowledgeBasePage({
                           data-icon="inline-start"
                         />
                       ) : null}
-                      向量化
+                      {t("向量化")}
                       {selectedDocumentCount ? `(${selectedDocumentCount})` : ""}
                     </Button>
                     <Button
@@ -1033,63 +1145,89 @@ export function KnowledgeBasePage({
                       ) : (
                         <RotateCcwIcon data-icon="inline-start" />
                       )}
-                      重建索引
-                    </Button>
-                    <Button type="button" variant="outline" disabled>
-                      生成问题
-                    </Button>
-                    <Button type="button" variant="outline" disabled>
-                      <SlidersHorizontalIcon data-icon="inline-start" />
-                      设置
+                      {t("重建索引")}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
-                      size="icon"
-                      disabled
-                      aria-label="更多"
+                      disabled={
+                        !canEditDocuments ||
+                        selectedDocumentCount === 0 ||
+                        isSubmittingDocumentTask
+                      }
+                      onClick={() => void handleDeleteSelectedDocuments()}
                     >
-                      <MoreHorizontalIcon />
+                      <Trash2Icon data-icon="inline-start" />
+                      {t("删除")}
+                      {selectedDocumentCount ? `(${selectedDocumentCount})` : ""}
                     </Button>
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 justify-between sm:w-36"
-                      disabled
-                    >
-                      名称
-                      <ChevronDownIcon data-icon="inline-end" />
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 justify-between sm:w-36"
+                        >
+                          <span className="truncate">
+                            {t(
+                              DOCUMENT_SORT_OPTIONS.find(
+                                (option) => option.key === documentSortKey
+                              )?.label ?? "排序"
+                            )}
+                          </span>
+                          {documentSortDirection === "asc" ? (
+                            <ArrowUpIcon className="size-3.5" />
+                          ) : (
+                            <ArrowDownIcon className="size-3.5" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-40">
+                        {DOCUMENT_SORT_OPTIONS.map((option) => (
+                          <DropdownMenuItem
+                            key={option.key}
+                            className="justify-between"
+                            onSelect={() => cycleDocumentSort(option.key)}
+                          >
+                            {t(option.label)}
+                            {documentSortKey === option.key ? (
+                              documentSortDirection === "asc" ? (
+                                <ArrowUpIcon className="size-3.5 text-primary" />
+                              ) : (
+                                <ArrowDownIcon className="size-3.5 text-primary" />
+                              )
+                            ) : null}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                     <div className="relative sm:w-80">
                       <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
                         value={documentSearch}
-                        onChange={(event) =>
+                        onChange={(event) => {
                           setDocumentSearch(event.target.value)
-                        }
+                          setDocumentPage(1)
+                        }}
                         className="pl-9"
-                        placeholder="按名称搜索"
+                        placeholder={t("按名称搜索")}
                       />
                     </div>
-                    <Button type="button" variant="outline" disabled>
-                      <TagIcon data-icon="inline-start" />
-                      标签管理
-                    </Button>
                   </div>
                 </div>
 
                 <div className="px-4 py-4 lg:px-5">
                   <div className="overflow-x-auto rounded-lg border bg-background">
-                    <div className="min-w-[1520px]">
-                      <div className="grid grid-cols-[44px_240px_120px_100px_90px_110px_130px_170px_170px_120px_220px] items-center border-b px-3 py-4 text-sm font-medium text-muted-foreground">
+                    <div className="min-w-[1270px]">
+                      <div className="grid grid-cols-[44px_240px_120px_100px_90px_110px_170px_170px_220px] items-center border-b px-3 py-4 text-sm font-medium text-muted-foreground">
                         <label className="flex items-center justify-center">
                           <input
                             ref={selectAllDocumentsRef}
                             type="checkbox"
                             className="size-4"
-                            aria-label="选择所有文档"
+                            aria-label={t("选择所有文档")}
                             checked={isAllFilteredDocumentsSelected}
                             disabled={!filteredDocuments.length}
                             onChange={(event) =>
@@ -1097,76 +1235,92 @@ export function KnowledgeBasePage({
                             }
                           />
                         </label>
-                        <span>文件名称</span>
-                        <span>文件状态</span>
-                        <span className="flex items-center gap-1">
-                          大小
-                          <ArrowUpDownIcon className="size-3.5" />
-                        </span>
-                        <span className="flex items-center gap-1">
-                          分段
-                          <ArrowUpDownIcon className="size-3.5" />
-                        </span>
-                        <span className="flex items-center gap-1">
-                          启用状态
-                          <FilterIcon className="size-3.5" />
-                        </span>
-                        <span>命中处理方式</span>
-                        <span className="flex items-center gap-1">
-                          创建时间
-                          <ArrowUpDownIcon className="size-3.5" />
-                        </span>
-                        <span className="flex items-center gap-1">
-                          更新时间
-                          <ArrowUpDownIcon className="size-3.5" />
-                        </span>
-                        <span className="flex items-center gap-1">
-                          标签
-                          <FilterIcon className="size-3.5" />
-                        </span>
-                        <span className="sticky right-0 flex h-full items-center border-l bg-background px-4">
-                          操作
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-[44px_240px_120px_100px_90px_110px_130px_170px_170px_120px_220px] items-center border-b px-3 py-4 text-sm">
-                        <span />
+                        <span>{t("文件名称")}</span>
+                        <span>{t("文件状态")}</span>
                         <button
                           type="button"
-                          className="flex w-fit items-center gap-1 text-primary disabled:text-muted-foreground"
-                          disabled
+                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => cycleDocumentSort("size_bytes")}
                         >
-                          <PlusIcon className="size-4" />
-                          快速创建空白文档
+                          {t("大小")}
+                          {documentSortKey === "size_bytes" ? (
+                            documentSortDirection === "asc" ? (
+                              <ArrowUpIcon className="size-3.5" />
+                            ) : (
+                              <ArrowDownIcon className="size-3.5" />
+                            )
+                          ) : (
+                            <ArrowUpDownIcon className="size-3.5" />
+                          )}
                         </button>
-                        <span />
-                        <span />
-                        <span />
-                        <span />
-                        <span />
-                        <span />
-                        <span />
-                        <span />
-                        <span className="sticky right-0 h-full border-l bg-background" />
+                        <button
+                          type="button"
+                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => cycleDocumentSort("chunk_count")}
+                        >
+                          {t("分段")}
+                          {documentSortKey === "chunk_count" ? (
+                            documentSortDirection === "asc" ? (
+                              <ArrowUpIcon className="size-3.5" />
+                            ) : (
+                              <ArrowDownIcon className="size-3.5" />
+                            )
+                          ) : (
+                            <ArrowUpDownIcon className="size-3.5" />
+                          )}
+                        </button>
+                        <span>{t("启用状态")}</span>
+                        <button
+                          type="button"
+                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => cycleDocumentSort("created_at")}
+                        >
+                          {t("创建时间")}
+                          {documentSortKey === "created_at" ? (
+                            documentSortDirection === "asc" ? (
+                              <ArrowUpIcon className="size-3.5" />
+                            ) : (
+                              <ArrowDownIcon className="size-3.5" />
+                            )
+                          ) : (
+                            <ArrowUpDownIcon className="size-3.5" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => cycleDocumentSort("updated_at")}
+                        >
+                          {t("更新时间")}
+                          {documentSortKey === "updated_at" ? (
+                            documentSortDirection === "asc" ? (
+                              <ArrowUpIcon className="size-3.5" />
+                            ) : (
+                              <ArrowDownIcon className="size-3.5" />
+                            )
+                          ) : (
+                            <ArrowUpDownIcon className="size-3.5" />
+                          )}
+                        </button>
+                        <span className="sticky right-0 flex h-full items-center border-l bg-background px-4">
+                          {t("操作")}
+                        </span>
                       </div>
                       {isDocumentLoading ? (
                         <div className="flex min-h-56 items-center justify-center px-3 py-10 text-sm text-muted-foreground">
                           <LoaderCircleIcon className="animate-spin" />
                         </div>
-                      ) : filteredDocuments.length ? (
-                        filteredDocuments.map((document) => (
+                      ) : visibleDocuments.length ? (
+                        visibleDocuments.map((document) => (
                           <div
                             key={document.id}
-                            className={cn(
-                              "grid min-h-14 grid-cols-[44px_240px_120px_100px_90px_110px_130px_170px_170px_120px_220px] items-center border-b px-3 text-sm last:border-b-0 hover:bg-muted/40",
-                              selectedPreviewDocumentId === document.id &&
-                                "bg-muted/50"
-                            )}
+                            className="grid min-h-14 grid-cols-[44px_240px_120px_100px_90px_110px_170px_170px_220px] items-center border-b px-3 text-sm last:border-b-0 hover:bg-muted/40"
                           >
                             <label className="flex items-center justify-center">
                               <input
                                 type="checkbox"
                                 className="size-4"
-                                aria-label={`选择 ${document.filename}`}
+                                aria-label={t("选择 {value}", { value: document.filename })}
                                 checked={selectedDocumentIds.includes(
                                   document.id
                                 )}
@@ -1181,9 +1335,14 @@ export function KnowledgeBasePage({
                             <div className="min-w-0 pr-3">
                               <div className="flex min-w-0 items-center gap-2">
                                 <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
-                                <p className="truncate font-medium">
+                                <button
+                                  type="button"
+                                  className="min-w-0 cursor-pointer truncate text-left font-medium outline-none hover:text-primary focus-visible:underline"
+                                  title={document.filename}
+                                  onClick={() => onOpenDocument(document.id)}
+                                >
                                   {document.filename}
-                                </p>
+                                </button>
                               </div>
                               {document.last_error ? (
                                 <p className="mt-1 truncate text-xs text-destructive">
@@ -1192,49 +1351,62 @@ export function KnowledgeBasePage({
                               ) : null}
                             </div>
                             <span className="flex items-center gap-2">
-                              <span
-                                className={cn(
-                                  "size-3.5 rounded-full",
-                                  documentStatusDotClassName(document.status)
-                                )}
-                              />
-                              {documentStatusLabel(document.status)}
+                              {PROCESSING_DOCUMENT_STATUSES[document.status] ? (
+                                <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-primary" />
+                              ) : (
+                                <span
+                                  className={cn(
+                                    "size-2.5 shrink-0 rounded-full",
+                                    documentStatusDotClassName(document.status)
+                                  )}
+                                />
+                              )}
+                              {documentStatusText(
+                                document,
+                                knowledgeTasks,
+                                t
+                              )}
                             </span>
                             <span>{formatBytes(document.size_bytes)}</span>
-                            <span>
-                              {selectedPreviewDocumentId === document.id
-                                ? documentChunks.length
-                                : "-"}
-                            </span>
+                            <span>{document.chunk_count}</span>
                             <span className="flex items-center gap-2">
-                              <span className="flex size-3.5 items-center justify-center rounded-full bg-primary text-[10px] leading-none text-primary-foreground">
-                                ✓
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={document.is_active}
+                                aria-label={t(
+                                  document.is_active ? "停用 {value}" : "启用 {value}",
+                                  { value: document.filename }
+                                )}
+                                disabled={!canEditDocuments || isSubmittingDocumentTask}
+                                onClick={() =>
+                                  void handleToggleDocumentActive(document)
+                                }
+                                className={cn(
+                                  "relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+                                  document.is_active
+                                    ? "bg-primary"
+                                    : "bg-muted-foreground/40"
+                                )}
+                              >
+                                <span
+                                  className={cn(
+                                    "block size-4 rounded-full bg-background shadow-sm transition-transform",
+                                    document.is_active ? "translate-x-[18px]" : "translate-x-0.5"
+                                  )}
+                                />
+                              </button>
+                              <span>
+                                {t(document.is_active ? "已启用" : "已停用")}
                               </span>
-                              已启用
                             </span>
-                            <span>-</span>
                             <span className="whitespace-nowrap">
                               {formatDateTime(document.created_at, locale)}
                             </span>
                             <span className="whitespace-nowrap">
                               {formatDateTime(document.updated_at, locale)}
                             </span>
-                            <span>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="border-dashed px-2 text-muted-foreground"
-                                disabled
-                              >
-                                <PlusIcon data-icon="inline-start" />
-                                标签
-                              </Button>
-                            </span>
                             <span className="sticky right-0 flex h-full items-center gap-2 border-l bg-background px-4">
-                              <span className="h-5 w-9 rounded-full bg-primary p-0.5">
-                                <span className="ml-auto block size-4 rounded-full bg-primary-foreground" />
-                              </span>
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -1243,8 +1415,16 @@ export function KnowledgeBasePage({
                                   !canEditDocuments ||
                                   isSubmittingDocumentTask
                                 }
-                                aria-label={`解析 ${document.filename}`}
-                                onClick={() => void handleParseDocument(document)}
+                                aria-label={t("重新分段 {value}", { value: document.filename })}
+                                title={t("重新分段 {value}", { value: document.filename })}
+                                onClick={() => {
+                                  setChunkSize(SMART_CHUNK_SIZE)
+                                  setChunkOverlap(SMART_CHUNK_OVERLAP)
+                                  setSplitSeparator(SMART_SPLIT_SEPARATOR)
+                                  setCleaningRules(SMART_CLEANING_RULES)
+                                  setSegmentMode("smart")
+                                  setSegmentDialogDocument(document)
+                                }}
                               >
                                 <RotateCcwIcon />
                               </Button>
@@ -1256,21 +1436,13 @@ export function KnowledgeBasePage({
                                   !canEditDocuments ||
                                   isSubmittingDocumentTask
                                 }
-                                aria-label={`向量化 ${document.filename}`}
+                                aria-label={t("向量化 {value}", { value: document.filename })}
+                                title={t("向量化 {value}", { value: document.filename })}
                                 onClick={() =>
                                   void handleIndexDocuments([document])
                                 }
                               >
                                 <SlidersHorizontalIcon />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={`预览 ${document.filename}`}
-                                onClick={() => handleOpenDocumentPreview(document)}
-                              >
-                                <FileTextIcon />
                               </Button>
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -1282,57 +1454,27 @@ export function KnowledgeBasePage({
                                       !canEditDocuments ||
                                       isSubmittingDocumentTask
                                     }
-                                    aria-label={`操作 ${document.filename}`}
+                                    aria-label={t("操作 {value}", { value: document.filename })}
+                                    title={t("操作 {value}", { value: document.filename })}
                                   >
                                     <MoreHorizontalIcon />
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  <DropdownMenuItem disabled>
-                                    <HelpCircleIcon />
-                                    生成问题
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem disabled>
-                                    <TagIcon />
-                                    标签设置
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem disabled>
-                                    <ArchiveIcon />
-                                    迁移
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem disabled>
-                                    <FileTextIcon />
-                                    导出 Excel
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem disabled>
-                                    <FileTextIcon />
-                                    导出 Zip
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem disabled>
-                                    <FileTextIcon />
-                                    下载原文
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem disabled>
-                                    <UploadIcon />
-                                    替换原文
+                                  <DropdownMenuItem
+                                    onSelect={() =>
+                                      void handleDownloadDocument(document)
+                                    }
+                                  >
+                                    <DownloadIcon />
+                                    {t("下载原文")}
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
-                                    onSelect={() =>
-                                      handleOpenDocumentPreview(document)
-                                    }
+                                    onSelect={() => onOpenDocument(document.id)}
                                   >
                                     <FileTextIcon />
-                                    预览切片
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onSelect={() =>
-                                      void handleParseDocument(document)
-                                    }
-                                  >
-                                    <RotateCcwIcon />
-                                    解析
+                                    {t("预览切片")}
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     onSelect={() =>
@@ -1340,7 +1482,7 @@ export function KnowledgeBasePage({
                                     }
                                   >
                                     <SlidersHorizontalIcon />
-                                    向量化
+                                    {t("向量化")}
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
@@ -1350,7 +1492,7 @@ export function KnowledgeBasePage({
                                     }
                                   >
                                     <Trash2Icon />
-                                    删除
+                                    {t("删除")}
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
@@ -1359,162 +1501,274 @@ export function KnowledgeBasePage({
                         ))
                       ) : (
                         <div className="flex min-h-56 items-center justify-center px-3 py-10 text-sm text-muted-foreground">
-                          {documents.length ? "没有匹配的文档" : "暂无文档"}
+                          {t(documents.length ? "没有匹配的文档" : "暂无文档")}
                         </div>
                       )}
                     </div>
                   </div>
-                  {selectedPreviewDocument ? (
-                    <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-                      <section className="rounded-lg border bg-background">
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
-                          <div className="min-w-0">
-                            <h2 className="truncate text-sm font-semibold">
-                              {selectedPreviewDocument.filename}
-                            </h2>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              切片预览
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={isDocumentDetailLoading}
-                            onClick={() =>
-                              void loadDocumentDetails(
-                                selectedPreviewDocument.id
-                              )
-                            }
-                          >
-                            {isDocumentDetailLoading ? (
-                              <LoaderCircleIcon
-                                className="animate-spin"
-                                data-icon="inline-start"
-                              />
-                            ) : (
-                              <RotateCcwIcon data-icon="inline-start" />
-                            )}
-                            刷新
-                          </Button>
-                        </div>
-                        {isDocumentDetailLoading ? (
-                          <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
-                            <LoaderCircleIcon className="animate-spin" />
-                          </div>
-                        ) : documentChunks.length ? (
-                          <div className="max-h-[420px] overflow-auto p-4">
-                            <div className="space-y-3">
-                              {documentChunks.map((chunk) => (
-                                <article
-                                  key={chunk.id}
-                                  className="rounded-md border p-3"
-                                >
-                                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                                    <span className="font-medium text-foreground">
-                                      #{chunk.chunk_index + 1}
-                                    </span>
-                                    <span>
-                                      {chunk.char_count} 字符 / {chunk.token_count} tokens
-                                    </span>
-                                    <span>{documentStatusLabel(chunk.status)}</span>
-                                  </div>
-                                  <MarkdownContent
-                                    content={chunk.content}
-                                    className="mt-3"
-                                  />
-                                </article>
-                              ))}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex min-h-40 items-center justify-center px-4 text-sm text-muted-foreground">
-                            暂无切片
-                          </div>
-                        )}
-                      </section>
-
-                      <section className="rounded-lg border bg-background">
-                        <div className="border-b px-4 py-3">
-                          <h2 className="text-sm font-semibold">文档任务</h2>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            解析、向量化和失败重试状态
-                          </p>
-                        </div>
-                        <div className="max-h-[420px] overflow-auto p-3">
-                          {documentTasks.length ? (
-                            <div className="space-y-2">
-                              {documentTasks.map((task) => (
-                                <div
-                                  key={task.id}
-                                  className="rounded-md border p-3 text-sm"
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="font-medium">
-                                      {taskTypeLabel(task.task_type)}
-                                    </span>
-                                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                                      <span
-                                        className={cn(
-                                          "size-2.5 rounded-full",
-                                          taskStatusDotClassName(task.status)
-                                        )}
-                                      />
-                                      {taskStatusLabel(task.status)}
-                                    </span>
-                                  </div>
-                                  <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
-                                    <span>进度 {taskProgressText(task)}</span>
-                                    <span>
-                                      尝试 {task.attempts}/{task.max_attempts}
-                                    </span>
-                                    <span>
-                                      更新时间 {formatDateTime(task.updated_at, locale)}
-                                    </span>
-                                  </div>
-                                  {task.last_error ? (
-                                    <p className="mt-2 text-xs text-destructive">
-                                      {task.last_error}
-                                    </p>
-                                  ) : null}
-                                  {task.status === "failed" ? (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="mt-3"
-                                      disabled={!canEditDocuments || isRetryingTask}
-                                      onClick={() =>
-                                        void handleRetryKnowledgeTask(task)
-                                      }
-                                    >
-                                      <RotateCcwIcon data-icon="inline-start" />
-                                      重试
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="flex min-h-32 items-center justify-center text-sm text-muted-foreground">
-                              暂无任务
-                            </div>
-                          )}
-                        </div>
-                      </section>
+                  {filteredDocuments.length > DOCUMENT_PAGE_SIZE ? (
+                    <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
+                      <span className="text-muted-foreground">
+                        {t("共 {value} 条", { value: filteredDocuments.length })}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={documentPage <= 1}
+                          onClick={() =>
+                            setDocumentPage((current) => Math.max(1, current - 1))
+                          }
+                        >
+                          {t("上一页")}
+                        </Button>
+                        <span className="text-muted-foreground">
+                          {documentPage} / {documentPageCount}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={documentPage >= documentPageCount}
+                          onClick={() =>
+                            setDocumentPage((current) =>
+                              Math.min(documentPageCount, current + 1)
+                            )
+                          }
+                        >
+                          {t("下一页")}
+                        </Button>
+                      </div>
                     </div>
                   ) : null}
                 </div>
               </div>
             ) : null}
 
+            <Dialog
+              open={segmentDialogDocument !== null}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setSegmentDialogDocument(null)
+                }
+              }}
+            >
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{t("重新分段")}</DialogTitle>
+                  <DialogDescription>
+                    {t("先用智能规则生成预览，需要时再精调。")}
+                  </DialogDescription>
+                </DialogHeader>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    if (segmentDialogDocument) {
+                      void handleParseDocumentWithOptions(segmentDialogDocument)
+                    }
+                  }}
+                >
+                  <FieldGroup>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded-lg border p-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          segmentMode === "smart"
+                            ? "border-primary bg-primary/5"
+                            : "hover:bg-muted"
+                        )}
+                        onClick={() => setSegmentMode("smart")}
+                      >
+                        <span className="block text-sm font-medium">
+                          {t("智能分段")}
+                        </span>
+                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                          {t("按常见文档结构自动设置长度、重叠和清洗规则。")}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded-lg border p-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          segmentMode === "advanced"
+                            ? "border-primary bg-primary/5"
+                            : "hover:bg-muted"
+                        )}
+                        onClick={() => setSegmentMode("advanced")}
+                      >
+                        <span className="block text-sm font-medium">
+                          {t("高级分段")}
+                        </span>
+                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                          {t("手动控制片段字符数、重叠字符和文本清洗规则。")}
+                        </span>
+                      </button>
+                    </div>
+
+                    {segmentMode === "advanced" ? (
+                      <>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field>
+                            <FieldLabel htmlFor="row-segment-size">
+                              {t("片段字符")}
+                            </FieldLabel>
+                            <Input
+                              id="row-segment-size"
+                              type="number"
+                              min={100}
+                              max={8000}
+                              value={chunkSize}
+                              onChange={(event) =>
+                                setChunkSize(Number(event.target.value))
+                              }
+                              required
+                            />
+                          </Field>
+                          <Field>
+                            <FieldLabel htmlFor="row-segment-overlap">
+                              {t("重叠字符")}
+                            </FieldLabel>
+                            <Input
+                              id="row-segment-overlap"
+                              type="number"
+                              min={0}
+                              max={2000}
+                              value={chunkOverlap}
+                              onChange={(event) =>
+                                setChunkOverlap(Number(event.target.value))
+                              }
+                              required
+                            />
+                          </Field>
+                        </div>
+                        {chunkOverlap >= chunkSize ? (
+                          <p className="text-sm text-destructive">
+                            {t("重叠字符必须小于片段字符")}
+                          </p>
+                        ) : null}
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field>
+                            <FieldLabel>{t("切分字符")}</FieldLabel>
+                            <DropdownMenu modal={false}>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-9 w-full justify-between font-normal"
+                                >
+                                  <span className="truncate">
+                                    {t(
+                                      SPLIT_SEPARATOR_OPTIONS.find(
+                                        (option) =>
+                                          option.value === splitSeparator
+                                      )?.labelKey ?? "空行（段落）"
+                                    )}
+                                  </span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start">
+                                {SPLIT_SEPARATOR_OPTIONS.map((option) => (
+                                  <DropdownMenuItem
+                                    key={option.value}
+                                    onSelect={() =>
+                                      setSplitSeparator(option.value)
+                                    }
+                                  >
+                                    {t(option.labelKey)}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </Field>
+                          <Field>
+                            <FieldLabel>{t("清洗规则")}</FieldLabel>
+                            <DropdownMenu modal={false}>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-9 w-full justify-between font-normal"
+                                >
+                                  <span className="truncate">
+                                    {cleaningRules.length
+                                      ? cleaningRules
+                                          .map(
+                                            (rule) =>
+                                              t(
+                                                CLEANING_RULE_OPTIONS.find(
+                                                  (option) =>
+                                                    option.value === rule
+                                                )?.labelKey ??
+                                                  "去除行首尾空白"
+                                              )
+                                          )
+                                          .join(t("列表分隔符"))
+                                      : t("不使用")}
+                                  </span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start">
+                                {CLEANING_RULE_OPTIONS.map((option) => (
+                                  <DropdownMenuItem
+                                    key={option.value}
+                                    onSelect={() =>
+                                      setCleaningRules((current) =>
+                                        current.includes(option.value)
+                                          ? current.filter(
+                                              (rule) => rule !== option.value
+                                            )
+                                          : [...current, option.value]
+                                      )
+                                    }
+                                  >
+                                    {t(option.labelKey)}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </Field>
+                        </div>
+                      </>
+                    ) : null}
+                  </FieldGroup>
+                  <DialogFooter className="pt-5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setSegmentDialogDocument(null)}
+                    >
+                      {t("取消")}
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={
+                        isSubmittingDocumentTask ||
+                        (segmentMode === "advanced" &&
+                          chunkOverlap >= chunkSize)
+                      }
+                    >
+                      {isSubmittingDocumentTask ? (
+                        <LoaderCircleIcon
+                          className="animate-spin"
+                          data-icon="inline-start"
+                        />
+                      ) : null}
+                      {t("开始入库")}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+
             {activeDetailTab === "tasks" ? (
               <div className="p-4 lg:p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h1 className="text-xl font-semibold">任务</h1>
+                    <h1 className="text-xl font-semibold">{t("任务")}</h1>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      导入、向量化、重建和失败重试记录
+                      {t("导入、向量化、重建和失败重试记录")}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1532,7 +1786,7 @@ export function KnowledgeBasePage({
                       ) : (
                         <RotateCcwIcon data-icon="inline-start" />
                       )}
-                      刷新
+                      {t("刷新")}
                     </Button>
                     <Button
                       type="button"
@@ -1541,7 +1795,7 @@ export function KnowledgeBasePage({
                       onClick={() => void handleRebuildIndex()}
                     >
                       <SlidersHorizontalIcon data-icon="inline-start" />
-                      重建索引
+                      {t("重建索引")}
                     </Button>
                   </div>
                 </div>
@@ -1549,12 +1803,12 @@ export function KnowledgeBasePage({
                 <div className="mt-4 overflow-x-auto rounded-lg border bg-background">
                   <div className="min-w-[860px]">
                     <div className="grid grid-cols-[120px_120px_140px_120px_minmax(220px,1fr)_120px] border-b px-4 py-3 text-sm font-medium text-muted-foreground">
-                      <span>类型</span>
-                      <span>状态</span>
-                      <span>进度</span>
-                      <span>尝试次数</span>
-                      <span>更新时间 / 错误</span>
-                      <span>操作</span>
+                      <span>{t("类型")}</span>
+                      <span>{t("状态")}</span>
+                      <span>{t("进度")}</span>
+                      <span>{t("尝试次数")}</span>
+                      <span>{t("更新时间 / 错误")}</span>
+                      <span>{t("操作")}</span>
                     </div>
                     {isKnowledgeTaskLoading ? (
                       <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
@@ -1567,18 +1821,18 @@ export function KnowledgeBasePage({
                           className="grid min-h-16 grid-cols-[120px_120px_140px_120px_minmax(220px,1fr)_120px] items-center border-b px-4 py-3 text-sm last:border-b-0"
                         >
                           <span className="font-medium">
-                            {taskTypeLabel(task.task_type)}
+                            {taskTypeLabel(task.task_type, t)}
                           </span>
                           <span className="flex items-center gap-2">
                             <span
                               className={cn(
-                                "size-3 rounded-full",
+                                "size-2.5 rounded-full",
                                 taskStatusDotClassName(task.status)
                               )}
                             />
-                            {taskStatusLabel(task.status)}
+                            {taskStatusLabel(task.status, t)}
                           </span>
-                          <span>{taskProgressText(task)}</span>
+                          <span>{task.processed_items}/{task.total_items}</span>
                           <span>
                             {task.attempts}/{task.max_attempts}
                           </span>
@@ -1605,14 +1859,14 @@ export function KnowledgeBasePage({
                               onClick={() => void handleRetryKnowledgeTask(task)}
                             >
                               <RotateCcwIcon data-icon="inline-start" />
-                              重试
+                              {t("重试")}
                             </Button>
                           </span>
                         </div>
                       ))
                     ) : (
                       <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-                        暂无任务
+                        {t("暂无任务")}
                       </div>
                     )}
                   </div>
@@ -1620,21 +1874,12 @@ export function KnowledgeBasePage({
               </div>
             ) : null}
 
-            {activeDetailTab === "questions" ? (
-              <div className="p-4 lg:p-5">
-                <h1 className="text-xl font-semibold">问题</h1>
-                <div className="mt-4 rounded-lg border p-8 text-sm text-muted-foreground">
-                  暂无问题
-                </div>
-              </div>
-            ) : null}
-
             {activeDetailTab === "hit-test" ? (
               <div className="p-4 lg:p-5">
                 <div className="max-w-4xl">
-                  <h1 className="text-xl font-semibold">命中测试</h1>
+                  <h1 className="text-xl font-semibold">{t("命中测试")}</h1>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    使用当前知识库的向量索引和权威切片状态验证召回结果
+                    {t("使用当前知识库的向量索引和权威切片状态验证召回结果")}
                   </p>
 
                   <form
@@ -1642,18 +1887,18 @@ export function KnowledgeBasePage({
                     onSubmit={(event) => void handleQueryKnowledgeBase(event)}
                   >
                     <label className="text-sm font-medium" htmlFor="query-text">
-                      查询内容
+                      {t("查询内容")}
                     </label>
                     <textarea
                       id="query-text"
                       value={queryText}
                       onChange={(event) => setQueryText(event.target.value)}
                       className="mt-2 min-h-28 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder="输入要测试的检索问题"
+                      placeholder={t("输入要测试的检索问题")}
                     />
                     <div className="mt-3 flex flex-wrap items-end gap-3">
                       <label className="grid gap-1 text-sm font-medium">
-                        返回数量
+                        {t("返回数量")}
                         <Input
                           type="number"
                           min={1}
@@ -1682,14 +1927,14 @@ export function KnowledgeBasePage({
                         ) : (
                           <TargetIcon data-icon="inline-start" />
                         )}
-                        测试召回
+                        {t("测试召回")}
                       </Button>
                     </div>
                   </form>
 
                   <div className="mt-4 rounded-lg border bg-background">
                     <div className="border-b px-4 py-3">
-                      <h2 className="text-sm font-semibold">召回结果</h2>
+                      <h2 className="text-sm font-semibold">{t("召回结果")}</h2>
                     </div>
                     {queryHits.length ? (
                       <div className="divide-y">
@@ -1707,7 +1952,7 @@ export function KnowledgeBasePage({
                       </div>
                     ) : (
                       <div className="flex min-h-40 items-center justify-center px-4 text-sm text-muted-foreground">
-                        暂无测试结果
+                        {t("暂无测试结果")}
                       </div>
                     )}
                   </div>
@@ -1717,7 +1962,7 @@ export function KnowledgeBasePage({
 
             {activeDetailTab === "settings" ? (
               <div className="w-full max-w-6xl p-4 lg:p-6">
-                <h1 className="text-xl font-semibold">设置</h1>
+                <h1 className="text-xl font-semibold">{t("设置")}</h1>
                 <div className="mt-4 rounded-lg border p-5 lg:p-6">
                   <div className="flex flex-wrap gap-2">
                     <PermissionBadge
@@ -1725,25 +1970,25 @@ export function KnowledgeBasePage({
                     />
                     <StatusBadge status={selectedKnowledgeBase.status} />
                   </div>
-                  <p className="mt-5 text-sm font-medium">描述</p>
+                  <p className="mt-5 text-sm font-medium">{t("描述")}</p>
                   <p className="mt-2 text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
                     {selectedKnowledgeBase.description || "-"}
                   </p>
                   <div className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
                     <div className="min-w-0 rounded-md border p-4">
                       <p className="text-xs font-medium text-muted-foreground">
-                        Embedding 模型
+                        {t("Embedding 模型")}
                       </p>
                       <p className="mt-1 truncate font-medium">
-                        {registeredModelLabel(selectedEmbeddingModel)}
+                        {registeredModelLabel(selectedEmbeddingModel, t)}
                       </p>
                     </div>
                     <div className="min-w-0 rounded-md border p-4">
                       <p className="text-xs font-medium text-muted-foreground">
-                        Rerank 模型
+                        {t("Rerank 模型")}
                       </p>
                       <p className="mt-1 truncate font-medium">
-                        {registeredModelLabel(selectedRerankerModel)}
+                        {registeredModelLabel(selectedRerankerModel, t)}
                       </p>
                     </div>
                   </div>
@@ -1765,7 +2010,7 @@ export function KnowledgeBasePage({
                         }
                       >
                         <PencilIcon data-icon="inline-start" />
-                        编辑
+                        {t("编辑")}
                       </Button>
                     ) : null}
                     {selectedKnowledgeBase.permission === "edit" ? (
@@ -1781,10 +2026,42 @@ export function KnowledgeBasePage({
                         {isTestingModels ? (
                           <LoaderCircleIcon data-icon="inline-start" />
                         ) : (
-                          <TargetIcon data-icon="inline-start" />
+                          <FlaskConicalIcon data-icon="inline-start" />
                         )}
-                        测试模型
+                        {t("测试模型")}
                       </Button>
+                    ) : null}
+                    {modelTestError ? (
+                      <div className="flex w-full flex-col gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                        <div className="flex items-center gap-2 font-medium">
+                          <AlertCircleIcon className="size-4 shrink-0" />
+                          {t("模型测试失败")}
+                        </div>
+                        <p className="break-words leading-6">
+                          {modelTestError}
+                        </p>
+                      </div>
+                    ) : modelTestResult ? (
+                      <div className="flex w-full flex-col gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
+                        <div className="flex items-center gap-2 font-medium text-emerald-600 dark:text-emerald-400">
+                          <CircleCheckIcon className="size-4 shrink-0" />
+                          {t("模型测试通过")}
+                        </div>
+                        <dl className="flex flex-wrap gap-x-6 gap-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <dt className="text-muted-foreground">Embedding</dt>
+                            <dd className="font-medium">
+                              {t("{value} 维", { value: modelTestResult.embedding_dimensions })}
+                            </dd>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <dt className="text-muted-foreground">Rerank</dt>
+                            <dd className="font-medium">
+                              {t("{value} 条", { value: modelTestResult.reranker_results })}
+                            </dd>
+                          </div>
+                        </dl>
+                      </div>
                     ) : null}
                     {canManagePermissions(selectedKnowledgeBase) ? (
                       <Button
@@ -1795,7 +2072,7 @@ export function KnowledgeBasePage({
                         }
                       >
                         <UsersIcon data-icon="inline-start" />
-                        授权
+                        {t("授权")}
                       </Button>
                     ) : null}
                   </div>
@@ -1920,8 +2197,8 @@ export function KnowledgeBasePage({
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
-                                title="编辑知识库"
-                                aria-label="编辑知识库"
+                                title={t("编辑知识库")}
+                                aria-label={t("编辑知识库")}
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   setEditForm({
@@ -1941,16 +2218,16 @@ export function KnowledgeBasePage({
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
-                                title={
+                                title={t(
                                   knowledgeBase.status === "active"
                                     ? "归档知识库"
                                     : "恢复知识库"
-                                }
-                                aria-label={
+                                )}
+                                aria-label={t(
                                   knowledgeBase.status === "active"
                                     ? "归档知识库"
                                     : "恢复知识库"
-                                }
+                                )}
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   void handleToggleStatus(knowledgeBase)
@@ -1970,8 +2247,8 @@ export function KnowledgeBasePage({
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
-                                title="资源授权"
-                                aria-label="资源授权"
+                                title={t("资源授权")}
+                                aria-label={t("资源授权")}
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   void handleOpenPermissions(knowledgeBase)
@@ -1983,8 +2260,8 @@ export function KnowledgeBasePage({
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
-                                title="永久删除知识库"
-                                aria-label="永久删除知识库"
+                                title={t("永久删除知识库")}
+                                aria-label={t("永久删除知识库")}
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   void handleDelete(knowledgeBase)

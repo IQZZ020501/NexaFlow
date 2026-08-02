@@ -1,4 +1,4 @@
-import { request } from "@/lib/api-client"
+import { ApiError, request } from "@/lib/api-client"
 import type {
   KnowledgeBase,
   KnowledgeDocument,
@@ -154,6 +154,51 @@ export function deleteKnowledgeDocument(
       token,
     },
   )
+}
+
+export function setKnowledgeDocumentActive(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId: string,
+  isActive: boolean,
+) {
+  return request<KnowledgeDocument>(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`,
+    {
+      method: "PATCH",
+      token,
+      body: JSON.stringify({ is_active: isActive }),
+    },
+  )
+}
+
+export async function downloadKnowledgeDocument(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId: string,
+  filename: string,
+) {
+  const response = await fetch(
+    `/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/download`,
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    },
+  )
+  if (!response.ok) {
+    throw new ApiError(response.status, response.statusText)
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
 }
 
 export function listKnowledgeDocumentChunks(

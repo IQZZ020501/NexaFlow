@@ -65,10 +65,16 @@ class KnowledgeDocumentResponse(BaseModel):
     size_bytes: int
     meta: dict[str, Any]
     status: str
+    is_active: bool = True
+    chunk_count: int = 0
     last_error: str | None = None
     created_by_user_id: str
     created_at: datetime
     updated_at: datetime
+
+
+class KnowledgeDocumentStatusUpdateRequest(BaseModel):
+    is_active: bool
 
 
 class KnowledgeDocumentParseRequest(BaseModel):
