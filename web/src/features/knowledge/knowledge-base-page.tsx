@@ -43,7 +43,6 @@ import {
   listKnowledgeBases,
   listKnowledgeDocuments,
   listKnowledgeTasks,
-  parseKnowledgeDocument,
   queryKnowledgeBase,
   rebuildKnowledgeIndex,
   retryKnowledgeTask,
@@ -631,35 +630,6 @@ export function KnowledgeBasePage({
       onNotify("success", t("知识库已删除"))
     } catch (error) {
       reportError(error)
-    }
-  }
-
-  async function handleParseDocument(document: KnowledgeDocument) {
-    if (!selectedWorkspaceId || !selectedKnowledgeBase) {
-      return
-    }
-
-    setIsSubmittingDocumentTask(true)
-    try {
-      await parseKnowledgeDocument(
-        token,
-        selectedWorkspaceId,
-        selectedKnowledgeBase.id,
-        document.id,
-        {
-          chunk_size: 1200,
-          chunk_overlap: 150,
-          cleaning_rules: [],
-          auto_index: false,
-        }
-      )
-      await loadDocuments()
-      await loadKnowledgeTasks()
-      onNotify("success", t("已提交解析任务"))
-    } catch (error) {
-      reportError(error)
-    } finally {
-      setIsSubmittingDocumentTask(false)
     }
   }
 
@@ -1351,34 +1321,6 @@ export function KnowledgeBasePage({
                               {formatDateTime(document.updated_at, locale)}
                             </span>
                             <span className="sticky right-0 flex h-full items-center gap-2 border-l bg-background px-4">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={
-                                  !canEditDocuments ||
-                                  isSubmittingDocumentTask
-                                }
-                                aria-label={t("解析 {value}", { value: document.filename })}
-                                onClick={() => void handleParseDocument(document)}
-                              >
-                                <RotateCcwIcon />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={
-                                  !canEditDocuments ||
-                                  isSubmittingDocumentTask
-                                }
-                                aria-label={t("向量化 {value}", { value: document.filename })}
-                                onClick={() =>
-                                  void handleIndexDocuments([document])
-                                }
-                              >
-                                <SlidersHorizontalIcon />
-                              </Button>
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <Button
@@ -1390,6 +1332,7 @@ export function KnowledgeBasePage({
                                       isSubmittingDocumentTask
                                     }
                                     aria-label={t("操作 {value}", { value: document.filename })}
+                                    title={t("操作 {value}", { value: document.filename })}
                                   >
                                     <MoreHorizontalIcon />
                                   </Button>
@@ -1409,14 +1352,6 @@ export function KnowledgeBasePage({
                                   >
                                     <FileTextIcon />
                                     {t("预览切片")}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onSelect={() =>
-                                      void handleParseDocument(document)
-                                    }
-                                  >
-                                    <RotateCcwIcon />
-                                    {t("解析")}
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     onSelect={() =>
