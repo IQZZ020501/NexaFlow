@@ -1,10 +1,24 @@
-from sqlalchemy import delete, or_, select
+from datetime import datetime
+
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexaflow.identity.models import User
-from nexaflow.knowledge.models import KnowledgeBase, KnowledgeDocument
+from nexaflow.knowledge.models import (
+    KnowledgeBase,
+    KnowledgeDocument,
+    KnowledgeDocumentChunk,
+    KnowledgeTask,
+)
 from nexaflow.resource_permissions.models import ResourcePermission
 from nexaflow.workspaces.models import WorkspaceMembership
+
+VISIBLE_DOCUMENT_STATUSES = (
+    "index_queued",
+    "indexing",
+    "indexed",
+    "index_failed",
+)
 
 
 async def list_knowledge_base_rows(
@@ -44,19 +58,226 @@ async def get_knowledge_base_by_id(
     return await db.get(KnowledgeBase, knowledge_base_id)
 
 
+async def lock_knowledge_base(db: AsyncSession, knowledge_base: KnowledgeBase) -> None:
+    await db.execute(
+        select(KnowledgeBase)
+        .where(KnowledgeBase.id == knowledge_base.id)
+        .with_for_update()
+    )
+
+
 async def list_knowledge_documents(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
+    *,
+    include_staged: bool = False,
 ) -> list[KnowledgeDocument]:
-    result = await db.scalars(
-        select(KnowledgeDocument)
-        .where(
-            KnowledgeDocument.workspace_id == knowledge_base.workspace_id,
-            KnowledgeDocument.knowledge_base_id == knowledge_base.id,
+    statement = select(KnowledgeDocument).where(
+        KnowledgeDocument.workspace_id == knowledge_base.workspace_id,
+        KnowledgeDocument.knowledge_base_id == knowledge_base.id,
+        KnowledgeDocument.status != "deleted",
+    )
+    if not include_staged:
+        statement = statement.where(
+            KnowledgeDocument.status.in_(VISIBLE_DOCUMENT_STATUSES)
         )
-        .order_by(KnowledgeDocument.created_at.desc())
+    result = await db.scalars(statement.order_by(KnowledgeDocument.created_at.desc()))
+    return list(result)
+
+
+async def get_knowledge_document_by_id(
+    db: AsyncSession,
+    document_id: str,
+) -> KnowledgeDocument | None:
+    return await db.get(KnowledgeDocument, document_id)
+
+
+async def list_document_chunks(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_id: str,
+) -> list[KnowledgeDocumentChunk]:
+    result = await db.scalars(
+        select(KnowledgeDocumentChunk)
+        .where(
+            KnowledgeDocumentChunk.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentChunk.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocumentChunk.document_id == document_id,
+        )
+        .order_by(KnowledgeDocumentChunk.chunk_index)
     )
     return list(result)
+
+
+async def list_indexable_chunks(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_id: str | None = None,
+    statuses: set[str] | None = None,
+) -> list[KnowledgeDocumentChunk]:
+    statement = select(KnowledgeDocumentChunk).where(
+        KnowledgeDocumentChunk.workspace_id == knowledge_base.workspace_id,
+        KnowledgeDocumentChunk.knowledge_base_id == knowledge_base.id,
+    )
+    if document_id is not None:
+        statement = statement.where(KnowledgeDocumentChunk.document_id == document_id)
+    if statuses is not None:
+        statement = statement.where(KnowledgeDocumentChunk.status.in_(statuses))
+    result = await db.scalars(statement.order_by(KnowledgeDocumentChunk.document_id, KnowledgeDocumentChunk.chunk_index))
+    return list(result)
+
+
+async def list_chunks_by_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    chunk_ids: list[str],
+) -> list[KnowledgeDocumentChunk]:
+    if not chunk_ids:
+        return []
+    result = await db.scalars(
+        select(KnowledgeDocumentChunk).where(
+            KnowledgeDocumentChunk.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentChunk.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocumentChunk.status == "indexed",
+            KnowledgeDocumentChunk.id.in_(chunk_ids),
+        )
+    )
+    return list(result)
+
+
+async def delete_document_chunks(db: AsyncSession, document_id: str) -> None:
+    await db.execute(delete(KnowledgeDocumentChunk).where(KnowledgeDocumentChunk.document_id == document_id))
+
+
+async def list_knowledge_tasks(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_id: str | None = None,
+) -> list[KnowledgeTask]:
+    statement = select(KnowledgeTask).where(
+        KnowledgeTask.workspace_id == knowledge_base.workspace_id,
+        KnowledgeTask.knowledge_base_id == knowledge_base.id,
+    )
+    if document_id is not None:
+        statement = statement.where(KnowledgeTask.document_id == document_id)
+    result = await db.scalars(statement.order_by(KnowledgeTask.created_at.desc()))
+    return list(result)
+
+
+async def list_recoverable_tasks(db: AsyncSession) -> list[KnowledgeTask]:
+    result = await db.scalars(
+        select(KnowledgeTask)
+        .where(KnowledgeTask.status.in_(["queued", "running"]))
+        .order_by(KnowledgeTask.created_at)
+    )
+    return list(result)
+
+
+async def get_knowledge_task_by_id(db: AsyncSession, task_id: str) -> KnowledgeTask | None:
+    return await db.get(KnowledgeTask, task_id)
+
+
+async def claim_knowledge_task(
+    db: AsyncSession,
+    task_id: str,
+    started_at: datetime,
+    lease_expires_at: datetime,
+    worker_task_id: str,
+) -> bool:
+    result = await db.execute(
+        update(KnowledgeTask)
+        .where(
+            KnowledgeTask.id == task_id,
+            KnowledgeTask.attempts < KnowledgeTask.max_attempts,
+            or_(
+                KnowledgeTask.status == "queued",
+                (KnowledgeTask.status == "running")
+                & or_(
+                    KnowledgeTask.lease_expires_at.is_(None),
+                    KnowledgeTask.lease_expires_at <= started_at,
+                ),
+            ),
+        )
+        .values(
+            status="running",
+            attempts=KnowledgeTask.attempts + 1,
+            started_at=started_at,
+            lease_expires_at=lease_expires_at,
+            worker_task_id=worker_task_id,
+            finished_at=None,
+            last_error=None,
+        )
+    )
+    return result.rowcount == 1
+
+
+async def renew_knowledge_task_lease(
+    db: AsyncSession,
+    task_id: str,
+    worker_task_id: str,
+    lease_expires_at: datetime,
+) -> bool:
+    result = await db.execute(
+        update(KnowledgeTask)
+        .where(
+            KnowledgeTask.id == task_id,
+            KnowledgeTask.status == "running",
+            KnowledgeTask.worker_task_id == worker_task_id,
+        )
+        .values(lease_expires_at=lease_expires_at)
+    )
+    return result.rowcount == 1
+
+
+async def get_open_knowledge_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    task_type: str,
+    document_id: str | None,
+) -> KnowledgeTask | None:
+    return await db.scalar(
+        select(KnowledgeTask)
+        .where(
+            KnowledgeTask.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTask.knowledge_base_id == knowledge_base.id,
+            KnowledgeTask.document_id == document_id,
+            KnowledgeTask.task_type == task_type,
+            KnowledgeTask.status.in_(["queued", "running"]),
+        )
+        .order_by(KnowledgeTask.created_at.desc())
+    )
+
+
+async def get_open_knowledge_base_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> KnowledgeTask | None:
+    return await db.scalar(
+        select(KnowledgeTask)
+        .where(
+            KnowledgeTask.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTask.knowledge_base_id == knowledge_base.id,
+            KnowledgeTask.status.in_(["queued", "running"]),
+        )
+        .order_by(KnowledgeTask.created_at.desc())
+    )
+
+
+async def get_open_document_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_id: str,
+) -> KnowledgeTask | None:
+    return await db.scalar(
+        select(KnowledgeTask)
+        .where(
+            KnowledgeTask.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTask.knowledge_base_id == knowledge_base.id,
+            KnowledgeTask.document_id == document_id,
+            KnowledgeTask.status.in_(["queued", "running"]),
+        )
+        .order_by(KnowledgeTask.created_at.desc())
+    )
 
 
 async def get_user_grant(
@@ -114,6 +335,18 @@ async def delete_knowledge_base_graph(
     knowledge_base: KnowledgeBase,
     resource_type: str,
 ) -> None:
+    await db.execute(
+        delete(KnowledgeTask).where(
+            KnowledgeTask.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTask.knowledge_base_id == knowledge_base.id,
+        )
+    )
+    await db.execute(
+        delete(KnowledgeDocumentChunk).where(
+            KnowledgeDocumentChunk.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentChunk.knowledge_base_id == knowledge_base.id,
+        )
+    )
     await db.execute(
         delete(KnowledgeDocument).where(
             KnowledgeDocument.workspace_id == knowledge_base.workspace_id,

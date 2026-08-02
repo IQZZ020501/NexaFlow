@@ -27,9 +27,53 @@ export type KnowledgeDocument = {
   content_type: string
   size_bytes: number
   status: string
+  last_error: string | null
   created_by_user_id: string
   created_at: string
   updated_at: string
+}
+
+export type KnowledgeDocumentChunk = {
+  id: string
+  workspace_id: string
+  knowledge_base_id: string
+  document_id: string
+  chunk_index: number
+  content: string
+  char_count: number
+  token_count: number
+  vector_id: string | null
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export type KnowledgeTask = {
+  id: string
+  workspace_id: string
+  knowledge_base_id: string
+  document_id: string | null
+  task_type: string
+  status: string
+  attempts: number
+  max_attempts: number
+  total_items: number
+  processed_items: number
+  last_error: string | null
+  created_by_user_id: string
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type KnowledgeQueryHit = {
+  chunk_id: string
+  document_id: string
+  document_filename: string
+  chunk_index: number
+  content: string
+  distance: number | null
 }
 
 export type KnowledgeBaseForm = {
@@ -50,7 +94,7 @@ export type KnowledgeBasePermissionForm = {
 }
 
 export type KnowledgeBaseDetailTab =
-  "documents" | "questions" | "hit-test" | "settings"
+  "documents" | "tasks" | "questions" | "hit-test" | "settings"
 
 export type KnowledgeModelTestResult = {
   embedding_model_id: string

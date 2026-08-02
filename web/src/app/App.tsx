@@ -53,6 +53,9 @@ export function App() {
   const [activeSystemTab, setActiveSystemTab] = React.useState<SystemTabKey>(
     () => routeFromPath().systemTab
   )
+  const [activeKnowledgeBaseId, setActiveKnowledgeBaseId] = React.useState<
+    string | null
+  >(() => routeFromPath().knowledgeBaseId ?? null)
   const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<
     string | null
   >(() => localStorage.getItem(WORKSPACE_KEY))
@@ -80,6 +83,7 @@ export function App() {
     setTeamsError(null)
     setActivePage("apps")
     setActiveSystemTab("workspaces")
+    setActiveKnowledgeBaseId(null)
     window.history.pushState(null, "", PAGE_PATHS.apps)
   }, [])
 
@@ -154,6 +158,7 @@ export function App() {
       const route = routeFromPath()
       setActivePage(route.page)
       setActiveSystemTab(route.systemTab)
+      setActiveKnowledgeBaseId(route.knowledgeBaseId ?? null)
     }
 
     window.addEventListener("popstate", handlePopState)
@@ -235,17 +240,35 @@ export function App() {
 
     setActivePage(route.page)
     setActiveSystemTab(route.systemTab)
+    setActiveKnowledgeBaseId(route.knowledgeBaseId ?? null)
   }
 
   function handlePageChange(page: PageKey) {
     navigateToRoute({
       page,
       systemTab: page === "system" ? activeSystemTab : "workspaces",
+      knowledgeBaseId: null,
     })
   }
 
   function handleSystemTabChange(tab: SystemTabKey) {
-    navigateToRoute({ page: "system", systemTab: tab })
+    navigateToRoute({ page: "system", systemTab: tab, knowledgeBaseId: null })
+  }
+
+  function handleOpenKnowledgeBase(knowledgeBaseId: string) {
+    navigateToRoute({
+      page: "knowledge",
+      systemTab: "workspaces",
+      knowledgeBaseId,
+    })
+  }
+
+  function handleCloseKnowledgeBase() {
+    navigateToRoute({
+      page: "knowledge",
+      systemTab: "workspaces",
+      knowledgeBaseId: null,
+    })
   }
 
   function handleSelectWorkspace(workspaceId: string) {
@@ -450,6 +473,9 @@ export function App() {
             token={token}
             me={me}
             selectedWorkspaceId={selectedWorkspaceId}
+            activeKnowledgeBaseId={activeKnowledgeBaseId}
+            onOpenKnowledgeBase={handleOpenKnowledgeBase}
+            onCloseKnowledgeBase={handleCloseKnowledgeBase}
             onNotify={notify}
           />
         )}

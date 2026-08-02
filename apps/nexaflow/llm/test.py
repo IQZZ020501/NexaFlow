@@ -48,9 +48,20 @@ class ModelTestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         if self.path == "/v1/embeddings":
+            inputs = body.get("input", [])
+            input_count = len(inputs) if isinstance(inputs, list) else 1
             self.wfile.write(
-                b'{"object":"list","data":[{"object":"embedding","embedding":[0.0],"index":0}],'
-                b'"model":"test","usage":{"prompt_tokens":1,"total_tokens":1}}'
+                json.dumps(
+                    {
+                        "object": "list",
+                        "data": [
+                            {"object": "embedding", "embedding": [0.0], "index": index}
+                            for index in range(input_count)
+                        ],
+                        "model": "test",
+                        "usage": {"prompt_tokens": input_count, "total_tokens": input_count},
+                    }
+                ).encode()
             )
         elif self.path == "/v1/rerank":
             self.wfile.write(b'{"results":[{"index":0,"relevance_score":1.0}]}')

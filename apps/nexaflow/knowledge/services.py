@@ -1,6 +1,7 @@
 import asyncio
 import shutil
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,7 @@ from nexaflow.identity.models import User
 from nexaflow.identity.services import user_to_response
 from nexaflow.knowledge import repositories as knowledge_base_repository
 from nexaflow.knowledge.models import KnowledgeBase, KnowledgeDocument
+from nexaflow.knowledge.pipeline import delete_chroma_collection
 from nexaflow.knowledge.schemas import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
@@ -41,6 +43,8 @@ MAX_DOCUMENT_UPLOAD_BYTES = 20 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 KNOWLEDGE_BASE_STATUSES = {ACTIVE_STATUS, ARCHIVED_STATUS}
 RESOURCE_PERMISSIONS = {"view", "edit"}
+DEFAULT_DOCUMENT_META = {"allow_download": True, "security_level": "PUBLIC"}
+RESTRICTED_FILENAME_MARKERS = ("秘密", "机密", "绝密")
 
 
 def validate_permission(permission: str) -> None:
@@ -91,7 +95,9 @@ def document_to_response(document: KnowledgeDocument) -> KnowledgeDocumentRespon
         filename=document.filename,
         content_type=document.content_type,
         size_bytes=document.size_bytes,
+        meta=document.meta,
         status=document.status,
+        last_error=document.last_error,
         created_by_user_id=document.created_by_user_id,
         created_at=document.created_at,
         updated_at=document.updated_at,
@@ -104,6 +110,11 @@ def clean_upload_filename(filename: str | None) -> str:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Document filename is required.",
+        )
+    if any(marker in name for marker in RESTRICTED_FILENAME_MARKERS):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Document filename contains restricted classification.",
         )
     return name[:255]
 
@@ -124,9 +135,13 @@ async def get_knowledge_model(
     workspace_id: str,
     model_id: str | None,
     model_type: str,
+    *,
+    use_default: bool = False,
 ) -> RegisteredModel | None:
     model_id = normalize_optional_model_id(model_id)
     if model_id is None:
+        if use_default:
+            return await get_default_knowledge_model(db, workspace_id, model_type)
         return None
     model = await model_repository.get_registered_model_by_id(db, model_id)
     if model is None or model.workspace_id != workspace_id:
@@ -145,6 +160,22 @@ async def get_knowledge_model(
             "Knowledge model is disabled.",
         )
     return model
+
+
+async def get_default_knowledge_model(
+    db: AsyncSession,
+    workspace_id: str,
+    model_type: str,
+) -> RegisteredModel | None:
+    models = await model_repository.list_registered_models(db, workspace_id)
+    return next(
+        (
+            model
+            for model in models
+            if model.model_type == model_type and model.status == ACTIVE_STATUS
+        ),
+        None,
+    )
 
 
 def require_can_manage_permissions(
@@ -227,12 +258,15 @@ async def require_knowledge_base_permission(
 async def list_knowledge_documents(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
+    *,
+    include_staged: bool = False,
 ) -> list[KnowledgeDocumentResponse]:
     return [
         document_to_response(document)
         for document in await knowledge_base_repository.list_knowledge_documents(
             db,
             knowledge_base,
+            include_staged=include_staged,
         )
     ]
 
@@ -266,6 +300,7 @@ async def upload_knowledge_document(
     upload: UploadFile,
     actor: User,
     settings: Settings,
+    meta: dict[str, Any] | None = None,
 ) -> KnowledgeDocumentResponse:
     document_id = new_id()
     filename = clean_upload_filename(upload.filename)
@@ -280,7 +315,9 @@ async def upload_knowledge_document(
         content_type=upload.content_type or "application/octet-stream",
         size_bytes=size,
         storage_path=storage_path,
+        meta={**DEFAULT_DOCUMENT_META, **(meta or {})},
         status=DOCUMENT_UPLOADED_STATUS,
+        last_error=None,
         created_by_user_id=actor.id,
     )
     db.add(document)
@@ -321,6 +358,7 @@ async def create_knowledge_base(
         workspace_id,
         payload.embedding_model_id,
         "EMBEDDING",
+        use_default=True,
     )
     reranker_model = await get_knowledge_model(
         db,
@@ -459,6 +497,7 @@ async def test_knowledge_base_models(
         knowledge_base.workspace_id,
         knowledge_base.embedding_model_id,
         "EMBEDDING",
+        use_default=True,
     )
     if embedding_model is None:
         raise HTTPException(
@@ -488,6 +527,10 @@ async def delete_knowledge_base_permanently(
     settings: Settings,
 ) -> None:
     require_can_manage_permissions(knowledge_base, actor, workspace_role)
+    await knowledge_base_repository.lock_knowledge_base(db, knowledge_base)
+    if await knowledge_base_repository.get_open_knowledge_base_task(db, knowledge_base) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
+
     storage_dir = settings.knowledge_storage_dir / knowledge_base.workspace_id / knowledge_base.id
     record_audit_log(
         db,
@@ -505,6 +548,7 @@ async def delete_knowledge_base_permanently(
         RESOURCE_TYPE,
     )
     await db.commit()
+    await asyncio.to_thread(delete_chroma_collection, settings, knowledge_base.id)
     shutil.rmtree(storage_dir, ignore_errors=True)
 
 

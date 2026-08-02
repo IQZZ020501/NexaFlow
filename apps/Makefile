@@ -1,4 +1,4 @@
-.PHONY: dev migrate
+.PHONY: dev migrate worker
 
 HOST ?= 127.0.0.1
 PORT ?= 8000
@@ -8,3 +8,6 @@ dev: migrate
 
 migrate:
 	uv run python -m alembic upgrade head
+
+worker:
+	uv run celery -A nexaflow.core.celery:celery_app worker --loglevel=INFO

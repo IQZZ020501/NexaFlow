@@ -1,6 +1,17 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexaflow.core.config import Settings
@@ -14,11 +25,23 @@ from nexaflow.knowledge.schemas import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
+    KnowledgeDocumentChunkResponse,
+    KnowledgeDocumentParseRequest,
     KnowledgeDocumentResponse,
     KnowledgeModelTestRequest,
     KnowledgeModelTestResponse,
+    KnowledgeTaskResponse,
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
+)
+from nexaflow.knowledge.processing import (
+    enqueue_index_knowledge_document,
+    enqueue_parse_knowledge_document,
+    enqueue_rebuild_knowledge_index,
+    get_knowledge_document,
+    list_knowledge_document_chunks,
+    list_knowledge_tasks,
+    retry_knowledge_task,
 )
 from nexaflow.knowledge.services import (
     create_knowledge_base,
@@ -26,6 +49,7 @@ from nexaflow.knowledge.services import (
     get_knowledge_base,
     list_knowledge_bases,
     list_knowledge_documents,
+    document_to_response,
     list_resource_permissions,
     require_can_manage_permissions,
     require_knowledge_base_permission,
@@ -35,8 +59,19 @@ from nexaflow.knowledge.services import (
     upload_knowledge_document,
     upsert_resource_permission,
 )
+from nexaflow.knowledge.tasks import enqueue_knowledge_task
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/knowledge-bases", tags=["knowledge"])
+
+
+async def dispatch_knowledge_task(task_id: str, settings: Settings) -> None:
+    try:
+        await enqueue_knowledge_task(task_id, settings)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Knowledge task queue is unavailable.",
+        ) from exc
 
 
 @router.get("", response_model=list[KnowledgeBaseResponse])
@@ -131,6 +166,7 @@ async def list_workspace_knowledge_base_documents(
     knowledge_base_id: str,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    include_staged: Annotated[bool, Query()] = False,
 ) -> list[KnowledgeDocumentResponse]:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     await require_knowledge_base_permission(
@@ -138,9 +174,13 @@ async def list_workspace_knowledge_base_documents(
         knowledge_base,
         context.user,
         context.membership_role,
-        {"view", "edit"},
+        {"edit"} if include_staged else {"view", "edit"},
     )
-    return await list_knowledge_documents(db, knowledge_base)
+    return await list_knowledge_documents(
+        db,
+        knowledge_base,
+        include_staged=include_staged,
+    )
 
 
 @router.post(
@@ -154,6 +194,7 @@ async def upload_workspace_knowledge_base_document(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    auto_parse: Annotated[bool, Form()] = True,
 ) -> KnowledgeDocumentResponse:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     await require_knowledge_base_permission(
@@ -163,13 +204,122 @@ async def upload_workspace_knowledge_base_document(
         context.membership_role,
         {"edit"},
     )
-    return await upload_knowledge_document(
+    uploaded = await upload_knowledge_document(
         db,
         knowledge_base,
         file,
         context.user,
         settings,
     )
+    if not auto_parse:
+        return uploaded
+
+    document = await get_knowledge_document(db, knowledge_base, uploaded.id)
+    task = await enqueue_parse_knowledge_document(db, knowledge_base, document, context.user)
+    try:
+        await dispatch_knowledge_task(task.id, settings)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
+            raise
+        await db.refresh(document)
+    return document_to_response(document)
+
+
+@router.get(
+    "/{knowledge_base_id}/documents/{document_id}/chunks",
+    response_model=list[KnowledgeDocumentChunkResponse],
+)
+async def list_workspace_knowledge_document_chunks(
+    knowledge_base_id: str,
+    document_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[KnowledgeDocumentChunkResponse]:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"view", "edit"},
+    )
+    document = await get_knowledge_document(db, knowledge_base, document_id)
+    return await list_knowledge_document_chunks(db, knowledge_base, document)
+
+
+@router.get(
+    "/{knowledge_base_id}/documents/{document_id}/tasks",
+    response_model=list[KnowledgeTaskResponse],
+)
+async def list_workspace_knowledge_document_tasks(
+    knowledge_base_id: str,
+    document_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[KnowledgeTaskResponse]:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"view", "edit"},
+    )
+    document = await get_knowledge_document(db, knowledge_base, document_id)
+    return await list_knowledge_tasks(db, knowledge_base, document)
+
+
+@router.post(
+    "/{knowledge_base_id}/documents/{document_id}/parse",
+    response_model=KnowledgeTaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def parse_workspace_knowledge_base_document(
+    knowledge_base_id: str,
+    document_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    payload: Annotated[KnowledgeDocumentParseRequest | None, Body()] = None,
+) -> KnowledgeTaskResponse:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    document = await get_knowledge_document(db, knowledge_base, document_id)
+    task = await enqueue_parse_knowledge_document(db, knowledge_base, document, context.user, payload)
+    await dispatch_knowledge_task(task.id, settings)
+    return task
+
+
+@router.post(
+    "/{knowledge_base_id}/documents/{document_id}/index",
+    response_model=KnowledgeTaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def index_workspace_knowledge_base_document(
+    knowledge_base_id: str,
+    document_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeTaskResponse:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    document = await get_knowledge_document(db, knowledge_base, document_id)
+    task = await enqueue_index_knowledge_document(db, knowledge_base, document, context.user)
+    await dispatch_knowledge_task(task.id, settings)
+    return task
 
 
 @router.post(
@@ -196,6 +346,72 @@ async def test_workspace_knowledge_base_models(
         {"edit"},
     )
     return await test_knowledge_base_models(db, knowledge_base, payload, settings)
+
+
+@router.get("/{knowledge_base_id}/tasks", response_model=list[KnowledgeTaskResponse])
+async def list_workspace_knowledge_base_tasks(
+    knowledge_base_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[KnowledgeTaskResponse]:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"view", "edit"},
+    )
+    return await list_knowledge_tasks(db, knowledge_base)
+
+
+@router.post(
+    "/{knowledge_base_id}/tasks/{task_id}/retry",
+    response_model=KnowledgeTaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_workspace_knowledge_task(
+    knowledge_base_id: str,
+    task_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeTaskResponse:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    task = await retry_knowledge_task(db, knowledge_base, task_id, context.user)
+    await dispatch_knowledge_task(task.id, settings)
+    return task
+
+
+@router.post(
+    "/{knowledge_base_id}/rebuild-index",
+    response_model=KnowledgeTaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def rebuild_workspace_knowledge_base_index(
+    knowledge_base_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeTaskResponse:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    task = await enqueue_rebuild_knowledge_index(db, knowledge_base, context.user)
+    await dispatch_knowledge_task(task.id, settings)
+    return task
 
 
 @router.get("/{knowledge_base_id}/permissions", response_model=list[ResourcePermissionResponse])

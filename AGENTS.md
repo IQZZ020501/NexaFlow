@@ -6,6 +6,12 @@ Instructions for coding agents working in this repository.
 
 This file applies to the whole repository unless a deeper `AGENTS.md` overrides it.
 
+## Required Development Skills
+
+- Backend work must read and follow `fastapi`, `fastapi-python`, and `fastapi-templates` before implementation.
+- Frontend work must read and follow `react-templates`, `vercel-react-best-practices`, `vercel-react-native-skills`, and `vercel-react-view-transitions` before implementation.
+- If a required skill is unavailable in the current agent environment, surface that before coding instead of silently proceeding.
+
 ## Behavioral Guidelines
 
 ### Think Before Coding
@@ -95,6 +101,7 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
 - Put hand-written SQL under `apps/nexaflow/sql/<feature>/`. Use SQL files for explicit database write workflows, seed/bootstrap data, complex queries, or any database operation that is clearer or not practical through the ORM; keep parameter binding in Python services and do not inline dynamic values into SQL strings.
 - `apps/.env.example` documents initialization env keys. Real `apps/.env` files are local-only and ignored by git; bootstrap admin credentials must come from env values, not Python constants.
 - `apps/alembic/` contains backend database migrations; production data is PostgreSQL-backed.
+- Knowledge document parsing and indexing are dispatched through Celery with Redis; API and worker instances must share `KNOWLEDGE_STORAGE_DIR` and `CHROMA_PERSIST_DIR`.
 - `web/` is a React + TypeScript + Vite app using Bun, shadcn/ui, and Tailwind CSS.
 - `docs/` stores project planning and product/engineering documentation.
 - Use `rg` / `rg --files` for code search.
@@ -120,5 +127,6 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
   - From `apps/`: `.venv/bin/python -m nexaflow.teams.test`
   - From `apps/`: `.venv/bin/python -m nexaflow.knowledge.test`
   - From `apps/`: `.venv/bin/python -m nexaflow.llm.test`
+  - For Celery wiring: `.venv/bin/python -c 'from nexaflow.core.celery import celery_app; celery_app.loader.import_default_modules(); assert "nexaflow.knowledge.run_task" in celery_app.tasks'`
   - From `apps/`: run Alembic against the target database, or a temporary explicit test database when only validating migration syntax.
 - If a check cannot be run, say exactly why in the final response.
