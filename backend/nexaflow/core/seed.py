@@ -2,10 +2,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexaflow.core.config import Settings
-from nexaflow.identity.models import User
-from nexaflow.identity.security import hash_password
-from nexaflow.teams.models import Team, TeamMembership
-from nexaflow.workspaces.models import Workspace, WorkspaceMembership
+from nexaflow.models.user import User
+from nexaflow.core.security import hash_password
+from nexaflow.models.team import Team, TeamMembership
+from nexaflow.models.workspace import Workspace, WorkspaceMembership
 
 
 async def seed_defaults(db: AsyncSession, settings: Settings) -> None:

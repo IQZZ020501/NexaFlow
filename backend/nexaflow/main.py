@@ -6,19 +6,11 @@ import traceback
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from nexaflow.api.v1.api import api_router
 from nexaflow.core.config import Settings
 from nexaflow.core.seed import seed_defaults
-from nexaflow.audit import api as audit_api
 from nexaflow.db.session import configure_database, get_session_factory
-from nexaflow.identity import api as auth_api
-from nexaflow.knowledge import api as knowledge_api
-from nexaflow.knowledge import legacy_api as knowledge_legacy_api
-from nexaflow.knowledge import lifecycle_api as knowledge_lifecycle_api
-from nexaflow.knowledge import retrieval_api as knowledge_retrieval_api
-from nexaflow.llm import api as llm_api
-from nexaflow.system_logs.services import record_system_log
-from nexaflow.teams import api as teams_api
-from nexaflow.workspaces import api as workspaces_api
+from nexaflow.services.system_log import record_system_log
 
 logger = logging.getLogger(__name__)
 
@@ -79,27 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    app.include_router(auth_api.router)
-    app.include_router(auth_api.users_router)
-    app.include_router(workspaces_api.router)
-    app.include_router(teams_api.router)
-    app.include_router(knowledge_api.router)
-    app.include_router(knowledge_lifecycle_api.router)
-    app.include_router(knowledge_retrieval_api.router)
-    app.include_router(knowledge_legacy_api.router)
-    app.include_router(knowledge_legacy_api.legacy_router)
-    app.include_router(llm_api.router)
-    app.include_router(audit_api.router)
-
-    if settings.web_dist_dir.is_dir():
-        # Low-priority routes: API routes win, then static files, then
-        # the index.html fallback for client-side page routes.
-        app.frontend("/", directory=settings.web_dist_dir, check_dir=False)
-    else:
-        logger.warning(
-            "Web frontend build not found at %s; serving API only.",
-            settings.web_dist_dir,
-        )
+    app.include_router(api_router)
     return app
 
 

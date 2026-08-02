@@ -78,7 +78,7 @@ def test_client() -> Iterator[TestClient]:
 
 def login(client: TestClient, username: str, password: str) -> dict:
     response = client.post(
-        "/auth/login",
+        "/api/v1/auth/login",
         json={"username": username, "password": password},
     )
     assert response.status_code == 200, response.text
@@ -96,7 +96,7 @@ def activate_user(
     token = payload["access_token"]
 
     changed = client.post(
-        "/auth/change-password",
+        "/api/v1/auth/change-password",
         headers=auth_headers(token),
         json={"new_password": new_password},
     )
@@ -111,7 +111,7 @@ def activate_admin(client: TestClient) -> tuple[str, str]:
     payload = login(client, "admin", BOOTSTRAP_ADMIN_PASSWORD)
     token = payload["access_token"]
 
-    me = client.get("/auth/me", headers=auth_headers(token))
+    me = client.get("/api/v1/auth/me", headers=auth_headers(token))
     assert me.status_code == 200, me.text
     default_workspace_id = me.json()["memberships"][0]["workspace_id"]
 

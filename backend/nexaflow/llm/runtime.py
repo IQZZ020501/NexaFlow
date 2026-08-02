@@ -7,7 +7,7 @@ from openai import APIStatusError, OpenAI, OpenAIError
 
 from nexaflow.core.config import Settings
 from nexaflow.core.secrets import decrypt_secret
-from nexaflow.llm.models import RegisteredModel
+from nexaflow.models.model import RegisteredModel
 
 MODEL_REQUEST_TIMEOUT_SECONDS = 20
 

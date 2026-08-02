@@ -4,20 +4,20 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from nexaflow.core.config import Settings
-from nexaflow.audit.models import AuditLog  # noqa: F401
+from nexaflow.models.audit import AuditLog  # noqa: F401
 from nexaflow.db.base import Base
-from nexaflow.identity.models import User  # noqa: F401
-from nexaflow.knowledge.models import (  # noqa: F401
+from nexaflow.models.user import User  # noqa: F401
+from nexaflow.models.knowledge import (  # noqa: F401
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeTask,
 )
-from nexaflow.llm.models import RegisteredModel  # noqa: F401
-from nexaflow.resource_permissions.models import ResourcePermission  # noqa: F401
-from nexaflow.system_logs.models import SystemLog  # noqa: F401
-from nexaflow.teams.models import Team, TeamMembership  # noqa: F401
-from nexaflow.workspaces.models import Workspace, WorkspaceMembership  # noqa: F401
+from nexaflow.models.model import RegisteredModel  # noqa: F401
+from nexaflow.models.resource_permission import ResourcePermission  # noqa: F401
+from nexaflow.models.system_log import SystemLog  # noqa: F401
+from nexaflow.models.team import Team, TeamMembership  # noqa: F401
+from nexaflow.models.workspace import Workspace, WorkspaceMembership  # noqa: F401
 
 config = context.config
 

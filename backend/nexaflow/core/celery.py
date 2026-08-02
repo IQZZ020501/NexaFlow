@@ -8,7 +8,7 @@ def create_celery_app() -> Celery:
     app = Celery(
         "nexaflow",
         broker=settings.celery_broker_url,
-        include=["nexaflow.knowledge.tasks"],
+        include=["nexaflow.tasks.knowledge"],
     )
     app.conf.update(
         accept_content=["json"],
