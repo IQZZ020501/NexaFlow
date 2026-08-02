@@ -5,6 +5,9 @@ import {
   FileTextIcon,
   LoaderCircleIcon,
 } from "lucide-react"
+import { useParams, useRouter } from "next/navigation"
+import type { AppNotification } from "@/lib/notifications"
+import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -31,7 +34,6 @@ import type {
 } from "@/lib/api/knowledge"
 import { formatDateTime } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
-import type { AppNotification } from "@/lib/notifications"
 import { cn } from "@/lib/utils"
 import { languageLocales } from "@/i18n"
 
@@ -47,21 +49,35 @@ const PROCESSING_TASK_STATUSES: Record<string, true> = {
   running: true,
 }
 
-export function DocumentDetailPage({
+export function DocumentDetailPage() {
+  const { token, selectedWorkspaceId, notify } = useSession()
+
+  if (!token) {
+    return null
+  }
+
+  return (
+    <DocumentDetailPageContent
+      token={token}
+      selectedWorkspaceId={selectedWorkspaceId}
+      notify={notify}
+    />
+  )
+}
+
+function DocumentDetailPageContent({
   token,
   selectedWorkspaceId,
-  knowledgeBaseId,
-  documentId,
-  onBack,
-  onNotify,
+  notify,
 }: {
   token: string
   selectedWorkspaceId: string | null
-  knowledgeBaseId: string
-  documentId: string
-  onBack: () => void
-  onNotify: (kind: AppNotification["kind"], message: string) => void
+  notify: (kind: AppNotification["kind"], message: string) => void
 }) {
+  const router = useRouter()
+  const params = useParams<{ id: string; docId: string }>()
+  const knowledgeBaseId = params.id
+  const documentId = params.docId
   const { language, t } = useLanguage()
   const locale = languageLocales[language]
   const [knowledgeBase, setKnowledgeBase] = React.useState<KnowledgeBase | null>(
@@ -105,14 +121,14 @@ export function DocumentDetailPage({
       setChunks(documentChunks)
       setTasks(documentTasks)
     } catch (error) {
-      onNotify("error", getErrorMessage(error, t))
+      notify("error", getErrorMessage(error, t))
     } finally {
       setIsLoading(false)
     }
   }, [
     documentId,
     knowledgeBaseId,
-    onNotify,
+    notify,
     selectedWorkspaceId,
     t,
     token,
@@ -159,7 +175,11 @@ export function DocumentDetailPage({
           <p className="text-sm text-muted-foreground">
             {t("文档不存在或已被删除")}
           </p>
-          <Button type="button" variant="outline" onClick={onBack}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => router.push(`/app/knowledge/${knowledgeBaseId}`)}
+          >
             <ArrowLeftIcon data-icon="inline-start" />
             {t("返回知识库")}
           </Button>
@@ -184,7 +204,7 @@ export function DocumentDetailPage({
               variant="ghost"
               size="icon-sm"
               aria-label={t("返回知识库")}
-              onClick={onBack}
+              onClick={() => router.push(`/app/knowledge/${knowledgeBaseId}`)}
             >
               <ArrowLeftIcon />
             </Button>
@@ -192,7 +212,7 @@ export function DocumentDetailPage({
               type="button"
               className="max-w-48 truncate text-muted-foreground outline-none hover:text-foreground"
               title={knowledgeBase.name}
-              onClick={onBack}
+              onClick={() => router.push(`/app/knowledge/${knowledgeBaseId}`)}
             >
               {knowledgeBase.name}
             </button>

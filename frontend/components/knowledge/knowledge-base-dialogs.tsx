@@ -22,7 +22,6 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import type { FeaturePageConfig } from "@/lib/pages"
 import type { ResourcePermission } from "@/lib/api/knowledge"
 import type { WorkspaceMember } from "@/lib/api/system"
 import { cn } from "@/lib/utils"
@@ -36,7 +35,6 @@ import type {
 import { useLanguage } from "@/contexts/language-provider"
 
 type KnowledgeBaseDialogsProps = {
-  page: FeaturePageConfig
   form: KnowledgeBaseForm
   setForm: React.Dispatch<React.SetStateAction<KnowledgeBaseForm>>
   editForm: KnowledgeBaseEditForm | null
@@ -60,7 +58,6 @@ type KnowledgeBaseDialogsProps = {
 }
 
 export function KnowledgeBaseDialogs({
-  page,
   form,
   setForm,
   editForm,
@@ -94,8 +91,10 @@ export function KnowledgeBaseDialogs({
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{page.actionLabel}</DialogTitle>
-            <DialogDescription>{page.dialogDescription}</DialogDescription>
+            <DialogTitle>{t("新建知识库")}</DialogTitle>
+            <DialogDescription>
+              {t("配置知识库名称、描述和默认数据源。")}
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate}>
             <FieldGroup>
@@ -167,7 +166,7 @@ export function KnowledgeBaseDialogs({
                 {isSaving ? (
                   <LoaderCircleIcon data-icon="inline-start" />
                 ) : null}
-                {page.actionLabel}
+                {t("新建知识库")}
               </Button>
             </DialogFooter>
           </form>

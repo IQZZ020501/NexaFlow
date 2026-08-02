@@ -7,6 +7,7 @@ import {
   ArrowUpDownIcon,
   ArrowUpIcon,
   CircleCheckIcon,
+  DatabaseIcon,
   DownloadIcon,
   ExternalLinkIcon,
   FileTextIcon,
@@ -24,6 +25,10 @@ import {
   UploadIcon,
   UsersIcon,
 } from "lucide-react"
+import { useParams, useRouter } from "next/navigation"
+import type { MeResponse } from "@/lib/api/auth"
+import type { AppNotification } from "@/lib/notifications"
+import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
@@ -73,17 +78,14 @@ import type {
   KnowledgeTask,
   ResourcePermission,
 } from "@/lib/api/knowledge"
-import type { MeResponse } from "@/lib/api/auth"
 import { listRegisteredModels } from "@/lib/api/llm"
 import type { RegisteredModel } from "@/lib/api/llm"
 import { listWorkspaceMembers } from "@/lib/api/system"
 import type { WorkspaceMember } from "@/lib/api/system"
-import { type FeaturePageConfig } from "@/lib/pages"
 import { languageLocales, type TFunction, type TranslationKey } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { formatDateTime, getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
-import type { AppNotification } from "@/lib/notifications"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
@@ -188,27 +190,38 @@ function documentStatusText(
   return documentStatusLabel(document.status, t)
 }
 
-export function KnowledgeBasePage({
-  page,
+export function KnowledgeBasePage() {
+  const { token, me, selectedWorkspaceId, notify } = useSession()
+
+  if (!token || !me) {
+    return null
+  }
+
+  return (
+    <KnowledgeBasePageContent
+      token={token}
+      me={me}
+      selectedWorkspaceId={selectedWorkspaceId}
+      notify={notify}
+    />
+  )
+}
+
+function KnowledgeBasePageContent({
   token,
   me,
   selectedWorkspaceId,
-  activeKnowledgeBaseId,
-  onOpenKnowledgeBase,
-  onCloseKnowledgeBase,
-  onOpenDocument,
-  onNotify,
+  notify,
 }: {
-  page: FeaturePageConfig
   token: string
   me: MeResponse
   selectedWorkspaceId: string | null
-  activeKnowledgeBaseId: string | null
-  onOpenKnowledgeBase: (knowledgeBaseId: string) => void
-  onCloseKnowledgeBase: () => void
-  onOpenDocument: (documentId: string) => void
-  onNotify: (kind: AppNotification["kind"], message: string) => void
+  notify: (kind: AppNotification["kind"], message: string) => void
 }) {
+  const router = useRouter()
+  const params = useParams<{ id?: string }>()
+  const activeKnowledgeBaseId = params.id ?? null
+  const Icon = DatabaseIcon
   const { language, t } = useLanguage()
   const locale = languageLocales[language]
   const [knowledgeBases, setKnowledgeBases] = React.useState<KnowledgeBase[]>(
@@ -285,7 +298,6 @@ export function KnowledgeBasePage({
   const selectAllDocumentsRef = React.useRef<HTMLInputElement>(null)
 
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
-  const Icon = page.icon
   const selectedKnowledgeBaseId = activeKnowledgeBaseId
   const selectedKnowledgeBase =
     knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId) ?? null
@@ -372,10 +384,10 @@ export function KnowledgeBasePage({
   const reportError = React.useCallback(
     (error: unknown) => {
       const message = getErrorMessage(error, t)
-      onNotify("error", message)
+      notify("error", message)
       return message
     },
-    [onNotify, t]
+    [notify, t]
   )
 
   const loadKnowledgeBases = React.useCallback(async () => {
@@ -550,13 +562,13 @@ export function KnowledgeBasePage({
     setQueryHits([])
     setQueryText("")
     setIsUploadFlowOpen(false)
-    onOpenKnowledgeBase(knowledgeBase.id)
+    router.push(`/app/knowledge/${knowledgeBase.id}`)
   }
 
   function closeKnowledgeBase() {
     setIsUploadFlowOpen(false)
     setKnowledgeTasks([])
-    onCloseKnowledgeBase()
+    router.push("/app/knowledge")
   }
 
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
@@ -575,7 +587,7 @@ export function KnowledgeBasePage({
       setKnowledgeBases((current) => [...current, knowledgeBase])
       resetForm()
       setIsDialogOpen(false)
-      onNotify("success", t("知识库已新建"))
+      notify("success", t("知识库已新建"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -600,7 +612,7 @@ export function KnowledgeBasePage({
         })
       )
       setEditForm(null)
-      onNotify("success", t("知识库已更新"))
+      notify("success", t("知识库已更新"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -625,7 +637,7 @@ export function KnowledgeBasePage({
           }
         )
       )
-      onNotify(
+      notify(
         "success",
         t(nextStatus === "active" ? "知识库已恢复" : "知识库已归档")
       )
@@ -677,7 +689,7 @@ export function KnowledgeBasePage({
       if (selectedKnowledgeBaseId === knowledgeBase.id) {
         closeKnowledgeBase()
       }
-      onNotify("success", t("知识库已删除"))
+      notify("success", t("知识库已删除"))
     } catch (error) {
       reportError(error)
     }
@@ -714,7 +726,7 @@ export function KnowledgeBasePage({
       setSegmentDialogDocument(null)
       await loadDocuments()
       await loadKnowledgeTasks()
-      onNotify("success", t("已提交解析任务"))
+      notify("success", t("已提交解析任务"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -741,7 +753,7 @@ export function KnowledgeBasePage({
       )
       await loadDocuments()
       await loadKnowledgeTasks()
-      onNotify(
+      notify(
         "success",
         targetDocuments.length === 1
           ? t("已提交向量化任务")
@@ -791,7 +803,7 @@ export function KnowledgeBasePage({
       setDocuments((current) =>
         current.map((item) => (item.id === updated.id ? updated : item))
       )
-      onNotify("success", t(updated.is_active ? "文档已启用" : "文档已停用"))
+      notify("success", t(updated.is_active ? "文档已启用" : "文档已停用"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -832,7 +844,7 @@ export function KnowledgeBasePage({
       )
       setSelectedDocumentIds([])
       await loadKnowledgeTasks()
-      onNotify("success", t("已删除 {value} 个文档", { value: selectedDocuments.length }))
+      notify("success", t("已删除 {value} 个文档", { value: selectedDocuments.length }))
     } catch (error) {
       reportError(error)
     } finally {
@@ -853,7 +865,7 @@ export function KnowledgeBasePage({
         selectedKnowledgeBase.id
       )
       await loadKnowledgeTasks()
-      onNotify("success", t("已提交重建索引任务"))
+      notify("success", t("已提交重建索引任务"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -878,7 +890,7 @@ export function KnowledgeBasePage({
         loadDocuments(),
         loadKnowledgeTasks(),
       ])
-      onNotify("success", t("已重新提交任务"))
+      notify("success", t("已重新提交任务"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -940,7 +952,7 @@ export function KnowledgeBasePage({
         current.filter((id) => id !== document.id)
       )
       await loadKnowledgeTasks()
-      onNotify("success", t("文档已删除"))
+      notify("success", t("文档已删除"))
     } catch (error) {
       reportError(error)
     }
@@ -997,7 +1009,7 @@ export function KnowledgeBasePage({
         ...current.filter((item) => item.user.id !== grant.user.id),
         grant,
       ])
-      onNotify("success", t("授权已保存"))
+      notify("success", t("授权已保存"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -1020,7 +1032,7 @@ export function KnowledgeBasePage({
       setPermissions((current) =>
         current.filter((item) => item.user.id !== userId)
       )
-      onNotify("success", t("授权已撤销"))
+      notify("success", t("授权已撤销"))
     } catch (error) {
       reportError(error)
     }
@@ -1052,7 +1064,7 @@ export function KnowledgeBasePage({
           setActiveDetailTab("documents")
           await Promise.all([loadDocuments(), loadKnowledgeTasks()])
         }}
-        onNotify={onNotify}
+        onNotify={notify}
       />
     )
   }
@@ -1342,7 +1354,11 @@ export function KnowledgeBasePage({
                                   type="button"
                                   className="min-w-0 cursor-pointer truncate text-left font-medium outline-none hover:text-primary focus-visible:underline"
                                   title={document.filename}
-                                  onClick={() => onOpenDocument(document.id)}
+                                  onClick={() =>
+                                    router.push(
+                                      `/app/knowledge/${selectedKnowledgeBaseId}/documents/${document.id}`
+                                    )
+                                  }
                                 >
                                   {document.filename}
                                 </button>
@@ -1474,7 +1490,11 @@ export function KnowledgeBasePage({
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
-                                    onSelect={() => onOpenDocument(document.id)}
+                                    onSelect={() =>
+                                      router.push(
+                                        `/app/knowledge/${selectedKnowledgeBaseId}/documents/${document.id}`
+                                      )
+                                    }
                                   >
                                     <FileTextIcon />
                                     {t("预览切片")}
@@ -2086,7 +2106,6 @@ export function KnowledgeBasePage({
         </div>
 
         <KnowledgeBaseDialogs
-          page={page}
           form={form}
           setForm={setForm}
           editForm={editForm}
@@ -2112,9 +2131,9 @@ export function KnowledgeBasePage({
     <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="truncate text-2xl font-semibold">{page.label}</h1>
+          <h1 className="truncate text-2xl font-semibold">{t("知识库")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {page.description}
+            {t("管理文档、数据源与向量索引，让应用可以检索你的业务知识。")}
           </p>
         </div>
         <Button
@@ -2124,7 +2143,7 @@ export function KnowledgeBasePage({
           onClick={() => setIsDialogOpen(true)}
         >
           <PlusIcon data-icon="inline-start" />
-          {page.actionLabel}
+          {t("新建知识库")}
         </Button>
       </div>
 
@@ -2145,7 +2164,7 @@ export function KnowledgeBasePage({
               <Input
                 value={knowledgeSearch}
                 onChange={(event) => setKnowledgeSearch(event.target.value)}
-                placeholder={t("搜索{label}...", { label: page.label })}
+                placeholder={t("搜索{label}...", { label: t("知识库") })}
                 className="pl-9"
               />
             </div>
@@ -2319,14 +2338,14 @@ export function KnowledgeBasePage({
                 <Icon className="size-5 text-muted-foreground" />
               </span>
               <div className="flex flex-col gap-2">
-                <p className="text-base font-semibold">{page.emptyTitle}</p>
+                <p className="text-base font-semibold">{t("还没有知识库")}</p>
                 <p className="text-sm leading-6 text-muted-foreground">
-                  {page.emptyDescription}
+                  {t("创建知识库后，你可以上传文档、配置检索方式，并让应用调用这些知识。")}
                 </p>
               </div>
               <Button type="button" onClick={() => setIsDialogOpen(true)}>
                 <PlusIcon data-icon="inline-start" />
-                {page.actionLabel}
+                {t("新建知识库")}
               </Button>
             </div>
           )}
@@ -2334,7 +2353,6 @@ export function KnowledgeBasePage({
       )}
 
       <KnowledgeBaseDialogs
-        page={page}
         form={form}
         setForm={setForm}
         editForm={editForm}

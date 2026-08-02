@@ -5,7 +5,9 @@ import {
   UserCogIcon,
   UsersIcon,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useLanguage } from "@/contexts/language-provider"
+import { useSession } from "@/contexts/session-context"
 import {
   changeUserPassword,
   createTeam,
@@ -40,7 +42,6 @@ import {
 } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import type { AppNotification } from "@/lib/notifications"
-import type { SystemTabKey } from "@/app/routing"
 import { getNewPasswordError } from "@/lib/password"
 import { SystemPageView } from "@/components/system/system-page-view"
 import type {
@@ -55,7 +56,40 @@ import type {
 } from "@/lib/api/system"
 import { getUserRoleKey } from "@/components/system/system-utils"
 
-export function SystemPage({
+export type SystemTab = "workspaces" | "teams" | "users" | "audit"
+
+export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
+  const session = useSession()
+  const router = useRouter()
+
+  if (!session.me || !session.token) {
+    return null
+  }
+
+  return (
+    <SystemPageContent
+      activeTab={activeTab}
+      me={session.me}
+      token={session.token}
+      workspaces={session.workspaces}
+      teams={session.teams}
+      selectedWorkspaceId={session.selectedWorkspaceId}
+      workspaceNotice={session.workspaceNotice}
+      isTeamsLoading={session.isTeamsLoading}
+      onSelectWorkspace={session.selectWorkspace}
+      onSystemTabChange={(tab) => router.push(`/system/${tab}`)}
+      onWorkspaceCreated={session.workspaceCreated}
+      onWorkspaceUpdated={session.workspaceUpdated}
+      onWorkspaceDeleted={session.workspaceDeleted}
+      onTeamCreated={session.teamCreated}
+      onTeamUpdated={session.teamUpdated}
+      onTeamDeleted={session.teamDeleted}
+      onNotify={session.notify}
+    />
+  )
+}
+
+function SystemPageContent({
   me,
   token,
   workspaces,
@@ -63,7 +97,7 @@ export function SystemPage({
   selectedWorkspaceId,
   workspaceNotice,
   isTeamsLoading,
-  activeSystemTab,
+  activeTab,
   onSelectWorkspace,
   onSystemTabChange,
   onWorkspaceCreated,
@@ -81,9 +115,9 @@ export function SystemPage({
   selectedWorkspaceId: string | null
   workspaceNotice: WorkspaceCreateResponse | null
   isTeamsLoading: boolean
-  activeSystemTab: SystemTabKey
+  activeTab: SystemTab
   onSelectWorkspace: (workspaceId: string) => void
-  onSystemTabChange: (tab: SystemTabKey) => void
+  onSystemTabChange: (tab: SystemTab) => void
   onWorkspaceCreated: (payload: WorkspaceCreateResponse) => void
   onWorkspaceUpdated: (workspace: Workspace) => void
   onWorkspaceDeleted: (workspaceId: string) => void
@@ -185,7 +219,7 @@ export function SystemPage({
     [onNotify, t]
   )
   const systemTabs: {
-    key: SystemTabKey
+    key: SystemTab
     label: string
     icon: React.ElementType
   }[] = [
@@ -287,7 +321,7 @@ export function SystemPage({
   )
 
   React.useEffect(() => {
-    if (activeSystemTab !== "users" || !canManageUsers) {
+    if (activeTab !== "users" || !canManageUsers) {
       return
     }
 
@@ -301,7 +335,7 @@ export function SystemPage({
 
     void loadUsers()
   }, [
-    activeSystemTab,
+    activeTab,
     canManageUsers,
     canManageWorkspace,
     loadUsers,
@@ -311,13 +345,13 @@ export function SystemPage({
   ])
 
   React.useEffect(() => {
-    if (activeSystemTab !== "audit" || !me.user.is_global_admin) {
+    if (activeTab !== "audit" || !me.user.is_global_admin) {
       return
     }
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadAuditLogs()
-  }, [activeSystemTab, loadAuditLogs, me.user.is_global_admin])
+  }, [activeTab, loadAuditLogs, me.user.is_global_admin])
 
   const filteredUsers = React.useMemo(() => {
     const query = userSearch.trim().toLowerCase()
@@ -818,7 +852,7 @@ export function SystemPage({
 
   return (
     <SystemPageView
-      activeSystemTab={activeSystemTab}
+      activeSystemTab={activeTab}
       systemTabs={systemTabs}
       onSystemTabChange={onSystemTabChange}
       me={me}

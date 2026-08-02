@@ -13,6 +13,8 @@ venv/
 # Node / Vite
 node_modules/
 dist-ssr/
+.next/
+out/
 *.local
 
 # Logs

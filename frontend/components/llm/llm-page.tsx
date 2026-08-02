@@ -11,8 +11,8 @@ import {
 } from "lucide-react"
 import { getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
-import type { AppNotification } from "@/lib/notifications"
 import { useLanguage } from "@/contexts/language-provider"
+import { useSession } from "@/contexts/session-context"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -51,9 +51,7 @@ import type {
   ModelProviderCatalog,
   RegisteredModel,
 } from "@/lib/api/llm"
-import type { MeResponse } from "@/lib/api/auth"
 import type { TFunction, TranslationKey } from "@/i18n"
-import type { FeaturePageConfig } from "@/lib/pages"
 
 const MODEL_TYPE_LABELS: Record<string, TranslationKey> = {
   LLM: "大语言模型",
@@ -112,20 +110,10 @@ const EMPTY_MODEL_FORM: ModelForm = {
   status: "active",
 }
 
-export function LlmPage({
-  page,
-  token,
-  me,
-  selectedWorkspaceId,
-  onNotify,
-}: {
-  page: FeaturePageConfig
-  token: string
-  me: MeResponse
-  selectedWorkspaceId: string | null
-  onNotify: (kind: AppNotification["kind"], message: string) => void
-}) {
+export function LlmPage() {
   const { t } = useLanguage()
+  const { token, me, selectedWorkspaceId, notify } = useSession()
+
   const [providerCatalog, setProviderCatalog] = React.useState<
     ModelProviderCatalog[]
   >([])
@@ -147,13 +135,17 @@ export function LlmPage({
   const reportError = React.useCallback(
     (error: unknown) => {
       const message = getErrorMessage(error, t)
-      onNotify("error", message)
+      notify("error", message)
       return message
     },
-    [onNotify, t]
+    [notify, t]
   )
 
   const loadProviderCatalog = React.useCallback(async () => {
+    if (!token) {
+      setProviderCatalog([])
+      return
+    }
     setIsCatalogLoading(true)
     try {
       const catalog = await listModelProviderCatalog(token)
@@ -173,6 +165,11 @@ export function LlmPage({
   }, [reportError, token])
 
   const loadModels = React.useCallback(async () => {
+    if (!token) {
+      setModels([])
+      return
+    }
+
     if (!selectedWorkspaceId) {
       setModels([])
       return
@@ -192,6 +189,11 @@ export function LlmPage({
   const loadBaseModels = React.useCallback(
     async (provider: string, modelType: string) => {
       if (!provider || !modelType) {
+        setBaseModels([])
+        return []
+      }
+
+      if (!token) {
         setBaseModels([])
         return []
       }
@@ -246,6 +248,10 @@ export function LlmPage({
         .includes(query)
     })
   }, [models, providerCatalog, search, selectedProvider])
+
+  if (!token || !me) {
+    return null
+  }
 
   function formForProvider(
     provider: ModelProviderCatalog | undefined
@@ -344,7 +350,7 @@ export function LlmPage({
 
   async function handleModelSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selectedWorkspaceId) {
+    if (!token || !selectedWorkspaceId) {
       return
     }
 
@@ -374,7 +380,7 @@ export function LlmPage({
         setModels((current) =>
           current.map((item) => (item.id === model.id ? model : item))
         )
-        onNotify("success", t("模型测试通过，模型已更新"))
+        notify("success", t("模型测试通过，模型已更新"))
       } else {
         const model = await createRegisteredModel(
           token,
@@ -382,7 +388,7 @@ export function LlmPage({
           payload
         )
         setModels((current) => [...current, model])
-        onNotify("success", t("模型测试通过，模型已添加"))
+        notify("success", t("模型测试通过，模型已添加"))
       }
       setIsDialogOpen(false)
       setIsProviderPickerOpen(false)
@@ -396,7 +402,7 @@ export function LlmPage({
   }
 
   async function handleDeleteModel(model: RegisteredModel) {
-    if (!selectedWorkspaceId) {
+    if (!token || !selectedWorkspaceId) {
       return
     }
     if (!window.confirm(t("删除模型 {value}？", { value: model.name }))) {
@@ -406,7 +412,7 @@ export function LlmPage({
     try {
       await deleteRegisteredModel(token, selectedWorkspaceId, model.id)
       setModels((current) => current.filter((item) => item.id !== model.id))
-      onNotify("success", t("模型已删除"))
+      notify("success", t("模型已删除"))
     } catch (error) {
       reportError(error)
     }
@@ -416,15 +422,15 @@ export function LlmPage({
     <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="truncate text-2xl font-semibold">{page.label}</h1>
+          <h1 className="truncate text-2xl font-semibold">{t("模型")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {t("按模型维度接入供应商、基础模型和 API Key，保存前会先测试真实调用。")}
+            {t("按模型维度接入供应商、基础模型和访问凭据。")}
           </p>
         </div>
         {canManage ? (
           <Button type="button" className="shrink-0" onClick={openCreateModel}>
             <PlusIcon data-icon="inline-start" />
-            {page.actionLabel}
+            {t("接入模型")}
           </Button>
         ) : null}
       </div>
@@ -573,13 +579,13 @@ export function LlmPage({
             ) : (
               <EmptyState
                 icon={BrainCircuitIcon}
-                title={page.emptyTitle}
-                description={t("添加模型后，应用和 Agent 才能选择它进行对话、检索增强和工具调用。")}
+                title={t("还没有模型")}
+                description={t("接入模型后，应用可以使用它进行对话、检索增强和工具调用。")}
                 action={
                   canManage ? (
                     <Button type="button" onClick={openCreateModel}>
                       <PlusIcon data-icon="inline-start" />
-                      {page.actionLabel}
+                      {t("接入模型")}
                     </Button>
                   ) : null
                 }

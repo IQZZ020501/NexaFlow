@@ -12,13 +12,13 @@ describe("api client", () => {
   test("adds auth headers and returns API error details", async () => {
     let headers = new Headers()
 
-    globalThis.fetch = (async (_url, init) => {
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       headers = new Headers(init?.headers)
       return new Response(JSON.stringify({ detail: "Invalid request." }), {
         status: 400,
         statusText: "Bad Request",
       })
-    }) as typeof fetch
+    }) as unknown as typeof fetch
 
     try {
       await request("/users", {
@@ -39,7 +39,7 @@ describe("api client", () => {
 
   test("returns undefined for empty success responses", async () => {
     globalThis.fetch = (async () =>
-      new Response(null, { status: 204 })) as typeof fetch
+      new Response(null, { status: 204 })) as unknown as typeof fetch
 
     expect(await request("/users/1", { method: "DELETE" })).toBeUndefined()
   })

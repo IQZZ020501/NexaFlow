@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Badge } from "@/components/ui/badge"
-import { findChunkOverlapLength } from "@/components/knowledge/chunk-overlap"
+import { findChunkOverlapLength } from "@/lib/chunk-overlap"
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import type { KnowledgeDocumentChunk } from "@/lib/api/knowledge"
 

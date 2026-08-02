@@ -16,6 +16,7 @@ export const languageOptions: Array<{
 import { zhHans } from "./zh-hans"
 import { zhHant } from "./zh-hant"
 import { en } from "./en"
+import type { TranslationKey } from "./zh-hans"
 
 const translations = {
   "zh-Hans": zhHans,

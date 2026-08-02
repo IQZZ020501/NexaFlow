@@ -10,7 +10,7 @@ import type {
   WorkspaceMember,
 } from "@/lib/api/system"
 import { cn } from "@/lib/utils"
-import type { SystemTabKey } from "@/app/routing"
+import type { SystemTab } from "./system-shell"
 import {
   CreateTeamDialog,
   CreateWorkspaceDialog,
@@ -38,16 +38,16 @@ import type {
   WorkspaceForm,
 } from "@/lib/api/system"
 
-type SystemTab = {
-  key: SystemTabKey
+type SystemTabItem = {
+  key: SystemTab
   label: string
   icon: React.ElementType
 }
 
 type SystemPageViewProps = {
-  activeSystemTab: SystemTabKey
-  systemTabs: SystemTab[]
-  onSystemTabChange: (tab: SystemTabKey) => void
+  activeSystemTab: SystemTab
+  systemTabs: SystemTabItem[]
+  onSystemTabChange: (tab: SystemTab) => void
   me: MeResponse
   workspaces: Workspace[]
   selectedWorkspaceId: string | null
