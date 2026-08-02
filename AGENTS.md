@@ -45,6 +45,19 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
 - If the repository is missing production foundation required by the task, stop and surface the decision instead of silently implementing around it.
 - "Simplicity First" still applies: avoid speculative features, but do not omit required production behavior just to keep the diff small.
 
+### File Size Guidelines
+
+- Treat line counts as soft maintainability signals, not hard rules.
+- Prefer files in the `100-250` line range when the responsibility is naturally small.
+- Files in the `250-400` line range are acceptable when they still own one clear responsibility.
+- Reconsider the structure around `400-600` lines, especially for React pages and backend services.
+- Split files over `600` lines when a clear module, component, hook, service, or helper boundary exists.
+- Avoid `1000+` line source files unless the file is generated, mostly static data, or there is no clean split yet.
+- For React, prefer ordinary components around `50-200` lines, page containers around `200-500` lines, and hooks/utilities around `50-150` lines.
+- For backend code, prefer FastAPI `api.py` files around `100-300` lines, `services.py` around `150-400` lines, and `schemas.py` / `models.py` around `100-300` lines.
+- Test files may be longer when a workflow is easier to read together; `300-600` lines is acceptable if setup stays clear.
+- Split by responsibility first, then by length. Do not create abstractions or tiny files just to satisfy a line-count target.
+
 ## Python Guidelines
 
 - Keep Python features modular: put cohesive business logic in focused functions, classes, or modules that can be reused by callers.
@@ -105,5 +118,7 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
   - From `apps/`: `.venv/bin/python -m nexaflow.identity.test`
   - From `apps/`: `.venv/bin/python -m nexaflow.workspaces.test`
   - From `apps/`: `.venv/bin/python -m nexaflow.teams.test`
+  - From `apps/`: `.venv/bin/python -m nexaflow.knowledge.test`
+  - From `apps/`: `.venv/bin/python -m nexaflow.llm.test`
   - From `apps/`: run Alembic against the target database, or a temporary explicit test database when only validating migration syntax.
 - If a check cannot be run, say exactly why in the final response.

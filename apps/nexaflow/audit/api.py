@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nexaflow.audit.schemas import AuditLogResponse
 from nexaflow.audit.services import list_audit_logs
 from nexaflow.db.session import get_db
-from nexaflow.identity.deps import require_global_admin
+from nexaflow.identity.dependencies import require_global_admin
 from nexaflow.identity.models import User
 
 router = APIRouter(prefix="/audit-logs", tags=["audit-logs"])

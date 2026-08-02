@@ -29,7 +29,6 @@ class ChangePasswordRequest(BaseModel):
 class UserWorkspaceResponse(BaseModel):
     id: str
     name: str
-    slug: str
     is_default: bool
     role: str
 
@@ -38,7 +37,6 @@ class UserTeamResponse(BaseModel):
     id: str
     workspace_id: str
     name: str
-    slug: str
     is_default: bool
     role: str
 

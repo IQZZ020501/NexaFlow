@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexaflow.db.session import get_db
-from nexaflow.identity.deps import (
+from nexaflow.identity.dependencies import (
     WorkspaceContext,
     get_workspace_context_from_path,
     require_workspace_path_role,

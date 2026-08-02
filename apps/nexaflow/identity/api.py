@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nexaflow.core.config import Settings
 from nexaflow.db.session import get_db
-from nexaflow.identity.deps import (
+from nexaflow.identity.dependencies import (
     get_current_user,
     get_settings,
     require_global_admin,

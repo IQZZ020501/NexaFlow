@@ -17,7 +17,7 @@ def main() -> None:
 
         workspaces = client.get("/workspaces", headers=auth_headers(admin_token))
         assert workspaces.status_code == 200, workspaces.text
-        assert [item["slug"] for item in workspaces.json()] == ["default"]
+        assert [item["name"] for item in workspaces.json()] == ["Default Workspace"]
 
         default_workspace = client.get(
             f"/workspaces/{default_workspace_id}",
@@ -31,7 +31,7 @@ def main() -> None:
             headers=auth_headers(admin_token),
             json={
                 "name": "Research Workspace",
-                "slug": "research",
+                "description": "研究工作空间",
                 "admin": {
                     "username": "research-admin",
                     "email": "research-admin@example.com",
@@ -44,6 +44,7 @@ def main() -> None:
         research_workspace_id = payload["workspace"]["id"]
         temp_password = payload["admin_initial_password"]
         assert payload["admin_created"] is True
+        assert payload["workspace"]["description"] == "研究工作空间"
         assert temp_password
 
         research_token = activate_user(
@@ -64,7 +65,7 @@ def main() -> None:
             headers=auth_headers(research_token),
         )
         assert research_workspace.status_code == 200, research_workspace.text
-        assert research_workspace.json()["slug"] == "research"
+        assert research_workspace.json()["description"] == "研究工作空间"
 
         members_denied = client.get(
             members_url(research_workspace_id),
@@ -97,15 +98,11 @@ def main() -> None:
         assert created_workspace_user.status_code == 201, created_workspace_user.text
         workspace_user_payload = created_workspace_user.json()
         assert workspace_user_payload["user"]["is_global_admin"] is False
-        assert workspace_user_payload["user"]["workspaces"] == [
-            {
-                "id": research_workspace_id,
-                "name": "Research Workspace",
-                "slug": "research",
-                "is_default": False,
-                "role": "member",
-            }
-        ]
+        user_workspace = workspace_user_payload["user"]["workspaces"][0]
+        assert user_workspace["id"] == research_workspace_id
+        assert user_workspace["name"] == "Research Workspace"
+        assert user_workspace["is_default"] is False
+        assert user_workspace["role"] == "member"
 
         disable_last_admin = client.patch(
             f"/users/{research_admin_id}",
@@ -184,17 +181,17 @@ def main() -> None:
         workspace_admin_update_denied = client.patch(
             f"/workspaces/{research_workspace_id}",
             headers=auth_headers(research_token),
-            json={"name": "Research Lab", "slug": "research-lab"},
+            json={"name": "Research Lab", "description": "研究实验室"},
         )
         assert workspace_admin_update_denied.status_code == 403, workspace_admin_update_denied.text
 
         updated = client.patch(
             f"/workspaces/{research_workspace_id}",
             headers=auth_headers(admin_token),
-            json={"name": "Research Lab", "slug": "research-lab"},
+            json={"name": "Research Lab", "description": "研究实验室"},
         )
         assert updated.status_code == 200, updated.text
-        assert updated.json()["slug"] == "research-lab"
+        assert updated.json()["description"] == "研究实验室"
 
         archived = client.patch(
             f"/workspaces/{research_workspace_id}",

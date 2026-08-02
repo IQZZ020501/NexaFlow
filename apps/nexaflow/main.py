@@ -11,6 +11,8 @@ from nexaflow.core.seed import seed_defaults
 from nexaflow.audit import api as audit_api
 from nexaflow.db.session import configure_database, get_session_factory
 from nexaflow.identity import api as auth_api
+from nexaflow.knowledge import api as knowledge_api
+from nexaflow.llm import api as llm_api
 from nexaflow.system_logs.services import record_system_log
 from nexaflow.teams import api as teams_api
 from nexaflow.workspaces import api as workspaces_api
@@ -78,6 +80,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_api.users_router)
     app.include_router(workspaces_api.router)
     app.include_router(teams_api.router)
+    app.include_router(knowledge_api.router)
+    app.include_router(llm_api.router)
     app.include_router(audit_api.router)
     return app
 

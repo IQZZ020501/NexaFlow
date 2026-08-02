@@ -6,8 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nexaflow.audit.schemas import AuditLogResponse
 from nexaflow.audit.services import list_workspace_audit_logs
 from nexaflow.db.session import get_db
-from nexaflow.identity.deps import (
+from nexaflow.identity.dependencies import (
     WorkspaceContext,
+    get_workspace_context_from_path,
     require_global_admin,
     require_password_changed,
     require_workspace_path_role,
@@ -91,7 +92,7 @@ async def delete_workspace(
 
 @router.get("/{workspace_id}/members", response_model=list[WorkspaceMemberResponse])
 async def list_members(
-    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[WorkspaceMemberResponse]:
     return await list_workspace_members(db, context.workspace)

@@ -13,6 +13,7 @@ os.environ.update(
     {
         "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
         "JWT_SECRET_KEY": "test-secret-for-nexaflow-smoke-suite",
+        "MODEL_SECRET_KEY": "test-model-secret-for-nexaflow-smoke-suite",
         "BOOTSTRAP_ADMIN_USERNAME": "admin",
         "BOOTSTRAP_ADMIN_EMAIL": "admin@nexaflow.local",
         "BOOTSTRAP_ADMIN_NAME": "NexaFlow Admin",
@@ -39,6 +40,7 @@ def settings() -> Settings:
     return Settings(
         database_url="sqlite+aiosqlite:///:memory:",
         jwt_secret_key="test-secret-for-nexaflow-smoke-suite",
+        model_secret_key="test-model-secret-for-nexaflow-smoke-suite",
         bootstrap_admin_username="admin",
         bootstrap_admin_email="admin@nexaflow.local",
         bootstrap_admin_name="NexaFlow Admin",

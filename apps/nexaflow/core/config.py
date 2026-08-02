@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 DEFAULT_JWT_SECRET_KEY = "dev-secret-change-me-please-replace"
+DEFAULT_MODEL_SECRET_KEY = "dev-model-secret-change-me-please-replace"
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
@@ -34,6 +35,7 @@ class Settings:
     default_workspace_slug: str
     default_team_name: str
     default_team_slug: str
+    model_secret_key: str = DEFAULT_MODEL_SECRET_KEY
     jwt_expires_minutes: int = 60
     cors_origins: tuple[str, ...] = ()
     environment: str = "development"
@@ -60,6 +62,7 @@ class Settings:
             default_workspace_slug=os.getenv("DEFAULT_WORKSPACE_SLUG", ""),
             default_team_name=os.getenv("DEFAULT_TEAM_NAME", ""),
             default_team_slug=os.getenv("DEFAULT_TEAM_SLUG", ""),
+            model_secret_key=os.getenv("MODEL_SECRET_KEY", DEFAULT_MODEL_SECRET_KEY),
             jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "60")),
             cors_origins=origins,
             environment=os.getenv("ENVIRONMENT", "development"),
@@ -83,3 +86,5 @@ class Settings:
             raise RuntimeError(f"Missing initialization env values: {', '.join(missing)}.")
         if self.environment == "production" and self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY:
             raise RuntimeError("JWT_SECRET_KEY must be set in production.")
+        if self.environment == "production" and self.model_secret_key == DEFAULT_MODEL_SECRET_KEY:
+            raise RuntimeError("MODEL_SECRET_KEY must be set in production.")

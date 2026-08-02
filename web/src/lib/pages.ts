@@ -62,7 +62,7 @@ const pageCopy = {
     emptyTitle: "还没有应用",
     emptyDescription: "创建应用后，可以编排对话、检索和工具调用流程。",
     secondaryActionLabel: "查看模板",
-    dialogDescription: "配置应用名称和入口标识。",
+    dialogDescription: "配置应用名称和描述。",
     dialogFields: [
       {
         id: "appName",
@@ -71,10 +71,10 @@ const pageCopy = {
         placeholder: "例如：客服助手",
       },
       {
-        id: "appSlug",
-        label: "应用标识",
+        id: "appDescription",
+        label: "应用描述",
         type: "text",
-        placeholder: "例如：support-agent",
+        placeholder: "例如：面向客服团队的业务助手",
       },
       {
         id: "appOwner",
@@ -92,7 +92,7 @@ const pageCopy = {
     emptyDescription:
       "创建知识库后，你可以上传文档、配置检索方式，并让应用调用这些知识。",
     secondaryActionLabel: "查看示例",
-    dialogDescription: "配置知识库名称、标识和默认数据源。",
+    dialogDescription: "配置知识库名称、描述和默认数据源。",
     dialogFields: [
       {
         id: "knowledgeName",
@@ -101,10 +101,10 @@ const pageCopy = {
         placeholder: "例如：产品文档",
       },
       {
-        id: "knowledgeSlug",
-        label: "知识库标识",
+        id: "knowledgeDescription",
+        label: "知识库描述",
         type: "text",
-        placeholder: "例如：product-docs",
+        placeholder: "例如：产品资料与常见问题",
       },
       {
         id: "knowledgeSource",
@@ -116,13 +116,13 @@ const pageCopy = {
   },
   models: {
     label: "模型",
-    description: "接入模型供应商，配置默认模型和调用参数。",
+    description: "按模型维度接入供应商、基础模型和访问凭据。",
     actionLabel: "接入模型",
     emptyTitle: "还没有模型",
     emptyDescription:
       "接入模型后，应用可以使用它进行对话、检索增强和工具调用。",
     secondaryActionLabel: "查看配置",
-    dialogDescription: "配置供应商、模型名称和访问凭据。",
+    dialogDescription: "配置供应商、基础模型、API URL 和 API Key。",
     dialogFields: [
       {
         id: "modelProvider",
@@ -152,7 +152,7 @@ const pageCopy = {
     emptyDescription:
       "添加工具后，应用可以调用外部系统完成查询、写入和自动化动作。",
     secondaryActionLabel: "查看示例",
-    dialogDescription: "配置工具名称、标识和调用地址。",
+    dialogDescription: "配置工具名称、描述和调用地址。",
     dialogFields: [
       {
         id: "toolName",
@@ -161,10 +161,10 @@ const pageCopy = {
         placeholder: "例如：订单查询",
       },
       {
-        id: "toolSlug",
-        label: "工具标识",
+        id: "toolDescription",
+        label: "工具描述",
         type: "text",
-        placeholder: "例如：order-query",
+        placeholder: "例如：查询订单状态",
       },
       {
         id: "toolUrl",

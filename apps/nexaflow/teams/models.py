@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -7,12 +8,17 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nexaflow.db.base import Base
 from nexaflow.db.model_utils import new_id, utc_now
+
+if TYPE_CHECKING:
+    from nexaflow.identity.models import User
+    from nexaflow.workspaces.models import Workspace
 
 
 class Team(Base):
@@ -26,6 +32,7 @@ class Team(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     slug: Mapped[str] = mapped_column(String(80), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
