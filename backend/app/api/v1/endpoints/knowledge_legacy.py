@@ -13,7 +13,7 @@ from app.api.deps import (
 )
 from app.api.v1.endpoints.knowledge import dispatch_knowledge_task
 from app.shareddomain.knowledge.legacy import batch_create_knowledge_documents
-from app.shareddomain.knowledge.processing import (
+from app.shareddomain.knowledge.orchestration import (
     enqueue_index_knowledge_document,
     get_knowledge_document,
     preview_knowledge_document,

@@ -9,8 +9,8 @@ from sqlalchemy import text
 
 from app.infrastructure.secrets import decrypt_secret
 from app.infrastructure.session import get_session_factory
-from app.ai.llm.models import RegisteredModel
-from app.ai.llm.runtime import build_registered_model_provider
+from app.capabilities.llm.models import RegisteredModel
+from app.capabilities.llm.runtime import build_registered_model_provider
 from tests.support import (
     activate_admin,
     activate_user,

@@ -7,8 +7,8 @@ from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
 from app.domain.user import User
 from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
-from app.ai.embedding.pipeline import delete_chroma_vectors
-from app.shareddomain.knowledge.processing import (
+from app.capabilities.embedding.pipeline import delete_chroma_vectors
+from app.shareddomain.knowledge.orchestration import (
     DOCUMENT_PARSED_STATUS,
     TASK_INDEX,
     get_conflicting_open_task,

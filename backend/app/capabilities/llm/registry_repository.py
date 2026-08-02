@@ -1,7 +1,7 @@
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.llm.models import RegisteredModel
+from app.capabilities.llm.models import RegisteredModel
 
 
 async def list_registered_models(

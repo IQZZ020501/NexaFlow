@@ -7,7 +7,7 @@ from openai import APIStatusError, OpenAI, OpenAIError
 
 from app.infrastructure.config import Settings
 from app.infrastructure.secrets import decrypt_secret
-from app.ai.llm.models import RegisteredModel
+from app.capabilities.llm.models import RegisteredModel
 
 MODEL_REQUEST_TIMEOUT_SECONDS = 20
 

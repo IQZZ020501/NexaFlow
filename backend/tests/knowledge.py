@@ -18,9 +18,9 @@ from app.shareddomain.knowledge.models import (
     KnowledgeTask,
 )
 from app.api.v1.endpoints import knowledge as knowledge_api
-from app.ai.rag import retrieval as knowledge_retrieval
-from app.ai.embedding.pipeline import VectorHit, clean_text, split_text
-from app.shareddomain.knowledge.processing import (
+from app.capabilities.rag import retrieval as knowledge_retrieval
+from app.capabilities.embedding.pipeline import VectorHit, clean_text, split_text
+from app.shareddomain.knowledge.orchestration import (
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
 )

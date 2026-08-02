@@ -17,7 +17,7 @@ from app.shareddomain.knowledge.lifecycle import (
     delete_knowledge_document,
     set_knowledge_document_active,
 )
-from app.shareddomain.knowledge.processing import get_knowledge_document
+from app.shareddomain.knowledge.orchestration import get_knowledge_document
 from app.infrastructure.repositories.knowledge import count_document_chunks
 from app.schemas.knowledge import (
     KnowledgeDocumentResponse,

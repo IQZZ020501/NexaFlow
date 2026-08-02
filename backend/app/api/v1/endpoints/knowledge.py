@@ -34,7 +34,7 @@ from app.schemas.knowledge import (
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
 )
-from app.shareddomain.knowledge.processing import (
+from app.shareddomain.knowledge.orchestration import (
     enqueue_index_knowledge_document,
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,

@@ -16,7 +16,7 @@ from app.domain.user import User
 from app.application.identity import user_to_response
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
-from app.ai.embedding.pipeline import delete_chroma_collection
+from app.capabilities.embedding.pipeline import delete_chroma_collection
 from app.schemas.knowledge import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
@@ -26,9 +26,9 @@ from app.schemas.knowledge import (
     KnowledgeModelTestResponse,
     ResourcePermissionResponse,
 )
-from app.ai.llm import repositories as model_repository
-from app.ai.llm.models import RegisteredModel
-from app.ai.llm.runtime import (
+from app.capabilities.llm import registry_repository as model_repository
+from app.capabilities.llm.models import RegisteredModel
+from app.capabilities.llm.runtime import (
     ModelProviderError,
     ModelProviderStatusError,
     build_registered_model_provider,

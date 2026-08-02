@@ -57,7 +57,7 @@ backend/
 │   │   ├── knowledge/    Entities, services, processing, task runner
 │   │   ├── teams/        Team services
 │   │   └── audit/        Audit services
-│   ├── ai/               AI capabilities
+│   ├── capabilities/      AI capabilities
 │   │   ├── llm/          Provider catalogs, runtime, model registry
 │   │   ├── rag/          Retrieval
 │   │   └── embedding/    Chunking and vectorization
@@ -83,7 +83,7 @@ Backend code mixes technical layers with module-owned business domains:
 | `application/` | Cross-domain use cases (auth, workspace management) |
 | `domain/` | Shared domain entities and rules |
 | `shareddomain/<feature>/` | Self-contained business domain modules |
-| `ai/` | Model runtime, retrieval, embedding capabilities |
+| `capabilities/` | Model runtime, retrieval, embedding capabilities |
 | `infrastructure/` | Config, DB session, data access, external services |
 | `schemas/` | Pydantic request and response contracts |
 | `tasks/` | Celery task entry points |
@@ -92,9 +92,9 @@ The knowledge domain spans several modules because parsing and indexing cross
 the API/worker runtime boundary:
 `tasks/knowledge.py` is the Celery entry point,
 `shareddomain/knowledge/task_runner.py` owns task execution and leases,
-`ai/embedding/pipeline.py` parses and indexes documents, and the
+`capabilities/embedding/pipeline.py` parses and indexes documents, and the
 `*_api.py` endpoint modules expose lifecycle, retrieval, and compatibility
-routes. The LLM domain keeps provider catalogs under `ai/llm/providers/` so
+routes. The LLM domain keeps provider catalogs under `capabilities/llm/providers/` so
 provider-specific metadata stays out of the generic runtime.
 
 ## Frontend

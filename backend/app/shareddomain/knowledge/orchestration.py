@@ -15,7 +15,7 @@ from app.shareddomain.knowledge.models import (
     KnowledgeDocumentChunk,
     KnowledgeTask,
 )
-from app.ai.embedding.pipeline import (
+from app.capabilities.embedding.pipeline import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     KnowledgePipelineError,
@@ -35,7 +35,7 @@ from app.shareddomain.knowledge.services import (
     get_knowledge_model,
     knowledge_document_path,
 )
-from app.ai.llm.models import RegisteredModel
+from app.capabilities.llm.models import RegisteredModel
 
 DOCUMENT_PARSE_QUEUED_STATUS = "parse_queued"
 DOCUMENT_PARSING_STATUS = "parsing"

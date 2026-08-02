@@ -12,10 +12,10 @@ from app.infrastructure.secrets import decrypt_secret, encrypt_secret, secret_hi
 from app.infrastructure.validation import normalize_name
 from app.infrastructure.model_utils import utc_now
 from app.domain.user import User
-from app.ai.llm.models import RegisteredModel
-from app.ai.llm import repositories as model_repository
-from app.ai.llm.providers import PROVIDER_CATALOG
-from app.ai.llm.runtime import (
+from app.capabilities.llm.models import RegisteredModel
+from app.capabilities.llm import registry_repository as model_repository
+from app.capabilities.llm.providers import PROVIDER_CATALOG
+from app.capabilities.llm.runtime import (
     ModelProviderError,
     ModelProviderStatusError,
     OpenAICompatibleModelProvider,

@@ -24,7 +24,7 @@ Correctness, safety, evidence, and validation take priority over speed.
 - Backend routes are async FastAPI with SQLAlchemy `AsyncSession`; do not add
   new synchronous database access paths.
 - Backend code follows a hybrid layer + domain layout: technical layers
-  (`api/` HTTP, `application/` use cases, `ai/` model/rag/embedding
+  (`api/` HTTP, `application/` use cases, `capabilities/` model/rag/embedding
   capabilities, `infrastructure/` config, DB session, data access, storage)
   cross-cut module-owned business domains under `shareddomain/` and shared
   domain entities under `domain/` (User, Workspace, Team, permissions).

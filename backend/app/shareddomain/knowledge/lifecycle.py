@@ -8,8 +8,8 @@ from app.infrastructure.config import Settings
 from app.domain.user import User
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
-from app.ai.embedding.pipeline import delete_chroma_vectors
-from app.shareddomain.knowledge.processing import DOCUMENT_DELETED_STATUS
+from app.capabilities.embedding.pipeline import delete_chroma_vectors
+from app.shareddomain.knowledge.orchestration import DOCUMENT_DELETED_STATUS
 from app.shareddomain.knowledge.services import knowledge_document_path
 
 

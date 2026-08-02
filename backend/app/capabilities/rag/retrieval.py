@@ -6,11 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.config import Settings
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
-from app.ai.embedding.pipeline import (
+from app.capabilities.embedding.pipeline import (
     KnowledgePipelineError,
     query_chroma_vectors,
 )
-from app.shareddomain.knowledge.processing import (
+from app.shareddomain.knowledge.orchestration import (
     CHUNK_INDEXED_STATUS,
     DOCUMENT_DELETED_STATUS,
     resolve_embedding_model,
@@ -19,8 +19,8 @@ from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
     KnowledgeQueryRequest,
 )
-from app.ai.llm.models import RegisteredModel
-from app.ai.llm.runtime import build_registered_model_provider
+from app.capabilities.llm.models import RegisteredModel
+from app.capabilities.llm.runtime import build_registered_model_provider
 
 QUERY_OVERFETCH_FACTOR = 5
 

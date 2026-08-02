@@ -10,7 +10,7 @@ from app.api.deps import (
     get_settings,
     get_workspace_context_from_path,
 )
-from app.ai.rag.retrieval import query_knowledge_base
+from app.capabilities.rag.retrieval import query_knowledge_base
 from app.schemas.knowledge import KnowledgeQueryHitResponse, KnowledgeQueryRequest
 from app.shareddomain.knowledge.services import (
     get_knowledge_base,

@@ -17,14 +17,14 @@ from app.shareddomain.knowledge.models import (
     KnowledgeDocument,
     KnowledgeTask,
 )
-from app.ai.embedding.pipeline import (
+from app.capabilities.embedding.pipeline import (
     EMBED_BATCH_SIZE,
     KnowledgePipelineError,
     VectorChunk,
     delete_chroma_vectors,
     upsert_chroma_vectors,
 )
-from app.shareddomain.knowledge.processing import (
+from app.shareddomain.knowledge.orchestration import (
     CHUNK_INDEXED_STATUS,
     CHUNK_INDEX_FAILED_STATUS,
     DOCUMENT_DELETED_STATUS,
@@ -48,8 +48,8 @@ from app.shareddomain.knowledge.processing import (
     task_error_message,
 )
 from app.shareddomain.knowledge.services import RESOURCE_TYPE
-from app.ai.llm.models import RegisteredModel
-from app.ai.llm.runtime import build_registered_model_provider
+from app.capabilities.llm.models import RegisteredModel
+from app.capabilities.llm.runtime import build_registered_model_provider
 
 # ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
 TASK_LEASE_SECONDS = 300

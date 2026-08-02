@@ -13,7 +13,7 @@ from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeDocumentChunk,
     KnowledgeTask,
 )
-from app.ai.llm.models import RegisteredModel  # noqa: F401
+from app.capabilities.llm.models import RegisteredModel  # noqa: F401
 from app.domain.resource_permission import ResourcePermission  # noqa: F401
 from app.infrastructure.system_log import SystemLog  # noqa: F401
 from app.domain.team import Team, TeamMembership  # noqa: F401

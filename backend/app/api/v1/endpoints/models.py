@@ -21,7 +21,7 @@ from app.schemas.model import (
     RegisteredModelResponse,
     RegisteredModelUpdateRequest,
 )
-from app.ai.llm.services import (
+from app.capabilities.llm.registry import (
     create_registered_model,
     delete_registered_model,
     get_model_credential_form,
