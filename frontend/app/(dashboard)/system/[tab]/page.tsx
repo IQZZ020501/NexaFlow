@@ -1,0 +1,20 @@
+"use client"
+
+import { redirect, useParams } from "next/navigation"
+
+import { SystemShell } from "@/components/system/system-shell"
+
+const SYSTEM_TABS = ["workspaces", "teams", "users", "audit"] as const
+
+export type SystemTab = (typeof SYSTEM_TABS)[number]
+
+export default function SystemTabPage() {
+  const params = useParams<{ tab: string }>()
+  const tab = params.tab
+
+  if (!SYSTEM_TABS.includes(tab as SystemTab)) {
+    redirect("/system/workspaces")
+  }
+
+  return <SystemShell activeTab={tab as SystemTab} />
+}

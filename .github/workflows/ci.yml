@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps
+        working-directory: backend
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,23 +32,32 @@ jobs:
         run: uv sync --dev --frozen
 
       - name: Compile Python
-        run: uv run python -m compileall nexaflow main.py
+        run: uv run python -m compileall app tests main.py
 
       - name: Run identity tests
-        run: uv run python -m nexaflow.identity.test
+        run: uv run python -m tests.identity
 
       - name: Run workspace tests
-        run: uv run python -m nexaflow.workspaces.test
+        run: uv run python -m tests.workspaces
 
       - name: Run team tests
-        run: uv run python -m nexaflow.teams.test
+        run: uv run python -m tests.teams
+
+      - name: Run knowledge tests
+        run: uv run python -m tests.knowledge
+
+      - name: Run llm tests
+        run: uv run python -m tests.llm
+
+      - name: Run main smoke tests
+        run: uv run python -m tests.test_main
 
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: web
+        working-directory: frontend
     steps:
       - name: Checkout
         uses: actions/checkout@v4

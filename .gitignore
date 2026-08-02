@@ -13,6 +13,8 @@ venv/
 # Node / Vite
 node_modules/
 dist-ssr/
+.next/
+out/
 *.local
 
 # Logs
@@ -23,7 +25,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-apps/storage/
+backend/storage/
 
 # Environment
 .env
@@ -46,3 +48,4 @@ docs/MVP_TASK_PLAN.md
 
 # code graph
 .codegraph
+*.tsbuildinfo
