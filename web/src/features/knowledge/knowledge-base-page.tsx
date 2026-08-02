@@ -10,7 +10,6 @@ import {
   DownloadIcon,
   FileTextIcon,
   FlaskConicalIcon,
-  HelpCircleIcon,
   LoaderCircleIcon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -966,7 +965,6 @@ export function KnowledgeBasePage({
   }> = [
     { key: "documents", label: t("文档"), icon: FileTextIcon },
     { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
-    { key: "questions", label: t("问题"), icon: HelpCircleIcon },
     { key: "hit-test", label: t("命中测试"), icon: TargetIcon },
     { key: "settings", label: t("设置"), icon: SettingsIcon },
   ]
@@ -1172,7 +1170,7 @@ export function KnowledgeBasePage({
                         <span>{t("文件状态")}</span>
                         <button
                           type="button"
-                          className="flex items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("size_bytes")}
                         >
                           {t("大小")}
@@ -1188,7 +1186,7 @@ export function KnowledgeBasePage({
                         </button>
                         <button
                           type="button"
-                          className="flex items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("chunk_count")}
                         >
                           {t("分段")}
@@ -1205,7 +1203,7 @@ export function KnowledgeBasePage({
                         <span>{t("启用状态")}</span>
                         <button
                           type="button"
-                          className="flex items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("created_at")}
                         >
                           {t("创建时间")}
@@ -1221,7 +1219,7 @@ export function KnowledgeBasePage({
                         </button>
                         <button
                           type="button"
-                          className="flex items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("updated_at")}
                         >
                           {t("更新时间")}
@@ -1270,7 +1268,7 @@ export function KnowledgeBasePage({
                                 <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
                                 <button
                                   type="button"
-                                  className="min-w-0 truncate text-left font-medium outline-none hover:text-primary focus-visible:underline"
+                                  className="min-w-0 cursor-pointer truncate text-left font-medium outline-none hover:text-primary focus-visible:underline"
                                   title={document.filename}
                                   onClick={() => onOpenDocument(document.id)}
                                 >
@@ -1316,7 +1314,7 @@ export function KnowledgeBasePage({
                                   void handleToggleDocumentActive(document)
                                 }
                                 className={cn(
-                                  "relative h-5 w-9 rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+                                  "relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
                                   document.is_active
                                     ? "bg-primary"
                                     : "bg-muted-foreground/40"
@@ -1549,15 +1547,6 @@ export function KnowledgeBasePage({
                       </div>
                     )}
                   </div>
-                </div>
-              </div>
-            ) : null}
-
-            {activeDetailTab === "questions" ? (
-              <div className="p-4 lg:p-5">
-                <h1 className="text-xl font-semibold">{t("问题")}</h1>
-                <div className="mt-4 rounded-lg border p-8 text-sm text-muted-foreground">
-                  {t("暂无问题")}
                 </div>
               </div>
             ) : null}
