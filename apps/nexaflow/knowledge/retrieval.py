@@ -82,7 +82,11 @@ async def query_knowledge_base(
         document = documents.get(chunk.document_id)
         if document is None:
             loaded = await db.get(KnowledgeDocument, chunk.document_id)
-            if loaded is None or loaded.status == DOCUMENT_DELETED_STATUS:
+            if (
+                loaded is None
+                or loaded.status == DOCUMENT_DELETED_STATUS
+                or not loaded.is_active
+            ):
                 continue
             documents[chunk.document_id] = loaded
             document = loaded

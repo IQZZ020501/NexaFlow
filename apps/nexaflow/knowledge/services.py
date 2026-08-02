@@ -87,7 +87,10 @@ def knowledge_base_to_response(
     )
 
 
-def document_to_response(document: KnowledgeDocument) -> KnowledgeDocumentResponse:
+def document_to_response(
+    document: KnowledgeDocument,
+    chunk_count: int = 0,
+) -> KnowledgeDocumentResponse:
     return KnowledgeDocumentResponse(
         id=document.id,
         workspace_id=document.workspace_id,
@@ -97,6 +100,8 @@ def document_to_response(document: KnowledgeDocument) -> KnowledgeDocumentRespon
         size_bytes=document.size_bytes,
         meta=document.meta,
         status=document.status,
+        is_active=document.is_active,
+        chunk_count=chunk_count,
         last_error=document.last_error,
         created_by_user_id=document.created_by_user_id,
         created_at=document.created_at,

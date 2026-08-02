@@ -6,6 +6,7 @@ export type AppRoute = {
   page: PageKey
   systemTab: SystemTabKey
   knowledgeBaseId?: string | null
+  documentId?: string | null
 }
 
 export const PAGE_PATHS: Record<PageKey, string> = {
@@ -25,6 +26,17 @@ export const SYSTEM_TAB_PATHS: Record<SystemTabKey, string> = {
 
 export function routeFromPath(pathname = window.location.pathname): AppRoute {
   const path = pathname.replace(/\/+$/, "") || "/"
+  const documentMatch = path.match(/^\/knowledge\/([^/]+)\/documents\/([^/]+)$/)
+
+  if (documentMatch) {
+    return {
+      page: "knowledge",
+      systemTab: "workspaces",
+      knowledgeBaseId: decodeURIComponent(documentMatch[1]),
+      documentId: decodeURIComponent(documentMatch[2]),
+    }
+  }
+
   const knowledgeMatch = path.match(/^\/knowledge\/([^/]+)$/)
 
   if (knowledgeMatch) {
@@ -64,6 +76,9 @@ export function routeFromPath(pathname = window.location.pathname): AppRoute {
 export function pathForRoute(route: AppRoute) {
   if (route.page === "system") {
     return SYSTEM_TAB_PATHS[route.systemTab]
+  }
+  if (route.page === "knowledge" && route.knowledgeBaseId && route.documentId) {
+    return `/knowledge/${encodeURIComponent(route.knowledgeBaseId)}/documents/${encodeURIComponent(route.documentId)}`
   }
   if (route.page === "knowledge" && route.knowledgeBaseId) {
     return `/knowledge/${encodeURIComponent(route.knowledgeBaseId)}`

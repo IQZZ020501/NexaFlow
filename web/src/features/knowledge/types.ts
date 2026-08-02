@@ -27,6 +27,8 @@ export type KnowledgeDocument = {
   content_type: string
   size_bytes: number
   status: string
+  is_active: boolean
+  chunk_count: number
   last_error: string | null
   created_by_user_id: string
   created_at: string

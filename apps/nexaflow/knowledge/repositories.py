@@ -1,8 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nexaflow.db.model_utils import new_id, utc_now
 from nexaflow.identity.models import User
 from nexaflow.knowledge.models import (
     KnowledgeBase,
@@ -14,6 +15,10 @@ from nexaflow.resource_permissions.models import ResourcePermission
 from nexaflow.workspaces.models import WorkspaceMembership
 
 VISIBLE_DOCUMENT_STATUSES = (
+    "parse_queued",
+    "parsing",
+    "parsed",
+    "parse_failed",
     "index_queued",
     "indexing",
     "indexed",
@@ -90,6 +95,21 @@ async def get_knowledge_document_by_id(
     document_id: str,
 ) -> KnowledgeDocument | None:
     return await db.get(KnowledgeDocument, document_id)
+
+
+async def count_document_chunks(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> dict[str, int]:
+    result = await db.execute(
+        select(KnowledgeDocumentChunk.document_id, func.count())
+        .where(
+            KnowledgeDocumentChunk.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentChunk.knowledge_base_id == knowledge_base.id,
+        )
+        .group_by(KnowledgeDocumentChunk.document_id)
+    )
+    return dict(result.all())
 
 
 async def list_document_chunks(
@@ -278,6 +298,29 @@ async def get_open_document_task(
         )
         .order_by(KnowledgeTask.created_at.desc())
     )
+
+
+async def fail_open_document_tasks(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_id: str,
+    message: str,
+) -> None:
+    tasks = await db.scalars(
+        select(KnowledgeTask)
+        .where(
+            KnowledgeTask.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTask.knowledge_base_id == knowledge_base.id,
+            KnowledgeTask.document_id == document_id,
+            KnowledgeTask.status.in_(["queued", "running"]),
+        )
+        .order_by(KnowledgeTask.created_at.desc())
+    )
+    for task in tasks:
+        task.status = "failed"
+        task.last_error = message
+        task.lease_expires_at = None
+        task.finished_at = utc_now()
 
 
 async def get_user_grant(

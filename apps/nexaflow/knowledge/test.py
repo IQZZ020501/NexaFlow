@@ -325,6 +325,28 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
         knowledge_retrieval.query_chroma_vectors = original_query_chroma_vectors
 
 
+async def assert_document_open_tasks_failed(
+    knowledge_base_id: str,
+    document_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        tasks = await db.scalars(
+            select(KnowledgeTask).where(KnowledgeTask.document_id == document_id)
+        )
+        task_list = list(tasks)
+        assert task_list, "expected open tasks to exist"
+        open_tasks = [
+            task
+            for task in task_list
+            if task.status in ("queued", "running")
+        ]
+        assert not open_tasks, [task.status for task in open_tasks]
+        assert any(
+            task.last_error == "Document deleted before task completed."
+            for task in task_list
+        )
+
+
 def main() -> None:
     assert split_text("甲。乙。丙。丁。", chunk_size=4, overlap=0, separator="。") == [
         "甲。乙。",
@@ -574,7 +596,7 @@ def main() -> None:
             headers=auth_headers(alice_token),
         )
         assert visible_documents.status_code == 200, visible_documents.text
-        assert configured_document_id not in {
+        assert configured_document_id in {
             item["id"] for item in visible_documents.json()
         }
 
@@ -685,6 +707,7 @@ def main() -> None:
 
         assert degraded_upload.status_code == 201, degraded_upload.text
         assert degraded_upload.json()["status"] == "parse_failed"
+        queued_later_document_id = degraded_upload.json()["id"]
 
         pdf_document = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
@@ -829,16 +852,22 @@ def main() -> None:
             headers=auth_headers(alice_token),
         )
         assert concurrent_rebuild.status_code == 409, concurrent_rebuild.text
-        concurrent_delete_document = client.delete(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{recovery_document_id}"),
-            headers=auth_headers(alice_token),
-        )
-        assert concurrent_delete_document.status_code == 409, concurrent_delete_document.text
         concurrent_delete_knowledge_base = client.delete(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(alice_token),
         )
         assert concurrent_delete_knowledge_base.status_code == 409, concurrent_delete_knowledge_base.text
+        concurrent_delete_document = client.delete(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{recovery_document_id}"),
+            headers=auth_headers(alice_token),
+        )
+        assert concurrent_delete_document.status_code == 204, concurrent_delete_document.text
+        asyncio.run(
+            assert_document_open_tasks_failed(
+                knowledge_base_id,
+                recovery_document_id,
+            )
+        )
         asyncio.run(recover_knowledge_tasks(test_settings()))
 
         failed_parse_document = client.post(
@@ -959,13 +988,6 @@ def main() -> None:
         assert deleted_document.status_code == 204, deleted_document.text
         asyncio.run(assert_document_deleted(document_id))
 
-        deleted_recovery_document = client.delete(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{recovery_document_id}"),
-            headers=auth_headers(alice_token),
-        )
-        assert deleted_recovery_document.status_code == 204, deleted_recovery_document.text
-        asyncio.run(assert_document_deleted(recovery_document_id))
-
         deleted_retry_document = client.delete(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{retry_document_id}"),
             headers=auth_headers(alice_token),
@@ -1001,13 +1023,19 @@ def main() -> None:
         assert deleted_split_document.status_code == 204, deleted_split_document.text
         asyncio.run(assert_document_deleted(split_document_id))
 
+        deleted_queued_later_document = client.delete(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{queued_later_document_id}"),
+            headers=auth_headers(alice_token),
+        )
+        assert deleted_queued_later_document.status_code == 204, deleted_queued_later_document.text
+        asyncio.run(assert_document_deleted(queued_later_document_id))
+
         empty_documents = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
             headers=auth_headers(alice_token),
         )
         assert empty_documents.status_code == 200, empty_documents.text
         assert empty_documents.json() == []
-
         empty_query = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/query"),
             headers=auth_headers(alice_token),

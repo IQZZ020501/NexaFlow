@@ -36,6 +36,7 @@ import { ChangePasswordDialog } from "@/features/auth/change-password-dialog"
 import { LoginScreen } from "@/features/auth/login-screen"
 import { FeaturePage } from "@/features/pages/feature-page"
 import { SystemPage } from "@/features/system/system-page"
+import { DocumentDetailPage } from "@/features/knowledge/document-detail-page"
 
 export function App() {
   const { t } = useLanguage()
@@ -56,6 +57,9 @@ export function App() {
   const [activeKnowledgeBaseId, setActiveKnowledgeBaseId] = React.useState<
     string | null
   >(() => routeFromPath().knowledgeBaseId ?? null)
+  const [activeDocumentId, setActiveDocumentId] = React.useState<string | null>(
+    () => routeFromPath().documentId ?? null
+  )
   const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<
     string | null
   >(() => localStorage.getItem(WORKSPACE_KEY))
@@ -82,6 +86,7 @@ export function App() {
     setActivePage("apps")
     setActiveSystemTab("workspaces")
     setActiveKnowledgeBaseId(null)
+    setActiveDocumentId(null)
     window.history.pushState(null, "", PAGE_PATHS.apps)
   }, [])
 
@@ -158,6 +163,7 @@ export function App() {
       setActivePage(route.page)
       setActiveSystemTab(route.systemTab)
       setActiveKnowledgeBaseId(route.knowledgeBaseId ?? null)
+      setActiveDocumentId(route.documentId ?? null)
     }
 
     window.addEventListener("popstate", handlePopState)
@@ -240,6 +246,7 @@ export function App() {
     setActivePage(route.page)
     setActiveSystemTab(route.systemTab)
     setActiveKnowledgeBaseId(route.knowledgeBaseId ?? null)
+    setActiveDocumentId(route.documentId ?? null)
   }
 
   function handlePageChange(page: PageKey) {
@@ -247,6 +254,7 @@ export function App() {
       page,
       systemTab: page === "system" ? activeSystemTab : "workspaces",
       knowledgeBaseId: null,
+      documentId: null,
     })
   }
 
@@ -259,6 +267,7 @@ export function App() {
       page: "knowledge",
       systemTab: "workspaces",
       knowledgeBaseId,
+      documentId: null,
     })
   }
 
@@ -267,6 +276,29 @@ export function App() {
       page: "knowledge",
       systemTab: "workspaces",
       knowledgeBaseId: null,
+      documentId: null,
+    })
+  }
+
+  function handleOpenDocument(documentId: string) {
+    if (!activeKnowledgeBaseId) {
+      return
+    }
+
+    navigateToRoute({
+      page: "knowledge",
+      systemTab: "workspaces",
+      knowledgeBaseId: activeKnowledgeBaseId,
+      documentId,
+    })
+  }
+
+  function handleCloseDocument() {
+    navigateToRoute({
+      page: "knowledge",
+      systemTab: "workspaces",
+      knowledgeBaseId: activeKnowledgeBaseId,
+      documentId: null,
     })
   }
 
@@ -475,6 +507,15 @@ export function App() {
               onNotify={notify}
             />
           </>
+        ) : activeKnowledgeBaseId && activeDocumentId ? (
+          <DocumentDetailPage
+            token={token}
+            selectedWorkspaceId={selectedWorkspaceId}
+            knowledgeBaseId={activeKnowledgeBaseId}
+            documentId={activeDocumentId}
+            onBack={handleCloseDocument}
+            onNotify={notify}
+          />
         ) : (
           <FeaturePage
             page={activePageConfig ?? featurePages[0]}
@@ -484,6 +525,7 @@ export function App() {
             activeKnowledgeBaseId={activeKnowledgeBaseId}
             onOpenKnowledgeBase={handleOpenKnowledgeBase}
             onCloseKnowledgeBase={handleCloseKnowledgeBase}
+            onOpenDocument={handleOpenDocument}
             onNotify={notify}
           />
         )}

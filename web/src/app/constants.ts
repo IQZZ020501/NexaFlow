@@ -57,6 +57,8 @@ export const AUDIT_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
   "knowledge_document.parse": "解析文档",
   "knowledge_document.index": "向量化文档",
   "knowledge_document.delete": "删除文档",
+  "knowledge_document.activate": "启用文档",
+  "knowledge_document.deactivate": "停用文档",
   "knowledge_document.batch_create": "批量导入文档",
   "knowledge_task.retry": "重试任务",
   "knowledge_task.parse.queue": "解析任务排队",
