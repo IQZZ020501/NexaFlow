@@ -524,6 +524,7 @@ const zhHans = {
     "共 {value} 条": "共 {value} 条",
     "上一页": "上一页",
     "下一页": "下一页",
+    "重新分段 {value}": "重新分段 {value}",
 } as const
 
 export type TranslationKey = keyof typeof zhHans
@@ -1045,6 +1046,7 @@ const zhHant = {
     "共 {value} 条": "共 {value} 條",
     "上一页": "上一頁",
     "下一页": "下一頁",
+    "重新分段 {value}": "重新分段 {value}",
 } satisfies Record<TranslationKey, string>
 
 const en = {
@@ -1566,6 +1568,7 @@ const en = {
     "共 {value} 条": "{value} total",
     "上一页": "Previous",
     "下一页": "Next",
+    "重新分段 {value}": "Re-segment {value}",
 } satisfies Record<TranslationKey, string>
 
 const translations = {

@@ -34,6 +34,15 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import {
   createKnowledgeBase,
   deleteKnowledgeDocument,
   deleteKnowledgeBase,
@@ -43,6 +52,7 @@ import {
   listKnowledgeBases,
   listKnowledgeDocuments,
   listKnowledgeTasks,
+  parseKnowledgeDocument,
   queryKnowledgeBase,
   rebuildKnowledgeIndex,
   retryKnowledgeTask,
@@ -127,6 +137,30 @@ const PROCESSING_DOCUMENT_STATUSES: Record<string, true> = {
 }
 
 const DOCUMENT_PAGE_SIZE = 20
+
+const SMART_CHUNK_SIZE = 1200
+const SMART_CHUNK_OVERLAP = 150
+const SMART_CLEANING_RULES = ["trim_lines", "remove_empty_lines"]
+const SMART_SPLIT_SEPARATOR = "\n\n"
+
+const CLEANING_RULE_OPTIONS: Array<{
+  value: string
+  labelKey: "去除行首尾空白" | "删除空行" | "合并连续空白"
+}> = [
+  { value: "trim_lines", labelKey: "去除行首尾空白" },
+  { value: "remove_empty_lines", labelKey: "删除空行" },
+  { value: "collapse_spaces", labelKey: "合并连续空白" },
+]
+
+const SPLIT_SEPARATOR_OPTIONS: Array<{
+  value: string
+  labelKey: "换行" | "空行（段落）" | "中文句号（。）" | "英文句号（.）"
+}> = [
+  { value: "\n", labelKey: "换行" },
+  { value: "\n\n", labelKey: "空行（段落）" },
+  { value: "。", labelKey: "中文句号（。）" },
+  { value: ".", labelKey: "英文句号（.）" },
+]
 
 function documentStatusText(
   document: KnowledgeDocument,
@@ -221,6 +255,19 @@ export function KnowledgeBasePage({
     React.useState(false)
   const [isSubmittingDocumentTask, setIsSubmittingDocumentTask] =
     React.useState(false)
+  const [segmentDialogDocument, setSegmentDialogDocument] =
+    React.useState<KnowledgeDocument | null>(null)
+  const [segmentMode, setSegmentMode] = React.useState<"smart" | "advanced">(
+    "smart"
+  )
+  const [chunkSize, setChunkSize] = React.useState(SMART_CHUNK_SIZE)
+  const [chunkOverlap, setChunkOverlap] = React.useState(SMART_CHUNK_OVERLAP)
+  const [splitSeparator, setSplitSeparator] = React.useState(
+    SMART_SPLIT_SEPARATOR
+  )
+  const [cleaningRules, setCleaningRules] = React.useState<string[]>(
+    SMART_CLEANING_RULES
+  )
   const [isRetryingTask, setIsRetryingTask] = React.useState(false)
   const [isQuerying, setIsQuerying] = React.useState(false)
   const [isTestingModels, setIsTestingModels] = React.useState(false)
@@ -630,6 +677,45 @@ export function KnowledgeBasePage({
       onNotify("success", t("知识库已删除"))
     } catch (error) {
       reportError(error)
+    }
+  }
+
+  async function handleParseDocumentWithOptions(document: KnowledgeDocument) {
+    if (!selectedWorkspaceId || !selectedKnowledgeBase) {
+      return
+    }
+
+    setIsSubmittingDocumentTask(true)
+    try {
+      await parseKnowledgeDocument(
+        token,
+        selectedWorkspaceId,
+        selectedKnowledgeBase.id,
+        document.id,
+        segmentMode === "smart"
+          ? {
+              chunk_size: SMART_CHUNK_SIZE,
+              chunk_overlap: SMART_CHUNK_OVERLAP,
+              cleaning_rules: SMART_CLEANING_RULES,
+              split_separator: SMART_SPLIT_SEPARATOR,
+              auto_index: false,
+            }
+          : {
+              chunk_size: chunkSize,
+              chunk_overlap: chunkOverlap,
+              cleaning_rules: cleaningRules,
+              split_separator: splitSeparator,
+              auto_index: false,
+            }
+      )
+      setSegmentDialogDocument(null)
+      await loadDocuments()
+      await loadKnowledgeTasks()
+      onNotify("success", t("已提交解析任务"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsSubmittingDocumentTask(false)
     }
   }
 
@@ -1321,6 +1407,43 @@ export function KnowledgeBasePage({
                               {formatDateTime(document.updated_at, locale)}
                             </span>
                             <span className="sticky right-0 flex h-full items-center gap-2 border-l bg-background px-4">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={
+                                  !canEditDocuments ||
+                                  isSubmittingDocumentTask
+                                }
+                                aria-label={t("重新分段 {value}", { value: document.filename })}
+                                title={t("重新分段 {value}", { value: document.filename })}
+                                onClick={() => {
+                                  setChunkSize(SMART_CHUNK_SIZE)
+                                  setChunkOverlap(SMART_CHUNK_OVERLAP)
+                                  setSplitSeparator(SMART_SPLIT_SEPARATOR)
+                                  setCleaningRules(SMART_CLEANING_RULES)
+                                  setSegmentMode("smart")
+                                  setSegmentDialogDocument(document)
+                                }}
+                              >
+                                <RotateCcwIcon />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={
+                                  !canEditDocuments ||
+                                  isSubmittingDocumentTask
+                                }
+                                aria-label={t("向量化 {value}", { value: document.filename })}
+                                title={t("向量化 {value}", { value: document.filename })}
+                                onClick={() =>
+                                  void handleIndexDocuments([document])
+                                }
+                              >
+                                <SlidersHorizontalIcon />
+                              </Button>
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <Button
@@ -1422,6 +1545,222 @@ export function KnowledgeBasePage({
                 </div>
               </div>
             ) : null}
+
+            <Dialog
+              open={segmentDialogDocument !== null}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setSegmentDialogDocument(null)
+                }
+              }}
+            >
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{t("重新分段")}</DialogTitle>
+                  <DialogDescription>
+                    {t("先用智能规则生成预览，需要时再精调。")}
+                  </DialogDescription>
+                </DialogHeader>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    if (segmentDialogDocument) {
+                      void handleParseDocumentWithOptions(segmentDialogDocument)
+                    }
+                  }}
+                >
+                  <FieldGroup>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded-lg border p-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          segmentMode === "smart"
+                            ? "border-primary bg-primary/5"
+                            : "hover:bg-muted"
+                        )}
+                        onClick={() => setSegmentMode("smart")}
+                      >
+                        <span className="block text-sm font-medium">
+                          {t("智能分段")}
+                        </span>
+                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                          {t("按常见文档结构自动设置长度、重叠和清洗规则。")}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          "rounded-lg border p-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          segmentMode === "advanced"
+                            ? "border-primary bg-primary/5"
+                            : "hover:bg-muted"
+                        )}
+                        onClick={() => setSegmentMode("advanced")}
+                      >
+                        <span className="block text-sm font-medium">
+                          {t("高级分段")}
+                        </span>
+                        <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                          {t("手动控制片段字符数、重叠字符和文本清洗规则。")}
+                        </span>
+                      </button>
+                    </div>
+
+                    {segmentMode === "advanced" ? (
+                      <>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field>
+                            <FieldLabel htmlFor="row-segment-size">
+                              {t("片段字符")}
+                            </FieldLabel>
+                            <Input
+                              id="row-segment-size"
+                              type="number"
+                              min={100}
+                              max={8000}
+                              value={chunkSize}
+                              onChange={(event) =>
+                                setChunkSize(Number(event.target.value))
+                              }
+                              required
+                            />
+                          </Field>
+                          <Field>
+                            <FieldLabel htmlFor="row-segment-overlap">
+                              {t("重叠字符")}
+                            </FieldLabel>
+                            <Input
+                              id="row-segment-overlap"
+                              type="number"
+                              min={0}
+                              max={2000}
+                              value={chunkOverlap}
+                              onChange={(event) =>
+                                setChunkOverlap(Number(event.target.value))
+                              }
+                              required
+                            />
+                          </Field>
+                        </div>
+                        {chunkOverlap >= chunkSize ? (
+                          <p className="text-sm text-destructive">
+                            {t("重叠字符必须小于片段字符")}
+                          </p>
+                        ) : null}
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field>
+                            <FieldLabel>{t("切分字符")}</FieldLabel>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-9 w-full justify-between font-normal"
+                                >
+                                  <span className="truncate">
+                                    {t(
+                                      SPLIT_SEPARATOR_OPTIONS.find(
+                                        (option) =>
+                                          option.value === splitSeparator
+                                      )?.labelKey ?? "空行（段落）"
+                                    )}
+                                  </span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start">
+                                {SPLIT_SEPARATOR_OPTIONS.map((option) => (
+                                  <DropdownMenuItem
+                                    key={option.value}
+                                    onSelect={() =>
+                                      setSplitSeparator(option.value)
+                                    }
+                                  >
+                                    {t(option.labelKey)}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </Field>
+                          <Field>
+                            <FieldLabel>{t("清洗规则")}</FieldLabel>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-9 w-full justify-between font-normal"
+                                >
+                                  <span className="truncate">
+                                    {cleaningRules.length
+                                      ? cleaningRules
+                                          .map(
+                                            (rule) =>
+                                              t(
+                                                CLEANING_RULE_OPTIONS.find(
+                                                  (option) =>
+                                                    option.value === rule
+                                                )?.labelKey ??
+                                                  "去除行首尾空白"
+                                              )
+                                          )
+                                          .join(t("列表分隔符"))
+                                      : t("不使用")}
+                                  </span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start">
+                                {CLEANING_RULE_OPTIONS.map((option) => (
+                                  <DropdownMenuItem
+                                    key={option.value}
+                                    onSelect={() =>
+                                      setCleaningRules((current) =>
+                                        current.includes(option.value)
+                                          ? current.filter(
+                                              (rule) => rule !== option.value
+                                            )
+                                          : [...current, option.value]
+                                      )
+                                    }
+                                  >
+                                    {t(option.labelKey)}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </Field>
+                        </div>
+                      </>
+                    ) : null}
+                  </FieldGroup>
+                  <DialogFooter className="pt-5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setSegmentDialogDocument(null)}
+                    >
+                      {t("取消")}
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={
+                        isSubmittingDocumentTask ||
+                        (segmentMode === "advanced" &&
+                          chunkOverlap >= chunkSize)
+                      }
+                    >
+                      {isSubmittingDocumentTask ? (
+                        <LoaderCircleIcon
+                          className="animate-spin"
+                          data-icon="inline-start"
+                        />
+                      ) : null}
+                      {t("开始入库")}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
 
             {activeDetailTab === "tasks" ? (
               <div className="p-4 lg:p-5">
