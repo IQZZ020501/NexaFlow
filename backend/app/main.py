@@ -7,10 +7,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.api import api_router
-from app.core.config import Settings
-from app.core.seed import seed_defaults
-from app.core.session import configure_database, get_session_factory
-from app.services.system_log import record_system_log
+from app.infrastructure.config import Settings
+from app.infrastructure.seed import seed_defaults
+from app.infrastructure.session import configure_database, get_session_factory
+from app.infrastructure.system_log import record_system_log
 
 logger = logging.getLogger(__name__)
 

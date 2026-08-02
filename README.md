@@ -51,11 +51,19 @@ backend/
 │   │       ├── endpoints/  Platform-facing routers (auth, workspaces, teams,
 │   │       │              knowledge, models, ...)
 │   │       └── admin/    Global-admin routers (users, audit logs)
-│   ├── core/             Configuration, security, DB session, seed data, Celery
-│   ├── llm/              Provider catalogs and model runtime
-│   ├── models/           SQLAlchemy persistence models by domain
+│   ├── application/      Use cases (identity, workspace management)
+│   ├── domain/           Shared domain entities (User, Workspace, Team, permissions)
+│   ├── shareddomain/     Module-owned business domains
+│   │   ├── knowledge/    Entities, services, processing, task runner
+│   │   ├── teams/        Team services
+│   │   └── audit/        Audit services
+│   ├── ai/               AI capabilities
+│   │   ├── llm/          Provider catalogs, runtime, model registry
+│   │   ├── rag/          Retrieval
+│   │   └── embedding/    Chunking and vectorization
+│   ├── infrastructure/   Config, security, DB session, data access, system log
+│   │   └── repositories/ SQLAlchemy query implementations
 │   ├── schemas/          Pydantic request and response contracts by domain
-│   ├── services/         Business workflows, repositories, knowledge pipeline
 │   └── tasks/            Celery task entry points
 ├── tests/            Executable regression suites (python -m tests.<suite>)
 │   └── support.py        Shared test database and application helpers
@@ -67,23 +75,26 @@ backend/
 └── uv.lock               Locked Python dependency graph
 ```
 
-Backend code is split by technical layer first, then by domain:
+Backend code mixes technical layers with module-owned business domains:
 
 | Layer | Responsibility |
 |---|---|
-| `api/v1/endpoints/` | Async FastAPI routes and HTTP-level validation |
+| `api/v1/` | Async FastAPI routes and HTTP-level validation |
+| `application/` | Cross-domain use cases (auth, workspace management) |
+| `domain/` | Shared domain entities and rules |
+| `shareddomain/<feature>/` | Self-contained business domain modules |
+| `ai/` | Model runtime, retrieval, embedding capabilities |
+| `infrastructure/` | Config, DB session, data access, external services |
 | `schemas/` | Pydantic request and response contracts |
-| `services/` | Business workflows, authorization, and transactions |
-| `models/` | SQLAlchemy persistence models |
 | `tasks/` | Celery task entry points |
 
-The knowledge domain spans several service modules (`services/knowledge*`)
-because parsing and indexing cross the API/worker runtime boundary:
+The knowledge domain spans several modules because parsing and indexing cross
+the API/worker runtime boundary:
 `tasks/knowledge.py` is the Celery entry point,
-`services/knowledge_task_runner.py` owns task execution and leases,
-`services/knowledge_pipeline.py` parses and indexes documents, and the
+`shareddomain/knowledge/task_runner.py` owns task execution and leases,
+`ai/embedding/pipeline.py` parses and indexes documents, and the
 `*_api.py` endpoint modules expose lifecycle, retrieval, and compatibility
-routes. The LLM domain keeps provider catalogs under `llm/providers/` so
+routes. The LLM domain keeps provider catalogs under `ai/llm/providers/` so
 provider-specific metadata stays out of the generic runtime.
 
 ## Frontend

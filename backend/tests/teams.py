@@ -3,9 +3,9 @@ import asyncio
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.core.session import get_session_factory
-from app.models.user import User
-from app.models.team import TeamMembership
+from app.infrastructure.session import get_session_factory
+from app.domain.user import User
+from app.domain.team import TeamMembership
 from tests.support import (
     RESEARCH_PASSWORD,
     activate_admin,

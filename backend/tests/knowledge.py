@@ -9,26 +9,26 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.core.session import get_session_factory
-from app.models.user import User
-from app.models.knowledge import (
+from app.infrastructure.session import get_session_factory
+from app.domain.user import User
+from app.shareddomain.knowledge.models import (
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeTask,
 )
 from app.api.v1.endpoints import knowledge as knowledge_api
-from app.services import knowledge_retrieval as knowledge_retrieval
-from app.services.knowledge_pipeline import VectorHit, clean_text, split_text
-from app.services.knowledge_processing import (
+from app.ai.rag import retrieval as knowledge_retrieval
+from app.ai.embedding.pipeline import VectorHit, clean_text, split_text
+from app.shareddomain.knowledge.processing import (
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
 )
-from app.services.knowledge_task_runner import recover_knowledge_tasks
+from app.shareddomain.knowledge.task_runner import recover_knowledge_tasks
 from app.tasks.knowledge import mark_task_dispatch_failed
 from app.schemas.knowledge import KnowledgeQueryRequest
 from tests.llm import ModelTestHandler, model_payload, model_test_server, models_url
-from app.models.resource_permission import ResourcePermission
+from app.domain.resource_permission import ResourcePermission
 from tests.support import (
     RESEARCH_PASSWORD,
     activate_admin,

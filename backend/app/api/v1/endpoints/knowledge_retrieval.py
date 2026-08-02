@@ -3,16 +3,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings
-from app.core.session import get_db
+from app.infrastructure.config import Settings
+from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_settings,
     get_workspace_context_from_path,
 )
-from app.services.knowledge_retrieval import query_knowledge_base
+from app.ai.rag.retrieval import query_knowledge_base
 from app.schemas.knowledge import KnowledgeQueryHitResponse, KnowledgeQueryRequest
-from app.services.knowledge import (
+from app.shareddomain.knowledge.services import (
     get_knowledge_base,
     require_knowledge_base_permission,
 )

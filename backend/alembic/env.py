@@ -3,21 +3,21 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.core.config import Settings
-from app.models.audit import AuditLog  # noqa: F401
-from app.core.base import Base
-from app.models.user import User  # noqa: F401
-from app.models.knowledge import (  # noqa: F401
+from app.infrastructure.config import Settings
+from app.shareddomain.audit.models import AuditLog  # noqa: F401
+from app.infrastructure.base import Base
+from app.domain.user import User  # noqa: F401
+from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeTask,
 )
-from app.models.model import RegisteredModel  # noqa: F401
-from app.models.resource_permission import ResourcePermission  # noqa: F401
-from app.models.system_log import SystemLog  # noqa: F401
-from app.models.team import Team, TeamMembership  # noqa: F401
-from app.models.workspace import Workspace, WorkspaceMembership  # noqa: F401
+from app.ai.llm.models import RegisteredModel  # noqa: F401
+from app.domain.resource_permission import ResourcePermission  # noqa: F401
+from app.infrastructure.system_log import SystemLog  # noqa: F401
+from app.domain.team import Team, TeamMembership  # noqa: F401
+from app.domain.workspace import Workspace, WorkspaceMembership  # noqa: F401
 
 config = context.config
 

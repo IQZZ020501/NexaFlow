@@ -3,8 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings
-from app.core.session import get_db
+from app.infrastructure.config import Settings
+from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_current_user,
@@ -12,7 +12,7 @@ from app.api.deps import (
     get_workspace_context_from_path,
     require_workspace_path_role,
 )
-from app.models.user import User
+from app.domain.user import User
 from app.schemas.model import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
@@ -21,7 +21,7 @@ from app.schemas.model import (
     RegisteredModelResponse,
     RegisteredModelUpdateRequest,
 )
-from app.services.model import (
+from app.ai.llm.services import (
     create_registered_model,
     delete_registered_model,
     get_model_credential_form,

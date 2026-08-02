@@ -7,10 +7,10 @@ from threading import Thread
 
 from sqlalchemy import text
 
-from app.core.secrets import decrypt_secret
-from app.core.session import get_session_factory
-from app.models.model import RegisteredModel
-from app.llm.runtime import build_registered_model_provider
+from app.infrastructure.secrets import decrypt_secret
+from app.infrastructure.session import get_session_factory
+from app.ai.llm.models import RegisteredModel
+from app.ai.llm.runtime import build_registered_model_provider
 from tests.support import (
     activate_admin,
     activate_user,

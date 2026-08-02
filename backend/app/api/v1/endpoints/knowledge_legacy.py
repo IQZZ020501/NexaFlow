@@ -4,16 +4,16 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings
-from app.core.session import get_db
+from app.infrastructure.config import Settings
+from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_settings,
     get_workspace_context_from_path,
 )
 from app.api.v1.endpoints.knowledge import dispatch_knowledge_task
-from app.services.knowledge_legacy import batch_create_knowledge_documents
-from app.services.knowledge_processing import (
+from app.shareddomain.knowledge.legacy import batch_create_knowledge_documents
+from app.shareddomain.knowledge.processing import (
     enqueue_index_knowledge_document,
     get_knowledge_document,
     preview_knowledge_document,
@@ -26,7 +26,7 @@ from app.schemas.knowledge import (
     KnowledgeDocumentSplitParagraphResponse,
     KnowledgeDocumentSplitResponse,
 )
-from app.services.knowledge import (
+from app.shareddomain.knowledge.services import (
     document_to_response,
     get_knowledge_base,
     require_knowledge_base_permission,

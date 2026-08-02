@@ -6,24 +6,24 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings
-from app.core.session import get_db
+from app.infrastructure.config import Settings
+from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_settings,
     get_workspace_context_from_path,
 )
-from app.services.knowledge_lifecycle import (
+from app.shareddomain.knowledge.lifecycle import (
     delete_knowledge_document,
     set_knowledge_document_active,
 )
-from app.services.knowledge_processing import get_knowledge_document
-from app.services.knowledge_repositories import count_document_chunks
+from app.shareddomain.knowledge.processing import get_knowledge_document
+from app.infrastructure.repositories.knowledge import count_document_chunks
 from app.schemas.knowledge import (
     KnowledgeDocumentResponse,
     KnowledgeDocumentStatusUpdateRequest,
 )
-from app.services.knowledge import (
+from app.shareddomain.knowledge.services import (
     document_to_response,
     get_knowledge_base,
     knowledge_document_path,

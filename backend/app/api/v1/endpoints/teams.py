@@ -3,14 +3,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.session import get_db
+from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_workspace_context_from_path,
     require_workspace_path_role,
 )
 from app.schemas.team import TeamCreateRequest, TeamResponse, TeamUpdateRequest
-from app.services.team import (
+from app.shareddomain.teams.services import (
     create_team,
     delete_team_permanently,
     get_team,

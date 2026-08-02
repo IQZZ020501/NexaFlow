@@ -23,18 +23,18 @@ Correctness, safety, evidence, and validation take priority over speed.
   `uv.lock`. `backend/app/` contains the FastAPI backend package.
 - Backend routes are async FastAPI with SQLAlchemy `AsyncSession`; do not add
   new synchronous database access paths.
-- Backend code follows a layer-first layout: HTTP routers live in
-  `backend/app/api/v1/endpoints/` (platform-facing) and
-  `backend/app/api/v1/admin/` (global-admin), aggregated under the
-  `/api/v1` prefix in `backend/app/api/v1/api.py`. Pydantic schemas live in
-  `backend/app/schemas/`, SQLAlchemy models in `backend/app/models/`,
-  business logic and repositories in `backend/app/services/`, and Celery
-  tasks in `backend/app/tasks/`. Shared infrastructure (configuration,
-  security, database session, seed data, Celery) stays in `backend/app/core/`;
-  the LLM runtime and provider catalogs stay in `backend/app/llm/`.
-- Hand-written SQL goes under `backend/app/sql/<feature>/` for explicit
-  write workflows, seed data, and complex queries; keep parameter binding in
-  Python services.
+- Backend code follows a hybrid layer + domain layout: technical layers
+  (`api/` HTTP, `application/` use cases, `ai/` model/rag/embedding
+  capabilities, `infrastructure/` config, DB session, data access, storage)
+  cross-cut module-owned business domains under `shareddomain/` and shared
+  domain entities under `domain/` (User, Workspace, Team, permissions).
+  Schemas stay in `app/schemas/` and Celery task entry points in
+  `app/tasks/`. New features: add a self-contained module directory under
+  `app/shareddomain/<feature>/` (entities + services), expose use cases
+  through `app/application/`, and keep HTTP routers thin in `app/api/v1/`.
+- Hand-written SQL goes under `backend/app/infrastructure/sql/<feature>/` for
+  explicit write workflows, seed data, and complex queries; keep parameter
+  binding in Python services.
 - `backend/.env.example` documents initialization env keys. Real `.env` files are
   local-only and gitignored; bootstrap admin credentials must come from env
   values, not Python constants.

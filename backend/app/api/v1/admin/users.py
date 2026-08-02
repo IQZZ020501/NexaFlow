@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_global_admin
-from app.core.session import get_db
-from app.models.user import User
+from app.infrastructure.session import get_db
+from app.domain.user import User
 from app.schemas.user import (
     ChangePasswordRequest,
     UserCreateRequest,
@@ -13,7 +13,7 @@ from app.schemas.user import (
     UserResponse,
     UserUpdateRequest,
 )
-from app.services.auth import (
+from app.application.identity import (
     change_user_password,
     create_user,
     delete_user_permanently,

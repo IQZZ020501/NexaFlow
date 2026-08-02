@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.audit import AuditLogResponse
-from app.services.audit import list_audit_logs
-from app.core.session import get_db
+from app.shareddomain.audit.services import list_audit_logs
+from app.infrastructure.session import get_db
 from app.api.deps import require_global_admin
-from app.models.user import User
+from app.domain.user import User
 
 router = APIRouter(prefix="/audit-logs", tags=["audit-logs"])
 

@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.audit import AuditLogResponse
-from app.services.audit import list_workspace_audit_logs
-from app.core.session import get_db
+from app.shareddomain.audit.services import list_workspace_audit_logs
+from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_workspace_context_from_path,
@@ -13,7 +13,7 @@ from app.api.deps import (
     require_password_changed,
     require_workspace_path_role,
 )
-from app.models.user import User
+from app.domain.user import User
 from app.schemas.user import UserPasswordResetResponse
 from app.schemas.workspace import (
     WorkspaceMemberCreateRequest,
@@ -25,7 +25,7 @@ from app.schemas.workspace import (
     WorkspaceResponse,
     WorkspaceUpdateRequest,
 )
-from app.services.workspace import (
+from app.application.workspace import (
     add_workspace_member,
     create_workspace,
     create_workspace_user,

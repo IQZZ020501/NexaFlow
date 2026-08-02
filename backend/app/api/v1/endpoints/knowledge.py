@@ -14,8 +14,8 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings
-from app.core.session import get_db
+from app.infrastructure.config import Settings
+from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_settings,
@@ -34,7 +34,7 @@ from app.schemas.knowledge import (
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
 )
-from app.services.knowledge_processing import (
+from app.shareddomain.knowledge.processing import (
     enqueue_index_knowledge_document,
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
@@ -43,10 +43,10 @@ from app.services.knowledge_processing import (
     list_knowledge_tasks,
     retry_knowledge_task,
 )
-from app.services.knowledge_repositories import (
+from app.infrastructure.repositories.knowledge import (
     count_document_chunks,
 )
-from app.services.knowledge import (
+from app.shareddomain.knowledge.services import (
     create_knowledge_base,
     delete_knowledge_base_permanently,
     get_knowledge_base,

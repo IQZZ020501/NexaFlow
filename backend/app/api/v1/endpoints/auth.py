@@ -4,16 +4,16 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_settings
-from app.core.config import Settings
-from app.core.session import get_db
-from app.models.user import User
+from app.infrastructure.config import Settings
+from app.infrastructure.session import get_db
+from app.domain.user import User
 from app.schemas.user import (
     ChangePasswordRequest,
     LoginRequest,
     MeResponse,
     TokenResponse,
 )
-from app.services.auth import authenticate_user, change_password, get_me
+from app.application.identity import authenticate_user, change_password, get_me
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

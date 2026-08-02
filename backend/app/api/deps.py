@@ -5,12 +5,12 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import Settings
-from app.core.session import get_db
-from app.models.user import User
-from app.core.security import decode_access_token
-from app.services import workspace_repositories as workspace_repository
-from app.models.workspace import Workspace
+from app.infrastructure.config import Settings
+from app.infrastructure.session import get_db
+from app.domain.user import User
+from app.infrastructure.security import decode_access_token
+from app.infrastructure.repositories import workspace as workspace_repository
+from app.domain.workspace import Workspace
 
 bearer_scheme = HTTPBearer(auto_error=False)
 

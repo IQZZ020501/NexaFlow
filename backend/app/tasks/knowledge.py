@@ -1,10 +1,10 @@
 import asyncio
 import os
 
-from app.core.celery import celery_app
-from app.core.config import Settings
-from app.core.session import configure_database, get_session_factory
-from app.services.knowledge_task_runner import (
+from app.infrastructure.celery import celery_app
+from app.infrastructure.config import Settings
+from app.infrastructure.session import configure_database, get_session_factory
+from app.shareddomain.knowledge.task_runner import (
     TASK_LEASE_RENEW_SECONDS,
     TASK_RUN_BUSY,
     mark_knowledge_task_failed,

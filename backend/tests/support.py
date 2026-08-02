@@ -29,9 +29,9 @@ os.environ.update(
     }
 )
 
-from app.core.config import Settings
-from app.core.base import Base
-from app.core.session import get_engine
+from app.infrastructure.config import Settings
+from app.infrastructure.base import Base
+from app.infrastructure.session import get_engine
 from app.main import create_app
 
 

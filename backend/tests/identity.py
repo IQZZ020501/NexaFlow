@@ -9,8 +9,8 @@ from tests.support import (
     login,
     test_client,
 )
-from app.core.session import get_session_factory
-from app.models.system_log import SystemLog
+from app.infrastructure.session import get_session_factory
+from app.infrastructure.system_log import SystemLog
 
 
 async def get_system_log_events() -> list[str]:
