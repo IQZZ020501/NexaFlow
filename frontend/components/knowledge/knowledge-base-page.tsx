@@ -2183,7 +2183,7 @@ function KnowledgeBasePageContent({
                         key={knowledgeBase.id}
                         role="button"
                         tabIndex={0}
-                        className="cursor-pointer rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                        className="rounded-md border p-3 min-h-40 cursor-pointer transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
                         onClick={() => openKnowledgeBase(knowledgeBase)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
@@ -2192,8 +2192,8 @@ function KnowledgeBasePageContent({
                           }
                         }}
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 gap-3">
                             <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
                               <Icon className="size-5 text-muted-foreground" />
                             </span>
@@ -2218,7 +2218,7 @@ function KnowledgeBasePageContent({
                               </p>
                             </div>
                           </div>
-                          <div className="flex shrink-0 gap-1">
+                          <div className="flex gap-1">
                             <IconButton
                               label={t("详情")}
                               onClick={(event) => {
