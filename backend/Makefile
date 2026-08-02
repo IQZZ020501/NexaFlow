@@ -10,4 +10,4 @@ migrate:
 	uv run python -m alembic upgrade head
 
 worker:
-	uv run celery -A app.core.celery:celery_app worker --loglevel=INFO
+	uv run celery -A app.infrastructure.celery:celery_app worker --loglevel=INFO

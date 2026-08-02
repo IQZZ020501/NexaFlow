@@ -47,7 +47,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/dockerfiles/backend.Dockerfile
-    command: celery -A app.core.celery:celery_app worker --loglevel=INFO
+    command: celery -A app.infrastructure.celery:celery_app worker --loglevel=INFO
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
@@ -66,7 +66,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/dockerfiles/backend.Dockerfile
-    command: celery -A app.core.celery:celery_app beat --loglevel=INFO
+    command: celery -A app.infrastructure.celery:celery_app beat --loglevel=INFO
     env_file: .env
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0

@@ -3,7 +3,7 @@
 Knowledge document preview and indexing are published to Redis through Celery.
 
 ```bash
-uv run celery -A app.core.celery:celery_app worker --loglevel=INFO
+uv run celery -A app.infrastructure.celery:celery_app worker --loglevel=INFO
 ```
 
 Set `CELERY_BROKER_URL` for Redis. The API process and every worker must share
