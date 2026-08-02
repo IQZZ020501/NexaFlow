@@ -1,20 +1,20 @@
 # NexaFlow
 
-NexaFlow is a monorepo organized first by runtime boundary, then by technical
-role and business domain.
+NexaFlow is a monorepo organized by runtime boundary, then by technical role
+and business domain.
 
 ```text
-frontend feature UI
+frontend pages and components (Next.js)
         ↓
-frontend feature API modules
+frontend API client modules (frontend/lib/api)
         ↓
-shared HTTP client
+backend HTTP layer (backend/nexaflow/api) — /api/v1
         ↓
-backend domain routers
+backend business layer (backend/nexaflow/services)
         ↓
-domain services and repositories
+models / schemas / LLM providers / Celery tasks
         ↓
-PostgreSQL / Redis / ChromaDB / local storage
+PostgreSQL + Redis + ChromaDB + local storage
 ```
 
 ## Repository layout
@@ -22,17 +22,21 @@ PostgreSQL / Redis / ChromaDB / local storage
 ```text
 .
 ├── backend/              FastAPI API, Celery worker, persistence, migrations
-├── frontend/             React/Vite single-page application
+├── frontend/             Next.js application (App Router)
+├── deploy/               Docker Compose, Dockerfiles, Nginx examples
 ├── docs/                 Product and engineering documentation
+├── scripts/              Repository-level maintenance scripts
+├── imgs/                 README and brand images
 ├── .github/workflows/    Repository CI
+├── .githooks/            Git hooks (enable via scripts/setup-hooks.sh)
 ├── AGENTS.md             Repository contribution rules
 ├── LICENSE               Project license
 └── README.md             Repository architecture and entry points
 ```
 
 Generated directories such as `.git/`, `.codegraph/`, `backend/.venv/`,
-`frontend/node_modules/`, `frontend/dist/`, `backend/storage/`, `__pycache__/`,
-and local `.env` files are not source-code layers.
+`frontend/node_modules/`, `frontend/.next/`, `backend/storage/`,
+`__pycache__/`, and local `.env` files are not source-code layers.
 
 ## Backend
 
@@ -40,19 +44,22 @@ and local `.env` files are not source-code layers.
 backend/
 ├── alembic/              Database migration environment and versions
 ├── nexaflow/             Importable FastAPI application package
-│   ├── main.py           App factory, middleware, router registration, SPA host
+│   ├── main.py           App factory, middleware, router registration
 │   ├── testing.py        Shared test database and application helpers
-│   ├── main_test.py      Application and SPA fallback smoke checks
+│   ├── api/              HTTP layer: auth dependencies (deps.py) and v1 routers
+│   │   └── v1/
+│   │       ├── api.py    /api/v1 router aggregation
+│   │       ├── endpoints/  Platform-facing routers (auth, workspaces, teams,
+│   │       │              knowledge, models, ...)
+│   │       └── admin/    Global-admin routers (users, audit logs)
 │   ├── core/             Configuration, secrets, validation, seed data, Celery
 │   ├── db/               SQLAlchemy base, sessions, and model helpers
-│   ├── audit/            Audit-log domain
-│   ├── identity/         Authentication, users, authorization dependencies
-│   ├── workspaces/       Workspace tenancy domain
-│   ├── teams/            Team and membership domain
-│   ├── knowledge/        Knowledge bases, documents, retrieval, processing jobs
-│   ├── llm/              Model registry, runtime, and provider catalogs
-│   ├── resource_permissions/  Cross-resource permission persistence
-│   └── system_logs/      Operational error-log persistence
+│   ├── llm/              Provider catalogs and model runtime
+│   ├── models/           SQLAlchemy persistence models by domain
+│   ├── schemas/          Pydantic request and response contracts by domain
+│   ├── services/         Business workflows, repositories, knowledge pipeline
+│   ├── tasks/            Celery task entry points
+│   └── tests/            Executable regression suites (python -m tests.<suite>)
 ├── .env.example          Runtime configuration template
 ├── alembic.ini           Alembic configuration
 ├── main.py               Compatibility ASGI entry point
@@ -61,66 +68,88 @@ backend/
 └── uv.lock               Locked Python dependency graph
 ```
 
-Business domains use a vertical slice. A typical domain contains:
+Backend code is split by technical layer first, then by domain:
 
-| File | Responsibility |
+| Layer | Responsibility |
 |---|---|
-| `api.py` | Async FastAPI routes and HTTP-level validation |
-| `schemas.py` | Pydantic request and response contracts |
-| `services.py` | Business workflows, authorization, and transactions |
-| `repositories.py` | Reusable SQLAlchemy queries |
-| `models.py` | SQLAlchemy persistence models |
-| `test.py` | Executable domain regression checks |
+| `api/v1/endpoints/` | Async FastAPI routes and HTTP-level validation |
+| `schemas/` | Pydantic request and response contracts |
+| `services/` | Business workflows, authorization, and transactions |
+| `models/` | SQLAlchemy persistence models |
+| `tasks/` | Celery task entry points |
 
-The knowledge domain has additional modules because parsing and indexing cross
-the API/worker runtime boundary: `tasks.py` is the Celery entry point,
-`task_runner.py` owns task execution and leases, `pipeline.py` parses and
-indexes documents, and the `*_api.py` modules expose lifecycle, retrieval, and
-compatibility routes. The LLM domain keeps provider catalogs under
-`llm/providers/` so provider-specific metadata stays out of the generic runtime.
+The knowledge domain spans several service modules (`services/knowledge*`)
+because parsing and indexing cross the API/worker runtime boundary:
+`tasks/knowledge.py` is the Celery entry point,
+`services/knowledge_task_runner.py` owns task execution and leases,
+`services/knowledge_pipeline.py` parses and indexes documents, and the
+`*_api.py` endpoint modules expose lifecycle, retrieval, and compatibility
+routes. The LLM domain keeps provider catalogs under `llm/providers/` so
+provider-specific metadata stays out of the generic runtime.
 
 ## Frontend
 
 ```text
 frontend/
+├── app/                  Next.js App Router pages and layouts
+│   ├── (auth)/login/     Authentication pages
+│   ├── (platform)/app/   User workspace pages (apps, knowledge, models, tools)
+│   └── (dashboard)/system/  Global-admin pages (workspaces, teams, users, audit)
+├── components/           Shared components
+│   ├── ui/               Domain-neutral shadcn/Radix primitives
+│   ├── app/              Application-shell UI (top bar, session gate)
+│   ├── auth/             Login screen and password dialogs
+│   ├── knowledge/        Knowledge base pages and dialogs
+│   ├── system/           System-admin panels and dialogs
+│   ├── llm/              Model management page
+│   └── pages/            Generic placeholder pages
+├── contexts/             Language, theme, and session providers
+├── hooks/                Shared hooks
+├── i18n/                 Trilingual dictionaries (zh-Hans, zh-Hant, en)
+├── lib/
+│   ├── api-client.ts     Shared fetch wrapper
+│   └── api/              Feature API modules (auth, system, knowledge, llm)
 ├── public/               Files served without bundling, including provider icons
-├── src/
-│   ├── main.tsx          Browser entry point
-│   ├── app/              Root composition, routing, session, notifications
-│   ├── components/
-│   │   ├── app/          Cross-feature application-shell UI
-│   │   └── ui/           Domain-neutral shadcn/Radix primitives
-│   ├── features/         Feature-owned UI, API calls, types, and local helpers
-│   ├── lib/              Shared HTTP client, i18n, DOM, and small utilities
-│   └── styles/           Tailwind theme tokens and global styles
-├── tests/                Cross-feature Bun tests
+├── tests/                Bun tests
 ├── components.json       shadcn/ui configuration
-├── package.json          Bun scripts and JavaScript dependencies
-├── vite.config.ts        Vite aliases, plugins, and development proxy
+├── next.config.ts        Next.js configuration and dev proxy
 └── bun.lock              Locked frontend dependency graph
 ```
 
-Feature modules currently cover `auth`, `knowledge`, `llm`, and `system`.
-Feature-specific API calls remain next to their feature; all of them share
-`src/lib/api-client.ts`. Route parsing and app-wide state stay in `src/app/`,
-while reusable visual primitives stay in `src/components/ui/`.
+Every user-facing string goes through `t()` from `@/i18n` (type-checked
+trilingual dictionaries). Feature API calls live in `lib/api/` and share
+`lib/api-client.ts`. Session state (token, workspaces, teams, notifications)
+lives in `contexts/session-context.tsx`.
 
 ## Runtime entry points
 
-Run commands from the runtime directory they belong to:
+Run the API and the web app together for local development:
 
 ```bash
 cd backend
-make dev
-make worker
+make dev          # FastAPI on http://localhost:8000 (runs migrations first)
 ```
 
 ```bash
 cd frontend
 bun install
-bun run dev
+bun run dev       # Next.js on http://localhost:3000, proxies /api to :8000
 ```
 
-The production backend serves `frontend/dist/` when it exists. Override that
-location with `WEB_DIST_DIR` for split or custom deployments. API and Celery
-worker processes must share `KNOWLEDGE_STORAGE_DIR` and `CHROMA_PERSIST_DIR`.
+Background workers:
+
+```bash
+cd backend
+make worker       # Celery worker (knowledge parsing and indexing)
+```
+
+The API and worker processes must share `KNOWLEDGE_STORAGE_DIR` and
+`CHROMA_PERSIST_DIR`. Containerized deployments (PostgreSQL, Redis, API,
+worker, beat, frontend) are defined under `deploy/`; see `deploy/README.md`.
+
+## Verification
+
+Backend regression suites run from `backend/` with
+`uv run python -m tests.<suite>` (identity, workspaces, teams, knowledge,
+llm, test_main). Frontend checks: `bun run typecheck`, `bun run lint`,
+`bun test`, `bun run build`. CI runs the same gates on every pull request.

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { findChunkOverlapLength } from "../src/features/knowledge/chunk-overlap"
+import { findChunkOverlapLength } from "../lib/chunk-overlap"
 
 describe("chunk overlap", () => {
   test("finds text repeated at the segment boundary", () => {

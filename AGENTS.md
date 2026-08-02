@@ -23,10 +23,15 @@ Correctness, safety, evidence, and validation take priority over speed.
   `uv.lock`. `backend/nexaflow/` contains the FastAPI backend package.
 - Backend routes are async FastAPI with SQLAlchemy `AsyncSession`; do not add
   new synchronous database access paths.
-- Business code follows a DRF-like app layout: new features live in
-  `backend/nexaflow/<feature>/` with local `api.py`, `models.py`, `schemas.py`,
-  and `services.py`. Shared infrastructure stays in `backend/nexaflow/core/` and
-  `backend/nexaflow/db/`.
+- Backend code follows a layer-first layout: HTTP routers live in
+  `backend/nexaflow/api/v1/endpoints/` (platform-facing) and
+  `backend/nexaflow/api/v1/admin/` (global-admin), aggregated under the
+  `/api/v1` prefix in `backend/nexaflow/api/v1/api.py`. Pydantic schemas live in
+  `backend/nexaflow/schemas/`, SQLAlchemy models in `backend/nexaflow/models/`,
+  business logic and repositories in `backend/nexaflow/services/`, and Celery
+  tasks in `backend/nexaflow/tasks/`. Shared infrastructure stays in
+  `backend/nexaflow/core/` and `backend/nexaflow/db/`; the LLM runtime and
+  provider catalogs stay in `backend/nexaflow/llm/`.
 - Hand-written SQL goes under `backend/nexaflow/sql/<feature>/` for explicit
   write workflows, seed data, and complex queries; keep parameter binding in
   Python services.
@@ -35,11 +40,18 @@ Correctness, safety, evidence, and validation take priority over speed.
   values, not Python constants.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
+- Regression suites live in `backend/tests/` and run from `backend/` with
+  `uv run python -m tests.<suite>`.
 - Knowledge parsing and indexing run through Celery with Redis; API and
   worker instances must share `KNOWLEDGE_STORAGE_DIR` and `CHROMA_PERSIST_DIR`.
-- `frontend/` is a React + TypeScript + Vite app using Bun, shadcn/ui, and
-  Tailwind CSS.
+- `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
+  and Tailwind CSS. Pages live under the `app/` route groups `(auth)`,
+  `(platform)`, and `(dashboard)`; shared components in `components/`, providers
+  in `contexts/`, trilingual dictionaries in `i18n/`, and feature API modules in
+  `lib/api/`.
 - `docs/` stores project planning and product/engineering documentation.
+- `deploy/` holds the Docker Compose topology, Dockerfiles, and Nginx examples;
+  `scripts/setup-hooks.sh` enables the repository Git hooks.
 - Use `rg` / `rg --files` for code search. Do not invent project commands;
   inspect local scripts first.
 
@@ -64,7 +76,7 @@ Correctness, safety, evidence, and validation take priority over speed.
 
 ### Trilingual i18n
 
-- Every user-facing string must go through `t()` from `@/lib/i18n` — never
+- Every user-facing string must go through `t()` from `@/i18n` — never
   hardcode Chinese text in components or utilities.
 - New UI copy must be added to all three dictionaries (`zhHans`, `zhHant`,
   `en`) in the same change; the dictionaries are type-checked to stay in
@@ -182,10 +194,10 @@ broad. Never claim a check passed unless it completed successfully.
 - `frontend/` changes: use the smallest relevant Bun script from `frontend/package.json`
   (typecheck, lint, test, build as applicable).
 - `backend/` changes: use the project's Python tooling. Run `compileall` over the
-  touched packages and the affected feature's test module — each feature owns
-  a `test` module; inspect the current layout rather than assuming a fixed
-  list. For migration changes, run Alembic against the target database or a
-  temporary explicit test database. For Celery wiring changes, verify the
+  touched packages, then run the affected suite from `backend/` with
+  `uv run python -m tests.<suite>` (identity, workspaces, teams, knowledge, llm,
+  test_main). For migration changes, run Alembic against the target database or
+  a temporary explicit test database. For Celery wiring changes, verify the
   expected tasks register on `celery_app`.
 - If a check cannot be run, say exactly why in the final response.
 

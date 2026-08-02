@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { isEventFromDropdownMenu } from "../src/lib/dom"
+import { isEventFromDropdownMenu } from "../lib/dom"
 
 type ClosestCapable = {
   closest: (selector: string) => ClosestCapable | null

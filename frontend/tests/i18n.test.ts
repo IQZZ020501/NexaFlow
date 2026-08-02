@@ -5,8 +5,8 @@ import {
   translate,
   type Language,
   type TFunction,
-} from "../src/lib/i18n"
-import { getPages } from "../src/lib/pages"
+} from "../i18n"
+import { getPages } from "../lib/pages"
 
 function tFor(language: Language): TFunction {
   return (key, values) => translate(language, key, values)

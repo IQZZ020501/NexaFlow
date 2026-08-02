@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Pre-commit checks: refuse local/secret files and whitespace errors.
+set -euo pipefail
+
+blocked=$(
+  git diff --cached --name-only |
+    grep -E '(^|/)\.env$|backend/storage/|\.pem$|(^|/)id_rsa$' || true
+)
+if [ -n "$blocked" ]; then
+  echo "Refusing to commit local or secret files:" >&2
+  echo "$blocked" >&2
+  exit 1
+fi
+
+git diff --cached --check
