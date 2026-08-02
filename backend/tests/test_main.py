@@ -2,10 +2,12 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
+# Must be imported before app.main: it populates the test environment
+# variables (no .env file exists on CI) that create_app() validates.
+from tests.support import settings as testing_settings  # noqa: E402
 from app.infrastructure.base import Base
 from app.infrastructure.session import get_engine
 from app.main import create_app
-from tests.support import settings as testing_settings
 
 
 def main() -> None:
