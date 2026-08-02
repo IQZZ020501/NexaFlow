@@ -698,14 +698,14 @@ export function KnowledgeBasePage({
               chunk_overlap: SMART_CHUNK_OVERLAP,
               cleaning_rules: SMART_CLEANING_RULES,
               split_separator: SMART_SPLIT_SEPARATOR,
-              auto_index: false,
+              auto_index: true,
             }
           : {
               chunk_size: chunkSize,
               chunk_overlap: chunkOverlap,
               cleaning_rules: cleaningRules,
               split_separator: splitSeparator,
-              auto_index: false,
+              auto_index: true,
             }
       )
       setSegmentDialogDocument(null)
