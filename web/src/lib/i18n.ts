@@ -521,6 +521,9 @@ const zhHans = {
     "已上传 {uploaded} 个文件，{failed} 个上传失败": "已上传 {uploaded} 个文件，{failed} 个上传失败",
     "已提交 {submitted} 个向量化任务，{failed} 个提交失败": "已提交 {submitted} 个向量化任务，{failed} 个提交失败",
     "向量化中 {done}/{total}": "向量化中 {done}/{total}",
+    "共 {value} 条": "共 {value} 条",
+    "上一页": "上一页",
+    "下一页": "下一页",
 } as const
 
 export type TranslationKey = keyof typeof zhHans
@@ -1039,6 +1042,9 @@ const zhHant = {
     "已上传 {uploaded} 个文件，{failed} 个上传失败": "已上傳 {uploaded} 個檔案，{failed} 個上傳失敗",
     "已提交 {submitted} 个向量化任务，{failed} 个提交失败": "已提交 {submitted} 個向量化任務，{failed} 個提交失敗",
     "向量化中 {done}/{total}": "向量化中 {done}/{total}",
+    "共 {value} 条": "共 {value} 條",
+    "上一页": "上一頁",
+    "下一页": "下一頁",
 } satisfies Record<TranslationKey, string>
 
 const en = {
@@ -1557,6 +1563,9 @@ const en = {
     "已上传 {uploaded} 个文件，{failed} 个上传失败": "Uploaded {uploaded} files, {failed} failed to upload",
     "已提交 {submitted} 个向量化任务，{failed} 个提交失败": "Submitted {submitted} indexing tasks, {failed} failed to submit",
     "向量化中 {done}/{total}": "Indexing {done}/{total}",
+    "共 {value} 条": "{value} total",
+    "上一页": "Previous",
+    "下一页": "Next",
 } satisfies Record<TranslationKey, string>
 
 const translations = {

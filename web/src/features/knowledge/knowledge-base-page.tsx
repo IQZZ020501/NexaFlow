@@ -127,6 +127,8 @@ const PROCESSING_DOCUMENT_STATUSES: Record<string, true> = {
   indexing: true,
 }
 
+const DOCUMENT_PAGE_SIZE = 20
+
 function documentStatusText(
   document: KnowledgeDocument,
   tasks: KnowledgeTask[],
@@ -191,6 +193,7 @@ export function KnowledgeBasePage({
   >([])
   const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
   const [documentSearch, setDocumentSearch] = React.useState("")
+  const [documentPage, setDocumentPage] = React.useState(1)
   const [documentSortKey, setDocumentSortKey] =
     React.useState<DocumentSortKey>("created_at")
   const [documentSortDirection, setDocumentSortDirection] = React.useState<
@@ -287,17 +290,26 @@ export function KnowledgeBasePage({
     }
     setDocumentSortKey(key)
     setDocumentSortDirection(key === "name" ? "asc" : "desc")
+    setDocumentPage(1)
   }
   const selectedDocuments = documents.filter((document) =>
     selectedDocumentIds.includes(document.id)
   )
   const selectedDocumentCount = selectedDocuments.length
+  const visibleDocuments = filteredDocuments.slice(
+    (documentPage - 1) * DOCUMENT_PAGE_SIZE,
+    documentPage * DOCUMENT_PAGE_SIZE
+  )
+  const documentPageCount = Math.max(
+    1,
+    Math.ceil(filteredDocuments.length / DOCUMENT_PAGE_SIZE)
+  )
   const isAllFilteredDocumentsSelected =
-    filteredDocuments.length > 0 &&
-    filteredDocuments.every((document) =>
+    visibleDocuments.length > 0 &&
+    visibleDocuments.every((document) =>
       selectedDocumentIds.includes(document.id)
     )
-  const isSomeFilteredDocumentSelected = filteredDocuments.some((document) =>
+  const isSomeFilteredDocumentSelected = visibleDocuments.some((document) =>
     selectedDocumentIds.includes(document.id)
   )
 
@@ -441,11 +453,11 @@ export function KnowledgeBasePage({
   }
 
   function toggleAllFilteredDocuments(checked: boolean) {
-    const filteredDocumentIds = filteredDocuments.map((document) => document.id)
+    const visibleDocumentIds = visibleDocuments.map((document) => document.id)
     setSelectedDocumentIds((current) =>
       checked
-        ? Array.from(new Set([...current, ...filteredDocumentIds]))
-        : current.filter((id) => !filteredDocumentIds.includes(id))
+        ? Array.from(new Set([...current, ...visibleDocumentIds]))
+        : current.filter((id) => !visibleDocumentIds.includes(id))
     )
   }
 
@@ -1139,9 +1151,10 @@ export function KnowledgeBasePage({
                       <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
                         value={documentSearch}
-                        onChange={(event) =>
+                        onChange={(event) => {
                           setDocumentSearch(event.target.value)
-                        }
+                          setDocumentPage(1)
+                        }}
                         className="pl-9"
                         placeholder={t("按名称搜索")}
                       />
@@ -1241,8 +1254,8 @@ export function KnowledgeBasePage({
                         <div className="flex min-h-56 items-center justify-center px-3 py-10 text-sm text-muted-foreground">
                           <LoaderCircleIcon className="animate-spin" />
                         </div>
-                      ) : filteredDocuments.length ? (
-                        filteredDocuments.map((document) => (
+                      ) : visibleDocuments.length ? (
+                        visibleDocuments.map((document) => (
                           <div
                             key={document.id}
                             className="grid min-h-14 grid-cols-[44px_240px_120px_100px_90px_110px_170px_170px_220px] items-center border-b px-3 text-sm last:border-b-0 hover:bg-muted/40"
@@ -1435,6 +1448,42 @@ export function KnowledgeBasePage({
                       )}
                     </div>
                   </div>
+                  {filteredDocuments.length > DOCUMENT_PAGE_SIZE ? (
+                    <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
+                      <span className="text-muted-foreground">
+                        {t("共 {value} 条", { value: filteredDocuments.length })}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={documentPage <= 1}
+                          onClick={() =>
+                            setDocumentPage((current) => Math.max(1, current - 1))
+                          }
+                        >
+                          {t("上一页")}
+                        </Button>
+                        <span className="text-muted-foreground">
+                          {documentPage} / {documentPageCount}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={documentPage >= documentPageCount}
+                          onClick={() =>
+                            setDocumentPage((current) =>
+                              Math.min(documentPageCount, current + 1)
+                            )
+                          }
+                        >
+                          {t("下一页")}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ) : null}
