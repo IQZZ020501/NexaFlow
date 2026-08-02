@@ -1302,7 +1302,7 @@ export function KnowledgeBasePage({
                             <ArrowUpDownIcon className="size-3.5" />
                           )}
                         </button>
-                        <span className="sticky right-0 flex h-full items-center justify-center border-l bg-background px-4">
+                        <span className="sticky right-0 flex h-full items-center border-l bg-background px-4">
                           {t("操作")}
                         </span>
                       </div>
