@@ -32,7 +32,6 @@ import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
-import { Spec } from "@/components/ui/spec"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -2179,23 +2178,12 @@ function KnowledgeBasePageContent({
               {filteredKnowledgeBases.length ? (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                   {filteredKnowledgeBases.map((knowledgeBase) => {
-                    const embeddingModel =
-                      registeredModels.find(
-                        (model) =>
-                          model.id === knowledgeBase.embedding_model_id
-                      ) ?? null
-                    const rerankerModel =
-                      registeredModels.find(
-                        (model) =>
-                          model.id === knowledgeBase.reranker_model_id
-                      ) ?? null
-
                     return (
                       <div
                         key={knowledgeBase.id}
                         role="button"
                         tabIndex={0}
-                        className="rounded-md border p-3 min-h-40 cursor-pointer transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                        className="cursor-pointer rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
                         onClick={() => openKnowledgeBase(knowledgeBase)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
@@ -2204,8 +2192,8 @@ function KnowledgeBasePageContent({
                           }
                         }}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex min-w-0 gap-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-3">
                             <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
                               <Icon className="size-5 text-muted-foreground" />
                             </span>
@@ -2230,7 +2218,7 @@ function KnowledgeBasePageContent({
                               </p>
                             </div>
                           </div>
-                          <div className="flex gap-1">
+                          <div className="flex shrink-0 gap-1">
                             <IconButton
                               label={t("详情")}
                               onClick={(event) => {
@@ -2305,23 +2293,6 @@ function KnowledgeBasePageContent({
                             ) : null}
                           </div>
                         </div>
-
-                        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                          <Spec
-                            label={t("Embedding 模型")}
-                            value={registeredModelLabel(
-                              embeddingModel,
-                              t
-                            )}
-                          />
-                          <Spec
-                            label={t("Rerank 模型")}
-                            value={registeredModelLabel(
-                              rerankerModel,
-                              t
-                            )}
-                          />
-                        </dl>
                       </div>
                     )
                   })}

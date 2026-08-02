@@ -24,6 +24,7 @@ export function SessionGate({ children }: { children: React.ReactNode }) {
     token,
     me,
     isSessionLoading,
+    isSessionRestored,
     sessionError,
     mustChangePassword,
     notification,
@@ -36,10 +37,10 @@ export function SessionGate({ children }: { children: React.ReactNode }) {
   } = useSession()
 
   React.useEffect(() => {
-    if (!token) {
+    if (isSessionRestored && !token) {
       router.replace("/login")
     }
-  }, [token, router])
+  }, [token, isSessionRestored, router])
 
   if (!token) {
     return null

@@ -25,6 +25,7 @@ type SessionContextValue = {
   selectedWorkspaceId: string | null
   mustChangePassword: boolean
   isSessionLoading: boolean
+  isSessionRestored: boolean
   isTeamsLoading: boolean
   sessionError: string | null
   notification: AppNotification | null
@@ -55,9 +56,7 @@ const SessionContext = React.createContext<SessionContextValue | undefined>(
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { t } = useLanguage()
-  const [token, setToken] = React.useState<string | null>(() =>
-    typeof window === "undefined" ? null : localStorage.getItem(TOKEN_KEY)
-  )
+  const [token, setToken] = React.useState<string | null>(null)
   const [mustChangePassword, setMustChangePassword] = React.useState(false)
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = React.useState(false)
   const [me, setMe] = React.useState<MeResponse | null>(null)
@@ -65,18 +64,29 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [teams, setTeams] = React.useState<Team[]>([])
   const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<
     string | null
-  >(() =>
-    typeof window === "undefined"
-      ? null
-      : localStorage.getItem(WORKSPACE_KEY)
-  )
+  >(null)
   const [workspaceNotice, setWorkspaceNotice] =
     React.useState<WorkspaceCreateResponse | null>(null)
-  const [isSessionLoading, setIsSessionLoading] = React.useState(Boolean(token))
+  const [isSessionLoading, setIsSessionLoading] = React.useState(false)
+  const [isSessionRestored, setIsSessionRestored] = React.useState(false)
   const [isTeamsLoading, setIsTeamsLoading] = React.useState(false)
   const [sessionError, setSessionError] = React.useState<string | null>(null)
   const [notification, setNotification] =
     React.useState<AppNotification | null>(null)
+
+  // Hydration-safe restore: localStorage is only readable on the client, so
+  // the initial render (server and client alike) starts signed out and the
+  // stored token is picked up after mount.
+  React.useEffect(() => {
+    const storedToken = localStorage.getItem(TOKEN_KEY)
+    if (storedToken) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsSessionLoading(true)
+      setToken(storedToken)
+    }
+    setIsSessionRestored(true)
+  }, [])
+
 
   const logout = React.useCallback(() => {
     localStorage.removeItem(TOKEN_KEY)
@@ -350,6 +360,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     selectedWorkspaceId,
     mustChangePassword,
     isSessionLoading,
+    isSessionRestored,
     isTeamsLoading,
     sessionError,
     notification,
