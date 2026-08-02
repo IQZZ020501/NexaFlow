@@ -268,8 +268,6 @@ export function KnowledgeBasePage({
   const [cleaningRules, setCleaningRules] = React.useState<string[]>(
     SMART_CLEANING_RULES
   )
-  const [separatorMenuOpen, setSeparatorMenuOpen] = React.useState(false)
-  const [cleaningMenuOpen, setCleaningMenuOpen] = React.useState(false)
   const [isRetryingTask, setIsRetryingTask] = React.useState(false)
   const [isQuerying, setIsQuerying] = React.useState(false)
   const [isTestingModels, setIsTestingModels] = React.useState(false)
@@ -1653,124 +1651,83 @@ export function KnowledgeBasePage({
                         <div className="grid gap-4 sm:grid-cols-2">
                           <Field>
                             <FieldLabel>{t("切分字符")}</FieldLabel>
-                            <div
-                              onMouseEnter={() => setSeparatorMenuOpen(true)}
-                              onMouseLeave={() => setSeparatorMenuOpen(false)}
-                            >
-                              <DropdownMenu
-                                open={separatorMenuOpen}
-                                onOpenChange={(open) => {
-                                  if (open) {
-                                    setSeparatorMenuOpen(true)
-                                  }
-                                }}
-                              >
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-9 w-full justify-between font-normal"
-                                    onPointerDown={(event) =>
-                                      event.preventDefault()
+                            <DropdownMenu modal={false}>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-9 w-full justify-between font-normal"
+                                >
+                                  <span className="truncate">
+                                    {t(
+                                      SPLIT_SEPARATOR_OPTIONS.find(
+                                        (option) =>
+                                          option.value === splitSeparator
+                                      )?.labelKey ?? "空行（段落）"
+                                    )}
+                                  </span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start">
+                                {SPLIT_SEPARATOR_OPTIONS.map((option) => (
+                                  <DropdownMenuItem
+                                    key={option.value}
+                                    onSelect={() =>
+                                      setSplitSeparator(option.value)
                                     }
-                                    onClick={(event) => {
-                                      event.preventDefault()
-                                      event.stopPropagation()
-                                    }}
                                   >
-                                    <span className="truncate">
-                                      {t(
-                                        SPLIT_SEPARATOR_OPTIONS.find(
-                                          (option) =>
-                                            option.value === splitSeparator
-                                        )?.labelKey ?? "空行（段落）"
-                                      )}
-                                    </span>
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="start">
-                                  {SPLIT_SEPARATOR_OPTIONS.map((option) => (
-                                    <DropdownMenuItem
-                                      key={option.value}
-                                      onSelect={() => {
-                                        setSplitSeparator(option.value)
-                                        setSeparatorMenuOpen(false)
-                                      }}
-                                    >
-                                      {t(option.labelKey)}
-                                    </DropdownMenuItem>
-                                  ))}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
+                                    {t(option.labelKey)}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </Field>
                           <Field>
                             <FieldLabel>{t("清洗规则")}</FieldLabel>
-                            <div
-                              onMouseEnter={() => setCleaningMenuOpen(true)}
-                              onMouseLeave={() => setCleaningMenuOpen(false)}
-                            >
-                              <DropdownMenu
-                                open={cleaningMenuOpen}
-                                onOpenChange={(open) => {
-                                  if (open) {
-                                    setCleaningMenuOpen(true)
-                                  }
-                                }}
-                              >
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-9 w-full justify-between font-normal"
-                                    onPointerDown={(event) =>
-                                      event.preventDefault()
-                                    }
-                                    onClick={(event) => {
-                                      event.preventDefault()
-                                      event.stopPropagation()
-                                    }}
-                                  >
-                                    <span className="truncate">
-                                      {cleaningRules.length
-                                        ? cleaningRules
-                                            .map(
-                                              (rule) =>
-                                                t(
-                                                  CLEANING_RULE_OPTIONS.find(
-                                                    (option) =>
-                                                      option.value === rule
-                                                  )?.labelKey ??
-                                                    "去除行首尾空白"
-                                                )
-                                            )
-                                            .join(t("列表分隔符"))
-                                        : t("不使用")}
-                                    </span>
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="start">
-                                  {CLEANING_RULE_OPTIONS.map((option) => (
-                                    <DropdownMenuItem
-                                      key={option.value}
-                                      onSelect={() => {
-                                        setCleaningRules((current) =>
-                                          current.includes(option.value)
-                                            ? current.filter(
-                                                (rule) =>
-                                                  rule !== option.value
+                            <DropdownMenu modal={false}>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-9 w-full justify-between font-normal"
+                                >
+                                  <span className="truncate">
+                                    {cleaningRules.length
+                                      ? cleaningRules
+                                          .map(
+                                            (rule) =>
+                                              t(
+                                                CLEANING_RULE_OPTIONS.find(
+                                                  (option) =>
+                                                    option.value === rule
+                                                )?.labelKey ??
+                                                  "去除行首尾空白"
                                               )
-                                            : [...current, option.value]
-                                        )
-                                        setCleaningMenuOpen(false)
-                                      }}
-                                    >
-                                      {t(option.labelKey)}
-                                    </DropdownMenuItem>
-                                  ))}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
+                                          )
+                                          .join(t("列表分隔符"))
+                                      : t("不使用")}
+                                  </span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start">
+                                {CLEANING_RULE_OPTIONS.map((option) => (
+                                  <DropdownMenuItem
+                                    key={option.value}
+                                    onSelect={() =>
+                                      setCleaningRules((current) =>
+                                        current.includes(option.value)
+                                          ? current.filter(
+                                              (rule) => rule !== option.value
+                                            )
+                                          : [...current, option.value]
+                                      )
+                                    }
+                                  >
+                                    {t(option.labelKey)}
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </Field>
                         </div>
                       </>
