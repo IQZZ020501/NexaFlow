@@ -138,7 +138,7 @@ export function DocumentDetailPage({
           auto_index: false,
         }
       )
-      onNotify("success", "已提交解析任务")
+      onNotify("success", t("已提交解析任务"))
       await load()
     } catch (error) {
       onNotify("error", getErrorMessage(error, t))
@@ -160,7 +160,7 @@ export function DocumentDetailPage({
         knowledgeBaseId,
         document.id
       )
-      onNotify("success", "已提交向量化任务")
+      onNotify("success", t("已提交向量化任务"))
       await load()
     } catch (error) {
       onNotify("error", getErrorMessage(error, t))
@@ -189,7 +189,7 @@ export function DocumentDetailPage({
         knowledgeBaseId,
         document.id
       )
-      onNotify("success", "文档已删除")
+      onNotify("success", t("文档已删除"))
       onBack()
     } catch (error) {
       onNotify("error", getErrorMessage(error, t))
@@ -214,11 +214,11 @@ export function DocumentDetailPage({
             <FileTextIcon className="size-5 text-muted-foreground" />
           </span>
           <p className="text-sm text-muted-foreground">
-            文档不存在或已被删除
+            {t("文档不存在或已被删除")}
           </p>
           <Button type="button" variant="outline" onClick={onBack}>
             <ArrowLeftIcon data-icon="inline-start" />
-            返回知识库
+            {t("返回知识库")}
           </Button>
         </div>
       </main>
@@ -240,7 +240,7 @@ export function DocumentDetailPage({
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label="返回知识库"
+              aria-label={t("返回知识库")}
               onClick={onBack}
             >
               <ArrowLeftIcon />
@@ -272,27 +272,27 @@ export function DocumentDetailPage({
                   )}
                 />
                 <Badge variant="outline">
-                  {documentStatusLabel(document.status)}
+                  {documentStatusLabel(document.status, t)}
                 </Badge>
                 {!document.is_active ? (
-                  <Badge variant="outline">已停用</Badge>
+                  <Badge variant="outline">{t("已停用")}</Badge>
                 ) : null}
               </div>
               <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <div className="flex items-center gap-1">
-                  <dt>大小</dt>
+                  <dt>{t("大小")}</dt>
                   <dd>{formatBytes(document.size_bytes)}</dd>
                 </div>
                 <div className="flex items-center gap-1">
-                  <dt>分段</dt>
+                  <dt>{t("分段")}</dt>
                   <dd>{chunks.length}</dd>
                 </div>
                 <div className="flex items-center gap-1">
-                  <dt>创建时间</dt>
+                  <dt>{t("创建时间")}</dt>
                   <dd>{formatDateTime(document.created_at, locale)}</dd>
                 </div>
                 <div className="flex items-center gap-1">
-                  <dt>更新时间</dt>
+                  <dt>{t("更新时间")}</dt>
                   <dd>{formatDateTime(document.updated_at, locale)}</dd>
                 </div>
               </dl>
@@ -313,7 +313,7 @@ export function DocumentDetailPage({
                 ) : (
                   <RotateCcwIcon data-icon="inline-start" />
                 )}
-                重新分段
+                {t("重新分段")}
               </Button>
               <Button
                 type="button"
@@ -322,7 +322,7 @@ export function DocumentDetailPage({
                 onClick={() => void handleIndex()}
               >
                 <SlidersHorizontalIcon data-icon="inline-start" />
-                向量化
+                {t("向量化")}
               </Button>
               <Button
                 type="button"
@@ -331,7 +331,7 @@ export function DocumentDetailPage({
                 onClick={() => void load()}
               >
                 <RefreshCwIcon data-icon="inline-start" />
-                刷新
+                {t("刷新")}
               </Button>
               <Button
                 type="button"
@@ -340,7 +340,7 @@ export function DocumentDetailPage({
                 onClick={() => void handleDelete()}
               >
                 <Trash2Icon data-icon="inline-start" />
-                删除
+                {t("删除")}
               </Button>
             </div>
           </div>
@@ -351,7 +351,7 @@ export function DocumentDetailPage({
         {isFailed ? (
           <div className="flex flex-col items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-8 text-center text-sm text-destructive">
             <AlertCircleIcon className="size-5" />
-            <p>{document.last_error ?? "解析失败"}</p>
+            <p>{document.last_error ?? t("解析失败")}</p>
             <Button
               type="button"
               variant="outline"
@@ -359,7 +359,7 @@ export function DocumentDetailPage({
               onClick={() => void handleParse()}
             >
               <RotateCcwIcon data-icon="inline-start" />
-              重新分段
+              {t("重新分段")}
             </Button>
           </div>
         ) : chunks.length ? (
@@ -373,8 +373,8 @@ export function DocumentDetailPage({
             )}
             <p>
               {isPending
-                ? "正在处理中，请稍后刷新"
-                : "暂无分段，点击重新分段生成预览"}
+                ? t("正在处理中，请稍后刷新")
+                : t("暂无分段，点击重新分段生成预览")}
             </p>
           </div>
         )}
@@ -382,9 +382,9 @@ export function DocumentDetailPage({
         {tasks.length ? (
           <section className="mt-6 rounded-lg border bg-background">
             <div className="border-b px-4 py-3">
-              <h2 className="text-sm font-semibold">文档任务</h2>
+              <h2 className="text-sm font-semibold">{t("文档任务")}</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                解析、向量化和失败重试状态
+                {t("解析、向量化和失败重试状态")}
               </p>
             </div>
             <div className="divide-y">
@@ -394,7 +394,9 @@ export function DocumentDetailPage({
                   className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
                 >
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="font-medium">{taskTypeLabel(task.task_type)}</span>
+                    <span className="font-medium">
+                      {taskTypeLabel(task.task_type, t)}
+                    </span>
                     <span className="truncate text-xs text-muted-foreground">
                       {formatDateTime(task.created_at, locale)}
                     </span>
@@ -410,7 +412,7 @@ export function DocumentDetailPage({
                           taskStatusDotClassName(task.status)
                         )}
                       />
-                      {taskStatusLabel(task.status)}
+                      {taskStatusLabel(task.status, t)}
                     </span>
                   </div>
                 </div>

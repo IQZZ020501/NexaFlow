@@ -28,6 +28,12 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
 - Reuse existing helpers, patterns, and dependencies before adding new code.
 - Prefer standard library and platform features over new dependencies.
 
+### Trilingual i18n (Simplified Chinese, Traditional Chinese, English)
+
+- Every user-facing string must go through `t()` from `@/lib/i18n` — never hardcode Chinese text in components or utilities.
+- New UI copy must be added to all three dictionaries in `web/src/lib/i18n.ts` (`zhHans`, `zhHant`, `en`) in the same change; the dictionaries are type-checked to stay in sync, so missing keys fail the build.
+- This applies to components, hooks, utilities, labels, aria-labels, and notification messages.`
+
 ### Surgical Changes
 
 - Touch only files required by the task.

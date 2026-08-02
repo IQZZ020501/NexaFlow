@@ -1,5 +1,7 @@
-export function documentStatusLabel(status: string) {
-  const labels: Record<string, string> = {
+import type { TFunction, TranslationKey } from "@/lib/i18n"
+
+export function documentStatusLabel(status: string, t: TFunction) {
+  const labels: Record<string, TranslationKey> = { // values are TranslationKeys
     uploaded: "待解析",
     parse_queued: "解析排队中",
     parsing: "解析中",
@@ -12,7 +14,8 @@ export function documentStatusLabel(status: string) {
     index_failed: "向量化失败",
   }
 
-  return labels[status] ?? status
+  const labelKey = labels[status]
+  return labelKey ? t(labelKey) : status
 }
 
 export function documentStatusDotClassName(status: string) {
@@ -32,25 +35,27 @@ export function documentStatusDotClassName(status: string) {
   return "bg-muted-foreground"
 }
 
-export function taskTypeLabel(taskType: string) {
-  const labels: Record<string, string> = {
+export function taskTypeLabel(taskType: string, t: TFunction) {
+  const labels: Record<string, TranslationKey> = { // values are TranslationKeys
     parse: "解析",
     index: "向量化",
     rebuild_index: "重建索引",
   }
 
-  return labels[taskType] ?? taskType
+  const labelKey = labels[taskType]
+  return labelKey ? t(labelKey) : taskType
 }
 
-export function taskStatusLabel(status: string) {
-  const labels: Record<string, string> = {
+export function taskStatusLabel(status: string, t: TFunction) {
+  const labels: Record<string, TranslationKey> = { // values are TranslationKeys
     queued: "排队中",
     running: "运行中",
     succeeded: "成功",
     failed: "失败",
   }
 
-  return labels[status] ?? status
+  const labelKey = labels[status]
+  return labelKey ? t(labelKey) : status
 }
 
 export function taskStatusDotClassName(status: string) {

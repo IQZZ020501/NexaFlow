@@ -14,9 +14,10 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 export function PermissionBadge({ permission }: { permission: string }) {
+  const { t } = useLanguage()
   return (
     <Badge variant={permission === "edit" ? "secondary" : "outline"}>
-      {permission === "edit" ? "可编辑" : "可查看"}
+      {t(permission === "edit" ? "可编辑" : "可查看")}
     </Badge>
   )
 }

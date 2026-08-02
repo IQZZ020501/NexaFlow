@@ -68,7 +68,7 @@ import type { RegisteredModel } from "@/features/llm/types"
 import { listWorkspaceMembers } from "@/features/system/api"
 import type { WorkspaceMember } from "@/features/system/types"
 import { type FeaturePageConfig } from "@/lib/pages"
-import { languageLocales } from "@/lib/i18n"
+import { languageLocales, type TFunction, type TranslationKey } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { formatDateTime, getMembershipRole } from "@/app/display"
 import { getErrorMessage } from "@/app/errors"
@@ -104,7 +104,7 @@ type DocumentSortKey =
 
 const DOCUMENT_SORT_OPTIONS: Array<{
   key: DocumentSortKey
-  label: string
+  label: TranslationKey
 }> = [
   { key: "name", label: "名称" },
   { key: "size_bytes", label: "大小" },
@@ -130,7 +130,8 @@ const PROCESSING_DOCUMENT_STATUSES: Record<string, true> = {
 
 function documentStatusText(
   document: KnowledgeDocument,
-  tasks: KnowledgeTask[]
+  tasks: KnowledgeTask[],
+  t: TFunction
 ) {
   if (document.status === "indexing") {
     const indexTask = tasks.find(
@@ -140,11 +141,14 @@ function documentStatusText(
         task.total_items > 0
     )
     if (indexTask) {
-      return `向量化中 ${indexTask.processed_items}/${indexTask.total_items}`
+      return t("向量化中 {done}/{total}", {
+        done: indexTask.processed_items,
+        total: indexTask.total_items,
+      })
     }
   }
 
-  return documentStatusLabel(document.status)
+  return documentStatusLabel(document.status, t)
 }
 
 export function KnowledgeBasePage({
@@ -457,8 +461,8 @@ export function KnowledgeBasePage({
     return distance === null ? "-" : distance.toFixed(4)
   }
 
-  function registeredModelLabel(model: RegisteredModel | null) {
-    return model ? `${model.name} / ${model.model_name}` : "未配置"
+  function registeredModelLabel(model: RegisteredModel | null, t: TFunction) {
+    return model ? `${model.name} / ${model.model_name}` : t("未配置")
   }
 
   function resetForm() {
@@ -511,7 +515,7 @@ export function KnowledgeBasePage({
       setKnowledgeBases((current) => [...current, knowledgeBase])
       resetForm()
       setIsDialogOpen(false)
-      onNotify("success", "知识库已新建")
+      onNotify("success", t("知识库已新建"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -536,7 +540,7 @@ export function KnowledgeBasePage({
         })
       )
       setEditForm(null)
-      onNotify("success", "知识库已更新")
+      onNotify("success", t("知识库已更新"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -563,7 +567,7 @@ export function KnowledgeBasePage({
       )
       onNotify(
         "success",
-        nextStatus === "active" ? "知识库已恢复" : "知识库已归档"
+        t(nextStatus === "active" ? "知识库已恢复" : "知识库已归档")
       )
     } catch (error) {
       reportError(error)
@@ -613,7 +617,7 @@ export function KnowledgeBasePage({
       if (selectedKnowledgeBaseId === knowledgeBase.id) {
         closeKnowledgeBase()
       }
-      onNotify("success", "知识库已删除")
+      onNotify("success", t("知识库已删除"))
     } catch (error) {
       reportError(error)
     }
@@ -640,7 +644,7 @@ export function KnowledgeBasePage({
       )
       await loadDocuments()
       await loadKnowledgeTasks()
-      onNotify("success", "已提交解析任务")
+      onNotify("success", t("已提交解析任务"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -670,8 +674,10 @@ export function KnowledgeBasePage({
       onNotify(
         "success",
         targetDocuments.length === 1
-          ? "已提交向量化任务"
-          : `已提交 ${targetDocuments.length} 个向量化任务`
+          ? t("已提交向量化任务")
+          : t("已提交 {value} 个向量化任务", {
+              value: targetDocuments.length,
+            })
       )
     } catch (error) {
       reportError(error)
@@ -715,7 +721,7 @@ export function KnowledgeBasePage({
       setDocuments((current) =>
         current.map((item) => (item.id === updated.id ? updated : item))
       )
-      onNotify("success", updated.is_active ? "文档已启用" : "文档已停用")
+      onNotify("success", t(updated.is_active ? "文档已启用" : "文档已停用"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -730,7 +736,9 @@ export function KnowledgeBasePage({
 
     if (
       !window.confirm(
-        `永久删除选中的 ${selectedDocuments.length} 个文档？此操作不可恢复。`
+        t("永久删除选中的 {value} 个文档？此操作不可恢复。", {
+          value: selectedDocuments.length,
+        })
       )
     ) {
       return
@@ -754,7 +762,7 @@ export function KnowledgeBasePage({
       )
       setSelectedDocumentIds([])
       await loadKnowledgeTasks()
-      onNotify("success", `已删除 ${selectedDocuments.length} 个文档`)
+      onNotify("success", t("已删除 {value} 个文档", { value: selectedDocuments.length }))
     } catch (error) {
       reportError(error)
     } finally {
@@ -775,7 +783,7 @@ export function KnowledgeBasePage({
         selectedKnowledgeBase.id
       )
       await loadKnowledgeTasks()
-      onNotify("success", "已提交重建索引任务")
+      onNotify("success", t("已提交重建索引任务"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -800,7 +808,7 @@ export function KnowledgeBasePage({
         loadDocuments(),
         loadKnowledgeTasks(),
       ])
-      onNotify("success", "已重新提交任务")
+      onNotify("success", t("已重新提交任务"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -862,7 +870,7 @@ export function KnowledgeBasePage({
         current.filter((id) => id !== document.id)
       )
       await loadKnowledgeTasks()
-      onNotify("success", "文档已删除")
+      onNotify("success", t("文档已删除"))
     } catch (error) {
       reportError(error)
     }
@@ -919,7 +927,7 @@ export function KnowledgeBasePage({
         ...current.filter((item) => item.user.id !== grant.user.id),
         grant,
       ])
-      onNotify("success", "授权已保存")
+      onNotify("success", t("授权已保存"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -942,7 +950,7 @@ export function KnowledgeBasePage({
       setPermissions((current) =>
         current.filter((item) => item.user.id !== userId)
       )
-      onNotify("success", "授权已撤销")
+      onNotify("success", t("授权已撤销"))
     } catch (error) {
       reportError(error)
     }
@@ -956,11 +964,11 @@ export function KnowledgeBasePage({
     label: string
     icon: React.ElementType
   }> = [
-    { key: "documents", label: "文档", icon: FileTextIcon },
-    { key: "tasks", label: "任务", icon: RotateCcwIcon },
-    { key: "questions", label: "问题", icon: HelpCircleIcon },
-    { key: "hit-test", label: "命中测试", icon: TargetIcon },
-    { key: "settings", label: "设置", icon: SettingsIcon },
+    { key: "documents", label: t("文档"), icon: FileTextIcon },
+    { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
+    { key: "questions", label: t("问题"), icon: HelpCircleIcon },
+    { key: "hit-test", label: t("命中测试"), icon: TargetIcon },
+    { key: "settings", label: t("设置"), icon: SettingsIcon },
   ]
 
   if (selectedKnowledgeBase && isUploadFlowOpen && selectedWorkspaceId) {
@@ -990,7 +998,7 @@ export function KnowledgeBasePage({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label="返回"
+                aria-label={t("返回")}
                 onClick={closeKnowledgeBase}
               >
                 <ArrowLeftIcon />
@@ -1036,7 +1044,7 @@ export function KnowledgeBasePage({
                       onClick={() => setIsUploadFlowOpen(true)}
                     >
                       <UploadIcon data-icon="inline-start" />
-                      上传文档
+                      {t("上传文档")}
                     </Button>
                     <Button
                       type="button"
@@ -1054,7 +1062,7 @@ export function KnowledgeBasePage({
                           data-icon="inline-start"
                         />
                       ) : null}
-                      向量化
+                      {t("向量化")}
                       {selectedDocumentCount ? `(${selectedDocumentCount})` : ""}
                     </Button>
                     <Button
@@ -1071,7 +1079,7 @@ export function KnowledgeBasePage({
                       ) : (
                         <RotateCcwIcon data-icon="inline-start" />
                       )}
-                      重建索引
+                      {t("重建索引")}
                     </Button>
                     <Button
                       type="button"
@@ -1084,7 +1092,7 @@ export function KnowledgeBasePage({
                       onClick={() => void handleDeleteSelectedDocuments()}
                     >
                       <Trash2Icon data-icon="inline-start" />
-                      删除
+                      {t("删除")}
                       {selectedDocumentCount ? `(${selectedDocumentCount})` : ""}
                     </Button>
                   </div>
@@ -1097,9 +1105,11 @@ export function KnowledgeBasePage({
                           className="h-9 justify-between sm:w-36"
                         >
                           <span className="truncate">
-                            {DOCUMENT_SORT_OPTIONS.find(
-                              (option) => option.key === documentSortKey
-                            )?.label ?? "排序"}
+                            {t(
+                              DOCUMENT_SORT_OPTIONS.find(
+                                (option) => option.key === documentSortKey
+                              )?.label ?? "排序"
+                            )}
                           </span>
                           {documentSortDirection === "asc" ? (
                             <ArrowUpIcon className="size-3.5" />
@@ -1115,7 +1125,7 @@ export function KnowledgeBasePage({
                             className="justify-between"
                             onSelect={() => cycleDocumentSort(option.key)}
                           >
-                            {option.label}
+                            {t(option.label)}
                             {documentSortKey === option.key ? (
                               documentSortDirection === "asc" ? (
                                 <ArrowUpIcon className="size-3.5 text-primary" />
@@ -1135,7 +1145,7 @@ export function KnowledgeBasePage({
                           setDocumentSearch(event.target.value)
                         }
                         className="pl-9"
-                        placeholder="按名称搜索"
+                        placeholder={t("按名称搜索")}
                       />
                     </div>
                   </div>
@@ -1150,7 +1160,7 @@ export function KnowledgeBasePage({
                             ref={selectAllDocumentsRef}
                             type="checkbox"
                             className="size-4"
-                            aria-label="选择所有文档"
+                            aria-label={t("选择所有文档")}
                             checked={isAllFilteredDocumentsSelected}
                             disabled={!filteredDocuments.length}
                             onChange={(event) =>
@@ -1158,14 +1168,14 @@ export function KnowledgeBasePage({
                             }
                           />
                         </label>
-                        <span>文件名称</span>
-                        <span>文件状态</span>
+                        <span>{t("文件名称")}</span>
+                        <span>{t("文件状态")}</span>
                         <button
                           type="button"
                           className="flex items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("size_bytes")}
                         >
-                          大小
+                          {t("大小")}
                           {documentSortKey === "size_bytes" ? (
                             documentSortDirection === "asc" ? (
                               <ArrowUpIcon className="size-3.5" />
@@ -1181,7 +1191,7 @@ export function KnowledgeBasePage({
                           className="flex items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("chunk_count")}
                         >
-                          分段
+                          {t("分段")}
                           {documentSortKey === "chunk_count" ? (
                             documentSortDirection === "asc" ? (
                               <ArrowUpIcon className="size-3.5" />
@@ -1192,13 +1202,13 @@ export function KnowledgeBasePage({
                             <ArrowUpDownIcon className="size-3.5" />
                           )}
                         </button>
-                        <span>启用状态</span>
+                        <span>{t("启用状态")}</span>
                         <button
                           type="button"
                           className="flex items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("created_at")}
                         >
-                          创建时间
+                          {t("创建时间")}
                           {documentSortKey === "created_at" ? (
                             documentSortDirection === "asc" ? (
                               <ArrowUpIcon className="size-3.5" />
@@ -1214,7 +1224,7 @@ export function KnowledgeBasePage({
                           className="flex items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("updated_at")}
                         >
-                          更新时间
+                          {t("更新时间")}
                           {documentSortKey === "updated_at" ? (
                             documentSortDirection === "asc" ? (
                               <ArrowUpIcon className="size-3.5" />
@@ -1226,7 +1236,7 @@ export function KnowledgeBasePage({
                           )}
                         </button>
                         <span className="sticky right-0 flex h-full items-center border-l bg-background px-4">
-                          操作
+                          {t("操作")}
                         </span>
                       </div>
                       {isDocumentLoading ? (
@@ -1243,7 +1253,7 @@ export function KnowledgeBasePage({
                               <input
                                 type="checkbox"
                                 className="size-4"
-                                aria-label={`选择 ${document.filename}`}
+                                aria-label={t("选择 {value}", { value: document.filename })}
                                 checked={selectedDocumentIds.includes(
                                   document.id
                                 )}
@@ -1286,7 +1296,8 @@ export function KnowledgeBasePage({
                               )}
                               {documentStatusText(
                                 document,
-                                knowledgeTasks
+                                knowledgeTasks,
+                                t
                               )}
                             </span>
                             <span>{formatBytes(document.size_bytes)}</span>
@@ -1296,7 +1307,10 @@ export function KnowledgeBasePage({
                                 type="button"
                                 role="switch"
                                 aria-checked={document.is_active}
-                                aria-label={`${document.is_active ? "停用" : "启用"} ${document.filename}`}
+                                aria-label={t(
+                                  document.is_active ? "停用 {value}" : "启用 {value}",
+                                  { value: document.filename }
+                                )}
                                 disabled={!canEditDocuments || isSubmittingDocumentTask}
                                 onClick={() =>
                                   void handleToggleDocumentActive(document)
@@ -1316,7 +1330,7 @@ export function KnowledgeBasePage({
                                 />
                               </button>
                               <span>
-                                {document.is_active ? "已启用" : "已停用"}
+                                {t(document.is_active ? "已启用" : "已停用")}
                               </span>
                             </span>
                             <span className="whitespace-nowrap">
@@ -1334,7 +1348,7 @@ export function KnowledgeBasePage({
                                   !canEditDocuments ||
                                   isSubmittingDocumentTask
                                 }
-                                aria-label={`解析 ${document.filename}`}
+                                aria-label={t("解析 {value}", { value: document.filename })}
                                 onClick={() => void handleParseDocument(document)}
                               >
                                 <RotateCcwIcon />
@@ -1347,7 +1361,7 @@ export function KnowledgeBasePage({
                                   !canEditDocuments ||
                                   isSubmittingDocumentTask
                                 }
-                                aria-label={`向量化 ${document.filename}`}
+                                aria-label={t("向量化 {value}", { value: document.filename })}
                                 onClick={() =>
                                   void handleIndexDocuments([document])
                                 }
@@ -1364,7 +1378,7 @@ export function KnowledgeBasePage({
                                       !canEditDocuments ||
                                       isSubmittingDocumentTask
                                     }
-                                    aria-label={`操作 ${document.filename}`}
+                                    aria-label={t("操作 {value}", { value: document.filename })}
                                   >
                                     <MoreHorizontalIcon />
                                   </Button>
@@ -1376,14 +1390,14 @@ export function KnowledgeBasePage({
                                     }
                                   >
                                     <DownloadIcon />
-                                    下载原文
+                                    {t("下载原文")}
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
                                     onSelect={() => onOpenDocument(document.id)}
                                   >
                                     <FileTextIcon />
-                                    预览切片
+                                    {t("预览切片")}
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     onSelect={() =>
@@ -1391,7 +1405,7 @@ export function KnowledgeBasePage({
                                     }
                                   >
                                     <RotateCcwIcon />
-                                    解析
+                                    {t("解析")}
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     onSelect={() =>
@@ -1399,7 +1413,7 @@ export function KnowledgeBasePage({
                                     }
                                   >
                                     <SlidersHorizontalIcon />
-                                    向量化
+                                    {t("向量化")}
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
@@ -1409,7 +1423,7 @@ export function KnowledgeBasePage({
                                     }
                                   >
                                     <Trash2Icon />
-                                    删除
+                                    {t("删除")}
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
@@ -1418,7 +1432,7 @@ export function KnowledgeBasePage({
                         ))
                       ) : (
                         <div className="flex min-h-56 items-center justify-center px-3 py-10 text-sm text-muted-foreground">
-                          {documents.length ? "没有匹配的文档" : "暂无文档"}
+                          {t(documents.length ? "没有匹配的文档" : "暂无文档")}
                         </div>
                       )}
                     </div>
@@ -1431,9 +1445,9 @@ export function KnowledgeBasePage({
               <div className="p-4 lg:p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h1 className="text-xl font-semibold">任务</h1>
+                    <h1 className="text-xl font-semibold">{t("任务")}</h1>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      导入、向量化、重建和失败重试记录
+                      {t("导入、向量化、重建和失败重试记录")}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1451,7 +1465,7 @@ export function KnowledgeBasePage({
                       ) : (
                         <RotateCcwIcon data-icon="inline-start" />
                       )}
-                      刷新
+                      {t("刷新")}
                     </Button>
                     <Button
                       type="button"
@@ -1460,7 +1474,7 @@ export function KnowledgeBasePage({
                       onClick={() => void handleRebuildIndex()}
                     >
                       <SlidersHorizontalIcon data-icon="inline-start" />
-                      重建索引
+                      {t("重建索引")}
                     </Button>
                   </div>
                 </div>
@@ -1468,12 +1482,12 @@ export function KnowledgeBasePage({
                 <div className="mt-4 overflow-x-auto rounded-lg border bg-background">
                   <div className="min-w-[860px]">
                     <div className="grid grid-cols-[120px_120px_140px_120px_minmax(220px,1fr)_120px] border-b px-4 py-3 text-sm font-medium text-muted-foreground">
-                      <span>类型</span>
-                      <span>状态</span>
-                      <span>进度</span>
-                      <span>尝试次数</span>
-                      <span>更新时间 / 错误</span>
-                      <span>操作</span>
+                      <span>{t("类型")}</span>
+                      <span>{t("状态")}</span>
+                      <span>{t("进度")}</span>
+                      <span>{t("尝试次数")}</span>
+                      <span>{t("更新时间 / 错误")}</span>
+                      <span>{t("操作")}</span>
                     </div>
                     {isKnowledgeTaskLoading ? (
                       <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
@@ -1486,7 +1500,7 @@ export function KnowledgeBasePage({
                           className="grid min-h-16 grid-cols-[120px_120px_140px_120px_minmax(220px,1fr)_120px] items-center border-b px-4 py-3 text-sm last:border-b-0"
                         >
                           <span className="font-medium">
-                            {taskTypeLabel(task.task_type)}
+                            {taskTypeLabel(task.task_type, t)}
                           </span>
                           <span className="flex items-center gap-2">
                             <span
@@ -1495,7 +1509,7 @@ export function KnowledgeBasePage({
                                 taskStatusDotClassName(task.status)
                               )}
                             />
-                            {taskStatusLabel(task.status)}
+                            {taskStatusLabel(task.status, t)}
                           </span>
                           <span>{task.processed_items}/{task.total_items}</span>
                           <span>
@@ -1524,14 +1538,14 @@ export function KnowledgeBasePage({
                               onClick={() => void handleRetryKnowledgeTask(task)}
                             >
                               <RotateCcwIcon data-icon="inline-start" />
-                              重试
+                              {t("重试")}
                             </Button>
                           </span>
                         </div>
                       ))
                     ) : (
                       <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
-                        暂无任务
+                        {t("暂无任务")}
                       </div>
                     )}
                   </div>
@@ -1541,9 +1555,9 @@ export function KnowledgeBasePage({
 
             {activeDetailTab === "questions" ? (
               <div className="p-4 lg:p-5">
-                <h1 className="text-xl font-semibold">问题</h1>
+                <h1 className="text-xl font-semibold">{t("问题")}</h1>
                 <div className="mt-4 rounded-lg border p-8 text-sm text-muted-foreground">
-                  暂无问题
+                  {t("暂无问题")}
                 </div>
               </div>
             ) : null}
@@ -1551,9 +1565,9 @@ export function KnowledgeBasePage({
             {activeDetailTab === "hit-test" ? (
               <div className="p-4 lg:p-5">
                 <div className="max-w-4xl">
-                  <h1 className="text-xl font-semibold">命中测试</h1>
+                  <h1 className="text-xl font-semibold">{t("命中测试")}</h1>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    使用当前知识库的向量索引和权威切片状态验证召回结果
+                    {t("使用当前知识库的向量索引和权威切片状态验证召回结果")}
                   </p>
 
                   <form
@@ -1561,18 +1575,18 @@ export function KnowledgeBasePage({
                     onSubmit={(event) => void handleQueryKnowledgeBase(event)}
                   >
                     <label className="text-sm font-medium" htmlFor="query-text">
-                      查询内容
+                      {t("查询内容")}
                     </label>
                     <textarea
                       id="query-text"
                       value={queryText}
                       onChange={(event) => setQueryText(event.target.value)}
                       className="mt-2 min-h-28 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder="输入要测试的检索问题"
+                      placeholder={t("输入要测试的检索问题")}
                     />
                     <div className="mt-3 flex flex-wrap items-end gap-3">
                       <label className="grid gap-1 text-sm font-medium">
-                        返回数量
+                        {t("返回数量")}
                         <Input
                           type="number"
                           min={1}
@@ -1601,14 +1615,14 @@ export function KnowledgeBasePage({
                         ) : (
                           <TargetIcon data-icon="inline-start" />
                         )}
-                        测试召回
+                        {t("测试召回")}
                       </Button>
                     </div>
                   </form>
 
                   <div className="mt-4 rounded-lg border bg-background">
                     <div className="border-b px-4 py-3">
-                      <h2 className="text-sm font-semibold">召回结果</h2>
+                      <h2 className="text-sm font-semibold">{t("召回结果")}</h2>
                     </div>
                     {queryHits.length ? (
                       <div className="divide-y">
@@ -1626,7 +1640,7 @@ export function KnowledgeBasePage({
                       </div>
                     ) : (
                       <div className="flex min-h-40 items-center justify-center px-4 text-sm text-muted-foreground">
-                        暂无测试结果
+                        {t("暂无测试结果")}
                       </div>
                     )}
                   </div>
@@ -1636,7 +1650,7 @@ export function KnowledgeBasePage({
 
             {activeDetailTab === "settings" ? (
               <div className="w-full max-w-6xl p-4 lg:p-6">
-                <h1 className="text-xl font-semibold">设置</h1>
+                <h1 className="text-xl font-semibold">{t("设置")}</h1>
                 <div className="mt-4 rounded-lg border p-5 lg:p-6">
                   <div className="flex flex-wrap gap-2">
                     <PermissionBadge
@@ -1644,25 +1658,25 @@ export function KnowledgeBasePage({
                     />
                     <StatusBadge status={selectedKnowledgeBase.status} />
                   </div>
-                  <p className="mt-5 text-sm font-medium">描述</p>
+                  <p className="mt-5 text-sm font-medium">{t("描述")}</p>
                   <p className="mt-2 text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
                     {selectedKnowledgeBase.description || "-"}
                   </p>
                   <div className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
                     <div className="min-w-0 rounded-md border p-4">
                       <p className="text-xs font-medium text-muted-foreground">
-                        Embedding 模型
+                        {t("Embedding 模型")}
                       </p>
                       <p className="mt-1 truncate font-medium">
-                        {registeredModelLabel(selectedEmbeddingModel)}
+                        {registeredModelLabel(selectedEmbeddingModel, t)}
                       </p>
                     </div>
                     <div className="min-w-0 rounded-md border p-4">
                       <p className="text-xs font-medium text-muted-foreground">
-                        Rerank 模型
+                        {t("Rerank 模型")}
                       </p>
                       <p className="mt-1 truncate font-medium">
-                        {registeredModelLabel(selectedRerankerModel)}
+                        {registeredModelLabel(selectedRerankerModel, t)}
                       </p>
                     </div>
                   </div>
@@ -1684,7 +1698,7 @@ export function KnowledgeBasePage({
                         }
                       >
                         <PencilIcon data-icon="inline-start" />
-                        编辑
+                        {t("编辑")}
                       </Button>
                     ) : null}
                     {selectedKnowledgeBase.permission === "edit" ? (
@@ -1702,14 +1716,14 @@ export function KnowledgeBasePage({
                         ) : (
                           <FlaskConicalIcon data-icon="inline-start" />
                         )}
-                        测试模型
+                        {t("测试模型")}
                       </Button>
                     ) : null}
                     {modelTestError ? (
                       <div className="flex w-full flex-col gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
                         <div className="flex items-center gap-2 font-medium">
                           <AlertCircleIcon className="size-4 shrink-0" />
-                          模型测试失败
+                          {t("模型测试失败")}
                         </div>
                         <p className="break-words leading-6">
                           {modelTestError}
@@ -1719,19 +1733,19 @@ export function KnowledgeBasePage({
                       <div className="flex w-full flex-col gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
                         <div className="flex items-center gap-2 font-medium text-emerald-600 dark:text-emerald-400">
                           <CircleCheckIcon className="size-4 shrink-0" />
-                          模型测试通过
+                          {t("模型测试通过")}
                         </div>
                         <dl className="flex flex-wrap gap-x-6 gap-y-1">
                           <div className="flex items-center gap-1.5">
                             <dt className="text-muted-foreground">Embedding</dt>
                             <dd className="font-medium">
-                              {modelTestResult.embedding_dimensions} 维
+                              {t("{value} 维", { value: modelTestResult.embedding_dimensions })}
                             </dd>
                           </div>
                           <div className="flex items-center gap-1.5">
                             <dt className="text-muted-foreground">Rerank</dt>
                             <dd className="font-medium">
-                              {modelTestResult.reranker_results} 条
+                              {t("{value} 条", { value: modelTestResult.reranker_results })}
                             </dd>
                           </div>
                         </dl>
@@ -1746,7 +1760,7 @@ export function KnowledgeBasePage({
                         }
                       >
                         <UsersIcon data-icon="inline-start" />
-                        授权
+                        {t("授权")}
                       </Button>
                     ) : null}
                   </div>
@@ -1871,8 +1885,8 @@ export function KnowledgeBasePage({
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
-                                title="编辑知识库"
-                                aria-label="编辑知识库"
+                                title={t("编辑知识库")}
+                                aria-label={t("编辑知识库")}
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   setEditForm({
@@ -1892,16 +1906,16 @@ export function KnowledgeBasePage({
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
-                                title={
+                                title={t(
                                   knowledgeBase.status === "active"
                                     ? "归档知识库"
                                     : "恢复知识库"
-                                }
-                                aria-label={
+                                )}
+                                aria-label={t(
                                   knowledgeBase.status === "active"
                                     ? "归档知识库"
                                     : "恢复知识库"
-                                }
+                                )}
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   void handleToggleStatus(knowledgeBase)
@@ -1921,8 +1935,8 @@ export function KnowledgeBasePage({
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
-                                title="资源授权"
-                                aria-label="资源授权"
+                                title={t("资源授权")}
+                                aria-label={t("资源授权")}
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   void handleOpenPermissions(knowledgeBase)
@@ -1934,8 +1948,8 @@ export function KnowledgeBasePage({
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
-                                title="永久删除知识库"
-                                aria-label="永久删除知识库"
+                                title={t("永久删除知识库")}
+                                aria-label={t("永久删除知识库")}
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   void handleDelete(knowledgeBase)
