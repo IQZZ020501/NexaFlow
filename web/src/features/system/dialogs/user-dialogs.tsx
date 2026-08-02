@@ -40,8 +40,6 @@ type CreateUserDialogProps = {
   setIsUserCreateDialogOpen: React.Dispatch<React.SetStateAction<boolean>>
   userCreateForm: UserCreateForm
   setUserCreateForm: React.Dispatch<React.SetStateAction<UserCreateForm>>
-  userCreateError: string | null
-  setUserCreateError: React.Dispatch<React.SetStateAction<string | null>>
   userCreateWorkspace: Workspace | null
   userCreateTeams: Team[]
   isUserCreateTeamsLoading: boolean
@@ -58,8 +56,6 @@ export function CreateUserDialog({
   setIsUserCreateDialogOpen,
   userCreateForm,
   setUserCreateForm,
-  userCreateError,
-  setUserCreateError,
   userCreateWorkspace,
   userCreateTeams,
   isUserCreateTeamsLoading,
@@ -75,12 +71,7 @@ export function CreateUserDialog({
   return (
     <Dialog
       open={isUserCreateDialogOpen}
-      onOpenChange={(open) => {
-        setIsUserCreateDialogOpen(open)
-        if (!open) {
-          setUserCreateError(null)
-        }
-      }}
+      onOpenChange={setIsUserCreateDialogOpen}
     >
       <DialogContent
         side="right"
@@ -267,9 +258,6 @@ export function CreateUserDialog({
                 )}
               </Field>
             ) : null}
-            {userCreateError ? (
-              <p className="text-sm text-destructive">{userCreateError}</p>
-            ) : null}
           </FieldGroup>
           <DialogFooter className="pt-5">
             <Button
@@ -422,8 +410,6 @@ type UserPasswordDialogProps = {
   setUserPasswordForm: React.Dispatch<
     React.SetStateAction<UserPasswordForm | null>
   >
-  userPasswordError: string | null
-  setUserPasswordError: React.Dispatch<React.SetStateAction<string | null>>
   isChangingUserPassword: boolean
   handleChangeUserPassword: React.FormEventHandler<HTMLFormElement>
 }
@@ -431,8 +417,6 @@ type UserPasswordDialogProps = {
 export function UserPasswordDialog({
   userPasswordForm,
   setUserPasswordForm,
-  userPasswordError,
-  setUserPasswordError,
   isChangingUserPassword,
   handleChangeUserPassword,
 }: UserPasswordDialogProps) {
@@ -441,12 +425,7 @@ export function UserPasswordDialog({
   return (
     <Dialog
       open={Boolean(userPasswordForm)}
-      onOpenChange={(open) => {
-        if (!open) {
-          setUserPasswordForm(null)
-          setUserPasswordError(null)
-        }
-      }}
+      onOpenChange={(open) => !open && setUserPasswordForm(null)}
     >
       <DialogContent>
         <DialogHeader>
@@ -508,9 +487,6 @@ export function UserPasswordDialog({
                   required
                 />
               </Field>
-              {userPasswordError ? (
-                <p className="text-sm text-destructive">{userPasswordError}</p>
-              ) : null}
             </FieldGroup>
             <DialogFooter className="pt-5">
               <Button

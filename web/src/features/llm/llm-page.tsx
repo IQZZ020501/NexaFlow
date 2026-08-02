@@ -131,7 +131,6 @@ export function LlmPage({
   const [selectedProvider, setSelectedProvider] = React.useState("")
   const [search, setSearch] = React.useState("")
   const [modelForm, setModelForm] = React.useState<ModelForm>(EMPTY_MODEL_FORM)
-  const [error, setError] = React.useState<string | null>(null)
   const [isCatalogLoading, setIsCatalogLoading] = React.useState(false)
   const [isModelsLoading, setIsModelsLoading] = React.useState(false)
   const [isBaseModelsLoading, setIsBaseModelsLoading] = React.useState(false)
@@ -145,7 +144,6 @@ export function LlmPage({
   const reportError = React.useCallback(
     (error: unknown) => {
       const message = getErrorMessage(error, t)
-      setError(message)
       onNotify("error", message)
       return message
     },
@@ -177,7 +175,6 @@ export function LlmPage({
       return
     }
 
-    setError(null)
     setIsModelsLoading(true)
     try {
       setModels(await listRegisteredModels(token, selectedWorkspaceId))
@@ -363,7 +360,6 @@ export function LlmPage({
     }
 
     setIsSaving(true)
-    setError(null)
     try {
       if (modelForm.id) {
         const model = await updateRegisteredModel(
@@ -404,7 +400,6 @@ export function LlmPage({
       return
     }
 
-    setError(null)
     try {
       await deleteRegisteredModel(token, selectedWorkspaceId, model.id)
       setModels((current) => current.filter((item) => item.id !== model.id))
@@ -430,8 +425,6 @@ export function LlmPage({
           </Button>
         ) : null}
       </div>
-
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       {!selectedWorkspaceId ? (
         <EmptyState

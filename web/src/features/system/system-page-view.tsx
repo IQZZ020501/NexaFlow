@@ -51,7 +51,6 @@ type SystemPageViewProps = {
   me: MeResponse
   workspaces: Workspace[]
   selectedWorkspaceId: string | null
-  workspaceError: string | null
   canCreateWorkspace: boolean
   onSelectWorkspace: (workspaceId: string) => void
   setIsWorkspaceDialogOpen: React.Dispatch<React.SetStateAction<boolean>>
@@ -60,7 +59,6 @@ type SystemPageViewProps = {
   handleDeleteWorkspace: (workspace: Workspace) => void | Promise<void>
   selectedWorkspace: Workspace | null
   teams: Team[]
-  teamsError: string | null
   isTeamsLoading: boolean
   canCreateTeam: boolean
   canManageWorkspace: boolean
@@ -86,30 +84,23 @@ type SystemPageViewProps = {
   handleOpenUserPasswordDialog: (user: User) => void
   handleDeleteUser: (user: User) => void | Promise<void>
   workspaceMembers: WorkspaceMember[]
-  workspaceMembersError: string | null
   isWorkspaceMembersLoading: boolean
   auditLogs: AuditLog[]
-  auditError: string | null
   isAuditLoading: boolean
   workspaceEditForm: ScopeEditForm | null
   setWorkspaceEditForm: React.Dispatch<
     React.SetStateAction<ScopeEditForm | null>
   >
-  setWorkspaceError: React.Dispatch<React.SetStateAction<string | null>>
   isSavingWorkspace: boolean
   handleUpdateWorkspace: React.FormEventHandler<HTMLFormElement>
   teamEditForm: ScopeEditForm | null
   setTeamEditForm: React.Dispatch<React.SetStateAction<ScopeEditForm | null>>
-  teamError: string | null
-  setTeamError: React.Dispatch<React.SetStateAction<string | null>>
   isSavingTeam: boolean
   handleUpdateTeam: React.FormEventHandler<HTMLFormElement>
   isUserCreateDialogOpen: boolean
   setIsUserCreateDialogOpen: React.Dispatch<React.SetStateAction<boolean>>
   userCreateForm: UserCreateForm
   setUserCreateForm: React.Dispatch<React.SetStateAction<UserCreateForm>>
-  userCreateError: string | null
-  setUserCreateError: React.Dispatch<React.SetStateAction<string | null>>
   userCreateWorkspace: Workspace | null
   userCreateTeams: Team[]
   isUserCreateTeamsLoading: boolean
@@ -125,8 +116,6 @@ type SystemPageViewProps = {
   setUserPasswordForm: React.Dispatch<
     React.SetStateAction<UserPasswordForm | null>
   >
-  userPasswordError: string | null
-  setUserPasswordError: React.Dispatch<React.SetStateAction<string | null>>
   isChangingUserPassword: boolean
   handleChangeUserPassword: React.FormEventHandler<HTMLFormElement>
   isWorkspaceDialogOpen: boolean
@@ -152,7 +141,6 @@ export function SystemPageView({
   me,
   workspaces,
   selectedWorkspaceId,
-  workspaceError,
   canCreateWorkspace,
   onSelectWorkspace,
   setIsWorkspaceDialogOpen,
@@ -161,7 +149,6 @@ export function SystemPageView({
   handleDeleteWorkspace,
   selectedWorkspace,
   teams,
-  teamsError,
   isTeamsLoading,
   canCreateTeam,
   canManageWorkspace,
@@ -187,28 +174,21 @@ export function SystemPageView({
   handleOpenUserPasswordDialog,
   handleDeleteUser,
   workspaceMembers,
-  workspaceMembersError,
   isWorkspaceMembersLoading,
   auditLogs,
-  auditError,
   isAuditLoading,
   workspaceEditForm,
   setWorkspaceEditForm,
-  setWorkspaceError,
   isSavingWorkspace,
   handleUpdateWorkspace,
   teamEditForm,
   setTeamEditForm,
-  teamError,
-  setTeamError,
   isSavingTeam,
   handleUpdateTeam,
   isUserCreateDialogOpen,
   setIsUserCreateDialogOpen,
   userCreateForm,
   setUserCreateForm,
-  userCreateError,
-  setUserCreateError,
   userCreateWorkspace,
   userCreateTeams,
   isUserCreateTeamsLoading,
@@ -222,8 +202,6 @@ export function SystemPageView({
   handleUpdateUser,
   userPasswordForm,
   setUserPasswordForm,
-  userPasswordError,
-  setUserPasswordError,
   isChangingUserPassword,
   handleChangeUserPassword,
   isWorkspaceDialogOpen,
@@ -286,7 +264,6 @@ export function SystemPageView({
             me={me}
             workspaces={workspaces}
             selectedWorkspaceId={selectedWorkspaceId}
-            workspaceError={workspaceError}
             canCreateWorkspace={canCreateWorkspace}
             onSelectWorkspace={onSelectWorkspace}
             onOpenCreateWorkspace={() => setIsWorkspaceDialogOpen(true)}
@@ -300,7 +277,6 @@ export function SystemPageView({
           <TeamsPanel
             selectedWorkspace={selectedWorkspace}
             teams={teams}
-            teamsError={teamsError}
             isTeamsLoading={isTeamsLoading}
             canCreateTeam={canCreateTeam}
             canManageWorkspace={canManageWorkspace}
@@ -342,7 +318,6 @@ export function SystemPageView({
             selectedWorkspace={selectedWorkspace}
             selectedWorkspaceId={selectedWorkspaceId}
             workspaceMembers={workspaceMembers}
-            workspaceMembersError={workspaceMembersError}
             isWorkspaceMembersLoading={isWorkspaceMembersLoading}
             locale={locale}
             handleOpenCreateUser={handleOpenCreateUser}
@@ -352,7 +327,6 @@ export function SystemPageView({
         {activeSystemTab === "audit" && me.user.is_global_admin ? (
           <AuditPanel
             auditLogs={auditLogs}
-            auditError={auditError}
             isAuditLoading={isAuditLoading}
             locale={locale}
           />
@@ -362,16 +336,12 @@ export function SystemPageView({
       <EditWorkspaceDialog
         workspaceEditForm={workspaceEditForm}
         setWorkspaceEditForm={setWorkspaceEditForm}
-        workspaceError={workspaceError}
-        setWorkspaceError={setWorkspaceError}
         isSavingWorkspace={isSavingWorkspace}
         handleUpdateWorkspace={handleUpdateWorkspace}
       />
       <EditTeamDialog
         teamEditForm={teamEditForm}
         setTeamEditForm={setTeamEditForm}
-        teamError={teamError}
-        setTeamError={setTeamError}
         selectedWorkspace={selectedWorkspace}
         selectedWorkspaceId={selectedWorkspaceId}
         isSavingTeam={isSavingTeam}
@@ -382,8 +352,6 @@ export function SystemPageView({
         setIsUserCreateDialogOpen={setIsUserCreateDialogOpen}
         userCreateForm={userCreateForm}
         setUserCreateForm={setUserCreateForm}
-        userCreateError={userCreateError}
-        setUserCreateError={setUserCreateError}
         userCreateWorkspace={userCreateWorkspace}
         userCreateTeams={userCreateTeams}
         isUserCreateTeamsLoading={isUserCreateTeamsLoading}
@@ -404,8 +372,6 @@ export function SystemPageView({
       <UserPasswordDialog
         userPasswordForm={userPasswordForm}
         setUserPasswordForm={setUserPasswordForm}
-        userPasswordError={userPasswordError}
-        setUserPasswordError={setUserPasswordError}
         isChangingUserPassword={isChangingUserPassword}
         handleChangeUserPassword={handleChangeUserPassword}
       />
@@ -414,7 +380,6 @@ export function SystemPageView({
         setIsWorkspaceDialogOpen={setIsWorkspaceDialogOpen}
         workspaceForm={workspaceForm}
         setWorkspaceForm={setWorkspaceForm}
-        workspaceError={workspaceError}
         workspaceNotice={workspaceNotice}
         isCreatingWorkspace={isCreatingWorkspace}
         handleCreateWorkspace={handleCreateWorkspace}
@@ -426,7 +391,6 @@ export function SystemPageView({
         manageableWorkspaces={manageableWorkspaces}
         teamForm={teamForm}
         setTeamForm={setTeamForm}
-        teamError={teamError}
         isCreatingTeam={isCreatingTeam}
         handleCreateTeam={handleCreateTeam}
       />

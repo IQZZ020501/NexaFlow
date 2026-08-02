@@ -22,7 +22,6 @@ type WorkspaceUsersPanelProps = {
   selectedWorkspace: Workspace | null
   selectedWorkspaceId: string | null
   workspaceMembers: WorkspaceMember[]
-  workspaceMembersError: string | null
   isWorkspaceMembersLoading: boolean
   locale: string
   handleOpenCreateUser: () => void
@@ -32,7 +31,6 @@ export function WorkspaceUsersPanel({
   selectedWorkspace,
   selectedWorkspaceId,
   workspaceMembers,
-  workspaceMembersError,
   isWorkspaceMembersLoading,
   locale,
   handleOpenCreateUser,
@@ -72,11 +70,6 @@ export function WorkspaceUsersPanel({
           </Button>
         </CardHeader>
         <CardContent className="min-w-0 px-4">
-          {workspaceMembersError ? (
-            <p className="mb-3 text-sm text-destructive">
-              {workspaceMembersError}
-            </p>
-          ) : null}
           {isWorkspaceMembersLoading ? (
             <div className="flex min-h-28 items-center justify-center">
               <LoaderCircleIcon className="animate-spin text-muted-foreground" />
