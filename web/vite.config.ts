@@ -11,4 +11,14 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    proxy: {
+      "/auth": "http://localhost:8000",
+      "/users": "http://localhost:8000",
+      "/workspaces": "http://localhost:8000",
+      "/audit-logs": "http://localhost:8000",
+      "/model-providers": "http://localhost:8000",
+      "/health": "http://localhost:8000",
+    },
+  },
 })

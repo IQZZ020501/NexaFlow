@@ -8,8 +8,8 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
 
 ## Required Development Skills
 
-- Backend work must read and follow `fastapi`, `fastapi-python`, and `fastapi-templates` before implementation.
-- Frontend work must read and follow `react-templates`, `vercel-react-best-practices`, `vercel-react-native-skills`, and `vercel-react-view-transitions` before implementation.
+- Backend work must read and follow `fastapi` before implementation.
+- Frontend work must read and follow `react-templates` and `vercel-react-best-practices` before implementation.
 - If a required skill is unavailable in the current agent environment, surface that before coding instead of silently proceeding.
 
 ## Behavioral Guidelines
@@ -95,6 +95,13 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
 
 - `apps/` is a Python project using `pyproject.toml`, Python `>=3.11`, and `uv.lock`.
 - `apps/nexaflow/` contains the FastAPI backend package.
+- The FastAPI app serves the built web frontend at `/` when `web/dist` exists
+  (see `WEB_DIST_DIR`), with client-side route fallback so deep links work;
+  API routes always take precedence over frontend files.
+- The web app calls the API same-origin by default. Dev mode proxies API
+  prefixes (`/auth`, `/users`, `/workspaces`, `/audit-logs`,
+  `/model-providers`, `/health`) to `http://localhost:8000` via
+  `web/vite.config.ts`; split hosting can override with `VITE_API_BASE_URL`.
 - Backend application code should use async FastAPI routes, async dependencies, and SQLAlchemy `AsyncSession`; avoid adding new synchronous database access paths.
 - Backend business code follows a DRF-like app layout. Add new feature modules as their own package under `apps/nexaflow/<feature>/`, with local `api.py`, `models.py`, `schemas.py`, and `services.py` files when needed.
 - Keep shared infrastructure in `apps/nexaflow/core/` and `apps/nexaflow/db/`; do not recreate global `api/`, `models/`, `schemas/`, or `services/` folders that collect every feature.
@@ -119,6 +126,7 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
 - For `web/` changes, use the smallest relevant Bun script from `web/package.json`:
   - `bun run typecheck`
   - `bun run lint`
+  - `bun run test`
   - `bun run build`
 - For `apps/` changes, inspect the available Python tooling first and run the narrowest relevant check:
   - `apps/.venv/bin/python -m compileall apps/nexaflow apps/main.py`
@@ -127,6 +135,7 @@ This file applies to the whole repository unless a deeper `AGENTS.md` overrides 
   - From `apps/`: `.venv/bin/python -m nexaflow.teams.test`
   - From `apps/`: `.venv/bin/python -m nexaflow.knowledge.test`
   - From `apps/`: `.venv/bin/python -m nexaflow.llm.test`
+  - From `apps/`: `.venv/bin/python -m nexaflow.main_test`
   - For Celery wiring: `.venv/bin/python -c 'from nexaflow.core.celery import celery_app; celery_app.loader.import_default_modules(); assert "nexaflow.knowledge.run_task" in celery_app.tasks'`
   - From `apps/`: run Alembic against the target database, or a temporary explicit test database when only validating migration syntax.
 - If a check cannot be run, say exactly why in the final response.

@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? "http://localhost:8000"
+// Empty by default: same-origin requests (the FastAPI app serves the built
+// frontend). Set VITE_API_BASE_URL to point at the API for split hosting.
+const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? ""
 
 export type RequestOptions = RequestInit & {
   token?: string
