@@ -16,11 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    settings = settings or Settings.from_env()
+    settings = settings or Settings.from_env(require_bootstrap=False)
     configure_database(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        settings.validate()
         async with get_session_factory()() as db:
             await seed_defaults(db, settings)
         yield

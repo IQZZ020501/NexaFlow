@@ -16,7 +16,7 @@ export class ApiError extends Error {
   }
 }
 
-function apiUrl(path: string) {
+export function apiUrl(path: string) {
   return `${API_BASE_URL}${path}`
 }
 

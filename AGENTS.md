@@ -44,6 +44,9 @@ Correctness, safety, evidence, and validation take priority over speed.
   `uv run python -m tests.<suite>`.
 - Knowledge parsing and indexing run through Celery with Redis; API and
   worker instances must share `KNOWLEDGE_STORAGE_DIR` and `CHROMA_PERSIST_DIR`.
+- MCP tools use workspace-scoped Streamable HTTP Server registrations. Bearer
+  tokens are encrypted, and private-network endpoints require
+  `MCP_ALLOW_PRIVATE_NETWORKS=true`.
 - `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
   and Tailwind CSS. Pages live under the `app/` route groups `(auth)`,
   `(platform)`, and `(dashboard)`; shared components in `components/`, providers
@@ -195,8 +198,8 @@ broad. Never claim a check passed unless it completed successfully.
   (typecheck, lint, test, build as applicable).
 - `backend/` changes: use the project's Python tooling. Run `compileall` over the
   touched packages, then run the affected suite from `backend/` with
-  `uv run python -m tests.<suite>` (identity, workspaces, teams, knowledge, llm,
-  test_main). For migration changes, run Alembic against the target database or
+  `uv run python -m tests.<suite>` (identity, workspaces, teams, knowledge, agents,
+  llm, test_main). For migration changes, run Alembic against the target database or
   a temporary explicit test database. For Celery wiring changes, verify the
   expected tasks register on `celery_app`.
 - If a check cannot be run, say exactly why in the final response.
