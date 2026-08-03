@@ -13,6 +13,7 @@ from app.capabilities.llm.runtime import (
 
 MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12
+MAX_RETRIEVAL_CALLS = 4
 MAX_EVENT_STRING_CHARS = 2000
 MAX_EVENT_LIST_ITEMS = 20
 SENSITIVE_FIELD_PARTS = (
@@ -121,6 +122,9 @@ async def run_agent(
     definitions = [tool.definition() for tool in tools]
     events: list[dict[str, Any]] = []
     tool_call_count = 0
+    retrieval_call_count = 0
+    last_evidence_count = -1
+    no_new_evidence_turns = 0
 
     for turn in range(1, MAX_AGENT_TURNS + 1):
         thought_event = {
@@ -239,6 +243,14 @@ async def run_agent(
                         )
                     try:
                         result = await tool.execute(tool_call.arguments)
+                        if tool.kind == "knowledge" and not result.is_error:
+                            retrieval_call_count += 1
+                            if retrieval_call_count > MAX_RETRIEVAL_CALLS:
+                                result = AgentToolResult(
+                                    content="Knowledge retrieval limit reached.",
+                                    summary="agent.retrieval_limit_reached",
+                                    is_error=True,
+                                )
                     except Exception:
                         result = AgentToolResult(
                             content="Tool execution failed.",
@@ -268,5 +280,28 @@ async def run_agent(
             events.append(event)
             if on_event:
                 await on_event({"type": "process", "event": event})
+            if event["type"] == "tool" and event["status"] == "succeeded":
+                output = event.get("output")
+                if isinstance(output, dict) and "retrieval_stats" in output:
+                    evidence_count = sum(
+                        entry.get("submitted", 0)
+                        for entry in output["retrieval_stats"]
+                    )
+                    if evidence_count == last_evidence_count:
+                        no_new_evidence_turns += 1
+                    else:
+                        no_new_evidence_turns = 0
+                        last_evidence_count = evidence_count
+                    if no_new_evidence_turns >= 2:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "No new evidence found in two consecutive retrieval rounds. "
+                                    "Answer based on what has already been gathered."
+                                ),
+                            }
+                        )
+                        no_new_evidence_turns = 0
 
     raise AgentRunnerError("Agent turn limit reached.")

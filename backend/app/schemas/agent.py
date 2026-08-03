@@ -76,8 +76,8 @@ class AgentCitationResponse(BaseModel):
     document_id: str
     document_filename: str
     chunk_id: str
-    chunk_index: int
     excerpt: str
+    citation_url: str = ""
 
 
 class AgentRunResponse(BaseModel):
@@ -99,3 +99,4 @@ class AgentRunResponse(BaseModel):
     finished_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    trace_id: str = ""

@@ -193,6 +193,7 @@ function processTimeline(run: AgentRun) {
 function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
   const timeline = processTimeline(run)
   const hasProcess = timeline.length > 0
+  const [isProcessOpen, setIsProcessOpen] = React.useState(true)
   return (
     <article className="flex flex-col gap-5">
       <div className="ml-auto max-w-[88%] rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 text-background shadow-sm">
@@ -204,11 +205,16 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
         </span>
         <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
           {hasProcess ? (
-            <div className="mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm">
-              <div className="flex items-center gap-2 font-medium text-muted-foreground">
+            <details
+              className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
+              open={isProcessOpen}
+              onToggle={(event) => setIsProcessOpen(event.currentTarget.open)}
+            >
+              <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                 <BrainIcon className="size-4" />
-                <span>{t("执行过程")}</span>
-              </div>
+                <span className="flex-1">{t("执行过程")}</span>
+                <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
+              </summary>
               <div className="mt-2 space-y-2 border-l pl-4">
                 {timeline.map(({ event }, index) =>
                   event.type === "tool" ? (
@@ -235,7 +241,7 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
                   )
                 )}
               </div>
-            </div>
+            </details>
           ) : null}
 
           {run.result ? (
