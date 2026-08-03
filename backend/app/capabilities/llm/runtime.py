@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -20,6 +21,20 @@ class ModelProviderStatusError(ModelProviderError):
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
         super().__init__(f"Provider returned status {status_code}.")
+
+
+@dataclass(frozen=True)
+class ModelToolCall:
+    id: str
+    name: str
+    arguments: str
+
+
+@dataclass(frozen=True)
+class ModelCompletion:
+    content: str
+    tool_calls: tuple[ModelToolCall, ...]
+    finish_reason: str
 
 
 def openai_compatible_base(api_base: str) -> str:
@@ -52,7 +67,26 @@ class OpenAICompatibleModelProvider:
         max_tokens: int | None = None,
         temperature: float | None = None,
     ) -> str:
+        return self.complete(
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        ).content
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> ModelCompletion:
         kwargs: dict[str, Any] = {"model": self.model_name, "messages": messages}
+        if tools:
+            kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
         if temperature is not None:
@@ -66,8 +100,22 @@ class OpenAICompatibleModelProvider:
             raise ModelProviderError("Model request failed.") from exc
 
         if not response.choices:
-            return ""
-        return response.choices[0].message.content or ""
+            return ModelCompletion(content="", tool_calls=(), finish_reason="stop")
+
+        choice = response.choices[0]
+        return ModelCompletion(
+            content=choice.message.content or "",
+            tool_calls=tuple(
+                ModelToolCall(
+                    id=tool_call.id,
+                    name=tool_call.function.name,
+                    arguments=tool_call.function.arguments,
+                )
+                for tool_call in choice.message.tool_calls or []
+                if tool_call.type == "function"
+            ),
+            finish_reason=choice.finish_reason or "stop",
+        )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:

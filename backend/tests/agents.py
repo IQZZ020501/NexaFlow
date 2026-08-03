@@ -1,0 +1,637 @@
+import asyncio
+import json
+from collections.abc import Iterator
+from contextlib import asynccontextmanager, contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from threading import Thread
+from types import SimpleNamespace
+
+from app.application import agents as agent_application
+from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
+from app.capabilities.mcp import client as mcp_client_module
+from app.capabilities.mcp.client import (
+    MAX_MCP_TOOL_PAGES,
+    McpClientError,
+    discover_mcp_tools,
+    normalize_mcp_url,
+)
+from app.schemas.knowledge import KnowledgeQueryHitResponse
+from app.shareddomain.agents.runner import AgentTool, AgentToolResult, run_agent
+from app.shareddomain.tools import services as mcp_services
+from tests.support import (
+    RESEARCH_PASSWORD,
+    activate_admin,
+    activate_user,
+    auth_headers,
+    test_client,
+)
+
+MEMBER_PASSWORD = "AgentMember@12345."
+
+
+class AgentModelHandler(BaseHTTPRequestHandler):
+    calls: list[dict] = []
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("content-length", "0"))
+        body = json.loads(self.rfile.read(length))
+        AgentModelHandler.calls.append(body)
+
+        tool_names = {
+            tool["function"]["name"]
+            for tool in body.get("tools", [])
+            if tool.get("type") == "function"
+        }
+        mcp_tool_name = next(
+            (name for name in tool_names if name.startswith("mcp_")),
+            None,
+        )
+        if "search_knowledge" in tool_names and not any(
+            item.get("role") == "tool" for item in body.get("messages", [])
+        ):
+            message = {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call-search",
+                        "type": "function",
+                        "function": {
+                            "name": "search_knowledge",
+                            "arguments": json.dumps({"query": "release process"}),
+                        },
+                    }
+                ],
+            }
+            finish_reason = "tool_calls"
+        elif mcp_tool_name and not any(
+            item.get("role") == "tool" for item in body.get("messages", [])
+        ):
+            message = {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call-mcp",
+                        "type": "function",
+                        "function": {
+                            "name": mcp_tool_name,
+                            "arguments": json.dumps({"topic": "release"}),
+                        },
+                    }
+                ],
+            }
+            finish_reason = "tool_calls"
+        else:
+            message = {"role": "assistant", "content": "Completed with source [S1]."}
+            finish_reason = "stop"
+
+        payload = {
+            "id": "agent-test",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "test",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": message,
+                    "finish_reason": finish_reason,
+                }
+            ],
+        }
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(payload).encode())
+
+    def log_message(self, format: str, *args) -> None:
+        return
+
+
+@contextmanager
+def agent_model_server() -> Iterator[str]:
+    AgentModelHandler.calls = []
+    server = HTTPServer(("127.0.0.1", 0), AgentModelHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join()
+
+
+def model_payload(api_base: str, name: str = "Agent Model") -> dict:
+    return {
+        "name": name,
+        "provider": "model_deepseek_provider",
+        "provider_type": "openai_compatible",
+        "model_type": "LLM",
+        "model_name": "deepseek-chat",
+        "credential": {"api_base": api_base, "api_key": "sk-agent-test-1234"},
+    }
+
+
+def agents_url(workspace_id: str, suffix: str = "") -> str:
+    return f"/api/v1/workspaces/{workspace_id}/agents{suffix}"
+
+
+def knowledge_url(workspace_id: str, suffix: str = "") -> str:
+    return f"/api/v1/workspaces/{workspace_id}/knowledge-bases{suffix}"
+
+
+def mcp_url(workspace_id: str, suffix: str = "") -> str:
+    return f"/api/v1/workspaces/{workspace_id}/mcp-servers{suffix}"
+
+
+def create_workspace_user(client, token: str, workspace_id: str) -> tuple[str, str]:
+    response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/members/users",
+        headers=auth_headers(token),
+        json={
+            "username": "agent-member",
+            "email": "agent-member@example.com",
+            "name": "Agent Member",
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["user"]["id"], response.json()["initial_password"]
+
+
+class SequenceProvider:
+    def __init__(self, completions: list[ModelCompletion]) -> None:
+        self.completions = completions
+
+    def complete(self, *_args, **_kwargs) -> ModelCompletion:
+        return self.completions.pop(0)
+
+
+async def assert_truncated_tool_call_is_not_executed() -> None:
+    executions = 0
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(content="ok", summary="ok")
+
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "test_tool", '{"value":'),),
+                finish_reason="length",
+            ),
+            ModelCompletion(content="Stopped safely.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [
+            AgentTool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"type": "object"},
+                execute=execute,
+            )
+        ],
+    )
+    assert result.content == "Stopped safely."
+    assert result.events[0]["status"] == "failed"
+    assert executions == 0
+
+
+async def assert_tool_error_returns_to_model() -> None:
+    async def execute(_arguments: str) -> AgentToolResult:
+        raise RuntimeError("private tool failure")
+
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "test_tool", "{}"),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Recovered.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [
+            AgentTool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"type": "object"},
+                execute=execute,
+            )
+        ],
+    )
+    assert result.content == "Recovered."
+    assert result.events[0]["status"] == "failed"
+
+
+def assert_mcp_url_validation() -> None:
+    assert normalize_mcp_url("https://tools.example.com/mcp/") == (
+        "https://tools.example.com/mcp"
+    )
+    for invalid_url in (
+        "file:///tmp/mcp.sock",
+        "https://tools.example.com/mcp?token=secret",
+        "https://tools.example.com:invalid/mcp",
+    ):
+        try:
+            normalize_mcp_url(invalid_url)
+        except McpClientError:
+            continue
+        raise AssertionError(f"Invalid MCP URL was accepted: {invalid_url}")
+
+
+async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
+    original_client = mcp_client_module.mcp_client
+
+    class FakeClient:
+        def __init__(self, schema: dict, next_cursor: str | None) -> None:
+            self.schema = schema
+            self.next_cursor = next_cursor
+            self.calls = 0
+
+        async def list_tools(self, **_kwargs):
+            self.calls += 1
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(
+                        name="unsafe_tool",
+                        description=None,
+                        input_schema=self.schema,
+                    )
+                ],
+                next_cursor=self.next_cursor,
+            )
+
+    async def run_discovery(client: FakeClient) -> None:
+        @asynccontextmanager
+        async def fake_client(*_args, **_kwargs):
+            yield client
+
+        mcp_client_module.mcp_client = fake_client  # type: ignore[assignment]
+        try:
+            await discover_mcp_tools("https://tools.example.com", None, False, 1)
+        except McpClientError:
+            return
+        raise AssertionError("Invalid MCP tool metadata was accepted.")
+
+    try:
+        await run_discovery(FakeClient({"type": "string"}, None))
+        paginated_client = FakeClient({"type": "object"}, "same-cursor")
+        await run_discovery(paginated_client)
+        assert paginated_client.calls == MAX_MCP_TOOL_PAGES
+    finally:
+        mcp_client_module.mcp_client = original_client
+
+
+def main() -> None:
+    asyncio.run(assert_truncated_tool_call_is_not_executed())
+    asyncio.run(assert_tool_error_returns_to_model())
+    asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
+    assert_mcp_url_validation()
+
+    original_query = agent_application.query_knowledge_base
+    original_discover = mcp_services.discover_mcp_tools
+    original_call_mcp_tool = agent_application.call_mcp_tool
+    query_calls: list[tuple[str, str]] = []
+    mcp_calls: list[tuple[str, str, dict]] = []
+
+    async def fake_query_knowledge_base(
+        _db,
+        knowledge_base,
+        payload,
+        _settings,
+    ) -> list[KnowledgeQueryHitResponse]:
+        query_calls.append((knowledge_base.id, payload.query))
+        return [
+            KnowledgeQueryHitResponse(
+                chunk_id="chunk-agent-source",
+                document_id="document-agent-source",
+                document_filename="release.md",
+                chunk_index=0,
+                content="Deployments require an approved pull request.",
+                distance=0.1,
+            )
+        ]
+
+    async def fake_discover_mcp_tools(
+        _url,
+        bearer_token,
+        _allow_private_networks,
+        _timeout_seconds,
+    ) -> list[dict]:
+        assert bearer_token == "mcp-secret-token"
+        return [
+            {
+                "name": "lookup_release",
+                "description": "Look up a release record.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"topic": {"type": "string"}},
+                    "required": ["topic"],
+                },
+            }
+        ]
+
+    async def fake_call_mcp_tool(
+        url,
+        bearer_token,
+        tool_name,
+        arguments,
+        _allow_private_networks,
+        _timeout_seconds,
+    ) -> tuple[str, bool]:
+        assert bearer_token == "mcp-secret-token"
+        mcp_calls.append((url, tool_name, arguments))
+        return json.dumps({"release": "approved"}), False
+
+    agent_application.query_knowledge_base = fake_query_knowledge_base
+    mcp_services.discover_mcp_tools = fake_discover_mcp_tools
+    agent_application.call_mcp_tool = fake_call_mcp_tool
+    try:
+        with test_client() as client, agent_model_server() as model_base_url:
+            admin_token, workspace_id = activate_admin(client)
+            member_id, temporary_password = create_workspace_user(
+                client,
+                admin_token,
+                workspace_id,
+            )
+            member_token = activate_user(
+                client,
+                "agent-member",
+                temporary_password,
+                MEMBER_PASSWORD,
+            )
+
+            model = client.post(
+                f"/api/v1/workspaces/{workspace_id}/models",
+                headers=auth_headers(admin_token),
+                json=model_payload(model_base_url),
+            )
+            assert model.status_code == 201, model.text
+            model_id = model.json()["id"]
+
+            knowledge_base = client.post(
+                knowledge_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={"name": "Release Docs", "description": "Deployment rules"},
+            )
+            assert knowledge_base.status_code == 201, knowledge_base.text
+            knowledge_base_id = knowledge_base.json()["id"]
+
+            created = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Release Planner",
+                    "description": "Plans release work",
+                    "instructions": "Use workspace evidence before answering.",
+                    "model_id": model_id,
+                    "knowledge_base_ids": [knowledge_base_id],
+                },
+            )
+            assert created.status_code == 201, created.text
+            agent = created.json()
+            agent_id = agent["id"]
+            assert agent["can_edit"] is True
+            assert agent["knowledge_base_ids"] == [knowledge_base_id]
+
+            duplicate = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Release Planner",
+                    "instructions": "Duplicate",
+                    "model_id": model_id,
+                },
+            )
+            assert duplicate.status_code == 409, duplicate.text
+
+            member_list = client.get(
+                agents_url(workspace_id),
+                headers=auth_headers(member_token),
+            )
+            assert member_list.status_code == 200, member_list.text
+            assert member_list.json()[0]["can_edit"] is False
+            assert member_list.json()[0]["knowledge_base_ids"] == []
+
+            member_update = client.patch(
+                agents_url(workspace_id, f"/{agent_id}"),
+                headers=auth_headers(member_token),
+                json={"name": "Changed"},
+            )
+            assert member_update.status_code == 403, member_update.text
+
+            member_question = client.post(
+                agents_url(workspace_id, f"/{agent_id}/runs"),
+                headers=auth_headers(member_token),
+                json={"goal": "Prepare the release"},
+            )
+            assert member_question.status_code == 201, member_question.text
+            member_run = member_question.json()
+            assert member_run["status"] == "succeeded"
+            assert member_run["plan"] == []
+            plan_calls = [
+                call
+                for call in AgentModelHandler.calls
+                if any(
+                    item.get("role") == "system"
+                    and "You plan goals for an AI agent" in item.get("content", "")
+                    for item in call.get("messages", [])
+                )
+            ]
+            assert plan_calls == []
+            assert member_run["citations"] == []
+            assert query_calls == []
+
+            grant = client.put(
+                knowledge_url(workspace_id, f"/{knowledge_base_id}/permissions/{member_id}"),
+                headers=auth_headers(admin_token),
+                json={"permission": "view"},
+            )
+            assert grant.status_code == 200, grant.text
+
+            permitted_question = client.post(
+                agents_url(workspace_id, f"/{agent_id}/runs"),
+                headers=auth_headers(member_token),
+                json={"goal": "Prepare the release with evidence"},
+            )
+            assert permitted_question.status_code == 201, permitted_question.text
+            executed = permitted_question.json()
+            assert executed["status"] == "succeeded"
+            assert executed["result"] == "Completed with source [S1]."
+            assert executed["events"][0]["tool_name"] == "search_knowledge"
+            assert executed["citations"][0]["document_filename"] == "release.md"
+            assert query_calls == [(knowledge_base_id, "release process")]
+
+            member_mcp_create = client.post(
+                mcp_url(workspace_id),
+                headers=auth_headers(member_token),
+                json={
+                    "name": "Release MCP",
+                    "url": "http://127.0.0.1:9999/mcp",
+                },
+            )
+            assert member_mcp_create.status_code == 403, member_mcp_create.text
+
+            mcp_server = client.post(
+                mcp_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Release MCP",
+                    "url": "http://127.0.0.1:9999/mcp",
+                    "bearer_token": "mcp-secret-token",
+                },
+            )
+            assert mcp_server.status_code == 201, mcp_server.text
+            mcp_server_data = mcp_server.json()
+            assert mcp_server_data["has_bearer_token"] is True
+            assert "bearer_token" not in mcp_server_data
+
+            mcp_agent = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Release Tool Agent",
+                    "model_id": model_id,
+                    "mcp_tools": [
+                        {
+                            "server_id": mcp_server_data["id"],
+                            "tool_name": "lookup_release",
+                        }
+                    ],
+                },
+            )
+            assert mcp_agent.status_code == 201, mcp_agent.text
+            mcp_agent_data = mcp_agent.json()
+            assert mcp_agent_data["mcp_tools"][0]["tool_name"] == "lookup_release"
+
+            mcp_question = client.post(
+                agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
+                headers=auth_headers(admin_token),
+                json={"goal": "Check the release"},
+            )
+            assert mcp_question.status_code == 201, mcp_question.text
+            mcp_run = mcp_question.json()
+            assert mcp_run["status"] == "succeeded"
+            assert mcp_run["events"][0]["status"] == "succeeded"
+            assert mcp_calls == [
+                (
+                    "http://127.0.0.1:9999/mcp",
+                    "lookup_release",
+                    {"topic": "release"},
+                )
+            ]
+
+            member_agent = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(member_token),
+                json={
+                    "name": "Member Agent",
+                    "instructions": "Use permitted workspace knowledge.",
+                    "model_id": model_id,
+                    "knowledge_base_ids": [knowledge_base_id],
+                },
+            )
+            assert member_agent.status_code == 201, member_agent.text
+            revoked = client.delete(
+                knowledge_url(
+                    workspace_id,
+                    f"/{knowledge_base_id}/permissions/{member_id}",
+                ),
+                headers=auth_headers(admin_token),
+            )
+            assert revoked.status_code == 204, revoked.text
+            member_agent_update = client.patch(
+                agents_url(workspace_id, f"/{member_agent.json()['id']}"),
+                headers=auth_headers(member_token),
+                json={
+                    "description": "Updated without knowledge access",
+                    "instructions": "",
+                },
+            )
+            assert member_agent_update.status_code == 200, member_agent_update.text
+            assert member_agent_update.json()["knowledge_base_ids"] == []
+            assert member_agent_update.json()["instructions"]
+
+            created_workspace = client.post(
+                "/api/v1/workspaces",
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Other Workspace",
+                    "admin": {
+                        "username": "other-admin",
+                        "email": "other-admin@example.com",
+                        "name": "Other Admin",
+                    },
+                },
+            )
+            assert created_workspace.status_code == 201, created_workspace.text
+            other_workspace_id = created_workspace.json()["workspace"]["id"]
+            other_password = created_workspace.json()["admin_initial_password"]
+            other_token = activate_user(
+                client,
+                "other-admin",
+                other_password,
+                RESEARCH_PASSWORD,
+            )
+            other_model = client.post(
+                f"/api/v1/workspaces/{other_workspace_id}/models",
+                headers=auth_headers(other_token),
+                json=model_payload(model_base_url, "Other Agent Model"),
+            )
+            assert other_model.status_code == 201, other_model.text
+
+            cross_workspace_model = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Cross Workspace Agent",
+                    "instructions": "Invalid",
+                    "model_id": other_model.json()["id"],
+                },
+            )
+            assert cross_workspace_model.status_code == 422, cross_workspace_model.text
+
+            disabled_model = client.patch(
+                f"/api/v1/workspaces/{workspace_id}/models/{model_id}",
+                headers=auth_headers(admin_token),
+                json={"status": "disabled"},
+            )
+            assert disabled_model.status_code == 200, disabled_model.text
+
+            disabled = client.patch(
+                agents_url(workspace_id, f"/{agent_id}"),
+                headers=auth_headers(admin_token),
+                json={"model_id": model_id, "status": "disabled"},
+            )
+            assert disabled.status_code == 200, disabled.text
+            assert disabled.json()["status"] == "disabled"
+
+            deleted = client.delete(
+                agents_url(workspace_id, f"/{agent_id}"),
+                headers=auth_headers(admin_token),
+            )
+            assert deleted.status_code == 204, deleted.text
+
+            audit_logs = client.get(
+                "/api/v1/admin/audit-logs",
+                headers=auth_headers(admin_token),
+            )
+            actions = [item["action"] for item in audit_logs.json()]
+            assert "agent.create" in actions
+            assert "agent.delete" in actions
+    finally:
+        agent_application.query_knowledge_base = original_query
+        mcp_services.discover_mcp_tools = original_discover
+        agent_application.call_mcp_tool = original_call_mcp_tool
+
+
+if __name__ == "__main__":
+    main()

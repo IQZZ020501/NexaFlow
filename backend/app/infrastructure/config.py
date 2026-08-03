@@ -43,6 +43,8 @@ class Settings:
     chroma_persist_dir: Path = DEFAULT_CHROMA_PERSIST_DIR
     celery_broker_url: str = DEFAULT_CELERY_BROKER_URL
     celery_task_always_eager: bool = False
+    mcp_allow_private_networks: bool = False
+    mcp_request_timeout_seconds: float = 30.0
     jwt_expires_minutes: int = 60
     cors_origins: tuple[str, ...] = ()
     environment: str = "development"
@@ -79,6 +81,11 @@ class Settings:
             celery_broker_url=os.getenv("CELERY_BROKER_URL", DEFAULT_CELERY_BROKER_URL),
             celery_task_always_eager=os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower()
             in {"1", "true", "yes"},
+            mcp_allow_private_networks=os.getenv("MCP_ALLOW_PRIVATE_NETWORKS", "").lower()
+            in {"1", "true", "yes"},
+            mcp_request_timeout_seconds=float(
+                os.getenv("MCP_REQUEST_TIMEOUT_SECONDS", "30")
+            ),
             jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "60")),
             cors_origins=origins,
             environment=os.getenv("ENVIRONMENT", "development"),
@@ -110,3 +117,7 @@ class Settings:
             raise RuntimeError("CHROMA_PERSIST_DIR must be set in production.")
         if self.environment == "production" and self.celery_broker_url == DEFAULT_CELERY_BROKER_URL:
             raise RuntimeError("CELERY_BROKER_URL must be set in production.")
+        if self.mcp_request_timeout_seconds <= 0:
+            raise RuntimeError("MCP_REQUEST_TIMEOUT_SECONDS must be greater than zero.")
+        if self.mcp_request_timeout_seconds > 300:
+            raise RuntimeError("MCP_REQUEST_TIMEOUT_SECONDS must not exceed 300.")

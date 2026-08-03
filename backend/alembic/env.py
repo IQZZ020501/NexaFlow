@@ -4,6 +4,12 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.infrastructure.config import Settings
+from app.shareddomain.agents.models import (  # noqa: F401
+    Agent,
+    AgentKnowledgeBase,
+    AgentMcpTool,
+    AgentRun,
+)
 from app.shareddomain.audit.models import AuditLog  # noqa: F401
 from app.infrastructure.base import Base
 from app.domain.user import User  # noqa: F401
@@ -13,6 +19,7 @@ from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeDocumentChunk,
     KnowledgeTask,
 )
+from app.shareddomain.tools.models import McpServer  # noqa: F401
 from app.capabilities.llm.models import RegisteredModel  # noqa: F401
 from app.domain.resource_permission import ResourcePermission  # noqa: F401
 from app.infrastructure.system_log import SystemLog  # noqa: F401

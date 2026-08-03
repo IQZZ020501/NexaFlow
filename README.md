@@ -54,11 +54,14 @@ backend/
 │   ├── application/      Use cases (identity, workspace management)
 │   ├── domain/           Shared domain entities (User, Workspace, Team, permissions)
 │   ├── shareddomain/     Module-owned business domains
+│   │   ├── agents/       Agent definitions, permissions, and bounded loop
 │   │   ├── knowledge/    Entities, services, processing, task runner
+│   │   ├── tools/        Workspace MCP Server registry and bindings
 │   │   ├── teams/        Team services
 │   │   └── audit/        Audit services
 │   ├── capabilities/      AI capabilities
 │   │   ├── llm/          Provider catalogs, runtime, model registry
+│   │   ├── mcp/          Streamable HTTP MCP client and safety checks
 │   │   ├── rag/          Retrieval
 │   │   └── embedding/    Chunking and vectorization
 │   ├── infrastructure/   Config, security, DB session, data access, system log
@@ -110,6 +113,8 @@ frontend/
 │   ├── app/              Application-shell UI (top bar, session gate)
 │   ├── auth/             Login screen and password dialogs
 │   ├── knowledge/        Knowledge base pages and dialogs
+│   ├── agents/           Agent configuration and live RAG/MCP test panel
+│   ├── tools/            MCP Server management
 │   ├── system/           System-admin panels and dialogs
 │   ├── llm/              Model management page
 │   └── pages/            Generic placeholder pages
@@ -118,7 +123,7 @@ frontend/
 ├── i18n/                 Trilingual dictionaries (zh-Hans, zh-Hant, en)
 ├── lib/
 │   ├── api-client.ts     Shared fetch wrapper
-│   └── api/              Feature API modules (auth, system, knowledge, llm)
+│   └── api/              Feature API modules (auth, system, knowledge, agents, MCP, llm)
 ├── public/               Files served without bundling, including provider icons
 ├── tests/                Bun tests
 ├── components.json       shadcn/ui configuration
@@ -161,5 +166,5 @@ worker, beat, frontend) are defined under `deploy/`; see `deploy/README.md`.
 
 Backend regression suites run from `backend/` with
 `uv run python -m tests.<suite>` (identity, workspaces, teams, knowledge,
-llm, test_main). Frontend checks: `bun run typecheck`, `bun run lint`,
+agents, llm, test_main). Frontend checks: `bun run typecheck`, `bun run lint`,
 `bun test`, `bun run build`. CI runs the same gates on every pull request.
