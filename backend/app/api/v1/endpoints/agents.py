@@ -1,10 +1,18 @@
 from typing import Annotated
+import json
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import WorkspaceContext, get_settings, get_workspace_context_from_path
-from app.application.agents import create_agent_run, list_agent_runs
+from app.application.agents import (
+    create_agent_run,
+    list_agent_runs,
+    prepare_agent_run,
+    stream_agent_run,
+)
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
 from app.schemas.agent import (
@@ -134,4 +142,39 @@ async def create_workspace_agent_run(
         context.user,
         context.membership_role,
         settings,
+    )
+
+
+@router.post("/{agent_id}/runs/stream", response_class=StreamingResponse)
+async def stream_workspace_agent_run(
+    agent_id: str,
+    payload: AgentRunCreateRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> StreamingResponse:
+    run, model = await prepare_agent_run(
+        db,
+        context.workspace.id,
+        agent_id,
+        payload.goal,
+        context.user,
+        context.membership_role,
+    )
+
+    async def encode_events() -> AsyncIterator[bytes]:
+        async for event in stream_agent_run(
+            db,
+            run,
+            model,
+            context.user,
+            context.membership_role,
+            settings,
+        ):
+            yield (json.dumps(event, ensure_ascii=False) + "\n").encode()
+
+    return StreamingResponse(
+        encode_events(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

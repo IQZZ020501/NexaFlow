@@ -86,6 +86,54 @@ class AgentModelHandler(BaseHTTPRequestHandler):
             message = {"role": "assistant", "content": "Completed with source [S1]."}
             finish_reason = "stop"
 
+        if body.get("stream"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            delta = {
+                "role": "assistant",
+                "content": message.get("content"),
+                "tool_calls": [
+                    {
+                        "index": index,
+                        **tool_call,
+                    }
+                    for index, tool_call in enumerate(message.get("tool_calls", []))
+                ],
+            }
+            chunks = [
+                {
+                    "id": "agent-test",
+                    "object": "chat.completion.chunk",
+                    "created": 0,
+                    "model": "test",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": delta,
+                            "finish_reason": None,
+                        }
+                    ],
+                },
+                {
+                    "id": "agent-test",
+                    "object": "chat.completion.chunk",
+                    "created": 0,
+                    "model": "test",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": finish_reason,
+                        }
+                    ],
+                },
+            ]
+            for chunk in chunks:
+                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+            self.wfile.write(b"data: [DONE]\n\n")
+            return
+
         payload = {
             "id": "agent-test",
             "object": "chat.completion",
@@ -231,6 +279,53 @@ async def assert_tool_error_returns_to_model() -> None:
     assert result.events[0]["status"] == "failed"
 
 
+
+async def assert_streaming_run_emits_process_and_answer() -> None:
+    emitted: list[dict] = []
+
+    async def emit(event: dict) -> None:
+        emitted.append(event)
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        return AgentToolResult(content="tool result", summary="Tool completed.")
+
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "test_tool", "{}"),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Streamed answer.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [
+            AgentTool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"type": "object"},
+                execute=execute,
+            )
+        ],
+        on_event=emit,
+    )
+    assert result.content == "Streamed answer."
+    assert [event["type"] for event in emitted] == [
+        "process",
+        "process",
+        "process",
+        "process",
+        "process",
+        "process",
+        "answer_delta",
+    ]
+    assert emitted[0]["event"]["type"] == "thought"
+    assert emitted[2]["event"]["type"] == "tool"
+    assert emitted[-1]["delta"] == "Streamed answer."
+
 def assert_mcp_url_validation() -> None:
     assert normalize_mcp_url("https://tools.example.com/mcp/") == (
         "https://tools.example.com/mcp"
@@ -294,6 +389,7 @@ def main() -> None:
     asyncio.run(assert_truncated_tool_call_is_not_executed())
     asyncio.run(assert_tool_error_returns_to_model())
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
+    asyncio.run(assert_streaming_run_emits_process_and_answer())
     assert_mcp_url_validation()
 
     original_query = agent_application.query_knowledge_base
@@ -421,6 +517,7 @@ def main() -> None:
             assert member_list.json()[0]["can_edit"] is False
             assert member_list.json()[0]["knowledge_base_ids"] == []
 
+
             member_update = client.patch(
                 agents_url(workspace_id, f"/{agent_id}"),
                 headers=auth_headers(member_token),
@@ -469,6 +566,13 @@ def main() -> None:
             assert executed["events"][0]["tool_name"] == "search_knowledge"
             assert executed["citations"][0]["document_filename"] == "release.md"
             assert query_calls == [(knowledge_base_id, "release process")]
+            knowledge_event = executed["events"][0]
+            assert knowledge_event["call_id"] == "call-search"
+            assert knowledge_event["tool_label"] == "知识库检索"
+            assert knowledge_event["tool_kind"] == "knowledge"
+            assert knowledge_event["input"] == {"query": "release process"}
+            assert knowledge_event["output"]["hits"][0]["source_id"] == "S1"
+            assert knowledge_event["output"]["hits"][0]["document"] == "release.md"
 
             member_mcp_create = client.post(
                 mcp_url(workspace_id),
@@ -521,6 +625,13 @@ def main() -> None:
             mcp_run = mcp_question.json()
             assert mcp_run["status"] == "succeeded"
             assert mcp_run["events"][0]["status"] == "succeeded"
+            mcp_event = mcp_run["events"][0]
+            assert mcp_event["call_id"] == "call-mcp"
+            assert mcp_event["tool_label"] == "lookup_release"
+            assert mcp_event["tool_kind"] == "mcp"
+            assert mcp_event["server_name"] == "Release MCP"
+            assert mcp_event["input"] == {"topic": "release"}
+            assert mcp_event["output"] == {"release": "approved"}
             assert mcp_calls == [
                 (
                     "http://127.0.0.1:9999/mcp",

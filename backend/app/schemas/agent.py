@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -56,10 +56,17 @@ class AgentPlanStepResponse(BaseModel):
 
 
 class AgentRunEventResponse(BaseModel):
+    type: Literal["thought", "tool"] = "tool"
     turn: int
     tool_name: str
-    status: Literal["succeeded", "failed"]
+    status: Literal["running", "succeeded", "failed"]
     summary: str
+    call_id: str = ""
+    tool_label: str = ""
+    tool_kind: Literal["knowledge", "mcp", "unknown"] = "unknown"
+    server_name: str = ""
+    input: dict[str, Any] = Field(default_factory=dict)
+    output: Any = None
 
 
 class AgentCitationResponse(BaseModel):

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -182,9 +183,11 @@ def build_knowledge_search_tool(
                 summary="Knowledge search failed.",
                 is_error=True,
             )
+        output = {"query": payload.query, "hits": tool_hits}
         return AgentToolResult(
             content=json.dumps({"hits": tool_hits}, ensure_ascii=False),
-            summary=f"{len(tool_hits)} knowledge chunks returned.",
+            summary=f"agent.knowledge_chunks_returned:{len(tool_hits)}",
+            output=output,
         )
 
     return AgentTool(
@@ -195,6 +198,8 @@ def build_knowledge_search_tool(
         ),
         parameters=KnowledgeSearchInput.model_json_schema(),
         execute=execute,
+        display_name="知识库检索",
+        kind="knowledge",
     )
 
 
@@ -237,9 +242,15 @@ def build_mcp_agent_tool(tool: ResolvedMcpTool, settings: Settings) -> AgentTool
                 summary=f"{tool.server.name}: {tool.name} request failed.",
                 is_error=True,
             )
+        safe_output: Any
+        try:
+            safe_output = json.loads(content)
+        except json.JSONDecodeError:
+            safe_output = content[:4000]
         return AgentToolResult(
             content=content,
             summary=f"{tool.server.name}: {tool.name} completed.",
+            output=safe_output,
             is_error=is_error,
         )
 
@@ -250,6 +261,9 @@ def build_mcp_agent_tool(tool: ResolvedMcpTool, settings: Settings) -> AgentTool
         )[:1000],
         parameters=tool.input_schema,
         execute=execute,
+        display_name=tool.name,
+        kind="mcp",
+        server_name=tool.server.name,
     )
 
 
@@ -282,16 +296,14 @@ def execution_messages(
         {"role": "user", "content": run.goal},
     ]
 
-
-async def create_agent_run(
+async def prepare_agent_run(
     db: AsyncSession,
     workspace_id: str,
     agent_id: str,
     goal: str,
     actor: User,
     workspace_role: str | None,
-    settings: Settings,
-) -> AgentRunResponse:
+) -> tuple[AgentRun, Any]:
     agent = await get_agent(db, workspace_id, agent_id)
     if agent.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent is disabled.")
@@ -323,8 +335,27 @@ async def create_agent_run(
     db.add(run)
     await db.commit()
     await db.refresh(run)
+    return run, model
 
+
+async def execute_agent_run(
+    db: AsyncSession,
+    run: AgentRun,
+    model: Any,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+    on_event: Any = None,
+) -> AgentRunResponse:
     citations: list[dict[str, Any]] = []
+    process_events: list[dict[str, Any]] = []
+
+    async def record_event(event: dict[str, Any]) -> None:
+        if event["type"] == "process" and event["event"]["status"] != "running":
+            process_events.append(event["event"])
+        if on_event:
+            await on_event(event)
+
     try:
         provider = build_registered_model_provider(model, settings)
         knowledge_bases = await accessible_agent_knowledge_bases(
@@ -336,7 +367,7 @@ async def create_agent_run(
         )
         mcp_tools = await resolve_mcp_tools(
             db,
-            workspace_id,
+            run.workspace_id,
             run.mcp_tools,
             strict=False,
         )
@@ -351,13 +382,14 @@ async def create_agent_run(
             provider,
             execution_messages(run, bool(knowledge_bases), bool(mcp_tools)),
             tools,
+            on_event=record_event,
         )
         run.result = result.content
-        run.events = result.events
+        run.events = process_events if on_event else result.events
         run.citations = citations
         run.status = "succeeded"
     except Exception as exc:
-        run.events = run.events or []
+        run.events = process_events
         run.citations = citations
         run.status = "failed"
         run.last_error = safe_agent_error(exc)
@@ -366,3 +398,76 @@ async def create_agent_run(
     await db.commit()
     await db.refresh(run)
     return run_to_response(run)
+
+
+async def stream_agent_run(
+    db: AsyncSession,
+    run: AgentRun,
+    model: Any,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+) -> AsyncIterator[dict[str, Any]]:
+    import asyncio
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    async def emit(event: dict[str, Any]) -> None:
+        await queue.put(event)
+
+    async def execute() -> None:
+        try:
+            response = await execute_agent_run(
+                db,
+                run,
+                model,
+                actor,
+                workspace_role,
+                settings,
+                on_event=emit,
+            )
+            await queue.put(
+                {
+                    "type": "complete" if response.status == "succeeded" else "error",
+                    "run": response.model_dump(mode="json"),
+                }
+            )
+        finally:
+            await queue.put(None)
+
+    yield {"type": "run", "run": run_to_response(run).model_dump(mode="json")}
+    task = asyncio.create_task(execute())
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield event
+    finally:
+        await task
+
+
+async def create_agent_run(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    goal: str,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+) -> AgentRunResponse:
+    run, model = await prepare_agent_run(
+        db,
+        workspace_id,
+        agent_id,
+        goal,
+        actor,
+        workspace_role,
+    )
+    return await execute_agent_run(
+        db,
+        run,
+        model,
+        actor,
+        workspace_role,
+        settings,
+    )

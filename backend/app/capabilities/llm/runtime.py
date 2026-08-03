@@ -1,10 +1,11 @@
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from openai import APIStatusError, OpenAI, OpenAIError
+from openai import APIStatusError, AsyncOpenAI, OpenAI, OpenAIError
 
 from app.infrastructure.config import Settings
 from app.infrastructure.secrets import decrypt_secret
@@ -55,6 +56,12 @@ class OpenAICompatibleModelProvider:
         self.model_name = model_name
         self.timeout = timeout
         self.client = OpenAI(
+            api_key=api_key,
+            base_url=self.api_base,
+            timeout=timeout,
+            max_retries=0,
+        )
+        self.async_client = AsyncOpenAI(
             api_key=api_key,
             base_url=self.api_base,
             timeout=timeout,
@@ -115,6 +122,86 @@ class OpenAICompatibleModelProvider:
                 if tool_call.type == "function"
             ),
             finish_reason=choice.finish_reason or "stop",
+        )
+    async def stream_complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> ModelCompletion:
+        kwargs: dict[str, Any] = {"model": self.model_name, "messages": messages}
+        if tools:
+            kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+
+        content_parts: list[str] = []
+        tool_call_parts: dict[int, dict[str, str]] = {}
+        finish_reason = "stop"
+        try:
+            stream = await self.async_client.chat.completions.create(
+                **kwargs,
+                stream=True,
+            )
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                delta = choice.delta
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+
+                reasoning = getattr(delta, "reasoning_content", None)
+                if not reasoning and delta.model_extra:
+                    reasoning = delta.model_extra.get("reasoning_content") or delta.model_extra.get(
+                        "reasoning"
+                    )
+                if isinstance(reasoning, str) and reasoning and on_reasoning_delta:
+                    await on_reasoning_delta(reasoning)
+
+                if delta.content:
+                    content_parts.append(delta.content)
+                    if on_content_delta:
+                        await on_content_delta(delta.content)
+
+                for tool_call in delta.tool_calls or []:
+                    part = tool_call_parts.setdefault(
+                        tool_call.index,
+                        {"id": "", "name": "", "arguments": ""},
+                    )
+                    if tool_call.id:
+                        part["id"] = tool_call.id
+                    if tool_call.function:
+                        if tool_call.function.name:
+                            part["name"] += tool_call.function.name
+                        if tool_call.function.arguments:
+                            part["arguments"] += tool_call.function.arguments
+        except APIStatusError as exc:
+            raise ModelProviderStatusError(exc.status_code) from exc
+        except OpenAIError as exc:
+            raise ModelProviderError("Model request failed.") from exc
+
+        return ModelCompletion(
+            content="".join(content_parts),
+            tool_calls=tuple(
+                ModelToolCall(
+                    id=part["id"],
+                    name=part["name"],
+                    arguments=part["arguments"],
+                )
+                for _, part in sorted(tool_call_parts.items())
+                if part["name"]
+            ),
+            finish_reason=finish_reason,
         )
 
     def embed(self, texts: list[str]) -> list[list[float]]:

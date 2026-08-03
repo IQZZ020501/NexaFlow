@@ -1,4 +1,4 @@
-import { request } from "@/lib/api-client"
+import { apiUrl, request } from "@/lib/api-client"
 
 export type Agent = {
   id: string
@@ -39,10 +39,17 @@ export type AgentPlanStep = {
 }
 
 export type AgentRunEvent = {
+  type: "thought" | "tool"
   turn: number
   tool_name: string
-  status: "succeeded" | "failed"
+  status: "running" | "succeeded" | "failed"
   summary: string
+  call_id: string
+  tool_label: string
+  tool_kind: "knowledge" | "mcp" | "unknown"
+  server_name: string
+  input: Record<string, unknown>
+  output: unknown
 }
 
 export type AgentCitation = {
@@ -76,6 +83,12 @@ export type AgentRun = {
   created_at: string
   updated_at: string
 }
+
+export type AgentRunStreamEvent =
+  | { type: "run"; run: AgentRun }
+  | { type: "process"; event: AgentRunEvent }
+  | { type: "answer_delta"; delta: string }
+  | { type: "complete" | "error"; run: AgentRun }
 
 function agentsPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/agents${suffix}`
@@ -131,15 +144,44 @@ export function listAgentRuns(
   })
 }
 
-export function askAgent(
+
+export async function streamAgentRun(
   token: string,
   workspaceId: string,
   agentId: string,
-  goal: string
+  goal: string,
+  onEvent: (event: AgentRunStreamEvent) => void
 ) {
-  return request<AgentRun>(agentsPath(workspaceId, `/${agentId}/runs`), {
+  const response = await fetch(
+    apiUrl(agentsPath(workspaceId, `/${agentId}/runs/stream`)),
+    {
     method: "POST",
-    token,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({ goal }),
-  })
+    }
+  )
+  if (!response.ok) {
+    throw new Error(`Agent stream failed with status ${response.status}.`)
+  }
+  if (!response.body) {
+    throw new Error("Agent stream did not return a response body.")
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  while (true) {
+    const { done, value } = await reader.read()
+    buffer += decoder.decode(value, { stream: !done })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (line.trim()) onEvent(JSON.parse(line) as AgentRunStreamEvent)
+    }
+    if (done) break
+  }
+  if (buffer.trim()) onEvent(JSON.parse(buffer) as AgentRunStreamEvent)
 }
