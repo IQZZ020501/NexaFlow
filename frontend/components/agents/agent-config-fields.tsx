@@ -8,6 +8,7 @@ import {
   ChevronRightIcon,
   DatabaseIcon,
   PlusIcon,
+  SearchIcon,
   SlidersHorizontalIcon,
   WrenchIcon,
 } from "lucide-react"
@@ -69,8 +70,9 @@ export function AgentConfigFields({
   const [resourcePicker, setResourcePicker] = React.useState<
     "knowledge" | "mcp" | null
   >(null)
-  const [isKnowledgeOpen, setIsKnowledgeOpen] = React.useState(true)
-  const [isMcpOpen, setIsMcpOpen] = React.useState(true)
+  const [isKnowledgeOpen, setIsKnowledgeOpen] = React.useState(false)
+  const [isMcpOpen, setIsMcpOpen] = React.useState(false)
+  const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
 
   const configurableModels = models.filter(
     (model) =>
@@ -80,6 +82,15 @@ export function AgentConfigFields({
   const activeKnowledgeBases = knowledgeBases.filter(
     (knowledgeBase) => knowledgeBase.status === "active"
   )
+  const filteredKnowledgeBases = React.useMemo(() => {
+    const query = knowledgeSearch.trim().toLowerCase()
+    if (!query) return activeKnowledgeBases
+    return activeKnowledgeBases.filter((knowledgeBase) =>
+      `${knowledgeBase.name} ${knowledgeBase.description}`
+        .toLowerCase()
+        .includes(query)
+    )
+  }, [activeKnowledgeBases, knowledgeSearch])
   const activeMcpServers = mcpServers.filter(
     (server) => server.status === "active"
   )
@@ -261,7 +272,10 @@ export function AgentConfigFields({
               aria-label={t("关联知识库")}
               title={t("关联知识库")}
               disabled={readOnly}
-              onClick={() => setResourcePicker("knowledge")}
+              onClick={() => {
+                setKnowledgeSearch("")
+                setResourcePicker("knowledge")
+              }}
             >
               <PlusIcon />
             </Button>
@@ -368,45 +382,117 @@ export function AgentConfigFields({
 
       <Dialog
         open={resourcePicker === "knowledge"}
-        onOpenChange={(open) => setResourcePicker(open ? "knowledge" : null)}
+        onOpenChange={(open) => {
+          setResourcePicker(open ? "knowledge" : null)
+          if (!open) setKnowledgeSearch("")
+        }}
       >
-        <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{t("关联知识库")}</DialogTitle>
-            <DialogDescription>
-              {t("按需选择知识库，最多 {value} 个。", { value: 4 })}
-            </DialogDescription>
+        <DialogContent className="max-h-[calc(100svh-2rem)] max-w-xl gap-0 overflow-hidden p-0">
+          <DialogHeader className="border-b bg-muted/25 px-5 py-5 sm:px-6">
+            <div className="flex items-start gap-3">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                <DatabaseIcon className="size-5" />
+              </span>
+              <div className="min-w-0 pt-0.5">
+                <DialogTitle>{t("关联知识库")}</DialogTitle>
+                <DialogDescription className="mt-1.5 leading-5">
+                  {t("按需选择知识库，最多 {value} 个。", { value: 4 })}
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
-          {activeKnowledgeBases.length === 0 ? (
-            <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-              {t("暂无可用知识库")}
-            </p>
-          ) : (
-            <fieldset
-              className="max-h-[50svh] space-y-1 overflow-y-auto"
-              disabled={readOnly}
-            >
-              {activeKnowledgeBases.map((knowledgeBase) => {
-                const checked = form.knowledgeBaseIds.includes(knowledgeBase.id)
-                return (
-                  <label
-                    key={knowledgeBase.id}
-                    className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2.5 text-sm hover:bg-muted"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={!checked && form.knowledgeBaseIds.length >= 4}
-                      onChange={() => toggleKnowledgeBase(knowledgeBase.id)}
-                    />
-                    <span className="min-w-0 truncate">{knowledgeBase.name}</span>
-                  </label>
-                )
+          <div className="border-b px-3 py-3 sm:px-4">
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={knowledgeSearch}
+                onChange={(event) => setKnowledgeSearch(event.target.value)}
+                className="bg-muted/20 pl-9"
+                placeholder={t("搜索{label}...", { label: t("知识库") })}
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="max-h-[46svh] min-h-48 overflow-y-auto p-3 sm:p-4">
+            {activeKnowledgeBases.length === 0 ? (
+              <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 p-6 text-center">
+                <span className="flex size-10 items-center justify-center rounded-xl bg-muted">
+                  <DatabaseIcon className="size-4 text-muted-foreground" />
+                </span>
+                <p className="text-sm text-muted-foreground">
+                  {t("暂无可用知识库")}
+                </p>
+              </div>
+            ) : filteredKnowledgeBases.length === 0 ? (
+              <div className="flex min-h-40 items-center justify-center rounded-xl border border-dashed bg-muted/20 p-6 text-center">
+                <p className="text-sm text-muted-foreground">
+                  {t("没有匹配的知识库")}
+                </p>
+              </div>
+            ) : (
+              <fieldset className="space-y-2" disabled={readOnly}>
+                {filteredKnowledgeBases.map((knowledgeBase) => {
+                  const checked = form.knowledgeBaseIds.includes(
+                    knowledgeBase.id
+                  )
+                  const disabled =
+                    !checked && form.knowledgeBaseIds.length >= 4
+                  return (
+                    <label
+                      key={knowledgeBase.id}
+                      className={`group flex items-center gap-3 rounded-xl border p-3.5 transition-[border-color,background-color,box-shadow] ${
+                        checked
+                          ? "border-foreground/20 bg-muted/70 shadow-xs"
+                          : "border-border/70 hover:border-foreground/20 hover:bg-muted/35"
+                      } ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={() => toggleKnowledgeBase(knowledgeBase.id)}
+                      />
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                        <DatabaseIcon className="size-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                          {knowledgeBase.name}
+                        </span>
+                        {knowledgeBase.description ? (
+                          <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-foreground">
+                            {knowledgeBase.description}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span
+                        className={`flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                          checked
+                            ? "border-foreground bg-foreground text-background"
+                            : "border-muted-foreground/30 text-transparent group-hover:border-muted-foreground/60"
+                        }`}
+                        aria-hidden="true"
+                      >
+                        <CheckIcon className="size-3.5" />
+                      </span>
+                    </label>
+                  )
+                })}
+              </fieldset>
+            )}
+          </div>
+          <DialogFooter className="flex-col border-t bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <p className="text-xs text-muted-foreground">
+              {t("{value} 个知识库", {
+                value: form.knowledgeBaseIds.length,
               })}
-            </fieldset>
-          )}
-          <DialogFooter>
-            <Button type="button" onClick={() => setResourcePicker(null)}>
+            </p>
+            <Button
+              type="button"
+              className="w-full sm:w-auto sm:min-w-20"
+              onClick={() => setResourcePicker(null)}
+            >
               {t("完成")}
             </Button>
           </DialogFooter>
@@ -417,64 +503,110 @@ export function AgentConfigFields({
         open={resourcePicker === "mcp"}
         onOpenChange={(open) => setResourcePicker(open ? "mcp" : null)}
       >
-        <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{t("MCP 工具")}</DialogTitle>
-            <DialogDescription>
-              {t("按需选择 MCP 工具，最多 {value} 个。", { value: 12 })}
-            </DialogDescription>
+        <DialogContent className="max-h-[calc(100svh-2rem)] max-w-xl gap-0 overflow-hidden p-0">
+          <DialogHeader className="border-b bg-muted/25 px-5 py-5 sm:px-6">
+            <div className="flex items-start gap-3">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-700 dark:text-sky-400">
+                <WrenchIcon className="size-5" />
+              </span>
+              <div className="min-w-0 pt-0.5">
+                <DialogTitle>{t("MCP 工具")}</DialogTitle>
+                <DialogDescription className="mt-1.5 leading-5">
+                  {t("按需选择 MCP 工具，最多 {value} 个。", { value: 12 })}
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
-          {activeMcpServers.every((server) => server.tools.length === 0) ? (
-            <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-              {t("暂无可用 MCP 工具")}
-            </p>
-          ) : (
-            <fieldset
-              className="max-h-[50svh] space-y-3 overflow-y-auto"
-              disabled={readOnly}
-            >
-              {activeMcpServers.map((server) =>
-                server.tools.length > 0 ? (
-                  <div key={server.id}>
-                    <p className="mb-1 px-3 text-xs font-medium text-muted-foreground">
-                      {server.name}
-                    </p>
-                    {server.tools.map((tool) => {
-                      const reference = {
-                        server_id: server.id,
-                        tool_name: tool.name,
-                      }
-                      const checked = hasMcpTool(form.mcpTools, reference)
-                      return (
-                        <label
-                          key={tool.name}
-                          className="flex cursor-pointer items-start gap-3 rounded-md px-3 py-2.5 text-sm hover:bg-muted"
-                        >
-                          <input
-                            type="checkbox"
-                            className="mt-0.5"
-                            checked={checked}
-                            disabled={!checked && form.mcpTools.length >= 12}
-                            onChange={() => toggleMcpTool(reference)}
-                          />
-                          <span className="min-w-0">
-                            <span className="block truncate">{tool.name}</span>
-                            {tool.description ? (
-                              <span className="mt-0.5 line-clamp-2 block text-xs text-muted-foreground">
-                                {tool.description}
+          <div className="max-h-[52svh] overflow-y-auto p-3 sm:p-4">
+            {activeMcpServers.every((server) => server.tools.length === 0) ? (
+              <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 p-6 text-center">
+                <span className="flex size-10 items-center justify-center rounded-xl bg-muted">
+                  <WrenchIcon className="size-4 text-muted-foreground" />
+                </span>
+                <p className="text-sm text-muted-foreground">
+                  {t("暂无可用 MCP 工具")}
+                </p>
+              </div>
+            ) : (
+              <fieldset className="space-y-5" disabled={readOnly}>
+                {activeMcpServers.map((server) =>
+                  server.tools.length > 0 ? (
+                    <section key={server.id}>
+                      <div className="mb-2 flex items-center justify-between gap-3 px-1">
+                        <p className="truncate text-xs font-medium text-muted-foreground">
+                          {server.name}
+                        </p>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {t("{value} 个工具", { value: server.tools.length })}
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {server.tools.map((tool) => {
+                          const reference = {
+                            server_id: server.id,
+                            tool_name: tool.name,
+                          }
+                          const checked = hasMcpTool(form.mcpTools, reference)
+                          const disabled =
+                            !checked && form.mcpTools.length >= 12
+                          return (
+                            <label
+                              key={tool.name}
+                              className={`group flex items-start gap-3 rounded-xl border p-3.5 transition-[border-color,background-color,box-shadow] ${
+                                checked
+                                  ? "border-foreground/20 bg-muted/70 shadow-xs"
+                                  : "border-border/70 hover:border-foreground/20 hover:bg-muted/35"
+                              } ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="sr-only"
+                                checked={checked}
+                                disabled={disabled}
+                                onChange={() => toggleMcpTool(reference)}
+                              />
+                              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-700 dark:text-sky-400">
+                                <WrenchIcon className="size-4" />
                               </span>
-                            ) : null}
-                          </span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                ) : null
-              )}
-            </fieldset>
-          )}
-          <DialogFooter>
-            <Button type="button" onClick={() => setResourcePicker(null)}>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium">
+                                  {tool.name}
+                                </span>
+                                {tool.description ? (
+                                  <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-foreground">
+                                    {tool.description}
+                                  </span>
+                                ) : null}
+                              </span>
+                              <span
+                                className={`mt-1 flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                                  checked
+                                    ? "border-foreground bg-foreground text-background"
+                                    : "border-muted-foreground/30 text-transparent group-hover:border-muted-foreground/60"
+                                }`}
+                                aria-hidden="true"
+                              >
+                                <CheckIcon className="size-3.5" />
+                              </span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </section>
+                  ) : null
+                )}
+              </fieldset>
+            )}
+          </div>
+          <DialogFooter className="flex-col border-t bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <p className="text-xs text-muted-foreground">
+              {t("{value} 个 MCP 工具", { value: form.mcpTools.length })}
+            </p>
+            <Button
+              type="button"
+              className="w-full sm:w-auto sm:min-w-20"
+              onClick={() => setResourcePicker(null)}
+            >
               {t("完成")}
             </Button>
           </DialogFooter>
