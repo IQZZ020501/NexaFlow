@@ -83,7 +83,7 @@ class AgentModelHandler(BaseHTTPRequestHandler):
             }
             finish_reason = "tool_calls"
         else:
-            message = {"role": "assistant", "content": "Completed with source [S1]."}
+            message = {"role": "assistant", "content": "Completed."}
             finish_reason = "stop"
 
         if body.get("stream"):
@@ -544,7 +544,7 @@ def main() -> None:
                 )
             ]
             assert plan_calls == []
-            assert member_run["citations"] == []
+            assert "citations" not in member_run
             assert query_calls == []
 
             grant = client.put(
@@ -562,16 +562,16 @@ def main() -> None:
             assert permitted_question.status_code == 201, permitted_question.text
             executed = permitted_question.json()
             assert executed["status"] == "succeeded"
-            assert executed["result"] == "Completed with source [S1]."
+            assert executed["result"] == "Completed."
             assert executed["events"][0]["tool_name"] == "search_knowledge"
-            assert executed["citations"][0]["document_filename"] == "release.md"
+            assert "citations" not in executed
             assert query_calls == [(knowledge_base_id, "release process")]
             knowledge_event = executed["events"][0]
             assert knowledge_event["call_id"] == "call-search"
             assert knowledge_event["tool_label"] == "知识库检索"
             assert knowledge_event["tool_kind"] == "knowledge"
             assert knowledge_event["input"] == {"query": "release process"}
-            assert knowledge_event["output"]["hits"][0]["source_id"] == "S1"
+            assert "source_id" not in knowledge_event["output"]["hits"][0]
             assert knowledge_event["output"]["hits"][0]["document"] == "release.md"
 
             member_mcp_create = client.post(

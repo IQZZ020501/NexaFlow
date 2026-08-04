@@ -158,9 +158,8 @@ function ToolEventDetails({
                   {event.output.hits.map((hit, index) => {
                     const item = hit as Record<string, unknown>
                     return (
-                      <article key={`${String(item.source_id)}-${index}`} className="rounded-md border bg-background p-3">
+                      <article key={index} className="rounded-md border bg-background p-3">
                         <div className="flex flex-wrap items-center gap-2 font-medium">
-                          <Badge variant="outline">{String(item.source_id ?? index + 1)}</Badge>
                           <span>{String(item.document ?? t("未知文档"))}</span>
                           <span className="text-muted-foreground">{String(item.knowledge_base ?? "")}</span>
                         </div>
@@ -245,7 +244,10 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
           ) : null}
 
           {run.result ? (
-            <MarkdownContent content={run.result} className="text-sm leading-6" />
+            <MarkdownContent
+              content={run.result.replace(/[ \t]*\[S\d+\]/g, "")}
+              className="text-sm leading-6"
+            />
           ) : run.status === "failed" ? (
             <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
               {run.last_error ?? t("Agent 未返回结果")}
@@ -260,29 +262,6 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
               {t("正在生成回答")}
             </div>
           )}
-
-          {run.citations.length > 0 ? (
-            <section className="mt-5 border-t pt-4">
-              <p className="text-xs font-medium text-muted-foreground">
-                {t("来源")}
-              </p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                {run.citations.map((citation) => (
-                  <div
-                    key={citation.source_id}
-                    className="min-w-0 rounded-lg bg-muted/60 px-3 py-2 text-xs"
-                  >
-                    <p className="truncate font-medium">
-                      [{citation.source_id}] {citation.document_filename}
-                    </p>
-                    <p className="mt-1 line-clamp-2 leading-5 text-muted-foreground">
-                      {citation.excerpt}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
         </div>
       </div>
     </article>

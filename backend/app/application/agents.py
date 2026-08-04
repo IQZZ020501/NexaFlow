@@ -50,7 +50,6 @@ MAX_RERANK_HITS_PER_BASE = 10
 MAX_RERANK_CONTEXT_HITS = 5
 MAX_KNOWLEDGE_HITS_PER_CALL = 8
 MAX_KNOWLEDGE_CONTENT_CHARS = 2000
-MAX_CITATION_EXCERPT_CHARS = 500
 
 
 class KnowledgeSearchInput(BaseModel):
@@ -69,7 +68,6 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         status=run.status,
         plan=run.plan,
         events=run.events,
-        citations=run.citations,
         result=run.result,
         last_error=run.last_error,
         planned_at=run.planned_at,
@@ -114,10 +112,7 @@ def build_knowledge_search_tool(
     db: AsyncSession,
     knowledge_bases: list[KnowledgeBase],
     settings: Settings,
-    citations: list[dict[str, Any]],
 ) -> AgentTool:
-    citation_ids: dict[str, str] = {}
-
     async def execute(arguments: str) -> AgentToolResult:
         try:
             payload = KnowledgeSearchInput.model_validate_json(arguments)
@@ -230,26 +225,8 @@ def build_knowledge_search_tool(
 
         tool_hits = []
         for knowledge_base, hit in selected_hits:
-            source_id = citation_ids.get(hit.chunk_id)
-            if source_id is None:
-                source_id = f"S{len(citations) + 1}"
-                citation_ids[hit.chunk_id] = source_id
-                citations.append(
-                    {
-                        "source_id": source_id,
-                        "knowledge_base_id": knowledge_base.id,
-                        "knowledge_base_name": knowledge_base.name,
-                        "document_id": hit.document_id,
-                        "document_filename": hit.document_filename,
-                        "chunk_id": hit.chunk_id,
-                        "chunk_index": hit.chunk_index,
-                        "excerpt": hit.content[:MAX_CITATION_EXCERPT_CHARS],
-                        "citation_url": f"/app/knowledge/{knowledge_base.id}/documents/{hit.document_id}",
-                    }
-                )
             tool_hits.append(
                 {
-                    "source_id": source_id,
                     "knowledge_base": knowledge_base.name,
                     "document": hit.document_filename,
                     "content": hit.content[:MAX_KNOWLEDGE_CONTENT_CHARS],
@@ -275,16 +252,18 @@ def build_knowledge_search_tool(
 
     return AgentTool(
         name="search_knowledge",
-        description=(
-            "Search the knowledge bases available to this run. Use the returned source IDs "
-            "as citations in the final answer."
-        ),
+        description="Search the knowledge bases available to this run.",
         parameters=KnowledgeSearchInput.model_json_schema(),
         execute=execute,
         display_name="知识库检索",
         kind="knowledge",
     )
 
+
+def mcp_function_name(tool: ResolvedMcpTool) -> str:
+    stem = re.sub(r"[^a-zA-Z0-9_-]", "_", tool.name).strip("_")[:40] or "tool"
+    digest = hashlib.sha256(f"{tool.server.id}:{tool.name}".encode()).hexdigest()[:8]
+    return f"mcp_{stem}_{digest}"
 
 
 def build_mcp_agent_tool(tool: ResolvedMcpTool, settings: Settings) -> AgentTool:
@@ -378,8 +357,7 @@ def execution_messages(
             "- MCP tools: use when external actions or data are required.\n"
         )
     knowledge_rule = (
-        "Use search_knowledge when workspace knowledge is needed to answer the question. "
-        "Cite used sources as [S1], [S2], and so on."
+        "Use search_knowledge when workspace knowledge is needed to answer the question."
         if has_knowledge_tool
         else "No workspace knowledge source is available for this run."
     )
@@ -436,7 +414,6 @@ async def prepare_agent_run(
         status="running",
         plan=[],
         events=[],
-        citations=[],
         result="",
         started_at=utc_now(),
     )
@@ -455,7 +432,6 @@ async def execute_agent_run(
     settings: Settings,
     on_event: Any = None,
 ) -> AgentRunResponse:
-    citations: list[dict[str, Any]] = []
     process_events: list[dict[str, Any]] = []
 
     async def record_event(event: dict[str, Any]) -> None:
@@ -481,7 +457,7 @@ async def execute_agent_run(
             strict=False,
         )
         tools: list[AgentTool] = (
-            [build_knowledge_search_tool(db, knowledge_bases, settings, citations)]
+            [build_knowledge_search_tool(db, knowledge_bases, settings)]
             if knowledge_bases
             else []
         )
@@ -495,11 +471,9 @@ async def execute_agent_run(
         )
         run.result = result.content
         run.events = process_events if on_event else result.events
-        run.citations = citations
         run.status = "succeeded"
     except Exception as exc:
         run.events = process_events
-        run.citations = citations
         run.status = "failed"
         run.last_error = safe_agent_error(exc)
 

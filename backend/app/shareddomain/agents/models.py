@@ -142,7 +142,6 @@ class AgentRun(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="planning", index=True)
     plan: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
-    citations: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     result: Mapped[str] = mapped_column(Text, nullable=False, default="")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

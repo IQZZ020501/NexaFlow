@@ -52,17 +52,6 @@ export type AgentRunEvent = {
   output: unknown
 }
 
-export type AgentCitation = {
-  source_id: string
-  knowledge_base_id: string
-  knowledge_base_name: string
-  document_id: string
-  document_filename: string
-  chunk_id: string
-  chunk_index: number
-  excerpt: string
-}
-
 export type AgentRun = {
   id: string
   workspace_id: string
@@ -74,7 +63,6 @@ export type AgentRun = {
   status: "planning" | "planned" | "running" | "succeeded" | "failed"
   plan: AgentPlanStep[]
   events: AgentRunEvent[]
-  citations: AgentCitation[]
   result: string
   last_error: string | null
   planned_at: string | null

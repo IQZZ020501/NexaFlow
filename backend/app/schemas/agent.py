@@ -69,17 +69,6 @@ class AgentRunEventResponse(BaseModel):
     output: Any = None
 
 
-class AgentCitationResponse(BaseModel):
-    source_id: str
-    knowledge_base_id: str
-    knowledge_base_name: str
-    document_id: str
-    document_filename: str
-    chunk_id: str
-    excerpt: str
-    citation_url: str = ""
-
-
 class AgentRunResponse(BaseModel):
     id: str
     workspace_id: str
@@ -91,7 +80,6 @@ class AgentRunResponse(BaseModel):
     status: str
     plan: list[AgentPlanStepResponse]
     events: list[AgentRunEventResponse]
-    citations: list[AgentCitationResponse]
     result: str
     last_error: str | None
     planned_at: datetime | None
