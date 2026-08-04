@@ -100,7 +100,7 @@ async def list_agent_runs(
 
 def safe_agent_error(exc: Exception) -> str:
     if isinstance(exc, ModelProviderStatusError):
-        return f"Agent model returned provider status {exc.status_code}."
+        return str(exc)
     if isinstance(exc, AgentRunnerError):
         return str(exc)
     if isinstance(exc, ModelProviderError):
