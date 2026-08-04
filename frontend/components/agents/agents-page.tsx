@@ -85,6 +85,13 @@ function sameValues(left: string[], right: string[]) {
   )
 }
 
+export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
+  return {
+    ...liveRun,
+    events: liveRun.events.length > 0 ? liveRun.events : pendingRun.events,
+  }
+}
+
 export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
   const formTools = form.mcpTools.map(
     (tool) => `${tool.server_id}:${tool.tool_name}`
@@ -407,7 +414,9 @@ export function AgentsPage() {
             setPendingQuestion(null)
             setRuns((current) =>
               current.map((run) =>
-                run.id === placeholderRun.id ? streamEvent.run : run
+                run.id === placeholderRun.id
+                  ? mergeInitialAgentRun(run, streamEvent.run)
+                  : run
               )
             )
             return

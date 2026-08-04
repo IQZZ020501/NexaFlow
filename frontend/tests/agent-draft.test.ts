@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test"
 
 import {
   isAgentFormDirty,
+  mergeInitialAgentRun,
   type AgentFormState,
 } from "../components/agents/agents-page"
-import type { Agent } from "../lib/api/agents"
+import type { Agent, AgentRun } from "../lib/api/agents"
 
 const agent: Agent = {
   id: "agent-1",
@@ -48,5 +49,27 @@ describe("Agent form state", () => {
     expect(
       isAgentFormDirty({ ...form, instructions: "Answer briefly." }, agent)
     ).toBe(true)
+  })
+})
+
+describe("Agent preview state", () => {
+  test("keeps optimistic progress until the stream reports progress", () => {
+    const pendingRun = {
+      id: "pending-1",
+      events: [{ summary: "agent.analyzing" }],
+    } as AgentRun
+    const liveRun = { ...pendingRun, id: "run-1", events: [] }
+    const liveEvent = pendingRun.events[0]
+
+    expect(mergeInitialAgentRun(pendingRun, liveRun)).toEqual({
+      ...liveRun,
+      events: pendingRun.events,
+    })
+    expect(
+      mergeInitialAgentRun(pendingRun, {
+        ...liveRun,
+        events: [liveEvent],
+      } as AgentRun).events
+    ).toEqual([liveEvent])
   })
 })
