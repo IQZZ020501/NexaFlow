@@ -33,7 +33,7 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import type { TFunction } from "@/i18n"
-import type { Agent, AgentMcpToolRef } from "@/lib/api/agents"
+import type { AgentMcpToolRef } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
@@ -360,21 +360,45 @@ export function AgentConfigFields({
                 </span>
                 <FieldLabel htmlFor="agent-status">{t("状态")}</FieldLabel>
               </div>
-              <select
-                id="agent-status"
-                value={form.status}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    status: event.target.value as Agent["status"],
-                  }))
-                }
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={readOnly}
-              >
-                <option value="active">{t("已启用")}</option>
-                <option value="disabled">{t("已停用")}</option>
-              </select>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    id="agent-status"
+                    type="button"
+                    variant="outline"
+                    className="h-9 w-full justify-between px-3 font-normal"
+                    disabled={readOnly}
+                  >
+                    <span>
+                      {t(form.status === "active" ? "已启用" : "已停用")}
+                    </span>
+                    <ChevronDownIcon data-icon="inline-end" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="w-(--radix-dropdown-menu-trigger-width)"
+                >
+                  <DropdownMenuGroup>
+                    {(["active", "disabled"] as const).map((status) => (
+                      <DropdownMenuItem
+                        key={status}
+                        className="justify-between"
+                        onSelect={() =>
+                          setForm((current) => ({ ...current, status }))
+                        }
+                      >
+                        <span>
+                          {t(status === "active" ? "已启用" : "已停用")}
+                        </span>
+                        {form.status === status ? (
+                          <CheckIcon className="text-primary" />
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </Field>
           </section>
         ) : null}
