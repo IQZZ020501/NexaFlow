@@ -158,9 +158,8 @@ function ToolEventDetails({
                   {event.output.hits.map((hit, index) => {
                     const item = hit as Record<string, unknown>
                     return (
-                      <article key={`${String(item.source_id)}-${index}`} className="rounded-md border bg-background p-3">
+                      <article key={index} className="rounded-md border bg-background p-3">
                         <div className="flex flex-wrap items-center gap-2 font-medium">
-                          <Badge variant="outline">{String(item.source_id ?? index + 1)}</Badge>
                           <span>{String(item.document ?? t("未知文档"))}</span>
                           <span className="text-muted-foreground">{String(item.knowledge_base ?? "")}</span>
                         </div>
@@ -193,6 +192,7 @@ function processTimeline(run: AgentRun) {
 function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
   const timeline = processTimeline(run)
   const hasProcess = timeline.length > 0
+  const [isProcessOpen, setIsProcessOpen] = React.useState(true)
   return (
     <article className="flex flex-col gap-5">
       <div className="ml-auto max-w-[88%] rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 text-background shadow-sm">
@@ -204,11 +204,16 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
         </span>
         <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
           {hasProcess ? (
-            <div className="mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm">
-              <div className="flex items-center gap-2 font-medium text-muted-foreground">
+            <details
+              className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
+              open={isProcessOpen}
+              onToggle={(event) => setIsProcessOpen(event.currentTarget.open)}
+            >
+              <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                 <BrainIcon className="size-4" />
-                <span>{t("执行过程")}</span>
-              </div>
+                <span className="flex-1">{t("执行过程")}</span>
+                <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
+              </summary>
               <div className="mt-2 space-y-2 border-l pl-4">
                 {timeline.map(({ event }, index) =>
                   event.type === "tool" ? (
@@ -235,11 +240,14 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
                   )
                 )}
               </div>
-            </div>
+            </details>
           ) : null}
 
           {run.result ? (
-            <MarkdownContent content={run.result} className="text-sm leading-6" />
+            <MarkdownContent
+              content={run.result.replace(/[ \t]*\[S\d+\]/g, "")}
+              className="text-sm leading-6"
+            />
           ) : run.status === "failed" ? (
             <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
               {run.last_error ?? t("Agent 未返回结果")}
@@ -254,29 +262,6 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
               {t("正在生成回答")}
             </div>
           )}
-
-          {run.citations.length > 0 ? (
-            <section className="mt-5 border-t pt-4">
-              <p className="text-xs font-medium text-muted-foreground">
-                {t("来源")}
-              </p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                {run.citations.map((citation) => (
-                  <div
-                    key={citation.source_id}
-                    className="min-w-0 rounded-lg bg-muted/60 px-3 py-2 text-xs"
-                  >
-                    <p className="truncate font-medium">
-                      [{citation.source_id}] {citation.document_filename}
-                    </p>
-                    <p className="mt-1 line-clamp-2 leading-5 text-muted-foreground">
-                      {citation.excerpt}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
         </div>
       </div>
     </article>
