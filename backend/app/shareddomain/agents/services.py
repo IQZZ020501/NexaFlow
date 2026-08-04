@@ -370,8 +370,9 @@ async def delete_agent(
     agent: Agent,
     actor: User,
     workspace_role: str | None,
-) -> None:
+) -> list[str]:
     require_agent_edit(agent, actor, workspace_role)
+    run_ids = await agent_repository.list_agent_run_ids(db, agent.id)
     record_audit_log(
         db,
         actor,
@@ -383,3 +384,4 @@ async def delete_agent(
     )
     await agent_repository.delete_agent_graph(db, agent.id)
     await db.commit()
+    return run_ids

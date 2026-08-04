@@ -123,6 +123,24 @@ async def list_agent_runs(
     return list(result.all())
 
 
+async def get_agent_run_by_id(db: AsyncSession, run_id: str) -> AgentRun | None:
+    return await db.get(AgentRun, run_id)
+
+
+async def get_agent_run_by_id_for_update(
+    db: AsyncSession,
+    run_id: str,
+) -> AgentRun | None:
+    return await db.scalar(
+        select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+    )
+
+
+async def list_agent_run_ids(db: AsyncSession, agent_id: str) -> list[str]:
+    result = await db.scalars(select(AgentRun.id).where(AgentRun.agent_id == agent_id))
+    return list(result.all())
+
+
 async def delete_agent_graph(db: AsyncSession, agent_id: str) -> None:
     await db.execute(delete(AgentRun).where(AgentRun.agent_id == agent_id))
     await db.execute(delete(AgentMcpTool).where(AgentMcpTool.agent_id == agent_id))

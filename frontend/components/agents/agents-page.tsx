@@ -34,12 +34,15 @@ import {
   deleteAgent,
   listAgentRuns,
   listAgents,
+  resumeAgentRun,
   streamAgentRun,
   updateAgent,
   type Agent,
   type AgentMcpToolRef,
   type AgentRun,
+  type AgentRunStreamEvent,
 } from "@/lib/api/agents"
+import { mergeAgentRunStreamEvent } from "@/lib/agent-run-state"
 import { listKnowledgeBases, type KnowledgeBase } from "@/lib/api/knowledge"
 import { listRegisteredModels, type RegisteredModel } from "@/lib/api/llm"
 import { listMcpServers, type McpServer } from "@/lib/api/mcp"
@@ -125,6 +128,7 @@ export function AgentsPage() {
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
   const [isAsking, setIsAsking] = React.useState(false)
+  const [activeRunId, setActiveRunId] = React.useState<string | null>(null)
   const [agentSearch, setAgentSearch] = React.useState("")
   const [hasLoadedWorkspaceData, setHasLoadedWorkspaceData] =
     React.useState(false)
@@ -245,6 +249,27 @@ export function AgentsPage() {
     }
   }, [reportError, selectedAgentId, selectedWorkspaceId, token])
 
+  const hasRunningRun = runs.some((run) =>
+    ["planning", "planned", "running"].includes(run.status)
+  )
+  React.useEffect(() => {
+    if (
+      !token ||
+      !selectedWorkspaceId ||
+      !selectedAgentId ||
+      !hasRunningRun ||
+      isAsking
+    ) {
+      return
+    }
+    const timer = window.setInterval(() => {
+      void listAgentRuns(token, selectedWorkspaceId, selectedAgentId)
+        .then(setRuns)
+        .catch(() => undefined)
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [hasRunningRun, isAsking, selectedAgentId, selectedWorkspaceId, token])
+
   if (!token || !me) return null
 
   function modelName(modelId: string) {
@@ -347,48 +372,11 @@ export function AgentsPage() {
         (streamEvent) => {
           if (streamEvent.type === "run") {
             liveRunId = streamEvent.run.id
+            setActiveRunId(streamEvent.run.id)
             setPendingQuestion(null)
-            setRuns((current) => [streamEvent.run, ...current])
-            return
-          }
-          if (streamEvent.type === "process") {
-            setRuns((current) =>
-              current.map((run) => {
-                if (run.id !== liveRunId) return run
-                const eventIndex = run.events.findIndex((event) =>
-                  streamEvent.event.call_id
-                    ? event.call_id === streamEvent.event.call_id
-                    : event.type === streamEvent.event.type &&
-                      event.turn === streamEvent.event.turn &&
-                      event.tool_name === streamEvent.event.tool_name
-                )
-                if (eventIndex === -1) {
-                  return { ...run, events: [...run.events, streamEvent.event] }
-                }
-                return {
-                  ...run,
-                  events: run.events.map((event, index) =>
-                    index === eventIndex ? streamEvent.event : event
-                  ),
-                }
-              })
-            )
-            return
-          }
-          if (streamEvent.type === "answer_delta") {
-            setRuns((current) =>
-              current.map((run) =>
-                run.id === liveRunId
-                  ? { ...run, result: run.result + streamEvent.delta }
-                  : run
-              )
-            )
-            return
           }
           setRuns((current) =>
-            current.map((run) =>
-              run.id === streamEvent.run.id ? streamEvent.run : run
-            )
+            mergeAgentRunStreamEvent(current, streamEvent, liveRunId)
           )
           if (streamEvent.type === "error") {
             notify("error", t("Agent 回答失败"))
@@ -396,13 +384,57 @@ export function AgentsPage() {
         }
       )
     } catch (error) {
-      setQuestion(nextQuestion)
-      setRuns((current) =>
-        liveRunId ? current.filter((run) => run.id !== liveRunId) : current
-      )
+      if (!liveRunId) setQuestion(nextQuestion)
+      try {
+        setRuns(
+          await listAgentRuns(token, selectedWorkspaceId, selectedAgent.id)
+        )
+      } catch {
+        // Keep the last persisted snapshot visible when refresh also fails.
+      }
       reportError(error)
     } finally {
       setPendingQuestion(null)
+      setActiveRunId(null)
+      setIsAsking(false)
+    }
+  }
+
+  async function handleResume(
+    run: AgentRun,
+    decision: "approved" | "rejected" | null
+  ) {
+    if (!token || !selectedWorkspaceId || !selectedAgent || isAsking) return
+    setIsAsking(true)
+    setActiveRunId(run.id)
+    const onEvent = (streamEvent: AgentRunStreamEvent) => {
+      setRuns((current) =>
+        mergeAgentRunStreamEvent(current, streamEvent, run.id)
+      )
+      if (streamEvent.type === "error") {
+        notify("error", t("Agent 回答失败"))
+      }
+    }
+    try {
+      await resumeAgentRun(
+        token,
+        selectedWorkspaceId,
+        selectedAgent.id,
+        run.id,
+        decision,
+        onEvent
+      )
+    } catch (error) {
+      try {
+        setRuns(
+          await listAgentRuns(token, selectedWorkspaceId, selectedAgent.id)
+        )
+      } catch {
+        // Keep the last persisted snapshot visible when refresh also fails.
+      }
+      reportError(error)
+    } finally {
+      setActiveRunId(null)
       setIsAsking(false)
     }
   }
@@ -423,6 +455,7 @@ export function AgentsPage() {
         isDirty={isDirty}
         isSaving={isSaving}
         isAsking={isAsking}
+        activeRunId={activeRunId}
         isRunsLoading={isRunsLoading}
         onBack={() => {
           if (!isDirty || window.confirm(t("放弃未保存的更改？"))) {
@@ -432,6 +465,7 @@ export function AgentsPage() {
         onDelete={() => void handleDeleteAgent(selectedAgent)}
         onSave={handleSaveAgent}
         onAsk={handleAsk}
+        onResume={handleResume}
         t={t}
       />
     )
