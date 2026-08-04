@@ -45,9 +45,6 @@ Correctness, safety, evidence, and validation take priority over speed.
 - MCP tools use workspace-scoped Streamable HTTP Server registrations. Bearer
   tokens are encrypted, and private-network endpoints require
   `MCP_ALLOW_PRIVATE_NETWORKS=true`.
-- Agent execution uses LangGraph with PostgreSQL checkpoints in production;
-  `AgentRun` is the tenant-scoped read model, and SQLite tests use in-memory
-  checkpoints.
 - `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
   and Tailwind CSS. Pages live under the `app/` route groups `(auth)`,
   `(platform)`, and `(dashboard)`; shared components in `components/`, providers

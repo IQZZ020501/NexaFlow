@@ -19,9 +19,18 @@ class ModelProviderError(Exception):
 
 
 class ModelProviderStatusError(ModelProviderError):
-    def __init__(self, status_code: int) -> None:
+    def __init__(self, status_code: int, message: str = "") -> None:
         self.status_code = status_code
-        super().__init__(f"Provider returned status {status_code}.")
+        self.message = message
+        detail = f"Provider returned status {status_code}"
+        if message:
+            detail = f"{detail}: {message}"
+        super().__init__(detail)
+
+
+def _api_error_detail(exc: APIStatusError) -> str:
+    body = exc.body if isinstance(exc.body, str) else json.dumps(exc.body) if exc.body else ""
+    return body or exc.message or ""
 
 
 @dataclass(frozen=True)
@@ -102,7 +111,7 @@ class OpenAICompatibleModelProvider:
         try:
             response = self.client.chat.completions.create(**kwargs)
         except APIStatusError as exc:
-            raise ModelProviderStatusError(exc.status_code) from exc
+            raise ModelProviderStatusError(exc.status_code, _api_error_detail(exc)) from exc
         except OpenAIError as exc:
             raise ModelProviderError("Model request failed.") from exc
 
@@ -186,7 +195,7 @@ class OpenAICompatibleModelProvider:
                         if tool_call.function.arguments:
                             part["arguments"] += tool_call.function.arguments
         except APIStatusError as exc:
-            raise ModelProviderStatusError(exc.status_code) from exc
+            raise ModelProviderStatusError(exc.status_code, _api_error_detail(exc)) from exc
         except OpenAIError as exc:
             raise ModelProviderError("Model request failed.") from exc
 
@@ -214,7 +223,7 @@ class OpenAICompatibleModelProvider:
                 encoding_format="float",
             )
         except APIStatusError as exc:
-            raise ModelProviderStatusError(exc.status_code) from exc
+            raise ModelProviderStatusError(exc.status_code, _api_error_detail(exc)) from exc
         except OpenAIError as exc:
             raise ModelProviderError("Model request failed.") from exc
         return [list(item.embedding) for item in response.data]

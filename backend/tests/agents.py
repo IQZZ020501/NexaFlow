@@ -7,6 +7,7 @@ from threading import Thread
 from types import SimpleNamespace
 
 from app.application import agents as agent_application
+from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.capabilities.mcp import client as mcp_client_module
 from app.capabilities.mcp.client import (
     MAX_MCP_TOOL_PAGES,
@@ -15,7 +16,7 @@ from app.capabilities.mcp.client import (
     normalize_mcp_url,
 )
 from app.schemas.knowledge import KnowledgeQueryHitResponse
-from tests.agent_orchestration import main as orchestration_main
+from app.shareddomain.agents.runner import AgentTool, AgentToolResult, run_agent
 from app.shareddomain.tools import services as mcp_services
 from tests.support import (
     RESEARCH_PASSWORD,
@@ -30,7 +31,6 @@ MEMBER_PASSWORD = "AgentMember@12345."
 
 class AgentModelHandler(BaseHTTPRequestHandler):
     calls: list[dict] = []
-    fail_next_decision = False
 
     def do_POST(self) -> None:
         length = int(self.headers.get("content-length", "0"))
@@ -42,54 +42,13 @@ class AgentModelHandler(BaseHTTPRequestHandler):
             for tool in body.get("tools", [])
             if tool.get("type") == "function"
         }
-        if (
-            AgentModelHandler.fail_next_decision
-            and "agent_submit_plan" not in tool_names
-            and not body.get("stream")
-        ):
-            AgentModelHandler.fail_next_decision = False
-            self.send_response(400)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(
-                json.dumps({"error": {"message": "temporary model failure"}}).encode()
-            )
-            return
-        knowledge_tool_name = next(
-            (name for name in tool_names if name.startswith("knowledge_")),
+        mcp_tool_name = next(
+            (name for name in tool_names if name.startswith("mcp_")),
             None,
         )
-        mcp_tool_name = next((name for name in tool_names if name.startswith("mcp_")), None)
-        has_tool_result = any(item.get("role") == "tool" for item in body.get("messages", []))
-        if body.get("stream"):
-            message = {"role": "assistant", "content": "Completed."}
-            finish_reason = "stop"
-        elif "agent_submit_plan" in tool_names:
-            message = {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "call-plan",
-                        "type": "function",
-                        "function": {
-                            "name": "agent_submit_plan",
-                            "arguments": json.dumps(
-                                {
-                                    "steps": [
-                                        {
-                                            "title": "Gather evidence",
-                                            "description": "Gather evidence and prepare an answer",
-                                        }
-                                    ]
-                                }
-                            ),
-                        },
-                    }
-                ],
-            }
-            finish_reason = "tool_calls"
-        elif knowledge_tool_name and not has_tool_result:
+        if "search_knowledge" in tool_names and not any(
+            item.get("role") == "tool" for item in body.get("messages", [])
+        ):
             message = {
                 "role": "assistant",
                 "content": None,
@@ -98,14 +57,16 @@ class AgentModelHandler(BaseHTTPRequestHandler):
                         "id": "call-search",
                         "type": "function",
                         "function": {
-                            "name": knowledge_tool_name,
+                            "name": "search_knowledge",
                             "arguments": json.dumps({"query": "release process"}),
                         },
                     }
                 ],
             }
             finish_reason = "tool_calls"
-        elif mcp_tool_name and not has_tool_result:
+        elif mcp_tool_name and not any(
+            item.get("role") == "tool" for item in body.get("messages", [])
+        ):
             message = {
                 "role": "assistant",
                 "content": None,
@@ -116,22 +77,6 @@ class AgentModelHandler(BaseHTTPRequestHandler):
                         "function": {
                             "name": mcp_tool_name,
                             "arguments": json.dumps({"topic": "release"}),
-                        },
-                    }
-                ],
-            }
-            finish_reason = "tool_calls"
-        elif "agent_complete_step" in tool_names:
-            message = {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "call-complete",
-                        "type": "function",
-                        "function": {
-                            "name": "agent_complete_step",
-                            "arguments": json.dumps({"summary": "Evidence gathered"}),
                         },
                     }
                 ],
@@ -214,7 +159,6 @@ class AgentModelHandler(BaseHTTPRequestHandler):
 @contextmanager
 def agent_model_server() -> Iterator[str]:
     AgentModelHandler.calls = []
-    AgentModelHandler.fail_next_decision = False
     server = HTTPServer(("127.0.0.1", 0), AgentModelHandler)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -248,11 +192,6 @@ def mcp_url(workspace_id: str, suffix: str = "") -> str:
     return f"/api/v1/workspaces/{workspace_id}/mcp-servers{suffix}"
 
 
-def stream_payloads(response) -> list[dict]:
-    assert response.status_code == 200, response.text
-    return [json.loads(line) for line in response.text.splitlines() if line.strip()]
-
-
 def create_workspace_user(client, token: str, workspace_id: str) -> tuple[str, str]:
     response = client.post(
         f"/api/v1/workspaces/{workspace_id}/members/users",
@@ -266,6 +205,126 @@ def create_workspace_user(client, token: str, workspace_id: str) -> tuple[str, s
     assert response.status_code == 201, response.text
     return response.json()["user"]["id"], response.json()["initial_password"]
 
+
+class SequenceProvider:
+    def __init__(self, completions: list[ModelCompletion]) -> None:
+        self.completions = completions
+
+    def complete(self, *_args, **_kwargs) -> ModelCompletion:
+        return self.completions.pop(0)
+
+
+async def assert_truncated_tool_call_is_not_executed() -> None:
+    executions = 0
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(content="ok", summary="ok")
+
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "test_tool", '{"value":'),),
+                finish_reason="length",
+            ),
+            ModelCompletion(content="Stopped safely.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [
+            AgentTool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"type": "object"},
+                execute=execute,
+            )
+        ],
+    )
+    assert result.content == "Stopped safely."
+    assert result.events[0]["status"] == "failed"
+    assert executions == 0
+
+
+async def assert_tool_error_returns_to_model() -> None:
+    async def execute(_arguments: str) -> AgentToolResult:
+        raise RuntimeError("private tool failure")
+
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "test_tool", "{}"),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Recovered.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [
+            AgentTool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"type": "object"},
+                execute=execute,
+            )
+        ],
+    )
+    assert result.content == "Recovered."
+    assert result.events[0]["status"] == "failed"
+
+
+
+async def assert_streaming_run_emits_process_and_answer() -> None:
+    emitted: list[dict] = []
+
+    async def emit(event: dict) -> None:
+        emitted.append(event)
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        return AgentToolResult(content="tool result", summary="Tool completed.")
+
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "test_tool", "{}"),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Streamed answer.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [
+            AgentTool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"type": "object"},
+                execute=execute,
+            )
+        ],
+        on_event=emit,
+    )
+    assert result.content == "Streamed answer."
+    assert [event["type"] for event in emitted] == [
+        "process",
+        "process",
+        "process",
+        "process",
+        "process",
+        "process",
+        "answer_delta",
+    ]
+    assert emitted[0]["event"]["type"] == "thought"
+    assert emitted[2]["event"]["type"] == "tool"
+    assert emitted[-1]["delta"] == "Streamed answer."
 
 def assert_mcp_url_validation() -> None:
     assert normalize_mcp_url("https://tools.example.com/mcp/") == (
@@ -326,85 +385,11 @@ async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
         mcp_client_module.mcp_client = original_client
 
 
-async def assert_knowledge_reranking() -> None:
-    original_query = agent_application.query_knowledge_base
-    original_get_model = agent_application.get_knowledge_model
-    original_build_provider = agent_application.build_registered_model_provider
-
-    class FakeClient:
-        def close(self) -> None:
-            pass
-
-    class FakeAsyncClient:
-        async def close(self) -> None:
-            pass
-
-    class FakeReranker:
-        client = FakeClient()
-        async_client = FakeAsyncClient()
-
-        def rerank(self, _query: str, _documents: list[str]) -> list[dict]:
-            return [
-                {"index": 4, "relevance_score": 0.9},
-                {"index": 1, "relevance_score": 0.8},
-            ]
-
-    async def fake_query(_db, _knowledge_base, payload, _settings):
-        assert payload.limit == agent_application.MAX_RERANK_HITS_PER_BASE
-        return [
-            KnowledgeQueryHitResponse(
-                chunk_id=f"chunk-{index}",
-                document_id=f"document-{index}",
-                document_filename=f"doc-{index}.md",
-                chunk_index=index,
-                content=f"content-{index}",
-                distance=index / 10,
-            )
-            for index in range(6)
-        ]
-
-    async def fake_get_model(*_args, **_kwargs):
-        return SimpleNamespace()
-
-    agent_application.query_knowledge_base = fake_query
-    agent_application.get_knowledge_model = fake_get_model
-    agent_application.build_registered_model_provider = lambda *_args: FakeReranker()
-    try:
-        tool = agent_application.build_knowledge_search_tool(
-            None,
-            SimpleNamespace(
-                id="knowledge-1",
-                workspace_id="workspace-1",
-                name="Docs",
-                reranker_model_id="reranker-1",
-            ),
-            None,
-        )
-        result = await tool.execute(json.dumps({"query": "release"}))
-        assert not result.is_error
-        assert [hit["document"] for hit in result.output["hits"]] == [
-            "doc-4.md",
-            "doc-1.md",
-        ]
-        assert result.output["retrieval_stats"] == [
-            {
-                "knowledge_base_id": "knowledge-1",
-                "knowledge_base_name": "Docs",
-                "candidates": 6,
-                "reranked": True,
-                "submitted": 2,
-            }
-        ]
-    finally:
-        agent_application.query_knowledge_base = original_query
-        agent_application.get_knowledge_model = original_get_model
-        agent_application.build_registered_model_provider = original_build_provider
-
-
 def main() -> None:
-    asyncio.run(orchestration_main())
+    asyncio.run(assert_truncated_tool_call_is_not_executed())
+    asyncio.run(assert_tool_error_returns_to_model())
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
-    asyncio.run(assert_knowledge_reranking())
+    asyncio.run(assert_streaming_run_emits_process_and_answer())
     assert_mcp_url_validation()
 
     original_query = agent_application.query_knowledge_base
@@ -548,31 +533,18 @@ def main() -> None:
             assert member_question.status_code == 201, member_question.text
             member_run = member_question.json()
             assert member_run["status"] == "succeeded"
-            assert len(member_run["plan"]) == 1
-            assert member_run["plan"][0]["status"] == "completed"
-            own_run = client.get(
-                agents_url(workspace_id, f"/{agent_id}/runs/{member_run['id']}"),
-                headers=auth_headers(member_token),
-            )
-            assert own_run.status_code == 200, own_run.text
-            hidden_run = client.get(
-                agents_url(workspace_id, f"/{agent_id}/runs/{member_run['id']}"),
-                headers=auth_headers(admin_token),
-            )
-            assert hidden_run.status_code == 404, hidden_run.text
+            assert member_run["plan"] == []
             plan_calls = [
                 call
                 for call in AgentModelHandler.calls
-                if "agent_submit_plan"
-                in {
-                    tool["function"]["name"]
-                    for tool in call.get("tools", [])
-                    if tool.get("type") == "function"
-                }
+                if any(
+                    item.get("role") == "system"
+                    and "You plan goals for an AI agent" in item.get("content", "")
+                    for item in call.get("messages", [])
+                )
             ]
-            assert plan_calls
+            assert plan_calls == []
             assert "citations" not in member_run
-            assert member_run["trace_id"]
             assert query_calls == []
 
             grant = client.put(
@@ -591,31 +563,16 @@ def main() -> None:
             executed = permitted_question.json()
             assert executed["status"] == "succeeded"
             assert executed["result"] == "Completed."
-            knowledge_event = next(
-                event
-                for event in executed["events"]
-                if event["type"] == "tool" and event["tool_kind"] == "knowledge"
-            )
-            assert knowledge_event["tool_name"].startswith("knowledge_")
+            assert executed["events"][0]["tool_name"] == "search_knowledge"
             assert "citations" not in executed
-            assert executed["trace_id"]
             assert query_calls == [(knowledge_base_id, "release process")]
+            knowledge_event = executed["events"][0]
             assert knowledge_event["call_id"] == "call-search"
-            assert knowledge_event["tool_label"] == "Release Docs"
+            assert knowledge_event["tool_label"] == "知识库检索"
             assert knowledge_event["tool_kind"] == "knowledge"
             assert knowledge_event["input"] == {"query": "release process"}
             assert "source_id" not in knowledge_event["output"]["hits"][0]
             assert knowledge_event["output"]["hits"][0]["document"] == "release.md"
-
-            streamed_question = client.post(
-                agents_url(workspace_id, f"/{agent_id}/runs/stream"),
-                headers=auth_headers(member_token),
-                json={"goal": "Stream the release evidence"},
-            )
-            streamed_events = stream_payloads(streamed_question)
-            streamed_types = {item["type"] for item in streamed_events}
-            assert {"run", "process", "answer_delta", "complete"} <= streamed_types
-            assert streamed_events[-1]["run"]["status"] == "succeeded"
 
             member_mcp_create = client.post(
                 mcp_url(workspace_id),
@@ -666,30 +623,9 @@ def main() -> None:
             )
             assert mcp_question.status_code == 201, mcp_question.text
             mcp_run = mcp_question.json()
-            assert mcp_run["status"] == "awaiting_approval"
-            assert mcp_run["pending_approval"]["tool_name"].startswith("mcp_")
-            assert mcp_calls == []
-            resumed = client.post(
-                agents_url(
-                    workspace_id,
-                    f"/{mcp_agent_data['id']}/runs/{mcp_run['id']}/resume/stream",
-                ),
-                headers=auth_headers(admin_token),
-                json={"decision": "approved"},
-            )
-            resumed_events = stream_payloads(resumed)
-            mcp_run = next(
-                item["run"]
-                for item in reversed(resumed_events)
-                if item["type"] in {"complete", "pause", "error"}
-            )
             assert mcp_run["status"] == "succeeded"
-            mcp_event = next(
-                event
-                for event in mcp_run["events"]
-                if event["type"] == "tool" and event["tool_kind"] == "mcp"
-            )
-            assert mcp_event["status"] == "succeeded"
+            assert mcp_run["events"][0]["status"] == "succeeded"
+            mcp_event = mcp_run["events"][0]
             assert mcp_event["call_id"] == "call-mcp"
             assert mcp_event["tool_label"] == "lookup_release"
             assert mcp_event["tool_kind"] == "mcp"
@@ -734,35 +670,6 @@ def main() -> None:
             assert member_agent_update.status_code == 200, member_agent_update.text
             assert member_agent_update.json()["knowledge_base_ids"] == []
             assert member_agent_update.json()["instructions"]
-
-            AgentModelHandler.fail_next_decision = True
-            failed_question = client.post(
-                agents_url(
-                    workspace_id,
-                    f"/{member_agent.json()['id']}/runs",
-                ),
-                headers=auth_headers(member_token),
-                json={"goal": "Recover this run"},
-            )
-            assert failed_question.status_code == 201, failed_question.text
-            failed_run = failed_question.json()
-            assert failed_run["status"] == "failed"
-            assert failed_run["resumable"] is True
-            recovered_response = client.post(
-                agents_url(
-                    workspace_id,
-                    f"/{member_agent.json()['id']}/runs/{failed_run['id']}/resume/stream",
-                ),
-                headers=auth_headers(member_token),
-                json={"decision": None},
-            )
-            recovered_events = stream_payloads(recovered_response)
-            recovered_run = next(
-                item["run"]
-                for item in reversed(recovered_events)
-                if item["type"] in {"complete", "pause", "error"}
-            )
-            assert recovered_run["status"] == "succeeded"
 
             created_workspace = client.post(
                 "/api/v1/workspaces",

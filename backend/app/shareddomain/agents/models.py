@@ -2,13 +2,11 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     JSON,
-    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -122,7 +120,7 @@ class AgentRun(Base):
             ondelete="CASCADE",
         ),
         CheckConstraint(
-            "status IN ('planning', 'planned', 'running', 'awaiting_approval', 'succeeded', 'failed')",
+            "status IN ('planning', 'planned', 'running', 'succeeded', 'failed')",
             name="ck_agent_runs_status",
         ),
     )
@@ -143,15 +141,9 @@ class AgentRun(Base):
     model_name: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="planning", index=True)
     plan: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
-    plan_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
-    pending_approval: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    budget: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    usage: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     result: Mapped[str] = mapped_column(Text, nullable=False, default="")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    stop_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    resumable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
