@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.api import api_router
+from app.infrastructure.agent_orchestration import open_agent_orchestrator
 from app.infrastructure.config import Settings
 from app.infrastructure.seed import seed_defaults
 from app.infrastructure.session import configure_database, get_session_factory
@@ -24,7 +25,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.validate()
         async with get_session_factory()() as db:
             await seed_defaults(db, settings)
-        yield
+        async with open_agent_orchestrator(settings) as orchestrator:
+            app.state.agent_orchestrator = orchestrator
+            yield
 
     app = FastAPI(title="NexaFlow API", lifespan=lifespan)
     app.state.settings = settings

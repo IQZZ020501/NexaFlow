@@ -5,7 +5,10 @@ import {
   ArrowLeftIcon,
   BotIcon,
   BrainIcon,
+  CheckIcon,
   CircleCheckIcon,
+  CircleDashedIcon,
+  CircleAlertIcon,
   ChevronDownIcon,
   CircleXIcon,
   DatabaseIcon,
@@ -15,9 +18,11 @@ import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   SaveIcon,
+  RotateCcwIcon,
   SendIcon,
   Trash2Icon,
   WrenchIcon,
+  XIcon,
 } from "lucide-react"
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
@@ -52,14 +57,15 @@ type AgentDetailWorkspaceProps = {
   isDirty: boolean
   isSaving: boolean
   isAsking: boolean
+  activeRunId: string | null
   isRunsLoading: boolean
   onBack: () => void
   onDelete: () => void
   onSave: (event: React.FormEvent<HTMLFormElement>) => void
   onAsk: (event: React.FormEvent<HTMLFormElement>) => void
+  onResume: (run: AgentRun, decision: "approved" | "rejected" | null) => void
   t: TFunction
 }
-
 
 function processSummary(
   event: AgentRun["events"][number],
@@ -74,17 +80,89 @@ function processSummary(
     return t("正在调用 {name}", { name: event.tool_name })
   if (event.summary === "agent.answer_ready")
     return t(run.status === "running" ? "正在生成回答" : "回答已生成")
+  if (event.summary === "agent.plan_created") return t("计划已生成")
+  if (event.summary === "agent.plan_revised") return t("计划已更新")
+  if (event.summary === "agent.step_completed") return t("计划步骤已完成")
+  if (event.summary === "agent.tool_selected")
+    return t("已选择工具 {name}", { name: event.tool_label || event.tool_name })
+  if (event.summary === "agent.approval_granted") return t("操作已批准")
+  if (event.summary === "agent.approval_rejected") return t("操作已拒绝")
+  if (event.summary === "agent.approval_expired") return t("批准已过期")
+  if (event.summary === "agent.control_selected") return t("已确定下一步")
+  if (
+    event.summary === "agent.execution_finished" ||
+    event.summary === "agent.plan_completed"
+  )
+    return t("执行已结束")
+  if (
+    event.summary === "agent.deadline_reached" ||
+    event.summary === "agent.turn_limit_reached" ||
+    event.summary === "agent.tool_call_limit_reached" ||
+    event.summary === "agent.retrieval_limit_reached"
+  )
+    return t("已达到运行限制")
   if (event.summary.startsWith("agent.knowledge_chunks_returned:")) {
     const count = Number(event.summary.split(":")[1])
     return t("已检索 {value} 个知识片段", { value: count })
   }
-  const legacyKnowledgeMatch = event.summary.match(/^(\d+) knowledge chunks returned\.$/)
+  const legacyKnowledgeMatch = event.summary.match(
+    /^(\d+) knowledge chunks returned\.$/
+  )
   if (legacyKnowledgeMatch) {
     return t("已检索 {value} 个知识片段", {
       value: Number(legacyKnowledgeMatch[1]),
     })
   }
-  return event.summary
+  return event.summary.startsWith("agent.") ? t("执行状态已更新") : event.summary
+}
+
+function PlanTimeline({ run, t }: { run: AgentRun; t: TFunction }) {
+  if (run.plan.length === 0) return null
+  return (
+    <section className="mb-4 border-b pb-4">
+      <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <CircleDashedIcon className="size-4" />
+        <span>{t("执行计划")}</span>
+        <Badge variant="outline" className="ml-auto font-normal">
+          {t("第 {value} 版", { value: run.plan_revision })}
+        </Badge>
+      </div>
+      <ol className="mt-3 space-y-2">
+        {run.plan.map((step) => {
+          const icon =
+            step.status === "completed" ? (
+              <CircleCheckIcon className="size-4 text-emerald-600" />
+            ) : step.status === "failed" ? (
+              <CircleAlertIcon className="size-4 text-destructive" />
+            ) : step.status === "in_progress" ? (
+              <LoaderCircleIcon className="size-4 animate-spin text-sky-600" />
+            ) : (
+              <span className="size-2 rounded-full border border-muted-foreground" />
+            )
+          return (
+            <li
+              key={step.id || step.number}
+              className="flex items-start gap-2 text-xs"
+            >
+              <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+                {icon}
+              </span>
+              <span className="min-w-0">
+                <span className="font-medium text-foreground">
+                  {step.number}. {step.title}
+                </span>
+                <span className="mt-0.5 block leading-5 text-muted-foreground">
+                  {step.status === "completed" && step.result
+                    ? step.result
+                    : step.description}
+                </span>
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+    </section>
+  )
 }
 
 function ToolEventDetails({
@@ -189,9 +267,77 @@ function processTimeline(run: AgentRun) {
   return run.events.map((event) => ({ event, count: 1 }))
 }
 
-function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
+function ApprovalPanel({
+  run,
+  activeRunId,
+  onResume,
+  t,
+}: {
+  run: AgentRun
+  activeRunId: string | null
+  onResume: AgentDetailWorkspaceProps["onResume"]
+  t: TFunction
+}) {
+  const approval = run.pending_approval
+  if (run.status !== "awaiting_approval" || !approval) return null
+  const isActive = activeRunId === run.id
+  return (
+    <section className="mb-4 border-y border-amber-500/30 bg-amber-500/5 px-3 py-3">
+      <div className="flex items-start gap-2">
+        <CircleAlertIcon className="mt-0.5 size-4 shrink-0 text-amber-600" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">{t("需要批准操作")}</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {approval.tool_label}
+            {approval.server_name ? ` @ ${approval.server_name}` : ""}
+          </p>
+          <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-background p-2 text-xs break-words whitespace-pre-wrap">
+            {JSON.stringify(approval.input, null, 2)}
+          </pre>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => onResume(run, "approved")}
+              disabled={isActive}
+            >
+              {isActive ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <CheckIcon />
+              )}
+              {t("批准并继续")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => onResume(run, "rejected")}
+              disabled={isActive}
+            >
+              <XIcon />
+              {t("拒绝操作")}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function RunExchange({
+  run,
+  activeRunId,
+  onResume,
+  t,
+}: {
+  run: AgentRun
+  activeRunId: string | null
+  onResume: AgentDetailWorkspaceProps["onResume"]
+  t: TFunction
+}) {
   const timeline = processTimeline(run)
-  const hasProcess = timeline.length > 0
+  const hasProcess = timeline.length > 0 || run.plan.length > 0
   const [isProcessOpen, setIsProcessOpen] = React.useState(true)
   return (
     <article className="flex flex-col gap-5">
@@ -212,13 +358,28 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
               <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                 <BrainIcon className="size-4" />
                 <span className="flex-1">{t("执行过程")}</span>
+                <Badge variant="outline" className="font-normal">
+                  {run.status === "awaiting_approval"
+                    ? t("等待批准")
+                    : run.status === "succeeded"
+                      ? t("已完成")
+                      : run.status === "failed"
+                        ? t("执行失败")
+                        : t("执行中")}
+                </Badge>
                 <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
               </summary>
-              <div className="mt-2 space-y-2 border-l pl-4">
+              <div className="mt-3">
+                <PlanTimeline run={run} t={t} />
+              </div>
+              <div className="space-y-2 border-l pl-4">
                 {timeline.map(({ event }, index) =>
                   event.type === "tool" ? (
                     <ToolEventDetails
-                      key={event.call_id || `${event.turn}-${event.tool_name}-${index}`}
+                      key={
+                        event.call_id ||
+                        `${event.turn}-${event.tool_name}-${index}`
+                      }
                       event={event}
                       run={run}
                       t={t}
@@ -230,7 +391,7 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
                     >
                       {event.status === "running" ? (
                         <LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
-                      ) : event.status === "succeeded" ? (
+                      ) : ["succeeded", "approved"].includes(event.status) ? (
                         <CircleCheckIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
                       ) : (
                         <CircleXIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
@@ -243,14 +404,22 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
             </details>
           ) : null}
 
+          <ApprovalPanel
+            run={run}
+            activeRunId={activeRunId}
+            onResume={onResume}
+            t={t}
+          />
           {run.result ? (
             <MarkdownContent
               content={run.result.replace(/[ \t]*\[S\d+\]/g, "")}
               className="text-sm leading-6"
             />
-          ) : run.status === "failed" ? (
-            <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-              {run.last_error ?? t("Agent 未返回结果")}
+          ) : ["failed", "awaiting_approval"].includes(run.status) ||
+            (run.status === "running" && run.resumable) ? null : run.status ===
+            "succeeded" ? (
+            <p className="text-sm text-muted-foreground">
+              {t("Agent 未返回结果")}
             </p>
           ) : (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -262,6 +431,38 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
               {t("正在生成回答")}
             </div>
           )}
+          {run.status === "failed" ||
+          (run.status === "running" && run.resumable) ? (
+            <div className={run.result ? "mt-3 space-y-3" : "space-y-3"}>
+              <p
+                className={
+                  run.status === "failed"
+                    ? "border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+                    : "border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700"
+                }
+              >
+                {run.status === "failed"
+                  ? (run.last_error ?? t("Agent 未返回结果"))
+                  : t("运行已中断，可从检查点恢复")}
+              </p>
+              {run.resumable ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onResume(run, null)}
+                  disabled={activeRunId === run.id}
+                >
+                  {activeRunId === run.id ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : (
+                    <RotateCcwIcon />
+                  )}
+                  {t("恢复运行")}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </article>
@@ -282,11 +483,13 @@ export function AgentDetailWorkspace({
   isDirty,
   isSaving,
   isAsking,
+  activeRunId,
   isRunsLoading,
   onBack,
   onDelete,
   onSave,
   onAsk,
+  onResume,
   t,
 }: AgentDetailWorkspaceProps) {
   const [activePanel, setActivePanel] = React.useState<"config" | "preview">(
@@ -493,7 +696,13 @@ export function AgentDetailWorkspace({
               ) : (
                 <div className="space-y-8">
                   {visibleRuns.map((run) => (
-                    <RunExchange key={run.id} run={run} t={t} />
+                    <RunExchange
+                      key={run.id}
+                      run={run}
+                      activeRunId={activeRunId}
+                      onResume={onResume}
+                      t={t}
+                    />
                   ))}
                 </div>
               )}

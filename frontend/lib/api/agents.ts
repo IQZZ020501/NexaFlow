@@ -32,24 +32,38 @@ export type AgentPayload = {
 }
 
 export type AgentPlanStep = {
+  id: string
   number: number
   title: string
   description: string
-  status: "pending" | "completed" | "failed"
+  status: "pending" | "in_progress" | "completed" | "failed" | "skipped"
+  result: string
 }
 
 export type AgentRunEvent = {
-  type: "thought" | "tool"
+  event_id: string
+  sequence: number
+  created_at: string
+  type: "thought" | "plan" | "decision" | "tool" | "approval" | "answer"
   turn: number
   tool_name: string
-  status: "running" | "succeeded" | "failed"
+  status: "running" | "succeeded" | "failed" | "approved" | "rejected"
   summary: string
   call_id: string
   tool_label: string
   tool_kind: "knowledge" | "mcp" | "unknown"
   server_name: string
-  input: Record<string, unknown>
+  input: unknown
   output: unknown
+}
+
+export type AgentRunApproval = {
+  approval_id: string
+  tool_name: string
+  tool_label: string
+  tool_kind: "knowledge" | "mcp" | "unknown"
+  server_name: string
+  input: unknown
 }
 
 export type AgentRun = {
@@ -60,23 +74,36 @@ export type AgentRun = {
   goal: string
   model_id: string
   model_name: string
-  status: "planning" | "planned" | "running" | "succeeded" | "failed"
+  status:
+    | "planning"
+    | "planned"
+    | "running"
+    | "awaiting_approval"
+    | "succeeded"
+    | "failed"
   plan: AgentPlanStep[]
+  plan_revision: number
   events: AgentRunEvent[]
+  pending_approval: AgentRunApproval | null
+  budget: Record<string, unknown>
+  usage: Record<string, unknown>
   result: string
   last_error: string | null
+  stop_reason: string | null
+  resumable: boolean
   planned_at: string | null
   started_at: string | null
   finished_at: string | null
   created_at: string
   updated_at: string
+  trace_id: string
 }
 
 export type AgentRunStreamEvent =
   | { type: "run"; run: AgentRun }
   | { type: "process"; event: AgentRunEvent }
   | { type: "answer_delta"; delta: string }
-  | { type: "complete" | "error"; run: AgentRun }
+  | { type: "pause" | "complete" | "error"; run: AgentRun }
 
 function agentsPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/agents${suffix}`
@@ -132,25 +159,22 @@ export function listAgentRuns(
   })
 }
 
-
-export async function streamAgentRun(
+export function getAgentRun(
   token: string,
   workspaceId: string,
   agentId: string,
-  goal: string,
+  runId: string
+) {
+  return request<AgentRun>(
+    agentsPath(workspaceId, `/${agentId}/runs/${runId}`),
+    { token }
+  )
+}
+
+async function consumeAgentRunStream(
+  response: Response,
   onEvent: (event: AgentRunStreamEvent) => void
 ) {
-  const response = await fetch(
-    apiUrl(agentsPath(workspaceId, `/${agentId}/runs/stream`)),
-    {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ goal }),
-    }
-  )
   if (!response.ok) {
     throw new Error(`Agent stream failed with status ${response.status}.`)
   }
@@ -172,4 +196,50 @@ export async function streamAgentRun(
     if (done) break
   }
   if (buffer.trim()) onEvent(JSON.parse(buffer) as AgentRunStreamEvent)
+}
+
+export async function streamAgentRun(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  goal: string,
+  onEvent: (event: AgentRunStreamEvent) => void
+) {
+  return consumeAgentRunStream(
+    await fetch(apiUrl(agentsPath(workspaceId, `/${agentId}/runs/stream`)), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ goal }),
+    }),
+    onEvent
+  )
+}
+
+export async function resumeAgentRun(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  runId: string,
+  decision: "approved" | "rejected" | null,
+  onEvent: (event: AgentRunStreamEvent) => void
+) {
+  return consumeAgentRunStream(
+    await fetch(
+      apiUrl(
+        agentsPath(workspaceId, `/${agentId}/runs/${runId}/resume/stream`)
+      ),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ decision }),
+      }
+    ),
+    onEvent
+  )
 }

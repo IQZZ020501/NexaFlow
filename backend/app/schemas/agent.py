@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -48,25 +48,43 @@ class AgentRunCreateRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
 
 
+class AgentRunResumeRequest(BaseModel):
+    decision: Literal["approved", "rejected"] | None = None
+
+
 class AgentPlanStepResponse(BaseModel):
+    id: str = ""
     number: int
     title: str
     description: str
-    status: Literal["pending", "completed", "failed"]
+    status: Literal["pending", "in_progress", "completed", "failed", "skipped"]
+    result: str = ""
 
 
 class AgentRunEventResponse(BaseModel):
-    type: Literal["thought", "tool"] = "tool"
+    event_id: str = ""
+    sequence: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    type: Literal["thought", "plan", "decision", "tool", "approval", "answer"]
     turn: int
     tool_name: str
-    status: Literal["running", "succeeded", "failed"]
+    status: Literal["running", "succeeded", "failed", "approved", "rejected"]
     summary: str
     call_id: str = ""
     tool_label: str = ""
     tool_kind: Literal["knowledge", "mcp", "unknown"] = "unknown"
     server_name: str = ""
-    input: dict[str, Any] = Field(default_factory=dict)
+    input: Any = Field(default_factory=dict)
     output: Any = None
+
+
+class AgentRunApprovalResponse(BaseModel):
+    approval_id: str
+    tool_name: str
+    tool_label: str
+    tool_kind: Literal["knowledge", "mcp", "unknown"]
+    server_name: str
+    input: Any
 
 
 class AgentRunResponse(BaseModel):
@@ -77,11 +95,24 @@ class AgentRunResponse(BaseModel):
     goal: str
     model_id: str
     model_name: str
-    status: str
+    status: Literal[
+        "planning",
+        "planned",
+        "running",
+        "awaiting_approval",
+        "succeeded",
+        "failed",
+    ]
     plan: list[AgentPlanStepResponse]
+    plan_revision: int
     events: list[AgentRunEventResponse]
+    pending_approval: AgentRunApprovalResponse | None
+    budget: dict[str, Any]
+    usage: dict[str, Any]
     result: str
     last_error: str | None
+    stop_reason: str | None
+    resumable: bool
     planned_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None

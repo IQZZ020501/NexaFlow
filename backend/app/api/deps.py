@@ -11,6 +11,7 @@ from app.domain.user import User
 from app.infrastructure.security import decode_access_token
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.domain.workspace import Workspace
+from app.shareddomain.agents.runner import AgentOrchestrator
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -24,6 +25,10 @@ class WorkspaceContext:
 
 def get_settings(request: Request) -> Settings:
     return request.app.state.settings
+
+
+def get_agent_orchestrator(request: Request) -> AgentOrchestrator:
+    return request.app.state.agent_orchestrator
 
 
 async def get_current_user(
