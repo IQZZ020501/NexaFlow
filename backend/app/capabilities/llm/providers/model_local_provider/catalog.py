@@ -4,6 +4,7 @@ CATALOG = {
     "provider_type": "openai_compatible",
     "icon": "/model-providers/model_local_provider/icon.svg",
     "default_api_base": "",
+    "api_key_required": False,
     "model_types": [
         "EMBEDDING",
         "RERANKER"

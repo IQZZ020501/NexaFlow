@@ -1,9 +1,32 @@
 CATALOG = {
     "provider": "model_azure_provider",
     "name": "Azure OpenAI",
-    "provider_type": "openai_compatible",
+    "provider_type": "azure_openai",
     "icon": "/model-providers/model_azure_provider/icon.svg",
     "default_api_base": "",
+    "credential_fields": [
+        {
+            "field": "azure_endpoint",
+            "label": "API URL",
+            "input_type": "TextInput",
+            "required": True,
+            "default_value": "",
+        },
+        {
+            "field": "api_version",
+            "label": "API Version",
+            "input_type": "TextInput",
+            "required": True,
+            "default_value": "2024-10-21",
+        },
+        {
+            "field": "api_key",
+            "label": "API Key",
+            "input_type": "PasswordInput",
+            "required": True,
+            "default_value": "",
+        },
+    ],
     "model_types": [
         "LLM",
         "EMBEDDING"

@@ -4,6 +4,7 @@ CATALOG = {
     "provider_type": "openai_compatible",
     "icon": "/model-providers/model_docker_ai_provider/icon.svg",
     "default_api_base": "http://localhost:12434/engines/v1",
+    "api_key_required": False,
     "model_types": [
         "LLM",
         "EMBEDDING",

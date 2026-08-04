@@ -1,9 +1,32 @@
 CATALOG = {
     "provider": "model_gemini_provider",
     "name": "Gemini",
-    "provider_type": "openai_compatible",
+    "provider_type": "google_genai",
     "icon": "/model-providers/model_gemini_provider/icon.svg",
-    "default_api_base": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "default_api_base": "",
+    "credential_fields": [
+        {
+            "field": "api_base",
+            "label": "API URL",
+            "input_type": "TextInput",
+            "required": False,
+            "default_value": "",
+        },
+        {
+            "field": "api_version",
+            "label": "API Version",
+            "input_type": "TextInput",
+            "required": False,
+            "default_value": "",
+        },
+        {
+            "field": "api_key",
+            "label": "API Key",
+            "input_type": "PasswordInput",
+            "required": True,
+            "default_value": "",
+        },
+    ],
     "model_types": [
         "LLM",
         "EMBEDDING"
