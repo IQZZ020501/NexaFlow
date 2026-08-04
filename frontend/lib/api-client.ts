@@ -64,6 +64,7 @@ export async function request<T>(path: string, options: RequestOptions = {}) {
 
   const response = await fetch(apiUrl(path), {
     ...options,
+    credentials: options.credentials ?? "include",
     headers,
   })
 

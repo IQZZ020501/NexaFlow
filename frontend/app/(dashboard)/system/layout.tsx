@@ -3,6 +3,7 @@
 import * as React from "react"
 
 import { SessionGate } from "@/components/app/session-gate"
+import { TopBar } from "@/components/app/top-bar"
 
 export default function SystemLayout({
   children,
@@ -11,9 +12,12 @@ export default function SystemLayout({
 }) {
   return (
     <SessionGate>
-      <main className="flex min-h-svh w-full min-w-0 flex-col gap-4 overflow-x-hidden bg-muted/20 px-4 py-6 sm:px-6 lg:px-8">
-        {children}
-      </main>
+      <div className="min-h-svh overflow-x-hidden bg-muted/20">
+        <TopBar />
+        <main className="flex w-full min-w-0 flex-col gap-4 overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8">
+          {children}
+        </main>
+      </div>
     </SessionGate>
   )
 }

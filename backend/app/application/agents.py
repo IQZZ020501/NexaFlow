@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import re
@@ -18,7 +19,7 @@ from app.capabilities.mcp.client import McpClientError, call_mcp_tool
 from app.capabilities.rag.retrieval import query_knowledge_base
 from app.domain.user import User
 from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
+from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.schemas.agent import AgentRunResponse
 from app.schemas.knowledge import KnowledgeQueryRequest
@@ -40,6 +41,7 @@ from app.shareddomain.agents.services import (
     get_agent_model,
 )
 from app.shareddomain.knowledge.models import KnowledgeBase
+from app.shareddomain.knowledge.services import get_knowledge_model
 from app.shareddomain.tools.services import (
     ResolvedMcpTool,
     bearer_token,
@@ -47,20 +49,21 @@ from app.shareddomain.tools.services import (
 )
 
 MAX_KNOWLEDGE_HITS_PER_BASE = 3
+MAX_RERANK_HITS_PER_BASE = 10
+MAX_RERANK_CONTEXT_HITS = 5
 MAX_KNOWLEDGE_CONTENT_CHARS = 2000
-MAX_CITATION_EXCERPT_CHARS = 500
 MAX_AGENT_TURNS = 12
 MAX_AGENT_TOOL_CALLS = 16
 MAX_AGENT_RETRIEVAL_CALLS = 6
 AGENT_RUN_TIMEOUT_SECONDS = 600
-STALE_AGENT_RUN_SECONDS = 120
+STALE_AGENT_RUN_SECONDS = AGENT_RUN_TIMEOUT_SECONDS + 60
 
 
 class KnowledgeSearchInput(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
 
 
-def run_to_response(run: AgentRun) -> AgentRunResponse:
+def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
     return AgentRunResponse(
         id=run.id,
         workspace_id=run.workspace_id,
@@ -73,7 +76,6 @@ def run_to_response(run: AgentRun) -> AgentRunResponse:
         plan=run.plan,
         plan_revision=run.plan_revision,
         events=run.events,
-        citations=run.citations,
         pending_approval=run.pending_approval,
         budget=run.budget,
         usage=run.usage,
@@ -86,6 +88,7 @@ def run_to_response(run: AgentRun) -> AgentRunResponse:
         finished_at=run.finished_at,
         created_at=run.created_at,
         updated_at=run.updated_at,
+        trace_id=trace_id,
     )
 
 
@@ -143,13 +146,7 @@ def build_knowledge_search_tool(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     settings: Settings,
-    citations: list[dict[str, Any]],
 ) -> AgentTool:
-    citation_ids = {
-        f"{citation['knowledge_base_id']}:{citation['chunk_id']}": citation["source_id"]
-        for citation in citations
-    }
-
     async def execute(arguments: str) -> AgentToolResult:
         try:
             payload = KnowledgeSearchInput.model_validate_json(arguments)
@@ -166,7 +163,11 @@ def build_knowledge_search_tool(
                 knowledge_base,
                 KnowledgeQueryRequest(
                     query=payload.query,
-                    limit=MAX_KNOWLEDGE_HITS_PER_BASE,
+                    limit=(
+                        MAX_RERANK_HITS_PER_BASE
+                        if knowledge_base.reranker_model_id
+                        else MAX_KNOWLEDGE_HITS_PER_BASE
+                    ),
                 ),
                 settings,
             )
@@ -177,36 +178,73 @@ def build_knowledge_search_tool(
                 is_error=True,
             )
 
-        tool_hits = []
-        for hit in selected_hits:
-            citation_key = f"{knowledge_base.id}:{hit.chunk_id}"
-            source_id = citation_ids.get(citation_key)
-            if source_id is None:
-                source_id = f"S{len(citations) + 1}"
-                citation_ids[citation_key] = source_id
-                citations.append(
-                    {
-                        "source_id": source_id,
-                        "knowledge_base_id": knowledge_base.id,
-                        "knowledge_base_name": knowledge_base.name,
-                        "document_id": hit.document_id,
-                        "document_filename": hit.document_filename,
-                        "chunk_id": hit.chunk_id,
-                        "chunk_index": hit.chunk_index,
-                        "excerpt": hit.content[:MAX_CITATION_EXCERPT_CHARS],
-                    }
+        candidate_count = len(selected_hits)
+        reranked = False
+        if knowledge_base.reranker_model_id and selected_hits:
+            try:
+                reranker_model = await get_knowledge_model(
+                    db,
+                    knowledge_base.workspace_id,
+                    knowledge_base.reranker_model_id,
+                    "RERANKER",
                 )
-            tool_hits.append(
-                {
-                    "source_id": source_id,
-                    "knowledge_base_id": knowledge_base.id,
-                    "knowledge_base": knowledge_base.name,
-                    "document": hit.document_filename,
-                    "content": hit.content[:MAX_KNOWLEDGE_CONTENT_CHARS],
-                }
-            )
+            except HTTPException:
+                reranker_model = None
+            if reranker_model is not None:
+                provider = None
+                try:
+                    provider = build_registered_model_provider(reranker_model, settings)
+                    rerank_results = await asyncio.to_thread(
+                        provider.rerank,
+                        payload.query,
+                        [hit.content for hit in selected_hits],
+                    )
+                except ModelProviderError:
+                    rerank_results = []
+                finally:
+                    if provider is not None:
+                        provider.client.close()
+                        await provider.async_client.close()
+                ranked_indices = [
+                    (result["index"], result.get("relevance_score", 0))
+                    for result in rerank_results
+                    if isinstance(result, dict)
+                    and isinstance(result.get("index"), int)
+                    and 0 <= result["index"] < len(selected_hits)
+                    and isinstance(result.get("relevance_score", 0), (int, float))
+                ]
+                ranked_indices.sort(key=lambda item: item[1], reverse=True)
+                if ranked_indices:
+                    selected_hits = [
+                        selected_hits[index]
+                        for index, _ in ranked_indices[:MAX_RERANK_CONTEXT_HITS]
+                    ]
+                    reranked = True
+        if not reranked:
+            selected_hits = selected_hits[:MAX_KNOWLEDGE_HITS_PER_BASE]
 
-        output = {"query": payload.query, "hits": tool_hits}
+        tool_hits = [
+            {
+                "knowledge_base": knowledge_base.name,
+                "document": hit.document_filename,
+                "content": hit.content[:MAX_KNOWLEDGE_CONTENT_CHARS],
+            }
+            for hit in selected_hits
+        ]
+
+        output = {
+            "query": payload.query,
+            "hits": tool_hits,
+            "retrieval_stats": [
+                {
+                    "knowledge_base_id": knowledge_base.id,
+                    "knowledge_base_name": knowledge_base.name,
+                    "candidates": candidate_count,
+                    "reranked": reranked,
+                    "submitted": len(tool_hits),
+                }
+            ],
+        }
         return AgentToolResult(
             content=json.dumps({"hits": tool_hits}, ensure_ascii=False),
             summary=f"agent.knowledge_chunks_returned:{len(tool_hits)}",
@@ -217,7 +255,7 @@ def build_knowledge_search_tool(
         name=knowledge_function_name(knowledge_base),
         description=(
             f"Search the knowledge base '{knowledge_base.name}'. "
-            "Use returned source IDs as citations in the final answer."
+            "Use it only when the goal likely depends on documents in this workspace."
         ),
         parameters=KnowledgeSearchInput.model_json_schema(),
         execute=execute,
@@ -330,7 +368,6 @@ async def prepare_agent_run(
         plan=[],
         plan_revision=0,
         events=[],
-        citations=[],
         pending_approval=None,
         budget=agent_run_budget(),
         usage={"turns": 0, "tool_calls": 0, "retrieval_calls": 0},
@@ -377,8 +414,7 @@ async def build_agent_runtime(
     actor: User,
     workspace_role: str | None,
     settings: Settings,
-) -> tuple[AgentRuntimeContext, list[dict[str, Any]]]:
-    citations = list(run.citations or [])
+) -> AgentRuntimeContext:
     knowledge_bases = await accessible_agent_knowledge_bases(
         db,
         run.workspace_id,
@@ -394,25 +430,24 @@ async def build_agent_runtime(
     )
     provider = build_registered_model_provider(model, settings)
     tools = [
-        build_knowledge_search_tool(db, knowledge_base, settings, citations)
+        build_knowledge_search_tool(db, knowledge_base, settings)
         for knowledge_base in knowledge_bases
     ]
     tools.extend(build_mcp_agent_tool(tool, settings) for tool in mcp_tools)
-    return AgentRuntimeContext(provider, tools), citations
+    return AgentRuntimeContext(provider, tools)
 
 
 async def project_agent_state(
     db: AsyncSession,
     run: AgentRun,
     state: AgentGraphState,
-    citations: list[dict[str, Any]],
     *,
     interrupted: bool,
+    trace_id: str,
 ) -> AgentRunResponse:
     run.plan = list(state.get("plan", []))
     run.plan_revision = state.get("plan_revision", 0)
     run.events = list(state.get("events", []))
-    run.citations = list(citations)
     run.pending_approval = state.get("pending_approval")
     run.budget = dict(state.get("budget", run.budget))
     run.usage = dict(state.get("usage", run.usage))
@@ -427,7 +462,7 @@ async def project_agent_state(
         run.finished_at = utc_now()
     await db.commit()
     await db.refresh(run)
-    return run_to_response(run)
+    return run_to_response(run, trace_id=trace_id)
 
 
 async def fail_agent_run(
@@ -435,6 +470,8 @@ async def fail_agent_run(
     run: AgentRun,
     orchestrator: AgentOrchestrator,
     exc: Exception,
+    *,
+    trace_id: str,
 ) -> AgentRunResponse:
     run_id = run.id
     await db.rollback()
@@ -452,7 +489,7 @@ async def fail_agent_run(
     run.finished_at = utc_now()
     await db.commit()
     await db.refresh(run)
-    return run_to_response(run)
+    return run_to_response(run, trace_id=trace_id)
 
 
 async def execute_agent_graph(
@@ -467,10 +504,12 @@ async def execute_agent_graph(
     state: AgentGraphState | None = None,
     approval_decision: str | None = None,
     recover: bool = False,
+    trace_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     context: AgentRuntimeContext | None = None
+    trace_id = trace_id or new_id()
     try:
-        context, citations = await build_agent_runtime(
+        context = await build_agent_runtime(
             db,
             run,
             model,
@@ -494,17 +533,23 @@ async def execute_agent_graph(
                 db,
                 run,
                 item["data"],
-                citations,
                 interrupted=bool(item.get("interrupts")),
+                trace_id=trace_id,
             )
             yield {"type": "run", "run": response.model_dump(mode="json")}
-        response = run_to_response(run)
+        response = run_to_response(run, trace_id=trace_id)
         yield {
             "type": "pause" if run.status == "awaiting_approval" else "complete",
             "run": response.model_dump(mode="json"),
         }
     except Exception as exc:
-        response = await fail_agent_run(db, run, orchestrator, exc)
+        response = await fail_agent_run(
+            db,
+            run,
+            orchestrator,
+            exc,
+            trace_id=trace_id,
+        )
         yield {"type": "error", "run": response.model_dump(mode="json")}
     finally:
         if context is not None:
@@ -521,7 +566,11 @@ async def stream_agent_run(
     settings: Settings,
     orchestrator: AgentOrchestrator,
 ) -> AsyncIterator[dict[str, Any]]:
-    yield {"type": "run", "run": run_to_response(run).model_dump(mode="json")}
+    trace_id = new_id()
+    yield {
+        "type": "run",
+        "run": run_to_response(run, trace_id=trace_id).model_dump(mode="json"),
+    }
     state = initial_agent_state(run.id, run.goal, run.instructions, run.budget)
     async for event in execute_agent_graph(
         db,
@@ -532,6 +581,7 @@ async def stream_agent_run(
         settings,
         orchestrator,
         state=state,
+        trace_id=trace_id,
     ):
         yield event
 
@@ -554,6 +604,7 @@ async def create_agent_run(
         actor,
         workspace_role,
     )
+    trace_id = new_id()
     async for _ in execute_agent_graph(
         db,
         run,
@@ -563,9 +614,10 @@ async def create_agent_run(
         settings,
         orchestrator,
         state=initial_agent_state(run.id, run.goal, run.instructions, run.budget),
+        trace_id=trace_id,
     ):
         pass
-    return run_to_response(run)
+    return run_to_response(run, trace_id=trace_id)
 
 
 async def prepare_agent_run_resume(
@@ -631,7 +683,11 @@ async def stream_agent_run_resume(
     decision: str | None,
     recover: bool,
 ) -> AsyncIterator[dict[str, Any]]:
-    yield {"type": "run", "run": run_to_response(run).model_dump(mode="json")}
+    trace_id = new_id()
+    yield {
+        "type": "run",
+        "run": run_to_response(run, trace_id=trace_id).model_dump(mode="json"),
+    }
     async for event in execute_agent_graph(
         db,
         run,
@@ -642,5 +698,6 @@ async def stream_agent_run_resume(
         orchestrator,
         approval_decision=decision,
         recover=recover,
+        trace_id=trace_id,
     ):
         yield event

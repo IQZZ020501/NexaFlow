@@ -277,6 +277,105 @@ async def assert_tool_limit_closes_call() -> None:
     )
 
 
+async def assert_repeated_evidence_stops_retrieval() -> None:
+    async def execute(_arguments: str) -> AgentToolResult:
+        return AgentToolResult(
+            "Same evidence",
+            "agent.knowledge_chunks_returned:1",
+            {
+                "hits": [{"document": "same.md", "content": "Same evidence"}],
+                "retrieval_stats": [{"submitted": 1}],
+            },
+        )
+
+    tool = AgentTool(
+        "knowledge_docs",
+        "Search workspace documents.",
+        {"type": "object"},
+        execute,
+        kind="knowledge",
+    )
+    provider = FinalRequestProvider(
+        [
+            tool_call(
+                SUBMIT_PLAN_TOOL,
+                {"steps": [{"title": "Research", "description": "Find evidence"}]},
+                "plan-evidence",
+            ),
+            tool_call("knowledge_docs", {}, "evidence-1"),
+            tool_call("knowledge_docs", {}, "evidence-2"),
+            tool_call("knowledge_docs", {}, "evidence-3"),
+            tool_call(COMPLETE_STEP_TOOL, {"summary": "Evidence gathered"}, "step-evidence"),
+            ModelCompletion("Completed from existing evidence.", (), "stop"),
+        ]
+    )
+    events = await collect(
+        AgentOrchestrator(InMemorySaver()).stream(
+            "run-evidence",
+            AgentRuntimeContext(provider, [tool]),
+            state=initial_state("run-evidence"),
+        )
+    )
+    assert final_state(events)["status"] == "succeeded"
+    assert any(
+        message.get("role") == "user"
+        and "without retrieval" in message.get("content", "")
+        for message in provider.final_messages
+    )
+
+    distinct_hits = iter(["First", "Second", "Third"])
+
+    async def execute_distinct(_arguments: str) -> AgentToolResult:
+        content = next(distinct_hits)
+        return AgentToolResult(
+            content,
+            "agent.knowledge_chunks_returned:1",
+            {
+                "hits": [{"document": "changing.md", "content": content}],
+                "retrieval_stats": [{"submitted": 1}],
+            },
+        )
+
+    distinct_tool = AgentTool(
+        "knowledge_docs",
+        "Search workspace documents.",
+        {"type": "object"},
+        execute_distinct,
+        kind="knowledge",
+    )
+    distinct_provider = FinalRequestProvider(
+        [
+            tool_call(
+                SUBMIT_PLAN_TOOL,
+                {"steps": [{"title": "Research", "description": "Find evidence"}]},
+                "plan-distinct",
+            ),
+            *[
+                tool_call("knowledge_docs", {}, f"distinct-{index}")
+                for index in range(3)
+            ],
+            tool_call(
+                COMPLETE_STEP_TOOL,
+                {"summary": "Evidence gathered"},
+                "step-distinct",
+            ),
+            ModelCompletion("Completed from distinct evidence.", (), "stop"),
+        ]
+    )
+    await collect(
+        AgentOrchestrator(InMemorySaver()).stream(
+            "run-distinct-evidence",
+            AgentRuntimeContext(distinct_provider, [distinct_tool]),
+            state=initial_state("run-distinct-evidence"),
+        )
+    )
+    assert not any(
+        message.get("role") == "user"
+        and "without retrieval" in message.get("content", "")
+        for message in distinct_provider.final_messages
+    )
+
+
 async def assert_recovery() -> None:
     orchestrator = AgentOrchestrator(InMemorySaver())
     failing = SequenceProvider(
@@ -324,6 +423,7 @@ async def main() -> None:
     await assert_approval()
     await assert_expired_approval()
     await assert_tool_limit_closes_call()
+    await assert_repeated_evidence_stops_retrieval()
     await assert_recovery()
 
 

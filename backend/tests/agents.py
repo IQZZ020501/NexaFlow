@@ -62,7 +62,7 @@ class AgentModelHandler(BaseHTTPRequestHandler):
         mcp_tool_name = next((name for name in tool_names if name.startswith("mcp_")), None)
         has_tool_result = any(item.get("role") == "tool" for item in body.get("messages", []))
         if body.get("stream"):
-            message = {"role": "assistant", "content": "Completed with source [S1]."}
+            message = {"role": "assistant", "content": "Completed."}
             finish_reason = "stop"
         elif "agent_submit_plan" in tool_names:
             message = {
@@ -326,9 +326,85 @@ async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
         mcp_client_module.mcp_client = original_client
 
 
+async def assert_knowledge_reranking() -> None:
+    original_query = agent_application.query_knowledge_base
+    original_get_model = agent_application.get_knowledge_model
+    original_build_provider = agent_application.build_registered_model_provider
+
+    class FakeClient:
+        def close(self) -> None:
+            pass
+
+    class FakeAsyncClient:
+        async def close(self) -> None:
+            pass
+
+    class FakeReranker:
+        client = FakeClient()
+        async_client = FakeAsyncClient()
+
+        def rerank(self, _query: str, _documents: list[str]) -> list[dict]:
+            return [
+                {"index": 4, "relevance_score": 0.9},
+                {"index": 1, "relevance_score": 0.8},
+            ]
+
+    async def fake_query(_db, _knowledge_base, payload, _settings):
+        assert payload.limit == agent_application.MAX_RERANK_HITS_PER_BASE
+        return [
+            KnowledgeQueryHitResponse(
+                chunk_id=f"chunk-{index}",
+                document_id=f"document-{index}",
+                document_filename=f"doc-{index}.md",
+                chunk_index=index,
+                content=f"content-{index}",
+                distance=index / 10,
+            )
+            for index in range(6)
+        ]
+
+    async def fake_get_model(*_args, **_kwargs):
+        return SimpleNamespace()
+
+    agent_application.query_knowledge_base = fake_query
+    agent_application.get_knowledge_model = fake_get_model
+    agent_application.build_registered_model_provider = lambda *_args: FakeReranker()
+    try:
+        tool = agent_application.build_knowledge_search_tool(
+            None,
+            SimpleNamespace(
+                id="knowledge-1",
+                workspace_id="workspace-1",
+                name="Docs",
+                reranker_model_id="reranker-1",
+            ),
+            None,
+        )
+        result = await tool.execute(json.dumps({"query": "release"}))
+        assert not result.is_error
+        assert [hit["document"] for hit in result.output["hits"]] == [
+            "doc-4.md",
+            "doc-1.md",
+        ]
+        assert result.output["retrieval_stats"] == [
+            {
+                "knowledge_base_id": "knowledge-1",
+                "knowledge_base_name": "Docs",
+                "candidates": 6,
+                "reranked": True,
+                "submitted": 2,
+            }
+        ]
+    finally:
+        agent_application.query_knowledge_base = original_query
+        agent_application.get_knowledge_model = original_get_model
+        agent_application.build_registered_model_provider = original_build_provider
+
+
 def main() -> None:
     asyncio.run(orchestration_main())
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
+    asyncio.run(assert_knowledge_reranking())
     assert_mcp_url_validation()
 
     original_query = agent_application.query_knowledge_base
@@ -495,7 +571,8 @@ def main() -> None:
                 }
             ]
             assert plan_calls
-            assert member_run["citations"] == []
+            assert "citations" not in member_run
+            assert member_run["trace_id"]
             assert query_calls == []
 
             grant = client.put(
@@ -513,20 +590,21 @@ def main() -> None:
             assert permitted_question.status_code == 201, permitted_question.text
             executed = permitted_question.json()
             assert executed["status"] == "succeeded"
-            assert executed["result"] == "Completed with source [S1]."
+            assert executed["result"] == "Completed."
             knowledge_event = next(
                 event
                 for event in executed["events"]
                 if event["type"] == "tool" and event["tool_kind"] == "knowledge"
             )
             assert knowledge_event["tool_name"].startswith("knowledge_")
-            assert executed["citations"][0]["document_filename"] == "release.md"
+            assert "citations" not in executed
+            assert executed["trace_id"]
             assert query_calls == [(knowledge_base_id, "release process")]
             assert knowledge_event["call_id"] == "call-search"
             assert knowledge_event["tool_label"] == "Release Docs"
             assert knowledge_event["tool_kind"] == "knowledge"
             assert knowledge_event["input"] == {"query": "release process"}
-            assert knowledge_event["output"]["hits"][0]["source_id"] == "S1"
+            assert "source_id" not in knowledge_event["output"]["hits"][0]
             assert knowledge_event["output"]["hits"][0]["document"] == "release.md"
 
             streamed_question = client.post(

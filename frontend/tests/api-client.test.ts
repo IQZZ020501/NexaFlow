@@ -11,9 +11,11 @@ afterEach(() => {
 describe("api client", () => {
   test("adds auth headers and returns API error details", async () => {
     let headers = new Headers()
+    let credentials: RequestCredentials | undefined
 
     globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       headers = new Headers(init?.headers)
+      credentials = init?.credentials
       return new Response(JSON.stringify({ detail: "Invalid request." }), {
         status: 400,
         statusText: "Bad Request",
@@ -35,6 +37,7 @@ describe("api client", () => {
 
     expect(headers.get("Authorization")).toBe("Bearer test-token")
     expect(headers.get("Content-Type")).toBe("application/json")
+    expect(credentials).toBe("include")
   })
 
   test("returns undefined for empty success responses", async () => {

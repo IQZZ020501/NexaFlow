@@ -19,6 +19,7 @@ import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace
 import { IconButton } from "@/components/ui/icon-button"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Spec } from "@/components/ui/spec"
 import {
   Dialog,
   DialogContent,
@@ -249,8 +250,9 @@ export function AgentsPage() {
     }
   }, [reportError, selectedAgentId, selectedWorkspaceId, token])
 
-  const hasRunningRun = runs.some((run) =>
-    ["planning", "planned", "running"].includes(run.status)
+  const hasRunningRun = runs.some(
+    (run) =>
+      ["planning", "planned", "running"].includes(run.status) && !run.resumable
   )
   React.useEffect(() => {
     if (
@@ -579,18 +581,16 @@ export function AgentsPage() {
                   </IconButton>
                 ) : null}
               </div>
-              <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground">
-                <span>
-                  {t("{value} 个知识库", {
-                    value: agent.knowledge_base_ids.length,
-                  })}
-                </span>
-                <span>
-                  {t("{value} 个 MCP 工具", {
-                    value: agent.mcp_tools.length,
-                  })}
-                </span>
-              </div>
+              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <Spec
+                  label={t("知识库")}
+                  value={String(agent.knowledge_base_ids.length)}
+                />
+                <Spec
+                  label={t("MCP 工具")}
+                  value={String(agent.mcp_tools.length)}
+                />
+              </dl>
             </div>
           ))}
         </div>

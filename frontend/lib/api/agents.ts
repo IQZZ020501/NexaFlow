@@ -66,17 +66,6 @@ export type AgentRunApproval = {
   input: unknown
 }
 
-export type AgentCitation = {
-  source_id: string
-  knowledge_base_id: string
-  knowledge_base_name: string
-  document_id: string
-  document_filename: string
-  chunk_id: string
-  chunk_index: number
-  excerpt: string
-}
-
 export type AgentRun = {
   id: string
   workspace_id: string
@@ -95,7 +84,6 @@ export type AgentRun = {
   plan: AgentPlanStep[]
   plan_revision: number
   events: AgentRunEvent[]
-  citations: AgentCitation[]
   pending_approval: AgentRunApproval | null
   budget: Record<string, unknown>
   usage: Record<string, unknown>
@@ -108,6 +96,7 @@ export type AgentRun = {
   finished_at: string | null
   created_at: string
   updated_at: string
+  trace_id: string
 }
 
 export type AgentRunStreamEvent =

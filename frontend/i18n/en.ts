@@ -548,7 +548,6 @@ export const en = {
   "正在思考": "Thinking",
   "调用成功": "Succeeded",
   "调用失败": "Failed",
-  "来源": "Sources",
   "未连接": "Not connected",
   "Agent 已更新": "Agent updated",
   "Agent 已创建": "Agent created",

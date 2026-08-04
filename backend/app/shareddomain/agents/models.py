@@ -145,7 +145,6 @@ class AgentRun(Base):
     plan: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     plan_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
-    citations: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     pending_approval: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     budget: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     usage: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)

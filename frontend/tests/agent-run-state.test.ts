@@ -15,7 +15,6 @@ const run: AgentRun = {
   plan: [],
   plan_revision: 0,
   events: [],
-  citations: [],
   pending_approval: null,
   budget: {},
   usage: {},
@@ -28,6 +27,7 @@ const run: AgentRun = {
   finished_at: null,
   created_at: "2026-08-04T00:00:00Z",
   updated_at: "2026-08-04T00:00:00Z",
+  trace_id: "trace-1",
 }
 
 const processEvent: AgentRunEvent = {

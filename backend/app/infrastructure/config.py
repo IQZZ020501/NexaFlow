@@ -45,7 +45,8 @@ class Settings:
     celery_task_always_eager: bool = False
     mcp_allow_private_networks: bool = False
     mcp_request_timeout_seconds: float = 30.0
-    jwt_expires_minutes: int = 60
+    jwt_expires_minutes: int = 1440
+    refresh_token_expires_days: int = 30
     cors_origins: tuple[str, ...] = ()
     environment: str = "development"
 
@@ -86,7 +87,8 @@ class Settings:
             mcp_request_timeout_seconds=float(
                 os.getenv("MCP_REQUEST_TIMEOUT_SECONDS", "30")
             ),
-            jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "60")),
+            jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "1440")),
+            refresh_token_expires_days=int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30")),
             cors_origins=origins,
             environment=os.getenv("ENVIRONMENT", "development"),
         )
@@ -121,3 +123,7 @@ class Settings:
             raise RuntimeError("MCP_REQUEST_TIMEOUT_SECONDS must be greater than zero.")
         if self.mcp_request_timeout_seconds > 300:
             raise RuntimeError("MCP_REQUEST_TIMEOUT_SECONDS must not exceed 300.")
+        if self.jwt_expires_minutes <= 0:
+            raise RuntimeError("JWT_EXPIRES_MINUTES must be greater than zero.")
+        if self.refresh_token_expires_days <= 0:
+            raise RuntimeError("REFRESH_TOKEN_EXPIRES_DAYS must be greater than zero.")

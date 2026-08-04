@@ -9,7 +9,6 @@ import {
   CircleCheckIcon,
   DatabaseIcon,
   DownloadIcon,
-  ExternalLinkIcon,
   FileTextIcon,
   FlaskConicalIcon,
   LoaderCircleIcon,
@@ -40,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { Spec } from "@/components/ui/spec"
 import {
   Dialog,
   DialogContent,
@@ -2183,7 +2183,7 @@ function KnowledgeBasePageContent({
                         key={knowledgeBase.id}
                         role="button"
                         tabIndex={0}
-                        className="rounded-md border p-3 min-h-40 cursor-pointer transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                        className="min-h-40 cursor-pointer rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
                         onClick={() => openKnowledgeBase(knowledgeBase)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
@@ -2219,80 +2219,111 @@ function KnowledgeBasePageContent({
                             </div>
                           </div>
                           <div className="flex gap-1">
-                            <IconButton
-                              label={t("详情")}
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                openKnowledgeBase(knowledgeBase)
-                              }}
-                            >
-                              <ExternalLinkIcon className="size-4" />
-                            </IconButton>
                             {knowledgeBase.permission === "edit" ? (
-                              <>
-                                <IconButton
-                                  label={t("编辑知识库")}
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    setEditForm({
-                                      id: knowledgeBase.id,
-                                      name: knowledgeBase.name,
-                                      description:
-                                        knowledgeBase.description,
-                                      embedding_model_id:
-                                        knowledgeBase.embedding_model_id,
-                                      reranker_model_id:
-                                        knowledgeBase.reranker_model_id,
-                                    })
-                                  }}
-                                >
-                                  <PencilIcon className="size-4" />
-                                </IconButton>
-                                <IconButton
-                                  label={t(
-                                    knowledgeBase.status === "active"
-                                      ? "归档知识库"
-                                      : "恢复知识库"
-                                  )}
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    void handleToggleStatus(knowledgeBase)
-                                  }}
-                                >
-                                  {knowledgeBase.status === "active" ? (
-                                    <ArchiveIcon className="size-4" />
-                                  ) : (
-                                    <RotateCcwIcon className="size-4" />
-                                  )}
-                                </IconButton>
-                              </>
+                              <IconButton
+                                label={t("编辑知识库")}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setEditForm({
+                                    id: knowledgeBase.id,
+                                    name: knowledgeBase.name,
+                                    description: knowledgeBase.description,
+                                    embedding_model_id:
+                                      knowledgeBase.embedding_model_id,
+                                    reranker_model_id:
+                                      knowledgeBase.reranker_model_id,
+                                  })
+                                }}
+                              >
+                                <PencilIcon className="size-4" />
+                              </IconButton>
                             ) : null}
-                            {canManagePermissions(knowledgeBase) ? (
-                              <>
-                                <IconButton
-                                  label={t("资源授权")}
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    void handleOpenPermissions(
-                                      knowledgeBase
-                                    )
-                                  }}
-                                >
-                                  <UsersIcon className="size-4" />
-                                </IconButton>
-                                <IconButton
-                                  label={t("永久删除知识库")}
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    void handleDelete(knowledgeBase)
-                                  }}
-                                >
-                                  <Trash2Icon className="size-4" />
-                                </IconButton>
-                              </>
+                            {knowledgeBase.permission === "edit" ||
+                            canManagePermissions(knowledgeBase) ? (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    title={t("操作")}
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
+                                    <MoreHorizontalIcon className="size-4" />
+                                    <span className="sr-only">{t("操作")}</span>
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  {knowledgeBase.permission === "edit" ? (
+                                    <DropdownMenuItem
+                                      onSelect={() =>
+                                        void handleToggleStatus(knowledgeBase)
+                                      }
+                                    >
+                                      {knowledgeBase.status === "active" ? (
+                                        <ArchiveIcon />
+                                      ) : (
+                                        <RotateCcwIcon />
+                                      )}
+                                      {t(
+                                        knowledgeBase.status === "active"
+                                          ? "归档知识库"
+                                          : "恢复知识库"
+                                      )}
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                  {knowledgeBase.permission === "edit" &&
+                                  canManagePermissions(knowledgeBase) ? (
+                                    <DropdownMenuSeparator />
+                                  ) : null}
+                                  {canManagePermissions(knowledgeBase) ? (
+                                    <>
+                                      <DropdownMenuItem
+                                        onSelect={() =>
+                                          void handleOpenPermissions(
+                                            knowledgeBase
+                                          )
+                                        }
+                                      >
+                                        <UsersIcon />
+                                        {t("资源授权")}
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        variant="destructive"
+                                        onSelect={() =>
+                                          void handleDelete(knowledgeBase)
+                                        }
+                                      >
+                                        <Trash2Icon />
+                                        {t("永久删除知识库")}
+                                      </DropdownMenuItem>
+                                    </>
+                                  ) : null}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             ) : null}
                           </div>
                         </div>
+                        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                          <Spec
+                            label={t("向量模型")}
+                            value={
+                              registeredModels.find(
+                                (model) =>
+                                  model.id === knowledgeBase.embedding_model_id
+                              )?.name ?? t("未配置")
+                            }
+                          />
+                          <Spec
+                            label={t("重排模型")}
+                            value={
+                              registeredModels.find(
+                                (model) =>
+                                  model.id === knowledgeBase.reranker_model_id
+                              )?.name ?? t("未配置")
+                            }
+                          />
+                        </dl>
                       </div>
                     )
                   })}

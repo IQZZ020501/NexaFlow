@@ -1,7 +1,7 @@
 """agent orchestration state
 
-Revision ID: 202608040001
-Revises: 202608030002
+Revision ID: 202608040003
+Revises: 202608040002
 Create Date: 2026-08-04
 """
 
@@ -10,8 +10,8 @@ from collections.abc import Sequence
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "202608040001"
-down_revision: str | None = "202608030002"
+revision: str = "202608040003"
+down_revision: str | None = "202608040002"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

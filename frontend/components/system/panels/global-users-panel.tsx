@@ -176,7 +176,7 @@ export function GlobalUsersPanel({
                 >
                   <div
                     role="row"
-                    className="grid grid-cols-[150px_140px_260px_240px_220px_130px_120px_180px_160px] border-b bg-muted/40 px-4 py-3 text-sm font-semibold text-muted-foreground"
+                    className="grid grid-cols-[150px_140px_minmax(260px,1fr)_240px_220px_130px_120px_180px_160px] border-b bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))] px-4 py-3 text-sm font-semibold text-muted-foreground"
                   >
                     <span role="columnheader">{t("用户名")}</span>
                     <span role="columnheader">{t("账号")}</span>
@@ -188,7 +188,7 @@ export function GlobalUsersPanel({
                     <span role="columnheader">{t("创建时间")}</span>
                     <span
                       role="columnheader"
-                      className="sticky right-0 flex h-full items-center border-l bg-background px-4"
+                      className="sticky right-0 flex h-full items-center border-l bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))] px-4"
                     >
                       {t("操作")}
                     </span>
@@ -203,8 +203,9 @@ export function GlobalUsersPanel({
                         key={user.id}
                         role="row"
                         className={cn(
-                          "grid grid-cols-[150px_140px_260px_240px_220px_130px_120px_180px_160px] items-center border-b px-4 py-4 last:border-b-0 hover:bg-muted/40",
-                          index % 2 === 1 && "bg-muted/20"
+                          "group grid grid-cols-[150px_140px_minmax(260px,1fr)_240px_220px_130px_120px_180px_160px] items-center border-b bg-background px-4 py-4 last:border-b-0 hover:bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))]",
+                          index % 2 === 1 &&
+                            "bg-[color-mix(in_oklch,var(--muted)_20%,var(--background))]"
                         )}
                       >
                         <span
@@ -273,7 +274,11 @@ export function GlobalUsersPanel({
                         </span>
                         <span
                           role="cell"
-                          className="sticky right-0 flex h-full items-center gap-2 border-l bg-background px-4 whitespace-nowrap"
+                          className={cn(
+                            "sticky right-0 flex h-full items-center gap-2 border-l bg-background px-4 whitespace-nowrap group-hover:bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))]",
+                            index % 2 === 1 &&
+                              "bg-[color-mix(in_oklch,var(--muted)_20%,var(--background))]"
+                          )}
                         >
                           <Button
                             type="button"

@@ -1,7 +1,9 @@
+from datetime import datetime
+
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.user import User
+from app.domain.user import RefreshSession, User
 from app.domain.team import Team, TeamMembership
 from app.domain.workspace import Workspace, WorkspaceMembership
 
@@ -22,6 +24,34 @@ async def get_active_user_by_username(db: AsyncSession, username: str) -> User |
             User.is_active.is_(True),
         )
     )
+
+
+async def get_active_refresh_session(
+    db: AsyncSession,
+    token_hash: str,
+    now: datetime,
+) -> RefreshSession | None:
+    return await db.scalar(
+        select(RefreshSession)
+        .join(User, RefreshSession.user_id == User.id)
+        .where(
+            RefreshSession.token_hash == token_hash,
+            RefreshSession.expires_at > now,
+            User.is_active.is_(True),
+        )
+    )
+
+
+async def delete_expired_refresh_sessions(db: AsyncSession, now: datetime) -> None:
+    await db.execute(delete(RefreshSession).where(RefreshSession.expires_at <= now))
+
+
+async def delete_refresh_session(db: AsyncSession, token_hash: str) -> None:
+    await db.execute(delete(RefreshSession).where(RefreshSession.token_hash == token_hash))
+
+
+async def delete_refresh_sessions_for_user(db: AsyncSession, user_id: str) -> None:
+    await db.execute(delete(RefreshSession).where(RefreshSession.user_id == user_id))
 
 
 async def list_workspace_scope_rows(
@@ -108,6 +138,7 @@ async def find_users_by_identity(
 
 
 async def delete_user_graph(db: AsyncSession, user_id: str) -> None:
+    await delete_refresh_sessions_for_user(db, user_id)
     await db.execute(delete(TeamMembership).where(TeamMembership.user_id == user_id))
     await db.execute(delete(WorkspaceMembership).where(WorkspaceMembership.user_id == user_id))
     await db.execute(delete(User).where(User.id == user_id))

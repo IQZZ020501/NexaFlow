@@ -87,17 +87,6 @@ class AgentRunApprovalResponse(BaseModel):
     input: Any
 
 
-class AgentCitationResponse(BaseModel):
-    source_id: str
-    knowledge_base_id: str
-    knowledge_base_name: str
-    document_id: str
-    document_filename: str
-    chunk_id: str
-    chunk_index: int
-    excerpt: str
-
-
 class AgentRunResponse(BaseModel):
     id: str
     workspace_id: str
@@ -117,7 +106,6 @@ class AgentRunResponse(BaseModel):
     plan: list[AgentPlanStepResponse]
     plan_revision: int
     events: list[AgentRunEventResponse]
-    citations: list[AgentCitationResponse]
     pending_approval: AgentRunApprovalResponse | None
     budget: dict[str, Any]
     usage: dict[str, Any]
@@ -130,3 +118,4 @@ class AgentRunResponse(BaseModel):
     finished_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    trace_id: str = ""

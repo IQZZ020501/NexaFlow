@@ -9,11 +9,9 @@ Correctness, safety, evidence, and validation take priority over speed.
 
 ## 1. Required Skills
 
-- Backend work must read and follow `fastapi`, `fastapi-python`, and
-  `fastapi-templates` before implementation.
+- Backend work must read and follow `fastapi` before implementation.
 - Frontend work must read and follow `react-templates`,
-  `vercel-react-best-practices`, `vercel-react-native-skills`, and
-  `vercel-react-view-transitions` before implementation.
+  `vercel-react-best-practices` before implementation.
 - If a required skill is unavailable, surface that before coding instead of
   silently proceeding.
 

@@ -9,6 +9,9 @@ from tests.support import (
     login,
     test_client,
 )
+from app.api.v1.endpoints.auth import REFRESH_TOKEN_COOKIE
+from app.domain.user import RefreshSession
+from app.infrastructure.security import hash_refresh_token
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.system_log import SystemLog
 
@@ -19,11 +22,46 @@ async def get_system_log_events() -> list[str]:
         return list(result.all())
 
 
+async def get_refresh_session(token: str) -> RefreshSession | None:
+    async with get_session_factory()() as db:
+        return await db.scalar(
+            select(RefreshSession).where(
+                RefreshSession.token_hash == hash_refresh_token(token)
+            )
+        )
+
+
 def main() -> None:
     with test_client() as client:
-        first_login = login(client, "admin", BOOTSTRAP_ADMIN_PASSWORD)
+        first_login_response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": BOOTSTRAP_ADMIN_PASSWORD},
+        )
+        assert first_login_response.status_code == 200, first_login_response.text
+        first_login = first_login_response.json()
         admin_token = first_login["access_token"]
+        assert first_login["expires_in"] == 24 * 60 * 60
         assert first_login["must_change_password"] is True
+        assert "refresh_token" not in first_login
+        refresh_token = client.cookies.get(REFRESH_TOKEN_COOKIE)
+        assert refresh_token
+        set_cookie = first_login_response.headers["set-cookie"].lower()
+        assert "httponly" in set_cookie
+        assert "samesite=lax" in set_cookie
+        assert "path=/api/v1/auth" in set_cookie
+        stored_refresh_session = asyncio.run(get_refresh_session(refresh_token))
+        assert stored_refresh_session is not None
+        assert stored_refresh_session.token_hash == hash_refresh_token(refresh_token)
+        assert stored_refresh_session.token_hash != refresh_token
+
+        refreshed = client.post("/api/v1/auth/refresh")
+        assert refreshed.status_code == 200, refreshed.text
+        assert refreshed.json()["expires_in"] == 24 * 60 * 60
+
+        logged_out = client.post("/api/v1/auth/logout")
+        assert logged_out.status_code == 204, logged_out.text
+        assert asyncio.run(get_refresh_session(refresh_token)) is None
+        assert client.post("/api/v1/auth/refresh").status_code == 401
 
         blocked = client.get("/api/v1/workspaces", headers=auth_headers(admin_token))
         assert blocked.status_code == 403, blocked.text
@@ -41,6 +79,7 @@ def main() -> None:
             json={"new_password": ADMIN_PASSWORD},
         )
         assert changed.status_code == 204, changed.text
+        assert client.post("/api/v1/auth/refresh").status_code == 200
 
         rotated_password = "NexaFlow@123456."
         wrong_current_password = client.post(
@@ -108,6 +147,8 @@ def main() -> None:
         analyst_id = payload["user"]["id"]
         analyst_login = login(client, "analyst", payload["initial_password"])
         assert analyst_login["must_change_password"] is True
+        analyst_refresh_token = client.cookies.get(REFRESH_TOKEN_COOKIE)
+        assert analyst_refresh_token
 
         updated_user = client.patch(
             f"/api/v1/admin/users/{analyst_id}",
@@ -125,6 +166,8 @@ def main() -> None:
         )
         assert change_managed_password.status_code == 200, change_managed_password.text
         assert change_managed_password.json()["must_change_password"] is False
+        assert client.post("/api/v1/auth/refresh").status_code == 401
+        assert asyncio.run(get_refresh_session(analyst_refresh_token)) is None
         analyst_changed_login = login(client, "analyst", analyst_changed_password)
         assert analyst_changed_login["must_change_password"] is False
 

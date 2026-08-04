@@ -41,6 +41,7 @@ export type MeResponse = {
 export type LoginResponse = {
   access_token: string
   token_type: string
+  expires_in: number
   must_change_password: boolean
 }
 
@@ -57,6 +58,14 @@ export function login(username: string, password: string) {
       password,
     }),
   })
+}
+
+export function refreshAccessToken() {
+  return request<LoginResponse>("/api/v1/auth/refresh", { method: "POST" })
+}
+
+export function logout() {
+  return request<void>("/api/v1/auth/logout", { method: "POST" })
 }
 
 export function changePassword(
