@@ -2,10 +2,10 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -21,7 +21,8 @@ class RegisteredModel(Base):
     __table_args__ = (
         UniqueConstraint("workspace_id", "name", name="uq_model_registry_model_workspace_name"),
         CheckConstraint(
-            "provider_type IN ('openai_compatible')",
+            "provider_type IN ('openai_compatible', 'anthropic', 'bedrock', "
+            "'azure_openai', 'deepseek', 'google_genai', 'ollama')",
             name="ck_model_registry_models_provider_type",
         ),
         CheckConstraint(
@@ -43,6 +44,12 @@ class RegisteredModel(Base):
     api_key_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_key_hint: Mapped[str | None] = mapped_column(String(32), nullable=True)
     api_key_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    credential_config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    credential_secret_hints: Mapped[dict[str, str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
     model_type: Mapped[str] = mapped_column(String(20), nullable=False)
     model_name: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")

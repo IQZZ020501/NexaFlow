@@ -70,6 +70,7 @@ class AgentRunEventResponse(BaseModel):
     server_name: str = ""
     input: dict[str, Any] = Field(default_factory=dict)
     output: Any = None
+    reasoning: str = ""
 
 
 class AgentRunResponse(BaseModel):

@@ -7,7 +7,7 @@ from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
 from app.domain.user import User
 from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
-from app.capabilities.embedding.pipeline import delete_chroma_vectors
+from app.capabilities.rag.vector_store import delete_vectors
 from app.shareddomain.knowledge.orchestration import (
     DOCUMENT_PARSED_STATUS,
     TASK_INDEX,
@@ -113,7 +113,7 @@ async def batch_create_knowledge_documents(
     )
     await db.commit()
     await asyncio.to_thread(
-        delete_chroma_vectors,
+        delete_vectors,
         settings,
         knowledge_base.id,
         vector_ids,

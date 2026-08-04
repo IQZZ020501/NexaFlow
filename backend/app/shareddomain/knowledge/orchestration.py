@@ -22,10 +22,10 @@ from app.capabilities.embedding.pipeline import (
     SPLIT_SEPARATORS,
     chunk_token_count,
     clean_text,
-    delete_chroma_vectors,
     extract_text,
     split_text,
 )
+from app.capabilities.rag.vector_store import delete_vectors
 from app.schemas.knowledge import (
     KnowledgeDocumentChunkResponse,
     KnowledgeDocumentParseRequest,
@@ -445,5 +445,5 @@ async def preview_knowledge_document(
         workspace_id=knowledge_base.workspace_id,
     )
     await db.commit()
-    await asyncio.to_thread(delete_chroma_vectors, settings, knowledge_base.id, vector_ids)
+    await asyncio.to_thread(delete_vectors, settings, knowledge_base.id, vector_ids)
     return await list_knowledge_document_chunks(db, knowledge_base, document)

@@ -110,8 +110,10 @@ async def list_agent_runs(
     agent_id: str,
     requested_by_user_id: str,
     limit: int,
+    *,
+    status: str | None = None,
 ) -> list[AgentRun]:
-    result = await db.scalars(
+    statement = (
         select(AgentRun)
         .where(
             AgentRun.agent_id == agent_id,
@@ -120,6 +122,9 @@ async def list_agent_runs(
         .order_by(AgentRun.created_at.desc())
         .limit(limit)
     )
+    if status is not None:
+        statement = statement.where(AgentRun.status == status)
+    result = await db.scalars(statement)
     return list(result.all())
 
 

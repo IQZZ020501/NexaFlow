@@ -5,12 +5,21 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 
+from langchain_core.embeddings import Embeddings
+from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import text
 
-from app.infrastructure.secrets import decrypt_secret
-from app.infrastructure.session import get_session_factory
+from app.capabilities.llm.credentials import decrypt_credential_secrets
 from app.capabilities.llm.models import RegisteredModel
-from app.capabilities.llm.runtime import build_registered_model_provider
+from app.capabilities.llm.runtime import (
+    build_chat_model,
+    build_embeddings,
+    build_registered_chat_model,
+    build_registered_embeddings,
+    build_registered_reranker,
+    build_reranker,
+)
+from app.infrastructure.session import get_session_factory
 from tests.support import (
     activate_admin,
     activate_user,
@@ -42,6 +51,59 @@ class ModelTestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b'{"error":"invalid key"}')
+            return
+
+        if self.path == "/v1/chat/completions" and body.get("stream"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            chunks = [
+                {
+                    "id": "test",
+                    "object": "chat.completion.chunk",
+                    "created": 0,
+                    "model": "test",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant",
+                                "reasoning_content": "Inspect ",
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                },
+                {
+                    "id": "test",
+                    "object": "chat.completion.chunk",
+                    "created": 0,
+                    "model": "test",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": "ok"},
+                            "finish_reason": None,
+                        }
+                    ],
+                },
+                {
+                    "id": "test",
+                    "object": "chat.completion.chunk",
+                    "created": 0,
+                    "model": "test",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            ]
+            for chunk in chunks:
+                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
+            self.wfile.write(b"data: [DONE]\n\n")
             return
 
         self.send_response(200)
@@ -119,23 +181,66 @@ async def assert_model_api_key(model_id: str, expected_api_key: str) -> None:
         assert model is not None
         assert model.api_key_ciphertext != expected_api_key
         assert model.api_key_hint == f"****{expected_api_key[-4:]}"
-        assert decrypt_secret(model.api_key_ciphertext, settings().model_secret_key) == expected_api_key
+        assert decrypt_credential_secrets(
+            model.api_key_ciphertext,
+            settings().model_secret_key,
+        ) == {"api_key": expected_api_key}
+        assert model.credential_config == {"api_base": model.api_base}
+        assert model.credential_secret_hints == {
+            "api_key": f"****{expected_api_key[-4:]}"
+        }
 
 
 async def assert_registered_model_runtime_call(model_id: str, model_type: str) -> None:
     async with get_session_factory()() as db:
         model = await db.get(RegisteredModel, model_id)
         assert model is not None
-        provider = build_registered_model_provider(model, settings())
-
         if model_type == "LLM":
-            assert provider.chat([{"role": "user", "content": "Hello"}], max_tokens=1) == "ok"
+            chat_model = build_registered_chat_model(model, settings())
+            assert isinstance(chat_model, BaseChatModel)
+            response = await chat_model.ainvoke(
+                [("human", "Hello")],
+                max_tokens=1,
+            )
+            assert response.text == "ok"
+            chunks = [
+                chunk
+                async for chunk in chat_model.astream([("human", "Hello")])
+            ]
+            assert "".join(chunk.text for chunk in chunks) == "ok"
+            assert "".join(
+                str(chunk.additional_kwargs.get("reasoning_content", ""))
+                for chunk in chunks
+            ) == "Inspect "
         elif model_type == "EMBEDDING":
-            assert provider.embed(["Hello"]) == [[0.0]]
+            embeddings = build_registered_embeddings(model, settings())
+            assert isinstance(embeddings, Embeddings)
+            assert embeddings.embed_documents(["Hello"]) == [[0.0]]
         elif model_type == "RERANKER":
-            assert provider.rerank("Hello", ["Hello"]) == [{"index": 0, "relevance_score": 1.0}]
+            assert build_registered_reranker(model, settings()).rerank(
+                "Hello",
+                ["Hello"],
+            ) == [{"index": 0, "relevance_score": 1.0}]
         else:
             raise AssertionError(f"Unexpected model type: {model_type}")
+
+
+async def assert_openai_compatible_runtime(api_base: str) -> None:
+    chat_model = build_chat_model(
+        "openai_compatible",
+        {"api_base": api_base, "api_key": "test"},
+        "test",
+    )
+    response = await chat_model.ainvoke([("human", "Hello")], max_tokens=1)
+    assert response.text == "ok"
+    chunks = [
+        chunk async for chunk in chat_model.astream([("human", "Hello")])
+    ]
+    assert "".join(chunk.text for chunk in chunks) == "ok"
+    assert "".join(
+        str(chunk.additional_kwargs.get("reasoning_content", ""))
+        for chunk in chunks
+    ) == "Inspect "
 
 
 async def assert_model_count(expected: int) -> None:
@@ -148,7 +253,7 @@ def model_payload(api_base: str, api_key: str = "sk-deepseek-test-1234") -> dict
     return {
         "name": "DeepSeek Chat",
         "provider": "model_deepseek_provider",
-        "provider_type": "openai_compatible",
+        "provider_type": "deepseek",
         "model_type": "LLM",
         "model_name": "deepseek-chat",
         "credential": {"api_base": f"{api_base}/", "api_key": api_key},
@@ -156,15 +261,128 @@ def model_payload(api_base: str, api_key: str = "sk-deepseek-test-1234") -> dict
     }
 
 
+def assert_provider_factories() -> None:
+    chat_cases = [
+        (
+            "openai_compatible",
+            {"api_base": "http://localhost:8000/v1"},
+            "local-model",
+            "OpenAICompatibleChatModel",
+        ),
+        (
+            "anthropic",
+            {"api_base": "https://api.anthropic.com", "api_key": "test"},
+            "claude-test",
+            "AnthropicChatModel",
+        ),
+        (
+            "bedrock",
+            {
+                "region_name": "us-east-1",
+                "aws_access_key_id": "test",
+                "aws_secret_access_key": "secret",
+            },
+            "amazon.nova-test-v1:0",
+            "BedrockChatModel",
+        ),
+        (
+            "azure_openai",
+            {
+                "azure_endpoint": "https://example.openai.azure.com",
+                "api_version": "2024-10-21",
+                "api_key": "test",
+            },
+            "deployment",
+            "AzureChatModel",
+        ),
+        (
+            "deepseek",
+            {"api_base": "https://api.deepseek.com", "api_key": "test"},
+            "deepseek-chat",
+            "DeepSeekChatModel",
+        ),
+        (
+            "google_genai",
+            {"api_key": "test"},
+            "gemini-test",
+            "GoogleChatModel",
+        ),
+        (
+            "ollama",
+            {"api_base": "http://localhost:11434"},
+            "llama3",
+            "OllamaChatModel",
+        ),
+    ]
+    for provider_type, credential, model_name, expected_type in chat_cases:
+        assert (
+            type(build_chat_model(provider_type, credential, model_name)).__name__
+            == expected_type
+        )
+
+    embedding_cases = [
+        (
+            "bedrock",
+            {
+                "region_name": "us-east-1",
+                "aws_access_key_id": "test",
+                "aws_secret_access_key": "secret",
+            },
+            "amazon.titan-embed-text-v1",
+        ),
+        (
+            "azure_openai",
+            {
+                "azure_endpoint": "https://example.openai.azure.com",
+                "api_version": "2024-10-21",
+                "api_key": "test",
+            },
+            "embedding-deployment",
+        ),
+        ("google_genai", {"api_key": "test"}, "models/embedding-001"),
+        ("ollama", {"api_base": "http://localhost:11434"}, "nomic-embed-text"),
+    ]
+    for provider_type, credential, model_name in embedding_cases:
+        assert isinstance(
+            build_embeddings(provider_type, credential, model_name),
+            Embeddings,
+        )
+
+    assert (
+        type(
+            build_reranker(
+                "bedrock",
+                {
+                    "region_name": "us-east-1",
+                    "aws_access_key_id": "test",
+                    "aws_secret_access_key": "secret",
+                },
+                "cohere.rerank-v3-5:0",
+            )
+        ).__name__
+        == "BedrockModelReranker"
+    )
+
+
 def main() -> None:
+    assert_provider_factories()
     with test_client() as client, model_test_server() as model_base_url:
         admin_token, workspace_id = activate_admin(client)
+        asyncio.run(assert_openai_compatible_runtime(model_base_url))
         member_password = create_workspace_user(client, admin_token, workspace_id, "model-user")
         member_token = activate_user(client, "model-user", member_password, MEMBER_PASSWORD)
 
         provider_catalog = client.get("/api/v1/model-providers", headers=auth_headers(admin_token))
         assert provider_catalog.status_code == 200, provider_catalog.text
-        assert any(item["provider"] == "model_deepseek_provider" for item in provider_catalog.json())
+        catalog_by_provider = {
+            item["provider"]: item for item in provider_catalog.json()
+        }
+        assert catalog_by_provider["model_deepseek_provider"]["provider_type"] == "deepseek"
+        assert catalog_by_provider["model_anthropic_provider"]["provider_type"] == "anthropic"
+        assert catalog_by_provider["model_aws_bedrock_provider"]["provider_type"] == "bedrock"
+        assert catalog_by_provider["model_azure_provider"]["provider_type"] == "azure_openai"
+        assert catalog_by_provider["model_gemini_provider"]["provider_type"] == "google_genai"
+        assert catalog_by_provider["model_ollama_provider"]["provider_type"] == "ollama"
 
         provider_model_types = client.get(
             "/api/v1/model-providers/model_type_list",
@@ -181,6 +399,46 @@ def main() -> None:
         )
         assert provider_form.status_code == 200, provider_form.text
         assert [item["field"] for item in provider_form.json()] == ["api_base", "api_key"]
+
+        custom_provider_form = client.get(
+            "/api/v1/model-providers/model_form",
+            headers=auth_headers(admin_token),
+            params={"provider": "model_custom_provider"},
+        )
+        assert custom_provider_form.status_code == 200, custom_provider_form.text
+        assert custom_provider_form.json()[1]["field"] == "api_key"
+        assert custom_provider_form.json()[1]["required"] is False
+
+        bedrock_form = client.get(
+            "/api/v1/model-providers/model_form",
+            headers=auth_headers(admin_token),
+            params={"provider": "model_aws_bedrock_provider"},
+        )
+        assert bedrock_form.status_code == 200, bedrock_form.text
+        assert [item["field"] for item in bedrock_form.json()] == [
+            "region_name",
+            "endpoint_url",
+            "aws_access_key_id",
+            "aws_secret_access_key",
+            "aws_session_token",
+        ]
+
+        partial_aws_credentials = client.post(
+            models_url(workspace_id),
+            headers=auth_headers(admin_token),
+            json={
+                "name": "Invalid Bedrock",
+                "provider": "model_aws_bedrock_provider",
+                "provider_type": "bedrock",
+                "model_type": "LLM",
+                "model_name": "amazon.nova-test-v1:0",
+                "credential": {
+                    "region_name": "us-east-1",
+                    "aws_access_key_id": "test",
+                },
+            },
+        )
+        assert partial_aws_credentials.status_code == 422, partial_aws_credentials.text
 
         empty = client.get(models_url(workspace_id), headers=auth_headers(admin_token))
         assert empty.status_code == 200, empty.text
@@ -265,6 +523,7 @@ def main() -> None:
                 **model_payload(model_base_url),
                 "name": "Embedding Model",
                 "provider": "model_openai_provider",
+                "provider_type": "openai_compatible",
                 "model_type": "EMBEDDING",
                 "model_name": "text-embedding-3-small",
             },
@@ -288,6 +547,7 @@ def main() -> None:
                 **model_payload(model_base_url),
                 "name": "Reranker Model",
                 "provider": "model_custom_provider",
+                "provider_type": "openai_compatible",
                 "model_type": "RERANKER",
                 "model_name": "custom-reranker",
             },

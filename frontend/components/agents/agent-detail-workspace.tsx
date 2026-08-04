@@ -5,9 +5,11 @@ import {
   ArrowLeftIcon,
   BotIcon,
   BrainIcon,
+  CheckIcon,
   CircleCheckIcon,
   ChevronDownIcon,
   CircleXIcon,
+  CopyIcon,
   DatabaseIcon,
   LoaderCircleIcon,
   MessageSquareIcon,
@@ -192,79 +194,122 @@ function processTimeline(run: AgentRun) {
   return run.events.map((event) => ({ event, count: 1 }))
 }
 
+function CopyMessageButton({ value, t }: { value: string; t: TFunction }) {
+  const [copied, setCopied] = React.useState(false)
+  const label = t(copied ? "已复制" : "复制")
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      className="text-muted-foreground"
+      aria-label={label}
+      title={label}
+      onClick={handleCopy}
+    >
+      {copied ? <CheckIcon /> : <CopyIcon />}
+    </Button>
+  )
+}
+
 function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
   const timeline = processTimeline(run)
   const hasProcess = timeline.length > 0
+  const answer = run.result
   const [isProcessOpen, setIsProcessOpen] = React.useState(true)
   return (
     <article className="flex flex-col gap-5">
-      <div className="ml-auto max-w-[88%] rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 text-background shadow-sm">
-        {run.goal}
+      <div className="ml-auto flex max-w-[88%] flex-col items-end gap-1">
+        <div className="rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 text-background shadow-sm">
+          {run.goal}
+        </div>
+        <CopyMessageButton value={run.goal} t={t} />
       </div>
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
           <BotIcon className="size-4" />
         </span>
-        <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
-          {hasProcess ? (
-            <details
-              className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
-              open={isProcessOpen}
-              onToggle={(event) => setIsProcessOpen(event.currentTarget.open)}
-            >
-              <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                <BrainIcon className="size-4" />
-                <span className="flex-1">{t("执行过程")}</span>
-                <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
-              </summary>
-              <div className="mt-2 space-y-2 border-l pl-4">
-                {timeline.map(({ event }, index) =>
-                  event.type === "tool" ? (
-                    <ToolEventDetails
-                      key={event.call_id || `${event.turn}-${event.tool_name}-${index}`}
-                      event={event}
-                      run={run}
-                      t={t}
-                    />
-                  ) : (
-                    <div
-                      key={`${event.type}-${event.turn}-${index}`}
-                      className="relative flex items-start gap-2 px-1 text-xs leading-5 text-muted-foreground"
-                    >
-                      {event.status === "running" ? (
-                        <LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
-                      ) : event.status === "succeeded" ? (
-                        <CircleCheckIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-                      ) : (
-                        <CircleXIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
-                      )}
-                      <span>{processSummary(event, run, t)}</span>
-                    </div>
-                  )
-                )}
-              </div>
-            </details>
-          ) : null}
+        <div className="min-w-0 flex-1">
+          <div className="rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
+            {hasProcess ? (
+              <details
+                className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
+                open={isProcessOpen}
+                onToggle={(event) => setIsProcessOpen(event.currentTarget.open)}
+              >
+                <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                  <BrainIcon className="size-4" />
+                  <span className="flex-1">{t("执行过程")}</span>
+                  <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="mt-2 space-y-2 border-l pl-4">
+                  {timeline.map(({ event }, index) =>
+                    event.type === "tool" ? (
+                      <ToolEventDetails
+                        key={event.call_id || `${event.turn}-${event.tool_name}-${index}`}
+                        event={event}
+                        run={run}
+                        t={t}
+                      />
+                    ) : (
+                      <div
+                        key={`${event.type}-${event.turn}-${index}`}
+                        className="relative px-1 text-xs leading-5 text-muted-foreground"
+                      >
+                        <div className="flex items-start gap-2">
+                          {event.status === "running" ? (
+                            <LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
+                          ) : event.status === "succeeded" ? (
+                            <CircleCheckIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+                          ) : (
+                            <CircleXIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+                          )}
+                          <span>{processSummary(event, run, t)}</span>
+                        </div>
+                        {event.reasoning ? (
+                          <div className="ml-5 mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words border-l pl-3 text-foreground/80">
+                            {event.reasoning}
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  )}
+                </div>
+              </details>
+            ) : null}
 
-          {run.result ? (
-            <MarkdownContent
-              content={run.result.replace(/[ \t]*\[S\d+\]/g, "")}
-              className="text-sm leading-6"
-            />
-          ) : run.status === "failed" ? (
-            <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-              {run.last_error ?? t("Agent 未返回结果")}
-            </p>
-          ) : (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="flex gap-1" aria-label={t("正在生成回答")}>
-                <span className="size-1.5 animate-pulse rounded-full bg-current" />
-                <span className="size-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
-                <span className="size-1.5 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
-              </span>
-              {t("正在生成回答")}
+            {run.result ? (
+              <MarkdownContent content={answer} className="text-sm leading-6" />
+            ) : run.status === "failed" ? (
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                {run.last_error ?? t("Agent 未返回结果")}
+              </p>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="flex gap-1" aria-label={t("正在生成回答")}>
+                  <span className="size-1.5 animate-pulse rounded-full bg-current" />
+                  <span className="size-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
+                  <span className="size-1.5 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
+                </span>
+                {t("正在生成回答")}
+              </div>
+            )}
+          </div>
+          {run.status !== "running" && answer ? (
+            <div className="mt-1 flex">
+              <CopyMessageButton value={answer} t={t} />
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </article>

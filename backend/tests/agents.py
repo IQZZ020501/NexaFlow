@@ -6,7 +6,15 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from types import SimpleNamespace
 
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.messages.tool import tool_call_chunk
+from langchain_core.tools import StructuredTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from mcp.types import Tool as McpTool
+from sqlalchemy import select
+
 from app.application import agents as agent_application
+from app.application.agent_memory import format_conversation_memory
 from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.capabilities.mcp import client as mcp_client_module
 from app.capabilities.mcp.client import (
@@ -16,7 +24,16 @@ from app.capabilities.mcp.client import (
     normalize_mcp_url,
 )
 from app.schemas.knowledge import KnowledgeQueryHitResponse
-from app.shareddomain.agents.runner import AgentTool, AgentToolResult, run_agent
+from app.infrastructure.session import get_session_factory
+from app.infrastructure.system_log import SystemLog
+from app.shareddomain.agents.runtime import (
+    AgentRunnerError,
+    AgentToolResult,
+    create_agent_tool,
+    run_agent,
+    safe_event_value,
+)
+from app.shareddomain.agents.runtime.graph import MAX_REASONING_CHARS
 from app.shareddomain.tools import services as mcp_services
 from tests.support import (
     RESEARCH_PASSWORD,
@@ -173,7 +190,7 @@ def model_payload(api_base: str, name: str = "Agent Model") -> dict:
     return {
         "name": name,
         "provider": "model_deepseek_provider",
-        "provider_type": "openai_compatible",
+        "provider_type": "deepseek",
         "model_type": "LLM",
         "model_name": "deepseek-chat",
         "credential": {"api_base": api_base, "api_key": "sk-agent-test-1234"},
@@ -206,12 +223,125 @@ def create_workspace_user(client, token: str, workspace_id: str) -> tuple[str, s
     return response.json()["user"]["id"], response.json()["initial_password"]
 
 
+def completion_message(completion: ModelCompletion) -> AIMessage:
+    tool_calls = []
+    invalid_tool_calls = []
+    for call in completion.tool_calls:
+        try:
+            arguments = json.loads(call.arguments)
+        except (json.JSONDecodeError, TypeError):
+            arguments = None
+        if isinstance(arguments, dict):
+            tool_calls.append(
+                {
+                    "name": call.name,
+                    "args": arguments,
+                    "id": call.id,
+                    "type": "tool_call",
+                }
+            )
+        else:
+            invalid_tool_calls.append(
+                {
+                    "name": call.name,
+                    "args": call.arguments,
+                    "id": call.id,
+                    "error": None,
+                    "type": "invalid_tool_call",
+                }
+            )
+    return AIMessage(
+        content=completion.content,
+        tool_calls=tool_calls,
+        invalid_tool_calls=invalid_tool_calls,
+        response_metadata={"finish_reason": completion.finish_reason},
+    )
+
+
 class SequenceProvider:
     def __init__(self, completions: list[ModelCompletion]) -> None:
         self.completions = completions
+        self.requests: list[list[BaseMessage]] = []
 
-    def complete(self, *_args, **_kwargs) -> ModelCompletion:
+    def bind_tools(self, *_args, **_kwargs):
+        return self
+
+    def next_completion(self, messages: list[BaseMessage]) -> ModelCompletion:
+        self.requests.append(list(messages))
         return self.completions.pop(0)
+
+    async def ainvoke(self, messages: list[BaseMessage]) -> AIMessage:
+        return completion_message(self.next_completion(messages))
+
+
+class StreamingProvider(SequenceProvider):
+    def __init__(
+        self,
+        completions: list[ModelCompletion],
+        reasoning: list[list[str]],
+    ) -> None:
+        super().__init__(completions)
+        self.reasoning = reasoning
+
+    async def astream(self, messages: list[BaseMessage]):
+        completion = self.next_completion(messages)
+        for delta in self.reasoning.pop(0):
+            yield AIMessageChunk(
+                content="",
+                additional_kwargs={"reasoning_content": delta},
+            )
+        for index, call in enumerate(completion.tool_calls):
+            yield AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    tool_call_chunk(
+                        name=call.name,
+                        args=call.arguments,
+                        id=call.id,
+                        index=index,
+                    )
+                ],
+            )
+        if completion.content:
+            yield AIMessageChunk(content=completion.content)
+        yield AIMessageChunk(
+            content="",
+            response_metadata={"finish_reason": completion.finish_reason},
+        )
+
+
+class RepeatedToolProvider:
+    def __init__(self, tool_name: str, calls_before_answer: int) -> None:
+        self.tool_name = tool_name
+        self.calls_before_answer = calls_before_answer
+        self.turn = 0
+
+    def bind_tools(self, *_args, **_kwargs):
+        return self
+
+    async def ainvoke(self, _messages: list[BaseMessage]) -> AIMessage:
+        self.turn += 1
+        if self.turn <= self.calls_before_answer:
+            return completion_message(
+                ModelCompletion(
+                    content="",
+                    tool_calls=(
+                        ModelToolCall(
+                            f"call-{self.turn}",
+                            self.tool_name,
+                            '{"query": "release"}',
+                        ),
+                    ),
+                    finish_reason="tool_calls",
+                )
+            )
+        return completion_message(
+            ModelCompletion(
+                content="Done.",
+                tool_calls=(),
+                finish_reason="stop",
+            )
+        )
 
 
 async def assert_truncated_tool_call_is_not_executed() -> None:
@@ -236,7 +366,7 @@ async def assert_truncated_tool_call_is_not_executed() -> None:
         provider,  # type: ignore[arg-type]
         [{"role": "user", "content": "Run it"}],
         [
-            AgentTool(
+            create_agent_tool(
                 name="test_tool",
                 description="Test tool",
                 parameters={"type": "object"},
@@ -245,6 +375,40 @@ async def assert_truncated_tool_call_is_not_executed() -> None:
         ],
     )
     assert result.content == "Stopped safely."
+    assert result.events[0]["status"] == "failed"
+    assert executions == 0
+
+
+async def assert_invalid_tool_arguments_are_not_executed() -> None:
+    executions = 0
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(content="ok", summary="ok")
+
+    result = await run_agent(
+        SequenceProvider(
+            [
+                ModelCompletion(
+                    content="",
+                    tool_calls=(ModelToolCall("call-1", "test_tool", "not-json"),),
+                    finish_reason="tool_calls",
+                ),
+                ModelCompletion(content="Recovered.", tool_calls=(), finish_reason="stop"),
+            ]
+        ),  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [
+            create_agent_tool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"type": "object"},
+                execute=execute,
+            )
+        ],
+    )
+    assert result.content == "Recovered."
     assert result.events[0]["status"] == "failed"
     assert executions == 0
 
@@ -267,7 +431,7 @@ async def assert_tool_error_returns_to_model() -> None:
         provider,  # type: ignore[arg-type]
         [{"role": "user", "content": "Run it"}],
         [
-            AgentTool(
+            create_agent_tool(
                 name="test_tool",
                 description="Test tool",
                 parameters={"type": "object"},
@@ -289,7 +453,7 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
     async def execute(_arguments: str) -> AgentToolResult:
         return AgentToolResult(content="tool result", summary="Tool completed.")
 
-    provider = SequenceProvider(
+    provider = StreamingProvider(
         [
             ModelCompletion(
                 content="",
@@ -297,13 +461,14 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
                 finish_reason="tool_calls",
             ),
             ModelCompletion(content="Streamed answer.", tool_calls=(), finish_reason="stop"),
-        ]
+        ],
+        [[], ["Inspect ", "x" * MAX_REASONING_CHARS]],
     )
     result = await run_agent(
         provider,  # type: ignore[arg-type]
         [{"role": "user", "content": "Run it"}],
         [
-            AgentTool(
+            create_agent_tool(
                 name="test_tool",
                 description="Test tool",
                 parameters={"type": "object"},
@@ -319,12 +484,340 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
         "process",
         "process",
         "process",
+        "reasoning_delta",
+        "reasoning_delta",
         "process",
         "answer_delta",
     ]
     assert emitted[0]["event"]["type"] == "thought"
     assert emitted[2]["event"]["type"] == "tool"
+    assert emitted[5] == {
+        "type": "reasoning_delta",
+        "turn": 2,
+        "delta": "Inspect ",
+    }
+    assert len(emitted[6]["delta"]) == MAX_REASONING_CHARS - len("Inspect ")
+    assert len(emitted[7]["event"]["reasoning"]) == MAX_REASONING_CHARS
     assert emitted[-1]["delta"] == "Streamed answer."
+
+
+async def assert_parallel_policy_is_enforced() -> None:
+    active = 0
+    max_parallel = 0
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        nonlocal active, max_parallel
+        active += 1
+        max_parallel = max(max_parallel, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return AgentToolResult(content="ok", summary="ok")
+
+    calls = tuple(
+        ModelToolCall(f"call-{index}", "test_tool", '{"value": 1}')
+        for index in range(2)
+    )
+    provider = SequenceProvider(
+        [
+            ModelCompletion(content="", tool_calls=calls, finish_reason="tool_calls"),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    tool = create_agent_tool(
+        name="test_tool",
+        description="Test tool",
+        parameters={"type": "object"},
+        execute=execute,
+        parallel_safe=True,
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [tool],
+    )
+    assert max_parallel == 2
+    assert [event["call_id"] for event in result.events] == ["call-0", "call-1"]
+
+    max_parallel = 0
+    provider = SequenceProvider(
+        [
+            ModelCompletion(content="", tool_calls=calls, finish_reason="tool_calls"),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    serial_tool = create_agent_tool(
+        name="test_tool",
+        description="Test tool",
+        parameters={"type": "object"},
+        execute=execute,
+    )
+    await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [serial_tool],
+    )
+    assert max_parallel == 1
+
+
+async def assert_runtime_budgets_are_enforced() -> None:
+    retrievals = 0
+
+    async def retrieve(_arguments: str) -> AgentToolResult:
+        nonlocal retrievals
+        retrievals += 1
+        return AgentToolResult(
+            content="hit",
+            summary="hit",
+            output={"retrieval_stats": [{"submitted": 1}]},
+            evidence_ids=frozenset({f"chunk-{retrievals}"}),
+        )
+
+    knowledge_tool = create_agent_tool(
+        name="search_knowledge",
+        description="Search",
+        parameters={"type": "object"},
+        execute=retrieve,
+        kind="knowledge",
+        parallel_safe=True,
+    )
+    result = await run_agent(
+        RepeatedToolProvider("search_knowledge", 5),  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [knowledge_tool],
+    )
+    assert retrievals == 5
+    assert len(result.events) == 5
+    assert all(event["status"] == "succeeded" for event in result.events)
+
+    executions = 0
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(content="ok", summary="ok")
+
+    ordinary_tool = create_agent_tool(
+        name="test_tool",
+        description="Test",
+        parameters={"type": "object"},
+        execute=execute,
+    )
+    try:
+        await run_agent(
+            SequenceProvider(
+                [
+                    ModelCompletion(
+                        content="",
+                        tool_calls=tuple(
+                            ModelToolCall(f"call-{index}", "test_tool", "{}")
+                            for index in range(13)
+                        ),
+                        finish_reason="tool_calls",
+                    )
+                ]
+            ),  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [ordinary_tool],
+        )
+    except AgentRunnerError as exc:
+        assert str(exc) == "Agent tool call limit reached."
+    else:
+        raise AssertionError("Agent tool call budget was not enforced.")
+    assert executions == 0
+
+    try:
+        await run_agent(
+            RepeatedToolProvider("test_tool", 8),  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [ordinary_tool],
+        )
+    except AgentRunnerError as exc:
+        assert str(exc) == "Agent turn limit reached."
+    else:
+        raise AssertionError("Agent turn budget was not enforced.")
+
+
+async def assert_retrieval_progress_uses_evidence_ids() -> None:
+    async def retrieve(arguments: str) -> AgentToolResult:
+        query = json.loads(arguments)["query"]
+        return AgentToolResult(
+            content="hit",
+            summary="hit",
+            output={"retrieval_stats": [{"submitted": 1}]},
+            evidence_ids=frozenset({f"chunk-{query}"}),
+        )
+
+    knowledge_tool = create_agent_tool(
+        name="search_knowledge",
+        description="Search",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        execute=retrieve,
+        kind="knowledge",
+        parallel_safe=True,
+    )
+
+    def completion(call_id: str, query: str) -> ModelCompletion:
+        return ModelCompletion(
+            content="",
+            tool_calls=(
+                ModelToolCall(call_id, "search_knowledge", json.dumps({"query": query})),
+            ),
+            finish_reason="tool_calls",
+        )
+
+    distinct_provider = SequenceProvider(
+        [
+            completion("call-1", "one"),
+            completion("call-2", "two"),
+            completion("call-3", "three"),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    await run_agent(
+        distinct_provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [knowledge_tool],
+    )
+    assert not any(
+        "No new evidence found" in message.text
+        for message in distinct_provider.requests[-1]
+    )
+
+    repeated_provider = SequenceProvider(
+        [
+            completion("call-1", "same"),
+            completion("call-2", "same"),
+            completion("call-3", "same"),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    await run_agent(
+        repeated_provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [knowledge_tool],
+    )
+    assert any(
+        "No new evidence found" in message.text
+        for message in repeated_provider.requests[-1]
+    )
+
+
+async def assert_structured_tool_and_event_safety() -> None:
+    executions = 0
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(content="ok", summary="ok")
+
+    definition = McpTool(
+        name="test_tool",
+        description="Test tool",
+        inputSchema={
+            "type": "object",
+            "$defs": {
+                "payload": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string"},
+                        "child": {"$ref": "#/$defs/payload"},
+                    },
+                    "required": ["value"],
+                    "additionalProperties": False,
+                }
+            },
+            "properties": {"payload": {"$ref": "#/$defs/payload"}},
+            "required": ["payload"],
+        },
+    )
+    tool = create_agent_tool(
+        name=definition.name,
+        description=definition.description or "",
+        parameters=definition.input_schema,
+        execute=execute,
+    )
+    assert isinstance(tool, StructuredTool)
+    assert tool.args_schema == definition.input_schema
+    model_schema = convert_to_openai_tool(tool)["function"]["parameters"]
+    assert "$defs" not in json.dumps(model_schema)
+    assert "$ref" not in json.dumps(model_schema)
+    invalid = await tool.ainvoke(
+        {"payload": {"value": "ok", "child": {}}}
+    )
+    assert invalid.is_error is True
+    assert executions == 0
+    valid = await tool.ainvoke(
+        {"payload": {"value": "ok", "child": {"value": "nested"}}}
+    )
+    assert valid.is_error is False
+    assert executions == 1
+
+    reserved_names = create_agent_tool(
+        name="reserved_names",
+        description="Test reserved property names",
+        parameters={
+            "type": "object",
+            "properties": {
+                "$id": {"type": "string"},
+                "definitions": {"type": "string"},
+            },
+            "required": ["$id", "definitions"],
+            "additionalProperties": False,
+        },
+        execute=execute,
+    )
+    assert set(reserved_names.args_schema["properties"]) == {"$id", "definitions"}
+    reserved_result = await reserved_names.ainvoke(
+        {"$id": "customer-1", "definitions": "active"}
+    )
+    assert reserved_result.is_error is False
+    safe = safe_event_value(
+        {
+            "authorization": "Bearer secret",
+            "nested": {"api_key": "secret", "value": "x" * 3000},
+        }
+    )
+    assert safe["authorization"] == "[REDACTED]"
+    assert safe["nested"]["api_key"] == "[REDACTED]"
+    assert len(safe["nested"]["value"]) == 2000
+
+
+def assert_conversation_memory_is_bounded() -> None:
+    def run(index: int, status: str = "succeeded") -> SimpleNamespace:
+        return SimpleNamespace(
+            status=status,
+            goal=f"question-{index}-" + "q" * 1000,
+            result=f"answer-{index}-" + "a" * 1000,
+        )
+
+    memory = format_conversation_memory(
+        [
+            run(12),
+            run(11),
+            run(10, "failed"),
+            *[run(index) for index in range(9, -1, -1)],
+        ]
+    )
+    assert "question-12" in memory
+    assert "question-11" in memory
+    assert "question-10" not in memory
+    assert "question-0" not in memory
+    assert len(memory) <= 6000
+
+
+async def get_agent_failure_log(trace_id: str) -> SystemLog | None:
+    async with get_session_factory()() as db:
+        return await db.scalar(
+            select(SystemLog).where(
+                SystemLog.event == "agent.execution_failed",
+                SystemLog.details["trace_id"].as_string() == trace_id,
+            )
+        )
+
 
 def assert_mcp_url_validation() -> None:
     assert normalize_mcp_url("https://tools.example.com/mcp/") == (
@@ -387,14 +880,21 @@ async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
 
 def main() -> None:
     asyncio.run(assert_truncated_tool_call_is_not_executed())
+    asyncio.run(assert_invalid_tool_arguments_are_not_executed())
     asyncio.run(assert_tool_error_returns_to_model())
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
     asyncio.run(assert_streaming_run_emits_process_and_answer())
+    asyncio.run(assert_parallel_policy_is_enforced())
+    asyncio.run(assert_runtime_budgets_are_enforced())
+    asyncio.run(assert_retrieval_progress_uses_evidence_ids())
+    asyncio.run(assert_structured_tool_and_event_safety())
+    assert_conversation_memory_is_bounded()
     assert_mcp_url_validation()
 
     original_query = agent_application.query_knowledge_base
     original_discover = mcp_services.discover_mcp_tools
     original_call_mcp_tool = agent_application.call_mcp_tool
+    original_run_agent = agent_application.run_agent
     query_calls: list[tuple[str, str]] = []
     mcp_calls: list[tuple[str, str, dict]] = []
 
@@ -497,6 +997,29 @@ def main() -> None:
             agent_id = agent["id"]
             assert agent["can_edit"] is True
             assert agent["knowledge_base_ids"] == [knowledge_base_id]
+
+            async def fail_agent_run(*_args, **_kwargs):
+                raise RuntimeError("synthetic runtime failure")
+
+            agent_application.run_agent = fail_agent_run
+            try:
+                failed_run_response = client.post(
+                    agents_url(workspace_id, f"/{agent_id}/runs"),
+                    headers=auth_headers(admin_token),
+                    json={"goal": "Verify failure observability"},
+                )
+            finally:
+                agent_application.run_agent = original_run_agent
+            assert failed_run_response.status_code == 201, failed_run_response.text
+            failed_run = failed_run_response.json()
+            assert failed_run["status"] == "failed"
+            assert failed_run["last_error"] == "Agent execution failed."
+            failure_log = asyncio.run(get_agent_failure_log(failed_run["trace_id"]))
+            assert failure_log is not None
+            assert failure_log.details["agent_run_id"] == failed_run["id"]
+            assert failure_log.details["agent_id"] == agent_id
+            assert failure_log.details["exception_type"] == "RuntimeError"
+            assert "synthetic runtime failure" in (failure_log.stack_trace or "")
 
             duplicate = client.post(
                 agents_url(workspace_id),
@@ -742,6 +1265,7 @@ def main() -> None:
         agent_application.query_knowledge_base = original_query
         mcp_services.discover_mcp_tools = original_discover
         agent_application.call_mcp_tool = original_call_mcp_tool
+        agent_application.run_agent = original_run_agent
 
 
 if __name__ == "__main__":

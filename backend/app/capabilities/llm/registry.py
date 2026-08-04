@@ -6,20 +6,25 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.shareddomain.audit.services import record_audit_log
-from app.infrastructure.config import Settings
-from app.infrastructure.secrets import decrypt_secret, encrypt_secret, secret_hint
-from app.infrastructure.validation import normalize_name
-from app.infrastructure.model_utils import utc_now
-from app.domain.user import User
-from app.capabilities.llm.models import RegisteredModel
 from app.capabilities.llm import registry_repository as model_repository
+from app.capabilities.llm.credentials import (
+    decrypt_credential_secrets,
+    encrypt_credential_secrets,
+    legacy_credential_config,
+)
+from app.capabilities.llm.models import RegisteredModel
 from app.capabilities.llm.providers import PROVIDER_CATALOG
 from app.capabilities.llm.runtime import (
+    SUPPORTED_PROVIDER_TYPES,
     ModelProviderError,
     ModelProviderStatusError,
-    OpenAICompatibleModelProvider,
+    test_model_connection,
 )
+from app.domain.user import User
+from app.infrastructure.config import Settings
+from app.infrastructure.model_utils import utc_now
+from app.infrastructure.secrets import secret_hint
+from app.infrastructure.validation import normalize_name
 from app.schemas.model import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
@@ -28,12 +33,30 @@ from app.schemas.model import (
     RegisteredModelResponse,
     RegisteredModelUpdateRequest,
 )
+from app.shareddomain.audit.services import record_audit_log
 
 ACTIVE_STATUS = "active"
 DISABLED_STATUS = "disabled"
 STATUSES = {ACTIVE_STATUS, DISABLED_STATUS}
-PROVIDER_TYPES = {"openai_compatible"}
+PROVIDER_TYPES = SUPPORTED_PROVIDER_TYPES
 MODEL_TYPES = {"LLM", "EMBEDDING", "RERANKER"}
+URL_CREDENTIAL_FIELDS = {"api_base", "azure_endpoint", "endpoint_url"}
+DEFAULT_CREDENTIAL_FIELDS = [
+    {
+        "field": "api_base",
+        "label": "API URL",
+        "input_type": "TextInput",
+        "required": True,
+        "default_value": "",
+    },
+    {
+        "field": "api_key",
+        "label": "API Key",
+        "input_type": "PasswordInput",
+        "required": True,
+        "default_value": "",
+    },
+]
 MODEL_TYPE_ALIASES = {
     "chat": "LLM",
     "llm": "LLM",
@@ -71,23 +94,33 @@ def validate_status(value: str) -> str:
     return value
 
 
-def normalize_api_base(value: object) -> str:
-    if not isinstance(value, str):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "API URL is required.")
-    api_base = value.strip().rstrip("/")
+def normalize_url_credential(value: str, field: str) -> str:
+    api_base = value.rstrip("/")
+    if not api_base:
+        return ""
     parsed = urlparse(api_base)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid API URL.")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Invalid URL for model credential {field}.",
+        )
     return api_base
 
 
-def normalize_api_key(value: object) -> str | None:
+def normalize_credential_value(value: object, field: str) -> str:
     if value is None:
-        return None
+        return ""
     if not isinstance(value, str):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "API Key must be a string.")
-    value = value.strip()
-    return value or None
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Model credential {field} must be a string.",
+        )
+    normalized = value.strip()
+    return (
+        normalize_url_credential(normalized, field)
+        if field in URL_CREDENTIAL_FIELDS
+        else normalized
+    )
 
 
 def is_masked_secret(value: str, hint: str | None) -> bool:
@@ -101,20 +134,181 @@ def validate_provider_support(entry: dict[str, Any], model_type: str) -> None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Model type is not supported by this provider.")
 
 
-def set_model_api_key(model: RegisteredModel, api_key: str, settings: Settings) -> None:
-    model.api_key_ciphertext = encrypt_secret(api_key, settings.model_secret_key)
-    model.api_key_hint = secret_hint(api_key)
-    model.api_key_updated_at = utc_now()
+def credential_fields(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    fields = entry.get("credential_fields")
+    if isinstance(fields, list):
+        return fields
+    return [
+        {
+            **field,
+            "default_value": (
+                entry["default_api_base"]
+                if field["field"] == "api_base"
+                else field["default_value"]
+            ),
+            "required": (
+                entry.get("api_key_required", True)
+                if field["field"] == "api_key"
+                else field["required"]
+            ),
+        }
+        for field in DEFAULT_CREDENTIAL_FIELDS
+    ]
 
 
-def run_openai_compatible_model_test(
-    api_base: str,
-    api_key: str,
+def stored_model_credentials(
+    model: RegisteredModel,
+    settings: Settings,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    config = {
+        key: value
+        for key, value in (model.credential_config or {}).items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+    if not config:
+        config = legacy_credential_config(model.provider_type, model.api_base)
+    secrets = decrypt_credential_secrets(
+        model.api_key_ciphertext,
+        settings.model_secret_key,
+    )
+    hints = {
+        key: value
+        for key, value in (model.credential_secret_hints or {}).items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+    if not hints and model.api_key_hint:
+        hints = {"api_key": model.api_key_hint}
+    return config, secrets, hints
+
+
+def normalize_provider_credentials(
+    entry: dict[str, Any],
+    submitted: dict[str, Any],
+    *,
+    current_config: dict[str, str] | None = None,
+    current_secrets: dict[str, str] | None = None,
+    current_hints: dict[str, str] | None = None,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str], set[str]]:
+    values = dict(submitted)
+    if "base_url" in values and "api_base" not in values:
+        values["api_base"] = values.pop("base_url")
+    fields = credential_fields(entry)
+    allowed_fields = {field["field"] for field in fields}
+    unknown_fields = set(values) - allowed_fields
+    if unknown_fields:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Unsupported model credential: {min(unknown_fields)}.",
+        )
+
+    config = dict(current_config or {})
+    secrets = dict(current_secrets or {})
+    hints = dict(current_hints or {})
+    changed_secrets: set[str] = set()
+    for field in fields:
+        name = field["field"]
+        is_secret = field["input_type"] == "PasswordInput"
+        if is_secret:
+            if name in values and values[name] is None:
+                secrets.pop(name, None)
+                hints.pop(name, None)
+                changed_secrets.add(name)
+            elif name in values:
+                value = normalize_credential_value(values[name], name)
+                if value and not is_masked_secret(value, hints.get(name)):
+                    secrets[name] = value
+                    hints[name] = secret_hint(value)
+                    changed_secrets.add(name)
+            if field.get("required", True) and not secrets.get(name):
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    f"Model credential {name} is required.",
+                )
+            continue
+
+        if name in values:
+            value = normalize_credential_value(values[name], name)
+        elif name in config:
+            value = config[name]
+        else:
+            value = normalize_credential_value(field.get("default_value"), name)
+        if field.get("required", True) and not value:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"Model credential {name} is required.",
+            )
+        if value:
+            config[name] = value
+        else:
+            config.pop(name, None)
+
+    access_key = secrets.get("aws_access_key_id")
+    secret_key = secrets.get("aws_secret_access_key")
+    if bool(access_key) != bool(secret_key):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "AWS access key ID and secret access key must be provided together.",
+        )
+    if secrets.get("aws_session_token") and not access_key:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "AWS session token requires access key credentials.",
+        )
+    return config, secrets, hints, changed_secrets
+
+
+def legacy_connection_value(config: dict[str, str]) -> str:
+    return next(
+        (
+            config[field]
+            for field in ("api_base", "azure_endpoint", "endpoint_url", "region_name")
+            if config.get(field)
+        ),
+        "",
+    )
+
+
+def primary_secret_hint(hints: dict[str, str]) -> str | None:
+    for field in ("api_key", "aws_access_key_id", "aws_secret_access_key"):
+        if hints.get(field):
+            return hints[field]
+    return next(iter(hints.values()), None)
+
+
+def apply_model_credentials(
+    model: RegisteredModel,
+    config: dict[str, str],
+    secrets: dict[str, str],
+    hints: dict[str, str],
+    settings: Settings,
+    *,
+    rewrite_secrets: bool,
+) -> None:
+    model.credential_config = config
+    model.credential_secret_hints = hints
+    model.api_base = legacy_connection_value(config)
+    model.api_key_hint = primary_secret_hint(hints)
+    if rewrite_secrets:
+        model.api_key_ciphertext = encrypt_credential_secrets(
+            secrets,
+            settings.model_secret_key,
+        )
+        model.api_key_updated_at = utc_now()
+
+
+def run_model_test(
+    provider_type: str,
+    credentials: dict[str, str],
     model_name: str,
     model_type: str,
 ) -> None:
     try:
-        OpenAICompatibleModelProvider(api_base, api_key, model_name).test(model_type)
+        test_model_connection(
+            provider_type,
+            credentials,
+            model_name,
+            model_type,
+        )
     except ModelProviderStatusError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -122,34 +316,33 @@ def run_openai_compatible_model_test(
         ) from exc
     except ModelProviderError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Model test request failed.") from exc
+    except Exception as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Model test request failed.") from exc
 
 
 async def test_registered_model(
     provider_type: str,
-    api_base: str,
-    api_key: str,
+    credentials: dict[str, str],
     model_name: str,
     model_type: str,
 ) -> None:
-    if provider_type != "openai_compatible":
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "Model test is only supported for OpenAI-compatible providers.",
-        )
     await asyncio.to_thread(
-        run_openai_compatible_model_test,
-        api_base,
-        api_key,
+        run_model_test,
+        provider_type,
+        credentials,
         model_name,
         model_type,
     )
 
 
 def model_to_response(model: RegisteredModel) -> RegisteredModelResponse:
-    credential = {
-        "api_base": model.api_base,
-        "api_key": model.api_key_hint or "",
-    }
+    config = model.credential_config or legacy_credential_config(
+        model.provider_type,
+        model.api_base,
+    )
+    hints = model.credential_secret_hints or (
+        {"api_key": model.api_key_hint} if model.api_key_hint else {}
+    )
     return RegisteredModelResponse(
         id=model.id,
         workspace_id=model.workspace_id,
@@ -159,7 +352,7 @@ def model_to_response(model: RegisteredModel) -> RegisteredModelResponse:
         model_type=model.model_type,
         model_name=model.model_name,
         status=model.status,
-        credential=credential,
+        credential={**config, **hints},
         api_base=model.api_base,
         has_api_key=model.api_key_ciphertext is not None,
         api_key_hint=model.api_key_hint,
@@ -205,22 +398,7 @@ def list_base_models(provider: str, model_type: str) -> list[BaseModelOptionResp
 
 def get_model_credential_form(provider: str) -> list[ModelCredentialFieldResponse]:
     entry = provider_catalog_entry(provider)
-    return [
-        ModelCredentialFieldResponse(
-            field="api_base",
-            label="API URL",
-            input_type="TextInput",
-            required=True,
-            default_value=entry["default_api_base"],
-        ),
-        ModelCredentialFieldResponse(
-            field="api_key",
-            label="API Key",
-            input_type="PasswordInput",
-            required=True,
-            default_value="",
-        ),
-    ]
+    return [ModelCredentialFieldResponse(**field) for field in credential_fields(entry)]
 
 
 async def list_registered_models(db: AsyncSession, workspace_id: str) -> list[RegisteredModelResponse]:
@@ -266,27 +444,44 @@ async def create_registered_model(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid provider type for provider.")
     model_type = normalize_model_type(payload.model_type)
     validate_provider_support(entry, model_type)
-    api_base = normalize_api_base(payload.credential.get("api_base") or payload.credential.get("base_url"))
-    api_key = normalize_api_key(payload.credential.get("api_key"))
-    if api_key is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "API Key is required.")
+    config, secrets, hints, _ = normalize_provider_credentials(
+        entry,
+        payload.credential,
+    )
 
     model_name = payload.model_name.strip()
-    await test_registered_model(provider_type, api_base, api_key, model_name, model_type)
+    if not model_name:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Model name is required.",
+        )
+    await test_registered_model(
+        provider_type,
+        {**config, **secrets},
+        model_name,
+        model_type,
+    )
 
     model = RegisteredModel(
         workspace_id=workspace_id,
         name=name,
         provider=payload.provider,
         provider_type=provider_type,
-        api_base=api_base,
+        api_base="",
         model_type=model_type,
         model_name=model_name,
         status=ACTIVE_STATUS,
         meta=payload.meta,
         created_by_user_id=actor.id,
     )
-    set_model_api_key(model, api_key, settings)
+    apply_model_credentials(
+        model,
+        config,
+        secrets,
+        hints,
+        settings,
+        rewrite_secrets=True,
+    )
     db.add(model)
 
     try:
@@ -335,44 +530,59 @@ async def update_registered_model(
     model_type = normalize_model_type(payload.model_type) if payload.model_type is not None else model.model_type
     validate_provider_support(entry, model_type)
     model_name = payload.model_name.strip() if payload.model_name is not None else model.model_name
+    if not model_name:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Model name is required.",
+        )
 
-    credential = payload.credential or {}
-    api_base = model.api_base
-    if "api_base" in credential or "base_url" in credential:
-        api_base = normalize_api_base(credential.get("api_base") or credential.get("base_url"))
-
-    current_api_key = (
-        decrypt_secret(model.api_key_ciphertext, settings.model_secret_key)
-        if model.api_key_ciphertext is not None
-        else None
+    provider_changed = provider != model.provider or provider_type != model.provider_type
+    if provider_changed:
+        current_config: dict[str, str] = {}
+        current_secrets: dict[str, str] = {}
+        current_hints: dict[str, str] = {}
+    else:
+        current_config, current_secrets, current_hints = stored_model_credentials(
+            model,
+            settings,
+        )
+    config, secrets, hints, changed_secrets = normalize_provider_credentials(
+        entry,
+        payload.credential or {},
+        current_config=current_config,
+        current_secrets=current_secrets,
+        current_hints=current_hints,
     )
-    api_key = current_api_key
-    api_key_updated = False
-    if "api_key" in credential:
-        candidate_api_key = normalize_api_key(credential.get("api_key"))
-        if candidate_api_key and not is_masked_secret(candidate_api_key, model.api_key_hint):
-            api_key = candidate_api_key
-            api_key_updated = True
-    if api_key is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "API Key is required.")
-
-    await test_registered_model(provider_type, api_base, api_key, model_name, model_type)
+    await test_registered_model(
+        provider_type,
+        {**config, **secrets},
+        model_name,
+        model_type,
+    )
 
     model.name = name
     model.provider = provider
     model.provider_type = provider_type
-    model.api_base = api_base
     model.model_type = model_type
     model.model_name = model_name
     if payload.status is not None:
         model.status = validate_status(payload.status)
     if payload.meta is not None:
         model.meta = payload.meta
-    if api_key_updated:
-        set_model_api_key(model, api_key, settings)
+    apply_model_credentials(
+        model,
+        config,
+        secrets,
+        hints,
+        settings,
+        rewrite_secrets=provider_changed or bool(changed_secrets),
+    )
 
     if "credential" in details:
-        details["credential"] = {"api_base": api_base, "api_key_updated": api_key_updated}
+        details["credential"] = {
+            "config_fields": sorted(config),
+            "secret_fields_updated": sorted(changed_secrets),
+        }
 
     record_audit_log(
         db,

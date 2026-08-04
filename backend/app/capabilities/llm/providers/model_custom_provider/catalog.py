@@ -4,6 +4,7 @@ CATALOG = {
     "provider_type": "openai_compatible",
     "icon": "",
     "default_api_base": "",
+    "api_key_required": False,
     "model_types": [
         "LLM",
         "EMBEDDING",

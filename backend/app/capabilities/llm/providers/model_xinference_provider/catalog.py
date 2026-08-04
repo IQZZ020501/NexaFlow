@@ -4,6 +4,7 @@ CATALOG = {
     "provider_type": "openai_compatible",
     "icon": "/model-providers/model_xinference_provider/icon.svg",
     "default_api_base": "http://localhost:9997/v1",
+    "api_key_required": False,
     "model_types": [
         "LLM",
         "EMBEDDING",

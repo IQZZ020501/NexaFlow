@@ -1,9 +1,46 @@
 CATALOG = {
     "provider": "model_aws_bedrock_provider",
     "name": "Amazon Bedrock",
-    "provider_type": "openai_compatible",
+    "provider_type": "bedrock",
     "icon": "/model-providers/model_aws_bedrock_provider/icon.svg",
     "default_api_base": "",
+    "credential_fields": [
+        {
+            "field": "region_name",
+            "label": "AWS Region",
+            "input_type": "TextInput",
+            "required": True,
+            "default_value": "us-east-1",
+        },
+        {
+            "field": "endpoint_url",
+            "label": "Endpoint URL",
+            "input_type": "TextInput",
+            "required": False,
+            "default_value": "",
+        },
+        {
+            "field": "aws_access_key_id",
+            "label": "AWS Access Key ID",
+            "input_type": "PasswordInput",
+            "required": False,
+            "default_value": "",
+        },
+        {
+            "field": "aws_secret_access_key",
+            "label": "AWS Secret Access Key",
+            "input_type": "PasswordInput",
+            "required": False,
+            "default_value": "",
+        },
+        {
+            "field": "aws_session_token",
+            "label": "AWS Session Token",
+            "input_type": "PasswordInput",
+            "required": False,
+            "default_value": "",
+        },
+    ],
     "model_types": [
         "LLM",
         "EMBEDDING",

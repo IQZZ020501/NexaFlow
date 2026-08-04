@@ -16,7 +16,7 @@ from app.domain.user import User
 from app.application.identity import user_to_response
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
-from app.capabilities.embedding.pipeline import delete_chroma_collection
+from app.capabilities.rag.vector_store import delete_vector_collection
 from app.schemas.knowledge import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
@@ -31,7 +31,8 @@ from app.capabilities.llm.models import RegisteredModel
 from app.capabilities.llm.runtime import (
     ModelProviderError,
     ModelProviderStatusError,
-    build_registered_model_provider,
+    build_registered_embeddings,
+    build_registered_reranker,
 )
 from app.domain.resource_permission import ResourcePermission
 
@@ -463,12 +464,13 @@ def run_knowledge_model_test(
     settings: Settings,
 ) -> KnowledgeModelTestResponse:
     try:
-        embedding = build_registered_model_provider(embedding_model, settings).embed(
-            [payload.query]
-        )
+        embedding = build_registered_embeddings(
+            embedding_model,
+            settings,
+        ).embed_query(payload.query)
         reranker_results = []
         if reranker_model is not None:
-            reranker_results = build_registered_model_provider(
+            reranker_results = build_registered_reranker(
                 reranker_model,
                 settings,
             ).rerank(payload.query, payload.documents)
@@ -485,7 +487,7 @@ def run_knowledge_model_test(
 
     return KnowledgeModelTestResponse(
         embedding_model_id=embedding_model.id,
-        embedding_dimensions=len(embedding[0]) if embedding else 0,
+        embedding_dimensions=len(embedding),
         reranker_model_id=reranker_model.id if reranker_model else None,
         reranker_results=len(reranker_results),
     )
@@ -553,7 +555,7 @@ async def delete_knowledge_base_permanently(
         RESOURCE_TYPE,
     )
     await db.commit()
-    await asyncio.to_thread(delete_chroma_collection, settings, knowledge_base.id)
+    await asyncio.to_thread(delete_vector_collection, settings, knowledge_base.id)
     shutil.rmtree(storage_dir, ignore_errors=True)
 
 

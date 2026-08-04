@@ -1,11 +1,8 @@
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from markitdown import MarkItDown, StreamInfo
 
-from app.infrastructure.config import Settings
-from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
+from app.shareddomain.knowledge.models import KnowledgeDocument
 
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150
@@ -38,21 +35,6 @@ def has_printable_text(text: str) -> bool:
 
 class KnowledgePipelineError(Exception):
     pass
-
-
-@dataclass(frozen=True)
-class VectorChunk:
-    id: str
-    document_id: str
-    document_filename: str
-    chunk_index: int
-    content: str
-
-
-@dataclass(frozen=True)
-class VectorHit:
-    chunk_id: str
-    distance: float | None
 
 
 def extract_text(document: KnowledgeDocument, path: Path) -> str:
@@ -124,80 +106,3 @@ def split_text(
 
 def chunk_token_count(content: str) -> int:
     return max(1, len(content.split()))
-
-
-def chroma_collection_name(knowledge_base_id: str) -> str:
-    return f"kb_{knowledge_base_id.replace('-', '')}"
-
-
-def chroma_client(settings: Settings):
-    import chromadb
-
-    settings.chroma_persist_dir.mkdir(parents=True, exist_ok=True)
-    return chromadb.PersistentClient(path=str(settings.chroma_persist_dir))
-
-
-def get_chroma_collection(settings: Settings, knowledge_base_id: str):
-    return chroma_client(settings).get_or_create_collection(chroma_collection_name(knowledge_base_id))
-
-
-def delete_chroma_collection(settings: Settings, knowledge_base_id: str) -> None:
-    client = chroma_client(settings)
-    try:
-        client.delete_collection(chroma_collection_name(knowledge_base_id))
-    except Exception as exc:
-        if "does not exist" not in str(exc).lower() and "not found" not in str(exc).lower():
-            raise
-
-
-def delete_chroma_vectors(settings: Settings, knowledge_base_id: str, vector_ids: list[str]) -> None:
-    if not vector_ids:
-        return
-    get_chroma_collection(settings, knowledge_base_id).delete(ids=vector_ids)
-
-
-def upsert_chroma_vectors(
-    settings: Settings,
-    knowledge_base: KnowledgeBase,
-    chunks: list[VectorChunk],
-    embeddings: list[list[float]],
-) -> None:
-    if len(chunks) != len(embeddings):
-        raise KnowledgePipelineError("Embedding response count did not match chunk count.")
-
-    collection = get_chroma_collection(settings, knowledge_base.id)
-    collection.upsert(
-        ids=[chunk.id for chunk in chunks],
-        embeddings=embeddings,
-        documents=[chunk.content for chunk in chunks],
-        metadatas=[
-            {
-                "workspace_id": knowledge_base.workspace_id,
-                "knowledge_base_id": knowledge_base.id,
-                "document_id": chunk.document_id,
-                "document_filename": chunk.document_filename,
-                "chunk_index": chunk.chunk_index,
-            }
-            for chunk in chunks
-        ],
-    )
-
-
-def query_chroma_vectors(
-    settings: Settings,
-    knowledge_base_id: str,
-    embedding: list[float],
-    limit: int,
-) -> list[VectorHit]:
-    collection = get_chroma_collection(settings, knowledge_base_id)
-    collection_count = collection.count()
-    if collection_count == 0:
-        return []
-
-    result: dict[str, Any] = collection.query(query_embeddings=[embedding], n_results=min(limit, collection_count))
-    ids = (result.get("ids") or [[]])[0]
-    distances = (result.get("distances") or [[]])[0]
-    return [
-        VectorHit(chunk_id=chunk_id, distance=distances[index] if index < len(distances) else None)
-        for index, chunk_id in enumerate(ids)
-    ]

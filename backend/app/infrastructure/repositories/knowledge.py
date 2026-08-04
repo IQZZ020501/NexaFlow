@@ -1,6 +1,7 @@
 from datetime import datetime
+from pathlib import Path
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.model_utils import new_id, utc_now
@@ -23,6 +24,15 @@ VISIBLE_DOCUMENT_STATUSES = (
     "indexing",
     "indexed",
     "index_failed",
+)
+
+_QUERY_KEYWORD_CHUNK_IDS = text(
+    (
+        Path(__file__).parents[1]
+        / "sql"
+        / "knowledge"
+        / "query_keyword_chunk_ids.sql"
+    ).read_text(encoding="utf-8")
 )
 
 
@@ -163,6 +173,45 @@ async def list_chunks_by_ids(
         )
     )
     return list(result)
+
+
+async def list_active_documents_by_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_ids: set[str],
+) -> list[KnowledgeDocument]:
+    if not document_ids:
+        return []
+    result = await db.scalars(
+        select(KnowledgeDocument).where(
+            KnowledgeDocument.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocument.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocument.id.in_(document_ids),
+            KnowledgeDocument.status != "deleted",
+            KnowledgeDocument.is_active.is_(True),
+        )
+    )
+    return list(result)
+
+
+async def query_keyword_chunk_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    query: str,
+    candidate_limit: int,
+) -> list[str]:
+    if db.get_bind().dialect.name != "postgresql":
+        return []
+    result = await db.execute(
+        _QUERY_KEYWORD_CHUNK_IDS,
+        {
+            "workspace_id": knowledge_base.workspace_id,
+            "knowledge_base_id": knowledge_base.id,
+            "query": query,
+            "candidate_limit": candidate_limit,
+        },
+    )
+    return list(result.scalars())
 
 
 async def delete_document_chunks(db: AsyncSession, document_id: str) -> None:

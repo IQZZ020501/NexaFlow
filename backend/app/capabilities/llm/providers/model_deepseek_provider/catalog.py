@@ -1,7 +1,7 @@
 CATALOG = {
     "provider": "model_deepseek_provider",
     "name": "DeepSeek",
-    "provider_type": "openai_compatible",
+    "provider_type": "deepseek",
     "icon": "/model-providers/model_deepseek_provider/icon.svg",
     "default_api_base": "https://api.deepseek.com",
     "model_types": [

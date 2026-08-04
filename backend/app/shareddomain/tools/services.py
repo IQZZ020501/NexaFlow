@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-from typing import Any
 
 from fastapi import HTTPException, status
+from mcp.types import Tool as McpTool
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,9 +23,7 @@ from app.shareddomain.tools.models import McpServer
 @dataclass(frozen=True)
 class ResolvedMcpTool:
     server: McpServer
-    name: str
-    description: str
-    input_schema: dict[str, Any]
+    definition: McpTool
 
 
 def mcp_server_to_response(server: McpServer) -> McpServerResponse:
@@ -218,9 +216,11 @@ async def resolve_mcp_tools(
         resolved.append(
             ResolvedMcpTool(
                 server=server,
-                name=tool_name,
-                description=str(tool.get("description") or ""),
-                input_schema=tool.get("input_schema") or {"type": "object"},
+                definition=McpTool(
+                    name=tool_name,
+                    description=str(tool.get("description") or ""),
+                    input_schema=tool.get("input_schema") or {"type": "object"},
+                ),
             )
         )
     return resolved

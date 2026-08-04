@@ -1,13 +1,21 @@
 CATALOG = {
     "provider": "model_ollama_provider",
     "name": "Ollama",
-    "provider_type": "openai_compatible",
+    "provider_type": "ollama",
     "icon": "/model-providers/model_ollama_provider/icon.svg",
-    "default_api_base": "http://localhost:11434/v1",
+    "default_api_base": "http://localhost:11434",
+    "credential_fields": [
+        {
+            "field": "api_base",
+            "label": "API URL",
+            "input_type": "TextInput",
+            "required": True,
+            "default_value": "http://localhost:11434",
+        },
+    ],
     "model_types": [
         "LLM",
-        "EMBEDDING",
-        "RERANKER"
+        "EMBEDDING"
     ],
     "models": {
         "LLM": [
@@ -32,13 +40,6 @@ CATALOG = {
                 "name": "nomic-embed-text",
                 "desc": "Local Ollama embedding model",
                 "model_type": "EMBEDDING"
-            }
-        ],
-        "RERANKER": [
-            {
-                "name": "linux6200/bge-reranker-v2-m3",
-                "desc": "Local Ollama reranker model",
-                "model_type": "RERANKER"
             }
         ]
     }

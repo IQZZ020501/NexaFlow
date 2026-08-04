@@ -41,6 +41,7 @@ import { Spec } from "@/components/ui/spec"
 import {
   createRegisteredModel,
   deleteRegisteredModel,
+  getModelProviderForm,
   listModelProviderBaseModels,
   listModelProviderCatalog,
   listRegisteredModels,
@@ -48,6 +49,7 @@ import {
 } from "@/lib/api/llm"
 import type {
   BaseModelOption,
+  ModelCredentialField,
   ModelProviderCatalog,
   RegisteredModel,
 } from "@/lib/api/llm"
@@ -57,6 +59,18 @@ const MODEL_TYPE_LABELS: Record<string, TranslationKey> = {
   LLM: "大语言模型",
   EMBEDDING: "向量模型",
   RERANKER: "重排模型",
+}
+
+const CREDENTIAL_FIELD_LABELS: Record<string, TranslationKey> = {
+  api_base: "API URL",
+  api_key: "API Key",
+  api_version: "API Version",
+  azure_endpoint: "API URL",
+  region_name: "AWS Region",
+  endpoint_url: "Endpoint URL",
+  aws_access_key_id: "AWS Access Key ID",
+  aws_secret_access_key: "AWS Secret Access Key",
+  aws_session_token: "AWS Session Token",
 }
 
 const PROVIDER_DISPLAY_ORDER = [
@@ -91,9 +105,8 @@ type ModelForm = {
   provider_type: string
   model_type: string
   model_name: string
-  api_base: string
-  api_key: string
-  api_key_hint: string
+  credential: Record<string, string>
+  credential_hints: Record<string, string>
   status: string
 }
 
@@ -104,9 +117,8 @@ const EMPTY_MODEL_FORM: ModelForm = {
   provider_type: "openai_compatible",
   model_type: "LLM",
   model_name: "",
-  api_base: "",
-  api_key: "",
-  api_key_hint: "",
+  credential: {},
+  credential_hints: {},
   status: "active",
 }
 
@@ -119,15 +131,21 @@ export function LlmPage() {
   >([])
   const [models, setModels] = React.useState<RegisteredModel[]>([])
   const [baseModels, setBaseModels] = React.useState<BaseModelOption[]>([])
+  const [credentialFields, setCredentialFields] = React.useState<
+    ModelCredentialField[]
+  >([])
   const [selectedProvider, setSelectedProvider] = React.useState("")
   const [search, setSearch] = React.useState("")
   const [modelForm, setModelForm] = React.useState<ModelForm>(EMPTY_MODEL_FORM)
   const [isCatalogLoading, setIsCatalogLoading] = React.useState(false)
   const [isModelsLoading, setIsModelsLoading] = React.useState(false)
   const [isBaseModelsLoading, setIsBaseModelsLoading] = React.useState(false)
+  const [isCredentialFieldsLoading, setIsCredentialFieldsLoading] =
+    React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [isProviderPickerOpen, setIsProviderPickerOpen] = React.useState(false)
+  const credentialRequestId = React.useRef(0)
 
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
   const canManage = workspaceRole === "admin"
@@ -218,6 +236,65 @@ export function LlmPage() {
     [reportError, token]
   )
 
+  const loadCredentialFields = React.useCallback(
+    async (
+      provider: string,
+      sourceCredential: Record<string, unknown> = {}
+    ) => {
+      const requestId = ++credentialRequestId.current
+      if (!provider || !token) {
+        setCredentialFields([])
+        return
+      }
+
+      setIsCredentialFieldsLoading(true)
+      try {
+        const fields = await getModelProviderForm(token, provider)
+        if (requestId !== credentialRequestId.current) {
+          return
+        }
+        setCredentialFields(fields)
+        setModelForm((current) => {
+          if (current.provider !== provider) {
+            return current
+          }
+          const credential: Record<string, string> = {}
+          const credentialHints: Record<string, string> = {}
+          for (const field of fields) {
+            const sourceValue = sourceCredential[field.field]
+            if (field.input_type === "PasswordInput") {
+              credential[field.field] = ""
+              if (typeof sourceValue === "string" && sourceValue) {
+                credentialHints[field.field] = sourceValue
+              }
+            } else {
+              credential[field.field] =
+                typeof sourceValue === "string"
+                  ? sourceValue
+                  : String(field.default_value ?? "")
+            }
+          }
+          return {
+            ...current,
+            credential,
+            credential_hints: credentialHints,
+          }
+        })
+      } catch (error) {
+        if (requestId !== credentialRequestId.current) {
+          return
+        }
+        setCredentialFields([])
+        reportError(error)
+      } finally {
+        if (requestId === credentialRequestId.current) {
+          setIsCredentialFieldsLoading(false)
+        }
+      }
+    },
+    [reportError, token]
+  )
+
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadProviderCatalog()
@@ -265,7 +342,6 @@ export function LlmPage() {
       provider: provider.provider,
       provider_type: provider.provider_type,
       model_type: provider.model_types[0] ?? "LLM",
-      api_base: provider.default_api_base,
     }
   }
 
@@ -297,9 +373,11 @@ export function LlmPage() {
     const nextForm = formForProvider(provider)
     setModelForm(nextForm)
     setBaseModels([])
+    setCredentialFields([])
     setIsProviderPickerOpen(false)
     setIsDialogOpen(true)
     void selectFirstBaseModel(nextForm.provider, nextForm.model_type)
+    void loadCredentialFields(nextForm.provider)
   }
 
   function openEditModel(model: RegisteredModel) {
@@ -310,14 +388,15 @@ export function LlmPage() {
       provider_type: model.provider_type,
       model_type: model.model_type,
       model_name: model.model_name,
-      api_base: String(model.credential.api_base ?? model.api_base),
-      api_key: "",
-      api_key_hint: model.api_key_hint ?? "",
+      credential: {},
+      credential_hints: {},
       status: model.status,
     })
+    setCredentialFields([])
     setIsProviderPickerOpen(false)
     setIsDialogOpen(true)
     void loadBaseModels(model.provider, model.model_type)
+    void loadCredentialFields(model.provider, model.credential)
   }
 
   function selectProvider(providerCode: string) {
@@ -332,9 +411,12 @@ export function LlmPage() {
       provider_type: provider?.provider_type ?? "openai_compatible",
       model_type: modelType,
       model_name: "",
-      api_base: provider?.default_api_base ?? current.api_base,
+      credential: {},
+      credential_hints: {},
     }))
+    setCredentialFields([])
     void selectFirstBaseModel(providerCode, modelType)
+    void loadCredentialFields(providerCode)
   }
 
   function selectModelType(modelType: string) {
@@ -354,16 +436,21 @@ export function LlmPage() {
       return
     }
 
+    const credential = Object.fromEntries(
+      credentialFields.flatMap((field) => {
+        const value = modelForm.credential[field.field] ?? ""
+        return field.input_type === "PasswordInput" && !value.trim()
+          ? []
+          : [[field.field, value]]
+      })
+    )
     const payload = {
       name: modelForm.name,
       provider: modelForm.provider,
       provider_type: modelForm.provider_type,
       model_type: modelForm.model_type,
       model_name: modelForm.model_name,
-      credential: {
-        api_base: modelForm.api_base,
-        ...(modelForm.api_key.trim() ? { api_key: modelForm.api_key } : {}),
-      },
+      credential,
       status: modelForm.status,
       meta: {},
     }
@@ -394,6 +481,7 @@ export function LlmPage() {
       setIsProviderPickerOpen(false)
       setModelForm(EMPTY_MODEL_FORM)
       setBaseModels([])
+      setCredentialFields([])
     } catch (error) {
       reportError(error)
     } finally {
@@ -566,10 +654,20 @@ export function LlmPage() {
                       </div>
 
                       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                        <Spec label="API URL" value={model.api_base} />
                         <Spec
-                          label="API Key"
-                          value={model.api_key_hint ?? t("未配置")}
+                          label={t("连接地址或区域")}
+                          value={model.api_base || t("默认连接")}
+                        />
+                        <Spec
+                          label={t("访问凭据")}
+                          value={
+                            model.api_key_hint ??
+                            t(
+                              model.provider_type === "bedrock"
+                                ? "环境凭据"
+                                : "无需密钥"
+                            )
+                          }
                         />
                       </dl>
                     </div>
@@ -607,9 +705,11 @@ export function LlmPage() {
         form={modelForm}
         providerCatalog={providerCatalog}
         baseModels={baseModels}
+        credentialFields={credentialFields}
         open={isDialogOpen}
         isSaving={isSaving}
         isBaseModelsLoading={isBaseModelsLoading}
+        isCredentialFieldsLoading={isCredentialFieldsLoading}
         onOpenChange={setIsDialogOpen}
         onFormChange={setModelForm}
         onProviderChange={selectProvider}
@@ -717,9 +817,11 @@ function ModelDialog({
   form,
   providerCatalog,
   baseModels,
+  credentialFields,
   open,
   isSaving,
   isBaseModelsLoading,
+  isCredentialFieldsLoading,
   onOpenChange,
   onFormChange,
   onProviderChange,
@@ -729,9 +831,11 @@ function ModelDialog({
   form: ModelForm
   providerCatalog: ModelProviderCatalog[]
   baseModels: BaseModelOption[]
+  credentialFields: ModelCredentialField[]
   open: boolean
   isSaving: boolean
   isBaseModelsLoading: boolean
+  isCredentialFieldsLoading: boolean
   onOpenChange: (open: boolean) => void
   onFormChange: (form: ModelForm) => void
   onProviderChange: (provider: string) => void
@@ -752,7 +856,7 @@ function ModelDialog({
         <DialogHeader>
           <DialogTitle>{t(isEditing ? "编辑模型" : "接入模型")}</DialogTitle>
           <DialogDescription>
-            {t("选择供应商和基础模型，填写 API URL 与 API Key；保存前会测试模型调用。")}
+            {t("选择供应商和基础模型，填写连接参数；保存前会测试模型调用。")}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit}>
@@ -879,37 +983,55 @@ function ModelDialog({
               </FieldDescription>
             </Field>
 
-            <Field>
-              <FieldLabel htmlFor="api-base">API URL</FieldLabel>
-              <Input
-                id="api-base"
-                value={form.api_base}
-                onChange={(event) =>
-                  onFormChange({ ...form, api_base: event.target.value })
-                }
-                placeholder="https://api.deepseek.com"
-                required
-              />
-            </Field>
-
-            <Field>
-              <FieldLabel htmlFor="api-key">API Key</FieldLabel>
-              <Input
-                id="api-key"
-                type="password"
-                value={form.api_key}
-                onChange={(event) =>
-                  onFormChange({ ...form, api_key: event.target.value })
-                }
-                placeholder={isEditing ? t("留空则保留当前 API Key") : "sk-..."}
-                required={!isEditing}
-              />
-              <FieldDescription>
-                {isEditing && form.api_key_hint
-                  ? t("当前密钥：{value}", { value: form.api_key_hint })
-                  : t("保存后只显示脱敏尾号，不会返回明文。")}
-              </FieldDescription>
-            </Field>
+            {isCredentialFieldsLoading ? (
+              <div className="flex h-20 items-center justify-center">
+                <LoaderCircleIcon
+                  className="size-4 animate-spin text-muted-foreground"
+                  aria-label={t("正在加载连接配置...")}
+                />
+              </div>
+            ) : (
+              credentialFields.map((field) => {
+                const isSecret = field.input_type === "PasswordInput"
+                const hint = form.credential_hints[field.field]
+                const labelKey =
+                  CREDENTIAL_FIELD_LABELS[field.field] ?? "访问凭据"
+                return (
+                  <Field key={field.field}>
+                    <FieldLabel htmlFor={`credential-${field.field}`}>
+                      {t(labelKey)}
+                    </FieldLabel>
+                    <Input
+                      id={`credential-${field.field}`}
+                      type={isSecret ? "password" : "text"}
+                      value={form.credential[field.field] ?? ""}
+                      onChange={(event) =>
+                        onFormChange({
+                          ...form,
+                          credential: {
+                            ...form.credential,
+                            [field.field]: event.target.value,
+                          },
+                        })
+                      }
+                      placeholder={
+                        isSecret && isEditing && hint
+                          ? t("留空则保留当前凭据")
+                          : String(field.default_value ?? "")
+                      }
+                      required={field.required && !(isSecret && Boolean(hint))}
+                    />
+                    {isSecret ? (
+                      <FieldDescription>
+                        {isEditing && hint
+                          ? t("当前凭据：{value}", { value: hint })
+                          : t("保存后只显示脱敏尾号，不会返回明文。")}
+                      </FieldDescription>
+                    ) : null}
+                  </Field>
+                )
+              })
+            )}
 
             {isEditing ? (
               <Field>
