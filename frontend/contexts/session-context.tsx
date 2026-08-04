@@ -4,7 +4,12 @@ import * as React from "react"
 
 import { useLanguage } from "@/contexts/language-provider"
 import { ApiError } from "@/lib/api-client"
-import { getMe, type MeResponse } from "@/lib/api/auth"
+import {
+  getMe,
+  logout as endSession,
+  refreshAccessToken,
+  type MeResponse,
+} from "@/lib/api/auth"
 import {
   listTeams,
   listWorkspaces,
@@ -15,7 +20,10 @@ import {
 import { displayWorkspaceName, hasWorkspaceMembership } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import type { AppNotification } from "@/lib/notifications"
-import { TOKEN_KEY, WORKSPACE_KEY } from "@/lib/storage"
+import { LEGACY_TOKEN_KEY, WORKSPACE_KEY } from "@/lib/storage"
+
+const ACCESS_TOKEN_REFRESH_EARLY_SECONDS = 60
+const REFRESH_RETRY_MILLISECONDS = 60_000
 
 type SessionContextValue = {
   token: string | null
@@ -33,7 +41,7 @@ type SessionContextValue = {
   currentWorkspace: Workspace | null
   workspaceOptions: Workspace[]
   passwordDialogOpen: boolean
-  login: (token: string, mustChangePassword: boolean) => void
+  login: (token: string, mustChangePassword: boolean, expiresIn: number) => void
   logout: () => void
   notify: (kind: AppNotification["kind"], message: string) => void
   dismissNotification: () => void
@@ -73,25 +81,20 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [sessionError, setSessionError] = React.useState<string | null>(null)
   const [notification, setNotification] =
     React.useState<AppNotification | null>(null)
+  const [refreshAt, setRefreshAt] = React.useState<number | null>(null)
 
-  // Hydration-safe restore: localStorage is only readable on the client, so
-  // the initial render (server and client alike) starts signed out and the
-  // stored token is picked up after mount.
-  React.useEffect(() => {
-    const storedToken = localStorage.getItem(TOKEN_KEY)
-    if (storedToken) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setIsSessionLoading(true)
-      setToken(storedToken)
-    }
-    setIsSessionRestored(true)
-  }, [])
+  const notify = React.useCallback(
+    (kind: AppNotification["kind"], message: string) => {
+      setNotification({ id: Date.now(), kind, message })
+    },
+    []
+  )
 
-
-  const logout = React.useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY)
+  const clearSession = React.useCallback(() => {
+    localStorage.removeItem(LEGACY_TOKEN_KEY)
     localStorage.removeItem(WORKSPACE_KEY)
     setToken(null)
+    setRefreshAt(null)
     setMustChangePassword(false)
     setIsPasswordDialogOpen(false)
     setMe(null)
@@ -102,12 +105,76 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setSessionError(null)
   }, [])
 
-  const notify = React.useCallback(
-    (kind: AppNotification["kind"], message: string) => {
-      setNotification({ id: Date.now(), kind, message })
+  const applyAccessToken = React.useCallback(
+    (nextToken: string, nextMustChangePassword: boolean, expiresIn: number) => {
+      setSessionError(null)
+      setIsSessionLoading(true)
+      setToken(nextToken)
+      setMustChangePassword(nextMustChangePassword)
+      setRefreshAt(
+        Date.now() +
+          Math.max(expiresIn - ACCESS_TOKEN_REFRESH_EARLY_SECONDS, 1) * 1000
+      )
     },
     []
   )
+
+  const renewAccessToken = React.useCallback(async () => {
+    const payload = await refreshAccessToken()
+    applyAccessToken(
+      payload.access_token,
+      payload.must_change_password,
+      payload.expires_in
+    )
+  }, [applyAccessToken])
+
+  const logout = React.useCallback(() => {
+    void endSession().catch(() => undefined)
+    clearSession()
+  }, [clearSession])
+
+  React.useEffect(() => {
+    let isCurrent = true
+    let restoredToken = false
+    localStorage.removeItem(LEGACY_TOKEN_KEY)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsSessionLoading(true)
+
+    refreshAccessToken()
+      .then((payload) => {
+        if (!isCurrent) {
+          return
+        }
+        restoredToken = true
+        applyAccessToken(
+          payload.access_token,
+          payload.must_change_password,
+          payload.expires_in
+        )
+      })
+      .catch((error: unknown) => {
+        if (
+          isCurrent &&
+          !(error instanceof ApiError && error.status === 401)
+        ) {
+          const message = getErrorMessage(error, t)
+          setSessionError(message)
+          notify("error", message)
+        }
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setIsSessionRestored(true)
+          if (!restoredToken) {
+            setIsSessionLoading(false)
+          }
+        }
+      })
+
+    return () => {
+      isCurrent = false
+    }
+  }, [applyAccessToken, notify, t])
 
   const loadSession = React.useCallback(
     async (nextToken: string) => {
@@ -155,7 +222,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
-          logout()
+          try {
+            await renewAccessToken()
+          } catch {
+            clearSession()
+          }
           return
         }
 
@@ -166,7 +237,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setIsSessionLoading(false)
       }
     },
-    [logout, notify, t]
+    [clearSession, notify, renewAccessToken, t]
   )
 
   React.useEffect(() => {
@@ -177,6 +248,26 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadSession(token)
   }, [token, loadSession])
+
+  React.useEffect(() => {
+    if (!token || refreshAt === null) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      void renewAccessToken().catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 401) {
+          clearSession()
+          return
+        }
+
+        setRefreshAt(Date.now() + REFRESH_RETRY_MILLISECONDS)
+        notify("error", getErrorMessage(error, t))
+      })
+    }, Math.max(refreshAt - Date.now(), 0))
+
+    return () => window.clearTimeout(timer)
+  }, [clearSession, notify, refreshAt, renewAccessToken, t, token])
 
   React.useEffect(() => {
     if (!notification) {
@@ -229,12 +320,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     t,
   ])
 
-  function handleLogin(nextToken: string, nextMustChangePassword: boolean) {
-    localStorage.setItem(TOKEN_KEY, nextToken)
-    setSessionError(null)
-    setIsSessionLoading(true)
-    setToken(nextToken)
-    setMustChangePassword(nextMustChangePassword)
+  function handleLogin(
+    nextToken: string,
+    nextMustChangePassword: boolean,
+    expiresIn: number
+  ) {
+    applyAccessToken(nextToken, nextMustChangePassword, expiresIn)
   }
 
   function handleSelectWorkspace(workspaceId: string) {

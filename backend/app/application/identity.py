@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,7 +8,8 @@ from fastapi import HTTPException, status
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
 from app.infrastructure.validation import normalize_email, normalize_name, normalize_username
-from app.domain.user import User
+from app.domain.user import RefreshSession, User
+from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import user as user_repository
 from app.schemas.user import (
     MembershipResponse,
@@ -19,12 +22,44 @@ from app.schemas.user import (
     UserUpdateRequest,
     UserWorkspaceResponse,
 )
-from app.infrastructure.security import create_access_token, hash_password, verify_password
+from app.infrastructure.security import (
+    create_access_token,
+    create_refresh_token,
+    hash_password,
+    hash_refresh_token,
+    verify_password,
+)
 from app.infrastructure.system_log import record_system_log
 from app.domain.team import Team, TeamMembership
 from app.domain.workspace import Workspace, WorkspaceMembership
 
 DEFAULT_USER_PASSWORD = "NexaFlow@123"
+
+
+def access_token_response(user: User, settings: Settings) -> TokenResponse:
+    return TokenResponse(
+        access_token=create_access_token(user.id, settings),
+        expires_in=settings.jwt_expires_minutes * 60,
+        must_change_password=user.must_change_password,
+    )
+
+
+async def issue_refresh_session(
+    db: AsyncSession,
+    user: User,
+    settings: Settings,
+) -> str:
+    now = utc_now()
+    await user_repository.delete_expired_refresh_sessions(db, now)
+    token = create_refresh_token()
+    db.add(
+        RefreshSession(
+            user_id=user.id,
+            token_hash=hash_refresh_token(token),
+            expires_at=now + timedelta(days=settings.refresh_token_expires_days),
+        )
+    )
+    return token
 
 
 def user_to_response(
@@ -272,6 +307,7 @@ async def update_user(
             )
         if not payload.is_active:
             await ensure_user_is_not_last_active_workspace_admin(db, user)
+            await user_repository.delete_refresh_sessions_for_user(db, user.id)
         user.is_active = payload.is_active
 
     record_audit_log(db, actor, "user.update", "user", user.id, user.name, details)
@@ -297,6 +333,7 @@ async def change_user_password(
 ) -> UserResponse:
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
+    await user_repository.delete_refresh_sessions_for_user(db, user.id)
     record_audit_log(db, actor, "user.change_password", "user", user.id, user.name)
     await db.commit()
     await db.refresh(user)
@@ -329,7 +366,7 @@ async def authenticate_user(
     password: str,
     settings: Settings,
     ip_address: str | None = None,
-) -> TokenResponse:
+) -> tuple[TokenResponse, str]:
     username = normalize_username(username)
     user = await user_repository.get_active_user_by_username(db, username)
     if user is None or not verify_password(password, user.password_hash):
@@ -349,18 +386,43 @@ async def authenticate_user(
         await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials.")
 
-    return TokenResponse(
-        access_token=create_access_token(user.id, settings),
-        must_change_password=user.must_change_password,
+    refresh_token = await issue_refresh_session(db, user, settings)
+    await db.commit()
+    return access_token_response(user, settings), refresh_token
+
+
+async def refresh_access_token(
+    db: AsyncSession,
+    refresh_token: str,
+    settings: Settings,
+) -> TokenResponse:
+    session = await user_repository.get_active_refresh_session(
+        db,
+        hash_refresh_token(refresh_token),
+        utc_now(),
     )
+    if session is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token.")
+
+    user = await db.get(User, session.user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token.")
+    return access_token_response(user, settings)
+
+
+async def revoke_refresh_token(db: AsyncSession, refresh_token: str | None) -> None:
+    if refresh_token:
+        await user_repository.delete_refresh_session(db, hash_refresh_token(refresh_token))
+    await db.commit()
 
 
 async def change_password(
     db: AsyncSession,
     user: User,
     new_password: str,
+    settings: Settings,
     current_password: str | None = None,
-) -> None:
+) -> str:
     if not user.must_change_password and not (
         current_password and verify_password(current_password, user.password_hash)
     ):
@@ -370,7 +432,10 @@ async def change_password(
 
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
+    await user_repository.delete_refresh_sessions_for_user(db, user.id)
+    refresh_token = await issue_refresh_session(db, user, settings)
     await db.commit()
+    return refresh_token
 
 
 async def get_me(db: AsyncSession, user: User) -> MeResponse:

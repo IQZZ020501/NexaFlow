@@ -26,7 +26,7 @@ export function LoginScreen({
   onLogin,
   onNotify,
 }: {
-  onLogin: (token: string, mustChangePassword: boolean) => void
+  onLogin: (token: string, mustChangePassword: boolean, expiresIn: number) => void
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
   const { t } = useLanguage()
@@ -43,7 +43,11 @@ export function LoginScreen({
 
     try {
       const payload = await login(form.username, form.password)
-      onLogin(payload.access_token, payload.must_change_password)
+      onLogin(
+        payload.access_token,
+        payload.must_change_password,
+        payload.expires_in
+      )
     } catch (error) {
       onNotify("error", getErrorMessage(error, t))
     } finally {

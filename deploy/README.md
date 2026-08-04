@@ -34,7 +34,8 @@ All runtime configuration comes from `deploy/.env` (see `.env.example`).
 The compose file overrides `DATABASE_URL` and `CELERY_BROKER_URL` to point at
 the bundled services, and mounts the uploads volume for
 `KNOWLEDGE_STORAGE_DIR` / `CHROMA_PERSIST_DIR` — the API and worker must
-share both directories.
+share both directories. `JWT_EXPIRES_MINUTES` controls access token lifetime;
+`REFRESH_TOKEN_EXPIRES_DAYS` controls persisted refresh sessions.
 
 ## Split hosting with Nginx
 

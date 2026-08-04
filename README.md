@@ -134,7 +134,8 @@ frontend/
 Every user-facing string goes through `t()` from `@/i18n` (type-checked
 trilingual dictionaries). Feature API calls live in `lib/api/` and share
 `lib/api-client.ts`. Session state (token, workspaces, teams, notifications)
-lives in `contexts/session-context.tsx`.
+lives in `contexts/session-context.tsx`; access tokens stay in memory and an
+HTTP-only refresh cookie restores and renews the session.
 
 ## Runtime entry points
 
