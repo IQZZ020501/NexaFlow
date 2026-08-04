@@ -8,7 +8,7 @@ from app.infrastructure.config import Settings
 from app.domain.user import User
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
-from app.capabilities.embedding.pipeline import delete_chroma_vectors
+from app.capabilities.rag.vector_store import delete_vectors
 from app.shareddomain.knowledge.orchestration import DOCUMENT_DELETED_STATUS
 from app.shareddomain.knowledge.services import knowledge_document_path
 
@@ -50,7 +50,7 @@ async def delete_knowledge_document(
     )
     await db.commit()
     await asyncio.to_thread(
-        delete_chroma_vectors,
+        delete_vectors,
         settings,
         knowledge_base.id,
         vector_ids,

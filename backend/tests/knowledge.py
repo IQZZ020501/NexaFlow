@@ -4,6 +4,7 @@ from html import escape
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from langchain_core.documents import Document
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import select, text
@@ -19,7 +20,10 @@ from app.shareddomain.knowledge.models import (
 )
 from app.api.v1.endpoints import knowledge as knowledge_api
 from app.capabilities.rag import retrieval as knowledge_retrieval
-from app.capabilities.embedding.pipeline import VectorHit, clean_text, split_text
+from app.capabilities.rag import vector_store as knowledge_vector_store
+from app.capabilities.embedding.pipeline import clean_text, split_text
+from app.capabilities.rag.vector_store import VectorChunk, VectorHit
+from app.infrastructure.repositories import knowledge as knowledge_repository
 from app.shareddomain.knowledge.orchestration import (
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
@@ -294,21 +298,16 @@ async def replace_document_file_with_text(
 
 
 async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_id: str) -> None:
-    original_embed_query = knowledge_retrieval.embed_query
-    original_query_chroma_vectors = knowledge_retrieval.query_chroma_vectors
+    original_query_vectors = knowledge_retrieval.query_vectors
 
-    def fake_embed_query(*_args) -> list[float]:
-        return [1.0]
-
-    def fake_query_chroma_vectors(*_args) -> list[VectorHit]:
+    def fake_query_vectors(*_args) -> list[VectorHit]:
         assert _args[-1] == 5
         return [
             VectorHit(chunk_id="stale-chunk", distance=0.0),
             VectorHit(chunk_id=indexed_chunk_id, distance=0.1),
         ]
 
-    knowledge_retrieval.embed_query = fake_embed_query
-    knowledge_retrieval.query_chroma_vectors = fake_query_chroma_vectors
+    knowledge_retrieval.query_vectors = fake_query_vectors
     try:
         async with get_session_factory()() as db:
             knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
@@ -321,8 +320,150 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
             )
             assert [hit.chunk_id for hit in hits] == [indexed_chunk_id]
     finally:
-        knowledge_retrieval.embed_query = original_embed_query
-        knowledge_retrieval.query_chroma_vectors = original_query_chroma_vectors
+        knowledge_retrieval.query_vectors = original_query_vectors
+
+
+def assert_vector_store_mmr_and_metadata() -> None:
+    captured_documents: list[Document] = []
+
+    class FakeVectorStore:
+        def max_marginal_relevance_search(
+            self,
+            query: str,
+            *,
+            k: int,
+            fetch_k: int,
+        ) -> list[Document]:
+            assert (query, k, fetch_k) == ("exact term", 3, 6)
+            return [
+                Document(page_content="kept", metadata={"chunk_id": "chunk-1"}),
+                Document(page_content="ignored", metadata={}),
+            ]
+
+        def add_documents(self, documents: list[Document], *, ids: list[str]) -> None:
+            assert ids == ["chunk-1"]
+            captured_documents.extend(documents)
+
+    original_build_vector_store = knowledge_vector_store._build_vector_store
+    knowledge_vector_store._build_vector_store = lambda *_args: FakeVectorStore()
+    try:
+        assert knowledge_vector_store.query_vectors(
+            test_settings(),
+            "knowledge-1",
+            object(),
+            "exact term",
+            3,
+        ) == [VectorHit(chunk_id="chunk-1", distance=None)]
+        knowledge_vector_store.upsert_vectors(
+            test_settings(),
+            KnowledgeBase(id="knowledge-1", workspace_id="workspace-1"),
+            object(),
+            [
+                VectorChunk(
+                    id="chunk-1",
+                    document_id="document-1",
+                    document_filename="guide.txt",
+                    chunk_index=2,
+                    content="content",
+                    document_metadata={
+                        "security_level": "INTERNAL",
+                        "allow_download": False,
+                        "content_type": "text/plain",
+                        "nested": {"ignored": True},
+                        "chunk_id": "untrusted",
+                    },
+                )
+            ],
+        )
+    finally:
+        knowledge_vector_store._build_vector_store = original_build_vector_store
+
+    assert len(captured_documents) == 1
+    assert captured_documents[0].metadata == {
+        "security_level": "INTERNAL",
+        "allow_download": False,
+        "content_type": "text/plain",
+        "chunk_id": "chunk-1",
+        "workspace_id": "workspace-1",
+        "knowledge_base_id": "knowledge-1",
+        "document_id": "document-1",
+        "document_filename": "guide.txt",
+        "chunk_index": 2,
+    }
+    assert knowledge_retrieval.reciprocal_rank_fusion(
+        [
+            VectorHit(chunk_id="vector-only", distance=0.1),
+            VectorHit(chunk_id="shared", distance=0.2),
+        ],
+        ["shared", "keyword-only"],
+    ) == [
+        VectorHit(chunk_id="shared", distance=0.2),
+        VectorHit(chunk_id="vector-only", distance=0.1),
+        VectorHit(chunk_id="keyword-only", distance=None),
+    ]
+
+
+async def assert_query_aggregates_hybrid_hits(
+    knowledge_base_id: str,
+    product_document_id: str,
+    product_chunk_id: str,
+    configured_document_id: str,
+    configured_chunks: list[dict],
+) -> None:
+    original_query_vectors = knowledge_retrieval.query_vectors
+    original_query_keyword_chunk_ids = knowledge_repository.query_keyword_chunk_ids
+    configured_by_index = {
+        chunk["chunk_index"]: chunk for chunk in configured_chunks
+    }
+
+    def fake_query_vectors(*args) -> list[VectorHit]:
+        assert args[-2:] == ("exact term", 10)
+        return [
+            VectorHit(chunk_id=product_chunk_id, distance=0.05),
+            VectorHit(chunk_id="stale-chunk", distance=0.1),
+            VectorHit(chunk_id=configured_by_index[2]["id"], distance=0.15),
+            VectorHit(chunk_id=configured_by_index[0]["id"], distance=0.2),
+            VectorHit(chunk_id=configured_by_index[1]["id"], distance=0.25),
+        ]
+
+    async def fake_query_keyword_chunk_ids(
+        _db,
+        knowledge_base,
+        query: str,
+        candidate_limit: int,
+    ) -> list[str]:
+        assert knowledge_base.id == knowledge_base_id
+        assert (query, candidate_limit) == ("exact term", 10)
+        return [configured_by_index[0]["id"]]
+
+    knowledge_retrieval.query_vectors = fake_query_vectors
+    knowledge_repository.query_keyword_chunk_ids = fake_query_keyword_chunk_ids
+    try:
+        async with get_session_factory()() as db:
+            knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
+            assert knowledge_base is not None
+            hits = await knowledge_retrieval.query_knowledge_base(
+                db,
+                knowledge_base,
+                KnowledgeQueryRequest(query="exact term", limit=2),
+                test_settings(),
+            )
+    finally:
+        knowledge_retrieval.query_vectors = original_query_vectors
+        knowledge_repository.query_keyword_chunk_ids = original_query_keyword_chunk_ids
+
+    assert [hit.document_id for hit in hits] == [
+        configured_document_id,
+        product_document_id,
+    ]
+    assert hits[0].chunk_id == configured_by_index[0]["id"]
+    assert hits[0].chunk_index == 0
+    assert hits[0].distance == 0.2
+    assert hits[0].content == "\n\n".join(
+        configured_by_index[index]["content"] for index in range(3)
+    )
+    assert hits[1].chunk_id == product_chunk_id
+    assert hits[1].distance == 0.05
 
 
 async def assert_document_open_tasks_failed(
@@ -348,6 +489,7 @@ async def assert_document_open_tasks_failed(
 
 
 def main() -> None:
+    assert_vector_store_mmr_and_metadata()
     assert split_text("甲。乙。丙。丁。", chunk_size=4, overlap=0, separator="。") == [
         "甲。乙。",
         "丙。丁。",
@@ -412,6 +554,7 @@ def main() -> None:
                 **model_payload(model_base_url),
                 "name": "Knowledge Embedding",
                 "provider": "model_openai_provider",
+                "provider_type": "openai_compatible",
                 "model_type": "EMBEDDING",
                 "model_name": "text-embedding-3-small",
             },
@@ -426,6 +569,7 @@ def main() -> None:
                 **model_payload(model_base_url),
                 "name": "Knowledge Reranker",
                 "provider": "model_custom_provider",
+                "provider_type": "openai_compatible",
                 "model_type": "RERANKER",
                 "model_name": "custom-reranker",
             },
@@ -626,6 +770,15 @@ def main() -> None:
         )
         assert configured_indexed_chunks.status_code == 200, configured_indexed_chunks.text
         assert {chunk["status"] for chunk in configured_indexed_chunks.json()} == {"indexed"}
+        asyncio.run(
+            assert_query_aggregates_hybrid_hits(
+                knowledge_base_id,
+                document_id,
+                document_chunks.json()[0]["id"],
+                configured_document_id,
+                configured_indexed_chunks.json(),
+            )
+        )
         visible_documents_after_index = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
             headers=auth_headers(alice_token),

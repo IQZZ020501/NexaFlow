@@ -5,37 +5,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.config import Settings
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
-from app.capabilities.embedding.pipeline import (
-    KnowledgePipelineError,
-    query_chroma_vectors,
+from app.shareddomain.knowledge.models import (
+    KnowledgeBase,
+    KnowledgeDocumentChunk,
 )
-from app.shareddomain.knowledge.orchestration import (
-    CHUNK_INDEXED_STATUS,
-    DOCUMENT_DELETED_STATUS,
-    resolve_embedding_model,
-)
+from app.capabilities.rag.vector_store import VectorHit, query_vectors
+from app.shareddomain.knowledge.orchestration import resolve_embedding_model
 from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
     KnowledgeQueryRequest,
 )
-from app.capabilities.llm.models import RegisteredModel
-from app.capabilities.llm.runtime import build_registered_model_provider
 
 QUERY_OVERFETCH_FACTOR = 5
+RRF_K = 60
 
 
-def embed_query(
-    settings: Settings,
-    embedding_model: RegisteredModel,
-    query: str,
-) -> list[float]:
-    embeddings = build_registered_model_provider(embedding_model, settings).embed(
-        [query]
-    )
-    if not embeddings:
-        raise KnowledgePipelineError("Embedding provider returned no query embedding.")
-    return embeddings[0]
+def reciprocal_rank_fusion(
+    vector_hits: list[VectorHit],
+    keyword_chunk_ids: list[str],
+) -> list[VectorHit]:
+    scores: dict[str, float] = {}
+    first_seen: dict[str, int] = {}
+    rankings = ([hit.chunk_id for hit in vector_hits], keyword_chunk_ids)
+    for ranking in rankings:
+        for rank, chunk_id in enumerate(dict.fromkeys(ranking), start=1):
+            first_seen.setdefault(chunk_id, len(first_seen))
+            scores[chunk_id] = scores.get(chunk_id, 0) + 1 / (RRF_K + rank)
+
+    distances = {hit.chunk_id: hit.distance for hit in reversed(vector_hits)}
+    return [
+        VectorHit(chunk_id=chunk_id, distance=distances.get(chunk_id))
+        for chunk_id in sorted(
+            scores,
+            key=lambda chunk_id: (-scores[chunk_id], first_seen[chunk_id]),
+        )
+    ]
 
 
 async def query_knowledge_base(
@@ -51,55 +55,62 @@ async def query_knowledge_base(
             "Embedding model is required.",
         )
 
-    embedding = await asyncio.to_thread(
-        embed_query,
-        settings,
-        embedding_model,
-        payload.query,
+    candidate_limit = payload.limit * QUERY_OVERFETCH_FACTOR
+    vector_hits, keyword_chunk_ids = await asyncio.gather(
+        asyncio.to_thread(
+            query_vectors,
+            settings,
+            knowledge_base.id,
+            embedding_model,
+            payload.query,
+            candidate_limit,
+        ),
+        knowledge_base_repository.query_keyword_chunk_ids(
+            db,
+            knowledge_base,
+            payload.query,
+            candidate_limit,
+        ),
     )
-    vector_hits = await asyncio.to_thread(
-        query_chroma_vectors,
-        settings,
-        knowledge_base.id,
-        embedding,
-        payload.limit * QUERY_OVERFETCH_FACTOR,
-    )
+    ranked_hits = reciprocal_rank_fusion(vector_hits, keyword_chunk_ids)
     chunks = await knowledge_base_repository.list_chunks_by_ids(
         db,
         knowledge_base,
-        [hit.chunk_id for hit in vector_hits],
+        [hit.chunk_id for hit in ranked_hits],
     )
-    chunks_by_id = {
-        chunk.id: chunk for chunk in chunks if chunk.status == CHUNK_INDEXED_STATUS
-    }
+    chunks_by_id = {chunk.id: chunk for chunk in chunks}
+    documents = await knowledge_base_repository.list_active_documents_by_ids(
+        db,
+        knowledge_base,
+        {chunk.document_id for chunk in chunks},
+    )
+    documents_by_id = {document.id: document for document in documents}
 
-    documents: dict[str, KnowledgeDocument] = {}
-    responses: list[KnowledgeQueryHitResponse] = []
-    for hit in vector_hits:
+    grouped_hits: dict[str, list[tuple[KnowledgeDocumentChunk, VectorHit]]] = {}
+    for hit in ranked_hits:
         chunk = chunks_by_id.get(hit.chunk_id)
-        if chunk is None:
+        if chunk is None or chunk.document_id not in documents_by_id:
             continue
-        document = documents.get(chunk.document_id)
-        if document is None:
-            loaded = await db.get(KnowledgeDocument, chunk.document_id)
-            if (
-                loaded is None
-                or loaded.status == DOCUMENT_DELETED_STATUS
-                or not loaded.is_active
-            ):
-                continue
-            documents[chunk.document_id] = loaded
-            document = loaded
+        grouped_hits.setdefault(chunk.document_id, []).append((chunk, hit))
+
+    responses: list[KnowledgeQueryHitResponse] = []
+    for document_id, hits in list(grouped_hits.items())[: payload.limit]:
+        document = documents_by_id[document_id]
+        representative_chunk, representative_hit = hits[0]
         responses.append(
             KnowledgeQueryHitResponse(
-                chunk_id=chunk.id,
-                document_id=chunk.document_id,
+                chunk_id=representative_chunk.id,
+                document_id=document_id,
                 document_filename=document.filename,
-                chunk_index=chunk.chunk_index,
-                content=chunk.content,
-                distance=hit.distance,
+                chunk_index=representative_chunk.chunk_index,
+                content="\n\n".join(
+                    chunk.content
+                    for chunk, _ in sorted(
+                        hits,
+                        key=lambda item: item[0].chunk_index,
+                    )
+                ),
+                distance=representative_hit.distance,
             )
         )
-        if len(responses) == payload.limit:
-            break
     return responses

@@ -20,9 +20,11 @@ from app.shareddomain.knowledge.models import (
 from app.capabilities.embedding.pipeline import (
     EMBED_BATCH_SIZE,
     KnowledgePipelineError,
+)
+from app.capabilities.rag.vector_store import (
     VectorChunk,
-    delete_chroma_vectors,
-    upsert_chroma_vectors,
+    delete_vectors,
+    upsert_vectors,
 )
 from app.shareddomain.knowledge.orchestration import (
     CHUNK_INDEXED_STATUS,
@@ -49,7 +51,6 @@ from app.shareddomain.knowledge.orchestration import (
 )
 from app.shareddomain.knowledge.services import RESOURCE_TYPE
 from app.capabilities.llm.models import RegisteredModel
-from app.capabilities.llm.runtime import build_registered_model_provider
 
 # ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
 TASK_LEASE_SECONDS = 300
@@ -60,19 +61,6 @@ TASK_RUN_FINISHED = "finished"
 
 def batches(items: list[VectorChunk], size: int) -> list[list[VectorChunk]]:
     return [items[index : index + size] for index in range(0, len(items), size)]
-
-
-def store_vector_chunks(
-    settings: Settings,
-    knowledge_base: KnowledgeBase,
-    embedding_model: RegisteredModel,
-    chunks: list[VectorChunk],
-) -> None:
-    provider = build_registered_model_provider(embedding_model, settings)
-    chunk_batches = batches(chunks, EMBED_BATCH_SIZE)
-    embedding_batches = [provider.embed([chunk.content for chunk in batch]) for batch in chunk_batches]
-    for batch, embeddings in zip(chunk_batches, embedding_batches, strict=True):
-        upsert_chroma_vectors(settings, knowledge_base, batch, embeddings)
 
 
 async def get_task_scope(
@@ -134,7 +122,7 @@ async def run_parse_task(
     await db.commit()
     ensure_knowledge_task_lease(lease_lost)
     await asyncio.to_thread(
-        delete_chroma_vectors,
+        delete_vectors,
         settings,
         knowledge_base.id,
         vector_ids,
@@ -189,13 +177,17 @@ async def run_index_task(
             document_filename=documents[chunk.document_id].filename,
             chunk_index=chunk.chunk_index,
             content=chunk.content,
+            document_metadata={
+                **(documents[chunk.document_id].meta or {}),
+                "content_type": documents[chunk.document_id].content_type,
+            },
         )
         for chunk in chunks
     ]
     for vector_batch in batches(vector_chunks, EMBED_BATCH_SIZE):
         ensure_knowledge_task_lease(lease_lost)
         await asyncio.to_thread(
-            store_vector_chunks,
+            upsert_vectors,
             settings,
             knowledge_base,
             embedding_model,
