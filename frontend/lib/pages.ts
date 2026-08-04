@@ -122,7 +122,7 @@ const pageCopy = {
     emptyDescription:
       "接入模型后，应用可以使用它进行对话、检索增强和工具调用。",
     secondaryActionLabel: "查看配置",
-    dialogDescription: "配置供应商、基础模型、API URL 和 API Key。",
+    dialogDescription: "配置供应商、基础模型和连接凭据。",
     dialogFields: [
       {
         id: "modelProvider",

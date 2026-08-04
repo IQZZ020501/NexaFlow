@@ -390,6 +390,7 @@ export function AgentsPage() {
           server_name: "",
           input: {},
           output: null,
+          reasoning: "",
         },
       ],
       result: "",
@@ -442,6 +443,28 @@ export function AgentsPage() {
                   ),
                 }
               })
+            )
+            return
+          }
+          if (streamEvent.type === "reasoning_delta") {
+            setRuns((current) =>
+              current.map((run) =>
+                run.id === liveRunId
+                  ? {
+                      ...run,
+                      events: run.events.map((event) =>
+                        event.type === "thought" &&
+                        event.turn === streamEvent.turn
+                          ? {
+                              ...event,
+                              reasoning:
+                                (event.reasoning ?? "") + streamEvent.delta,
+                            }
+                          : event
+                      ),
+                    }
+                  : run
+              )
             )
             return
           }

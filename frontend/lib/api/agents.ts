@@ -52,6 +52,7 @@ export type AgentRunEvent = {
   server_name: string
   input: Record<string, unknown>
   output: unknown
+  reasoning?: string
 }
 
 export type AgentRun = {
@@ -77,6 +78,7 @@ export type AgentRun = {
 export type AgentRunStreamEvent =
   | { type: "run"; run: AgentRun }
   | { type: "process"; event: AgentRunEvent }
+  | { type: "reasoning_delta"; turn: number; delta: string }
   | { type: "answer_delta"; delta: string }
   | { type: "complete" | "error"; run: AgentRun }
 
