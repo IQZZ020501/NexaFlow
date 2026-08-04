@@ -525,22 +525,6 @@ export function AgentDetailWorkspace({
                   ))}
                 </div>
               )}
-              {pendingQuestion ? (
-                <article className="mt-8 flex flex-col gap-5">
-                  <div className="ml-auto max-w-[88%] rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 text-background shadow-sm">
-                    {pendingQuestion}
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <span className="flex size-8 items-center justify-center rounded-lg bg-foreground text-background">
-                      <BotIcon className="size-4" />
-                    </span>
-                    <div className="flex items-center gap-2 rounded-2xl rounded-tl-md border bg-background px-4 py-3 text-sm text-muted-foreground shadow-xs">
-                      <BrainIcon className="size-4 animate-pulse" />
-                      {t("正在思考")}
-                    </div>
-                  </div>
-                </article>
-              ) : null}
             </div>
           </div>
 

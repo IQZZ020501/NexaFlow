@@ -360,6 +360,40 @@ export function AgentsPage() {
     setQuestion("")
     setPendingQuestion(nextQuestion)
     setIsAsking(true)
+    const placeholderRun: AgentRun = {
+      id: `pending-${Date.now()}`,
+      workspace_id: selectedWorkspaceId,
+      agent_id: selectedAgent.id,
+      requested_by_user_id: me?.user.id ?? "",
+      goal: nextQuestion,
+      model_id: selectedAgent.model_id,
+      model_name: models.find((m) => m.id === selectedAgent.model_id)?.name ?? "",
+      status: "running",
+      plan: [],
+      events: [
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "running",
+          summary: "agent.analyzing",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+        },
+      ],
+      result: "",
+      last_error: null,
+      planned_at: null,
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    setRuns((current) => [placeholderRun, ...current])
     let liveRunId: string | null = null
     try {
       await streamAgentRun(
@@ -371,7 +405,11 @@ export function AgentsPage() {
           if (streamEvent.type === "run") {
             liveRunId = streamEvent.run.id
             setPendingQuestion(null)
-            setRuns((current) => [streamEvent.run, ...current])
+            setRuns((current) =>
+              current.map((run) =>
+                run.id === placeholderRun.id ? streamEvent.run : run
+              )
+            )
             return
           }
           if (streamEvent.type === "process") {
@@ -422,7 +460,10 @@ export function AgentsPage() {
     } catch (error) {
       setQuestion(nextQuestion)
       setRuns((current) =>
-        liveRunId ? current.filter((run) => run.id !== liveRunId) : current
+        current.filter(
+          (run) =>
+            run.id !== liveRunId && !run.id.startsWith("pending-")
+        )
       )
       reportError(error)
     } finally {
