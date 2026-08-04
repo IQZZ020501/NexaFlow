@@ -10,6 +10,7 @@ export type Agent = {
   knowledge_base_ids: string[]
   mcp_tools: AgentMcpToolRef[]
   status: "active" | "disabled"
+  published: boolean
   created_by_user_id: string
   can_edit: boolean
   created_at: string
@@ -29,6 +30,7 @@ export type AgentPayload = {
   description?: string
   instructions?: string
   status?: "active" | "disabled"
+  published?: boolean
 }
 
 export type AgentPlanStep = {
@@ -138,7 +140,8 @@ export async function streamAgentRun(
   workspaceId: string,
   agentId: string,
   goal: string,
-  onEvent: (event: AgentRunStreamEvent) => void
+  onEvent: (event: AgentRunStreamEvent) => void,
+  preview = false
 ) {
   const response = await fetch(
     apiUrl(agentsPath(workspaceId, `/${agentId}/runs/stream`)),
@@ -148,7 +151,7 @@ export async function streamAgentRun(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ goal }),
+    body: JSON.stringify({ goal, preview }),
     }
   )
   if (!response.ok) {

@@ -72,6 +72,7 @@ def agent_to_response(
         knowledge_base_ids=knowledge_base_ids,
         mcp_tools=mcp_tools if can_edit_agent(agent, actor, workspace_role) else [],
         status=agent.status,
+        published=agent.published,
         created_by_user_id=agent.created_by_user_id,
         can_edit=can_edit_agent(agent, actor, workspace_role),
         created_at=agent.created_at,
@@ -319,6 +320,8 @@ async def update_agent(
         agent.model_id = (await get_agent_model(db, agent.workspace_id, payload.model_id)).id
     if payload.status is not None:
         agent.status = validate_agent_status(payload.status)
+    if payload.published is not None:
+        agent.published = payload.published
 
     if payload.knowledge_base_ids is not None:
         knowledge_bases = await resolve_agent_knowledge_bases(

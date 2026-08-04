@@ -19,6 +19,7 @@ class AgentResponse(BaseModel):
     knowledge_base_ids: list[str]
     mcp_tools: list[AgentMcpToolRef]
     status: str
+    published: bool
     created_by_user_id: str
     can_edit: bool
     created_at: datetime
@@ -42,10 +43,12 @@ class AgentUpdateRequest(BaseModel):
     knowledge_base_ids: list[str] | None = Field(default=None, max_length=4)
     mcp_tools: list[AgentMcpToolRef] | None = Field(default=None, max_length=12)
     status: str | None = Field(default=None, min_length=1, max_length=20)
+    published: bool | None = None
 
 
 class AgentRunCreateRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
+    preview: bool = False
 
 
 class AgentPlanStepResponse(BaseModel):

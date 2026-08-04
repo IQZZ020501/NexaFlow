@@ -389,6 +389,8 @@ async def prepare_agent_run(
     goal: str,
     actor: User,
     workspace_role: str | None,
+    *,
+    persist: bool = True,
 ) -> tuple[AgentRun, Any]:
     agent = await get_agent(db, workspace_id, agent_id)
     if agent.status != ACTIVE_STATUS:
@@ -417,9 +419,16 @@ async def prepare_agent_run(
         result="",
         started_at=utc_now(),
     )
-    db.add(run)
-    await db.commit()
-    await db.refresh(run)
+    if persist:
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+    else:
+        # Preview runs stay uncommitted: flush materializes id/timestamps
+        # (column defaults) without persisting; the transaction rolls back
+        # when the request session closes.
+        db.add(run)
+        await db.flush()
     return run, model
 
 
@@ -431,6 +440,8 @@ async def execute_agent_run(
     workspace_role: str | None,
     settings: Settings,
     on_event: Any = None,
+    *,
+    persist: bool = True,
 ) -> AgentRunResponse:
     process_events: list[dict[str, Any]] = []
 
@@ -478,8 +489,9 @@ async def execute_agent_run(
         run.last_error = safe_agent_error(exc)
 
     run.finished_at = utc_now()
-    await db.commit()
-    await db.refresh(run)
+    if persist:
+        await db.commit()
+        await db.refresh(run)
     return run_to_response(run, trace_id=trace_id)
 
 
@@ -490,6 +502,8 @@ async def stream_agent_run(
     actor: User,
     workspace_role: str | None,
     settings: Settings,
+    *,
+    persist: bool = True,
 ) -> AsyncIterator[dict[str, Any]]:
     import asyncio
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -507,6 +521,7 @@ async def stream_agent_run(
                 workspace_role,
                 settings,
                 on_event=emit,
+                persist=persist,
             )
             await queue.put(
                 {

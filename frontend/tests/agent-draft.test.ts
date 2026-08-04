@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test"
 
 import {
   isAgentFormDirty,
+  mergeInitialAgentRun,
   type AgentFormState,
 } from "../components/agents/agents-page"
-import type { Agent } from "../lib/api/agents"
+import type { Agent, AgentRun } from "../lib/api/agents"
 
 const agent: Agent = {
   id: "agent-1",
@@ -16,6 +17,7 @@ const agent: Agent = {
   knowledge_base_ids: ["knowledge-1", "knowledge-2"],
   mcp_tools: [{ server_id: "server-1", tool_name: "search" }],
   status: "active",
+  published: false,
   created_by_user_id: "user-1",
   can_edit: true,
   created_at: "2026-08-03T00:00:00Z",
@@ -47,5 +49,27 @@ describe("Agent form state", () => {
     expect(
       isAgentFormDirty({ ...form, instructions: "Answer briefly." }, agent)
     ).toBe(true)
+  })
+})
+
+describe("Agent preview state", () => {
+  test("keeps optimistic progress until the stream reports progress", () => {
+    const pendingRun = {
+      id: "pending-1",
+      events: [{ summary: "agent.analyzing" }],
+    } as AgentRun
+    const liveRun = { ...pendingRun, id: "run-1", events: [] }
+    const liveEvent = pendingRun.events[0]
+
+    expect(mergeInitialAgentRun(pendingRun, liveRun)).toEqual({
+      ...liveRun,
+      events: pendingRun.events,
+    })
+    expect(
+      mergeInitialAgentRun(pendingRun, {
+        ...liveRun,
+        events: [liveEvent],
+      } as AgentRun).events
+    ).toEqual([liveEvent])
   })
 })

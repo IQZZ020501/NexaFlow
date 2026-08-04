@@ -14,9 +14,11 @@ import {
   MoreHorizontalIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  RocketIcon,
   SaveIcon,
   SendIcon,
   Trash2Icon,
+  Undo2Icon,
   WrenchIcon,
 } from "lucide-react"
 
@@ -56,6 +58,7 @@ type AgentDetailWorkspaceProps = {
   onBack: () => void
   onDelete: () => void
   onSave: (event: React.FormEvent<HTMLFormElement>) => void
+  onPublish: () => void
   onAsk: (event: React.FormEvent<HTMLFormElement>) => void
   t: TFunction
 }
@@ -286,6 +289,7 @@ export function AgentDetailWorkspace({
   onBack,
   onDelete,
   onSave,
+  onPublish,
   onAsk,
   t,
 }: AgentDetailWorkspaceProps) {
@@ -338,6 +342,15 @@ export function AgentDetailWorkspace({
               />
               {t(agent.status === "active" ? "已启用" : "已停用")}
             </Badge>
+            {agent.published ? (
+              <Badge
+                variant="outline"
+                className="border-blue-600/20 bg-blue-500/10 text-blue-700 dark:text-blue-400"
+              >
+                <span className="mr-1.5 size-1.5 rounded-full bg-blue-500" />
+                {t("已发布")}
+              </Badge>
+            ) : null}
             {isDirty ? <Badge variant="secondary">{t("未保存")}</Badge> : null}
           </div>
           <p className="mt-0.5 hidden truncate text-xs text-muted-foreground sm:block">
@@ -358,6 +371,21 @@ export function AgentDetailWorkspace({
         </Button>
         {agent.can_edit ? (
           <>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSaving}
+              onClick={onPublish}
+            >
+              {agent.published ? (
+                <Undo2Icon />
+              ) : (
+                <RocketIcon />
+              )}
+              <span className="hidden sm:inline">
+                {t(agent.published ? "取消发布" : "发布")}
+              </span>
+            </Button>
             <Button
               type="submit"
               form="agent-settings-form"
@@ -497,22 +525,6 @@ export function AgentDetailWorkspace({
                   ))}
                 </div>
               )}
-              {pendingQuestion ? (
-                <article className="mt-8 flex flex-col gap-5">
-                  <div className="ml-auto max-w-[88%] rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 text-background shadow-sm">
-                    {pendingQuestion}
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <span className="flex size-8 items-center justify-center rounded-lg bg-foreground text-background">
-                      <BotIcon className="size-4" />
-                    </span>
-                    <div className="flex items-center gap-2 rounded-2xl rounded-tl-md border bg-background px-4 py-3 text-sm text-muted-foreground shadow-xs">
-                      <BrainIcon className="size-4 animate-pulse" />
-                      {t("正在思考")}
-                    </div>
-                  </div>
-                </article>
-              ) : null}
             </div>
           </div>
 

@@ -85,6 +85,13 @@ function sameValues(left: string[], right: string[]) {
   )
 }
 
+export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
+  return {
+    ...liveRun,
+    events: liveRun.events.length > 0 ? liveRun.events : pendingRun.events,
+  }
+}
+
 export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
   const formTools = form.mcpTools.map(
     (tool) => `${tool.server_id}:${tool.tool_name}`
@@ -304,6 +311,28 @@ export function AgentsPage() {
     }
   }
 
+  async function handlePublishAgent() {
+    if (!token || !selectedWorkspaceId || !selectedAgent) return
+    try {
+      const updated = await updateAgent(
+        token,
+        selectedWorkspaceId,
+        selectedAgent.id,
+        { published: !selectedAgent.published }
+      )
+      setAgents((current) =>
+        current.map((agent) => (agent.id === updated.id ? updated : agent))
+      )
+      setForm(formFromAgent(updated))
+      notify(
+        "success",
+        t(updated.published ? "Agent 已发布" : "Agent 已取消发布")
+      )
+    } catch (error) {
+      reportError(error)
+    }
+  }
+
   async function handleDeleteAgent(agent: Agent) {
     if (
       !token ||
@@ -338,6 +367,40 @@ export function AgentsPage() {
     setQuestion("")
     setPendingQuestion(nextQuestion)
     setIsAsking(true)
+    const placeholderRun: AgentRun = {
+      id: `pending-${Date.now()}`,
+      workspace_id: selectedWorkspaceId,
+      agent_id: selectedAgent.id,
+      requested_by_user_id: me?.user.id ?? "",
+      goal: nextQuestion,
+      model_id: selectedAgent.model_id,
+      model_name: models.find((m) => m.id === selectedAgent.model_id)?.name ?? "",
+      status: "running",
+      plan: [],
+      events: [
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "running",
+          summary: "agent.analyzing",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+        },
+      ],
+      result: "",
+      last_error: null,
+      planned_at: null,
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    setRuns((current) => [placeholderRun, ...current])
     let liveRunId: string | null = null
     try {
       await streamAgentRun(
@@ -349,7 +412,13 @@ export function AgentsPage() {
           if (streamEvent.type === "run") {
             liveRunId = streamEvent.run.id
             setPendingQuestion(null)
-            setRuns((current) => [streamEvent.run, ...current])
+            setRuns((current) =>
+              current.map((run) =>
+                run.id === placeholderRun.id
+                  ? mergeInitialAgentRun(run, streamEvent.run)
+                  : run
+              )
+            )
             return
           }
           if (streamEvent.type === "process") {
@@ -394,12 +463,16 @@ export function AgentsPage() {
           if (streamEvent.type === "error") {
             notify("error", t("Agent 回答失败"))
           }
-        }
+        },
+        !selectedAgent.published
       )
     } catch (error) {
       setQuestion(nextQuestion)
       setRuns((current) =>
-        liveRunId ? current.filter((run) => run.id !== liveRunId) : current
+        current.filter(
+          (run) =>
+            run.id !== liveRunId && !run.id.startsWith("pending-")
+        )
       )
       reportError(error)
     } finally {
@@ -432,6 +505,7 @@ export function AgentsPage() {
         }}
         onDelete={() => void handleDeleteAgent(selectedAgent)}
         onSave={handleSaveAgent}
+        onPublish={() => void handlePublishAgent()}
         onAsk={handleAsk}
         t={t}
       />

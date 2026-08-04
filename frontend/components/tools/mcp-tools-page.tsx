@@ -6,6 +6,7 @@ import {
   LoaderCircleIcon,
   PlusIcon,
   RefreshCwIcon,
+  SearchIcon,
   Trash2Icon,
   WrenchIcon,
 } from "lucide-react"
@@ -45,6 +46,14 @@ type McpForm = {
   bearerToken: string
 }
 
+type McpPreset = {
+  name: string
+  url: string
+  description: string
+  requiresToken: boolean
+  icon: typeof SearchIcon
+}
+
 const EMPTY_FORM: McpForm = { name: "", url: "", bearerToken: "" }
 
 export function McpToolsPage() {
@@ -58,6 +67,26 @@ export function McpToolsPage() {
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
 
   const canManage = getMembershipRole(me, selectedWorkspaceId) === "admin"
+
+  const presets: McpPreset[] = [
+    {
+      name: "Tavily",
+      url: "https://mcp.tavily.com/mcp",
+      description: t(
+        "通过 Tavily 搜索 API 进行实时网页搜索、网页提取和站点爬取，需填写 Tavily API Key。"
+      ),
+      requiresToken: true,
+      icon: SearchIcon,
+    },
+  ]
+
+  function handleUsePreset(preset: McpPreset) {
+    setForm({
+      name: preset.name,
+      url: preset.url,
+      bearerToken: "",
+    })
+  }
 
   const reportError = React.useCallback(
     (error: unknown) => notify("error", getErrorMessage(error, t)),
@@ -304,13 +333,57 @@ export function McpToolsPage() {
       )}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{t("添加 MCP Server")}</DialogTitle>
             <DialogDescription>
               {t("保存时会连接 Server 并发现可用工具。")}
             </DialogDescription>
           </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">
+                {t("从内置预设快速填写")}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("点击预设自动填写名称和地址。")}
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 [&>:only-child]:sm:col-span-2">
+              {presets.map((preset) => (
+                <button
+                  key={preset.url}
+                  type="button"
+                  className="group flex w-full items-start gap-3 rounded-lg border bg-background p-3.5 text-left outline-none transition-[border-color,background-color,box-shadow] hover:border-primary/50 hover:bg-muted/40 hover:shadow-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  onClick={() => handleUsePreset(preset)}
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-foreground transition-colors group-hover:text-primary">
+                    <preset.icon className="size-4" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                      {preset.name}
+                      {preset.requiresToken ? (
+                        <Badge variant="outline" className="gap-1 text-[10px]">
+                          <KeyRoundIcon className="size-3" aria-hidden="true" />
+                          {t("需要 Token")}
+                        </Badge>
+                      ) : null}
+                    </span>
+                    <span
+                      className="mt-1 block truncate font-mono text-xs text-muted-foreground"
+                      title={preset.url}
+                    >
+                      {preset.url}
+                    </span>
+                    <span className="mt-2 block text-xs leading-5 text-muted-foreground">
+                      {preset.description}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
           <form onSubmit={handleCreate}>
             <FieldGroup>
               <Field>
