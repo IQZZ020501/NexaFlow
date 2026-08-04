@@ -292,16 +292,17 @@ async def run_agent(
                     else:
                         no_new_evidence_turns = 0
                         last_evidence_count = evidence_count
-                    if no_new_evidence_turns >= 2:
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": (
-                                    "No new evidence found in two consecutive retrieval rounds. "
-                                    "Answer based on what has already been gathered."
-                                ),
-                            }
-                        )
-                        no_new_evidence_turns = 0
+
+        if no_new_evidence_turns >= 2:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "No new evidence found in two consecutive retrieval rounds. "
+                        "Answer based on what has already been gathered."
+                    ),
+                }
+            )
+            no_new_evidence_turns = 0
 
     raise AgentRunnerError("Agent turn limit reached.")
