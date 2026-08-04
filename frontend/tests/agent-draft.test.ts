@@ -16,6 +16,7 @@ const agent: Agent = {
   knowledge_base_ids: ["knowledge-1", "knowledge-2"],
   mcp_tools: [{ server_id: "server-1", tool_name: "search" }],
   status: "active",
+  published: false,
   created_by_user_id: "user-1",
   can_edit: true,
   created_at: "2026-08-03T00:00:00Z",

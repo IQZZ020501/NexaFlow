@@ -304,6 +304,28 @@ export function AgentsPage() {
     }
   }
 
+  async function handlePublishAgent() {
+    if (!token || !selectedWorkspaceId || !selectedAgent) return
+    try {
+      const updated = await updateAgent(
+        token,
+        selectedWorkspaceId,
+        selectedAgent.id,
+        { published: !selectedAgent.published }
+      )
+      setAgents((current) =>
+        current.map((agent) => (agent.id === updated.id ? updated : agent))
+      )
+      setForm(formFromAgent(updated))
+      notify(
+        "success",
+        t(updated.published ? "Agent 已发布" : "Agent 已取消发布")
+      )
+    } catch (error) {
+      reportError(error)
+    }
+  }
+
   async function handleDeleteAgent(agent: Agent) {
     if (
       !token ||
@@ -394,7 +416,8 @@ export function AgentsPage() {
           if (streamEvent.type === "error") {
             notify("error", t("Agent 回答失败"))
           }
-        }
+        },
+        !selectedAgent.published
       )
     } catch (error) {
       setQuestion(nextQuestion)
@@ -432,6 +455,7 @@ export function AgentsPage() {
         }}
         onDelete={() => void handleDeleteAgent(selectedAgent)}
         onSave={handleSaveAgent}
+        onPublish={() => void handlePublishAgent()}
         onAsk={handleAsk}
         t={t}
       />

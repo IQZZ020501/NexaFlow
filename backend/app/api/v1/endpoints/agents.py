@@ -160,6 +160,7 @@ async def stream_workspace_agent_run(
         payload.goal,
         context.user,
         context.membership_role,
+        persist=not payload.preview,
     )
 
     async def encode_events() -> AsyncIterator[bytes]:
@@ -170,6 +171,7 @@ async def stream_workspace_agent_run(
             context.user,
             context.membership_role,
             settings,
+            persist=not payload.preview,
         ):
             yield (json.dumps(event, ensure_ascii=False) + "\n").encode()
 

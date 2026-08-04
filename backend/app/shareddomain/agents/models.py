@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -37,6 +38,7 @@ class Agent(Base):
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     model_id: Mapped[str] = mapped_column(ForeignKey("model.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True
     )
