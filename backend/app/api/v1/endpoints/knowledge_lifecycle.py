@@ -18,15 +18,15 @@ from app.shareddomain.knowledge.lifecycle import (
     set_knowledge_document_active,
 )
 from app.shareddomain.knowledge.orchestration import get_knowledge_document
-from app.infrastructure.repositories.knowledge import count_document_chunks
+from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.schemas.knowledge import (
     KnowledgeDocumentResponse,
     KnowledgeDocumentStatusUpdateRequest,
 )
 from app.shareddomain.knowledge.services import (
-    document_to_response,
     get_knowledge_base,
     knowledge_document_path,
+    knowledge_object_storage,
     require_knowledge_base_permission,
 )
 
@@ -70,6 +70,50 @@ async def download_workspace_knowledge_base_document(
         document_path,
         media_type="application/octet-stream",
         filename=document.filename,
+    )
+
+
+@router.get(
+    "/{knowledge_base_id}/documents/{document_id}/assets/{asset_id}",
+    response_class=FileResponse,
+)
+async def read_workspace_knowledge_document_asset(
+    knowledge_base_id: str,
+    document_id: str,
+    asset_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> FileResponse:
+    knowledge_base = await get_knowledge_base(
+        db,
+        context.workspace.id,
+        knowledge_base_id,
+    )
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"view", "edit"},
+    )
+    await get_knowledge_document(db, knowledge_base, document_id)
+    asset = await knowledge_base_repository.get_document_asset(
+        db,
+        knowledge_base,
+        document_id,
+        asset_id,
+    )
+    if asset is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge asset not found.")
+    asset_path = knowledge_object_storage(settings).path(asset.object_key)
+    if not asset_path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge asset file is missing.")
+    return FileResponse(
+        asset_path,
+        media_type=asset.content_type,
+        filename=asset.filename,
+        content_disposition_type="inline",
     )
 
 

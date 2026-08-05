@@ -7,7 +7,14 @@
 ## 分层关系
 
 ```text
-api/knowledge*.py → shareddomain/knowledge/services（CRUD/权限/上传落盘）
+10:api/knowledge*.py → shareddomain/knowledge/services（CRUD/权限/上传落盘）
+11:
+12:## 文档导入流程（解耦形态）
+13:
+14:- 附件上传 `POST /documents/../attachments` 只持久化文件（`infrastructure/object_storage.py` 本地对象存储 adapter，对象 key 形如 `workspace/kb/attachments/<id>/<name>`），返回 attachment。
+15:- 文档创建 `POST /documents` 接收 `attachment_ids` JSON，事务内消费附件并生成 staged 文档；解析/向量化一律走 Celery 任务（`POST /parse`、`POST /index`），请求内不再同步解析。
+16:- 图片资产：DOCX 解析时经 Mammoth callback 抽取内嵌图片落对象存储，chunk 正文保留原子占位符（私有区字符）并用 `images[]` 结构化返回；前端经鉴权接口拉取 blob 渲染，不暴露对象路径。图片不参与向量化。
+17:- 附件生命周期：available → consumed（创建文档）→ deleted（删除文档/知识库时对象一并清理）。
                  → orchestration（任务状态机编排）
                  → task_runner（执行体：租约锁/解析/向量化）
                  → tasks/knowledge.py（Celery 任务包装，失败重试）

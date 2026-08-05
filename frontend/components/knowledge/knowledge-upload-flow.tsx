@@ -27,18 +27,23 @@ import { Input } from "@/components/ui/input"
 import { getErrorMessage } from "@/lib/errors"
 import type { AppNotification } from "@/lib/notifications"
 import {
+  createKnowledgeDocuments,
+  deleteKnowledgeAttachment,
   deleteKnowledgeDocument,
   indexKnowledgeDocument,
   listKnowledgeDocumentChunks,
   listKnowledgeDocuments,
-  previewKnowledgeDocument,
-  uploadKnowledgeDocument,
+  listKnowledgeTasks,
+  parseKnowledgeDocument,
+  uploadKnowledgeAttachment,
 } from "@/lib/api/knowledge"
 import { ChunkPreviewList } from "@/components/knowledge/chunk-preview-list"
+import { useKnowledgeUploadState } from "@/components/knowledge/knowledge-upload-state"
 import type {
   KnowledgeBase,
   KnowledgeDocument,
   KnowledgeDocumentChunk,
+  KnowledgeSegmentationStrategy,
 } from "@/lib/api/knowledge"
 import type { TFunction, TranslationKey } from "@/i18n"
 import {
@@ -102,6 +107,8 @@ export function KnowledgeUploadFlow({
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
   const { t } = useLanguage()
+  const { files, setFiles, prepareUpload, startUpload } =
+    useKnowledgeUploadState()
   const cleaningRuleOptions = [
     { value: "trim_lines", label: t("去除行首尾空白") },
     { value: "remove_empty_lines", label: t("删除空行") },
@@ -113,7 +120,6 @@ export function KnowledgeUploadFlow({
     { value: "。", label: t("中文句号（。）") },
     { value: ".", label: t("英文句号（.）") },
   ]
-  const [files, setFiles] = React.useState<File[]>([])
   const [uploadedDocuments, setUploadedDocuments] = React.useState<
     UploadedDocument[]
   >([])
@@ -170,9 +176,8 @@ export function KnowledgeUploadFlow({
   const hasFailedParsing = uploadedDocuments.some((document) =>
     document.status.endsWith("_failed"),
   )
-  const isPreviewRunning = isParsing || hasPendingParsing
-  const isNavigationLocked =
-    isUploading || isRefreshing || isPreviewRunning || isIndexing
+  const isPreviewRunning = isUploading || isParsing || hasPendingParsing
+  const isNavigationLocked = isRefreshing || isPreviewRunning || isIndexing
   const isSegmentInvalid =
     segmentMode === "advanced" && chunkOverlap >= chunkSize
 
@@ -308,112 +313,172 @@ export function KnowledgeUploadFlow({
       (document) => document.status === "parsed" && document.chunks.length > 0,
     )
 
-  React.useEffect(() => {
-    if (step !== "segment") {
-      return
-    }
-    if (!routeState?.documentIds.length) {
-      onBackToFiles()
-      return
-    }
-
-    let cancelled = false
-    const routeSignature = JSON.stringify(routeState.parseSettings)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsRefreshing(true)
-
-    void loadPreviewDocuments(routeState.documentIds)
-      .then((nextDocuments) => {
-        if (cancelled) {
-          return
-        }
-        if (!nextDocuments.length) {
-          onBackToFiles()
-          return
-        }
-
-        applyPreviewDocuments(nextDocuments)
-        if (
-          nextDocuments.every(
-            (document) =>
-              document.status === "parsed" && document.chunks.length > 0,
-          )
-        ) {
-          setPreviewOptionsSignature(routeSignature)
-        }
-      })
-      .catch(reportError)
-      .finally(() => {
-        if (!cancelled) {
-          setIsRefreshing(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    applyPreviewDocuments,
-    loadPreviewDocuments,
-    onBackToFiles,
-    reportError,
-    routeState,
-    step,
-  ])
-
-  async function generatePreviewForDocuments(
+  const generatePreviewForDocuments = React.useCallback(async (
     documents: UploadedDocument[],
-  ) {
-    if (!documents.length || isSegmentInvalid) {
+    parseSettings: KnowledgeUploadParseSettings,
+  ) => {
+    if (
+      !documents.length ||
+      (parseSettings.segmentMode === "advanced" &&
+        parseSettings.chunkOverlap >= parseSettings.chunkSize)
+    ) {
       return
     }
 
     setIsParsing(true)
+    applyPreviewDocuments(
+      documents.map((document) => ({
+        ...document,
+        status: "parsing",
+        last_error: null,
+        chunks: [],
+      })),
+    )
     try {
-      const parseSettings = currentParseSettings()
       const parseOptionsSignature = JSON.stringify(parseSettings)
-      const results = await Promise.allSettled(
+      const parsePayload = {
+        strategy: (parseSettings.segmentMode === "smart"
+          ? "hierarchical"
+          : "flat") as KnowledgeSegmentationStrategy,
+        chunk_size: parseSettings.chunkSize,
+        chunk_overlap: parseSettings.chunkOverlap,
+        split_separator: parseSettings.splitSeparator,
+        cleaning_rules: parseSettings.cleaningRules,
+        auto_index: false,
+      }
+      const enqueueResults = await Promise.allSettled(
         documents.map((document) =>
-          previewKnowledgeDocument(
+          parseKnowledgeDocument(
             token,
             workspaceId,
             knowledgeBase.id,
             document.id,
-            {
-              strategy:
-                parseSettings.segmentMode === "smart"
-                  ? "hierarchical"
-                  : "flat",
-              chunk_size: parseSettings.chunkSize,
-              chunk_overlap: parseSettings.chunkOverlap,
-              split_separator: parseSettings.splitSeparator,
-              cleaning_rules: parseSettings.cleaningRules,
-            },
+            parsePayload,
           ),
         ),
       )
-      const nextDocuments = documents.map((document, index) => {
-        const result = results[index]
-        return result?.status === "fulfilled"
-          ? {
-              ...document,
+      const taskIdByDocumentId = new Map<string, string>()
+      const failedAtEnqueue: UploadedDocument[] = []
+      documents.forEach((document, index) => {
+        const result = enqueueResults[index]
+        if (result?.status === "fulfilled") {
+          taskIdByDocumentId.set(document.id, result.value.id)
+        } else {
+          failedAtEnqueue.push({
+            ...document,
+            status: "parse_failed",
+            last_error: getErrorMessage(result?.reason, t),
+            chunks: [],
+          })
+        }
+      })
+
+      const nextDocuments = [...documents]
+      let pendingDocumentIds = new Set(taskIdByDocumentId.keys())
+      const startedAt = Date.now()
+      const PARSE_POLL_INTERVAL_MS = 2000
+      const PARSE_TIMEOUT_MS = 5 * 60 * 1000
+      while (pendingDocumentIds.size > 0) {
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, PARSE_POLL_INTERVAL_MS),
+        )
+        if (Date.now() - startedAt > PARSE_TIMEOUT_MS) {
+          for (const documentId of pendingDocumentIds) {
+            const index = documents.findIndex(
+              (document) => document.id === documentId,
+            )
+            if (index >= 0) {
+              nextDocuments[index] = {
+                ...documents[index],
+                status: "parse_failed",
+                last_error: t("分段超时"),
+                chunks: [],
+              }
+            }
+          }
+          break
+        }
+
+        const taskResults = await Promise.allSettled(
+          [...pendingDocumentIds].map((documentId) =>
+            listKnowledgeTasks(
+              token,
+              workspaceId,
+              knowledgeBase.id,
+              documentId,
+            ),
+          ),
+        )
+        const documentIds = [...pendingDocumentIds]
+        const stillPending: string[] = []
+        documentIds.forEach((documentId, index) => {
+          const result = taskResults[index]
+          const task = result?.status === "fulfilled" ? result.value[0] : null
+          const documentIndex = documents.findIndex(
+            (document) => document.id === documentId,
+          )
+          if (documentIndex < 0) {
+            return
+          }
+          if (task?.status === "succeeded") {
+            nextDocuments[documentIndex] = {
+              ...documents[documentIndex],
               status: "parsed",
               last_error: null,
-              chunks: result.value,
-            }
-          : {
-              ...document,
-              status: "parse_failed",
-              last_error: getErrorMessage(result?.reason, t),
               chunks: [],
             }
-      })
+          } else if (task?.status === "failed") {
+            nextDocuments[documentIndex] = {
+              ...documents[documentIndex],
+              status: "parse_failed",
+              last_error: task.last_error || t("分段失败"),
+              chunks: [],
+            }
+          } else {
+            stillPending.push(documentId)
+          }
+        })
+        pendingDocumentIds = new Set(stillPending)
+      }
+
+      // Load chunks for every parsed document.
+      await Promise.all(
+        nextDocuments.map(async (document, index) => {
+          if (document.status !== "parsed") {
+            return
+          }
+          try {
+            nextDocuments[index] = {
+              ...document,
+              chunks: await listKnowledgeDocumentChunks(
+                token,
+                workspaceId,
+                knowledgeBase.id,
+                document.id,
+              ),
+            }
+          } catch (error) {
+            nextDocuments[index] = {
+              ...document,
+              status: "parse_failed",
+              last_error: getErrorMessage(error, t),
+              chunks: [],
+            }
+          }
+        }),
+      )
+
+      for (const failed of failedAtEnqueue) {
+        const index = nextDocuments.findIndex(
+          (document) => document.id === failed.id,
+        )
+        if (index >= 0) {
+          nextDocuments[index] = failed
+        }
+      }
+
       applyPreviewDocuments(nextDocuments)
       setPreviewOptionsSignature(parseOptionsSignature)
-      onRouteSegment({
-        documentIds: documents.map((document) => document.id),
-        parseSettings,
-      })
 
       const failedDocuments = nextDocuments.filter(
         (document) => document.status === "parse_failed",
@@ -455,13 +520,134 @@ export function KnowledgeUploadFlow({
     } finally {
       setIsParsing(false)
     }
-  }
+  }, [
+    applyPreviewDocuments,
+    knowledgeBase.id,
+    onNotify,
+    reportError,
+    t,
+    token,
+    workspaceId,
+  ])
+
+  React.useEffect(() => {
+    if (step !== "segment") {
+      return
+    }
+    if (!routeState) {
+      onBackToFiles()
+      return
+    }
+
+    let cancelled = false
+
+    if (!routeState.documentIds.length) {
+      const upload = startUpload()
+      if (!upload) {
+        onBackToFiles()
+        return
+      }
+
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsUploading(true)
+      void upload
+        .then((documents) => {
+          if (cancelled) {
+            return
+          }
+          if (!documents.length) {
+            onBackToFiles()
+            return
+          }
+
+          const nextDocuments = documents.map((document) => ({
+            ...document,
+            chunks: [],
+          }))
+          applyPreviewDocuments(nextDocuments)
+          setPreviewOptionsSignature(null)
+          setIsUploading(false)
+          onRouteSegment({
+            documentIds: nextDocuments.map((document) => document.id),
+            parseSettings: routeState.parseSettings,
+          })
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            reportError(error)
+            onBackToFiles()
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setIsUploading(false)
+          }
+        })
+
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const routeSignature = JSON.stringify(routeState.parseSettings)
+    setIsRefreshing(true)
+
+    void loadPreviewDocuments(routeState.documentIds)
+      .then(async (nextDocuments) => {
+        if (cancelled) {
+          return
+        }
+        if (!nextDocuments.length) {
+          onBackToFiles()
+          return
+        }
+
+        applyPreviewDocuments(nextDocuments)
+        if (
+          nextDocuments.every(
+            (document) =>
+              document.status === "parsed" && document.chunks.length > 0,
+          )
+        ) {
+          setPreviewOptionsSignature(routeSignature)
+          return
+        }
+        if (
+          nextDocuments.some((document) => document.status === UNPARSED_STATUS)
+        ) {
+          await generatePreviewForDocuments(
+            nextDocuments,
+            routeState.parseSettings,
+          )
+        }
+      })
+      .catch(reportError)
+      .finally(() => {
+        if (!cancelled) {
+          setIsRefreshing(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    applyPreviewDocuments,
+    generatePreviewForDocuments,
+    loadPreviewDocuments,
+    onBackToFiles,
+    onRouteSegment,
+    reportError,
+    routeState,
+    startUpload,
+    step,
+  ])
 
   async function discardStagedDocuments() {
     const pendingDocuments = uploadedDocuments.filter((document) =>
       document.meta.staged === true && document.status in UNINDEXED_STATUSES,
     )
-    const results = await Promise.allSettled(
+    const documentResults = await Promise.allSettled(
       pendingDocuments.map((document) =>
         deleteKnowledgeDocument(
           token,
@@ -473,13 +659,15 @@ export function KnowledgeUploadFlow({
     )
     const deletedIds = new Set(
       pendingDocuments
-        .filter((_, index) => results[index]?.status === "fulfilled")
+        .filter((_, index) => documentResults[index]?.status === "fulfilled")
         .map((document) => document.id),
     )
     setUploadedDocuments((current) =>
       current.filter((document) => !deletedIds.has(document.id)),
     )
-    const firstFailure = results.find((result) => result.status === "rejected")
+    const firstFailure = documentResults.find(
+      (result) => result.status === "rejected",
+    )
     if (firstFailure?.status === "rejected") {
       reportError(firstFailure.reason)
       return false
@@ -501,33 +689,16 @@ export function KnowledgeUploadFlow({
     onBackToFiles()
   }
 
-  async function handleNext() {
+  function handleNext() {
     if (!files.length) {
       return
     }
 
-    setIsUploading(true)
-    try {
-      const uploaded = await uploadPendingFiles()
-      if (!uploaded.length) {
-        return
-      }
-
-      const nextDocuments = [
-        ...uploadedDocuments,
-        ...uploaded.map((document) => ({ ...document, chunks: [] })),
-      ]
-      setUploadedDocuments(nextDocuments)
-      setSelectedDocumentId(
-        (current) => current ?? nextDocuments[0]?.id ?? null,
-      )
-      setPreviewOptionsSignature(null)
-      await generatePreviewForDocuments(nextDocuments)
-    } catch (error) {
-      reportError(error)
-    } finally {
-      setIsUploading(false)
-    }
+    prepareUpload(uploadPendingFiles)
+    onRouteSegment({
+      documentIds: [],
+      parseSettings: currentParseSettings(),
+    })
   }
 
   async function uploadPendingFiles() {
@@ -535,40 +706,75 @@ export function KnowledgeUploadFlow({
       return []
     }
 
-    const results = await Promise.allSettled(
+    const uploadResults = await Promise.allSettled(
       files.map((file) =>
-        uploadKnowledgeDocument(token, workspaceId, knowledgeBase.id, file, {
-          autoParse: false,
-          staged: true,
-        }),
+        uploadKnowledgeAttachment(token, workspaceId, knowledgeBase.id, file),
       ),
     )
-    const documents = results.flatMap((result) =>
+    const attachments = uploadResults.flatMap((result) =>
       result.status === "fulfilled" ? [result.value] : [],
     )
-    const failedCount = results.filter(
-      (result) => result.status === "rejected",
-    ).length
-    const firstFailure = results.find(
+    const failedCount = uploadResults.length - attachments.length
+    const firstFailure = uploadResults.find(
       (result) => result.status === "rejected",
     )
-    if (!documents.length) {
+    if (!attachments.length) {
       if (firstFailure?.status === "rejected") {
         reportError(firstFailure.reason)
       }
       return []
     }
 
-    if (failedCount) {
-      onNotify(
-        "error",
-        t("已上传 {uploaded} 个文件，{failed} 个上传失败", {
-          uploaded: documents.length,
-          failed: failedCount,
-        }),
+    try {
+      const documents = await createKnowledgeDocuments(
+        token,
+        workspaceId,
+        knowledgeBase.id,
+        attachments.map((attachment) => attachment.id),
+        true,
       )
+      const consumedAttachmentIds = new Set(
+        documents
+          .map((document) => document.attachment_id)
+          .filter((attachmentId): attachmentId is string => attachmentId !== null),
+      )
+      await Promise.allSettled(
+        attachments
+          .filter((attachment) => !consumedAttachmentIds.has(attachment.id))
+          .map((attachment) =>
+            deleteKnowledgeAttachment(
+              token,
+              workspaceId,
+              knowledgeBase.id,
+              attachment.id,
+            ),
+          ),
+      )
+
+      if (failedCount) {
+        onNotify(
+          "error",
+          t("已上传 {uploaded} 个文件，{failed} 个上传失败", {
+            uploaded: documents.length,
+            failed: failedCount,
+          }),
+        )
+      }
+      return documents.map((document) => ({ ...document, chunks: [] }))
+    } catch (error) {
+      await Promise.allSettled(
+        attachments.map((attachment) =>
+          deleteKnowledgeAttachment(
+            token,
+            workspaceId,
+            knowledgeBase.id,
+            attachment.id,
+          ),
+        ),
+      )
+      reportError(error)
+      return []
     }
-    return documents
   }
 
   async function handleGeneratePreview() {
@@ -576,7 +782,12 @@ export function KnowledgeUploadFlow({
       return
     }
 
-    await generatePreviewForDocuments(uploadedDocuments)
+    const parseSettings = currentParseSettings()
+    await generatePreviewForDocuments(uploadedDocuments, parseSettings)
+    onRouteSegment({
+      documentIds: uploadedDocuments.map((document) => document.id),
+      parseSettings,
+    })
   }
 
   async function handleStartImport() {
@@ -777,17 +988,10 @@ export function KnowledgeUploadFlow({
                   </Button>
                   <Button
                     type="button"
-                    disabled={!files.length || isUploading}
-                    onClick={() => void handleNext()}
+                    disabled={!files.length}
+                    onClick={handleNext}
                   >
-                    {isUploading ? (
-                      <LoaderCircleIcon
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />
-                    ) : (
-                      <UploadIcon data-icon="inline-start" />
-                    )}
+                    <UploadIcon data-icon="inline-start" />
                     {t("下一步")}
                   </Button>
                 </div>
@@ -1011,7 +1215,13 @@ export function KnowledgeUploadFlow({
                   ))}
                 </div>
 
-                <PreviewPane document={selectedDocument} />
+                <PreviewPane
+                  document={selectedDocument}
+                  isLoading={isUploading || isRefreshing || isParsing}
+                  token={token}
+                  workspaceId={workspaceId}
+                  knowledgeBaseId={knowledgeBase.id}
+                />
               </div>
             </main>
           </div>
@@ -1207,19 +1417,35 @@ function FileList({
   )
 }
 
-function PreviewPane({ document }: { document: UploadedDocument | null }) {
+function PreviewPane({
+  document,
+  isLoading,
+  token,
+  workspaceId,
+  knowledgeBaseId,
+}: {
+  document: UploadedDocument
+  isLoading: boolean
+  token: string
+  workspaceId: string
+  knowledgeBaseId: string
+}) {
   const { t } = useLanguage()
   if (!document) {
     return (
       <div className="mt-4 flex min-h-72 flex-col items-center justify-center rounded-lg border border-dashed px-4 text-center text-sm text-muted-foreground">
-        <FolderOpenIcon className="mb-2 size-5" />
-        {t("暂无文件")}
+        {isLoading ? (
+          <LoaderCircleIcon className="mb-2 size-5 animate-spin" />
+        ) : (
+          <FolderOpenIcon className="mb-2 size-5" />
+        )}
+        {isLoading ? t("正在生成分段预览") : t("暂无文件")}
       </div>
     )
   }
 
   const isFailed = document.status.endsWith("_failed")
-  const isParsing = document.status in PARSING_STATUSES
+  const isParsing = isLoading || document.status in PARSING_STATUSES
   if (isFailed || !document.chunks.length) {
     return (
       <div
@@ -1255,7 +1481,13 @@ function PreviewPane({ document }: { document: UploadedDocument | null }) {
           {documentStatusLabel(document.status, t)}
         </Badge>
       </div>
-      <ChunkPreviewList chunks={document.chunks} fileName={document.filename} />
+      <ChunkPreviewList
+        chunks={document.chunks}
+        fileName={document.filename}
+        token={token}
+        workspaceId={workspaceId}
+        knowledgeBaseId={knowledgeBaseId}
+      />
     </div>
   )
 }

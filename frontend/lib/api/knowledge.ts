@@ -1,4 +1,4 @@
-import { ApiError, request } from "@/lib/api-client"
+import { ApiError, request, requestBlob } from "@/lib/api-client"
 import type { User } from "@/lib/api/auth"
 
 export type { User } from "@/lib/api/auth"
@@ -24,6 +24,20 @@ export type ResourcePermission = {
   permission: "view" | "edit"
 }
 
+export type KnowledgeAttachment = {
+  id: string
+  workspace_id: string
+  knowledge_base_id: string
+  filename: string
+  content_type: string
+  size_bytes: number
+  status: string
+  created_by_user_id: string
+  created_at: string
+  updated_at: string
+}
+
+
 export type KnowledgeDocument = {
   id: string
   workspace_id: string
@@ -31,6 +45,7 @@ export type KnowledgeDocument = {
   filename: string
   content_type: string
   size_bytes: number
+  attachment_id: string | null
   meta: Record<string, unknown>
   status: string
   is_active: boolean
@@ -40,6 +55,16 @@ export type KnowledgeDocument = {
   created_at: string
   updated_at: string
 }
+
+export type KnowledgeAsset = {
+  id: string
+  kind: "image"
+  filename: string
+  content_type: string
+  size_bytes: number
+  alt_text: string
+}
+
 
 export type KnowledgeDocumentChunk = {
   id: string
@@ -57,6 +82,7 @@ export type KnowledgeDocumentChunk = {
   token_count: number
   vector_id: string | null
   status: string
+  images: KnowledgeAsset[]
   created_at: string
   updated_at: string
 }
@@ -195,24 +221,49 @@ export function listKnowledgeDocuments(
   )
 }
 
-export function uploadKnowledgeDocument(
+export function uploadKnowledgeAttachment(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
   file: File,
-  options: { autoParse?: boolean; staged?: boolean } = {},
 ) {
   const formData = new FormData()
   formData.append("file", file)
-  formData.append("auto_parse", String(options.autoParse ?? true))
-  formData.append("staged", String(options.staged ?? false))
-
-  return request<KnowledgeDocument>(
-    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents`,
+  return request<KnowledgeAttachment>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/attachments`,
     {
       method: "POST",
       token,
       body: formData,
+    },
+  )
+}
+
+export function deleteKnowledgeAttachment(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  attachmentId: string,
+) {
+  return request<void>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/attachments/${attachmentId}`,
+    { method: "DELETE", token },
+  )
+}
+
+export function createKnowledgeDocuments(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  attachmentIds: string[],
+  staged = true,
+) {
+  return request<KnowledgeDocument[]>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify({ attachment_ids: attachmentIds, staged }),
     },
   )
 }
@@ -241,28 +292,6 @@ export function parseKnowledgeDocument(
   )
 }
 
-export function previewKnowledgeDocument(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  documentId: string,
-  payload?: {
-    strategy?: KnowledgeSegmentationStrategy
-    chunk_size: number
-    chunk_overlap: number
-    split_separator?: string
-    cleaning_rules: string[]
-  },
-) {
-  return request<KnowledgeDocumentChunk[]>(
-    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/preview`,
-    {
-      method: "POST",
-      token,
-      body: payload ? JSON.stringify(payload) : undefined,
-    },
-  )
-}
 
 export function indexKnowledgeDocument(
   token: string,
@@ -357,6 +386,20 @@ export async function listKnowledgeDocumentChunks(
       return chunks
     }
   }
+}
+
+
+export function loadKnowledgeAsset(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId: string,
+  assetId: string,
+) {
+  return requestBlob(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/assets/${assetId}`,
+    { token },
+  )
 }
 
 export function listKnowledgeTasks(

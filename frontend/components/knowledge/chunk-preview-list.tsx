@@ -3,13 +3,83 @@ import { Badge } from "@/components/ui/badge"
 import { useLanguage } from "@/contexts/language-provider"
 import { findChunkOverlapLength } from "@/lib/chunk-overlap"
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
-import type { KnowledgeDocumentChunk } from "@/lib/api/knowledge"
+import { loadKnowledgeAsset } from "@/lib/api/knowledge"
+import type {
+  KnowledgeAsset,
+  KnowledgeDocumentChunk,
+} from "@/lib/api/knowledge"
 
 const CHUNK_OVERLAP_HIGHLIGHT_NAME = "knowledge-chunk-overlap"
 const CHUNK_OVERLAP_HIGHLIGHT_STYLE = `::highlight(${CHUNK_OVERLAP_HIGHLIGHT_NAME}) {
   background-color: var(--chunk-overlap-highlight);
   color: inherit;
 }`
+
+function AssetImage({
+  token,
+  workspaceId,
+  knowledgeBaseId,
+  documentId,
+  asset,
+}: {
+  token: string
+  workspaceId: string
+  knowledgeBaseId: string
+  documentId: string
+  asset: KnowledgeAsset
+}) {
+  const { t } = useLanguage()
+  const [objectUrl, setObjectUrl] = React.useState<string | null>(null)
+  const [failed, setFailed] = React.useState(false)
+
+  React.useEffect(() => {
+    let cancelled = false
+    let createdUrl: string | null = null
+    loadKnowledgeAsset(
+      token,
+      workspaceId,
+      knowledgeBaseId,
+      documentId,
+      asset.id,
+    )
+      .then((blob) => {
+        if (cancelled) {
+          return
+        }
+        createdUrl = URL.createObjectURL(blob)
+        setObjectUrl(createdUrl)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true)
+        }
+      })
+    return () => {
+      cancelled = true
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl)
+      }
+    }
+  }, [asset.id, documentId, knowledgeBaseId, token, workspaceId])
+
+  if (failed) {
+    return (
+      <span className="text-xs text-muted-foreground">
+        {t("图片加载失败")}
+      </span>
+    )
+  }
+  if (!objectUrl) {
+    return <div className="h-24 w-32 animate-pulse rounded bg-muted" />
+  }
+  return (
+    <img
+      src={objectUrl}
+      alt={asset.alt_text || asset.filename}
+      className="max-h-64 max-w-full rounded border object-contain"
+    />
+  )
+}
 
 function createLeadingTextRange(root: HTMLElement, charCount: number) {
   const walker = window.document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
@@ -43,9 +113,15 @@ function createLeadingTextRange(root: HTMLElement, charCount: number) {
 export function ChunkPreviewList({
   chunks,
   fileName,
+  token,
+  workspaceId,
+  knowledgeBaseId,
 }: {
   chunks: KnowledgeDocumentChunk[]
   fileName: string
+  token: string
+  workspaceId: string
+  knowledgeBaseId: string
 }) {
   const { t } = useLanguage()
   const previewRef = React.useRef<HTMLDivElement>(null)
@@ -157,6 +233,20 @@ export function ChunkPreviewList({
             content={chunk.content}
             className="px-4 py-3 text-[15px] leading-7"
           />
+          {chunk.images.length ? (
+            <div className="flex flex-wrap gap-3 border-t px-4 py-3">
+              {chunk.images.map((asset) => (
+                <AssetImage
+                  key={asset.id}
+                  token={token}
+                  workspaceId={workspaceId}
+                  knowledgeBaseId={knowledgeBaseId}
+                  documentId={chunk.document_id}
+                  asset={asset}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
       </article>
     )

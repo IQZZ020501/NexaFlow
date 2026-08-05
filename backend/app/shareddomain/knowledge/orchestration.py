@@ -13,7 +13,9 @@ from app.domain.user import User
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.shareddomain.knowledge.models import (
     DOCUMENT_STAGED_META_KEY,
+    KnowledgeAsset,
     KnowledgeBase,
+    KnowledgeChunkAsset,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
@@ -29,11 +31,12 @@ from app.capabilities.embedding.pipeline import (
     build_hierarchical_chunks,
     chunk_token_count,
     clean_text,
-    extract_text,
+    extract_document,
     split_text,
 )
 from app.capabilities.rag.vector_store import delete_vectors
 from app.schemas.knowledge import (
+    KnowledgeAssetResponse,
     KnowledgeDocumentChunkResponse,
     KnowledgeDocumentParseRequest,
     KnowledgeTaskResponse,
@@ -41,6 +44,7 @@ from app.schemas.knowledge import (
 from app.shareddomain.knowledge.services import (
     get_knowledge_model,
     knowledge_document_path,
+    knowledge_object_storage,
 )
 from app.capabilities.llm.models import RegisteredModel
 
@@ -76,9 +80,21 @@ DEFAULT_PARSE_OPTIONS: dict[str, Any] = {
 }
 
 
+def asset_to_response(asset: KnowledgeAsset) -> KnowledgeAssetResponse:
+    return KnowledgeAssetResponse(
+        id=asset.id,
+        kind="image",
+        filename=asset.filename,
+        content_type=asset.content_type,
+        size_bytes=asset.size_bytes,
+        alt_text=asset.alt_text,
+    )
+
+
 def chunk_to_response(
     chunk: KnowledgeDocumentChunk,
     parent: KnowledgeDocumentParentChunk | None = None,
+    assets: list[KnowledgeAsset] | None = None,
 ) -> KnowledgeDocumentChunkResponse:
     return KnowledgeDocumentChunkResponse(
         id=chunk.id,
@@ -96,6 +112,7 @@ def chunk_to_response(
         token_count=chunk.token_count,
         vector_id=chunk.vector_id,
         status=chunk.status,
+        images=[asset_to_response(asset) for asset in assets or []],
         created_at=chunk.created_at,
         updated_at=chunk.updated_at,
     )
@@ -158,8 +175,20 @@ async def list_knowledge_document_chunks(
         {chunk.parent_id for chunk in chunks if chunk.parent_id},
     )
     parents_by_id = {parent.id: parent for parent in parents}
+    asset_rows = await knowledge_base_repository.list_chunk_assets(
+        db,
+        knowledge_base,
+        {chunk.id for chunk in chunks},
+    )
+    assets_by_chunk: dict[str, list[KnowledgeAsset]] = {}
+    for chunk_asset, asset in asset_rows:
+        assets_by_chunk.setdefault(chunk_asset.chunk_id, []).append(asset)
     return [
-        chunk_to_response(chunk, parents_by_id.get(chunk.parent_id))
+        chunk_to_response(
+            chunk,
+            parents_by_id.get(chunk.parent_id),
+            assets_by_chunk.get(chunk.id, []),
+        )
         for chunk in chunks
     ]
 
@@ -225,7 +254,11 @@ async def extract_document_chunk_contents(
     settings: Settings,
     options: dict[str, Any],
 ) -> DocumentChunkDrafts:
-    text = await asyncio.to_thread(extract_text, document, knowledge_document_path(settings, document.storage_path))
+    text, assets = await asyncio.to_thread(
+        extract_document,
+        document,
+        knowledge_document_path(settings, document.storage_path),
+    )
     text = clean_text(
         text,
         options["cleaning_rules"],
@@ -250,7 +283,11 @@ async def extract_document_chunk_contents(
     )
     if not chunks.children:
         raise KnowledgePipelineError("Document has no extractable chunks.")
-    return chunks
+    return DocumentChunkDrafts(
+        parents=chunks.parents,
+        children=chunks.children,
+        assets=assets,
+    )
 
 
 async def replace_document_chunks(
@@ -258,43 +295,84 @@ async def replace_document_chunks(
     knowledge_base: KnowledgeBase,
     document: KnowledgeDocument,
     chunks: DocumentChunkDrafts,
-) -> list[str]:
-    existing_chunks = await knowledge_base_repository.list_document_chunks(db, knowledge_base, document.id)
+    settings: Settings,
+) -> tuple[list[str], list[str], list[str]]:
+    existing_chunks = await knowledge_base_repository.list_document_chunks(
+        db,
+        knowledge_base,
+        document.id,
+    )
     vector_ids = [chunk.vector_id for chunk in existing_chunks if chunk.vector_id]
+    stale_asset_keys = await knowledge_base_repository.delete_document_assets(
+        db,
+        document.id,
+    )
     await knowledge_base_repository.delete_document_chunks(db, document.id)
 
-    parents: list[KnowledgeDocumentParentChunk] = []
-    for index, draft in enumerate(chunks.parents):
-        parent = KnowledgeDocumentParentChunk(
-            id=new_id(),
-            workspace_id=document.workspace_id,
-            knowledge_base_id=document.knowledge_base_id,
-            document_id=document.id,
-            parent_index=index,
-            title=draft.title,
-            content=draft.content,
-            char_count=len(draft.content),
-            meta={},
-        )
-        parents.append(parent)
-        db.add(parent)
-    if parents:
-        await db.flush()
+    storage = knowledge_object_storage(settings)
+    written_asset_keys: list[str] = []
+    try:
+        assets_by_id: dict[str, KnowledgeAsset] = {}
+        for index, draft in enumerate(chunks.assets):
+            object_key = (
+                f"{document.workspace_id}/{document.knowledge_base_id}/assets/"
+                f"{document.id}/{draft.id}/{draft.filename}"
+            )
+            storage.put_bytes(object_key, draft.content)
+            written_asset_keys.append(object_key)
+            asset = KnowledgeAsset(
+                id=draft.id,
+                workspace_id=document.workspace_id,
+                knowledge_base_id=document.knowledge_base_id,
+                document_id=document.id,
+                asset_index=index,
+                kind="image",
+                filename=draft.filename,
+                content_type=draft.content_type,
+                size_bytes=len(draft.content),
+                object_key=object_key,
+                alt_text=draft.alt_text,
+                meta={},
+            )
+            assets_by_id[asset.id] = asset
+            db.add(asset)
+        if assets_by_id:
+            await db.flush()
 
-    for index, draft in enumerate(chunks.children):
-        parent = (
-            parents[draft.parent_index]
-            if draft.parent_index is not None
-            else None
-        )
-        if parent is not None and (
-            draft.start_offset is None
-            or draft.end_offset is None
-            or parent.content[draft.start_offset : draft.end_offset] != draft.content
-        ):
-            raise KnowledgePipelineError("Knowledge chunk offsets are invalid.")
-        db.add(
-            KnowledgeDocumentChunk(
+        parents: list[KnowledgeDocumentParentChunk] = []
+        for index, draft in enumerate(chunks.parents):
+            parent = KnowledgeDocumentParentChunk(
+                id=new_id(),
+                workspace_id=document.workspace_id,
+                knowledge_base_id=document.knowledge_base_id,
+                document_id=document.id,
+                parent_index=index,
+                title=draft.title,
+                content=draft.content,
+                char_count=len(draft.content),
+                meta={},
+            )
+            parents.append(parent)
+            db.add(parent)
+        if parents:
+            await db.flush()
+
+        pending_chunk_assets: list[tuple[str, str, int]] = []
+        for index, draft in enumerate(chunks.children):
+            parent = (
+                parents[draft.parent_index]
+                if draft.parent_index is not None
+                else None
+            )
+            if parent is not None and (
+                draft.start_offset is None
+                or draft.end_offset is None
+                or parent.content[draft.start_offset : draft.end_offset]
+                != draft.content
+            ):
+                raise KnowledgePipelineError("Knowledge chunk offsets are invalid.")
+            chunk = KnowledgeDocumentChunk(
+                id=new_id(),
                 workspace_id=document.workspace_id,
                 knowledge_base_id=document.knowledge_base_id,
                 document_id=document.id,
@@ -307,8 +385,38 @@ async def replace_document_chunks(
                 token_count=chunk_token_count(draft.content),
                 status=CHUNK_PREVIEW_STATUS,
             )
-        )
-    return vector_ids
+            db.add(chunk)
+            for asset_index, document_asset_index in enumerate(
+                draft.asset_indexes
+            ):
+                if not 0 <= document_asset_index < len(chunks.assets):
+                    continue
+                pending_chunk_assets.append(
+                    (
+                        chunk.id,
+                        chunks.assets[document_asset_index].id,
+                        asset_index,
+                    )
+                )
+
+        if pending_chunk_assets:
+            await db.flush()
+            for chunk_id, asset_id, asset_index in pending_chunk_assets:
+                db.add(
+                    KnowledgeChunkAsset(
+                        workspace_id=document.workspace_id,
+                        knowledge_base_id=document.knowledge_base_id,
+                        document_id=document.id,
+                        chunk_id=chunk_id,
+                        asset_id=asset_id,
+                        asset_index=asset_index,
+                    )
+                )
+    except Exception:
+        for object_key in written_asset_keys:
+            storage.delete(object_key)
+        raise
+    return vector_ids, stale_asset_keys, written_asset_keys
 
 
 async def create_knowledge_task(
@@ -504,46 +612,3 @@ async def retry_knowledge_task(
     return task_to_response(task)
 
 
-async def preview_knowledge_document(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-    document: KnowledgeDocument,
-    actor: User,
-    settings: Settings,
-    payload: KnowledgeDocumentParseRequest,
-) -> list[KnowledgeDocumentChunkResponse]:
-    options = parse_task_options(payload)
-    try:
-        chunks = await extract_document_chunk_contents(document, settings, options)
-        vector_ids = await replace_document_chunks(db, knowledge_base, document, chunks)
-    except KnowledgePipelineError as exc:
-        log_error(
-            logger,
-            "Knowledge document preview failed.",
-            exc,
-            document_id=document.id,
-            knowledge_base_id=knowledge_base.id,
-        )
-        document.status = DOCUMENT_PARSE_FAILED_STATUS
-        document.last_error = task_error_message(exc)
-        await db.commit()
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, document.last_error) from exc
-
-    document.status = DOCUMENT_PARSED_STATUS
-    document.last_error = None
-    record_audit_log(
-        db,
-        actor,
-        "knowledge_document.parse",
-        "knowledge_document",
-        document.id,
-        document.filename,
-        {
-            "knowledge_base_id": knowledge_base.id,
-            "chunk_count": len(chunks.children),
-        },
-        workspace_id=knowledge_base.workspace_id,
-    )
-    await db.commit()
-    await asyncio.to_thread(delete_vectors, settings, knowledge_base.id, vector_ids)
-    return await list_knowledge_document_chunks(db, knowledge_base, document)

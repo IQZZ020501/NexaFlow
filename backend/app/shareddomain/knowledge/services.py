@@ -1,5 +1,4 @@
 import asyncio
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -15,16 +14,24 @@ from app.infrastructure.model_utils import new_id
 from app.domain.user import User
 from app.application.identity import user_to_response
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
+from app.infrastructure.object_storage import (
+    EmptyObjectError,
+    LocalObjectStorage,
+    ObjectTooLargeError,
+)
 from app.shareddomain.knowledge.models import (
     DOCUMENT_STAGED_META_KEY,
+    KnowledgeAttachment,
     KnowledgeBase,
     KnowledgeDocument,
 )
 from app.capabilities.rag.vector_store import delete_vector_collection
 from app.schemas.knowledge import (
+    KnowledgeAttachmentResponse,
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
+    KnowledgeDocumentCreateRequest,
     KnowledgeDocumentResponse,
     KnowledgeModelTestRequest,
     KnowledgeModelTestResponse,
@@ -44,7 +51,7 @@ RESOURCE_TYPE = "knowledge_base"
 ACTIVE_STATUS = "active"
 ARCHIVED_STATUS = "archived"
 DOCUMENT_UPLOADED_STATUS = "uploaded"
-MAX_DOCUMENT_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_DOCUMENT_UPLOAD_BYTES = 100 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 KNOWLEDGE_BASE_STATUSES = {ACTIVE_STATUS, ARCHIVED_STATUS}
 RESOURCE_PERMISSIONS = {"view", "edit"}
@@ -96,6 +103,21 @@ def knowledge_base_to_response(
     )
 
 
+def attachment_to_response(attachment: KnowledgeAttachment) -> KnowledgeAttachmentResponse:
+    return KnowledgeAttachmentResponse(
+        id=attachment.id,
+        workspace_id=attachment.workspace_id,
+        knowledge_base_id=attachment.knowledge_base_id,
+        filename=attachment.filename,
+        content_type=attachment.content_type,
+        size_bytes=attachment.size_bytes,
+        status=attachment.status,
+        created_by_user_id=attachment.created_by_user_id,
+        created_at=attachment.created_at,
+        updated_at=attachment.updated_at,
+    )
+
+
 def document_to_response(
     document: KnowledgeDocument,
     chunk_count: int = 0,
@@ -106,6 +128,7 @@ def document_to_response(
         knowledge_base_id=document.knowledge_base_id,
         filename=document.filename,
         content_type=document.content_type,
+        attachment_id=document.attachment_id,
         size_bytes=document.size_bytes,
         meta=document.meta,
         status=document.status,
@@ -133,8 +156,12 @@ def clean_upload_filename(filename: str | None) -> str:
     return name[:255]
 
 
+def knowledge_object_storage(settings: Settings) -> LocalObjectStorage:
+    return LocalObjectStorage(settings.knowledge_storage_dir)
+
+
 def knowledge_document_path(settings: Settings, storage_path: str) -> Path:
-    return settings.knowledge_storage_dir / storage_path
+    return knowledge_object_storage(settings).path(storage_path)
 
 
 def normalize_optional_model_id(value: str | None) -> str | None:
@@ -293,69 +320,58 @@ async def list_knowledge_documents(
     ]
 
 
-async def save_upload_file(upload: UploadFile, target_path: Path) -> int:
-    size = 0
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with target_path.open("wb") as output:
-            while chunk := await upload.read(UPLOAD_CHUNK_BYTES):
-                size += len(chunk)
-                if size > MAX_DOCUMENT_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        "Document is too large.",
-                    )
-                output.write(chunk)
-    except Exception:
-        target_path.unlink(missing_ok=True)
-        raise
-
-    if size == 0:
-        target_path.unlink(missing_ok=True)
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Document is empty.")
-    return size
-
-
-async def upload_knowledge_document(
+async def upload_knowledge_attachment(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     upload: UploadFile,
     actor: User,
     settings: Settings,
-    meta: dict[str, Any] | None = None,
-    *,
-    staged: bool = False,
-) -> KnowledgeDocumentResponse:
-    document_id = new_id()
+) -> KnowledgeAttachmentResponse:
+    attachment_id = new_id()
     filename = clean_upload_filename(upload.filename)
-    storage_path = f"{knowledge_base.workspace_id}/{knowledge_base.id}/{document_id}/{filename}"
-    target_path = knowledge_document_path(settings, storage_path)
-    size = await save_upload_file(upload, target_path)
-    document = KnowledgeDocument(
-        id=document_id,
+    object_key = (
+        f"{knowledge_base.workspace_id}/{knowledge_base.id}/attachments/"
+        f"{attachment_id}/{filename}"
+    )
+    storage = knowledge_object_storage(settings)
+
+    async def chunks():
+        while chunk := await upload.read(UPLOAD_CHUNK_BYTES):
+            yield chunk
+
+    try:
+        size = await storage.put_chunks(
+            object_key,
+            chunks(),
+            MAX_DOCUMENT_UPLOAD_BYTES,
+        )
+    except ObjectTooLargeError as exc:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "Document is too large.",
+        ) from exc
+    except EmptyObjectError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Document is empty.") from exc
+
+    attachment = KnowledgeAttachment(
+        id=attachment_id,
         workspace_id=knowledge_base.workspace_id,
         knowledge_base_id=knowledge_base.id,
         filename=filename,
         content_type=upload.content_type or "application/octet-stream",
         size_bytes=size,
-        storage_path=storage_path,
-        meta={
-            **DEFAULT_DOCUMENT_META,
-            **(meta or {}),
-            DOCUMENT_STAGED_META_KEY: staged,
-        },
-        status=DOCUMENT_UPLOADED_STATUS,
-        last_error=None,
+        object_key=object_key,
+        status="available",
         created_by_user_id=actor.id,
     )
-    db.add(document)
+    db.add(attachment)
     record_audit_log(
         db,
         actor,
-        "knowledge_document.upload",
-        "knowledge_document",
-        document.id,
-        document.filename,
+        "knowledge_attachment.upload",
+        "knowledge_attachment",
+        attachment.id,
+        attachment.filename,
         {
             "workspace_id": knowledge_base.workspace_id,
             "knowledge_base_id": knowledge_base.id,
@@ -363,16 +379,114 @@ async def upload_knowledge_document(
         },
         workspace_id=knowledge_base.workspace_id,
     )
-
     try:
         await db.commit()
     except Exception:
         await db.rollback()
-        target_path.unlink(missing_ok=True)
+        storage.delete(object_key)
         raise
+    await db.refresh(attachment)
+    return attachment_to_response(attachment)
 
-    await db.refresh(document)
-    return document_to_response(document)
+
+async def delete_knowledge_attachment(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    attachment_id: str,
+    actor: User,
+    settings: Settings,
+) -> None:
+    attachment = await knowledge_base_repository.get_knowledge_attachment_by_id(
+        db,
+        attachment_id,
+    )
+    if (
+        attachment is None
+        or attachment.workspace_id != knowledge_base.workspace_id
+        or attachment.knowledge_base_id != knowledge_base.id
+        or attachment.created_by_user_id != actor.id
+        or attachment.status != "available"
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge attachment not found.")
+    object_key = attachment.object_key
+    await db.delete(attachment)
+    await db.commit()
+    knowledge_object_storage(settings).delete(object_key)
+
+
+async def create_knowledge_documents_from_attachments(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    payload: KnowledgeDocumentCreateRequest,
+    actor: User,
+) -> list[KnowledgeDocumentResponse]:
+    attachment_ids = list(dict.fromkeys(payload.attachment_ids))
+    if len(attachment_ids) != len(payload.attachment_ids):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Duplicate attachment id.",
+        )
+    attachments = await knowledge_base_repository.lock_knowledge_attachments(
+        db,
+        attachment_ids,
+    )
+    attachments_by_id = {attachment.id: attachment for attachment in attachments}
+    if set(attachments_by_id) != set(attachment_ids):
+        await db.rollback()
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge attachment not found.")
+
+    documents: list[KnowledgeDocument] = []
+    for attachment_id in attachment_ids:
+        attachment = attachments_by_id[attachment_id]
+        if (
+            attachment.workspace_id != knowledge_base.workspace_id
+            or attachment.knowledge_base_id != knowledge_base.id
+            or attachment.created_by_user_id != actor.id
+            or attachment.status != "available"
+        ):
+            await db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Knowledge attachment is unavailable.",
+            )
+        document = KnowledgeDocument(
+            id=new_id(),
+            workspace_id=knowledge_base.workspace_id,
+            knowledge_base_id=knowledge_base.id,
+            attachment_id=attachment.id,
+            filename=attachment.filename,
+            content_type=attachment.content_type,
+            size_bytes=attachment.size_bytes,
+            storage_path=attachment.object_key,
+            meta={
+                **DEFAULT_DOCUMENT_META,
+                DOCUMENT_STAGED_META_KEY: payload.staged,
+            },
+            status=DOCUMENT_UPLOADED_STATUS,
+            last_error=None,
+            created_by_user_id=actor.id,
+        )
+        attachment.status = "consumed"
+        documents.append(document)
+        db.add(document)
+
+    record_audit_log(
+        db,
+        actor,
+        "knowledge_document.create_from_attachments",
+        RESOURCE_TYPE,
+        knowledge_base.id,
+        knowledge_base.name,
+        {
+            "knowledge_base_id": knowledge_base.id,
+            "document_count": len(documents),
+        },
+        workspace_id=knowledge_base.workspace_id,
+    )
+    await db.commit()
+    for document in documents:
+        await db.refresh(document)
+    return [document_to_response(document) for document in documents]
 
 
 async def create_knowledge_base(
@@ -468,7 +582,6 @@ async def update_knowledge_base(
         details,
         workspace_id=knowledge_base.workspace_id,
     )
-
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -560,7 +673,7 @@ async def delete_knowledge_base_permanently(
     if await knowledge_base_repository.get_open_knowledge_base_task(db, knowledge_base) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
 
-    storage_dir = settings.knowledge_storage_dir / knowledge_base.workspace_id / knowledge_base.id
+    storage_prefix = f"{knowledge_base.workspace_id}/{knowledge_base.id}"
     record_audit_log(
         db,
         actor,
@@ -578,7 +691,7 @@ async def delete_knowledge_base_permanently(
     )
     await db.commit()
     await asyncio.to_thread(delete_vector_collection, settings, knowledge_base.id)
-    shutil.rmtree(storage_dir, ignore_errors=True)
+    knowledge_object_storage(settings).delete_prefix(storage_prefix)
 
 
 async def list_resource_permissions(
