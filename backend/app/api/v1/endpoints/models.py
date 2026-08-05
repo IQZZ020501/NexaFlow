@@ -1,15 +1,15 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
-    get_current_user,
     get_settings,
     get_workspace_context_from_path,
+    require_password_changed,
     require_workspace_path_role,
 )
 from app.domain.user import User
@@ -17,6 +17,7 @@ from app.schemas.model import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
     ModelProviderCatalogResponse,
+    ModelTypeOptionResponse,
     RegisteredModelCreateRequest,
     RegisteredModelResponse,
     RegisteredModelUpdateRequest,
@@ -39,25 +40,25 @@ router = APIRouter(tags=["llm"])
 
 @router.get("/model-providers", response_model=list[ModelProviderCatalogResponse])
 async def list_model_provider_catalog(
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_password_changed)],
     model_type: str | None = None,
 ) -> list[ModelProviderCatalogResponse]:
     _ = user
     return list_provider_catalog(model_type)
 
 
-@router.get("/model-providers/model_type_list", response_model=list[dict[str, str]])
+@router.get("/model-providers/model-types", response_model=list[ModelTypeOptionResponse])
 async def list_model_provider_model_types(
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_password_changed)],
     provider: str,
-) -> list[dict[str, str]]:
+) -> list[ModelTypeOptionResponse]:
     _ = user
     return list_model_types(provider)
 
 
-@router.get("/model-providers/model_list", response_model=list[BaseModelOptionResponse])
+@router.get("/model-providers/base-models", response_model=list[BaseModelOptionResponse])
 async def list_model_provider_base_models(
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_password_changed)],
     provider: str,
     model_type: str,
 ) -> list[BaseModelOptionResponse]:
@@ -65,9 +66,9 @@ async def list_model_provider_base_models(
     return list_base_models(provider, model_type)
 
 
-@router.get("/model-providers/model_form", response_model=list[ModelCredentialFieldResponse])
+@router.get("/model-providers/credential-form", response_model=list[ModelCredentialFieldResponse])
 async def get_model_provider_credential_form(
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_password_changed)],
     provider: str,
 ) -> list[ModelCredentialFieldResponse]:
     _ = user
@@ -78,8 +79,10 @@ async def get_model_provider_credential_form(
 async def list_workspace_models(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[RegisteredModelResponse]:
-    return await list_registered_models(db, context.workspace.id)
+    return await list_registered_models(db, context.workspace.id, limit, offset)
 
 
 @router.post(

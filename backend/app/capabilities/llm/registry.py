@@ -29,6 +29,7 @@ from app.schemas.model import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
     ModelProviderCatalogResponse,
+    ModelTypeOptionResponse,
     RegisteredModelCreateRequest,
     RegisteredModelResponse,
     RegisteredModelUpdateRequest,
@@ -383,10 +384,13 @@ def list_provider_catalog(model_type: str | None = None) -> list[ModelProviderCa
     ]
 
 
-def list_model_types(provider: str) -> list[dict[str, str]]:
+def list_model_types(provider: str) -> list[ModelTypeOptionResponse]:
     entry = provider_catalog_entry(provider)
     labels = {"LLM": "LLM", "EMBEDDING": "Embedding", "RERANKER": "Rerank"}
-    return [{"key": labels[item], "value": item} for item in entry["model_types"]]
+    return [
+        ModelTypeOptionResponse(key=labels[item], value=item)
+        for item in entry["model_types"]
+    ]
 
 
 def list_base_models(provider: str, model_type: str) -> list[BaseModelOptionResponse]:
@@ -401,8 +405,18 @@ def get_model_credential_form(provider: str) -> list[ModelCredentialFieldRespons
     return [ModelCredentialFieldResponse(**field) for field in credential_fields(entry)]
 
 
-async def list_registered_models(db: AsyncSession, workspace_id: str) -> list[RegisteredModelResponse]:
-    models = await model_repository.list_registered_models(db, workspace_id)
+async def list_registered_models(
+    db: AsyncSession,
+    workspace_id: str,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[RegisteredModelResponse]:
+    models = await model_repository.list_registered_models(
+        db,
+        workspace_id,
+        limit,
+        offset,
+    )
     return [model_to_response(item) for item in models]
 
 

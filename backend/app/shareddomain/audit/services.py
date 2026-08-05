@@ -49,8 +49,12 @@ def audit_log_to_response(log: AuditLog) -> AuditLogResponse:
     )
 
 
-async def list_audit_logs(db: AsyncSession, limit: int) -> list[AuditLogResponse]:
-    logs = await audit_repository.list_audit_logs(db, limit)
+async def list_audit_logs(
+    db: AsyncSession,
+    limit: int,
+    offset: int = 0,
+) -> list[AuditLogResponse]:
+    logs = await audit_repository.list_audit_logs(db, limit, offset)
     return [audit_log_to_response(item) for item in logs]
 
 
@@ -58,6 +62,12 @@ async def list_workspace_audit_logs(
     db: AsyncSession,
     workspace_id: str,
     limit: int,
+    offset: int = 0,
 ) -> list[AuditLogResponse]:
-    logs = await audit_repository.list_workspace_audit_logs(db, workspace_id, limit)
+    logs = await audit_repository.list_workspace_audit_logs(
+        db,
+        workspace_id,
+        limit,
+        offset,
+    )
     return [audit_log_to_response(item) for item in logs]

@@ -128,8 +128,16 @@ async def list_knowledge_document_chunks(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     document: KnowledgeDocument,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[KnowledgeDocumentChunkResponse]:
-    chunks = await knowledge_base_repository.list_document_chunks(db, knowledge_base, document.id)
+    chunks = await knowledge_base_repository.list_document_chunks(
+        db,
+        knowledge_base,
+        document.id,
+        limit,
+        offset,
+    )
     return [chunk_to_response(chunk) for chunk in chunks]
 
 
@@ -137,11 +145,15 @@ async def list_knowledge_tasks(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     document: KnowledgeDocument | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[KnowledgeTaskResponse]:
     tasks = await knowledge_base_repository.list_knowledge_tasks(
         db,
         knowledge_base,
         document.id if document else None,
+        limit,
+        offset,
     )
     return [task_to_response(task) for task in tasks]
 

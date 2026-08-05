@@ -96,7 +96,8 @@ async def list_agent_runs(
     workspace_id: str,
     agent_id: str,
     actor: User,
-    limit: int = 20,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[AgentRunResponse]:
     await get_agent(db, workspace_id, agent_id)
     return [
@@ -106,6 +107,7 @@ async def list_agent_runs(
             agent_id,
             actor.id,
             limit,
+            offset,
         )
     ]
 

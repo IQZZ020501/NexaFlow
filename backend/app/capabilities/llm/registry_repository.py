@@ -7,11 +7,15 @@ from app.capabilities.llm.models import RegisteredModel
 async def list_registered_models(
     db: AsyncSession,
     workspace_id: str,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[RegisteredModel]:
     result = await db.scalars(
         select(RegisteredModel)
         .where(RegisteredModel.workspace_id == workspace_id)
-        .order_by(RegisteredModel.created_at)
+        .order_by(RegisteredModel.created_at.desc(), RegisteredModel.id.desc())
+        .limit(limit)
+        .offset(offset)
     )
     return list(result.all())
 

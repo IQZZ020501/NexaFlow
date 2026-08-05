@@ -944,7 +944,7 @@ def main() -> None:
 
         split_content = b" Legacy split content\n\nSecond paragraph "
         split_document = client.post(
-            f"/api/v1/workspace/{default_workspace_id}/knowledge/{knowledge_base_id}/document/split",
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/split"),
             headers=auth_headers(alice_token),
             data={
                 "security_levels": json.dumps(
@@ -956,7 +956,7 @@ def main() -> None:
             },
             files=[("file", ("split-guide.txt", split_content, "text/plain"))],
         )
-        assert split_document.status_code == 200, split_document.text
+        assert split_document.status_code == 201, split_document.text
         split_payload = split_document.json()[0]
         split_document_id = split_payload["source_file_id"]
         assert split_payload["name"] == "split-guide.txt"
@@ -964,8 +964,8 @@ def main() -> None:
         assert split_payload["content"][0]["content"] == "Legacy split content\nSecond paragraph"
         asyncio.run(assert_document_saved(split_document_id, split_content))
 
-        batch_created = client.put(
-            f"/api/v1/workspace/{default_workspace_id}/knowledge/{knowledge_base_id}/document/batch_create",
+        batch_created = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/batch-create"),
             headers=auth_headers(alice_token),
             json=[
                 {
@@ -976,7 +976,7 @@ def main() -> None:
                 }
             ],
         )
-        assert batch_created.status_code == 200, batch_created.text
+        assert batch_created.status_code == 201, batch_created.text
         assert batch_created.json()[0]["id"] == split_document_id
         assert batch_created.json()[0]["meta"]["source_file_id"] == split_document_id
         assert batch_created.json()[0]["meta"]["security_level"] == "INTERNAL"

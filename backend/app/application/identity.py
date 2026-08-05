@@ -142,8 +142,12 @@ async def user_to_response_with_scopes(db: AsyncSession, user: User) -> UserResp
     )
 
 
-async def list_users(db: AsyncSession) -> list[UserResponse]:
-    users = await user_repository.list_users(db)
+async def list_users(
+    db: AsyncSession,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[UserResponse]:
+    users = await user_repository.list_users(db, limit, offset)
     workspaces_by_user = await user_workspaces_by_user_id(db, users)
     teams_by_user = await user_teams_by_user_id(db, users)
     return [

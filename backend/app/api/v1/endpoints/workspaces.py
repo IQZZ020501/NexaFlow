@@ -46,8 +46,10 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 async def list_current_workspaces(
     user: Annotated[User, Depends(require_password_changed)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[WorkspaceResponse]:
-    return await list_workspaces(db, user)
+    return await list_workspaces(db, user, limit, offset)
 
 
 @router.post("", response_model=WorkspaceCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -94,8 +96,10 @@ async def delete_workspace(
 async def list_members(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[WorkspaceMemberResponse]:
-    return await list_workspace_members(db, context.workspace)
+    return await list_workspace_members(db, context.workspace, limit, offset)
 
 
 @router.post(
@@ -161,5 +165,6 @@ async def list_workspace_logs(
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[AuditLogResponse]:
-    return await list_workspace_audit_logs(db, context.workspace.id, limit)
+    return await list_workspace_audit_logs(db, context.workspace.id, limit, offset)

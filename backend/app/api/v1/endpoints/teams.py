@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.session import get_db
@@ -25,8 +25,10 @@ router = APIRouter(prefix="/workspaces/{workspace_id}/teams", tags=["teams"])
 async def list_workspace_teams(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[TeamResponse]:
-    return await list_teams(db, context.workspace.id)
+    return await list_teams(db, context.workspace.id, limit, offset)
 
 
 @router.post("", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)

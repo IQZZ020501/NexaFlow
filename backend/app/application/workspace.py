@@ -72,11 +72,21 @@ async def ensure_not_last_workspace_admin(
         )
 
 
-async def list_workspaces(db: AsyncSession, user: User) -> list[WorkspaceResponse]:
+async def list_workspaces(
+    db: AsyncSession,
+    user: User,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[WorkspaceResponse]:
     if user.is_global_admin:
-        workspaces = await workspace_repository.list_all_workspaces(db)
+        workspaces = await workspace_repository.list_all_workspaces(db, limit, offset)
     else:
-        workspaces = await workspace_repository.list_workspaces_for_user(db, user.id)
+        workspaces = await workspace_repository.list_workspaces_for_user(
+            db,
+            user.id,
+            limit,
+            offset,
+        )
     return [workspace_to_response(item) for item in workspaces]
 
 
@@ -209,10 +219,17 @@ async def update_workspace(
 async def list_workspace_members(
     db: AsyncSession,
     workspace: Workspace,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[WorkspaceMemberResponse]:
     return [
         workspace_member_to_response(membership, user)
-        for membership, user in await workspace_repository.list_workspace_member_rows(db, workspace.id)
+        for membership, user in await workspace_repository.list_workspace_member_rows(
+            db,
+            workspace.id,
+            limit,
+            offset,
+        )
     ]
 
 
