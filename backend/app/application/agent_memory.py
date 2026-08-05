@@ -3,9 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.repositories import agent as agent_repository
 from app.shareddomain.agents.models import AgentRun
 
-MAX_MEMORY_RUNS = 8
-MAX_MEMORY_TURN_CHARS = 600
-MAX_MEMORY_TOTAL_CHARS = 6000
+MAX_MEMORY_RUNS = 50
+MAX_MEMORY_TURN_CHARS = 6000
+MAX_MEMORY_TOTAL_CHARS = 60000
 
 
 def format_conversation_memory(runs: list[AgentRun]) -> str:
