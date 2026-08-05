@@ -39,6 +39,7 @@ from app.capabilities.llm.credentials import (
 )
 from app.capabilities.llm.models import RegisteredModel
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import ExternalServiceError
 
 MODEL_REQUEST_TIMEOUT_SECONDS = 20
 SUPPORTED_PROVIDER_TYPES = {
@@ -61,7 +62,7 @@ PROVIDER_EXCEPTIONS = (
 )
 
 
-class ModelProviderError(Exception):
+class ModelProviderError(ExternalServiceError):
     pass
 
 

@@ -1,6 +1,5 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-import logging
 import traceback
 
 from fastapi import FastAPI, Request
@@ -8,15 +7,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.api import api_router
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import classify_error, log_error
+from app.infrastructure.logger import get_logger, setup_logging
 from app.infrastructure.seed import seed_defaults
 from app.infrastructure.session import configure_database, get_session_factory
 from app.infrastructure.system_log import record_system_log
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env(require_bootstrap=False)
+    setup_logging(level=settings.log_level)
     configure_database(settings)
 
     @asynccontextmanager
@@ -43,7 +45,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             return await call_next(request)
         except Exception as exc:
-            logger.exception("Unhandled request error.")
+            log_error(
+                logger,
+                "Unhandled request error.",
+                exc,
+                path=request.url.path,
+                method=request.method,
+                status_code=500,
+            )
             forwarded_for = request.headers.get("x-forwarded-for", "")
             ip_address = forwarded_for.split(",", 1)[0].strip()
             if not ip_address and request.client:
@@ -60,12 +69,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         method=request.method,
                         status_code=500,
                         ip_address=ip_address or None,
-                        details={"exception_type": exc.__class__.__name__},
+                        details={
+                            "exception_type": exc.__class__.__name__,
+                            "source": classify_error(exc),
+                        },
                         stack_trace=traceback.format_exc(),
                     )
                     await db.commit()
-            except Exception:
-                logger.exception("Failed to record system log.")
+            except Exception as log_exc:
+                log_error(logger, "Failed to record system log.", log_exc)
             raise
 
     @app.middleware("http")

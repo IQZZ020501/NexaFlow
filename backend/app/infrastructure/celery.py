@@ -1,10 +1,12 @@
 from celery import Celery
 
 from app.infrastructure.config import Settings
+from app.infrastructure.logger import setup_logging
 
 
 def create_celery_app() -> Celery:
     settings = Settings.from_env(require_bootstrap=False)
+    setup_logging(level=settings.log_level)
     app = Celery(
         "app",
         broker=settings.celery_broker_url,

@@ -11,6 +11,8 @@ import httpx2
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
+from app.infrastructure.errors import ExternalServiceError
+
 MAX_MCP_TOOLS = 64
 MAX_MCP_TOOL_PAGES = 32
 MAX_MCP_RESULT_CHARS = 20_000
@@ -18,7 +20,7 @@ MAX_MCP_TOOL_DESCRIPTION_CHARS = 1_000
 MAX_MCP_TOOL_SCHEMA_CHARS = 20_000
 
 
-class McpClientError(RuntimeError):
+class McpClientError(ExternalServiceError):
     pass
 
 

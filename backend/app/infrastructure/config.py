@@ -49,6 +49,7 @@ class Settings:
     refresh_token_expires_days: int = 30
     cors_origins: tuple[str, ...] = ()
     environment: str = "development"
+    log_level: str = "INFO"
 
     @classmethod
     def from_env(cls, require_bootstrap: bool = True) -> "Settings":
@@ -91,6 +92,7 @@ class Settings:
             refresh_token_expires_days=int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30")),
             cors_origins=origins,
             environment=os.getenv("ENVIRONMENT", "development"),
+            log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         )
         settings.validate(require_bootstrap=require_bootstrap)
         return settings
@@ -119,6 +121,8 @@ class Settings:
             raise RuntimeError("CHROMA_PERSIST_DIR must be set in production.")
         if self.environment == "production" and self.celery_broker_url == DEFAULT_CELERY_BROKER_URL:
             raise RuntimeError("CELERY_BROKER_URL must be set in production.")
+        if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise RuntimeError(f"Invalid LOG_LEVEL: {self.log_level}.")
         if self.mcp_request_timeout_seconds <= 0:
             raise RuntimeError("MCP_REQUEST_TIMEOUT_SECONDS must be greater than zero.")
         if self.mcp_request_timeout_seconds > 300:

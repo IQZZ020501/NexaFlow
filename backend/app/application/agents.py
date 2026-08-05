@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import json
-import logging
 import re
 import traceback
 from collections.abc import AsyncIterator
@@ -23,6 +22,8 @@ from app.capabilities.mcp.client import McpClientError, call_mcp_tool
 from app.capabilities.rag.retrieval import query_knowledge_base
 from app.domain.user import User
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import classify_error, log_error
+from app.infrastructure.logger import get_logger
 from app.infrastructure.model_utils import new_id
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
@@ -58,7 +59,7 @@ MAX_RERANK_CONTEXT_HITS = 5
 MAX_KNOWLEDGE_HITS_PER_CALL = 8
 MAX_KNOWLEDGE_CONTENT_CHARS = 2000
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class KnowledgeSearchInput(BaseModel):
@@ -572,14 +573,14 @@ async def execute_agent_run(
         run.events = process_events
         run.status = "failed"
         run.last_error = safe_agent_error(exc)
-        logger.exception(
+        log_error(
+            logger,
             "Agent execution failed.",
-            extra={
-                "agent_id": run.agent_id,
-                "agent_run_id": run.id,
-                "trace_id": trace_id,
-                "workspace_id": run.workspace_id,
-            },
+            exc,
+            agent_id=run.agent_id,
+            agent_run_id=run.id,
+            trace_id=trace_id,
+            workspace_id=run.workspace_id,
         )
         try:
             async with get_session_factory()() as log_db:
@@ -595,14 +596,15 @@ async def execute_agent_run(
                         "agent_id": run.agent_id,
                         "agent_run_id": run.id,
                         "exception_type": exc.__class__.__name__,
+                        "source": classify_error(exc),
                         "trace_id": trace_id,
                         "workspace_id": run.workspace_id,
                     },
                     stack_trace="".join(traceback.format_exception(exc)),
                 )
                 await log_db.commit()
-        except Exception:
-            logger.exception("Failed to record agent execution error.")
+        except Exception as log_exc:
+            log_error(logger, "Failed to record agent execution error.", log_exc)
 
     run.finished_at = utc_now()
     if persist:
