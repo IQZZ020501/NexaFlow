@@ -644,9 +644,9 @@ export function KnowledgeUploadFlow({
   }
 
   return (
-    <div className="-mx-4 min-h-[calc(100svh-6.5rem)] border-y bg-muted/20 sm:-mx-6 lg:-mx-8">
-      <header className="border-b bg-background">
-        <div className="mx-auto flex w-full max-w-[90rem] items-center px-4 py-4 sm:px-6 lg:px-8">
+    <div className="-mx-4 flex min-h-[calc(100svh-6.5rem)] flex-col bg-muted/20 sm:-mx-6 lg:-mx-8">
+      <header>
+        <div className="mx-auto flex w-full max-w-[90rem] items-center px-4 py-1 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <Button
               type="button"
@@ -677,7 +677,7 @@ export function KnowledgeUploadFlow({
                 <div className="border-b px-5 py-4">
                   <SectionTitle
                     icon={UploadIcon}
-                    title={t("选择导入材料")}
+                    title={t("选择导入文件")}
                     description={t(
                       "文件会先上传暂存，确认分段效果后再进入向量化。",
                     )}
@@ -759,35 +759,37 @@ export function KnowledgeUploadFlow({
             </main>
           </div>
 
-          <div className="sticky bottom-0 z-10 border-t bg-background/95 px-4 py-3 shadow-sm sm:px-6 lg:px-8">
-            <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-muted-foreground">
-                {files.length
-                  ? t("已选择 {count} 个文件，合计 {size}", {
-                      count: files.length,
-                      size: formatBytes(selectedFileBytes),
-                    })
-                  : t("等待选择文件")}
-              </p>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={onCancel}>
-                  {t("取消")}
-                </Button>
-                <Button
-                  type="button"
-                  disabled={!files.length || isUploading}
-                  onClick={() => void handleUploadFiles()}
-                >
-                  {isUploading ? (
-                    <LoaderCircleIcon
-                      className="animate-spin"
-                      data-icon="inline-start"
-                    />
-                  ) : (
-                    <UploadIcon data-icon="inline-start" />
-                  )}
-                  {t("上传并继续")}
-                </Button>
+          <div className="sticky bottom-4 z-10 mt-auto">
+            <div className="mx-auto w-full max-w-[90rem] px-4 sm:px-6 lg:px-8">
+              <div className="flex flex-col gap-3 rounded-lg border bg-background/95 px-4 py-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  {files.length
+                    ? t("已选择 {count} 个文件，合计 {size}", {
+                        count: files.length,
+                        size: formatBytes(selectedFileBytes),
+                      })
+                    : t("等待选择文件")}
+                </p>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={onCancel}>
+                    {t("取消")}
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!files.length || isUploading}
+                    onClick={() => void handleUploadFiles()}
+                  >
+                    {isUploading ? (
+                      <LoaderCircleIcon
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <UploadIcon data-icon="inline-start" />
+                    )}
+                    {t("上传并继续")}
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -1011,44 +1013,46 @@ export function KnowledgeUploadFlow({
             </main>
           </div>
 
-          <div className="sticky bottom-0 z-10 border-t bg-background/95 px-4 py-3 shadow-sm sm:px-6 lg:px-8">
-            <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-muted-foreground">
-                {canStartIndex
-                  ? t("{documents} 个文档、{chunks} 个片段可入库", {
-                      documents: uploadedDocuments.length,
-                      chunks: totalChunks,
-                    })
-                  : hasStalePreview && totalChunks
-                    ? t("分段规则已修改，请重新生成预览后再入库")
-                    : t("生成预览并确认片段后才能入库")}
-              </p>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={onCancel}>
-                  {t("取消")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={onBackToFiles}
-                >
-                  {t("上一步")}
-                </Button>
-                <Button
-                  type="button"
-                  disabled={!canStartIndex || isIndexing}
-                  onClick={() => void handleStartImport()}
-                >
-                  {isIndexing ? (
-                    <LoaderCircleIcon
-                      className="animate-spin"
-                      data-icon="inline-start"
-                    />
-                  ) : (
-                    <CheckCircle2Icon data-icon="inline-start" />
-                  )}
-                  {t("开始入库")}
-                </Button>
+          <div className="sticky bottom-4 z-10 mt-auto">
+            <div className="mx-auto w-full max-w-[90rem] px-4 sm:px-6 lg:px-8">
+              <div className="flex flex-col gap-3 rounded-lg border bg-background/95 px-4 py-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  {canStartIndex
+                    ? t("{documents} 个文档、{chunks} 个片段可入库", {
+                        documents: uploadedDocuments.length,
+                        chunks: totalChunks,
+                      })
+                    : hasStalePreview && totalChunks
+                      ? t("分段规则已修改，请重新生成预览后再入库")
+                      : t("生成预览并确认片段后才能入库")}
+                </p>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={onCancel}>
+                    {t("取消")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onBackToFiles}
+                  >
+                    {t("上一步")}
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!canStartIndex || isIndexing}
+                    onClick={() => void handleStartImport()}
+                  >
+                    {isIndexing ? (
+                      <LoaderCircleIcon
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <CheckCircle2Icon data-icon="inline-start" />
+                    )}
+                    {t("开始入库")}
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

@@ -457,7 +457,7 @@ export const en = {
     "返回知识库": "Back to knowledge base",
     "选择 {value}": "Select {value}",
     "选择供应商": "Select provider",
-    "选择导入材料": "Select materials to import",
+    "选择导入文件": "Select files to import",
     "选择工作空间后管理可被应用和 Agent 调用的模型。": "Select a workspace to manage models available to apps and agents.",
     "选择所有文档": "Select all documents",
     "选择用户": "Select user",
