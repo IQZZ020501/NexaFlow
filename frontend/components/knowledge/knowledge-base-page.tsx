@@ -767,6 +767,7 @@ function KnowledgeBasePageContent({
         document.id,
         segmentMode === "smart"
           ? {
+              strategy: "hierarchical",
               chunk_size: SMART_CHUNK_SIZE,
               chunk_overlap: SMART_CHUNK_OVERLAP,
               cleaning_rules: SMART_CLEANING_RULES,
@@ -774,6 +775,7 @@ function KnowledgeBasePageContent({
               auto_index: true,
             }
           : {
+              strategy: "flat",
               chunk_size: chunkSize,
               chunk_overlap: chunkOverlap,
               cleaning_rules: cleaningRules,

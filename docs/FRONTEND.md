@@ -45,7 +45,7 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/components/knowledge/knowledge-upload-flow.tsx` — 上传流程（选文件→上传→分段预览）
 - `frontend/components/knowledge/knowledge-base-dialogs.tsx` — 新建/编辑/权限分配对话框
 - `frontend/components/knowledge/document-detail-page.tsx` — 文档详情：分段、任务、重新解析/向量化
-- `frontend/components/knowledge/chunk-preview-list.tsx` — 分段预览列表（高亮相邻重叠文本）
+- `frontend/components/knowledge/chunk-preview-list.tsx` — 分段预览列表（智能模式按 Parent 分组，高级模式平铺，高亮同 Parent 相邻重叠文本）
 - `frontend/components/knowledge/markdown-content.tsx` — react-markdown + GFM 渲染
 - `frontend/components/knowledge/status-badges.tsx` — 状态/权限徽章
 - `frontend/components/knowledge/status-labels.ts` — 状态中文标签与状态点样式映射

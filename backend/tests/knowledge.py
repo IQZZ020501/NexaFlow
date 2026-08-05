@@ -16,6 +16,7 @@ from app.shareddomain.knowledge.models import (
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
+    KnowledgeDocumentParentChunk,
     KnowledgeTask,
 )
 from app.api.v1.endpoints import knowledge as knowledge_api
@@ -23,6 +24,7 @@ from app.capabilities.rag import retrieval as knowledge_retrieval
 from app.capabilities.rag import vector_store as knowledge_vector_store
 from app.capabilities.embedding.pipeline import (
     KnowledgePipelineError,
+    build_hierarchical_chunks,
     clean_text,
     split_text,
 )
@@ -201,6 +203,12 @@ async def assert_document_deleted(document_id: str) -> None:
             select(KnowledgeDocumentChunk).where(KnowledgeDocumentChunk.document_id == document_id)
         )
         assert chunks.scalars().all() == []
+        parents = await db.execute(
+            select(KnowledgeDocumentParentChunk).where(
+                KnowledgeDocumentParentChunk.document_id == document_id
+            )
+        )
+        assert parents.scalars().all() == []
         assert not (test_settings().knowledge_storage_dir / document.storage_path).exists()
 
 
@@ -597,6 +605,185 @@ async def assert_query_aggregates_hybrid_hits(
     assert hits[1].distance == 0.05
 
 
+async def assert_hierarchical_chunks_persisted(
+    document_id: str,
+) -> tuple[list[str], list[str]]:
+    async with get_session_factory()() as db:
+        chunks = list(
+            await db.scalars(
+                select(KnowledgeDocumentChunk)
+                .where(KnowledgeDocumentChunk.document_id == document_id)
+                .order_by(KnowledgeDocumentChunk.chunk_index)
+            )
+        )
+        parents = list(
+            await db.scalars(
+                select(KnowledgeDocumentParentChunk)
+                .where(KnowledgeDocumentParentChunk.document_id == document_id)
+                .order_by(KnowledgeDocumentParentChunk.parent_index)
+            )
+        )
+        parents_by_id = {parent.id: parent for parent in parents}
+        assert [parent.title for parent in parents] == ["First", "Second"]
+        assert len(chunks) > len(parents)
+        assert all(chunk.parent_id in parents_by_id for chunk in chunks)
+        assert all(
+            parents_by_id[chunk.parent_id].content[
+                chunk.start_offset : chunk.end_offset
+            ]
+            == chunk.content
+            for chunk in chunks
+        )
+        return [chunk.id for chunk in chunks], [parent.id for parent in parents]
+
+
+async def assert_parent_scope_constraint(
+    knowledge_base_id: str,
+    document_id: str,
+    foreign_document_id: str,
+) -> None:
+    parent_scope = next(
+        constraint
+        for constraint in KnowledgeDocumentChunk.__table__.foreign_key_constraints
+        if constraint.name == "fk_knowledge_document_chunks_parent_scope"
+    )
+    assert tuple(parent_scope.column_keys) == (
+        "workspace_id",
+        "knowledge_base_id",
+        "document_id",
+        "parent_id",
+    )
+
+    async with get_session_factory()() as db:
+        await db.execute(text("PRAGMA foreign_keys=ON"))
+        knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
+        document = await db.get(KnowledgeDocument, document_id)
+        foreign_document = await db.get(KnowledgeDocument, foreign_document_id)
+        assert knowledge_base is not None
+        assert document is not None
+        assert foreign_document is not None
+
+        foreign_parent = KnowledgeDocumentParentChunk(
+            workspace_id=knowledge_base.workspace_id,
+            knowledge_base_id=knowledge_base.id,
+            document_id=foreign_document.id,
+            parent_index=0,
+            title="Foreign",
+            content="foreign",
+            char_count=7,
+            meta={},
+        )
+        db.add(foreign_parent)
+        await db.commit()
+        await db.refresh(foreign_parent)
+
+        db.add(
+            KnowledgeDocumentChunk(
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                document_id=document.id,
+                parent_id=foreign_parent.id,
+                chunk_index=999999,
+                start_offset=0,
+                end_offset=7,
+                content="foreign",
+                char_count=7,
+                token_count=1,
+                status="preview",
+            )
+        )
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            return
+    raise AssertionError("Cross-document parent association was allowed.")
+
+
+async def assert_hierarchical_retrieval(
+    knowledge_base_id: str,
+    document_id: str,
+) -> None:
+    original_query_vectors = knowledge_retrieval.query_vectors
+    original_query_keyword_chunk_ids = knowledge_repository.query_keyword_chunk_ids
+    original_build_registered_reranker = (
+        knowledge_retrieval.build_registered_reranker
+    )
+    reranked_documents: list[str] = []
+
+    async with get_session_factory()() as db:
+        knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
+        chunks = list(
+            await db.scalars(
+                select(KnowledgeDocumentChunk)
+                .where(KnowledgeDocumentChunk.document_id == document_id)
+                .order_by(KnowledgeDocumentChunk.chunk_index)
+            )
+        )
+        parents = list(
+            await db.scalars(
+                select(KnowledgeDocumentParentChunk)
+                .where(KnowledgeDocumentParentChunk.document_id == document_id)
+                .order_by(KnowledgeDocumentParentChunk.parent_index)
+            )
+        )
+        assert knowledge_base is not None
+        first_children = [chunk for chunk in chunks if chunk.parent_id == parents[0].id]
+        second_children = [chunk for chunk in chunks if chunk.parent_id == parents[1].id]
+        assert len(first_children) >= 2
+        assert second_children
+        candidates = [first_children[0], first_children[1], second_children[0]]
+
+        def fake_query_vectors(*args) -> list[VectorHit]:
+            assert args[-2:] == ("hierarchical query", 10)
+            return [
+                VectorHit(chunk_id=chunk.id, distance=index / 10)
+                for index, chunk in enumerate(candidates, start=1)
+            ]
+
+        async def fake_query_keyword_chunk_ids(*_args) -> list[str]:
+            return []
+
+        class FakeReranker:
+            def rerank(self, query: str, documents: list[str]) -> list[dict]:
+                assert query == "hierarchical query"
+                reranked_documents.extend(documents)
+                return [
+                    {"index": 2, "relevance_score": 1.0},
+                    {"index": 1, "relevance_score": 0.9},
+                    {"index": 0, "relevance_score": 0.8},
+                ]
+
+        knowledge_retrieval.query_vectors = fake_query_vectors
+        knowledge_repository.query_keyword_chunk_ids = fake_query_keyword_chunk_ids
+        knowledge_retrieval.build_registered_reranker = lambda *_args: FakeReranker()
+        try:
+            hits = await knowledge_retrieval.query_knowledge_base(
+                db,
+                knowledge_base,
+                KnowledgeQueryRequest(query="hierarchical query", limit=2),
+                test_settings(),
+            )
+        finally:
+            knowledge_retrieval.query_vectors = original_query_vectors
+            knowledge_repository.query_keyword_chunk_ids = (
+                original_query_keyword_chunk_ids
+            )
+            knowledge_retrieval.build_registered_reranker = (
+                original_build_registered_reranker
+            )
+
+    assert reranked_documents == [chunk.content for chunk in candidates]
+    assert [hit.parent_id for hit in hits] == [parents[1].id, parents[0].id]
+    assert hits[0].chunk_id == second_children[0].id
+    assert hits[1].chunk_id == first_children[1].id
+    assert len({hit.parent_id for hit in hits}) == len(hits)
+    assert all(len(hit.content) <= 2000 for hit in hits)
+    assert "SECOND" in hits[0].content and "FIRST" not in hits[0].content
+    assert "FIRST" in hits[1].content and "SECOND" not in hits[1].content
+    assert len(hits[1].content) == 2000
+
+
 async def assert_document_open_tasks_failed(
     knowledge_base_id: str,
     document_id: str,
@@ -621,6 +808,19 @@ async def assert_document_open_tasks_failed(
 
 def main() -> None:
     assert_vector_store_mmr_and_metadata()
+    hierarchical_drafts = build_hierarchical_chunks(
+        "# One\n\n```text\n# not a heading\n```\n\nBody\n\n# Two\n\nMore",
+        chunk_size=20,
+        overlap=5,
+    )
+    assert [parent.title for parent in hierarchical_drafts.parents] == ["One", "Two"]
+    assert all(
+        hierarchical_drafts.parents[chunk.parent_index].content[
+            chunk.start_offset : chunk.end_offset
+        ]
+        == chunk.content
+        for chunk in hierarchical_drafts.children
+    )
     assert split_text("甲。乙。丙。丁。", chunk_size=4, overlap=0, separator="。") == [
         "甲。乙。",
         "丙。丁。",
@@ -1358,6 +1558,7 @@ def main() -> None:
             files={
                 "file": ("preview-guide.txt", b"Preview synchronously", "text/plain"),
                 "auto_parse": (None, "false"),
+                "staged": (None, "true"),
             },
         )
         assert preview_document.status_code == 201, preview_document.text
@@ -1386,6 +1587,15 @@ def main() -> None:
         assert preview_tasks.status_code == 200, preview_tasks.text
         assert preview_tasks.json() == []
 
+        visible_preview_documents = client.get(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
+            headers=auth_headers(alice_token),
+        )
+        assert visible_preview_documents.status_code == 200, visible_preview_documents.text
+        assert preview_document_id not in {
+            item["id"] for item in visible_preview_documents.json()
+        }
+
         preview_document_list = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents?include_staged=true"),
             headers=auth_headers(alice_token),
@@ -1397,6 +1607,117 @@ def main() -> None:
             if item["id"] == preview_document_id
         )
         assert preview_status == "parsed"
+
+        preview_index = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{preview_document_id}/index",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert preview_index.status_code == 202, preview_index.text
+        visible_indexed_documents = client.get(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
+            headers=auth_headers(alice_token),
+        )
+        assert visible_indexed_documents.status_code == 200, visible_indexed_documents.text
+        assert preview_document_id in {
+            item["id"] for item in visible_indexed_documents.json()
+        }
+
+        first_parent_body = "\n\n".join(
+            f"FIRST paragraph {index} " + "alpha " * 40
+            for index in range(15)
+        )
+        second_parent_body = "SECOND " * 80
+        hierarchical_content = (
+            f"# First\n\n{first_parent_body}\n\n# Second\n\n{second_parent_body}"
+        ).encode()
+        hierarchical_document = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
+            headers=auth_headers(alice_token),
+            files={
+                "file": (
+                    "hierarchical-guide.md",
+                    hierarchical_content,
+                    "text/markdown",
+                ),
+                "auto_parse": (None, "false"),
+            },
+        )
+        assert hierarchical_document.status_code == 201, hierarchical_document.text
+        hierarchical_document_id = hierarchical_document.json()["id"]
+        hierarchical_preview = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{hierarchical_document_id}/preview",
+            ),
+            headers=auth_headers(alice_token),
+            json={
+                "strategy": "hierarchical",
+                "chunk_size": 400,
+                "chunk_overlap": 50,
+                "split_separator": "\n\n",
+                "cleaning_rules": [],
+            },
+        )
+        assert hierarchical_preview.status_code == 200, hierarchical_preview.text
+        assert {chunk["parent_title"] for chunk in hierarchical_preview.json()} == {
+            "First",
+            "Second",
+        }
+        assert all(
+            chunk["parent_id"]
+            and chunk["start_offset"] is not None
+            and chunk["end_offset"] is not None
+            for chunk in hierarchical_preview.json()
+        )
+        hierarchical_child_ids, hierarchical_parent_ids = asyncio.run(
+            assert_hierarchical_chunks_persisted(hierarchical_document_id)
+        )
+
+        hierarchical_index = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{hierarchical_document_id}/index",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert hierarchical_index.status_code == 202, hierarchical_index.text
+        vector_client = knowledge_vector_store._client(test_settings())
+        stored_hierarchical_ids = {
+            str(point.id)
+            for point in vector_client.retrieve(
+                knowledge_vector_store.vector_collection_name(knowledge_base_id),
+                ids=hierarchical_child_ids + hierarchical_parent_ids,
+            )
+        }
+        assert stored_hierarchical_ids == set(hierarchical_child_ids)
+        asyncio.run(
+            assert_hierarchical_retrieval(
+                knowledge_base_id,
+                hierarchical_document_id,
+            )
+        )
+        asyncio.run(
+            assert_parent_scope_constraint(
+                knowledge_base_id,
+                hierarchical_document_id,
+                preview_document_id,
+            )
+        )
+
+        deleted_hierarchical_document = client.delete(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{hierarchical_document_id}",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert (
+            deleted_hierarchical_document.status_code == 204
+        ), deleted_hierarchical_document.text
+        asyncio.run(assert_document_deleted(hierarchical_document_id))
 
         deleted_preview_document = client.delete(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{preview_document_id}"),

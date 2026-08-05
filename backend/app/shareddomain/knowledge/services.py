@@ -15,7 +15,11 @@ from app.infrastructure.model_utils import new_id
 from app.domain.user import User
 from app.application.identity import user_to_response
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
+from app.shareddomain.knowledge.models import (
+    DOCUMENT_STAGED_META_KEY,
+    KnowledgeBase,
+    KnowledgeDocument,
+)
 from app.capabilities.rag.vector_store import delete_vector_collection
 from app.schemas.knowledge import (
     KnowledgeBaseCreateRequest,
@@ -44,7 +48,11 @@ MAX_DOCUMENT_UPLOAD_BYTES = 20 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 KNOWLEDGE_BASE_STATUSES = {ACTIVE_STATUS, ARCHIVED_STATUS}
 RESOURCE_PERMISSIONS = {"view", "edit"}
-DEFAULT_DOCUMENT_META = {"allow_download": True, "security_level": "PUBLIC"}
+DEFAULT_DOCUMENT_META = {
+    "allow_download": True,
+    "security_level": "PUBLIC",
+    DOCUMENT_STAGED_META_KEY: False,
+}
 RESTRICTED_FILENAME_MARKERS = ("秘密", "机密", "绝密")
 
 
@@ -315,6 +323,8 @@ async def upload_knowledge_document(
     actor: User,
     settings: Settings,
     meta: dict[str, Any] | None = None,
+    *,
+    staged: bool = False,
 ) -> KnowledgeDocumentResponse:
     document_id = new_id()
     filename = clean_upload_filename(upload.filename)
@@ -329,7 +339,11 @@ async def upload_knowledge_document(
         content_type=upload.content_type or "application/octet-stream",
         size_bytes=size,
         storage_path=storage_path,
-        meta={**DEFAULT_DOCUMENT_META, **(meta or {})},
+        meta={
+            **DEFAULT_DOCUMENT_META,
+            **(meta or {}),
+            DOCUMENT_STAGED_META_KEY: staged,
+        },
         status=DOCUMENT_UPLOADED_STATUS,
         last_error=None,
         created_by_user_id=actor.id,

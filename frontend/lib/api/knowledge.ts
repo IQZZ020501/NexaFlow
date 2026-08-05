@@ -3,6 +3,8 @@ import type { User } from "@/lib/api/auth"
 
 export type { User } from "@/lib/api/auth"
 
+export type KnowledgeSegmentationStrategy = "flat" | "hierarchical"
+
 export type KnowledgeBase = {
   id: string
   workspace_id: string
@@ -29,6 +31,7 @@ export type KnowledgeDocument = {
   filename: string
   content_type: string
   size_bytes: number
+  meta: Record<string, unknown>
   status: string
   is_active: boolean
   chunk_count: number
@@ -43,7 +46,12 @@ export type KnowledgeDocumentChunk = {
   workspace_id: string
   knowledge_base_id: string
   document_id: string
+  parent_id: string | null
+  parent_title: string | null
+  parent_index: number | null
   chunk_index: number
+  start_offset: number | null
+  end_offset: number | null
   content: string
   char_count: number
   token_count: number
@@ -76,6 +84,9 @@ export type KnowledgeQueryHit = {
   chunk_id: string
   document_id: string
   document_filename: string
+  parent_id: string | null
+  parent_title: string | null
+  parent_index: number | null
   chunk_index: number
   content: string
   distance: number | null
@@ -189,11 +200,12 @@ export function uploadKnowledgeDocument(
   workspaceId: string,
   knowledgeBaseId: string,
   file: File,
-  options: { autoParse?: boolean } = {},
+  options: { autoParse?: boolean; staged?: boolean } = {},
 ) {
   const formData = new FormData()
   formData.append("file", file)
   formData.append("auto_parse", String(options.autoParse ?? true))
+  formData.append("staged", String(options.staged ?? false))
 
   return request<KnowledgeDocument>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents`,
@@ -211,6 +223,7 @@ export function parseKnowledgeDocument(
   knowledgeBaseId: string,
   documentId: string,
   payload?: {
+    strategy?: KnowledgeSegmentationStrategy
     chunk_size: number
     chunk_overlap: number
     split_separator?: string
@@ -234,6 +247,7 @@ export function previewKnowledgeDocument(
   knowledgeBaseId: string,
   documentId: string,
   payload?: {
+    strategy?: KnowledgeSegmentationStrategy
     chunk_size: number
     chunk_overlap: number
     split_separator?: string
@@ -325,16 +339,24 @@ export async function downloadKnowledgeDocument(
   URL.revokeObjectURL(url)
 }
 
-export function listKnowledgeDocumentChunks(
+export async function listKnowledgeDocumentChunks(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
   documentId: string,
 ) {
-  return request<KnowledgeDocumentChunk[]>(
-    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/chunks`,
-    { token },
-  )
+  const chunks: KnowledgeDocumentChunk[] = []
+  const limit = 200
+  while (true) {
+    const page = await request<KnowledgeDocumentChunk[]>(
+      `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/chunks?limit=${limit}&offset=${chunks.length}`,
+      { token },
+    )
+    chunks.push(...page)
+    if (page.length < limit) {
+      return chunks
+    }
+  }
 }
 
 export function listKnowledgeTasks(

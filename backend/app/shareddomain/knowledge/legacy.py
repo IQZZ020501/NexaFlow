@@ -7,6 +7,7 @@ from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
 from app.domain.user import User
 from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeDocument
+from app.capabilities.embedding.pipeline import build_flat_chunks
 from app.capabilities.rag.vector_store import delete_vectors
 from app.shareddomain.knowledge.orchestration import (
     DOCUMENT_PARSED_STATUS,
@@ -86,7 +87,7 @@ async def batch_create_knowledge_documents(
                 db,
                 knowledge_base,
                 document,
-                chunk_contents,
+                build_flat_chunks(chunk_contents),
             )
         )
         document.filename = clean_upload_filename(item.name)
