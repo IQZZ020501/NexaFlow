@@ -22,6 +22,8 @@ import logging
 import sys
 from typing import Any, Literal
 
+from app.infrastructure.logger import render_context
+
 ErrorSource = Literal["internal", "external"]
 
 _INTERNAL_MODULE_PREFIX = "app."
@@ -71,6 +73,7 @@ def log_error(
     ``key=value`` pairs after the message.
     """
     source = source or classify_error(exc)
-    parts = [f"{key}={value}" for key, value in context.items()]
-    context_text = f" [{' '.join(parts)}]" if parts else ""
-    logger.error(f"{message} [source={source}]{context_text}", exc_info=exc)
+    logger.error(
+        f"{message} [source={source}]{render_context(context)}",
+        exc_info=exc,
+    )

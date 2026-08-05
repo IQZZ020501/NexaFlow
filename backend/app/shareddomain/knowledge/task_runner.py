@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import timedelta
@@ -8,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import log_error
+from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.session import get_session_factory
 from app.domain.user import User
@@ -53,6 +56,8 @@ from app.shareddomain.knowledge.services import RESOURCE_TYPE
 from app.capabilities.llm.models import RegisteredModel
 
 # ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
+logger = get_logger(__name__)
+
 TASK_LEASE_SECONDS = 300
 TASK_LEASE_RENEW_SECONDS = 30
 TASK_RUN_BUSY = "busy"
@@ -365,6 +370,16 @@ async def run_knowledge_task(
             task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
             assert task is not None
             knowledge_base, actor, document = await get_task_scope(db, task)
+            log_event(
+                logger,
+                logging.INFO,
+                "Knowledge task started.",
+                task_id=task.id,
+                task_type=task.task_type,
+                knowledge_base_id=task.knowledge_base_id,
+                document_id=task.document_id or "",
+                worker_task_id=worker_task_id,
+            )
             if task.task_type == TASK_PARSE:
                 assert document is not None
                 await run_parse_task(
@@ -422,6 +437,15 @@ async def run_knowledge_task(
                 and parse_task_options_from_task(task)["auto_index"]
             )
             await db.commit()
+            log_event(
+                logger,
+                logging.INFO,
+                "Knowledge task succeeded.",
+                task_id=task.id,
+                task_type=task.task_type,
+                worker_task_id=worker_task_id,
+                duration_ms=round((utc_now() - started_at).total_seconds() * 1000),
+            )
             if should_chain_index:
                 try:
                     index_task = await enqueue_index_knowledge_document(
@@ -438,6 +462,13 @@ async def run_knowledge_task(
                     await db.commit()
         except Exception as exc:
             await db.rollback()
+            log_error(
+                logger,
+                "Knowledge task failed.",
+                exc,
+                task_id=task_id,
+                worker_task_id=worker_task_id,
+            )
             await mark_knowledge_task_failed(
                 db,
                 task_id,

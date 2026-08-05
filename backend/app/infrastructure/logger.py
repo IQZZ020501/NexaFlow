@@ -9,6 +9,7 @@ or from an upstream service (`external`).
 
 import logging
 import sys
+from typing import Any
 
 PROJECT_NAME = "NexaFlow"
 
@@ -53,3 +54,24 @@ def get_logger(name: str = "") -> logging.Logger:
     log aggregators and makes the origin explicit on each line.
     """
     return logging.getLogger(f"{PROJECT_NAME}.{name}".rstrip("."))
+
+
+def render_context(context: dict[str, Any]) -> str:
+    """Render key=value pairs for structured log lines."""
+    parts = [f"{key}={value}" for key, value in context.items()]
+    return f" [{' '.join(parts)}]" if parts else ""
+
+
+def log_event(
+    logger: logging.Logger,
+    level: int,
+    message: str,
+    **context: Any,
+) -> None:
+    """Log a structured event with key=value context pairs.
+
+    Companion to ``app.infrastructure.errors.log_error`` for non-error
+    events: every line carries the project tag and greppable context, e.g.
+    ``Knowledge task started. [task_id=abc task_type=parse]``.
+    """
+    logger.log(level, f"{message}{render_context(context)}")

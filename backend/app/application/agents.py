@@ -1,7 +1,9 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
+import time
 import traceback
 from collections.abc import AsyncIterator
 from typing import Any
@@ -23,7 +25,7 @@ from app.capabilities.rag.retrieval import query_knowledge_base
 from app.domain.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import classify_error, log_error
-from app.infrastructure.logger import get_logger
+from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.model_utils import new_id
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
@@ -520,7 +522,18 @@ async def execute_agent_run(
             await on_event(event)
 
     trace_id = new_id()
+    started_at = time.perf_counter()
     try:
+        log_event(
+            logger,
+            logging.INFO,
+            "Agent run started.",
+            agent_id=run.agent_id,
+            agent_run_id=run.id,
+            trace_id=trace_id,
+            model_id=getattr(model, "id", ""),
+            goal=run.goal[:120],
+        )
         chat_model = build_registered_chat_model(model, settings)
         knowledge_bases = await accessible_agent_knowledge_bases(
             db,
@@ -569,6 +582,15 @@ async def execute_agent_run(
         run.result = result.content
         run.events = process_events if on_event else result.events
         run.status = "succeeded"
+        log_event(
+            logger,
+            logging.INFO,
+            "Agent run succeeded.",
+            agent_id=run.agent_id,
+            agent_run_id=run.id,
+            trace_id=trace_id,
+            duration_ms=round((time.perf_counter() - started_at) * 1000),
+        )
     except Exception as exc:
         run.events = process_events
         run.status = "failed"

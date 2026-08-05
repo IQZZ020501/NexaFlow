@@ -12,7 +12,7 @@ from app.infrastructure.errors import (
     classify_error,
     log_error,
 )
-from app.infrastructure.logger import get_logger, setup_logging
+from app.infrastructure.logger import get_logger, log_event, setup_logging
 
 
 class _UpstreamFailure(ExternalServiceError):
@@ -80,11 +80,27 @@ def test_log_error_format() -> None:
     assert "| NexaFlow | NexaFlow.tests | upstream down [source=external] [service=openai]" in output
 
 
+def test_log_event_format() -> None:
+    setup_logging()
+    handler = logging.getLogger().handlers[0]
+    stream = io.StringIO()
+    handler.setStream(stream)
+
+    logger = get_logger("tests")
+    log_event(logger, logging.INFO, "job started", task_id="t1", worker="w2")
+    log_event(logger, logging.WARNING, "lease busy", task_id="t1")
+
+    output = stream.getvalue()
+    assert "| NexaFlow | NexaFlow.tests | job started [task_id=t1 worker=w2]" in output
+    assert "| NexaFlow | NexaFlow.tests | lease busy [task_id=t1]" in output
+
+
 def main() -> None:
     test_setup_logging_idempotent()
     test_get_logger_project_prefix()
     test_classify_error()
     test_log_error_format()
+    test_log_event_format()
     print("logger tests passed")
 
 

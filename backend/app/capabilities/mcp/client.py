@@ -1,7 +1,9 @@
 import asyncio
 import ipaddress
 import json
+import logging
 import socket
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -11,7 +13,10 @@ import httpx2
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
-from app.infrastructure.errors import ExternalServiceError
+from app.infrastructure.errors import ExternalServiceError, log_error
+from app.infrastructure.logger import get_logger, log_event
+
+logger = get_logger(__name__)
 
 MAX_MCP_TOOLS = 64
 MAX_MCP_TOOL_PAGES = 32
@@ -109,6 +114,7 @@ async def mcp_client(
     except McpClientError:
         raise
     except Exception as exc:
+        log_error(logger, "MCP server request failed.", exc, url=url)
         raise McpClientError("MCP server request failed.") from exc
 
 
@@ -165,6 +171,13 @@ async def discover_mcp_tools(
                 break
         else:
             raise McpClientError("MCP server returned too many tool pages.")
+    log_event(
+        logger,
+        logging.INFO,
+        "MCP tool discovery completed.",
+        tool_count=len(discovered),
+        url=url,
+    )
     return discovered
 
 
@@ -176,6 +189,7 @@ async def call_mcp_tool(
     allow_private_networks: bool,
     timeout_seconds: float,
 ) -> tuple[str, bool]:
+    started_at = time.perf_counter()
     async with mcp_client(
         url,
         bearer_token,
@@ -197,4 +211,12 @@ async def call_mcp_tool(
     content = json.dumps(payload, ensure_ascii=False)
     if len(content) > MAX_MCP_RESULT_CHARS:
         content = content[:MAX_MCP_RESULT_CHARS] + "\n[truncated]"
+    log_event(
+        logger,
+        logging.INFO,
+        "MCP tool call completed.",
+        tool_name=tool_name,
+        is_error=bool(result.is_error),
+        duration_ms=round((time.perf_counter() - started_at) * 1000),
+    )
     return content, bool(result.is_error)
