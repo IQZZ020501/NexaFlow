@@ -1242,7 +1242,7 @@ function PreviewPane({ document }: { document: UploadedDocument | null }) {
           {documentStatusLabel(document.status, t)}
         </Badge>
       </div>
-      <ChunkPreviewList chunks={document.chunks} />
+      <ChunkPreviewList chunks={document.chunks} fileName={document.filename} />
     </div>
   )
 }

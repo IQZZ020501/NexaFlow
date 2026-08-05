@@ -41,8 +41,10 @@ function createLeadingTextRange(root: HTMLElement, charCount: number) {
 
 export function ChunkPreviewList({
   chunks,
+  fileName,
 }: {
   chunks: KnowledgeDocumentChunk[]
+  fileName: string
 }) {
   const previewRef = React.useRef<HTMLDivElement>(null)
   const overlapLengths = React.useMemo(
@@ -100,8 +102,8 @@ export function ChunkPreviewList({
               className="overflow-hidden rounded-lg border bg-background"
             >
               <div className="flex items-center justify-between gap-3 border-b bg-muted/20 px-4 py-2">
-                <h3 className="truncate text-sm font-semibold text-foreground">
-                  分段 {chunk.chunk_index + 1}
+                <h3 className="truncate text-sm font-semibold text-foreground" title={fileName}>
+                  {fileName}
                 </h3>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                   {overlapLength ? (

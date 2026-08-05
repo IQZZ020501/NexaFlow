@@ -271,7 +271,7 @@ function DocumentDetailPageContent({
             <p>{document.last_error ?? t("解析失败")}</p>
           </div>
         ) : chunks.length ? (
-          <ChunkPreviewList chunks={chunks} />
+          <ChunkPreviewList chunks={chunks} fileName={document.filename} />
         ) : (
           <div className="flex min-h-72 flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 text-center text-sm text-muted-foreground">
             {isPending ? (
