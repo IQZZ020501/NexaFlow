@@ -68,6 +68,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 logger.exception("Failed to record system log.")
             raise
 
+    @app.middleware("http")
+    async def prevent_api_caching(request: Request, call_next):
+        # API responses are authenticated and tenant-scoped: they must never
+        # be stored by browsers or shared caches (RFC 9111 heuristic caching
+        # would otherwise apply to GET responses without Cache-Control).
+        # Endpoints that opt into their own policy (e.g. the agent NDJSON
+        # stream sets `Cache-Control: no-cache`) are left untouched.
+        response = await call_next(request)
+        if (
+            request.url.path.startswith("/api/")
+            and "cache-control" not in response.headers
+        ):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}

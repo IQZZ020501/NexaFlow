@@ -27,6 +27,7 @@ def main() -> None:
             json={"username": "admin", "password": "NexaFlow@123."},
         )
         assert login.status_code == 200, login.text
+        assert login.headers.get("cache-control") == "no-store"
 
         me = client.get(
             "/api/v1/auth/me",
@@ -34,6 +35,7 @@ def main() -> None:
         )
         assert me.status_code == 200, me.text
         assert me.json()["user"]["username"] == "admin"
+        assert me.headers.get("cache-control") == "no-store"
 
         unknown = client.get("/no-such-route")
         assert unknown.status_code == 404, unknown.text
