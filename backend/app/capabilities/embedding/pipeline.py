@@ -1,3 +1,5 @@
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from markitdown import MarkItDown, StreamInfo
@@ -6,12 +8,43 @@ from app.shareddomain.knowledge.models import KnowledgeDocument
 
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150
+PARENT_CHUNK_SIZE = CHUNK_SIZE * 4
 EMBED_BATCH_SIZE = 64
 MARKITDOWN = MarkItDown(enable_plugins=False)
 SPLIT_SEPARATORS = frozenset({"\n\n", "\n", "。", "."})
 SUPPORTED_DOCUMENT_EXTENSIONS = frozenset(
     {".docx", ".md", ".markdown", ".pdf", ".txt"}
 )
+MARKDOWN_HEADING_PATTERN = re.compile(
+    r"^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$"
+)
+
+
+@dataclass(frozen=True)
+class TextSpan:
+    content: str
+    start_offset: int
+    end_offset: int
+
+
+@dataclass(frozen=True)
+class ParentChunkDraft:
+    title: str
+    content: str
+
+
+@dataclass(frozen=True)
+class ChildChunkDraft:
+    content: str
+    parent_index: int | None = None
+    start_offset: int | None = None
+    end_offset: int | None = None
+
+
+@dataclass(frozen=True)
+class DocumentChunkDrafts:
+    parents: list[ParentChunkDraft]
+    children: list[ChildChunkDraft]
 
 
 def normalize_text(text: str) -> str:
@@ -71,7 +104,19 @@ def split_text(
     overlap: int = CHUNK_OVERLAP,
     separator: str = "\n\n",
 ) -> list[str]:
-    chunks: list[str] = []
+    return [
+        span.content
+        for span in split_text_spans(text, chunk_size, overlap, separator)
+    ]
+
+
+def split_text_spans(
+    text: str,
+    chunk_size: int = CHUNK_SIZE,
+    overlap: int = CHUNK_OVERLAP,
+    separator: str = "\n\n",
+) -> list[TextSpan]:
+    chunks: list[TextSpan] = []
     start = 0
     text_length = len(text)
 
@@ -88,9 +133,17 @@ def split_text(
                 if split_at > start:
                     end = split_at
 
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
+        raw_chunk = text[start:end]
+        content_start = start + len(raw_chunk) - len(raw_chunk.lstrip())
+        content_end = end - (len(raw_chunk) - len(raw_chunk.rstrip()))
+        if content_start < content_end:
+            chunks.append(
+                TextSpan(
+                    content=text[content_start:content_end],
+                    start_offset=content_start,
+                    end_offset=content_end,
+                )
+            )
         if end >= text_length:
             break
 
@@ -102,6 +155,84 @@ def split_text(
         start = next_start
 
     return chunks
+
+
+def split_parent_chunks(
+    text: str,
+    max_size: int = PARENT_CHUNK_SIZE,
+) -> list[ParentChunkDraft]:
+    sections: list[tuple[str, str]] = []
+    section_start = 0
+    section_title = ""
+    offset = 0
+    fence_marker: str | None = None
+
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        marker = "```" if stripped.startswith("```") else "~~~" if stripped.startswith("~~~") else None
+        if fence_marker is not None:
+            if marker == fence_marker:
+                fence_marker = None
+            offset += len(line)
+            continue
+        if marker is not None:
+            fence_marker = marker
+            offset += len(line)
+            continue
+
+        heading = MARKDOWN_HEADING_PATTERN.match(line.rstrip("\r\n"))
+        if heading is not None:
+            content = text[section_start:offset].strip()
+            if content:
+                sections.append((section_title, content))
+            section_start = offset
+            section_title = heading.group(1).strip()
+        offset += len(line)
+
+    content = text[section_start:].strip()
+    if content:
+        sections.append((section_title, content))
+
+    parents: list[ParentChunkDraft] = []
+    for title, section in sections:
+        parents.extend(
+            ParentChunkDraft(title=title, content=span.content)
+            for span in split_text_spans(section, max_size, 0, "\n\n")
+        )
+    return parents
+
+
+def build_hierarchical_chunks(
+    text: str,
+    chunk_size: int = CHUNK_SIZE,
+    overlap: int = CHUNK_OVERLAP,
+    separator: str = "\n\n",
+) -> DocumentChunkDrafts:
+    parents = split_parent_chunks(text)
+    children: list[ChildChunkDraft] = []
+    for parent_index, parent in enumerate(parents):
+        children.extend(
+            ChildChunkDraft(
+                content=span.content,
+                parent_index=parent_index,
+                start_offset=span.start_offset,
+                end_offset=span.end_offset,
+            )
+            for span in split_text_spans(
+                parent.content,
+                chunk_size,
+                overlap,
+                separator,
+            )
+        )
+    return DocumentChunkDrafts(parents=parents, children=children)
+
+
+def build_flat_chunks(contents: list[str]) -> DocumentChunkDrafts:
+    return DocumentChunkDrafts(
+        parents=[],
+        children=[ChildChunkDraft(content=content) for content in contents],
+    )
 
 
 def chunk_token_count(content: str) -> int:

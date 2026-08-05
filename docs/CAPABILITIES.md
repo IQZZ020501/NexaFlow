@@ -19,7 +19,7 @@
 ### rag/（向量检索）
 
 - `backend/app/capabilities/rag/vector_store.py` — Qdrant 向量库封装：collection 管理（并发创建竞态处理）、向量 upsert/查询/删除、结构化日志（`source=external` 分类）
-- `backend/app/capabilities/rag/retrieval.py` — 知识库检索：向量召回 + 关键词命中 RRF 融合排序
+- `backend/app/capabilities/rag/retrieval.py` — 知识库检索：Child 向量召回 + 关键词命中 RRF、可选 Child 重排、Parent 去重与预算内上下文扩展；平铺文档保持原聚合行为
 
 ### mcp/（MCP 客户端）
 
@@ -27,4 +27,4 @@
 
 ### embedding/（文档解析管道）
 
-- `backend/app/capabilities/embedding/pipeline.py` — 文档解析管道：MarkItDown 文本抽取、清洗、分块与 token 统计
+- `backend/app/capabilities/embedding/pipeline.py` — 文档解析管道：MarkItDown 文本抽取、清洗、平铺分块、Markdown 章节 Parent/Child 分块、精确字符偏移与 token 统计

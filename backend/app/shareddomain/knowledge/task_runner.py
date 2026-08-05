@@ -108,8 +108,8 @@ async def run_parse_task(
     ensure_knowledge_task_lease(lease_lost)
     vector_ids = await replace_document_chunks(db, knowledge_base, document, chunks)
 
-    task.total_items = len(chunks)
-    task.processed_items = len(chunks)
+    task.total_items = len(chunks.children)
+    task.processed_items = len(chunks.children)
     document.status = DOCUMENT_PARSED_STATUS
     document.last_error = None
     record_audit_log(
@@ -121,7 +121,7 @@ async def run_parse_task(
         document.filename,
         {
             "knowledge_base_id": knowledge_base.id,
-            "chunk_count": len(chunks),
+            "chunk_count": len(chunks.children),
             "task_id": task.id,
         },
         workspace_id=knowledge_base.workspace_id,

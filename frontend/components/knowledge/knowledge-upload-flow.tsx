@@ -67,6 +67,7 @@ const UNINDEXED_STATUSES: Record<string, true> = {
   parse_queued: true,
   parsing: true,
   parsed: true,
+  parse_failed: true,
 }
 const SUPPORTED_FILE_TYPES = [".docx", ".md", ".markdown", ".pdf", ".txt"]
 const SMART_CHUNK_SIZE = DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.chunkSize
@@ -170,6 +171,8 @@ export function KnowledgeUploadFlow({
     document.status.endsWith("_failed"),
   )
   const isPreviewRunning = isParsing || hasPendingParsing
+  const isNavigationLocked =
+    isUploading || isRefreshing || isPreviewRunning || isIndexing
   const isSegmentInvalid =
     segmentMode === "advanced" && chunkOverlap >= chunkSize
 
@@ -377,6 +380,10 @@ export function KnowledgeUploadFlow({
             knowledgeBase.id,
             document.id,
             {
+              strategy:
+                parseSettings.segmentMode === "smart"
+                  ? "hierarchical"
+                  : "flat",
               chunk_size: parseSettings.chunkSize,
               chunk_overlap: parseSettings.chunkOverlap,
               split_separator: parseSettings.splitSeparator,
@@ -450,15 +457,11 @@ export function KnowledgeUploadFlow({
     }
   }
 
-  async function handleCancel() {
-    if (isUploading) {
-      return
-    }
-
+  async function discardStagedDocuments() {
     const pendingDocuments = uploadedDocuments.filter((document) =>
-      document.status in UNINDEXED_STATUSES,
+      document.meta.staged === true && document.status in UNINDEXED_STATUSES,
     )
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       pendingDocuments.map((document) =>
         deleteKnowledgeDocument(
           token,
@@ -468,7 +471,34 @@ export function KnowledgeUploadFlow({
         ),
       ),
     )
+    const deletedIds = new Set(
+      pendingDocuments
+        .filter((_, index) => results[index]?.status === "fulfilled")
+        .map((document) => document.id),
+    )
+    setUploadedDocuments((current) =>
+      current.filter((document) => !deletedIds.has(document.id)),
+    )
+    const firstFailure = results.find((result) => result.status === "rejected")
+    if (firstFailure?.status === "rejected") {
+      reportError(firstFailure.reason)
+      return false
+    }
+    return true
+  }
+
+  async function handleCancel() {
+    if (isNavigationLocked || !(await discardStagedDocuments())) {
+      return
+    }
     onCancel()
+  }
+
+  async function handleBackToFiles() {
+    if (isNavigationLocked || !(await discardStagedDocuments())) {
+      return
+    }
+    onBackToFiles()
   }
 
   async function handleNext() {
@@ -509,6 +539,7 @@ export function KnowledgeUploadFlow({
       files.map((file) =>
         uploadKnowledgeDocument(token, workspaceId, knowledgeBase.id, file, {
           autoParse: false,
+          staged: true,
         }),
       ),
     )
@@ -521,10 +552,6 @@ export function KnowledgeUploadFlow({
     const firstFailure = results.find(
       (result) => result.status === "rejected",
     )
-    setFiles(
-      files.filter((_, index) => results[index]?.status === "rejected"),
-    )
-
     if (!documents.length) {
       if (firstFailure?.status === "rejected") {
         reportError(firstFailure.reason)
@@ -621,6 +648,7 @@ export function KnowledgeUploadFlow({
               variant="ghost"
               size="icon-sm"
               aria-label={t("返回知识库")}
+              disabled={isNavigationLocked}
               onClick={() => void handleCancel()}
             >
               <ArrowLeftIcon />
@@ -647,7 +675,7 @@ export function KnowledgeUploadFlow({
                     icon={UploadIcon}
                     title={t("选择导入文件")}
                     description={t(
-                      "文件会先上传暂存，确认分段效果后再进入向量化。",
+                      "先确认分段效果，点击开始导入后才会写入知识库。",
                     )}
                   />
                 </div>
@@ -742,7 +770,7 @@ export function KnowledgeUploadFlow({
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={isUploading}
+                    disabled={isNavigationLocked}
                     onClick={() => void handleCancel()}
                   >
                     {t("取消")}
@@ -1005,6 +1033,7 @@ export function KnowledgeUploadFlow({
                   <Button
                     type="button"
                     variant="outline"
+                    disabled={isNavigationLocked}
                     onClick={() => void handleCancel()}
                   >
                     {t("取消")}
@@ -1012,7 +1041,8 @@ export function KnowledgeUploadFlow({
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={onBackToFiles}
+                    disabled={isNavigationLocked}
+                    onClick={() => void handleBackToFiles()}
                   >
                     {t("上一步")}
                   </Button>

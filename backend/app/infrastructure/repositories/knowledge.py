@@ -7,9 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.model_utils import new_id, utc_now
 from app.domain.user import User
 from app.shareddomain.knowledge.models import (
+    DOCUMENT_STAGED_META_KEY,
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
+    KnowledgeDocumentParentChunk,
     KnowledgeTask,
 )
 from app.domain.resource_permission import ResourcePermission
@@ -102,7 +104,10 @@ async def list_knowledge_documents(
     )
     if not include_staged:
         statement = statement.where(
-            KnowledgeDocument.status.in_(VISIBLE_DOCUMENT_STATUSES)
+            KnowledgeDocument.status.in_(VISIBLE_DOCUMENT_STATUSES),
+            KnowledgeDocument.meta[DOCUMENT_STAGED_META_KEY]
+            .as_boolean()
+            .is_not(True),
         )
     statement = statement.order_by(
         KnowledgeDocument.created_at.desc(),
@@ -194,6 +199,23 @@ async def list_chunks_by_ids(
     return list(result)
 
 
+async def list_parent_chunks_by_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    parent_ids: set[str],
+) -> list[KnowledgeDocumentParentChunk]:
+    if not parent_ids:
+        return []
+    result = await db.scalars(
+        select(KnowledgeDocumentParentChunk).where(
+            KnowledgeDocumentParentChunk.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentParentChunk.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocumentParentChunk.id.in_(parent_ids),
+        )
+    )
+    return list(result)
+
+
 async def list_active_documents_by_ids(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
@@ -235,6 +257,11 @@ async def query_keyword_chunk_ids(
 
 async def delete_document_chunks(db: AsyncSession, document_id: str) -> None:
     await db.execute(delete(KnowledgeDocumentChunk).where(KnowledgeDocumentChunk.document_id == document_id))
+    await db.execute(
+        delete(KnowledgeDocumentParentChunk).where(
+            KnowledgeDocumentParentChunk.document_id == document_id
+        )
+    )
 
 
 async def list_knowledge_tasks(
@@ -466,6 +493,12 @@ async def delete_knowledge_base_graph(
         delete(KnowledgeDocumentChunk).where(
             KnowledgeDocumentChunk.workspace_id == knowledge_base.workspace_id,
             KnowledgeDocumentChunk.knowledge_base_id == knowledge_base.id,
+        )
+    )
+    await db.execute(
+        delete(KnowledgeDocumentParentChunk).where(
+            KnowledgeDocumentParentChunk.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentParentChunk.knowledge_base_id == knowledge_base.id,
         )
     )
     await db.execute(

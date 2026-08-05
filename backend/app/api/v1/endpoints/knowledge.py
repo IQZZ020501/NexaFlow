@@ -217,6 +217,7 @@ async def upload_workspace_knowledge_base_document(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
     auto_parse: Annotated[bool, Form()] = True,
+    staged: Annotated[bool, Form()] = False,
 ) -> KnowledgeDocumentResponse:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     await require_knowledge_base_permission(
@@ -232,6 +233,7 @@ async def upload_workspace_knowledge_base_document(
         file,
         context.user,
         settings,
+        staged=staged,
     )
     if not auto_parse:
         return uploaded

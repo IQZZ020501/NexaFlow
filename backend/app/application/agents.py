@@ -197,6 +197,7 @@ def build_knowledge_search_tool(
                 if (
                     knowledge_base.reranker_model_id is not None
                     and len(hits) > 0
+                    and all(hit.parent_id is None for hit in hits)
                 ):
                     try:
                         reranker_model = await get_knowledge_model(

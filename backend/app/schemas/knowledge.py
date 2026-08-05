@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -78,6 +78,7 @@ class KnowledgeDocumentStatusUpdateRequest(BaseModel):
 
 
 class KnowledgeDocumentParseRequest(BaseModel):
+    strategy: Literal["flat", "hierarchical"] = "flat"
     chunk_size: int = Field(default=1200, ge=100, le=8000)
     chunk_overlap: int = Field(default=150, ge=0, le=2000)
     split_separator: str = Field(default="\n\n", min_length=1, max_length=16)
@@ -90,7 +91,12 @@ class KnowledgeDocumentChunkResponse(BaseModel):
     workspace_id: str
     knowledge_base_id: str
     document_id: str
+    parent_id: str | None = None
+    parent_title: str | None = None
+    parent_index: int | None = None
     chunk_index: int
+    start_offset: int | None = None
+    end_offset: int | None = None
     content: str
     char_count: int
     token_count: int
@@ -159,6 +165,9 @@ class KnowledgeQueryHitResponse(BaseModel):
     chunk_id: str
     document_id: str
     document_filename: str
+    parent_id: str | None = None
+    parent_title: str | None = None
+    parent_index: int | None = None
     chunk_index: int
     content: str
     distance: float | None = None

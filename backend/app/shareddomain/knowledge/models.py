@@ -20,6 +20,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.infrastructure.base import Base
 from app.infrastructure.model_utils import new_id, utc_now
 
+DOCUMENT_STAGED_META_KEY = "staged"
+
 
 class KnowledgeBase(Base):
     __tablename__ = "knowledge"
@@ -64,6 +66,12 @@ class KnowledgeDocument(Base):
             ["knowledge.workspace_id", "knowledge.id"],
             name="fk_knowledge_documents_knowledge_workspace",
         ),
+        UniqueConstraint(
+            "workspace_id",
+            "knowledge_base_id",
+            "id",
+            name="uq_knowledge_documents_workspace_knowledge_id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -88,6 +96,51 @@ class KnowledgeDocument(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 
+class KnowledgeDocumentParentChunk(Base):
+    __tablename__ = "knowledge_document_parent_chunks"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id"],
+            ["knowledge.workspace_id", "knowledge.id"],
+            name="fk_knowledge_document_parent_chunks_knowledge_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "document_id"],
+            [
+                "knowledge_documents.workspace_id",
+                "knowledge_documents.knowledge_base_id",
+                "knowledge_documents.id",
+            ],
+            name="fk_knowledge_document_parent_chunks_document_scope",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "document_id",
+            "parent_index",
+            name="uq_knowledge_document_parent_chunks_document_index",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "knowledge_base_id",
+            "document_id",
+            "id",
+            name="uq_knowledge_document_parent_chunks_scope_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    parent_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    char_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    meta: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
 class KnowledgeDocumentChunk(Base):
     __tablename__ = "knowledge_document_chunks"
     __table_args__ = (
@@ -95,6 +148,26 @@ class KnowledgeDocumentChunk(Base):
             ["workspace_id", "knowledge_base_id"],
             ["knowledge.workspace_id", "knowledge.id"],
             name="fk_knowledge_document_chunks_knowledge_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "document_id"],
+            [
+                "knowledge_documents.workspace_id",
+                "knowledge_documents.knowledge_base_id",
+                "knowledge_documents.id",
+            ],
+            name="fk_knowledge_document_chunks_document_scope",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "document_id", "parent_id"],
+            [
+                "knowledge_document_parent_chunks.workspace_id",
+                "knowledge_document_parent_chunks.knowledge_base_id",
+                "knowledge_document_parent_chunks.document_id",
+                "knowledge_document_parent_chunks.id",
+            ],
+            name="fk_knowledge_document_chunks_parent_scope",
+            ondelete="CASCADE",
         ),
         UniqueConstraint(
             "document_id",
@@ -105,13 +178,22 @@ class KnowledgeDocumentChunk(Base):
             "status IN ('preview', 'indexed', 'index_failed')",
             name="ck_knowledge_document_chunks_status",
         ),
+        CheckConstraint(
+            "(parent_id IS NULL AND start_offset IS NULL AND end_offset IS NULL) OR "
+            "(parent_id IS NOT NULL AND start_offset IS NOT NULL AND end_offset IS NOT NULL "
+            "AND start_offset >= 0 AND end_offset > start_offset)",
+            name="ck_knowledge_document_chunks_parent_offsets",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
     knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     document_id: Mapped[str] = mapped_column(ForeignKey("knowledge_documents.id"), nullable=False, index=True)
+    parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     char_count: Mapped[int] = mapped_column(Integer, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
