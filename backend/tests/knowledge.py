@@ -21,14 +21,23 @@ from app.shareddomain.knowledge.models import (
 from app.api.v1.endpoints import knowledge as knowledge_api
 from app.capabilities.rag import retrieval as knowledge_retrieval
 from app.capabilities.rag import vector_store as knowledge_vector_store
-from app.capabilities.embedding.pipeline import clean_text, split_text
+from app.capabilities.embedding.pipeline import (
+    KnowledgePipelineError,
+    clean_text,
+    split_text,
+)
 from app.capabilities.rag.vector_store import VectorChunk, VectorHit
 from app.infrastructure.repositories import knowledge as knowledge_repository
 from app.shareddomain.knowledge.orchestration import (
+    DOCUMENT_DELETED_STATUS,
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
 )
-from app.shareddomain.knowledge.task_runner import recover_knowledge_tasks
+from app.shareddomain.knowledge.task_runner import (
+    mark_knowledge_task_failed,
+    recover_knowledge_tasks,
+    run_parse_task,
+)
 from app.tasks.knowledge import mark_task_dispatch_failed
 from app.schemas.knowledge import KnowledgeQueryRequest
 from tests.llm import ModelTestHandler, model_payload, model_test_server, models_url
@@ -208,6 +217,68 @@ async def enqueue_recoverable_parse_task(
         assert document is not None
         assert actor is not None
         await enqueue_parse_knowledge_document(db, knowledge_base, document, actor)
+
+
+async def assert_deleted_document_not_resurrected_by_parse_task(
+    knowledge_base_id: str,
+    document_id: str,
+    task_id: str,
+) -> None:
+    # 模拟 worker 已领取任务（running），随后文档在导入会话中被删除
+    async with get_session_factory()() as db:
+        document = await db.get(KnowledgeDocument, document_id)
+        task = await db.get(KnowledgeTask, task_id)
+        assert document is not None
+        assert task is not None
+        task.status = "running"
+        document.status = DOCUMENT_DELETED_STATUS
+        await db.commit()
+
+        aborted = False
+        caught: Exception | None = None
+        async with get_session_factory()() as db:
+            knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
+            document = await db.get(KnowledgeDocument, document_id)
+            task = await db.get(KnowledgeTask, task_id)
+            assert knowledge_base is not None
+            assert document is not None
+            assert task is not None
+            actor = await db.get(User, task.created_by_user_id)
+            assert actor is not None
+            try:
+                await run_parse_task(
+                    db,
+                    task,
+                    knowledge_base,
+                    document,
+                    actor,
+                    test_settings(),
+                    asyncio.Event(),
+                )
+            except KnowledgePipelineError as exc:
+                aborted = True
+                caught = exc
+            except Exception as exc:  # noqa: BLE001 - surface unexpected failures
+                caught = exc
+            await db.rollback()
+
+        assert caught is None or isinstance(
+            caught, KnowledgePipelineError
+        ), f"unexpected exception: {type(caught).__name__}: {caught}"
+        assert aborted, "parse task must abort when its document was deleted"
+        # run_knowledge_task 的收尾：任务标记失败（文档已删除时不改文档状态）
+        await mark_knowledge_task_failed(
+            db,
+            task_id,
+            "Knowledge document no longer exists.",
+        )
+    async with get_session_factory()() as db:
+        document = await db.get(KnowledgeDocument, document_id)
+        assert document is not None
+        assert document.status == DOCUMENT_DELETED_STATUS
+        task = await db.get(KnowledgeTask, task_id)
+        assert task is not None
+        assert task.status == "failed"
 
 
 async def enqueue_recoverable_rebuild_task(
@@ -1249,6 +1320,90 @@ def main() -> None:
         )
         assert empty_documents.status_code == 200, empty_documents.text
         assert empty_documents.json() == []
+
+        cancel_document = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
+            headers=auth_headers(alice_token),
+            files={
+                "file": ("cancel-guide.txt", b"Cancel flow document", "text/plain"),
+                "auto_parse": (None, "false"),
+            },
+        )
+        assert cancel_document.status_code == 201, cancel_document.text
+        cancel_document_id = cancel_document.json()["id"]
+        asyncio.run(
+            enqueue_recoverable_parse_task(
+                knowledge_base_id,
+                cancel_document_id,
+                "alice",
+            )
+        )
+        cancel_tasks = client.get(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{cancel_document_id}/tasks"),
+            headers=auth_headers(alice_token),
+        )
+        assert cancel_tasks.status_code == 200, cancel_tasks.text
+        cancel_task_id = cancel_tasks.json()[0]["id"]
+        asyncio.run(
+            assert_deleted_document_not_resurrected_by_parse_task(
+                knowledge_base_id,
+                cancel_document_id,
+                cancel_task_id,
+            )
+        )
+
+        preview_document = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
+            headers=auth_headers(alice_token),
+            files={
+                "file": ("preview-guide.txt", b"Preview synchronously", "text/plain"),
+                "auto_parse": (None, "false"),
+            },
+        )
+        assert preview_document.status_code == 201, preview_document.text
+        preview_document_id = preview_document.json()["id"]
+        assert preview_document.json()["status"] == "uploaded"
+
+        preview_chunks = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{preview_document_id}/preview"),
+            headers=auth_headers(alice_token),
+            json={
+                "chunk_size": 100,
+                "chunk_overlap": 0,
+                "split_separator": "\n",
+                "cleaning_rules": [],
+            },
+        )
+        assert preview_chunks.status_code == 200, preview_chunks.text
+        assert [chunk["content"] for chunk in preview_chunks.json()] == [
+            "Preview synchronously"
+        ]
+
+        preview_tasks = client.get(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{preview_document_id}/tasks"),
+            headers=auth_headers(alice_token),
+        )
+        assert preview_tasks.status_code == 200, preview_tasks.text
+        assert preview_tasks.json() == []
+
+        preview_document_list = client.get(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents?include_staged=true"),
+            headers=auth_headers(alice_token),
+        )
+        assert preview_document_list.status_code == 200, preview_document_list.text
+        preview_status = next(
+            item["status"]
+            for item in preview_document_list.json()
+            if item["id"] == preview_document_id
+        )
+        assert preview_status == "parsed"
+
+        deleted_preview_document = client.delete(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{preview_document_id}"),
+            headers=auth_headers(alice_token),
+        )
+        assert deleted_preview_document.status_code == 204, deleted_preview_document.text
+        asyncio.run(assert_document_deleted(preview_document_id))
         empty_query = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/query"),
             headers=auth_headers(alice_token),

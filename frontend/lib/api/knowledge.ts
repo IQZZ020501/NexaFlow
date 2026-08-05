@@ -228,6 +228,28 @@ export function parseKnowledgeDocument(
   )
 }
 
+export function previewKnowledgeDocument(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId: string,
+  payload?: {
+    chunk_size: number
+    chunk_overlap: number
+    split_separator?: string
+    cleaning_rules: string[]
+  },
+) {
+  return request<KnowledgeDocumentChunk[]>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/preview`,
+    {
+      method: "POST",
+      token,
+      body: payload ? JSON.stringify(payload) : undefined,
+    },
+  )
+}
+
 export function indexKnowledgeDocument(
   token: string,
   workspaceId: string,

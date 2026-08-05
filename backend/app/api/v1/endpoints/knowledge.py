@@ -43,6 +43,7 @@ from app.shareddomain.knowledge.orchestration import (
     get_knowledge_document,
     list_knowledge_document_chunks,
     list_knowledge_tasks,
+    preview_knowledge_document,
     retry_knowledge_task,
 )
 from app.infrastructure.repositories.knowledge import (
@@ -292,6 +293,37 @@ async def list_workspace_knowledge_document_tasks(
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)
     return await list_knowledge_tasks(db, knowledge_base, document, limit, offset)
+
+
+@router.post(
+    "/{knowledge_base_id}/documents/{document_id}/preview",
+    response_model=list[KnowledgeDocumentChunkResponse],
+)
+async def preview_workspace_knowledge_base_document(
+    knowledge_base_id: str,
+    document_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    payload: Annotated[KnowledgeDocumentParseRequest | None, Body()] = None,
+) -> list[KnowledgeDocumentChunkResponse]:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    document = await get_knowledge_document(db, knowledge_base, document_id)
+    return await preview_knowledge_document(
+        db,
+        knowledge_base,
+        document,
+        context.user,
+        settings,
+        payload or KnowledgeDocumentParseRequest(),
+    )
 
 
 @router.post(

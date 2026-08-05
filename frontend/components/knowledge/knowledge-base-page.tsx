@@ -1848,7 +1848,7 @@ function KnowledgeBasePageContent({
                           data-icon="inline-start"
                         />
                       ) : null}
-                      {t("开始入库")}
+                      {t("开始导入")}
                     </Button>
                   </DialogFooter>
                 </form>
