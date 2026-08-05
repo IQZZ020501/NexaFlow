@@ -96,6 +96,9 @@ async def run_parse_task(
     lease_lost: asyncio.Event,
 ) -> None:
     ensure_knowledge_task_lease(lease_lost)
+    await db.refresh(document)
+    if document.status == DOCUMENT_DELETED_STATUS:
+        raise KnowledgePipelineError("Knowledge document no longer exists.")
     document.status = DOCUMENT_PARSING_STATUS
     document.last_error = None
     await db.flush()
@@ -168,6 +171,9 @@ async def run_index_task(
 
     if task.task_type != TASK_REBUILD_INDEX:
         for chunk_document in documents.values():
+            await db.refresh(chunk_document)
+            if chunk_document.status == DOCUMENT_DELETED_STATUS:
+                raise KnowledgePipelineError("Knowledge chunk document is missing.")
             chunk_document.status = DOCUMENT_INDEXING_STATUS
             chunk_document.last_error = None
     task.total_items = len(chunks)
