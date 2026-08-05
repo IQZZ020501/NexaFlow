@@ -41,7 +41,8 @@ Correctness, safety, evidence, and validation take priority over speed.
 - Regression suites live in `backend/tests/` and run from `backend/` with
   `uv run python -m tests.<suite>`.
 - Knowledge parsing and indexing run through Celery with Redis; API and
-  worker instances must share `KNOWLEDGE_STORAGE_DIR` and `CHROMA_PERSIST_DIR`.
+  worker instances must share `KNOWLEDGE_STORAGE_DIR` and use the same
+  `QDRANT_URL`.
 - MCP tools use workspace-scoped Streamable HTTP Server registrations. Bearer
   tokens are encrypted, and private-network endpoints require
   `MCP_ALLOW_PRIVATE_NETWORKS=true`.

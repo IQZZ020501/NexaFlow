@@ -1,7 +1,7 @@
 # NexaFlow container deployment
 
-Runs the full stack with Docker Compose: PostgreSQL, Redis, FastAPI (`api`),
-Celery worker and beat, and the Next.js frontend.
+Runs the full stack with Docker Compose: PostgreSQL, Redis, Qdrant, FastAPI
+(`api`), Celery worker and beat, and the Next.js frontend.
 
 ## Quick start
 
@@ -19,22 +19,22 @@ docker compose -f deploy/docker-compose.yml up --build
 |---|---|---|
 | `db` | postgres:17-alpine | — |
 | `redis` | redis:7-alpine | — |
+| `qdrant` | qdrant/qdrant:v1.19.0 | vector database |
 | `api` | `deploy/dockerfiles/backend.Dockerfile` | uvicorn |
 | `worker` | same backend image | celery worker |
 | `beat` | same backend image | celery beat |
 | `frontend` | `deploy/dockerfiles/frontend.Dockerfile` | Next.js standalone |
 
-Persistent volumes: `db-data` (PostgreSQL), `redis-data`, and `uploads`
-(shared `KNOWLEDGE_STORAGE_DIR` / `CHROMA_PERSIST_DIR` for the API and
-worker).
+Persistent volumes: `db-data` (PostgreSQL), `redis-data`, `qdrant-data`, and
+`uploads` (shared `KNOWLEDGE_STORAGE_DIR` for the API and worker).
 
 ## Configuration
 
 All runtime configuration comes from `deploy/.env` (see `.env.example`).
 The compose file overrides `DATABASE_URL` and `CELERY_BROKER_URL` to point at
-the bundled services, and mounts the uploads volume for
-`KNOWLEDGE_STORAGE_DIR` / `CHROMA_PERSIST_DIR` — the API and worker must
-share both directories. `JWT_EXPIRES_MINUTES` controls access token lifetime;
+the bundled services, connects the API and worker to the bundled Qdrant through
+`QDRANT_URL`, and mounts the uploads volume for `KNOWLEDGE_STORAGE_DIR`.
+`JWT_EXPIRES_MINUTES` controls access token lifetime;
 `REFRESH_TOKEN_EXPIRES_DAYS` controls persisted refresh sessions.
 
 ## Split hosting with Nginx
