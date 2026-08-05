@@ -58,6 +58,39 @@ class KnowledgeBase(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 
+class KnowledgeAttachment(Base):
+    __tablename__ = "knowledge_attachments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id"],
+            ["knowledge.workspace_id", "knowledge.id"],
+            name="fk_knowledge_attachments_knowledge_workspace",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "knowledge_base_id",
+            "id",
+            name="uq_knowledge_attachments_scope_id",
+        ),
+        CheckConstraint(
+            "status IN ('available', 'consumed', 'deleted')",
+            name="ck_knowledge_attachments_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    object_key: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="available")
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
 class KnowledgeDocument(Base):
     __tablename__ = "knowledge_documents"
     __table_args__ = (
@@ -66,17 +99,28 @@ class KnowledgeDocument(Base):
             ["knowledge.workspace_id", "knowledge.id"],
             name="fk_knowledge_documents_knowledge_workspace",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "attachment_id"],
+            [
+                "knowledge_attachments.workspace_id",
+                "knowledge_attachments.knowledge_base_id",
+                "knowledge_attachments.id",
+            ],
+            name="fk_knowledge_documents_attachment_scope",
+        ),
         UniqueConstraint(
             "workspace_id",
             "knowledge_base_id",
             "id",
             name="uq_knowledge_documents_workspace_knowledge_id",
         ),
+        UniqueConstraint("attachment_id", name="uq_knowledge_documents_attachment"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
     knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    attachment_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(
         String(255),
@@ -92,6 +136,50 @@ class KnowledgeDocument(Base):
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class KnowledgeAsset(Base):
+    __tablename__ = "knowledge_assets"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "document_id"],
+            [
+                "knowledge_documents.workspace_id",
+                "knowledge_documents.knowledge_base_id",
+                "knowledge_documents.id",
+            ],
+            name="fk_knowledge_assets_document_scope",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "knowledge_base_id",
+            "document_id",
+            "id",
+            name="uq_knowledge_assets_scope_id",
+        ),
+        UniqueConstraint(
+            "document_id",
+            "asset_index",
+            name="uq_knowledge_assets_document_index",
+        ),
+        CheckConstraint("kind IN ('image')", name="ck_knowledge_assets_kind"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    asset_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="image")
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    object_key: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
+    alt_text: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    meta: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
@@ -174,6 +262,13 @@ class KnowledgeDocumentChunk(Base):
             "chunk_index",
             name="uq_knowledge_document_chunks_document_index",
         ),
+        UniqueConstraint(
+            "workspace_id",
+            "knowledge_base_id",
+            "document_id",
+            "id",
+            name="uq_knowledge_document_chunks_scope_id",
+        ),
         CheckConstraint(
             "status IN ('preview', 'indexed', 'index_failed')",
             name="ck_knowledge_document_chunks_status",
@@ -201,6 +296,45 @@ class KnowledgeDocumentChunk(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="preview")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class KnowledgeChunkAsset(Base):
+    __tablename__ = "knowledge_chunk_assets"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "document_id", "chunk_id"],
+            [
+                "knowledge_document_chunks.workspace_id",
+                "knowledge_document_chunks.knowledge_base_id",
+                "knowledge_document_chunks.document_id",
+                "knowledge_document_chunks.id",
+            ],
+            name="fk_knowledge_chunk_assets_chunk_scope",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "document_id", "asset_id"],
+            [
+                "knowledge_assets.workspace_id",
+                "knowledge_assets.knowledge_base_id",
+                "knowledge_assets.document_id",
+                "knowledge_assets.id",
+            ],
+            name="fk_knowledge_chunk_assets_asset_scope",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("chunk_id", "asset_id", name="uq_knowledge_chunk_assets_pair"),
+        UniqueConstraint("chunk_id", "asset_index", name="uq_knowledge_chunk_assets_order"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    chunk_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    asset_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    asset_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class KnowledgeTask(Base):

@@ -8,7 +8,10 @@ from app.infrastructure.model_utils import new_id, utc_now
 from app.domain.user import User
 from app.shareddomain.knowledge.models import (
     DOCUMENT_STAGED_META_KEY,
+    KnowledgeAsset,
+    KnowledgeAttachment,
     KnowledgeBase,
+    KnowledgeChunkAsset,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
@@ -18,6 +21,7 @@ from app.domain.resource_permission import ResourcePermission
 from app.domain.workspace import WorkspaceMembership
 
 VISIBLE_DOCUMENT_STATUSES = (
+    "uploaded",
     "parse_queued",
     "parsing",
     "parsed",
@@ -122,6 +126,95 @@ async def get_knowledge_document_by_id(
     document_id: str,
 ) -> KnowledgeDocument | None:
     return await db.get(KnowledgeDocument, document_id)
+
+
+async def get_knowledge_attachment_by_id(
+    db: AsyncSession,
+    attachment_id: str,
+) -> KnowledgeAttachment | None:
+    return await db.get(KnowledgeAttachment, attachment_id)
+
+
+async def lock_knowledge_attachments(
+    db: AsyncSession,
+    attachment_ids: list[str],
+) -> list[KnowledgeAttachment]:
+    result = await db.scalars(
+        select(KnowledgeAttachment)
+        .where(KnowledgeAttachment.id.in_(attachment_ids))
+        .with_for_update()
+    )
+    return list(result)
+
+
+async def list_document_assets(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_id: str,
+) -> list[KnowledgeAsset]:
+    result = await db.scalars(
+        select(KnowledgeAsset)
+        .where(
+            KnowledgeAsset.workspace_id == knowledge_base.workspace_id,
+            KnowledgeAsset.knowledge_base_id == knowledge_base.id,
+            KnowledgeAsset.document_id == document_id,
+        )
+        .order_by(KnowledgeAsset.asset_index, KnowledgeAsset.id)
+    )
+    return list(result)
+
+
+async def get_document_asset(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_id: str,
+    asset_id: str,
+) -> KnowledgeAsset | None:
+    return await db.scalar(
+        select(KnowledgeAsset).where(
+            KnowledgeAsset.workspace_id == knowledge_base.workspace_id,
+            KnowledgeAsset.knowledge_base_id == knowledge_base.id,
+            KnowledgeAsset.document_id == document_id,
+            KnowledgeAsset.id == asset_id,
+        )
+    )
+
+
+async def list_chunk_assets(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    chunk_ids: set[str],
+) -> list[tuple[KnowledgeChunkAsset, KnowledgeAsset]]:
+    if not chunk_ids:
+        return []
+    result = await db.execute(
+        select(KnowledgeChunkAsset, KnowledgeAsset)
+        .join(KnowledgeAsset, KnowledgeAsset.id == KnowledgeChunkAsset.asset_id)
+        .where(
+            KnowledgeChunkAsset.workspace_id == knowledge_base.workspace_id,
+            KnowledgeChunkAsset.knowledge_base_id == knowledge_base.id,
+            KnowledgeChunkAsset.chunk_id.in_(chunk_ids),
+        )
+        .order_by(KnowledgeChunkAsset.chunk_id, KnowledgeChunkAsset.asset_index)
+    )
+    return list(result.all())
+
+
+async def delete_document_assets(db: AsyncSession, document_id: str) -> list[str]:
+    object_keys = list(
+        await db.scalars(
+            select(KnowledgeAsset.object_key).where(
+                KnowledgeAsset.document_id == document_id
+            )
+        )
+    )
+    await db.execute(
+        delete(KnowledgeChunkAsset).where(
+            KnowledgeChunkAsset.document_id == document_id
+        )
+    )
+    await db.execute(delete(KnowledgeAsset).where(KnowledgeAsset.document_id == document_id))
+    return object_keys
 
 
 async def count_document_chunks(
@@ -256,6 +349,11 @@ async def query_keyword_chunk_ids(
 
 
 async def delete_document_chunks(db: AsyncSession, document_id: str) -> None:
+    await db.execute(
+        delete(KnowledgeChunkAsset).where(
+            KnowledgeChunkAsset.document_id == document_id
+        )
+    )
     await db.execute(delete(KnowledgeDocumentChunk).where(KnowledgeDocumentChunk.document_id == document_id))
     await db.execute(
         delete(KnowledgeDocumentParentChunk).where(
@@ -490,6 +588,12 @@ async def delete_knowledge_base_graph(
         )
     )
     await db.execute(
+        delete(KnowledgeChunkAsset).where(
+            KnowledgeChunkAsset.workspace_id == knowledge_base.workspace_id,
+            KnowledgeChunkAsset.knowledge_base_id == knowledge_base.id,
+        )
+    )
+    await db.execute(
         delete(KnowledgeDocumentChunk).where(
             KnowledgeDocumentChunk.workspace_id == knowledge_base.workspace_id,
             KnowledgeDocumentChunk.knowledge_base_id == knowledge_base.id,
@@ -502,9 +606,21 @@ async def delete_knowledge_base_graph(
         )
     )
     await db.execute(
+        delete(KnowledgeAsset).where(
+            KnowledgeAsset.workspace_id == knowledge_base.workspace_id,
+            KnowledgeAsset.knowledge_base_id == knowledge_base.id,
+        )
+    )
+    await db.execute(
         delete(KnowledgeDocument).where(
             KnowledgeDocument.workspace_id == knowledge_base.workspace_id,
             KnowledgeDocument.knowledge_base_id == knowledge_base.id,
+        )
+    )
+    await db.execute(
+        delete(KnowledgeAttachment).where(
+            KnowledgeAttachment.workspace_id == knowledge_base.workspace_id,
+            KnowledgeAttachment.knowledge_base_id == knowledge_base.id,
         )
     )
     await db.execute(

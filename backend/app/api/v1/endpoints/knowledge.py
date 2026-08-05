@@ -24,10 +24,12 @@ from app.api.deps import (
     get_workspace_context_from_path,
 )
 from app.schemas.knowledge import (
+    KnowledgeAttachmentResponse,
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
     KnowledgeDocumentChunkResponse,
+    KnowledgeDocumentCreateRequest,
     KnowledgeDocumentParseRequest,
     KnowledgeDocumentResponse,
     KnowledgeModelTestRequest,
@@ -43,7 +45,6 @@ from app.shareddomain.knowledge.orchestration import (
     get_knowledge_document,
     list_knowledge_document_chunks,
     list_knowledge_tasks,
-    preview_knowledge_document,
     retry_knowledge_task,
 )
 from app.infrastructure.repositories.knowledge import (
@@ -51,6 +52,8 @@ from app.infrastructure.repositories.knowledge import (
 )
 from app.shareddomain.knowledge.services import (
     create_knowledge_base,
+    create_knowledge_documents_from_attachments,
+    delete_knowledge_attachment,
     delete_knowledge_base_permanently,
     get_knowledge_base,
     list_knowledge_bases,
@@ -62,7 +65,7 @@ from app.shareddomain.knowledge.services import (
     revoke_resource_permission,
     test_knowledge_base_models,
     update_knowledge_base,
-    upload_knowledge_document,
+    upload_knowledge_attachment,
     upsert_resource_permission,
 )
 from app.tasks.knowledge import enqueue_knowledge_task
@@ -206,19 +209,17 @@ async def list_workspace_knowledge_base_documents(
 
 
 @router.post(
-    "/{knowledge_base_id}/documents",
-    response_model=KnowledgeDocumentResponse,
+    "/{knowledge_base_id}/attachments",
+    response_model=KnowledgeAttachmentResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def upload_workspace_knowledge_base_document(
+async def upload_workspace_knowledge_attachment(
     knowledge_base_id: str,
     file: Annotated[UploadFile, File()],
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    auto_parse: Annotated[bool, Form()] = True,
-    staged: Annotated[bool, Form()] = False,
-) -> KnowledgeDocumentResponse:
+) -> KnowledgeAttachmentResponse:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     await require_knowledge_base_permission(
         db,
@@ -227,26 +228,69 @@ async def upload_workspace_knowledge_base_document(
         context.membership_role,
         {"edit"},
     )
-    uploaded = await upload_knowledge_document(
+    return await upload_knowledge_attachment(
         db,
         knowledge_base,
         file,
         context.user,
         settings,
-        staged=staged,
     )
-    if not auto_parse:
-        return uploaded
 
-    document = await get_knowledge_document(db, knowledge_base, uploaded.id)
-    task = await enqueue_parse_knowledge_document(db, knowledge_base, document, context.user)
-    try:
-        await dispatch_knowledge_task(task.id, settings)
-    except HTTPException as exc:
-        if exc.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
-            raise
-        await db.refresh(document)
-    return document_to_response(document)
+
+@router.delete(
+    "/{knowledge_base_id}/attachments/{attachment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_workspace_knowledge_attachment(
+    knowledge_base_id: str,
+    attachment_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    await delete_knowledge_attachment(
+        db,
+        knowledge_base,
+        attachment_id,
+        context.user,
+        settings,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{knowledge_base_id}/documents",
+    response_model=list[KnowledgeDocumentResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_workspace_knowledge_base_documents(
+    knowledge_base_id: str,
+    payload: KnowledgeDocumentCreateRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[KnowledgeDocumentResponse]:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    return await create_knowledge_documents_from_attachments(
+        db,
+        knowledge_base,
+        payload,
+        context.user,
+    )
 
 
 @router.get(
@@ -297,35 +341,6 @@ async def list_workspace_knowledge_document_tasks(
     return await list_knowledge_tasks(db, knowledge_base, document, limit, offset)
 
 
-@router.post(
-    "/{knowledge_base_id}/documents/{document_id}/preview",
-    response_model=list[KnowledgeDocumentChunkResponse],
-)
-async def preview_workspace_knowledge_base_document(
-    knowledge_base_id: str,
-    document_id: str,
-    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
-    settings: Annotated[Settings, Depends(get_settings)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    payload: Annotated[KnowledgeDocumentParseRequest | None, Body()] = None,
-) -> list[KnowledgeDocumentChunkResponse]:
-    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
-    await require_knowledge_base_permission(
-        db,
-        knowledge_base,
-        context.user,
-        context.membership_role,
-        {"edit"},
-    )
-    document = await get_knowledge_document(db, knowledge_base, document_id)
-    return await preview_knowledge_document(
-        db,
-        knowledge_base,
-        document,
-        context.user,
-        settings,
-        payload or KnowledgeDocumentParseRequest(),
-    )
 
 
 @router.post(

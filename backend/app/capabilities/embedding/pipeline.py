@@ -1,8 +1,13 @@
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+import mammoth
 from markitdown import MarkItDown, StreamInfo
+from markitdown.converters._docx_converter import pre_process_docx
+from markitdown.converters._html_converter import HtmlConverter
+
+from app.infrastructure.model_utils import new_id
 
 from app.shareddomain.knowledge.models import KnowledgeDocument
 
@@ -18,6 +23,55 @@ SUPPORTED_DOCUMENT_EXTENSIONS = frozenset(
 MARKDOWN_HEADING_PATTERN = re.compile(
     r"^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$"
 )
+ASSET_MARKER_BASE = 0xE000
+ASSET_MARKER_LIMIT = 0xF8FF - ASSET_MARKER_BASE + 1
+ASSET_MARKER_PATTERN = re.compile(r"[\ue000-\uf8ff]")
+DOCX_ASSET_MARKDOWN_PATTERN = re.compile(
+    r"!\[([^]]*)]\(nexaflow-asset://(\d+)\)",
+    re.IGNORECASE,
+)
+DOCX_EXTENSION_BY_MIME = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/bmp": "bmp",
+    "image/tiff": "tiff",
+    "image/webp": "webp",
+}
+
+
+def asset_marker(asset_index: int) -> str:
+    if not 0 <= asset_index < ASSET_MARKER_LIMIT:
+        raise KnowledgePipelineError("Document contains too many embedded images.")
+    return chr(ASSET_MARKER_BASE + asset_index)
+
+
+def extract_asset_indexes(content: str) -> list[int]:
+    return list(
+        dict.fromkeys(
+            ord(marker) - ASSET_MARKER_BASE
+            for marker in ASSET_MARKER_PATTERN.findall(content)
+        )
+    )
+
+
+def remove_asset_markers(content: str) -> str:
+    return ASSET_MARKER_PATTERN.sub("", content)
+
+
+def strip_asset_markers(content: str) -> str:
+    return remove_asset_markers(content).strip()
+
+
+@dataclass(frozen=True)
+class DocumentAssetDraft:
+    id: str
+    filename: str
+    content_type: str
+    content: bytes
+    alt_text: str
+
+
 
 
 @dataclass(frozen=True)
@@ -39,12 +93,14 @@ class ChildChunkDraft:
     parent_index: int | None = None
     start_offset: int | None = None
     end_offset: int | None = None
+    asset_indexes: list[int] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class DocumentChunkDrafts:
     parents: list[ParentChunkDraft]
     children: list[ChildChunkDraft]
+    assets: list[DocumentAssetDraft] = field(default_factory=list)
 
 
 def normalize_text(text: str) -> str:
@@ -70,7 +126,7 @@ class KnowledgePipelineError(Exception):
     pass
 
 
-def extract_text(document: KnowledgeDocument, path: Path) -> str:
+def extract_document(document: KnowledgeDocument, path: Path) -> tuple[str, list[DocumentAssetDraft]]:
     if not path.exists():
         raise KnowledgePipelineError("Document file is missing.")
 
@@ -79,23 +135,65 @@ def extract_text(document: KnowledgeDocument, path: Path) -> str:
         raise KnowledgePipelineError("Document format is not supported.")
 
     content_type = document.content_type.split(";", 1)[0].strip().lower()
+    assets: list[DocumentAssetDraft] = []
     try:
-        result = MARKITDOWN.convert_local(
-            path,
-            stream_info=StreamInfo(
-                mimetype=content_type or None,
-                extension=extension,
-                filename=document.filename,
-                local_path=str(path),
-            ),
-        )
+        if extension == ".docx":
+            def convert_image(image):
+                asset_id = new_id()
+                asset_index = len(assets)
+                image_content_type = image.content_type or "application/octet-stream"
+                extension_name = DOCX_EXTENSION_BY_MIME.get(
+                    image_content_type,
+                    image_content_type.split("/", 1)[-1] or "bin",
+                )
+                alt_text = (image.alt_text or "image")[:500]
+                with image.open() as image_bytes:
+                    image_content = image_bytes.read()
+                assets.append(
+                    DocumentAssetDraft(
+                        id=asset_id,
+                        filename=f"inline_image_{asset_id}.{extension_name}",
+                        content_type=image_content_type,
+                        content=image_content,
+                        alt_text=alt_text,
+                    )
+                )
+                return {
+                    "src": f"nexaflow-asset://{asset_index}",
+                    "alt": alt_text,
+                }
+
+            with path.open("rb") as stream:
+                html = mammoth.convert_to_html(
+                    pre_process_docx(stream),
+                    convert_image=mammoth.images.img_element(convert_image),
+                ).value
+            extracted_text = HtmlConverter().convert_string(html).text_content
+            extracted_text = DOCX_ASSET_MARKDOWN_PATTERN.sub(
+                lambda match: (
+                    f"{match.group(1) or 'image'} "
+                    f"{asset_marker(int(match.group(2)))}"
+                ),
+                extracted_text,
+            )
+        else:
+            result = MARKITDOWN.convert_local(
+                path,
+                stream_info=StreamInfo(
+                    mimetype=content_type or None,
+                    extension=extension,
+                    filename=document.filename,
+                    local_path=str(path),
+                ),
+            )
+            extracted_text = result.text_content
     except Exception as exc:
         raise KnowledgePipelineError("Document text extraction failed.") from exc
 
-    text = normalize_text(result.text_content)
-    if not text or not has_printable_text(text):
+    text = normalize_text(extracted_text)
+    if not text or not has_printable_text(strip_asset_markers(text)):
         raise KnowledgePipelineError("Document has no extractable text.")
-    return text
+    return text, assets
 
 
 def split_text(
@@ -208,30 +306,57 @@ def build_hierarchical_chunks(
     overlap: int = CHUNK_OVERLAP,
     separator: str = "\n\n",
 ) -> DocumentChunkDrafts:
-    parents = split_parent_chunks(text)
+    raw_parents = split_parent_chunks(text)
+    parents: list[ParentChunkDraft] = []
     children: list[ChildChunkDraft] = []
-    for parent_index, parent in enumerate(parents):
-        children.extend(
-            ChildChunkDraft(
-                content=span.content,
-                parent_index=parent_index,
-                start_offset=span.start_offset,
-                end_offset=span.end_offset,
-            )
-            for span in split_text_spans(
-                parent.content,
-                chunk_size,
-                overlap,
-                separator,
+    for parent_index, raw_parent in enumerate(raw_parents):
+        clean_parent = remove_asset_markers(raw_parent.content)
+        parents.append(
+            ParentChunkDraft(
+                title=raw_parent.title,
+                content=clean_parent.strip(),
             )
         )
+        parent_leading = len(clean_parent) - len(clean_parent.lstrip())
+        for span in split_text_spans(
+            raw_parent.content,
+            chunk_size,
+            overlap,
+            separator,
+        ):
+            cleaned_span = remove_asset_markers(span.content)
+            content = cleaned_span.strip()
+            if not content:
+                continue
+            span_leading = len(cleaned_span) - len(cleaned_span.lstrip())
+            start_offset = (
+                len(remove_asset_markers(raw_parent.content[: span.start_offset]))
+                + span_leading
+                - parent_leading
+            )
+            children.append(
+                ChildChunkDraft(
+                    content=content,
+                    parent_index=parent_index,
+                    start_offset=start_offset,
+                    end_offset=start_offset + len(content),
+                    asset_indexes=extract_asset_indexes(span.content),
+                )
+            )
     return DocumentChunkDrafts(parents=parents, children=children)
 
 
 def build_flat_chunks(contents: list[str]) -> DocumentChunkDrafts:
     return DocumentChunkDrafts(
         parents=[],
-        children=[ChildChunkDraft(content=content) for content in contents],
+        children=[
+            ChildChunkDraft(
+                content=strip_asset_markers(content),
+                asset_indexes=extract_asset_indexes(content),
+            )
+            for content in contents
+            if strip_asset_markers(content)
+        ],
     )
 
 

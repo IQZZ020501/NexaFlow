@@ -14,9 +14,13 @@ from app.shareddomain.audit.models import AuditLog  # noqa: F401
 from app.infrastructure.base import Base
 from app.domain.user import RefreshSession, User  # noqa: F401
 from app.shareddomain.knowledge.models import (  # noqa: F401
+    KnowledgeAsset,
+    KnowledgeAttachment,
     KnowledgeBase,
+    KnowledgeChunkAsset,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
+    KnowledgeDocumentParentChunk,
     KnowledgeTask,
 )
 from app.shareddomain.tools.models import McpServer  # noqa: F401

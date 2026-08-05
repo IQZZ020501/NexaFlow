@@ -605,6 +605,33 @@ async def assert_query_aggregates_hybrid_hits(
     assert hits[1].distance == 0.05
 
 
+def upload_document(
+    client,
+    token,
+    workspace_id,
+    knowledge_base_id,
+    filename,
+    content,
+    mime,
+    staged=False,
+):
+    """Two-step decoupled upload: attachment, then document creation."""
+    attachment = client.post(
+        knowledge_url(workspace_id, f"/{knowledge_base_id}/attachments"),
+        headers=auth_headers(token),
+        files={"file": (filename, content, mime)},
+    )
+    assert attachment.status_code == 201, attachment.text
+    attachment_id = attachment.json()["id"]
+    created = client.post(
+        knowledge_url(workspace_id, f"/{knowledge_base_id}/documents"),
+        headers=auth_headers(token),
+        json={"attachment_ids": [attachment_id], "staged": staged},
+    )
+    assert created.status_code == 201, created.text
+    return created.json()[0]
+
+
 async def assert_hierarchical_chunks_persisted(
     document_id: str,
 ) -> tuple[list[str], list[str]]:
@@ -978,23 +1005,26 @@ def main() -> None:
         assert bob_model_test_denied.status_code == 403, bob_model_test_denied.text
 
         bob_upload_denied = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/attachments"),
             headers=auth_headers(bob_token),
             files={"file": ("denied.txt", b"nope", "text/plain")},
         )
         assert bob_upload_denied.status_code == 403, bob_upload_denied.text
 
         document_content = b"Hello from product docs"
-        uploaded_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
-            headers=auth_headers(alice_token),
-            files={"file": ("product-guide.txt", document_content, "text/plain")},
+        uploaded_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "product-guide.txt",
+            document_content,
+            "text/plain",
         )
-        assert uploaded_document.status_code == 201, uploaded_document.text
-        document_payload = uploaded_document.json()
+        document_payload = uploaded_document
         document_id = document_payload["id"]
         assert document_payload["filename"] == "product-guide.txt"
-        assert document_payload["status"] == "parse_queued"
+        assert document_payload["status"] == "uploaded"
         assert document_payload["size_bytes"] == len(document_content)
         asyncio.run(assert_document_saved(document_id, document_content))
 
@@ -1004,6 +1034,13 @@ def main() -> None:
         )
         assert bob_documents.status_code == 200, bob_documents.text
         assert [item["id"] for item in bob_documents.json()] == [document_id]
+
+        parsed_document = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{document_id}/parse"),
+            headers=auth_headers(alice_token),
+            json={"auto_index": True},
+        )
+        assert parsed_document.status_code == 202, parsed_document.text
 
         document_chunks = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{document_id}/chunks"),
@@ -1026,17 +1063,17 @@ def main() -> None:
         assert knowledge_query.json()[0]["content"] == "Hello from product docs"
 
         configured_content = ("Alpha   beta " * 12 + "Gamma   delta " * 12).encode()
-        configured_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
-            headers=auth_headers(alice_token),
-            files={
-                "file": ("configured-guide.txt", configured_content, "text/plain"),
-                "auto_parse": (None, "false"),
-            },
+        configured_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "configured-guide.txt",
+            configured_content,
+            "text/plain",
         )
-        assert configured_document.status_code == 201, configured_document.text
-        configured_document_id = configured_document.json()["id"]
-        assert configured_document.json()["status"] == "uploaded"
+        configured_document_id = configured_document["id"]
+        assert configured_document["status"] == "uploaded"
         configured_empty_chunks = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{configured_document_id}/chunks"),
             headers=auth_headers(alice_token),
@@ -1181,25 +1218,42 @@ def main() -> None:
 
         knowledge_api.enqueue_knowledge_task = fail_knowledge_task_dispatch
         try:
-            degraded_upload = client.post(
-                knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
+            degraded_parse = client.post(
+                knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{document_id}/parse"),
                 headers=auth_headers(alice_token),
-                files={"file": ("queued-later.txt", b"Stored before dispatch", "text/plain")},
             )
         finally:
             knowledge_api.enqueue_knowledge_task = original_enqueue_knowledge_task
 
-        assert degraded_upload.status_code == 201, degraded_upload.text
-        assert degraded_upload.json()["status"] == "parse_failed"
-        queued_later_document_id = degraded_upload.json()["id"]
+        assert degraded_parse.status_code == 503, degraded_parse.text
 
-        pdf_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
-            headers=auth_headers(alice_token),
-            files={"file": ("pdf-guide.pdf", pdf_bytes("Hello from PDF docs"), "application/pdf")},
+        queued_later_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "queued-later.txt",
+            b"Stored before dispatch",
+            "text/plain",
         )
-        assert pdf_document.status_code == 201, pdf_document.text
-        pdf_document_id = pdf_document.json()["id"]
+        queued_later_document_id = queued_later_document["id"]
+
+        pdf_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "pdf-guide.pdf",
+            pdf_bytes("Hello from PDF docs"),
+            "application/pdf",
+        )
+        pdf_document_id = pdf_document["id"]
+        parsed_pdf = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{pdf_document_id}/parse"),
+            headers=auth_headers(alice_token),
+            json={"auto_index": True},
+        )
+        assert parsed_pdf.status_code == 202, parsed_pdf.text
 
         pdf_chunks = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{pdf_document_id}/chunks"),
@@ -1208,13 +1262,22 @@ def main() -> None:
         assert pdf_chunks.status_code == 200, pdf_chunks.text
         assert pdf_chunks.json()[0]["content"] == "Hello from PDF docs"
 
-        docx_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
-            headers=auth_headers(alice_token),
-            files={"file": ("word-guide.docx", docx_bytes("Hello from DOCX docs"), DOCX_MIME)},
+        docx_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "word-guide.docx",
+            docx_bytes("Hello from DOCX docs"),
+            DOCX_MIME,
         )
-        assert docx_document.status_code == 201, docx_document.text
-        docx_document_id = docx_document.json()["id"]
+        docx_document_id = docx_document["id"]
+        parsed_docx = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{docx_document_id}/parse"),
+            headers=auth_headers(alice_token),
+            json={"auto_index": True},
+        )
+        assert parsed_docx.status_code == 202, parsed_docx.text
 
         docx_chunks = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{docx_document_id}/chunks"),
@@ -1231,13 +1294,16 @@ def main() -> None:
         assert pdf_query.status_code == 200, pdf_query.text
         assert pdf_document_id in {item["document_id"] for item in pdf_query.json()}
 
-        recovery_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
-            headers=auth_headers(alice_token),
-            files={"file": ("recovery-guide.txt", b"Recovered on startup", "text/plain")},
+        recovery_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "recovery-guide.txt",
+            b"Recovered on startup",
+            "text/plain",
         )
-        assert recovery_document.status_code == 201, recovery_document.text
-        recovery_document_id = recovery_document.json()["id"]
+        recovery_document_id = recovery_document["id"]
         asyncio.run(
             enqueue_recoverable_parse_task(
                 knowledge_base_id,
@@ -1274,50 +1340,18 @@ def main() -> None:
         assert recovery_chunks_after_rebuild.json()[0]["status"] == "indexed"
 
         split_content = b" Legacy split content\n\nSecond paragraph "
-        split_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/split"),
-            headers=auth_headers(alice_token),
-            data={
-                "security_levels": json.dumps(
-                    [{"name": "split-guide.txt", "security_level": "INTERNAL"}]
-                ),
-                "limit": "1000",
-                "with_filter": "true",
-                "patterns": "[]",
-            },
-            files=[("file", ("split-guide.txt", split_content, "text/plain"))],
+        split_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "split-guide.txt",
+            split_content,
+            "text/plain",
         )
-        assert split_document.status_code == 201, split_document.text
-        split_payload = split_document.json()[0]
-        split_document_id = split_payload["source_file_id"]
-        assert split_payload["name"] == "split-guide.txt"
-        assert split_payload["security_level"] == "INTERNAL"
-        assert split_payload["content"][0]["content"] == "Legacy split content\nSecond paragraph"
+        split_document_id = split_document["id"]
+        assert split_document["filename"] == "split-guide.txt"
         asyncio.run(assert_document_saved(split_document_id, split_content))
-
-        batch_created = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/batch-create"),
-            headers=auth_headers(alice_token),
-            json=[
-                {
-                    "name": "split-guide.txt",
-                    "source_file_id": split_document_id,
-                    "paragraphs": [{"title": "Intro", "content": "Edited split content"}],
-                    "meta": {"security_level": "INTERNAL"},
-                }
-            ],
-        )
-        assert batch_created.status_code == 201, batch_created.text
-        assert batch_created.json()[0]["id"] == split_document_id
-        assert batch_created.json()[0]["meta"]["source_file_id"] == split_document_id
-        assert batch_created.json()[0]["meta"]["security_level"] == "INTERNAL"
-        split_chunks = client.get(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{split_document_id}/chunks"),
-            headers=auth_headers(alice_token),
-        )
-        assert split_chunks.status_code == 200, split_chunks.text
-        assert split_chunks.json()[0]["content"] == "Intro\n\nEdited split content"
-        assert split_chunks.json()[0]["status"] == "indexed"
 
         asyncio.run(
             enqueue_recoverable_parse_task(
@@ -1354,13 +1388,21 @@ def main() -> None:
         )
         asyncio.run(recover_knowledge_tasks(test_settings()))
 
-        failed_parse_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
-            headers=auth_headers(alice_token),
-            files={"file": ("unsupported.bin", b"\x00\x01\x02", "application/octet-stream")},
+        failed_parse_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "unsupported.bin",
+            b"\x00\x01\x02",
+            "application/octet-stream",
         )
-        assert failed_parse_document.status_code == 201, failed_parse_document.text
-        failed_parse_document_id = failed_parse_document.json()["id"]
+        failed_parse_document_id = failed_parse_document["id"]
+        failed_parse_enqueue = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{failed_parse_document_id}/parse"),
+            headers=auth_headers(alice_token),
+        )
+        assert failed_parse_enqueue.status_code == 202, failed_parse_enqueue.text
         failed_parse_tasks = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{failed_parse_document_id}/tasks"),
             headers=auth_headers(alice_token),
@@ -1392,13 +1434,22 @@ def main() -> None:
         assert retried_parse_task.json()["id"] == failed_parse_task_id
         asyncio.run(assert_task_succeeded(failed_parse_task_id, failed_parse_document_id, 2))
 
-        retry_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
-            headers=auth_headers(alice_token),
-            files={"file": ("retry-guide.txt", b"Retryable embedding document", "text/plain")},
+        retry_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "retry-guide.txt",
+            b"Retryable embedding document",
+            "text/plain",
         )
-        assert retry_document.status_code == 201, retry_document.text
-        retry_document_id = retry_document.json()["id"]
+        retry_document_id = retry_document["id"]
+        retry_parse = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{retry_document_id}/parse"),
+            headers=auth_headers(alice_token),
+            json={"auto_index": False},
+        )
+        assert retry_parse.status_code == 202, retry_parse.text
 
         ModelTestHandler.fail_next = True
         failed_index_task = client.post(
@@ -1521,16 +1572,16 @@ def main() -> None:
         assert empty_documents.status_code == 200, empty_documents.text
         assert empty_documents.json() == []
 
-        cancel_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
-            headers=auth_headers(alice_token),
-            files={
-                "file": ("cancel-guide.txt", b"Cancel flow document", "text/plain"),
-                "auto_parse": (None, "false"),
-            },
+        cancel_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "cancel-guide.txt",
+            b"Cancel flow document",
+            "text/plain",
         )
-        assert cancel_document.status_code == 201, cancel_document.text
-        cancel_document_id = cancel_document.json()["id"]
+        cancel_document_id = cancel_document["id"]
         asyncio.run(
             enqueue_recoverable_parse_task(
                 knowledge_base_id,
@@ -1552,28 +1603,35 @@ def main() -> None:
             )
         )
 
-        preview_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
-            headers=auth_headers(alice_token),
-            files={
-                "file": ("preview-guide.txt", b"Preview synchronously", "text/plain"),
-                "auto_parse": (None, "false"),
-                "staged": (None, "true"),
-            },
+        preview_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "preview-guide.txt",
+            b"Preview synchronously",
+            "text/plain",
+            staged=True,
         )
-        assert preview_document.status_code == 201, preview_document.text
-        preview_document_id = preview_document.json()["id"]
-        assert preview_document.json()["status"] == "uploaded"
+        preview_document_id = preview_document["id"]
+        assert preview_document["status"] == "uploaded"
 
-        preview_chunks = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{preview_document_id}/preview"),
+        preview_parse = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{preview_document_id}/parse"),
             headers=auth_headers(alice_token),
             json={
                 "chunk_size": 100,
                 "chunk_overlap": 0,
                 "split_separator": "\n",
                 "cleaning_rules": [],
+                "auto_index": False,
             },
+        )
+        assert preview_parse.status_code == 202, preview_parse.text
+
+        preview_chunks = client.get(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{preview_document_id}/chunks"),
+            headers=auth_headers(alice_token),
         )
         assert preview_chunks.status_code == 200, preview_chunks.text
         assert [chunk["content"] for chunk in preview_chunks.json()] == [
@@ -1585,7 +1643,7 @@ def main() -> None:
             headers=auth_headers(alice_token),
         )
         assert preview_tasks.status_code == 200, preview_tasks.text
-        assert preview_tasks.json() == []
+        assert preview_tasks.json()[0]["status"] == "succeeded"
 
         visible_preview_documents = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
@@ -1633,24 +1691,20 @@ def main() -> None:
         hierarchical_content = (
             f"# First\n\n{first_parent_body}\n\n# Second\n\n{second_parent_body}"
         ).encode()
-        hierarchical_document = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
-            headers=auth_headers(alice_token),
-            files={
-                "file": (
-                    "hierarchical-guide.md",
-                    hierarchical_content,
-                    "text/markdown",
-                ),
-                "auto_parse": (None, "false"),
-            },
+        hierarchical_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "hierarchical-guide.md",
+            hierarchical_content,
+            "text/markdown",
         )
-        assert hierarchical_document.status_code == 201, hierarchical_document.text
-        hierarchical_document_id = hierarchical_document.json()["id"]
-        hierarchical_preview = client.post(
+        hierarchical_document_id = hierarchical_document["id"]
+        hierarchical_parse = client.post(
             knowledge_url(
                 default_workspace_id,
-                f"/{knowledge_base_id}/documents/{hierarchical_document_id}/preview",
+                f"/{knowledge_base_id}/documents/{hierarchical_document_id}/parse",
             ),
             headers=auth_headers(alice_token),
             json={
@@ -1659,7 +1713,17 @@ def main() -> None:
                 "chunk_overlap": 50,
                 "split_separator": "\n\n",
                 "cleaning_rules": [],
+                "auto_index": False,
             },
+        )
+        assert hierarchical_parse.status_code == 202, hierarchical_parse.text
+
+        hierarchical_preview = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{hierarchical_document_id}/chunks",
+            ),
+            headers=auth_headers(alice_token),
         )
         assert hierarchical_preview.status_code == 200, hierarchical_preview.text
         assert {chunk["parent_title"] for chunk in hierarchical_preview.json()} == {
@@ -1745,9 +1809,9 @@ def main() -> None:
         assert audit_logs.status_code == 200, audit_logs.text
         actions = [item["action"] for item in audit_logs.json()]
         assert "knowledge_base.create" in actions
-        assert "knowledge_document.upload" in actions
+        assert "knowledge_attachment.upload" in actions
+        assert "knowledge_document.create_from_attachments" in actions
         assert "knowledge_document.parse" in actions
-        assert "knowledge_document.batch_create" in actions
         assert "knowledge_document.index" in actions
         assert "knowledge_document.delete" in actions
         assert "knowledge_task.parse.fail" in actions

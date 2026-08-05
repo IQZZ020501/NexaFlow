@@ -1,7 +1,11 @@
+"use client"
+
+import * as React from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { cn } from "@/lib/utils"
+import { useLanguage } from "@/contexts/language-provider"
 
 type MarkdownContentProps = {
   content: string
@@ -12,6 +16,33 @@ function omitMarkdownNode<T extends { node?: unknown }>(props: T) {
   const nextProps = { ...props }
   delete nextProps.node
   return nextProps
+}
+
+function MarkdownImage(
+  props: React.ImgHTMLAttributes<HTMLImageElement> & { node?: unknown },
+) {
+  const { t } = useLanguage()
+  const src = String(props.src ?? "")
+  if (
+    !src ||
+    src.startsWith("data:") ||
+    src.startsWith("nexaflow-asset:") ||
+    src.startsWith("blob:")
+  ) {
+    return (
+      <span className="text-xs text-muted-foreground">{t("图片")}</span>
+    )
+  }
+  const { className, ...restProps } = omitMarkdownNode(props)
+  return (
+    <img
+      className={cn(
+        "my-2 max-h-64 max-w-full rounded border object-contain",
+        className
+      )}
+      {...restProps}
+    />
+  )
 }
 
 const markdownComponents: Components = {
@@ -142,6 +173,10 @@ const markdownComponents: Components = {
 
 export function MarkdownContent({ content, className }: MarkdownContentProps) {
   const value = content.trim()
+  const components = React.useMemo<Components>(
+    () => ({ ...markdownComponents, img: MarkdownImage }),
+    [],
+  )
 
   if (!value) {
     return <p className={cn("text-sm text-muted-foreground", className)}>暂无内容</p>
@@ -149,7 +184,7 @@ export function MarkdownContent({ content, className }: MarkdownContentProps) {
 
   return (
     <div className={cn("min-w-0 text-sm leading-6 text-foreground", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {value}
       </ReactMarkdown>
     </div>

@@ -52,7 +52,10 @@ from app.shareddomain.knowledge.orchestration import (
     resolve_embedding_model,
     task_error_message,
 )
-from app.shareddomain.knowledge.services import RESOURCE_TYPE
+from app.shareddomain.knowledge.services import (
+    RESOURCE_TYPE,
+    knowledge_object_storage,
+)
 from app.capabilities.llm.models import RegisteredModel
 
 # ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
@@ -106,7 +109,13 @@ async def run_parse_task(
     options = parse_task_options_from_task(task)
     chunks = await extract_document_chunk_contents(document, settings, options)
     ensure_knowledge_task_lease(lease_lost)
-    vector_ids = await replace_document_chunks(db, knowledge_base, document, chunks)
+    vector_ids, stale_asset_keys, written_asset_keys = await replace_document_chunks(
+        db,
+        knowledge_base,
+        document,
+        chunks,
+        settings,
+    )
 
     task.total_items = len(chunks.children)
     task.processed_items = len(chunks.children)
@@ -127,7 +136,16 @@ async def run_parse_task(
         workspace_id=knowledge_base.workspace_id,
     )
     ensure_knowledge_task_lease(lease_lost)
-    await db.commit()
+    storage = knowledge_object_storage(settings)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        for object_key in written_asset_keys:
+            storage.delete(object_key)
+        raise
+    for object_key in stale_asset_keys:
+        storage.delete(object_key)
     ensure_knowledge_task_lease(lease_lost)
     await asyncio.to_thread(
         delete_vectors,

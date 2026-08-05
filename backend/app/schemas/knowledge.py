@@ -56,6 +56,24 @@ class ResourcePermissionUpsertRequest(BaseModel):
     permission: str = Field(min_length=1, max_length=20)
 
 
+class KnowledgeAttachmentResponse(BaseModel):
+    id: str
+    workspace_id: str
+    knowledge_base_id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    status: str
+    created_by_user_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeDocumentCreateRequest(BaseModel):
+    attachment_ids: list[str] = Field(min_length=1, max_length=30)
+    staged: bool = True
+
+
 class KnowledgeDocumentResponse(BaseModel):
     id: str
     workspace_id: str
@@ -63,6 +81,7 @@ class KnowledgeDocumentResponse(BaseModel):
     filename: str
     content_type: str
     size_bytes: int
+    attachment_id: str | None = None
     meta: dict[str, Any]
     status: str
     is_active: bool = True
@@ -86,6 +105,15 @@ class KnowledgeDocumentParseRequest(BaseModel):
     auto_index: bool = True
 
 
+class KnowledgeAssetResponse(BaseModel):
+    id: str
+    kind: Literal["image"]
+    filename: str
+    content_type: str
+    size_bytes: int
+    alt_text: str
+
+
 class KnowledgeDocumentChunkResponse(BaseModel):
     id: str
     workspace_id: str
@@ -102,6 +130,7 @@ class KnowledgeDocumentChunkResponse(BaseModel):
     token_count: int
     vector_id: str | None = None
     status: str
+    images: list[KnowledgeAssetResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -116,25 +145,6 @@ class KnowledgeDocumentParagraphRequest(BaseModel):
     problem_list: list[KnowledgeDocumentParagraphProblemRequest] = Field(default_factory=list)
 
 
-class KnowledgeDocumentBatchCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    paragraphs: list[KnowledgeDocumentParagraphRequest] = Field(min_length=1)
-    source_file_id: str = Field(min_length=1, max_length=36)
-    preview_file_id: str | None = Field(default=None, max_length=36)
-    meta: dict[str, Any] = Field(default_factory=dict)
-
-
-class KnowledgeDocumentSplitParagraphResponse(BaseModel):
-    title: str
-    content: str
-
-
-class KnowledgeDocumentSplitResponse(BaseModel):
-    name: str
-    content: list[KnowledgeDocumentSplitParagraphResponse]
-    source_file_id: str
-    preview_file_id: str | None = None
-    security_level: str
 
 
 class KnowledgeTaskResponse(BaseModel):
