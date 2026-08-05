@@ -15,6 +15,8 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import log_error
+from app.infrastructure.logger import get_logger
 from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
@@ -64,6 +66,8 @@ from app.shareddomain.knowledge.services import (
 )
 from app.tasks.knowledge import enqueue_knowledge_task
 
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/workspaces/{workspace_id}/knowledge-bases", tags=["knowledge"])
 
 
@@ -71,6 +75,7 @@ async def dispatch_knowledge_task(task_id: str, settings: Settings) -> None:
     try:
         await enqueue_knowledge_task(task_id, settings)
     except Exception as exc:
+        log_error(logger, "Knowledge task dispatch failed.", exc, task_id=task_id)
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Knowledge task queue is unavailable.",

@@ -39,7 +39,10 @@ from app.capabilities.llm.credentials import (
 )
 from app.capabilities.llm.models import RegisteredModel
 from app.infrastructure.config import Settings
-from app.infrastructure.errors import ExternalServiceError
+from app.infrastructure.errors import ExternalServiceError, log_error
+from app.infrastructure.logger import get_logger
+
+logger = get_logger(__name__)
 
 MODEL_REQUEST_TIMEOUT_SECONDS = 20
 SUPPORTED_PROVIDER_TYPES = {
@@ -96,6 +99,7 @@ def _provider_status_code(exc: Exception) -> int | None:
 
 
 def _model_provider_error(exc: Exception) -> ModelProviderError:
+    log_error(logger, "LLM provider request failed.", exc)
     if isinstance(exc, APIStatusError):
         return ModelProviderStatusError(exc.status_code, _api_error_detail(exc))
     status_code = _provider_status_code(exc)

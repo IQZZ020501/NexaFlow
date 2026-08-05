@@ -1,9 +1,12 @@
 import asyncio
+import logging
+import time
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.config import Settings
+from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.shareddomain.knowledge.models import (
     KnowledgeBase,
@@ -15,6 +18,8 @@ from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
     KnowledgeQueryRequest,
 )
+
+logger = get_logger(__name__)
 
 QUERY_OVERFETCH_FACTOR = 5
 RRF_K = 60
@@ -48,6 +53,7 @@ async def query_knowledge_base(
     payload: KnowledgeQueryRequest,
     settings: Settings,
 ) -> list[KnowledgeQueryHitResponse]:
+    started_at = time.perf_counter()
     embedding_model = await resolve_embedding_model(db, knowledge_base)
     if embedding_model is None:
         raise HTTPException(
@@ -113,4 +119,13 @@ async def query_knowledge_base(
                 distance=representative_hit.distance,
             )
         )
+    log_event(
+        logger,
+        logging.INFO,
+        "Knowledge query completed.",
+        knowledge_base_id=knowledge_base.id,
+        hits=len(responses),
+        duration_ms=round((time.perf_counter() - started_at) * 1000),
+        query=payload.query[:120],
+    )
     return responses

@@ -1,11 +1,16 @@
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.config import Settings
+from app.infrastructure.logger import get_logger, log_event
 from app.domain.user import User
 from app.infrastructure.security import hash_password
 from app.domain.team import Team, TeamMembership
 from app.domain.workspace import Workspace, WorkspaceMembership
+
+logger = get_logger(__name__)
 
 
 async def seed_defaults(db: AsyncSession, settings: Settings) -> None:
@@ -89,3 +94,11 @@ async def seed_defaults(db: AsyncSession, settings: Settings) -> None:
         team_membership.role = "admin"
 
     await db.commit()
+    log_event(
+        logger,
+        logging.INFO,
+        "Bootstrap defaults ensured.",
+        admin_username=admin.username,
+        workspace_slug=workspace.slug,
+        team_slug=team.slug,
+    )
