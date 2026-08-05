@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - ./data/postgresql:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
       interval: 5s
@@ -16,7 +16,7 @@ services:
   redis:
     image: redis:7-alpine
     volumes:
-      - redis-data:/data
+      - ./data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -26,7 +26,7 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.19.0
     volumes:
-      - qdrant-data:/qdrant/storage
+      - ./data/qdrant:/qdrant/storage
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
       interval: 5s
@@ -44,7 +44,7 @@ services:
       KNOWLEDGE_STORAGE_DIR: /data/knowledge
       QDRANT_URL: http://qdrant:6333
     volumes:
-      - uploads:/data
+      - ./data/uploads:/data
     ports:
       - "8000:8000"
     depends_on:
@@ -67,7 +67,7 @@ services:
       KNOWLEDGE_STORAGE_DIR: /data/knowledge
       QDRANT_URL: http://qdrant:6333
     volumes:
-      - uploads:/data
+      - ./data/uploads:/data
     depends_on:
       db:
         condition: service_healthy
@@ -98,9 +98,3 @@ services:
       - "3000:3000"
     depends_on:
       - api
-
-volumes:
-  db-data:
-  redis-data:
-  qdrant-data:
-  uploads:
