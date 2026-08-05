@@ -49,3 +49,6 @@ docs/MVP_TASK_PLAN.md
 # code graph
 .codegraph
 *.tsbuildinfo
+
+# playwright-cli browser automation artifacts
+.playwright-cli/
