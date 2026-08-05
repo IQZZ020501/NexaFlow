@@ -9,10 +9,11 @@ const BACKEND_ORIGIN = process.env.NEXAFLOW_API_PROXY ?? "http://127.0.0.1:8000"
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
-  // Dev proxy clones rewrite bodies with a 10MB default cap
-  // (DEFAULT_BODY_CLONE_SIZE_LIMIT in next/dist/server/body-streams.js);
-  // backend allows 100MB per document, keep the proxy at 101MB and give
-  // long-running synchronous parses room past the 30s default proxyTimeout.
+  // Next dev proxies rewrite bodies through a 10MB clone buffer by default
+  // (DEFAULT_BODY_CLONE_SIZE_LIMIT in next/dist/server/body-streams.js); larger
+  // uploads stall the proxy until proxyTimeout and surface as HTTP 500.
+  // Backend allows up to 100MB per document, so keep the proxy at 101MB
+  // (multipart overhead included).
   experimental: {
     middlewareClientMaxBodySize: "101mb",
     proxyTimeout: 120,

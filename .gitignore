@@ -52,3 +52,6 @@ docs/MVP_TASK_PLAN.md
 
 # playwright-cli browser automation artifacts
 .playwright-cli/
+
+# deploy runtime data (bind-mounted, never commit)
+deploy/data/
