@@ -1,3 +1,5 @@
+"use client"
+
 import * as React from "react"
 import {
   AlertCircleIcon,
@@ -85,6 +87,12 @@ import { languageLocales, type TFunction, type TranslationKey } from "@/i18n"
 import { cn } from "@/lib/utils"
 import { formatDateTime, getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
+import {
+  knowledgeUploadPath,
+  knowledgeUploadSegmentPath,
+  type KnowledgeUploadRouteState,
+  type KnowledgeUploadStep,
+} from "@/lib/knowledge-upload-route"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
@@ -189,7 +197,13 @@ function documentStatusText(
   return documentStatusLabel(document.status, t)
 }
 
-export function KnowledgeBasePage() {
+export function KnowledgeBasePage({
+  uploadStep,
+  uploadRouteState,
+}: {
+  uploadStep?: KnowledgeUploadStep
+  uploadRouteState?: KnowledgeUploadRouteState
+} = {}) {
   const { token, me, selectedWorkspaceId, notify } = useSession()
 
   if (!token || !me) {
@@ -202,6 +216,8 @@ export function KnowledgeBasePage() {
       me={me}
       selectedWorkspaceId={selectedWorkspaceId}
       notify={notify}
+      uploadStep={uploadStep}
+      uploadRouteState={uploadRouteState}
     />
   )
 }
@@ -211,11 +227,15 @@ function KnowledgeBasePageContent({
   me,
   selectedWorkspaceId,
   notify,
+  uploadStep,
+  uploadRouteState,
 }: {
   token: string
   me: MeResponse
   selectedWorkspaceId: string | null
   notify: (kind: AppNotification["kind"], message: string) => void
+  uploadStep?: KnowledgeUploadStep
+  uploadRouteState?: KnowledgeUploadRouteState
 }) {
   const router = useRouter()
   const params = useParams<{ id?: string }>()
@@ -293,7 +313,6 @@ function KnowledgeBasePageContent({
   )
   const [isSaving, setIsSaving] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
-  const [isUploadFlowOpen, setIsUploadFlowOpen] = React.useState(false)
   const selectAllDocumentsRef = React.useRef<HTMLInputElement>(null)
 
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
@@ -473,6 +492,16 @@ function KnowledgeBasePageContent({
   }, [loadKnowledgeBases])
 
   React.useEffect(() => {
+    if (
+      uploadStep &&
+      selectedKnowledgeBase &&
+      selectedKnowledgeBase.permission !== "edit"
+    ) {
+      router.replace(`/app/knowledge/${selectedKnowledgeBase.id}`)
+    }
+  }, [router, selectedKnowledgeBase, uploadStep])
+
+  React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadDocuments()
   }, [loadDocuments])
@@ -501,6 +530,38 @@ function KnowledgeBasePageContent({
     }, 3000)
     return () => window.clearInterval(timer)
   }, [hasProcessingDocuments, loadDocuments, loadKnowledgeTasks])
+
+  const cancelUpload = React.useCallback(() => {
+    if (selectedKnowledgeBaseId) {
+      router.push(`/app/knowledge/${selectedKnowledgeBaseId}`)
+    }
+  }, [router, selectedKnowledgeBaseId])
+
+  const routeUploadSegment = React.useCallback(
+    (routeState: KnowledgeUploadRouteState) => {
+      if (!selectedKnowledgeBaseId) {
+        return
+      }
+
+      const path = knowledgeUploadSegmentPath(
+        selectedKnowledgeBaseId,
+        routeState.documentIds,
+        routeState.parseSettings
+      )
+      if (uploadStep === "segment") {
+        router.replace(path)
+      } else {
+        router.push(path)
+      }
+    },
+    [router, selectedKnowledgeBaseId, uploadStep]
+  )
+
+  const backToUploadFiles = React.useCallback(() => {
+    if (selectedKnowledgeBaseId) {
+      router.push(knowledgeUploadPath(selectedKnowledgeBaseId))
+    }
+  }, [router, selectedKnowledgeBaseId])
 
   function toggleDocumentSelection(documentId: string, checked: boolean) {
     setSelectedDocumentIds((current) =>
@@ -560,12 +621,10 @@ function KnowledgeBasePageContent({
     setKnowledgeTasks([])
     setQueryHits([])
     setQueryText("")
-    setIsUploadFlowOpen(false)
     router.push(`/app/knowledge/${knowledgeBase.id}`)
   }
 
   function closeKnowledgeBase() {
-    setIsUploadFlowOpen(false)
     setKnowledgeTasks([])
     router.push("/app/knowledge")
   }
@@ -1051,17 +1110,25 @@ function KnowledgeBasePageContent({
     { key: "settings", label: t("设置"), icon: SettingsIcon },
   ]
 
-  if (selectedKnowledgeBase && isUploadFlowOpen && selectedWorkspaceId) {
+  if (selectedKnowledgeBase && uploadStep && selectedWorkspaceId) {
+    if (!canEditDocuments) {
+      return null
+    }
+
     return (
       <KnowledgeUploadFlow
         token={token}
         workspaceId={selectedWorkspaceId}
         knowledgeBase={selectedKnowledgeBase}
-        onBack={() => setIsUploadFlowOpen(false)}
+        step={uploadStep}
+        routeState={uploadRouteState}
+        onCancel={cancelUpload}
+        onRouteSegment={routeUploadSegment}
+        onBackToFiles={backToUploadFiles}
         onDone={async () => {
-          setIsUploadFlowOpen(false)
           setActiveDetailTab("documents")
           await Promise.all([loadDocuments(), loadKnowledgeTasks()])
+          router.push(`/app/knowledge/${selectedKnowledgeBase.id}`)
         }}
         onNotify={notify}
       />
@@ -1121,7 +1188,11 @@ function KnowledgeBasePageContent({
                     <Button
                       type="button"
                       disabled={!canEditDocuments}
-                      onClick={() => setIsUploadFlowOpen(true)}
+                      onClick={() =>
+                        router.push(
+                          knowledgeUploadPath(selectedKnowledgeBase.id)
+                        )
+                      }
                     >
                       <UploadIcon data-icon="inline-start" />
                       {t("上传文档")}
