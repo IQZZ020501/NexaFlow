@@ -178,8 +178,10 @@ async def list_agents(
     workspace_id: str,
     actor: User,
     workspace_role: str | None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[AgentResponse]:
-    agents = await agent_repository.list_agents(db, workspace_id)
+    agents = await agent_repository.list_agents(db, workspace_id, limit, offset)
     bindings = await agent_repository.list_binding_map(db, [agent.id for agent in agents])
     mcp_bindings = await agent_repository.list_mcp_binding_map(
         db,

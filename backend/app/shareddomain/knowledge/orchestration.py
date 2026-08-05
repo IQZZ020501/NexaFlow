@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import log_error
+from app.infrastructure.logger import get_logger
 from app.infrastructure.model_utils import new_id
 from app.domain.user import User
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
@@ -36,6 +38,8 @@ from app.shareddomain.knowledge.services import (
     knowledge_document_path,
 )
 from app.capabilities.llm.models import RegisteredModel
+
+logger = get_logger(__name__)
 
 DOCUMENT_PARSE_QUEUED_STATUS = "parse_queued"
 DOCUMENT_PARSING_STATUS = "parsing"
@@ -124,8 +128,16 @@ async def list_knowledge_document_chunks(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     document: KnowledgeDocument,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[KnowledgeDocumentChunkResponse]:
-    chunks = await knowledge_base_repository.list_document_chunks(db, knowledge_base, document.id)
+    chunks = await knowledge_base_repository.list_document_chunks(
+        db,
+        knowledge_base,
+        document.id,
+        limit,
+        offset,
+    )
     return [chunk_to_response(chunk) for chunk in chunks]
 
 
@@ -133,11 +145,15 @@ async def list_knowledge_tasks(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     document: KnowledgeDocument | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[KnowledgeTaskResponse]:
     tasks = await knowledge_base_repository.list_knowledge_tasks(
         db,
         knowledge_base,
         document.id if document else None,
+        limit,
+        offset,
     )
     return [task_to_response(task) for task in tasks]
 
@@ -427,6 +443,13 @@ async def preview_knowledge_document(
         chunks = await extract_document_chunk_contents(document, settings, options)
         vector_ids = await replace_document_chunks(db, knowledge_base, document, chunks)
     except KnowledgePipelineError as exc:
+        log_error(
+            logger,
+            "Knowledge document preview failed.",
+            exc,
+            document_id=document.id,
+            knowledge_base_id=knowledge_base.id,
+        )
         document.status = DOCUMENT_PARSE_FAILED_STATUS
         document.last_error = task_error_message(exc)
         await db.commit()

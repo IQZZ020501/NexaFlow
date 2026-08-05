@@ -40,11 +40,17 @@ import type {
   KnowledgeDocumentChunk,
 } from "@/lib/api/knowledge"
 import type { TFunction, TranslationKey } from "@/i18n"
+import {
+  DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS,
+  MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
+  type KnowledgeUploadParseSettings,
+  type KnowledgeUploadRouteState,
+  type KnowledgeUploadStep,
+} from "@/lib/knowledge-upload-route"
 import { cn } from "@/lib/utils"
 import { formatBytes } from "@/components/knowledge/status-labels"
 
-type UploadStep = "files" | "segment"
-type SegmentMode = "smart" | "advanced"
+type SegmentMode = KnowledgeUploadParseSettings["segmentMode"]
 
 type UploadedDocument = KnowledgeDocument & {
   chunks: KnowledgeDocumentChunk[]
@@ -52,27 +58,41 @@ type UploadedDocument = KnowledgeDocument & {
 
 const UNPARSED_STATUS = "uploaded"
 const PARSING_STATUSES = new Set(["parse_queued", "parsing"])
-const MAX_FILE_COUNT = 30
 const SUPPORTED_FILE_TYPES = [".docx", ".md", ".markdown", ".pdf", ".txt"]
-const SMART_CHUNK_SIZE = 1200
-const SMART_CHUNK_OVERLAP = 150
-const SMART_CLEANING_RULES = ["trim_lines", "remove_empty_lines"]
-const SMART_SPLIT_SEPARATOR = "\n\n"
+const SMART_CHUNK_SIZE = DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.chunkSize
+const SMART_CHUNK_OVERLAP =
+  DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.chunkOverlap
+const SMART_CLEANING_RULES =
+  DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.cleaningRules
+const SMART_SPLIT_SEPARATOR =
+  DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.splitSeparator
 const PREVIEW_POLL_INTERVAL_MS = 1200
 const PREVIEW_POLL_TIMEOUT_MS = 60_000
+
+function hasOpenPreviewTask(documents: UploadedDocument[]) {
+  return documents.some((document) => PARSING_STATUSES.has(document.status))
+}
 
 export function KnowledgeUploadFlow({
   token,
   workspaceId,
   knowledgeBase,
-  onBack,
+  step,
+  routeState,
+  onCancel,
+  onRouteSegment,
+  onBackToFiles,
   onDone,
   onNotify,
 }: {
   token: string
   workspaceId: string
   knowledgeBase: KnowledgeBase
-  onBack: () => void
+  step: KnowledgeUploadStep
+  routeState?: KnowledgeUploadRouteState
+  onCancel: () => void
+  onRouteSegment: (routeState: KnowledgeUploadRouteState) => void
+  onBackToFiles: () => void
   onDone: () => void | Promise<void>
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
@@ -88,7 +108,6 @@ export function KnowledgeUploadFlow({
     { value: "。", label: t("中文句号（。）") },
     { value: ".", label: t("英文句号（.）") },
   ]
-  const [step, setStep] = React.useState<UploadStep>("files")
   const [files, setFiles] = React.useState<File[]>([])
   const [uploadedDocuments, setUploadedDocuments] = React.useState<
     UploadedDocument[]
@@ -96,13 +115,20 @@ export function KnowledgeUploadFlow({
   const [selectedDocumentId, setSelectedDocumentId] = React.useState<
     string | null
   >(null)
-  const [segmentMode, setSegmentMode] = React.useState<SegmentMode>("smart")
-  const [chunkSize, setChunkSize] = React.useState(SMART_CHUNK_SIZE)
-  const [chunkOverlap, setChunkOverlap] = React.useState(SMART_CHUNK_OVERLAP)
-  const [cleaningRules, setCleaningRules] =
-    React.useState<string[]>(SMART_CLEANING_RULES)
+  const [segmentMode, setSegmentMode] = React.useState<SegmentMode>(
+    routeState?.parseSettings.segmentMode ?? "smart",
+  )
+  const [chunkSize, setChunkSize] = React.useState(
+    routeState?.parseSettings.chunkSize ?? SMART_CHUNK_SIZE,
+  )
+  const [chunkOverlap, setChunkOverlap] = React.useState(
+    routeState?.parseSettings.chunkOverlap ?? SMART_CHUNK_OVERLAP,
+  )
+  const [cleaningRules, setCleaningRules] = React.useState<string[]>(() => [
+    ...(routeState?.parseSettings.cleaningRules ?? SMART_CLEANING_RULES),
+  ])
   const [splitSeparator, setSplitSeparator] = React.useState(
-    SMART_SPLIT_SEPARATOR,
+    routeState?.parseSettings.splitSeparator ?? SMART_SPLIT_SEPARATOR,
   )
   const [previewOptionsSignature, setPreviewOptionsSignature] = React.useState<
     string | null
@@ -152,7 +178,7 @@ export function KnowledgeUploadFlow({
   )
 
   const loadPreviewDocuments = React.useCallback(
-    async (sourceDocuments: UploadedDocument[]) => {
+    async (documentIds: string[]) => {
       const documents = await listKnowledgeDocuments(
         token,
         workspaceId,
@@ -162,17 +188,23 @@ export function KnowledgeUploadFlow({
       const documentsById = new Map(
         documents.map((document) => [document.id, document]),
       )
-      return Promise.all(
-        sourceDocuments.map(async (document) => {
-          const latestDocument = documentsById.get(document.id) ?? document
+      const loadedDocuments = await Promise.all(
+        documentIds.map(async (documentId) => {
+          const document = documentsById.get(documentId)
+          if (!document) {
+            return null
+          }
           const chunks = await listKnowledgeDocumentChunks(
             token,
             workspaceId,
             knowledgeBase.id,
-            document.id,
+            documentId,
           )
-          return { ...latestDocument, chunks }
+          return { ...document, chunks }
         }),
+      )
+      return loadedDocuments.filter(
+        (document): document is UploadedDocument => document !== null,
       )
     },
     [knowledgeBase.id, token, workspaceId],
@@ -195,7 +227,9 @@ export function KnowledgeUploadFlow({
 
     setIsRefreshing(true)
     try {
-      const nextDocuments = await loadPreviewDocuments(uploadedDocuments)
+      const nextDocuments = await loadPreviewDocuments(
+        uploadedDocuments.map((document) => document.id),
+      )
       applyPreviewDocuments(nextDocuments)
       if (!hasOpenPreviewTask(nextDocuments)) {
         if (
@@ -243,15 +277,20 @@ export function KnowledgeUploadFlow({
         file.name.toLowerCase().endsWith(extension),
       ),
     )
-    const limitedFiles = supportedFiles.slice(0, MAX_FILE_COUNT)
+    const limitedFiles = supportedFiles.slice(
+      0,
+      MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
+    )
     setFiles(limitedFiles)
     if (supportedFiles.length !== nextFiles.length) {
       onNotify("error", t("已忽略不支持的文件格式"))
     }
-    if (supportedFiles.length > MAX_FILE_COUNT) {
+    if (supportedFiles.length > MAX_KNOWLEDGE_UPLOAD_DOCUMENTS) {
       onNotify(
         "error",
-        t("每次最多上传 {value} 个文件", { value: MAX_FILE_COUNT }),
+        t("每次最多上传 {value} 个文件", {
+          value: MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
+        }),
       )
     }
   }
@@ -260,28 +299,22 @@ export function KnowledgeUploadFlow({
     setFiles((current) => current.filter((_, index) => index !== indexToRemove))
   }
 
-  function buildParseOptions() {
+  function currentParseSettings(): KnowledgeUploadParseSettings {
     return segmentMode === "smart"
       ? {
-          chunk_size: SMART_CHUNK_SIZE,
-          chunk_overlap: SMART_CHUNK_OVERLAP,
-          split_separator: SMART_SPLIT_SEPARATOR,
-          cleaning_rules: SMART_CLEANING_RULES,
-          auto_index: false,
+          ...DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS,
+          cleaningRules: [...SMART_CLEANING_RULES],
         }
       : {
-          chunk_size: chunkSize,
-          chunk_overlap: chunkOverlap,
-          split_separator: splitSeparator,
-          cleaning_rules: cleaningRules,
-          auto_index: false,
+          segmentMode,
+          chunkSize,
+          chunkOverlap,
+          splitSeparator,
+          cleaningRules,
         }
   }
 
-  const currentParseOptionsSignature = JSON.stringify({
-    segmentMode,
-    ...buildParseOptions(),
-  })
+  const currentParseOptionsSignature = JSON.stringify(currentParseSettings())
   const hasStalePreview =
     previewOptionsSignature !== currentParseOptionsSignature
   const canStartIndex =
@@ -293,16 +326,71 @@ export function KnowledgeUploadFlow({
       (document) => document.status === "parsed" && document.chunks.length > 0,
     )
 
-  function hasOpenPreviewTask(documents: UploadedDocument[]) {
-    return documents.some((document) => PARSING_STATUSES.has(document.status))
-  }
+  React.useEffect(() => {
+    if (step !== "segment") {
+      return
+    }
+    if (!routeState?.documentIds.length) {
+      onBackToFiles()
+      return
+    }
+
+    let cancelled = false
+    const routeSignature = JSON.stringify(routeState.parseSettings)
+    pendingPreviewOptionsSignatureRef.current = routeSignature
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsRefreshing(true)
+
+    void loadPreviewDocuments(routeState.documentIds)
+      .then((nextDocuments) => {
+        if (cancelled) {
+          return
+        }
+        if (!nextDocuments.length) {
+          onBackToFiles()
+          return
+        }
+
+        applyPreviewDocuments(nextDocuments)
+        if (!hasOpenPreviewTask(nextDocuments)) {
+          if (
+            nextDocuments.every(
+              (document) =>
+                document.status === "parsed" && document.chunks.length > 0,
+            )
+          ) {
+            setPreviewOptionsSignature(routeSignature)
+          }
+          pendingPreviewOptionsSignatureRef.current = null
+        }
+      })
+      .catch(reportError)
+      .finally(() => {
+        if (!cancelled) {
+          setIsRefreshing(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    applyPreviewDocuments,
+    loadPreviewDocuments,
+    onBackToFiles,
+    reportError,
+    routeState,
+    step,
+  ])
 
   async function waitForPreviewDocuments(seedDocuments: UploadedDocument[]) {
     let latestDocuments = seedDocuments
     const deadline = Date.now() + PREVIEW_POLL_TIMEOUT_MS
 
     while (Date.now() < deadline) {
-      latestDocuments = await loadPreviewDocuments(latestDocuments)
+      latestDocuments = await loadPreviewDocuments(
+        latestDocuments.map((document) => document.id),
+      )
       applyPreviewDocuments(latestDocuments)
 
       if (!hasOpenPreviewTask(latestDocuments)) {
@@ -327,30 +415,52 @@ export function KnowledgeUploadFlow({
 
     setIsParsing(true)
     try {
-      const parseOptions = buildParseOptions()
-      const parseOptionsSignature = JSON.stringify({
-        segmentMode,
-        ...parseOptions,
-      })
-      const queuedDocuments = documents.map((document) => ({
-        ...document,
-        chunks: [],
-        status: "parse_queued",
-      }))
-      applyPreviewDocuments(queuedDocuments)
-      pendingPreviewOptionsSignatureRef.current = parseOptionsSignature
-
-      await Promise.all(
+      const parseSettings = currentParseSettings()
+      const parseOptionsSignature = JSON.stringify(parseSettings)
+      const results = await Promise.allSettled(
         documents.map((document) =>
           parseKnowledgeDocument(
             token,
             workspaceId,
             knowledgeBase.id,
             document.id,
-            parseOptions,
+            {
+              chunk_size: parseSettings.chunkSize,
+              chunk_overlap: parseSettings.chunkOverlap,
+              split_separator: parseSettings.splitSeparator,
+              cleaning_rules: parseSettings.cleaningRules,
+              auto_index: false,
+            },
           ),
         ),
       )
+      const queuedDocuments = documents.map((document, index) =>
+        results[index]?.status === "fulfilled"
+          ? { ...document, chunks: [], status: "parse_queued" }
+          : document,
+      )
+      const firstFailure = results.find(
+        (result) => result.status === "rejected",
+      )
+      const allQueued = results.every(
+        (result) => result.status === "fulfilled",
+      )
+
+      applyPreviewDocuments(queuedDocuments)
+      pendingPreviewOptionsSignatureRef.current = allQueued
+        ? parseOptionsSignature
+        : null
+      if (step === "files" || allQueued) {
+        onRouteSegment({
+          documentIds: documents.map((document) => document.id),
+          parseSettings,
+        })
+      }
+
+      if (firstFailure?.status === "rejected") {
+        reportError(firstFailure.reason)
+        return
+      }
 
       const nextDocuments = await waitForPreviewDocuments(queuedDocuments)
       const failedDocuments = nextDocuments.filter((document) =>
@@ -447,7 +557,6 @@ export function KnowledgeUploadFlow({
       setUploadedDocuments(nextDocuments)
       setSelectedDocumentId((current) => current ?? documents[0]?.id ?? null)
       setPreviewOptionsSignature(null)
-      setStep("segment")
       onNotify(
         failedCount ? "error" : "success",
         failedCount
@@ -544,7 +653,7 @@ export function KnowledgeUploadFlow({
               variant="ghost"
               size="icon-sm"
               aria-label={t("返回知识库")}
-              onClick={onBack}
+              onClick={onCancel}
             >
               <ArrowLeftIcon />
             </Button>
@@ -661,7 +770,7 @@ export function KnowledgeUploadFlow({
                   : t("等待选择文件")}
               </p>
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={onBack}>
+                <Button type="button" variant="outline" onClick={onCancel}>
                   {t("取消")}
                 </Button>
                 <Button
@@ -915,13 +1024,13 @@ export function KnowledgeUploadFlow({
                     : t("生成预览并确认片段后才能入库")}
               </p>
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={onBack}>
+                <Button type="button" variant="outline" onClick={onCancel}>
                   {t("取消")}
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setStep("files")}
+                  onClick={onBackToFiles}
                 >
                   {t("上一步")}
                 </Button>

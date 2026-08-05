@@ -385,7 +385,7 @@ def main() -> None:
         assert catalog_by_provider["model_ollama_provider"]["provider_type"] == "ollama"
 
         provider_model_types = client.get(
-            "/api/v1/model-providers/model_type_list",
+            "/api/v1/model-providers/model-types",
             headers=auth_headers(admin_token),
             params={"provider": "model_deepseek_provider"},
         )
@@ -393,7 +393,7 @@ def main() -> None:
         assert provider_model_types.json() == [{"key": "LLM", "value": "LLM"}]
 
         provider_form = client.get(
-            "/api/v1/model-providers/model_form",
+            "/api/v1/model-providers/credential-form",
             headers=auth_headers(admin_token),
             params={"provider": "model_deepseek_provider"},
         )
@@ -401,7 +401,7 @@ def main() -> None:
         assert [item["field"] for item in provider_form.json()] == ["api_base", "api_key"]
 
         custom_provider_form = client.get(
-            "/api/v1/model-providers/model_form",
+            "/api/v1/model-providers/credential-form",
             headers=auth_headers(admin_token),
             params={"provider": "model_custom_provider"},
         )
@@ -410,7 +410,7 @@ def main() -> None:
         assert custom_provider_form.json()[1]["required"] is False
 
         bedrock_form = client.get(
-            "/api/v1/model-providers/model_form",
+            "/api/v1/model-providers/credential-form",
             headers=auth_headers(admin_token),
             params={"provider": "model_aws_bedrock_provider"},
         )

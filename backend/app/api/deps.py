@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from typing import Annotated, Callable
 
@@ -6,11 +7,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.config import Settings
+from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.session import get_db
 from app.domain.user import User
 from app.infrastructure.security import decode_access_token
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.domain.workspace import Workspace
+
+logger = get_logger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -32,14 +36,23 @@ async def get_current_user(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
     if credentials is None:
+        log_event(logger, logging.WARNING, "Authentication failed.", reason="missing_token")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication required.")
 
     user_id = decode_access_token(credentials.credentials, settings)
     if user_id is None:
+        log_event(logger, logging.WARNING, "Authentication failed.", reason="invalid_token")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token.")
 
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
+        log_event(
+            logger,
+            logging.WARNING,
+            "Authentication failed.",
+            reason="user_inactive",
+            user_id=user_id,
+        )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token.")
     return user
 
@@ -75,12 +88,35 @@ async def build_workspace_context(
 ) -> WorkspaceContext:
     workspace = await workspace_repository.get_workspace_by_id(db, workspace_id)
     if workspace is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            "Workspace context failed.",
+            reason="not_found",
+            user_id=user.id,
+            workspace_id=workspace_id,
+        )
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
     if workspace.status != "active":
+        log_event(
+            logger,
+            logging.WARNING,
+            "Workspace context failed.",
+            reason="inactive",
+            user_id=user.id,
+            workspace_id=workspace_id,
+        )
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace is not active.")
 
     membership = await workspace_repository.get_workspace_membership(db, workspace_id, user.id)
     if membership is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            "Workspace access denied.",
+            user_id=user.id,
+            workspace_id=workspace_id,
+        )
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace access denied.")
 
     return WorkspaceContext(

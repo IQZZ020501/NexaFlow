@@ -4,6 +4,11 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class ModelTypeOptionResponse(BaseModel):
+    key: str
+    value: str
+
+
 class ModelProviderCatalogResponse(BaseModel):
     provider: str
     name: str

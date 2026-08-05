@@ -7,6 +7,6 @@ uv run celery -A app.infrastructure.celery:celery_app worker --loglevel=INFO
 ```
 
 Set `CELERY_BROKER_URL` for Redis. The API process and every worker must share
-the configured `KNOWLEDGE_STORAGE_DIR` and `CHROMA_PERSIST_DIR`; separate local
-directories cause workers to miss uploaded files or write vectors to a different
-collection.
+the configured `KNOWLEDGE_STORAGE_DIR` and connect to the same `QDRANT_URL`;
+otherwise workers can miss uploaded files or write vectors to a different
+Qdrant instance.

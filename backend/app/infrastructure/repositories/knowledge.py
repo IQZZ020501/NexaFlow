@@ -42,6 +42,8 @@ async def list_knowledge_base_rows(
     actor_id: str,
     workspace_role: str | None,
     resource_type: str,
+    limit: int | None = None,
+    offset: int = 0,
 ):
     grant = ResourcePermission
     statement = select(KnowledgeBase, grant).outerjoin(
@@ -62,7 +64,11 @@ async def list_knowledge_base_rows(
             )
         )
 
-    result = await db.execute(statement.order_by(KnowledgeBase.created_at))
+    statement = statement.order_by(
+        KnowledgeBase.created_at.desc(),
+        KnowledgeBase.id.desc(),
+    )
+    result = await db.execute(statement.limit(limit).offset(offset))
     return result.all()
 
 
@@ -86,6 +92,8 @@ async def list_knowledge_documents(
     knowledge_base: KnowledgeBase,
     *,
     include_staged: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[KnowledgeDocument]:
     statement = select(KnowledgeDocument).where(
         KnowledgeDocument.workspace_id == knowledge_base.workspace_id,
@@ -96,7 +104,11 @@ async def list_knowledge_documents(
         statement = statement.where(
             KnowledgeDocument.status.in_(VISIBLE_DOCUMENT_STATUSES)
         )
-    result = await db.scalars(statement.order_by(KnowledgeDocument.created_at.desc()))
+    statement = statement.order_by(
+        KnowledgeDocument.created_at.desc(),
+        KnowledgeDocument.id.desc(),
+    )
+    result = await db.scalars(statement.limit(limit).offset(offset))
     return list(result)
 
 
@@ -126,6 +138,8 @@ async def list_document_chunks(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     document_id: str,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[KnowledgeDocumentChunk]:
     result = await db.scalars(
         select(KnowledgeDocumentChunk)
@@ -134,7 +148,12 @@ async def list_document_chunks(
             KnowledgeDocumentChunk.knowledge_base_id == knowledge_base.id,
             KnowledgeDocumentChunk.document_id == document_id,
         )
-        .order_by(KnowledgeDocumentChunk.chunk_index)
+        .order_by(
+            KnowledgeDocumentChunk.chunk_index,
+            KnowledgeDocumentChunk.id,
+        )
+        .limit(limit)
+        .offset(offset)
     )
     return list(result)
 
@@ -222,6 +241,8 @@ async def list_knowledge_tasks(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     document_id: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[KnowledgeTask]:
     statement = select(KnowledgeTask).where(
         KnowledgeTask.workspace_id == knowledge_base.workspace_id,
@@ -229,7 +250,11 @@ async def list_knowledge_tasks(
     )
     if document_id is not None:
         statement = statement.where(KnowledgeTask.document_id == document_id)
-    result = await db.scalars(statement.order_by(KnowledgeTask.created_at.desc()))
+    statement = statement.order_by(
+        KnowledgeTask.created_at.desc(),
+        KnowledgeTask.id.desc(),
+    )
+    result = await db.scalars(statement.limit(limit).offset(offset))
     return list(result)
 
 
@@ -392,6 +417,8 @@ async def list_resource_permission_rows(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     resource_type: str,
+    limit: int | None = None,
+    offset: int = 0,
 ):
     result = await db.execute(
         select(ResourcePermission, User)
@@ -401,7 +428,9 @@ async def list_resource_permission_rows(
             ResourcePermission.resource_type == resource_type,
             ResourcePermission.resource_id == knowledge_base.id,
         )
-        .order_by(User.name)
+        .order_by(User.name, User.id)
+        .limit(limit)
+        .offset(offset)
     )
     return result.all()
 

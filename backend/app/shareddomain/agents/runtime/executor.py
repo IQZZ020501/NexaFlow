@@ -1,3 +1,5 @@
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -5,6 +7,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import convert_to_messages
 from langchain_core.tools import StructuredTool
 
+from app.infrastructure.logger import get_logger, log_event
 from app.shareddomain.agents.runtime.callbacks import (
     AgentEventBus,
     AgentEventHandler,
@@ -16,6 +19,8 @@ from app.shareddomain.agents.runtime.graph import (
     agent_graph,
 )
 from app.shareddomain.agents.runtime.state import AgentState
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,7 @@ async def run_agent(
         "finish_reason": "",
         "final_answer": "",
     }
+    started_at = time.perf_counter()
     state = await agent_graph.ainvoke(
         initial_state,
         config={"recursion_limit": MAX_AGENT_TURNS * 2 + 1},
@@ -51,6 +57,15 @@ async def run_agent(
                 AgentEventBus([on_event] if on_event is not None else [])
             ),
         ),
+    )
+    log_event(
+        logger,
+        logging.INFO,
+        "Agent graph execution completed.",
+        turns=state["turn"],
+        tool_calls=state["tool_call_count"],
+        finish_reason=state["finish_reason"],
+        duration_ms=round((time.perf_counter() - started_at) * 1000),
     )
     return AgentExecutionResult(
         content=state["final_answer"],

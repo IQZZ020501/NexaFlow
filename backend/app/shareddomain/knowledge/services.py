@@ -199,6 +199,8 @@ async def list_knowledge_bases(
     workspace_id: str,
     actor: User,
     workspace_role: str | None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[KnowledgeBaseResponse]:
     rows = await knowledge_base_repository.list_knowledge_base_rows(
         db,
@@ -206,6 +208,8 @@ async def list_knowledge_bases(
         actor.id,
         workspace_role,
         RESOURCE_TYPE,
+        limit,
+        offset,
     )
     return [
         knowledge_base_to_response(
@@ -266,6 +270,8 @@ async def list_knowledge_documents(
     knowledge_base: KnowledgeBase,
     *,
     include_staged: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[KnowledgeDocumentResponse]:
     return [
         document_to_response(document)
@@ -273,6 +279,8 @@ async def list_knowledge_documents(
             db,
             knowledge_base,
             include_staged=include_staged,
+            limit=limit,
+            offset=offset,
         )
     ]
 
@@ -562,11 +570,15 @@ async def delete_knowledge_base_permanently(
 async def list_resource_permissions(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[ResourcePermissionResponse]:
     rows = await knowledge_base_repository.list_resource_permission_rows(
         db,
         knowledge_base,
         RESOURCE_TYPE,
+        limit,
+        offset,
     )
     return [
         ResourcePermissionResponse(

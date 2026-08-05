@@ -60,9 +60,14 @@ export function listModelProviderCatalog(token: string, modelType?: string) {
   })
 }
 
+export type ModelTypeOption = {
+  key: string
+  value: string
+}
+
 export function listModelProviderModelTypes(token: string, provider: string) {
-  return request<Array<{ key: string; value: string }>>(
-    `/api/v1/model-providers/model_type_list?provider=${encodeURIComponent(provider)}`,
+  return request<ModelTypeOption[]>(
+    `/api/v1/model-providers/model-types?provider=${encodeURIComponent(provider)}`,
     { token }
   )
 }
@@ -73,14 +78,14 @@ export function listModelProviderBaseModels(
   modelType: string
 ) {
   return request<BaseModelOption[]>(
-    `/api/v1/model-providers/model_list?provider=${encodeURIComponent(provider)}&model_type=${encodeURIComponent(modelType)}`,
+    `/api/v1/model-providers/base-models?provider=${encodeURIComponent(provider)}&model_type=${encodeURIComponent(modelType)}`,
     { token }
   )
 }
 
 export function getModelProviderForm(token: string, provider: string) {
   return request<ModelCredentialField[]>(
-    `/api/v1/model-providers/model_form?provider=${encodeURIComponent(provider)}`,
+    `/api/v1/model-providers/credential-form?provider=${encodeURIComponent(provider)}`,
     { token }
   )
 }

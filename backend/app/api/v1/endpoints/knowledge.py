@@ -15,6 +15,8 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import log_error
+from app.infrastructure.logger import get_logger
 from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
@@ -64,6 +66,8 @@ from app.shareddomain.knowledge.services import (
 )
 from app.tasks.knowledge import enqueue_knowledge_task
 
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/workspaces/{workspace_id}/knowledge-bases", tags=["knowledge"])
 
 
@@ -71,6 +75,7 @@ async def dispatch_knowledge_task(task_id: str, settings: Settings) -> None:
     try:
         await enqueue_knowledge_task(task_id, settings)
     except Exception as exc:
+        log_error(logger, "Knowledge task dispatch failed.", exc, task_id=task_id)
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Knowledge task queue is unavailable.",
@@ -81,12 +86,16 @@ async def dispatch_knowledge_task(task_id: str, settings: Settings) -> None:
 async def list_workspace_knowledge_bases(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[KnowledgeBaseResponse]:
     return await list_knowledge_bases(
         db,
         context.workspace.id,
         context.user,
         context.membership_role,
+        limit,
+        offset,
     )
 
 
@@ -170,6 +179,8 @@ async def list_workspace_knowledge_base_documents(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
     include_staged: Annotated[bool, Query()] = False,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[KnowledgeDocumentResponse]:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     await require_knowledge_base_permission(
@@ -183,6 +194,8 @@ async def list_workspace_knowledge_base_documents(
         db,
         knowledge_base,
         include_staged=include_staged,
+        limit=limit,
+        offset=offset,
     )
     chunk_counts = await count_document_chunks(db, knowledge_base)
     return [
@@ -242,6 +255,8 @@ async def list_workspace_knowledge_document_chunks(
     document_id: str,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[KnowledgeDocumentChunkResponse]:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     await require_knowledge_base_permission(
@@ -252,7 +267,7 @@ async def list_workspace_knowledge_document_chunks(
         {"view", "edit"},
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)
-    return await list_knowledge_document_chunks(db, knowledge_base, document)
+    return await list_knowledge_document_chunks(db, knowledge_base, document, limit, offset)
 
 
 @router.get(
@@ -264,6 +279,8 @@ async def list_workspace_knowledge_document_tasks(
     document_id: str,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[KnowledgeTaskResponse]:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     await require_knowledge_base_permission(
@@ -274,7 +291,7 @@ async def list_workspace_knowledge_document_tasks(
         {"view", "edit"},
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)
-    return await list_knowledge_tasks(db, knowledge_base, document)
+    return await list_knowledge_tasks(db, knowledge_base, document, limit, offset)
 
 
 @router.post(
@@ -361,6 +378,8 @@ async def list_workspace_knowledge_base_tasks(
     knowledge_base_id: str,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[KnowledgeTaskResponse]:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     await require_knowledge_base_permission(
@@ -370,7 +389,7 @@ async def list_workspace_knowledge_base_tasks(
         context.membership_role,
         {"view", "edit"},
     )
-    return await list_knowledge_tasks(db, knowledge_base)
+    return await list_knowledge_tasks(db, knowledge_base, limit=limit, offset=offset)
 
 
 @router.post(
@@ -427,10 +446,12 @@ async def list_workspace_knowledge_base_permissions(
     knowledge_base_id: str,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ResourcePermissionResponse]:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     require_can_manage_permissions(knowledge_base, context.user, context.membership_role)
-    return await list_resource_permissions(db, knowledge_base)
+    return await list_resource_permissions(db, knowledge_base, limit, offset)
 
 
 @router.put("/{knowledge_base_id}/permissions/{user_id}", response_model=ResourcePermissionResponse)

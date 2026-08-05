@@ -52,10 +52,17 @@ def bearer_token(server: McpServer, settings: Settings) -> str | None:
 async def list_mcp_servers(
     db: AsyncSession,
     workspace_id: str,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[McpServerResponse]:
     return [
         mcp_server_to_response(server)
-        for server in await mcp_repository.list_mcp_servers(db, workspace_id)
+        for server in await mcp_repository.list_mcp_servers(
+            db,
+            workspace_id,
+            limit,
+            offset,
+        )
     ]
 
 

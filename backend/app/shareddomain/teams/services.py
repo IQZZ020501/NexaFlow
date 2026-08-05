@@ -27,8 +27,13 @@ def team_to_response(team: Team) -> TeamResponse:
     )
 
 
-async def list_teams(db: AsyncSession, workspace_id: str) -> list[TeamResponse]:
-    teams = await team_repository.list_teams(db, workspace_id)
+async def list_teams(
+    db: AsyncSession,
+    workspace_id: str,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[TeamResponse]:
+    teams = await team_repository.list_teams(db, workspace_id, limit, offset)
     return [team_to_response(item) for item in teams]
 
 

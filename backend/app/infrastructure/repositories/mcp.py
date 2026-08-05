@@ -5,11 +5,18 @@ from app.shareddomain.agents.models import AgentMcpTool
 from app.shareddomain.tools.models import McpServer
 
 
-async def list_mcp_servers(db: AsyncSession, workspace_id: str) -> list[McpServer]:
+async def list_mcp_servers(
+    db: AsyncSession,
+    workspace_id: str,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[McpServer]:
     result = await db.scalars(
         select(McpServer)
         .where(McpServer.workspace_id == workspace_id)
-        .order_by(McpServer.updated_at.desc())
+        .order_by(McpServer.created_at.desc(), McpServer.id.desc())
+        .limit(limit)
+        .offset(offset)
     )
     return list(result.all())
 

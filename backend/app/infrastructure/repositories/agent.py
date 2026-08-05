@@ -9,11 +9,18 @@ from app.shareddomain.agents.models import (
 )
 
 
-async def list_agents(db: AsyncSession, workspace_id: str) -> list[Agent]:
+async def list_agents(
+    db: AsyncSession,
+    workspace_id: str,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[Agent]:
     result = await db.scalars(
         select(Agent)
         .where(Agent.workspace_id == workspace_id)
-        .order_by(Agent.updated_at.desc())
+        .order_by(Agent.created_at.desc(), Agent.id.desc())
+        .limit(limit)
+        .offset(offset)
     )
     return list(result.all())
 
@@ -109,7 +116,8 @@ async def list_agent_runs(
     db: AsyncSession,
     agent_id: str,
     requested_by_user_id: str,
-    limit: int,
+    limit: int | None = None,
+    offset: int = 0,
     *,
     status: str | None = None,
 ) -> list[AgentRun]:
@@ -119,8 +127,9 @@ async def list_agent_runs(
             AgentRun.agent_id == agent_id,
             AgentRun.requested_by_user_id == requested_by_user_id,
         )
-        .order_by(AgentRun.created_at.desc())
+        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         .limit(limit)
+        .offset(offset)
     )
     if status is not None:
         statement = statement.where(AgentRun.status == status)

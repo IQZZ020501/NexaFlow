@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from sqlalchemy.exc import IntegrityError
@@ -7,6 +8,7 @@ from fastapi import HTTPException, status
 
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
+from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.validation import normalize_email, normalize_name, normalize_username
 from app.domain.user import RefreshSession, User
 from app.infrastructure.model_utils import utc_now
@@ -32,6 +34,8 @@ from app.infrastructure.security import (
 from app.infrastructure.system_log import record_system_log
 from app.domain.team import Team, TeamMembership
 from app.domain.workspace import Workspace, WorkspaceMembership
+
+logger = get_logger(__name__)
 
 DEFAULT_USER_PASSWORD = "NexaFlow@123"
 
@@ -138,8 +142,12 @@ async def user_to_response_with_scopes(db: AsyncSession, user: User) -> UserResp
     )
 
 
-async def list_users(db: AsyncSession) -> list[UserResponse]:
-    users = await user_repository.list_users(db)
+async def list_users(
+    db: AsyncSession,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[UserResponse]:
+    users = await user_repository.list_users(db, limit, offset)
     workspaces_by_user = await user_workspaces_by_user_id(db, users)
     teams_by_user = await user_teams_by_user_id(db, users)
     return [
@@ -370,6 +378,14 @@ async def authenticate_user(
     username = normalize_username(username)
     user = await user_repository.get_active_user_by_username(db, username)
     if user is None or not verify_password(password, user.password_hash):
+        log_event(
+            logger,
+            logging.WARNING,
+            "Login failed.",
+            username=username,
+            ip_address=ip_address or "",
+            reason="invalid_credentials",
+        )
         record_system_log(
             db,
             level="warning",
@@ -388,6 +404,14 @@ async def authenticate_user(
 
     refresh_token = await issue_refresh_session(db, user, settings)
     await db.commit()
+    log_event(
+        logger,
+        logging.INFO,
+        "Login succeeded.",
+        user_id=user.id,
+        username=user.username,
+        ip_address=ip_address or "",
+    )
     return access_token_response(user, settings), refresh_token
 
 
@@ -402,11 +426,26 @@ async def refresh_access_token(
         utc_now(),
     )
     if session is None:
+        log_event(logger, logging.WARNING, "Refresh token rejected.", reason="invalid_token")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token.")
 
     user = await db.get(User, session.user_id)
     if user is None or not user.is_active:
+        log_event(
+            logger,
+            logging.WARNING,
+            "Refresh token rejected.",
+            reason="user_inactive",
+            user_id=session.user_id,
+        )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token.")
+    log_event(
+        logger,
+        logging.INFO,
+        "Refresh token accepted.",
+        user_id=user.id,
+        username=user.username,
+    )
     return access_token_response(user, settings)
 
 
@@ -435,6 +474,13 @@ async def change_password(
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
     refresh_token = await issue_refresh_session(db, user, settings)
     await db.commit()
+    log_event(
+        logger,
+        logging.INFO,
+        "Password changed.",
+        user_id=user.id,
+        username=user.username,
+    )
     return refresh_token
 
 

@@ -37,10 +37,6 @@ router = APIRouter(
     prefix="/workspaces/{workspace_id}/knowledge-bases",
     tags=["knowledge"],
 )
-legacy_router = APIRouter(
-    prefix="/workspace/{workspace_id}/knowledge",
-    tags=["knowledge"],
-)
 
 
 def parse_security_levels(raw: str | None) -> dict[str, str]:
@@ -117,12 +113,9 @@ def split_response(
 
 
 @router.post(
-    "/{knowledge_base_id}/document/split",
+    "/{knowledge_base_id}/documents/split",
     response_model=list[KnowledgeDocumentSplitResponse],
-)
-@legacy_router.post(
-    "/{knowledge_base_id}/document/split",
-    response_model=list[KnowledgeDocumentSplitResponse],
+    status_code=status.HTTP_201_CREATED,
 )
 async def split_workspace_knowledge_base_documents(
     knowledge_base_id: str,
@@ -186,13 +179,10 @@ async def split_workspace_knowledge_base_documents(
     return responses
 
 
-@router.put(
-    "/{knowledge_base_id}/document/batch_create",
+@router.post(
+    "/{knowledge_base_id}/documents/batch-create",
     response_model=list[KnowledgeDocumentResponse],
-)
-@legacy_router.put(
-    "/{knowledge_base_id}/document/batch_create",
-    response_model=list[KnowledgeDocumentResponse],
+    status_code=status.HTTP_201_CREATED,
 )
 async def batch_create_workspace_knowledge_base_documents(
     knowledge_base_id: str,

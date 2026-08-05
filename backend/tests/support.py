@@ -26,6 +26,7 @@ os.environ.update(
         "DEFAULT_TEAM_SLUG": "default",
         "ENVIRONMENT": "test",
         "CELERY_TASK_ALWAYS_EAGER": "true",
+        "QDRANT_URL": ":memory:",
     }
 )
 
@@ -45,7 +46,7 @@ def settings() -> Settings:
         jwt_secret_key="test-secret-for-app-smoke-suite",
         model_secret_key="test-model-secret-for-app-smoke-suite",
         knowledge_storage_dir=Path("/tmp/app-test-knowledge-storage"),
-        chroma_persist_dir=Path("/tmp/app-test-chroma"),
+        qdrant_url=":memory:",
         celery_task_always_eager=True,
         bootstrap_admin_username="admin",
         bootstrap_admin_email="admin@app.local",
@@ -63,7 +64,6 @@ def settings() -> Settings:
 def test_client() -> Iterator[TestClient]:
     runtime_settings = settings()
     shutil.rmtree(runtime_settings.knowledge_storage_dir, ignore_errors=True)
-    shutil.rmtree(runtime_settings.chroma_persist_dir, ignore_errors=True)
     app = create_app(runtime_settings)
 
     async def create_schema() -> None:

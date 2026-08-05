@@ -17,5 +17,6 @@ async def list_logs(
     _: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[AuditLogResponse]:
-    return await list_audit_logs(db, limit)
+    return await list_audit_logs(db, limit, offset)

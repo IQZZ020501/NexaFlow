@@ -4,11 +4,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.team import Team, TeamMembership
 
 
-async def list_teams(db: AsyncSession, workspace_id: str) -> list[Team]:
+async def list_teams(
+    db: AsyncSession,
+    workspace_id: str,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[Team]:
     result = await db.scalars(
         select(Team)
         .where(Team.workspace_id == workspace_id)
-        .order_by(Team.created_at)
+        .order_by(Team.created_at.desc(), Team.id.desc())
+        .limit(limit)
+        .offset(offset)
     )
     return list(result.all())
 

@@ -23,6 +23,16 @@ services:
       timeout: 5s
       retries: 10
 
+  qdrant:
+    image: qdrant/qdrant:v1.19.0
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   api:
     build:
       context: ..
@@ -32,7 +42,7 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
       CELERY_BROKER_URL: redis://redis:6379/0
       KNOWLEDGE_STORAGE_DIR: /data/knowledge
-      CHROMA_PERSIST_DIR: /data/chroma
+      QDRANT_URL: http://qdrant:6333
     volumes:
       - uploads:/data
     ports:
@@ -41,6 +51,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
 
   worker:
@@ -53,13 +65,15 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
       CELERY_BROKER_URL: redis://redis:6379/0
       KNOWLEDGE_STORAGE_DIR: /data/knowledge
-      CHROMA_PERSIST_DIR: /data/chroma
+      QDRANT_URL: http://qdrant:6333
     volumes:
       - uploads:/data
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
 
   beat:
@@ -88,4 +102,5 @@ services:
 volumes:
   db-data:
   redis-data:
+  qdrant-data:
   uploads:

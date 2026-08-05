@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_global_admin
@@ -29,8 +29,10 @@ router = APIRouter(prefix="/users", tags=["users"])
 async def list_all_users(
     _: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[UserResponse]:
-    return await list_users(db)
+    return await list_users(db, limit, offset)
 
 
 @router.post(

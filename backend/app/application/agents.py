@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 import traceback
 from collections.abc import AsyncIterator
 from typing import Any
@@ -23,6 +24,8 @@ from app.capabilities.mcp.client import McpClientError, call_mcp_tool
 from app.capabilities.rag.retrieval import query_knowledge_base
 from app.domain.user import User
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import classify_error, log_error
+from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.model_utils import new_id
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
@@ -58,7 +61,7 @@ MAX_RERANK_CONTEXT_HITS = 5
 MAX_KNOWLEDGE_HITS_PER_CALL = 8
 MAX_KNOWLEDGE_CONTENT_CHARS = 2000
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class KnowledgeSearchInput(BaseModel):
@@ -93,7 +96,8 @@ async def list_agent_runs(
     workspace_id: str,
     agent_id: str,
     actor: User,
-    limit: int = 20,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[AgentRunResponse]:
     await get_agent(db, workspace_id, agent_id)
     return [
@@ -103,6 +107,7 @@ async def list_agent_runs(
             agent_id,
             actor.id,
             limit,
+            offset,
         )
     ]
 
@@ -519,7 +524,18 @@ async def execute_agent_run(
             await on_event(event)
 
     trace_id = new_id()
+    started_at = time.perf_counter()
     try:
+        log_event(
+            logger,
+            logging.INFO,
+            "Agent run started.",
+            agent_id=run.agent_id,
+            agent_run_id=run.id,
+            trace_id=trace_id,
+            model_id=getattr(model, "id", ""),
+            goal=run.goal[:120],
+        )
         chat_model = build_registered_chat_model(model, settings)
         knowledge_bases = await accessible_agent_knowledge_bases(
             db,
@@ -568,18 +584,27 @@ async def execute_agent_run(
         run.result = result.content
         run.events = process_events if on_event else result.events
         run.status = "succeeded"
+        log_event(
+            logger,
+            logging.INFO,
+            "Agent run succeeded.",
+            agent_id=run.agent_id,
+            agent_run_id=run.id,
+            trace_id=trace_id,
+            duration_ms=round((time.perf_counter() - started_at) * 1000),
+        )
     except Exception as exc:
         run.events = process_events
         run.status = "failed"
         run.last_error = safe_agent_error(exc)
-        logger.exception(
+        log_error(
+            logger,
             "Agent execution failed.",
-            extra={
-                "agent_id": run.agent_id,
-                "agent_run_id": run.id,
-                "trace_id": trace_id,
-                "workspace_id": run.workspace_id,
-            },
+            exc,
+            agent_id=run.agent_id,
+            agent_run_id=run.id,
+            trace_id=trace_id,
+            workspace_id=run.workspace_id,
         )
         try:
             async with get_session_factory()() as log_db:
@@ -595,14 +620,15 @@ async def execute_agent_run(
                         "agent_id": run.agent_id,
                         "agent_run_id": run.id,
                         "exception_type": exc.__class__.__name__,
+                        "source": classify_error(exc),
                         "trace_id": trace_id,
                         "workspace_id": run.workspace_id,
                     },
                     stack_trace="".join(traceback.format_exception(exc)),
                 )
                 await log_db.commit()
-        except Exception:
-            logger.exception("Failed to record agent execution error.")
+        except Exception as log_exc:
+            log_error(logger, "Failed to record agent execution error.", log_exc)
 
     run.finished_at = utc_now()
     if persist:

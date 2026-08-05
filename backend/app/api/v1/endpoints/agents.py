@@ -2,7 +2,7 @@ from typing import Annotated
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,12 +41,16 @@ router = APIRouter(
 async def list_workspace_agents(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[AgentResponse]:
     return await list_agents(
         db,
         context.workspace.id,
         context.user,
         context.membership_role,
+        limit,
+        offset,
     )
 
 
@@ -113,12 +117,16 @@ async def list_workspace_agent_runs(
     agent_id: str,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[AgentRunResponse]:
     return await list_agent_runs(
         db,
         context.workspace.id,
         agent_id,
         context.user,
+        limit,
+        offset,
     )
 
 

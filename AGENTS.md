@@ -41,7 +41,8 @@ Correctness, safety, evidence, and validation take priority over speed.
 - Regression suites live in `backend/tests/` and run from `backend/` with
   `uv run python -m tests.<suite>`.
 - Knowledge parsing and indexing run through Celery with Redis; API and
-  worker instances must share `KNOWLEDGE_STORAGE_DIR` and `CHROMA_PERSIST_DIR`.
+  worker instances must share `KNOWLEDGE_STORAGE_DIR` and use the same
+  `QDRANT_URL`.
 - MCP tools use workspace-scoped Streamable HTTP Server registrations. Bearer
   tokens are encrypted, and private-network endpoints require
   `MCP_ALLOW_PRIVATE_NETWORKS=true`.
@@ -150,32 +151,43 @@ docs(readme): update deployment steps
 
 ### PR Description Template
 
+Use the template below. Fill every section with facts grounded in the actual
+change: explain what changed and why the approach works based on your
+understanding of the code, not by pasting unedited output. If verification was
+not run, say so plainly; if risk is low, state the reason. For multi-commit
+PRs, group the change log per commit or per module.
+
 ```markdown
 ## 背景
 
-说明为什么需要这个改动。
+说明为什么需要这个改动，以及为什么这样改能生效（基于对代码逻辑的理解）。
+
+## 变更类型
+
+- [ ] 🐛 Bug 修复 (Bug fix) - 请关联对应 Issue，避免将设计取舍或预期不一致直接归类为 bug
+- [ ] ✨ 新功能 (New feature)
+- [ ] ⚡ 性能优化 / 重构 (Refactor)
+- [ ] 📝 文档更新 (Documentation)
 
 ## 改动内容
 
--
+- 逐项说明改了什么、为什么；跨模块改动按模块分条。
 
 ## 验证方式
 
-- [ ] 本地测试通过
-- [ ] 相关页面/接口已验证
+- [ ] 本地测试通过（列出实际运行的套件/命令与结果）
+- [ ] 相关页面/接口已验证（附截图、关键日志或测试报告）
 - [ ] 无需验证，原因：
+- [ ] 已知未过/未验证项：如实列出，不隐含为通过
 
 ## 风险与影响
 
-说明可能影响的模块、兼容性、回滚方式。
+说明可能影响的模块、兼容性、回滚方式；风险低时写明原因。
 
 ## 关联信息
 
 关联 issue、需求、缺陷或上下游 PR。
 ```
-
-Fill every section with facts; if verification was not run, say so plainly.
-If risk is low, state the reason.
 
 ### Release Tag Naming
 

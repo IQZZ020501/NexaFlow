@@ -17,17 +17,33 @@ async def count_workspace_admins(db: AsyncSession, workspace_id: str) -> int:
     ) or 0
 
 
-async def list_all_workspaces(db: AsyncSession) -> list[Workspace]:
-    result = await db.scalars(select(Workspace).order_by(Workspace.created_at))
+async def list_all_workspaces(
+    db: AsyncSession,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[Workspace]:
+    result = await db.scalars(
+        select(Workspace)
+        .order_by(Workspace.created_at.desc(), Workspace.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     return list(result.all())
 
 
-async def list_workspaces_for_user(db: AsyncSession, user_id: str) -> list[Workspace]:
+async def list_workspaces_for_user(
+    db: AsyncSession,
+    user_id: str,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[Workspace]:
     result = await db.scalars(
         select(Workspace)
         .join(WorkspaceMembership)
         .where(WorkspaceMembership.user_id == user_id)
-        .order_by(Workspace.created_at)
+        .order_by(Workspace.created_at.desc(), Workspace.id.desc())
+        .limit(limit)
+        .offset(offset)
     )
     return list(result.all())
 
@@ -49,12 +65,19 @@ async def get_workspace_membership(
     )
 
 
-async def list_workspace_member_rows(db: AsyncSession, workspace_id: str):
+async def list_workspace_member_rows(
+    db: AsyncSession,
+    workspace_id: str,
+    limit: int | None = None,
+    offset: int = 0,
+):
     result = await db.execute(
         select(WorkspaceMembership, User)
         .join(User, WorkspaceMembership.user_id == User.id)
         .where(WorkspaceMembership.workspace_id == workspace_id)
-        .order_by(User.created_at)
+        .order_by(User.created_at.desc(), User.id.desc())
+        .limit(limit)
+        .offset(offset)
     )
     return result.all()
 

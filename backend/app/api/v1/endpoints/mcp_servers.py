@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -30,8 +30,10 @@ router = APIRouter(
 async def list_workspace_mcp_servers(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[McpServerResponse]:
-    return await list_mcp_servers(db, context.workspace.id)
+    return await list_mcp_servers(db, context.workspace.id, limit, offset)
 
 
 @router.post(

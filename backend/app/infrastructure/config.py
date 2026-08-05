@@ -7,7 +7,7 @@ DEFAULT_JWT_SECRET_KEY = "dev-secret-change-me-please-replace"
 DEFAULT_MODEL_SECRET_KEY = "dev-model-secret-change-me-please-replace"
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 DEFAULT_KNOWLEDGE_STORAGE_DIR = Path(__file__).resolve().parents[2] / "storage" / "knowledge"
-DEFAULT_CHROMA_PERSIST_DIR = Path(__file__).resolve().parents[2] / "storage" / "chroma"
+DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
 DEFAULT_CELERY_BROKER_URL = "redis://localhost:6379/0"
 
 
@@ -40,7 +40,8 @@ class Settings:
     default_team_slug: str
     model_secret_key: str = DEFAULT_MODEL_SECRET_KEY
     knowledge_storage_dir: Path = DEFAULT_KNOWLEDGE_STORAGE_DIR
-    chroma_persist_dir: Path = DEFAULT_CHROMA_PERSIST_DIR
+    qdrant_url: str = DEFAULT_QDRANT_URL
+    qdrant_api_key: str = ""
     celery_broker_url: str = DEFAULT_CELERY_BROKER_URL
     celery_task_always_eager: bool = False
     mcp_allow_private_networks: bool = False
@@ -49,6 +50,7 @@ class Settings:
     refresh_token_expires_days: int = 30
     cors_origins: tuple[str, ...] = ()
     environment: str = "development"
+    log_level: str = "INFO"
 
     @classmethod
     def from_env(cls, require_bootstrap: bool = True) -> "Settings":
@@ -76,9 +78,8 @@ class Settings:
             knowledge_storage_dir=Path(
                 os.getenv("KNOWLEDGE_STORAGE_DIR", str(DEFAULT_KNOWLEDGE_STORAGE_DIR))
             ),
-            chroma_persist_dir=Path(
-                os.getenv("CHROMA_PERSIST_DIR", str(DEFAULT_CHROMA_PERSIST_DIR))
-            ),
+            qdrant_url=os.getenv("QDRANT_URL", DEFAULT_QDRANT_URL),
+            qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
             celery_broker_url=os.getenv("CELERY_BROKER_URL", DEFAULT_CELERY_BROKER_URL),
             celery_task_always_eager=os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower()
             in {"1", "true", "yes"},
@@ -91,6 +92,7 @@ class Settings:
             refresh_token_expires_days=int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30")),
             cors_origins=origins,
             environment=os.getenv("ENVIRONMENT", "development"),
+            log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         )
         settings.validate(require_bootstrap=require_bootstrap)
         return settings
@@ -115,10 +117,12 @@ class Settings:
             raise RuntimeError("MODEL_SECRET_KEY must be set in production.")
         if self.environment == "production" and self.knowledge_storage_dir == DEFAULT_KNOWLEDGE_STORAGE_DIR:
             raise RuntimeError("KNOWLEDGE_STORAGE_DIR must be set in production.")
-        if self.environment == "production" and self.chroma_persist_dir == DEFAULT_CHROMA_PERSIST_DIR:
-            raise RuntimeError("CHROMA_PERSIST_DIR must be set in production.")
+        if self.environment == "production" and self.qdrant_url == DEFAULT_QDRANT_URL:
+            raise RuntimeError("QDRANT_URL must be set in production.")
         if self.environment == "production" and self.celery_broker_url == DEFAULT_CELERY_BROKER_URL:
             raise RuntimeError("CELERY_BROKER_URL must be set in production.")
+        if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            raise RuntimeError(f"Invalid LOG_LEVEL: {self.log_level}.")
         if self.mcp_request_timeout_seconds <= 0:
             raise RuntimeError("MCP_REQUEST_TIMEOUT_SECONDS must be greater than zero.")
         if self.mcp_request_timeout_seconds > 300:

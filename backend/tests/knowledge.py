@@ -2,9 +2,9 @@ import asyncio
 import json
 from html import escape
 from io import BytesIO
+from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from langchain_core.documents import Document
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import select, text
@@ -324,43 +324,40 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
 
 
 def assert_vector_store_mmr_and_metadata() -> None:
-    captured_documents: list[Document] = []
+    chunk_id = "00000000-0000-0000-0000-000000000001"
 
-    class FakeVectorStore:
-        def max_marginal_relevance_search(
-            self,
-            query: str,
-            *,
-            k: int,
-            fetch_k: int,
-        ) -> list[Document]:
-            assert (query, k, fetch_k) == ("exact term", 3, 6)
-            return [
-                Document(page_content="kept", metadata={"chunk_id": "chunk-1"}),
-                Document(page_content="ignored", metadata={}),
-            ]
+    class FakeEmbeddings:
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            assert texts == ["content"]
+            return [[1.0, 0.0]]
 
-        def add_documents(self, documents: list[Document], *, ids: list[str]) -> None:
-            assert ids == ["chunk-1"]
-            captured_documents.extend(documents)
+        def embed_query(self, query: str) -> list[float]:
+            assert query == "exact term"
+            return [1.0, 0.0]
 
-    original_build_vector_store = knowledge_vector_store._build_vector_store
-    knowledge_vector_store._build_vector_store = lambda *_args: FakeVectorStore()
+    original_build_embeddings = knowledge_vector_store.build_registered_embeddings
+    knowledge_vector_store._build_qdrant_client.cache_clear()
+    knowledge_vector_store.build_registered_embeddings = (
+        lambda *_args: FakeEmbeddings()
+    )
+    client = None
     try:
+        settings = test_settings()
         assert knowledge_vector_store.query_vectors(
-            test_settings(),
-            "knowledge-1",
+            settings,
+            "missing-knowledge",
             object(),
             "exact term",
             3,
-        ) == [VectorHit(chunk_id="chunk-1", distance=None)]
+        ) == []
+
         knowledge_vector_store.upsert_vectors(
-            test_settings(),
+            settings,
             KnowledgeBase(id="knowledge-1", workspace_id="workspace-1"),
             object(),
             [
                 VectorChunk(
-                    id="chunk-1",
+                    id=chunk_id,
                     document_id="document-1",
                     document_filename="guide.txt",
                     chunk_index=2,
@@ -375,21 +372,84 @@ def assert_vector_store_mmr_and_metadata() -> None:
                 )
             ],
         )
-    finally:
-        knowledge_vector_store._build_vector_store = original_build_vector_store
 
-    assert len(captured_documents) == 1
-    assert captured_documents[0].metadata == {
-        "security_level": "INTERNAL",
-        "allow_download": False,
-        "content_type": "text/plain",
-        "chunk_id": "chunk-1",
-        "workspace_id": "workspace-1",
-        "knowledge_base_id": "knowledge-1",
-        "document_id": "document-1",
-        "document_filename": "guide.txt",
-        "chunk_index": 2,
-    }
+        client = knowledge_vector_store._client(settings)
+        collection_name = knowledge_vector_store.vector_collection_name("knowledge-1")
+        assert client.get_collection(collection_name).config.params.vectors.size == 2
+        stored = client.retrieve(collection_name, ids=[chunk_id], with_payload=True)
+        assert len(stored) == 1
+        assert stored[0].payload == {
+            "security_level": "INTERNAL",
+            "allow_download": False,
+            "content_type": "text/plain",
+            "chunk_id": chunk_id,
+            "workspace_id": "workspace-1",
+            "knowledge_base_id": "knowledge-1",
+            "document_id": "document-1",
+            "document_filename": "guide.txt",
+            "chunk_index": 2,
+        }
+
+        client.upsert(
+            collection_name,
+            points=[
+                knowledge_vector_store.models.PointStruct(
+                    id="00000000-0000-0000-0000-000000000002",
+                    vector=[1.0, 0.0],
+                    payload={},
+                )
+            ],
+        )
+        assert knowledge_vector_store.query_vectors(
+            settings,
+            "knowledge-1",
+            object(),
+            "exact term",
+            3,
+        ) == [VectorHit(chunk_id=chunk_id, distance=None)]
+
+        try:
+            knowledge_vector_store._ensure_collection(client, collection_name, 3)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Qdrant vector size mismatch was accepted.")
+
+        class RacingClient:
+            def collection_exists(self, _collection_name: str) -> bool:
+                return False
+
+            def create_collection(self, *_args, **_kwargs) -> bool:
+                raise knowledge_vector_store.UnexpectedResponse(
+                    409,
+                    "Conflict",
+                    b"",
+                    {},
+                )
+
+            def get_collection(self, _collection_name: str):
+                return SimpleNamespace(
+                    config=SimpleNamespace(
+                        params=SimpleNamespace(
+                            vectors=knowledge_vector_store.models.VectorParams(
+                                size=2,
+                                distance=knowledge_vector_store.models.Distance.COSINE,
+                            )
+                        )
+                    )
+                )
+
+        knowledge_vector_store._ensure_collection(RacingClient(), "race", 2)
+        knowledge_vector_store.delete_vectors(settings, "knowledge-1", [chunk_id])
+        assert client.retrieve(collection_name, ids=[chunk_id]) == []
+        knowledge_vector_store.delete_vector_collection(settings, "knowledge-1")
+        assert not client.collection_exists(collection_name)
+    finally:
+        knowledge_vector_store.build_registered_embeddings = original_build_embeddings
+        if client is not None:
+            client.close()
+        knowledge_vector_store._build_qdrant_client.cache_clear()
+
     assert knowledge_retrieval.reciprocal_rank_fusion(
         [
             VectorHit(chunk_id="vector-only", distance=0.1),
@@ -944,7 +1004,7 @@ def main() -> None:
 
         split_content = b" Legacy split content\n\nSecond paragraph "
         split_document = client.post(
-            f"/api/v1/workspace/{default_workspace_id}/knowledge/{knowledge_base_id}/document/split",
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/split"),
             headers=auth_headers(alice_token),
             data={
                 "security_levels": json.dumps(
@@ -956,7 +1016,7 @@ def main() -> None:
             },
             files=[("file", ("split-guide.txt", split_content, "text/plain"))],
         )
-        assert split_document.status_code == 200, split_document.text
+        assert split_document.status_code == 201, split_document.text
         split_payload = split_document.json()[0]
         split_document_id = split_payload["source_file_id"]
         assert split_payload["name"] == "split-guide.txt"
@@ -964,8 +1024,8 @@ def main() -> None:
         assert split_payload["content"][0]["content"] == "Legacy split content\nSecond paragraph"
         asyncio.run(assert_document_saved(split_document_id, split_content))
 
-        batch_created = client.put(
-            f"/api/v1/workspace/{default_workspace_id}/knowledge/{knowledge_base_id}/document/batch_create",
+        batch_created = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/batch-create"),
             headers=auth_headers(alice_token),
             json=[
                 {
@@ -976,7 +1036,7 @@ def main() -> None:
                 }
             ],
         )
-        assert batch_created.status_code == 200, batch_created.text
+        assert batch_created.status_code == 201, batch_created.text
         assert batch_created.json()[0]["id"] == split_document_id
         assert batch_created.json()[0]["meta"]["source_file_id"] == split_document_id
         assert batch_created.json()[0]["meta"]["security_level"] == "INTERNAL"

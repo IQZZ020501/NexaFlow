@@ -8,8 +8,17 @@ from app.domain.team import Team, TeamMembership
 from app.domain.workspace import Workspace, WorkspaceMembership
 
 
-async def list_users(db: AsyncSession) -> list[User]:
-    result = await db.scalars(select(User).order_by(User.created_at))
+async def list_users(
+    db: AsyncSession,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[User]:
+    result = await db.scalars(
+        select(User)
+        .order_by(User.created_at.desc(), User.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     return list(result.all())
 
 
