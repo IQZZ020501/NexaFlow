@@ -1,3 +1,5 @@
+import logging
+import time
 from dataclasses import dataclass
 from functools import cache
 from typing import Any
@@ -8,7 +10,11 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 from app.capabilities.llm.models import RegisteredModel
 from app.capabilities.llm.runtime import build_registered_embeddings
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import log_error
+from app.infrastructure.logger import get_logger, log_event
 from app.shareddomain.knowledge.models import KnowledgeBase
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -34,7 +40,9 @@ def vector_collection_name(knowledge_base_id: str) -> str:
 @cache
 def _build_qdrant_client(qdrant_url: str, qdrant_api_key: str) -> QdrantClient:
     if qdrant_url == ":memory:":
+        log_event(logger, logging.INFO, "Qdrant client created.", mode="memory")
         return QdrantClient(location=":memory:")
+    log_event(logger, logging.INFO, "Qdrant client created.", url=qdrant_url)
     return QdrantClient(url=qdrant_url, api_key=qdrant_api_key or None)
 
 
@@ -58,9 +66,29 @@ def _ensure_collection(
             )
         except UnexpectedResponse as exc:
             if exc.status_code != 409:
+                log_error(
+                    logger,
+                    "Qdrant collection creation failed.",
+                    exc,
+                    collection_name=collection_name,
+                    vector_size=vector_size,
+                )
                 raise
+            log_event(
+                logger,
+                logging.INFO,
+                "Qdrant collection created concurrently by another process.",
+                collection_name=collection_name,
+            )
         else:
             if created:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "Qdrant collection created.",
+                    collection_name=collection_name,
+                    vector_size=vector_size,
+                )
                 return
 
     vectors_config = client.get_collection(collection_name).config.params.vectors
@@ -68,6 +96,13 @@ def _ensure_collection(
         not isinstance(vectors_config, models.VectorParams)
         or vectors_config.size != vector_size
     ):
+        log_error(
+            logger,
+            "Qdrant collection vector size mismatch.",
+            None,
+            collection_name=collection_name,
+            expected_size=vector_size,
+        )
         raise ValueError(
             f"Qdrant collection {collection_name!r} uses a different vector size."
         )
@@ -78,6 +113,21 @@ def delete_vector_collection(settings: Settings, knowledge_base_id: str) -> None
     collection_name = vector_collection_name(knowledge_base_id)
     if client.collection_exists(collection_name):
         client.delete_collection(collection_name)
+        log_event(
+            logger,
+            logging.INFO,
+            "Qdrant collection deleted.",
+            knowledge_base_id=knowledge_base_id,
+            collection_name=collection_name,
+        )
+    else:
+        log_event(
+            logger,
+            logging.INFO,
+            "Qdrant collection absent, nothing to delete.",
+            knowledge_base_id=knowledge_base_id,
+            collection_name=collection_name,
+        )
 
 
 def delete_vectors(
@@ -91,6 +141,23 @@ def delete_vectors(
     collection_name = vector_collection_name(knowledge_base_id)
     if client.collection_exists(collection_name):
         client.delete(collection_name, points_selector=vector_ids, wait=True)
+        log_event(
+            logger,
+            logging.INFO,
+            "Qdrant vectors deleted.",
+            knowledge_base_id=knowledge_base_id,
+            collection_name=collection_name,
+            vector_count=len(vector_ids),
+        )
+    else:
+        log_event(
+            logger,
+            logging.INFO,
+            "Qdrant collection absent, vectors already gone.",
+            knowledge_base_id=knowledge_base_id,
+            collection_name=collection_name,
+            vector_count=len(vector_ids),
+        )
 
 
 def upsert_vectors(
@@ -109,34 +176,64 @@ def upsert_vectors(
         or vector_size == 0
         or any(len(vector) != vector_size for vector in vectors)
     ):
+        log_error(
+            logger,
+            "Embedding provider returned invalid document vectors.",
+            None,
+            source="external",
+            expected_count=len(chunks),
+            received_count=len(vectors),
+            vector_size=vector_size,
+        )
         raise ValueError("Embedding provider returned invalid document vectors.")
 
     client = _client(settings)
     collection_name = vector_collection_name(knowledge_base.id)
     _ensure_collection(client, collection_name, vector_size)
-    client.upsert(
-        collection_name,
-        points=[
-            models.PointStruct(
-                id=chunk.id,
-                vector=vector,
-                payload={
-                    **{
-                        key: value
-                        for key, value in chunk.document_metadata.items()
-                        if isinstance(value, (str, int, float, bool))
+    started = time.monotonic()
+    try:
+        client.upsert(
+            collection_name,
+            points=[
+                models.PointStruct(
+                    id=chunk.id,
+                    vector=vector,
+                    payload={
+                        **{
+                            key: value
+                            for key, value in chunk.document_metadata.items()
+                            if isinstance(value, (str, int, float, bool))
+                        },
+                        "chunk_id": chunk.id,
+                        "workspace_id": knowledge_base.workspace_id,
+                        "knowledge_base_id": knowledge_base.id,
+                        "document_id": chunk.document_id,
+                        "document_filename": chunk.document_filename,
+                        "chunk_index": chunk.chunk_index,
                     },
-                    "chunk_id": chunk.id,
-                    "workspace_id": knowledge_base.workspace_id,
-                    "knowledge_base_id": knowledge_base.id,
-                    "document_id": chunk.document_id,
-                    "document_filename": chunk.document_filename,
-                    "chunk_index": chunk.chunk_index,
-                },
-            )
-            for chunk, vector in zip(chunks, vectors, strict=True)
-        ],
-        wait=True,
+                )
+                for chunk, vector in zip(chunks, vectors, strict=True)
+            ],
+            wait=True,
+        )
+    except Exception as exc:
+        log_error(
+            logger,
+            "Qdrant vector upsert failed.",
+            exc,
+            collection_name=collection_name,
+            knowledge_base_id=knowledge_base.id,
+            vector_count=len(chunks),
+        )
+        raise
+    log_event(
+        logger,
+        logging.INFO,
+        "Qdrant vectors upserted.",
+        collection_name=collection_name,
+        knowledge_base_id=knowledge_base.id,
+        vector_count=len(chunks),
+        duration_ms=round((time.monotonic() - started) * 1000, 1),
     )
 
 
@@ -158,15 +255,28 @@ def query_vectors(
         embedding_model,
         settings,
     ).embed_query(query)
-    results = client.query_points(
-        collection_name,
-        query=models.NearestQuery(
-            nearest=query_embedding,
-            mmr=models.Mmr(diversity=0.5, candidates_limit=limit * 2),
-        ),
-        limit=limit,
-        with_payload=["chunk_id"],
-    ).points
+    started = time.monotonic()
+    try:
+        results = client.query_points(
+            collection_name,
+            query=models.NearestQuery(
+                nearest=query_embedding,
+                mmr=models.Mmr(diversity=0.5, candidates_limit=limit * 2),
+            ),
+            limit=limit,
+            with_payload=["chunk_id"],
+        ).points
+    except Exception as exc:
+        log_error(
+            logger,
+            "Qdrant vector query failed.",
+            exc,
+            collection_name=collection_name,
+            knowledge_base_id=knowledge_base_id,
+            query_limit=limit,
+            duration_ms=round((time.monotonic() - started) * 1000, 1),
+        )
+        raise
     return [
         VectorHit(chunk_id=chunk_id, distance=None)
         for point in results
