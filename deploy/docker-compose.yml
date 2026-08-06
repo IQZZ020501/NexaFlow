@@ -94,6 +94,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/dockerfiles/frontend.Dockerfile
+      args:
+        NEXAFLOW_API_PROXY: http://api:8000
     environment:
       NEXAFLOW_API_PROXY: http://api:8000
     ports:

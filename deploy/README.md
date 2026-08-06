@@ -51,6 +51,15 @@ docker build -f deploy/dockerfiles/backend.Dockerfile -t app/backend .
 docker build -f deploy/dockerfiles/frontend.Dockerfile -t app/frontend .
 ```
 
+`NEXAFLOW_API_PROXY` is baked into the Next.js routes manifest at build time,
+so a custom API origin must be passed as a build arg (a runtime env var has no
+effect):
+
+```bash
+docker build -f deploy/dockerfiles/frontend.Dockerfile \
+  --build-arg NEXAFLOW_API_PROXY=https://api.example.com -t app/frontend .
+```
+
 ## Migrations
 
 Run migrations before first start or after upgrading:

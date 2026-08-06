@@ -7,6 +7,10 @@ RUN bun install --frozen-lockfile
 FROM oven/bun:1 AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
+# next.config.ts reads NEXAFLOW_API_PROXY at build time (rewrites are baked
+# into routes-manifest.json), so the proxy target must be a build arg.
+ARG NEXAFLOW_API_PROXY
+ENV NEXAFLOW_API_PROXY=$NEXAFLOW_API_PROXY
 COPY frontend/ ./
 RUN bun run build
 
