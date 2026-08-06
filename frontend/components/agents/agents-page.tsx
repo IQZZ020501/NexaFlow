@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import { useParams, useRouter } from "next/navigation"
 import {
   BotIcon,
@@ -257,8 +258,22 @@ export function AgentsPage() {
 
   if (!token || !me) return null
 
-  function modelName(modelId: string) {
-    return models.find((model) => model.id === modelId)?.name ?? t("未连接")
+  function modelLine(modelId: string) {
+    const model = models.find((item) => item.id === modelId)
+    if (!model) {
+      return t("未连接")
+    }
+    return (
+      <span className="flex min-w-0 items-center gap-1.5">
+        <ModelIcon
+          model={model.model_name}
+          size={14}
+          type="color"
+          className="shrink-0"
+        />
+        <span className="truncate">{model.name}</span>
+      </span>
+    )
   }
 
   function openCreateDialog() {
@@ -644,8 +659,8 @@ export function AgentsPage() {
                         permission={agent.can_edit ? "edit" : "view"}
                       />
                     </div>
-                    <p className="mt-1 truncate text-sm text-muted-foreground">
-                      {modelName(agent.model_id)}
+                    <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-muted-foreground">
+                      {modelLine(agent.model_id)}
                     </p>
                   </div>
                 </div>

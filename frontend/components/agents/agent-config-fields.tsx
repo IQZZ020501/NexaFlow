@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   BotIcon,
   CheckIcon,
@@ -181,8 +182,18 @@ export function AgentConfigFields({
                     className="h-9 w-full justify-between px-3 font-normal"
                     disabled={readOnly}
                   >
-                    <span className="min-w-0 flex-1 truncate text-left">
-                      {selectedModel?.name ?? t("选择模型")}
+                    <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-left">
+                      {selectedModel ? (
+                        <ModelIcon
+                          model={selectedModel.model_name}
+                          size={16}
+                          type="color"
+                          className="shrink-0"
+                        />
+                      ) : null}
+                      <span className="min-w-0 truncate">
+                        {selectedModel?.name ?? t("选择模型")}
+                      </span>
                     </span>
                     <ChevronDownIcon data-icon="inline-end" />
                   </Button>
@@ -203,7 +214,17 @@ export function AgentConfigFields({
                           }))
                         }
                       >
-                        <span className="min-w-0 truncate">{model.name}</span>
+                        <span className="flex min-w-0 items-center gap-2 truncate">
+                          <ModelIcon
+                            model={model.model_name}
+                            size={16}
+                            type="color"
+                            className="shrink-0"
+                          />
+                          <span className="min-w-0 truncate">
+                            {model.name}
+                          </span>
+                        </span>
                         {model.id === form.modelId ? (
                           <CheckIcon className="text-primary" />
                         ) : null}

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   ArrowLeftIcon,
   BotIcon,
@@ -400,8 +401,18 @@ export function AgentDetailWorkspace({
             ) : null}
             {isDirty ? <Badge variant="secondary">{t("未保存")}</Badge> : null}
           </div>
-          <p className="mt-0.5 hidden truncate text-xs text-muted-foreground sm:block">
-            {selectedModel?.name ?? t("未连接")} · {t("设置")}
+          <p className="mt-0.5 hidden items-center gap-1.5 truncate text-xs text-muted-foreground sm:flex">
+            {selectedModel ? (
+              <ModelIcon
+                model={selectedModel.model_name}
+                size={13}
+                type="color"
+                className="shrink-0"
+              />
+            ) : null}
+            <span className="truncate">
+              {selectedModel?.name ?? t("未连接")} · {t("设置")}
+            </span>
           </p>
         </div>
 
