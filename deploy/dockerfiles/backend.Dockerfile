@@ -7,15 +7,15 @@ WORKDIR /app
 
 FROM base AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-COPY pyproject.toml uv.lock ./
+COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --no-dev --frozen
 
 FROM base
 COPY --from=builder /app/.venv /app/.venv
-COPY app ./app
-COPY alembic ./alembic
-COPY alembic.ini ./alembic.ini
-COPY main.py ./main.py
+COPY backend/app ./app
+COPY backend/alembic ./alembic
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/main.py ./main.py
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
