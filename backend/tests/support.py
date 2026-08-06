@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 BOOTSTRAP_ADMIN_PASSWORD = "NexaFlow@123."
 ADMIN_PASSWORD = "NexaFlow@12345."
@@ -71,6 +72,7 @@ def test_client() -> Iterator[TestClient]:
 
     async def create_schema() -> None:
         async with get_engine().begin() as connection:
+            await connection.execute(text("PRAGMA foreign_keys=ON"))
             await connection.run_sync(Base.metadata.create_all)
 
     asyncio.run(create_schema())

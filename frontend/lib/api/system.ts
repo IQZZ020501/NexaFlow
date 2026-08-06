@@ -63,6 +63,7 @@ export type TeamForm = {
   workspaceId: string
   name: string
   description: string
+  adminUserId: string
 }
 
 export type ScopeEditForm = {
@@ -271,6 +272,7 @@ export function createTeam(
   payload: {
     name: string
     description: string
+    admin_user_id: string
   }
 ) {
   return request<Team>(`/api/v1/workspaces/${workspaceId}/teams`, {

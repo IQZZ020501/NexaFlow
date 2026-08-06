@@ -76,6 +76,12 @@ async def build_workspace_context(
 
     membership = await workspace_repository.get_workspace_membership(db, workspace_id, user.id)
     if membership is None:
+        if user.is_global_admin:
+            return WorkspaceContext(
+                workspace=workspace,
+                user=user,
+                membership_role="admin",
+            )
         log_event(
             logger,
             logging.WARNING,

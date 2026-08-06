@@ -10,6 +10,7 @@ from app.infrastructure.config import Settings
 from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.session import get_db
 from app.entities.user import User
+from app.infrastructure.repositories import team as team_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.security import decode_access_token
 
@@ -91,3 +92,16 @@ def require_context_role(
     if context.membership_role not in roles:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace role required.")
     return context
+
+
+async def require_team_admin_or_workspace_admin(
+    team_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkspaceContext:
+    if context.membership_role == "admin":
+        return context
+    membership = await team_repository.get_team_membership(db, team_id, context.user.id)
+    if membership is not None and membership.role == "admin":
+        return context
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Team admin role required.")

@@ -266,11 +266,11 @@ def main() -> None:
         assert research_workspace.status_code == 200, research_workspace.text
         assert research_workspace.json()["description"] == "研究工作空间"
 
-        members_denied = client.get(
+        members_super = client.get(
             members_url(research_workspace_id),
             headers=auth_headers(admin_token),
         )
-        assert members_denied.status_code == 403, members_denied.text
+        assert members_super.status_code == 200, members_super.text
 
         members = client.get(
             members_url(research_workspace_id),
@@ -408,11 +408,11 @@ def main() -> None:
         assert restored.status_code == 200, restored.text
         assert restored.json()["status"] == "active"
 
-        workspace_audit_denied = client.get(
+        workspace_audit_super = client.get(
             f"/api/v1/workspaces/{research_workspace_id}/audit-logs",
             headers=auth_headers(admin_token),
         )
-        assert workspace_audit_denied.status_code == 403, workspace_audit_denied.text
+        assert workspace_audit_super.status_code == 200, workspace_audit_super.text
 
         workspace_audit = client.get(
             f"/api/v1/workspaces/{research_workspace_id}/audit-logs",
