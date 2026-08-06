@@ -11,6 +11,9 @@ COPY --from=deps /app/node_modules ./node_modules
 # into routes-manifest.json), so the proxy target must be a build arg.
 ARG NEXAFLOW_API_PROXY
 ENV NEXAFLOW_API_PROXY=$NEXAFLOW_API_PROXY
+# Next.js telemetry pings the network during builds; disable to avoid
+# stalls in offline/restricted Docker builds.
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY frontend/ ./
 RUN bun run build
 
