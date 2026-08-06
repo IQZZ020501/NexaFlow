@@ -84,6 +84,8 @@ services:
     env_file: .env
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
+      KNOWLEDGE_STORAGE_DIR: /data/knowledge
+      QDRANT_URL: http://qdrant:6333
     depends_on:
       redis:
         condition: service_healthy
