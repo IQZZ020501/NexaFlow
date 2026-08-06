@@ -1,0 +1,14 @@
+# Build context is the repository root; keep it lean for both images.
+.git
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.env
+docs
+imgs
+output
+.codegraph
+.playwright-cli
+deploy/data
