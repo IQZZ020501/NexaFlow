@@ -106,7 +106,7 @@ export function CreateUserDialog({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="newUserUsername">{t("账号")}</FieldLabel>
+              <FieldLabel htmlFor="newUserUsername">{t("用户名")}</FieldLabel>
               <Input
                 id="newUserUsername"
                 value={userCreateForm.username}
