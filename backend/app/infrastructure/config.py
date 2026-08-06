@@ -3,12 +3,7 @@ import os
 from pathlib import Path
 
 
-DEFAULT_JWT_SECRET_KEY = "dev-secret-change-me-please-replace"
-DEFAULT_MODEL_SECRET_KEY = "dev-model-secret-change-me-please-replace"
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
-DEFAULT_KNOWLEDGE_STORAGE_DIR = Path(__file__).resolve().parents[2] / "storage" / "knowledge"
-DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
-DEFAULT_CELERY_BROKER_URL = "redis://localhost:6379/0"
 
 
 def load_env_file(path: Path = ENV_FILE) -> None:
@@ -29,7 +24,6 @@ def load_env_file(path: Path = ENV_FILE) -> None:
 @dataclass(frozen=True)
 class Settings:
     database_url: str
-    jwt_secret_key: str
     bootstrap_admin_username: str
     bootstrap_admin_email: str
     bootstrap_admin_name: str
@@ -38,11 +32,12 @@ class Settings:
     default_workspace_slug: str
     default_team_name: str
     default_team_slug: str
-    model_secret_key: str = DEFAULT_MODEL_SECRET_KEY
-    knowledge_storage_dir: Path = DEFAULT_KNOWLEDGE_STORAGE_DIR
-    qdrant_url: str = DEFAULT_QDRANT_URL
+    jwt_secret_key: str = ""
+    model_secret_key: str = ""
+    knowledge_storage_dir: Path | None = None
+    qdrant_url: str = ""
     qdrant_api_key: str = ""
-    celery_broker_url: str = DEFAULT_CELERY_BROKER_URL
+    celery_broker_url: str = ""
     celery_task_always_eager: bool = False
     mcp_allow_private_networks: bool = False
     mcp_request_timeout_seconds: float = 30.0
@@ -65,7 +60,7 @@ class Settings:
                 "DATABASE_URL",
                 "postgresql+psycopg://app:app@localhost:5432/app",
             ),
-            jwt_secret_key=os.getenv("JWT_SECRET_KEY", DEFAULT_JWT_SECRET_KEY),
+            jwt_secret_key=os.getenv("JWT_SECRET_KEY", ""),
             bootstrap_admin_username=os.getenv("BOOTSTRAP_ADMIN_USERNAME", ""),
             bootstrap_admin_email=os.getenv("BOOTSTRAP_ADMIN_EMAIL", ""),
             bootstrap_admin_name=os.getenv("BOOTSTRAP_ADMIN_NAME", ""),
@@ -74,13 +69,15 @@ class Settings:
             default_workspace_slug=os.getenv("DEFAULT_WORKSPACE_SLUG", ""),
             default_team_name=os.getenv("DEFAULT_TEAM_NAME", ""),
             default_team_slug=os.getenv("DEFAULT_TEAM_SLUG", ""),
-            model_secret_key=os.getenv("MODEL_SECRET_KEY", DEFAULT_MODEL_SECRET_KEY),
-            knowledge_storage_dir=Path(
-                os.getenv("KNOWLEDGE_STORAGE_DIR", str(DEFAULT_KNOWLEDGE_STORAGE_DIR))
+            model_secret_key=os.getenv("MODEL_SECRET_KEY", ""),
+            knowledge_storage_dir=(
+                Path(os.getenv("KNOWLEDGE_STORAGE_DIR"))
+                if os.getenv("KNOWLEDGE_STORAGE_DIR")
+                else None
             ),
-            qdrant_url=os.getenv("QDRANT_URL", DEFAULT_QDRANT_URL),
+            qdrant_url=os.getenv("QDRANT_URL", ""),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
-            celery_broker_url=os.getenv("CELERY_BROKER_URL", DEFAULT_CELERY_BROKER_URL),
+            celery_broker_url=os.getenv("CELERY_BROKER_URL", ""),
             celery_task_always_eager=os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower()
             in {"1", "true", "yes"},
             mcp_allow_private_networks=os.getenv("MCP_ALLOW_PRIVATE_NETWORKS", "").lower()
@@ -111,16 +108,16 @@ class Settings:
         missing = [key for key, value in required.items() if not value]
         if require_bootstrap and missing:
             raise RuntimeError(f"Missing initialization env values: {', '.join(missing)}.")
-        if self.environment == "production" and self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY:
-            raise RuntimeError("JWT_SECRET_KEY must be set in production.")
-        if self.environment == "production" and self.model_secret_key == DEFAULT_MODEL_SECRET_KEY:
-            raise RuntimeError("MODEL_SECRET_KEY must be set in production.")
-        if self.environment == "production" and self.knowledge_storage_dir == DEFAULT_KNOWLEDGE_STORAGE_DIR:
-            raise RuntimeError("KNOWLEDGE_STORAGE_DIR must be set in production.")
-        if self.environment == "production" and self.qdrant_url == DEFAULT_QDRANT_URL:
-            raise RuntimeError("QDRANT_URL must be set in production.")
-        if self.environment == "production" and self.celery_broker_url == DEFAULT_CELERY_BROKER_URL:
-            raise RuntimeError("CELERY_BROKER_URL must be set in production.")
+        if not self.jwt_secret_key:
+            raise RuntimeError("JWT_SECRET_KEY must be set via environment or the .env file.")
+        if not self.model_secret_key:
+            raise RuntimeError("MODEL_SECRET_KEY must be set via environment or the .env file.")
+        if not self.knowledge_storage_dir:
+            raise RuntimeError("KNOWLEDGE_STORAGE_DIR must be set via environment or the .env file.")
+        if not self.qdrant_url:
+            raise RuntimeError("QDRANT_URL must be set via environment or the .env file.")
+        if not self.celery_broker_url:
+            raise RuntimeError("CELERY_BROKER_URL must be set via environment or the .env file.")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise RuntimeError(f"Invalid LOG_LEVEL: {self.log_level}.")
         if self.mcp_request_timeout_seconds <= 0:
