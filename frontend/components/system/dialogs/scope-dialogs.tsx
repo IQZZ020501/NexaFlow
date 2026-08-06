@@ -24,10 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import type {
-  Workspace,
-  WorkspaceCreateResponse,
-} from "@/lib/api/system"
+import type { User, Workspace } from "@/lib/api/system"
 import { cn } from "@/lib/utils"
 import { displayWorkspaceName } from "@/lib/display"
 import type {
@@ -223,7 +220,8 @@ type CreateWorkspaceDialogProps = {
   setIsWorkspaceDialogOpen: React.Dispatch<React.SetStateAction<boolean>>
   workspaceForm: WorkspaceForm
   setWorkspaceForm: React.Dispatch<React.SetStateAction<WorkspaceForm>>
-  workspaceNotice: WorkspaceCreateResponse | null
+  users: User[]
+  isUsersLoading: boolean
   isCreatingWorkspace: boolean
   handleCreateWorkspace: React.FormEventHandler<HTMLFormElement>
 }
@@ -233,23 +231,32 @@ export function CreateWorkspaceDialog({
   setIsWorkspaceDialogOpen,
   workspaceForm,
   setWorkspaceForm,
-  workspaceNotice,
+  users,
+  isUsersLoading,
   isCreatingWorkspace,
   handleCreateWorkspace,
 }: CreateWorkspaceDialogProps) {
   const { t } = useLanguage()
+  const activeUsers = users.filter((user) => user.is_active)
+  const adminUser =
+    activeUsers.find((user) => user.id === workspaceForm.adminUserId) ?? null
 
   return (
     <Dialog
       open={isWorkspaceDialogOpen}
       onOpenChange={setIsWorkspaceDialogOpen}
     >
-      <DialogContent side="right">
+      <DialogContent side="right" className="flex flex-col gap-6">
         <DialogHeader>
           <DialogTitle>{t("新建工作空间")}</DialogTitle>
-          <DialogDescription>{t("创建租户和负责人")}</DialogDescription>
+          <DialogDescription>
+            {t("创建工作空间并指定已有用户为负责人")}
+          </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleCreateWorkspace}>
+        <form
+          className="flex min-h-0 flex-1 flex-col"
+          onSubmit={handleCreateWorkspace}
+        >
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="workspaceName">{t("名称")}</FieldLabel>
@@ -281,60 +288,71 @@ export function CreateWorkspaceDialog({
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="adminName">{t("负责人姓名")}</FieldLabel>
-              <Input
-                id="adminName"
-                value={workspaceForm.adminName}
-                onChange={(event) =>
-                  setWorkspaceForm((current) => ({
-                    ...current,
-                    adminName: event.target.value,
-                  }))
-                }
-                required
-              />
+              <FieldLabel id="workspaceAdminLabel">{t("负责人")}</FieldLabel>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    id="workspaceAdmin"
+                    type="button"
+                    variant="outline"
+                    className="h-9 w-full justify-between px-3 font-normal"
+                    aria-labelledby="workspaceAdminLabel workspaceAdmin"
+                    disabled={isUsersLoading}
+                  >
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-left",
+                        !adminUser && "text-muted-foreground"
+                      )}
+                    >
+                      {adminUser
+                        ? `${adminUser.name} · ${adminUser.username}`
+                        : isUsersLoading
+                          ? t("正在加载")
+                          : t("选择负责人")}
+                    </span>
+                    <ChevronDownIcon data-icon="inline-end" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="max-h-72 w-(--radix-dropdown-menu-trigger-width) overflow-y-auto"
+                >
+                  {activeUsers.length ? (
+                    activeUsers.map((user) => (
+                      <DropdownMenuItem
+                        key={user.id}
+                        className="items-start justify-between gap-3"
+                        onSelect={() =>
+                          setWorkspaceForm((current) => ({
+                            ...current,
+                            adminUserId: user.id,
+                          }))
+                        }
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium">
+                            {user.name}
+                          </span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {user.username} · {user.email}
+                          </span>
+                        </span>
+                        {user.id === workspaceForm.adminUserId ? (
+                          <CircleCheckIcon className="mt-0.5 shrink-0" />
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))
+                  ) : (
+                    <DropdownMenuItem disabled>
+                      {t("暂无可选用户")}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </Field>
-            <Field>
-              <FieldLabel htmlFor="adminUsername">{t("负责人账号")}</FieldLabel>
-              <Input
-                id="adminUsername"
-                value={workspaceForm.adminUsername}
-                onChange={(event) =>
-                  setWorkspaceForm((current) => ({
-                    ...current,
-                    adminUsername: event.target.value,
-                  }))
-                }
-                required
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="adminEmail">{t("负责人邮箱")}</FieldLabel>
-              <Input
-                id="adminEmail"
-                type="email"
-                value={workspaceForm.adminEmail}
-                onChange={(event) =>
-                  setWorkspaceForm((current) => ({
-                    ...current,
-                    adminEmail: event.target.value,
-                  }))
-                }
-                required
-              />
-            </Field>
-            {workspaceNotice?.admin_initial_password ? (
-              <div className="rounded-lg border bg-muted p-3 text-sm">
-                <Field>
-                  <FieldLabel>{t("默认密码")}</FieldLabel>
-                  <p className="font-mono text-xs">
-                    {workspaceNotice.admin_initial_password}
-                  </p>
-                </Field>
-              </div>
-            ) : null}
           </FieldGroup>
-          <DialogFooter className="pt-5">
+          <DialogFooter className="mt-auto pt-5">
             <Button
               type="button"
               variant="outline"
@@ -342,7 +360,9 @@ export function CreateWorkspaceDialog({
             >
               {t("取消")}
             </Button>
-            <Button disabled={isCreatingWorkspace}>
+            <Button
+              disabled={isCreatingWorkspace || !workspaceForm.adminUserId}
+            >
               {isCreatingWorkspace ? (
                 <LoaderCircleIcon data-icon="inline-start" />
               ) : (
@@ -395,7 +415,7 @@ export function CreateTeamDialog({
           <FieldGroup>
             <Field>
               <FieldLabel id="teamWorkspaceLabel">{t("工作空间")}</FieldLabel>
-              <DropdownMenu>
+              <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                   <Button
                     id="teamWorkspace"

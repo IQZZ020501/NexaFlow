@@ -572,9 +572,9 @@ export function AgentsPage() {
     <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold">{t("智能 Agent")}</h1>
+          <h1 className="text-2xl font-semibold">{t("应用")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {t("选择模型、知识库和 MCP 工具，创建可以直接对话的 Agent。")}
+            {t("编排业务流程、知识库和模型能力，构建可运行的 AI 应用。")}
           </p>
         </div>
         <Button
@@ -583,7 +583,7 @@ export function AgentsPage() {
           disabled={activeModels.length === 0}
         >
           <PlusIcon data-icon="inline-start" />
-          {t("新建 Agent")}
+          {t("新建应用")}
         </Button>
       </div>
 
@@ -593,7 +593,7 @@ export function AgentsPage() {
           <Input
             value={agentSearch}
             onChange={(event) => setAgentSearch(event.target.value)}
-            placeholder={t("搜索{label}...", { label: t("智能 Agent") })}
+            placeholder={t("搜索{label}...", { label: t("应用") })}
             className="pl-9"
           />
         </div>
@@ -610,17 +610,17 @@ export function AgentsPage() {
             <BotIcon className="size-5 text-muted-foreground" />
           </span>
           <div className="flex flex-col gap-2">
-            <p className="text-base font-semibold">{t("还没有 Agent")}</p>
+            <p className="text-base font-semibold">{t("还没有应用")}</p>
             <p className="text-sm leading-6 text-muted-foreground">
               {activeModels.length === 0
                 ? t("先接入一个已启用的大语言模型，再创建 Agent。")
-                : t("创建 Agent 后，就可以直接提问。")}
+                : t("创建应用后，可以编排对话、检索和工具调用流程。")}
             </p>
           </div>
           {activeModels.length > 0 ? (
             <Button type="button" onClick={openCreateDialog}>
               <PlusIcon data-icon="inline-start" />
-              {t("新建 Agent")}
+              {t("新建应用")}
             </Button>
           ) : null}
         </div>
@@ -701,7 +701,7 @@ export function AgentsPage() {
         <DialogContent className="max-h-[calc(100svh-2rem)] max-w-xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {form.id ? t("编辑 Agent") : t("新建 Agent")}
+              {form.id ? t("编辑 Agent") : t("新建应用")}
             </DialogTitle>
             <DialogDescription>
               {t("只需选择 Agent 可以使用的模型、知识和工具。")}
@@ -732,7 +732,7 @@ export function AgentsPage() {
                 {isSaving ? (
                   <LoaderCircleIcon className="animate-spin" />
                 ) : null}
-                {form.id ? t("保存") : t("新建 Agent")}
+                {form.id ? t("保存") : t("新建应用")}
               </Button>
             </DialogFooter>
           </form>

@@ -75,6 +75,7 @@ export function CreateUserDialog({
     >
       <DialogContent
         side="right"
+        className="flex flex-col gap-6"
         onInteractOutside={(event) => {
           if (isEventFromDropdownMenu(event)) {
             event.preventDefault()
@@ -89,8 +90,14 @@ export function CreateUserDialog({
               : t("创建普通账号并加入当前工作空间")}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleCreateUser}>
+        <form
+          className="flex min-h-0 flex-1 flex-col"
+          onSubmit={handleCreateUser}
+        >
           <FieldGroup>
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold">{t("基本信息")}</h3>
+            </div>
             <Field>
               <FieldLabel htmlFor="newUserName">{t("姓名")}</FieldLabel>
               <Input
@@ -141,27 +148,11 @@ export function CreateUserDialog({
               </p>
             </Field>
             {me.user.is_global_admin ? (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="size-4"
-                  checked={userCreateForm.isGlobalAdmin}
-                  onChange={(event) =>
-                    setUserCreateForm((current) => ({
-                      ...current,
-                      isGlobalAdmin: event.target.checked,
-                    }))
-                  }
-                />
-                {t("全局管理员")}
-              </label>
-            ) : null}
-            {me.user.is_global_admin ? (
               <Field>
                 <FieldLabel id="newUserWorkspaceLabel">
                   {t("工作空间")}
                 </FieldLabel>
-                <DropdownMenu>
+                <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild>
                     <Button
                       id="newUserWorkspace"
@@ -259,7 +250,7 @@ export function CreateUserDialog({
               </Field>
             ) : null}
           </FieldGroup>
-          <DialogFooter className="pt-5">
+          <DialogFooter className="mt-auto pt-5">
             <Button
               type="button"
               variant="outline"
@@ -290,7 +281,6 @@ export function CreateUserDialog({
 type EditUserDialogProps = {
   userForm: UserForm | null
   setUserForm: React.Dispatch<React.SetStateAction<UserForm | null>>
-  me: MeResponse
   isSavingUser: boolean
   handleUpdateUser: React.FormEventHandler<HTMLFormElement>
 }
@@ -298,7 +288,6 @@ type EditUserDialogProps = {
 export function EditUserDialog({
   userForm,
   setUserForm,
-  me,
   isSavingUser,
   handleUpdateUser,
 }: EditUserDialogProps) {
@@ -363,25 +352,6 @@ export function EditUserDialog({
                   required
                 />
               </Field>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="size-4"
-                  checked={userForm.isGlobalAdmin}
-                  disabled={userForm.id === me.user.id}
-                  onChange={(event) =>
-                    setUserForm((current) =>
-                      current
-                        ? {
-                            ...current,
-                            isGlobalAdmin: event.target.checked,
-                          }
-                        : current
-                    )
-                  }
-                />
-                {t("全局管理员")}
-              </label>
             </FieldGroup>
             <DialogFooter className="pt-5">
               <Button

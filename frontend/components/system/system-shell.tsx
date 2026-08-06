@@ -74,7 +74,6 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
       workspaces={session.workspaces}
       teams={session.teams}
       selectedWorkspaceId={session.selectedWorkspaceId}
-      workspaceNotice={session.workspaceNotice}
       isTeamsLoading={session.isTeamsLoading}
       onSelectWorkspace={session.selectWorkspace}
       onSystemTabChange={(tab) => router.push(`/system/${tab}`)}
@@ -96,7 +95,6 @@ function SystemPageContent({
   workspaces,
   teams,
   selectedWorkspaceId,
-  workspaceNotice,
   isTeamsLoading,
   activeTab,
   onSelectWorkspace,
@@ -115,7 +113,6 @@ function SystemPageContent({
   workspaces: Workspace[]
   teams: Team[]
   selectedWorkspaceId: string | null
-  workspaceNotice: WorkspaceCreateResponse | null
   isTeamsLoading: boolean
   activeTab: SystemTab
   onSelectWorkspace: (workspaceId: string) => void
@@ -134,9 +131,7 @@ function SystemPageContent({
   const [workspaceForm, setWorkspaceForm] = React.useState<WorkspaceForm>({
     name: "",
     description: "",
-    adminUsername: "",
-    adminEmail: "",
-    adminName: "",
+    adminUserId: "",
   })
   const [teamForm, setTeamForm] = React.useState<TeamForm>({
     workspaceId: "",
@@ -152,7 +147,6 @@ function SystemPageContent({
     username: "",
     email: "",
     name: "",
-    isGlobalAdmin: false,
     workspaceId: selectedWorkspaceId ?? "",
     teamIds: [],
   })
@@ -402,6 +396,12 @@ function SystemPageContent({
     onUserUpdated(user)
   }
 
+  function handleOpenCreateWorkspace() {
+    setWorkspaceForm({ name: "", description: "", adminUserId: "" })
+    setIsWorkspaceDialogOpen(true)
+    void loadUsers()
+  }
+
   function handleOpenCreateUser() {
     const workspaceId = me.user.is_global_admin
       ? (activeWorkspaces.find(
@@ -412,7 +412,6 @@ function SystemPageContent({
       username: "",
       email: "",
       name: "",
-      isGlobalAdmin: false,
       workspaceId,
       teamIds: [],
     })
@@ -457,26 +456,23 @@ function SystemPageContent({
     event: React.FormEvent<HTMLFormElement>
   ) {
     event.preventDefault()
+
+    if (!workspaceForm.adminUserId) {
+      onNotify("error", t("请选择负责人"))
+      return
+    }
+
     setIsCreatingWorkspace(true)
 
     try {
       const payload = await createWorkspace(token, {
         name: workspaceForm.name,
         description: workspaceForm.description,
-        admin: {
-          username: workspaceForm.adminUsername,
-          email: workspaceForm.adminEmail,
-          name: workspaceForm.adminName,
-        },
+        admin_user_id: workspaceForm.adminUserId,
       })
-      setWorkspaceForm({
-        name: "",
-        description: "",
-        adminUsername: "",
-        adminEmail: "",
-        adminName: "",
-      })
+      setWorkspaceForm({ name: "", description: "", adminUserId: "" })
       onWorkspaceCreated(payload)
+      setIsWorkspaceDialogOpen(false)
       onNotify("success", t("工作空间已新建"))
     } catch (error) {
       reportError(error)
@@ -707,7 +703,6 @@ function SystemPageContent({
             username: userCreateForm.username,
             email: userCreateForm.email,
             name: userCreateForm.name,
-            is_global_admin: userCreateForm.isGlobalAdmin,
             workspace_id: userCreateForm.workspaceId || null,
             team_ids: userCreateForm.teamIds,
           })
@@ -729,7 +724,6 @@ function SystemPageContent({
         username: "",
         email: "",
         name: "",
-        isGlobalAdmin: false,
         workspaceId: "",
         teamIds: [],
       })
@@ -759,7 +753,6 @@ function SystemPageContent({
       username: user.username,
       email: user.email,
       name: user.name,
-      isGlobalAdmin: user.is_global_admin,
     })
   }
 
@@ -777,7 +770,6 @@ function SystemPageContent({
         username: userForm.username,
         email: userForm.email,
         name: userForm.name,
-        is_global_admin: userForm.isGlobalAdmin,
       })
       updateUserInList(user)
       setUserForm(null)
@@ -865,6 +857,7 @@ function SystemPageContent({
       canCreateWorkspace={canCreateWorkspace}
       onSelectWorkspace={onSelectWorkspace}
       setIsWorkspaceDialogOpen={setIsWorkspaceDialogOpen}
+      handleOpenCreateWorkspace={handleOpenCreateWorkspace}
       handleOpenEditWorkspace={handleOpenEditWorkspace}
       handleArchiveWorkspace={handleArchiveWorkspace}
       handleDeleteWorkspace={handleDeleteWorkspace}
@@ -928,7 +921,6 @@ function SystemPageContent({
       isWorkspaceDialogOpen={isWorkspaceDialogOpen}
       workspaceForm={workspaceForm}
       setWorkspaceForm={setWorkspaceForm}
-      workspaceNotice={workspaceNotice}
       isCreatingWorkspace={isCreatingWorkspace}
       handleCreateWorkspace={handleCreateWorkspace}
       isTeamDialogOpen={isTeamDialogOpen}

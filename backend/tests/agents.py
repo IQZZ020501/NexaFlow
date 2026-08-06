@@ -43,10 +43,10 @@ from app.shareddomain.agents.runtime import graph as agent_graph_module
 from app.shareddomain.agents.runtime.graph import MAX_REASONING_CHARS
 from app.shareddomain.tools import services as mcp_services
 from tests.support import (
-    RESEARCH_PASSWORD,
     activate_admin,
     activate_user,
     auth_headers,
+    create_active_user,
     settings as test_settings,
     test_client,
 )
@@ -1323,27 +1323,21 @@ def main() -> None:
             assert member_agent_update.json()["knowledge_base_ids"] == []
             assert member_agent_update.json()["instructions"]
 
+            other_admin_id, other_token = create_active_user(
+                client,
+                admin_token,
+                "other-admin",
+            )
             created_workspace = client.post(
                 "/api/v1/workspaces",
                 headers=auth_headers(admin_token),
                 json={
                     "name": "Other Workspace",
-                    "admin": {
-                        "username": "other-admin",
-                        "email": "other-admin@example.com",
-                        "name": "Other Admin",
-                    },
+                    "admin_user_id": other_admin_id,
                 },
             )
             assert created_workspace.status_code == 201, created_workspace.text
             other_workspace_id = created_workspace.json()["workspace"]["id"]
-            other_password = created_workspace.json()["admin_initial_password"]
-            other_token = activate_user(
-                client,
-                "other-admin",
-                other_password,
-                RESEARCH_PASSWORD,
-            )
             other_model = client.post(
                 f"/api/v1/workspaces/{other_workspace_id}/models",
                 headers=auth_headers(other_token),

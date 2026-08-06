@@ -38,7 +38,6 @@ type SessionContextValue = {
   isTeamsLoading: boolean
   sessionError: string | null
   notification: AppNotification | null
-  workspaceNotice: WorkspaceCreateResponse | null
   currentWorkspace: Workspace | null
   workspaceOptions: Workspace[]
   passwordDialogOpen: boolean
@@ -68,6 +67,29 @@ export function replaceSessionUser(me: MeResponse | null, user: User) {
   return me?.user.id === user.id ? { ...me, user } : me
 }
 
+export function addCreatedWorkspaceMembership(
+  me: MeResponse | null,
+  payload: WorkspaceCreateResponse
+) {
+  if (
+    !me ||
+    me.user.id !== payload.admin_user.id ||
+    me.memberships.some(
+      (membership) => membership.workspace_id === payload.workspace.id
+    )
+  ) {
+    return me
+  }
+
+  return {
+    ...me,
+    memberships: [
+      ...me.memberships,
+      { workspace_id: payload.workspace.id, role: "admin" },
+    ],
+  }
+}
+
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { t } = useLanguage()
   const [token, setToken] = React.useState<string | null>(null)
@@ -79,8 +101,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<
     string | null
   >(null)
-  const [workspaceNotice, setWorkspaceNotice] =
-    React.useState<WorkspaceCreateResponse | null>(null)
   const [isSessionLoading, setIsSessionLoading] = React.useState(false)
   const [isSessionRestored, setIsSessionRestored] = React.useState(false)
   const [isTeamsLoading, setIsTeamsLoading] = React.useState(false)
@@ -107,7 +127,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setWorkspaces([])
     setTeams([])
     setSelectedWorkspaceId(null)
-    setWorkspaceNotice(null)
     setSessionError(null)
   }, [])
 
@@ -354,7 +373,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setTeams([])
     setIsTeamsLoading(true)
     setSelectedWorkspaceId(workspaceId)
-    setWorkspaceNotice(null)
   }
 
   function clearSelectedWorkspace() {
@@ -362,12 +380,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setTeams([])
     setIsTeamsLoading(false)
     setSelectedWorkspaceId(null)
-    setWorkspaceNotice(null)
   }
 
   function handleWorkspaceCreated(payload: WorkspaceCreateResponse) {
     setWorkspaces((current) => [...current, payload.workspace])
-    setWorkspaceNotice(payload)
+    setMe((current) => addCreatedWorkspaceMembership(current, payload))
   }
 
   function handleWorkspaceUpdated(workspace: Workspace) {
@@ -465,7 +482,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     isTeamsLoading,
     sessionError,
     notification,
-    workspaceNotice,
     currentWorkspace,
     workspaceOptions,
     passwordDialogOpen: isPasswordDialogOpen,

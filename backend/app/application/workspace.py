@@ -1,5 +1,4 @@
 import logging
-import secrets
 from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
@@ -12,12 +11,11 @@ from app.infrastructure.logger import get_logger, log_event
 logger = get_logger(__name__)
 
 from app.shareddomain.audit.services import record_audit_log
-from app.infrastructure.validation import normalize_email, normalize_name, normalize_username
+from app.infrastructure.validation import normalize_name
 from app.infrastructure.model_utils import new_id
 from app.entities.user import User
 from app.schemas.user import UserCreateRequest, UserPasswordResetResponse
-from app.infrastructure.security import hash_password
-from app.application.identity import create_user, find_user_by_identity
+from app.application.identity import create_user
 from app.schemas.user import user_to_response
 from app.entities.workspace import WORKSPACE_MEMBER_ROLES, Workspace, WorkspaceMembership
 from app.infrastructure.repositories import user as user_repository
@@ -166,26 +164,18 @@ async def create_workspace(
     payload: WorkspaceCreateRequest,
     actor: User,
 ) -> WorkspaceCreateResponse:
-    username = normalize_username(payload.admin.username)
-    email = normalize_email(payload.admin.email)
-    admin_name = normalize_name(payload.admin.name)
+    admin = await user_repository.get_user_by_id(db, payload.admin_user_id)
+    if admin is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    if not admin.is_active:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Workspace admin must be active.",
+        )
+
     workspace_name = normalize_name(payload.name)
     workspace_description = payload.description.strip()
     workspace_slug = new_id()
-
-    admin = await find_user_by_identity(db, username, email)
-    admin_created = admin is None
-    initial_password: str | None = None
-    if admin is None:
-        initial_password = secrets.token_urlsafe(18)
-        admin = User(
-            username=username,
-            email=email,
-            name=admin_name,
-            password_hash=hash_password(initial_password),
-            must_change_password=True,
-            is_global_admin=False,
-        )
 
     workspace = Workspace(
         name=workspace_name,
@@ -195,8 +185,6 @@ async def create_workspace(
     )
 
     try:
-        if admin_created:
-            admin = await user_repository.create_user(db, admin)
         workspace = await workspace_repository.create_workspace(db, workspace)
         await workspace_repository.create_workspace_membership(
             db,
@@ -213,7 +201,10 @@ async def create_workspace(
             "workspace",
             workspace.id,
             workspace.name,
-            {"description": workspace.description},
+            {
+                "description": workspace.description,
+                "admin_user_id": admin.id,
+            },
             workspace_id=workspace.id,
         )
         await db.commit()
@@ -222,12 +213,9 @@ async def create_workspace(
         raise HTTPException(status.HTTP_409_CONFLICT, "Workspace already exists.") from exc
 
     workspace = await workspace_repository.refresh_workspace(db, workspace)
-    admin = await user_repository.refresh_user(db, admin)
     return WorkspaceCreateResponse(
         workspace=workspace_to_response(workspace),
         admin_user=user_to_response(admin),
-        admin_created=admin_created,
-        admin_initial_password=initial_password,
     )
 
 

@@ -1,8 +1,7 @@
 from tests.support import (
-    RESEARCH_PASSWORD,
     activate_admin,
-    activate_user,
     auth_headers,
+    create_active_user,
     test_client,
 )
 
@@ -26,33 +25,68 @@ def main() -> None:
         assert default_workspace.status_code == 200, default_workspace.text
         assert default_workspace.json()["is_default"] is True
 
+        missing_admin = client.post(
+            "/api/v1/workspaces",
+            headers=auth_headers(admin_token),
+            json={
+                "name": "Missing Admin Workspace",
+                "admin_user_id": "missing-user",
+            },
+        )
+        assert missing_admin.status_code == 404, missing_admin.text
+
+        inactive_admin_id, _ = create_active_user(
+            client,
+            admin_token,
+            "inactive-admin",
+        )
+        disabled_admin = client.patch(
+            f"/api/v1/admin/users/{inactive_admin_id}",
+            headers=auth_headers(admin_token),
+            json={"is_active": False},
+        )
+        assert disabled_admin.status_code == 200, disabled_admin.text
+        inactive_admin = client.post(
+            "/api/v1/workspaces",
+            headers=auth_headers(admin_token),
+            json={
+                "name": "Inactive Admin Workspace",
+                "admin_user_id": inactive_admin_id,
+            },
+        )
+        assert inactive_admin.status_code == 400, inactive_admin.text
+
+        research_admin_id, research_token = create_active_user(
+            client,
+            admin_token,
+            "research-admin",
+        )
+        users_before = client.get(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+        ).json()
+
         created = client.post(
             "/api/v1/workspaces",
             headers=auth_headers(admin_token),
             json={
                 "name": "Research Workspace",
                 "description": "研究工作空间",
-                "admin": {
-                    "username": "research-admin",
-                    "email": "research-admin@example.com",
-                    "name": "Research Admin",
-                },
+                "admin_user_id": research_admin_id,
             },
         )
         assert created.status_code == 201, created.text
         payload = created.json()
         research_workspace_id = payload["workspace"]["id"]
-        temp_password = payload["admin_initial_password"]
-        assert payload["admin_created"] is True
+        assert payload["admin_user"]["id"] == research_admin_id
         assert payload["workspace"]["description"] == "研究工作空间"
-        assert temp_password
-
-        research_token = activate_user(
-            client,
-            "research-admin",
-            temp_password,
-            RESEARCH_PASSWORD,
-        )
+        users_after = client.get(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+        ).json()
+        assert [user["id"] for user in users_after] == [
+            user["id"] for user in users_before
+        ]
 
         denied_default = client.get(
             f"/api/v1/workspaces/{default_workspace_id}",
@@ -81,7 +115,7 @@ def main() -> None:
         assert [(item["user"]["username"], item["role"]) for item in members.json()] == [
             ("research-admin", "admin")
         ]
-        research_admin_id = members.json()[0]["user"]["id"]
+        assert members.json()[0]["user"]["id"] == research_admin_id
 
         global_users_denied = client.get("/api/v1/admin/users", headers=auth_headers(research_token))
         assert global_users_denied.status_code == 403, global_users_denied.text

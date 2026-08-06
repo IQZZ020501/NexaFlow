@@ -110,6 +110,32 @@ def activate_user(
     return payload["access_token"]
 
 
+def create_active_user(
+    client: TestClient,
+    admin_token: str,
+    username: str,
+    new_password: str = RESEARCH_PASSWORD,
+) -> tuple[str, str]:
+    created = client.post(
+        "/api/v1/admin/users",
+        headers=auth_headers(admin_token),
+        json={
+            "username": username,
+            "email": f"{username}@example.com",
+            "name": username,
+        },
+    )
+    assert created.status_code == 201, created.text
+    payload = created.json()
+    token = activate_user(
+        client,
+        username,
+        payload["initial_password"],
+        new_password,
+    )
+    return payload["user"]["id"], token
+
+
 def activate_admin(client: TestClient) -> tuple[str, str]:
     payload = login(client, "admin", BOOTSTRAP_ADMIN_PASSWORD)
     token = payload["access_token"]
