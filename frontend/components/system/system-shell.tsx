@@ -84,6 +84,7 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
       onTeamCreated={session.teamCreated}
       onTeamUpdated={session.teamUpdated}
       onTeamDeleted={session.teamDeleted}
+      onUserUpdated={session.userUpdated}
       onNotify={session.notify}
     />
   )
@@ -106,6 +107,7 @@ function SystemPageContent({
   onTeamCreated,
   onTeamUpdated,
   onTeamDeleted,
+  onUserUpdated,
   onNotify,
 }: {
   me: MeResponse
@@ -124,6 +126,7 @@ function SystemPageContent({
   onTeamCreated: (team: Team) => void
   onTeamUpdated: (team: Team) => void
   onTeamDeleted: (teamId: string) => void
+  onUserUpdated: (user: User) => void
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
   const { language, t } = useLanguage()
@@ -396,6 +399,7 @@ function SystemPageContent({
     setUsers((current) =>
       current.map((item) => (item.id === user.id ? user : item))
     )
+    onUserUpdated(user)
   }
 
   function handleOpenCreateUser() {
