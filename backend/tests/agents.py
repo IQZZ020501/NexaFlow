@@ -13,8 +13,14 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from mcp.types import Tool as McpTool
 from sqlalchemy import select
 
+from app.application import agent_runs, agent_tools
 from app.application import agents as agent_application
-from app.application.agent_memory import format_conversation_memory
+from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import user as user_repository
+from app.application.agent_memory import (
+    MAX_MEMORY_TOTAL_CHARS,
+    format_conversation_memory,
+)
 from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.capabilities.mcp import client as mcp_client_module
 from app.capabilities.mcp.client import (
@@ -33,6 +39,7 @@ from app.shareddomain.agents.runtime import (
     run_agent,
     safe_event_value,
 )
+from app.shareddomain.agents.runtime import graph as agent_graph_module
 from app.shareddomain.agents.runtime.graph import MAX_REASONING_CHARS
 from app.shareddomain.tools import services as mcp_services
 from tests.support import (
@@ -40,6 +47,7 @@ from tests.support import (
     activate_admin,
     activate_user,
     auth_headers,
+    settings as test_settings,
     test_client,
 )
 
@@ -342,6 +350,49 @@ class RepeatedToolProvider:
                 finish_reason="stop",
             )
         )
+
+
+class HangingStreamingProvider:
+    def bind_tools(self, *_args, **_kwargs):
+        return self
+
+    async def astream(self, _messages: list[BaseMessage]):
+        await asyncio.Event().wait()
+        yield AIMessageChunk(content="")
+
+
+async def assert_hanging_model_stream_times_out() -> None:
+    async def emit(_event: dict) -> None:
+        return None
+
+    original_timeout = getattr(
+        agent_graph_module,
+        "MODEL_RESPONSE_TIMEOUT_SECONDS",
+        None,
+    )
+    agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS = 0.01
+    try:
+        try:
+            await asyncio.wait_for(
+                run_agent(
+                    HangingStreamingProvider(),  # type: ignore[arg-type]
+                    [{"role": "user", "content": "Run it"}],
+                    [],
+                    on_event=emit,
+                ),
+                timeout=0.1,
+            )
+        except AgentRunnerError as exc:
+            assert str(exc) == "Agent model response timed out."
+        except TimeoutError as exc:
+            raise AssertionError("Agent model stream did not time out.") from exc
+        else:
+            raise AssertionError("Hanging agent model stream completed.")
+    finally:
+        if original_timeout is None:
+            del agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS
+        else:
+            agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS = original_timeout
 
 
 async def assert_truncated_tool_call_is_not_executed() -> None:
@@ -804,9 +855,79 @@ def assert_conversation_memory_is_bounded() -> None:
     )
     assert "question-12" in memory
     assert "question-11" in memory
-    assert "question-10" not in memory
-    assert "question-0" not in memory
-    assert len(memory) <= 6000
+    assert "question-10" not in memory  # failed runs are excluded
+    assert "question-0" in memory  # 11 succeeded runs fit the 60000-char budget
+    assert len(memory) <= MAX_MEMORY_TOTAL_CHARS
+
+    # the total budget still caps: a 40-run history exceeds 60000 chars,
+    # so the oldest runs are dropped while the newest stay.
+    overflow = format_conversation_memory(
+        [run(index) for index in range(39, -1, -1)]
+    )
+    assert "question-39" in overflow
+    assert "question-0" not in overflow
+    assert len(overflow) <= MAX_MEMORY_TOTAL_CHARS
+
+
+async def assert_cancelled_run_marked_failed(run_id: str) -> None:
+    cancelled_run = None
+    for _ in range(50):
+        async with get_session_factory()() as db:
+            cancelled_run = await agent_repository.get_agent_run_by_id(db, run_id)
+            if (
+                cancelled_run is not None
+                and cancelled_run.status == "failed"
+                and cancelled_run.last_error == "Agent run cancelled."
+            ):
+                return
+        await asyncio.sleep(0.1)
+    raise AssertionError(
+        f"cancelled run was not marked failed (status={cancelled_run.status if cancelled_run else None})"
+    )
+
+
+async def assert_stream_disconnect_marks_run_failed(
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    started = asyncio.Event()
+    hang = asyncio.Event()
+
+    async def hanging_run_agent(*_args, **_kwargs):
+        started.set()
+        await hang.wait()
+
+    original_run_agent = agent_runs.run_agent
+    agent_runs.run_agent = hanging_run_agent
+    try:
+        async with get_session_factory()() as db:
+            actor = await user_repository.get_active_user_by_username(db, "admin")
+            assert actor is not None
+            run, model = await agent_runs.prepare_agent_run(
+                db,
+                workspace_id,
+                agent_id,
+                "Cancel me",
+                actor,
+                "admin",
+            )
+            stream = agent_runs.stream_agent_run(
+                db,
+                run,
+                model,
+                actor,
+                "admin",
+                test_settings(),
+            )
+            first_event = await anext(stream)
+            assert first_event["type"] == "run"
+            assert first_event["run"]["id"] == run.id
+            await asyncio.wait_for(started.wait(), timeout=1)
+            await stream.aclose()
+        await assert_cancelled_run_marked_failed(run.id)
+    finally:
+        agent_runs.run_agent = original_run_agent
+        hang.set()
 
 
 async def get_agent_failure_log(trace_id: str) -> SystemLog | None:
@@ -879,6 +1000,7 @@ async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
 
 
 def main() -> None:
+    asyncio.run(assert_hanging_model_stream_times_out())
     asyncio.run(assert_truncated_tool_call_is_not_executed())
     asyncio.run(assert_invalid_tool_arguments_are_not_executed())
     asyncio.run(assert_tool_error_returns_to_model())
@@ -891,10 +1013,10 @@ def main() -> None:
     assert_conversation_memory_is_bounded()
     assert_mcp_url_validation()
 
-    original_query = agent_application.query_knowledge_base
+    original_query = agent_tools.query_knowledge_base
     original_discover = mcp_services.discover_mcp_tools
-    original_call_mcp_tool = agent_application.call_mcp_tool
-    original_run_agent = agent_application.run_agent
+    original_call_mcp_tool = agent_tools.call_mcp_tool
+    original_run_agent = agent_runs.run_agent
     query_calls: list[tuple[str, str]] = []
     mcp_calls: list[tuple[str, str, dict]] = []
 
@@ -947,9 +1069,9 @@ def main() -> None:
         mcp_calls.append((url, tool_name, arguments))
         return json.dumps({"release": "approved"}), False
 
-    agent_application.query_knowledge_base = fake_query_knowledge_base
+    agent_tools.query_knowledge_base = fake_query_knowledge_base
     mcp_services.discover_mcp_tools = fake_discover_mcp_tools
-    agent_application.call_mcp_tool = fake_call_mcp_tool
+    agent_tools.call_mcp_tool = fake_call_mcp_tool
     try:
         with test_client() as client, agent_model_server() as model_base_url:
             admin_token, workspace_id = activate_admin(client)
@@ -1001,7 +1123,7 @@ def main() -> None:
             async def fail_agent_run(*_args, **_kwargs):
                 raise RuntimeError("synthetic runtime failure")
 
-            agent_application.run_agent = fail_agent_run
+            agent_runs.run_agent = fail_agent_run
             try:
                 failed_run_response = client.post(
                     agents_url(workspace_id, f"/{agent_id}/runs"),
@@ -1009,7 +1131,7 @@ def main() -> None:
                     json={"goal": "Verify failure observability"},
                 )
             finally:
-                agent_application.run_agent = original_run_agent
+                agent_runs.run_agent = original_run_agent
             assert failed_run_response.status_code == 201, failed_run_response.text
             failed_run = failed_run_response.json()
             assert failed_run["status"] == "failed"
@@ -1020,6 +1142,13 @@ def main() -> None:
             assert failure_log.details["agent_id"] == agent_id
             assert failure_log.details["exception_type"] == "RuntimeError"
             assert "synthetic runtime failure" in (failure_log.stack_trace or "")
+
+            asyncio.run(
+                assert_stream_disconnect_marks_run_failed(
+                    workspace_id,
+                    agent_id,
+                )
+            )
 
             duplicate = client.post(
                 agents_url(workspace_id),
@@ -1262,10 +1391,10 @@ def main() -> None:
             assert "agent.create" in actions
             assert "agent.delete" in actions
     finally:
-        agent_application.query_knowledge_base = original_query
+        agent_tools.query_knowledge_base = original_query
         mcp_services.discover_mcp_tools = original_discover
-        agent_application.call_mcp_tool = original_call_mcp_tool
-        agent_application.run_agent = original_run_agent
+        agent_tools.call_mcp_tool = original_call_mcp_tool
+        agent_runs.run_agent = original_run_agent
 
 
 if __name__ == "__main__":

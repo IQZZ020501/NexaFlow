@@ -1,19 +1,26 @@
+import logging
 import secrets
+from dataclasses import dataclass
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException, status
 
+from app.infrastructure.logger import get_logger, log_event
+
+logger = get_logger(__name__)
+
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.validation import normalize_email, normalize_name, normalize_username
 from app.infrastructure.model_utils import new_id
-from app.domain.user import User
+from app.entities.user import User
 from app.schemas.user import UserCreateRequest, UserPasswordResetResponse
 from app.infrastructure.security import hash_password
-from app.application.identity import create_user, find_user_by_identity, user_to_response
-from app.domain.team import Team
-from app.domain.workspace import Workspace, WorkspaceMembership
+from app.application.identity import create_user, find_user_by_identity
+from app.schemas.user import user_to_response
+from app.entities.workspace import WORKSPACE_MEMBER_ROLES, Workspace, WorkspaceMembership
+from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.schemas.workspace import (
     WorkspaceMemberResponse,
@@ -27,7 +34,58 @@ from app.schemas.workspace import (
 ACTIVE_STATUS = "active"
 ARCHIVED_STATUS = "archived"
 WORKSPACE_STATUSES = {ACTIVE_STATUS, ARCHIVED_STATUS}
-WORKSPACE_MEMBER_ROLES = {"admin", "member"}
+
+
+@dataclass(frozen=True)
+class WorkspaceContext:
+    workspace: Workspace
+    user: User
+    membership_role: str | None
+
+
+async def build_workspace_context(
+    db: AsyncSession,
+    user: User,
+    workspace_id: str,
+) -> WorkspaceContext:
+    workspace = await workspace_repository.get_workspace_by_id(db, workspace_id)
+    if workspace is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            "Workspace context failed.",
+            reason="not_found",
+            user_id=user.id,
+            workspace_id=workspace_id,
+        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
+    if workspace.status != ACTIVE_STATUS:
+        log_event(
+            logger,
+            logging.WARNING,
+            "Workspace context failed.",
+            reason="inactive",
+            user_id=user.id,
+            workspace_id=workspace_id,
+        )
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace is not active.")
+
+    membership = await workspace_repository.get_workspace_membership(db, workspace_id, user.id)
+    if membership is None:
+        log_event(
+            logger,
+            logging.WARNING,
+            "Workspace access denied.",
+            user_id=user.id,
+            workspace_id=workspace_id,
+        )
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace access denied.")
+
+    return WorkspaceContext(
+        workspace=workspace,
+        user=user,
+        membership_role=membership.role if membership else None,
+    )
 
 
 def workspace_to_response(workspace: Workspace) -> WorkspaceResponse:
@@ -128,7 +186,6 @@ async def create_workspace(
             must_change_password=True,
             is_global_admin=False,
         )
-        db.add(admin)
 
     workspace = Workspace(
         name=workspace_name,
@@ -136,16 +193,18 @@ async def create_workspace(
         slug=workspace_slug,
         status=ACTIVE_STATUS,
     )
-    db.add(workspace)
 
     try:
-        await db.flush()
-        db.add(
+        if admin_created:
+            admin = await user_repository.create_user(db, admin)
+        workspace = await workspace_repository.create_workspace(db, workspace)
+        await workspace_repository.create_workspace_membership(
+            db,
             WorkspaceMembership(
                 workspace_id=workspace.id,
                 user_id=admin.id,
                 role="admin",
-            )
+            ),
         )
         record_audit_log(
             db,
@@ -162,8 +221,8 @@ async def create_workspace(
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Workspace already exists.") from exc
 
-    await db.refresh(workspace)
-    await db.refresh(admin)
+    workspace = await workspace_repository.refresh_workspace(db, workspace)
+    admin = await user_repository.refresh_user(db, admin)
     return WorkspaceCreateResponse(
         workspace=workspace_to_response(workspace),
         admin_user=user_to_response(admin),
@@ -207,12 +266,13 @@ async def update_workspace(
     )
 
     try:
+        workspace = await workspace_repository.save_workspace(db, workspace)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Workspace already exists.") from exc
 
-    await db.refresh(workspace)
+    workspace = await workspace_repository.refresh_workspace(db, workspace)
     return workspace_to_response(workspace)
 
 
@@ -253,7 +313,7 @@ async def add_workspace_member(
     actor: User,
 ) -> WorkspaceMemberResponse:
     validate_workspace_member_role(role)
-    user = await db.get(User, user_id)
+    user = await user_repository.get_user_by_id(db, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
 
@@ -262,7 +322,6 @@ async def add_workspace_member(
         user_id=user.id,
         role=role,
     )
-    db.add(membership)
     record_audit_log(
         db,
         actor,
@@ -274,6 +333,10 @@ async def add_workspace_member(
         workspace_id=workspace.id,
     )
     try:
+        membership = await workspace_repository.create_workspace_membership(
+            db,
+            membership,
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -318,6 +381,7 @@ async def update_workspace_member_role(
         await ensure_not_last_workspace_admin(db, membership)
     previous_role = membership.role
     membership.role = role
+    membership = await workspace_repository.save_workspace_membership(db, membership)
     record_audit_log(
         db,
         actor,
@@ -329,7 +393,7 @@ async def update_workspace_member_role(
         workspace_id=workspace.id,
     )
     await db.commit()
-    await db.refresh(membership)
+    membership = await workspace_repository.refresh_workspace_membership(db, membership)
     return workspace_member_to_response(membership, user)
 
 

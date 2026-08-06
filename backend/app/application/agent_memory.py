@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.entities.agents import AgentRun
 from app.infrastructure.repositories import agent as agent_repository
-from app.shareddomain.agents.models import AgentRun
 
 MAX_MEMORY_RUNS = 50
 MAX_MEMORY_TURN_CHARS = 6000

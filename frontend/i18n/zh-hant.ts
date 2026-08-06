@@ -554,6 +554,7 @@ export const zhHant = {
   "Agent 已创建": "Agent 已建立",
   "确定删除 Agent“{name}”吗？": "確定刪除 Agent「{name}」嗎？",
   "Agent 已删除": "Agent 已刪除",
+  "Agent 回答超时": "Agent 回答逾時",
   "Agent 回答失败": "Agent 回答失敗",
   "返回 Agent 列表": "返回 Agent 列表",
   "放弃未保存的更改？": "放棄未儲存的變更？",

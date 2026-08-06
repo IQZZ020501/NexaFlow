@@ -1,6 +1,9 @@
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.entities.agents import Agent as AgentEntity
+from app.entities.agents import AgentRun as AgentRunEntity
+from app.infrastructure.repositories.mapping import refresh_entity, save, to_entity
 from app.shareddomain.agents.models import (
     Agent,
     AgentKnowledgeBase,
@@ -14,7 +17,7 @@ async def list_agents(
     workspace_id: str,
     limit: int | None = None,
     offset: int = 0,
-) -> list[Agent]:
+) -> list[AgentEntity]:
     result = await db.scalars(
         select(Agent)
         .where(Agent.workspace_id == workspace_id)
@@ -22,11 +25,26 @@ async def list_agents(
         .limit(limit)
         .offset(offset)
     )
-    return list(result.all())
+    return [to_entity(AgentEntity, row) for row in result.all()]
 
 
-async def get_agent_by_id(db: AsyncSession, agent_id: str) -> Agent | None:
-    return await db.get(Agent, agent_id)
+async def get_agent_by_id(db: AsyncSession, agent_id: str) -> AgentEntity | None:
+    row = await db.get(Agent, agent_id)
+    return to_entity(AgentEntity, row) if row is not None else None
+
+
+async def create_agent(db: AsyncSession, entity: AgentEntity) -> AgentEntity:
+    orm = await save(db, Agent, entity)
+    return to_entity(AgentEntity, orm)
+
+
+async def save_agent(db: AsyncSession, entity: AgentEntity) -> AgentEntity:
+    orm = await save(db, Agent, entity)
+    return to_entity(AgentEntity, orm)
+
+
+async def refresh_agent(db: AsyncSession, entity: AgentEntity) -> AgentEntity:
+    return await refresh_entity(db, Agent, AgentEntity, entity)
 
 
 async def list_binding_map(
@@ -48,7 +66,7 @@ async def list_binding_map(
 
 async def replace_bindings(
     db: AsyncSession,
-    agent: Agent,
+    agent: AgentEntity,
     knowledge_base_ids: list[str],
 ) -> None:
     await db.execute(
@@ -93,7 +111,7 @@ async def list_mcp_binding_map(
 
 async def replace_mcp_bindings(
     db: AsyncSession,
-    agent: Agent,
+    agent: AgentEntity,
     references: list[dict[str, str]],
 ) -> None:
     await db.execute(
@@ -120,7 +138,7 @@ async def list_agent_runs(
     offset: int = 0,
     *,
     status: str | None = None,
-) -> list[AgentRun]:
+) -> list[AgentRunEntity]:
     statement = (
         select(AgentRun)
         .where(
@@ -134,7 +152,29 @@ async def list_agent_runs(
     if status is not None:
         statement = statement.where(AgentRun.status == status)
     result = await db.scalars(statement)
-    return list(result.all())
+    return [to_entity(AgentRunEntity, row) for row in result.all()]
+
+
+async def get_agent_run_by_id(
+    db: AsyncSession,
+    run_id: str,
+) -> AgentRunEntity | None:
+    row = await db.get(AgentRun, run_id)
+    return to_entity(AgentRunEntity, row) if row is not None else None
+
+
+async def create_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
+    orm = await save(db, AgentRun, entity)
+    return to_entity(AgentRunEntity, orm)
+
+
+async def save_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
+    orm = await save(db, AgentRun, entity)
+    return to_entity(AgentRunEntity, orm)
+
+
+async def refresh_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
+    return await refresh_entity(db, AgentRun, AgentRunEntity, entity)
 
 
 async def delete_agent_graph(db: AsyncSession, agent_id: str) -> None:

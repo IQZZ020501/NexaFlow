@@ -3,9 +3,17 @@ from datetime import datetime
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.user import RefreshSession, User
-from app.domain.team import Team, TeamMembership
-from app.domain.workspace import Workspace, WorkspaceMembership
+from app.domain.team import Team as TeamOrm
+from app.domain.team import TeamMembership as TeamMembershipOrm
+from app.domain.user import RefreshSession as RefreshSessionOrm
+from app.domain.user import User as UserOrm
+from app.domain.workspace import Workspace as WorkspaceOrm
+from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipOrm
+from app.entities.team import Team, TeamMembership
+from app.entities.user import RefreshSession, User
+from app.entities.workspace import WORKSPACE_ADMIN_ROLE
+from app.entities.workspace import Workspace, WorkspaceMembership
+from app.infrastructure.repositories import mapping
 
 
 async def list_users(
@@ -14,25 +22,27 @@ async def list_users(
     offset: int = 0,
 ) -> list[User]:
     result = await db.scalars(
-        select(User)
-        .order_by(User.created_at.desc(), User.id.desc())
+        select(UserOrm)
+        .order_by(UserOrm.created_at.desc(), UserOrm.id.desc())
         .limit(limit)
         .offset(offset)
     )
-    return list(result.all())
+    return [mapping.to_entity(User, row) for row in result.all()]
 
 
 async def get_user_by_id(db: AsyncSession, user_id: str) -> User | None:
-    return await db.get(User, user_id)
+    row = await db.get(UserOrm, user_id)
+    return mapping.to_entity(User, row) if row is not None else None
 
 
 async def get_active_user_by_username(db: AsyncSession, username: str) -> User | None:
-    return await db.scalar(
-        select(User).where(
-            User.username == username,
-            User.is_active.is_(True),
+    row = await db.scalar(
+        select(UserOrm).where(
+            UserOrm.username == username,
+            UserOrm.is_active.is_(True),
         )
     )
+    return mapping.to_entity(User, row) if row is not None else None
 
 
 async def get_active_refresh_session(
@@ -40,27 +50,34 @@ async def get_active_refresh_session(
     token_hash: str,
     now: datetime,
 ) -> RefreshSession | None:
-    return await db.scalar(
-        select(RefreshSession)
-        .join(User, RefreshSession.user_id == User.id)
+    row = await db.scalar(
+        select(RefreshSessionOrm)
+        .join(UserOrm, RefreshSessionOrm.user_id == UserOrm.id)
         .where(
-            RefreshSession.token_hash == token_hash,
-            RefreshSession.expires_at > now,
-            User.is_active.is_(True),
+            RefreshSessionOrm.token_hash == token_hash,
+            RefreshSessionOrm.expires_at > now,
+            UserOrm.is_active.is_(True),
         )
     )
+    return mapping.to_entity(RefreshSession, row) if row is not None else None
 
 
 async def delete_expired_refresh_sessions(db: AsyncSession, now: datetime) -> None:
-    await db.execute(delete(RefreshSession).where(RefreshSession.expires_at <= now))
+    await db.execute(
+        delete(RefreshSessionOrm).where(RefreshSessionOrm.expires_at <= now)
+    )
 
 
 async def delete_refresh_session(db: AsyncSession, token_hash: str) -> None:
-    await db.execute(delete(RefreshSession).where(RefreshSession.token_hash == token_hash))
+    await db.execute(
+        delete(RefreshSessionOrm).where(RefreshSessionOrm.token_hash == token_hash)
+    )
 
 
 async def delete_refresh_sessions_for_user(db: AsyncSession, user_id: str) -> None:
-    await db.execute(delete(RefreshSession).where(RefreshSession.user_id == user_id))
+    await db.execute(
+        delete(RefreshSessionOrm).where(RefreshSessionOrm.user_id == user_id)
+    )
 
 
 async def list_workspace_scope_rows(
@@ -71,12 +88,18 @@ async def list_workspace_scope_rows(
         return []
 
     result = await db.execute(
-        select(WorkspaceMembership, Workspace)
-        .join(Workspace, WorkspaceMembership.workspace_id == Workspace.id)
-        .where(WorkspaceMembership.user_id.in_(user_ids))
-        .order_by(Workspace.created_at)
+        select(WorkspaceMembershipOrm, WorkspaceOrm)
+        .join(WorkspaceOrm, WorkspaceMembershipOrm.workspace_id == WorkspaceOrm.id)
+        .where(WorkspaceMembershipOrm.user_id.in_(user_ids))
+        .order_by(WorkspaceOrm.created_at)
     )
-    return result.all()
+    return [
+        (
+            mapping.to_entity(WorkspaceMembership, membership),
+            mapping.to_entity(Workspace, workspace),
+        )
+        for membership, workspace in result.all()
+    ]
 
 
 async def list_team_scope_rows(
@@ -87,12 +110,18 @@ async def list_team_scope_rows(
         return []
 
     result = await db.execute(
-        select(TeamMembership, Team)
-        .join(Team, TeamMembership.team_id == Team.id)
-        .where(TeamMembership.user_id.in_(user_ids))
-        .order_by(Team.created_at)
+        select(TeamMembershipOrm, TeamOrm)
+        .join(TeamOrm, TeamMembershipOrm.team_id == TeamOrm.id)
+        .where(TeamMembershipOrm.user_id.in_(user_ids))
+        .order_by(TeamOrm.created_at)
     )
-    return result.all()
+    return [
+        (
+            mapping.to_entity(TeamMembership, membership),
+            mapping.to_entity(Team, team),
+        )
+        for membership, team in result.all()
+    ]
 
 
 async def list_admin_workspace_ids_for_user(
@@ -100,9 +129,9 @@ async def list_admin_workspace_ids_for_user(
     user_id: str,
 ) -> list[str]:
     result = await db.scalars(
-        select(WorkspaceMembership.workspace_id).where(
-            WorkspaceMembership.user_id == user_id,
-            WorkspaceMembership.role == "admin",
+        select(WorkspaceMembershipOrm.workspace_id).where(
+            WorkspaceMembershipOrm.user_id == user_id,
+            WorkspaceMembershipOrm.role == WORKSPACE_ADMIN_ROLE,
         )
     )
     return list(result.all())
@@ -113,14 +142,14 @@ async def active_admin_counts_by_workspace(
     workspace_ids: list[str],
 ) -> dict[str, int]:
     result = await db.execute(
-        select(WorkspaceMembership.workspace_id, func.count())
-        .join(User, WorkspaceMembership.user_id == User.id)
+        select(WorkspaceMembershipOrm.workspace_id, func.count())
+        .join(UserOrm, WorkspaceMembershipOrm.user_id == UserOrm.id)
         .where(
-            WorkspaceMembership.workspace_id.in_(workspace_ids),
-            WorkspaceMembership.role == "admin",
-            User.is_active.is_(True),
+            WorkspaceMembershipOrm.workspace_id.in_(workspace_ids),
+            WorkspaceMembershipOrm.role == WORKSPACE_ADMIN_ROLE,
+            UserOrm.is_active.is_(True),
         )
-        .group_by(WorkspaceMembership.workspace_id)
+        .group_by(WorkspaceMembershipOrm.workspace_id)
     )
     return dict(result.all())
 
@@ -130,9 +159,13 @@ async def list_workspace_memberships_for_user(
     user_id: str,
 ) -> list[WorkspaceMembership]:
     result = await db.scalars(
-        select(WorkspaceMembership).where(WorkspaceMembership.user_id == user_id)
+        select(WorkspaceMembershipOrm).where(
+            WorkspaceMembershipOrm.user_id == user_id
+        )
     )
-    return list(result.all())
+    return [
+        mapping.to_entity(WorkspaceMembership, row) for row in result.all()
+    ]
 
 
 async def find_users_by_identity(
@@ -141,13 +174,55 @@ async def find_users_by_identity(
     email: str,
 ) -> list[User]:
     result = await db.scalars(
-        select(User).where(or_(User.username == username, User.email == email))
+        select(UserOrm).where(
+            or_(UserOrm.username == username, UserOrm.email == email)
+        )
     )
-    return list(result.all())
+    return [mapping.to_entity(User, row) for row in result.all()]
 
 
 async def delete_user_graph(db: AsyncSession, user_id: str) -> None:
     await delete_refresh_sessions_for_user(db, user_id)
-    await db.execute(delete(TeamMembership).where(TeamMembership.user_id == user_id))
-    await db.execute(delete(WorkspaceMembership).where(WorkspaceMembership.user_id == user_id))
-    await db.execute(delete(User).where(User.id == user_id))
+    await db.execute(delete(TeamMembershipOrm).where(TeamMembershipOrm.user_id == user_id))
+    await db.execute(
+        delete(WorkspaceMembershipOrm).where(WorkspaceMembershipOrm.user_id == user_id)
+    )
+    await db.execute(delete(UserOrm).where(UserOrm.id == user_id))
+
+
+async def create_user(db: AsyncSession, entity: User) -> User:
+    orm_row = await mapping.save(db, UserOrm, entity)
+    return mapping.to_entity(User, orm_row)
+
+
+async def create_refresh_session(
+    db: AsyncSession,
+    entity: RefreshSession,
+) -> RefreshSession:
+    orm_row = await mapping.save(db, RefreshSessionOrm, entity)
+    return mapping.to_entity(RefreshSession, orm_row)
+
+
+async def create_workspace_membership(
+    db: AsyncSession,
+    entity: WorkspaceMembership,
+) -> WorkspaceMembership:
+    orm_row = await mapping.save(db, WorkspaceMembershipOrm, entity)
+    return mapping.to_entity(WorkspaceMembership, orm_row)
+
+
+async def create_team_membership(
+    db: AsyncSession,
+    entity: TeamMembership,
+) -> TeamMembership:
+    orm_row = await mapping.save(db, TeamMembershipOrm, entity)
+    return mapping.to_entity(TeamMembership, orm_row)
+
+
+async def save_user(db: AsyncSession, entity: User) -> User:
+    orm_row = await mapping.save(db, UserOrm, entity)
+    return mapping.to_entity(User, orm_row)
+
+
+async def refresh_user(db: AsyncSession, entity: User) -> User:
+    return await mapping.refresh_entity(db, UserOrm, User, entity)

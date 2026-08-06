@@ -5,19 +5,19 @@ from mcp.types import Tool as McpTool
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.capabilities.mcp.client import (
+from app.ports.mcp import (
     McpClientError,
     discover_mcp_tools,
     normalize_mcp_url,
 )
-from app.domain.user import User
+from app.entities.tools import McpServer
+from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.repositories import mcp as mcp_repository
 from app.infrastructure.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.infrastructure.validation import normalize_name
 from app.schemas.mcp import McpServerCreateRequest, McpServerResponse
 from app.shareddomain.audit.services import record_audit_log
-from app.shareddomain.tools.models import McpServer
 
 
 @dataclass(frozen=True)
@@ -107,9 +107,8 @@ async def create_mcp_server(
     if token:
         server.bearer_token_ciphertext = encrypt_secret(token, settings.model_secret_key)
         server.bearer_token_hint = secret_hint(token)
-    db.add(server)
     try:
-        await db.flush()
+        server = await mcp_repository.create_mcp_server(db, server)
         record_audit_log(
             db,
             actor,
@@ -127,7 +126,7 @@ async def create_mcp_server(
             status.HTTP_409_CONFLICT,
             "MCP server name already exists.",
         ) from exc
-    await db.refresh(server)
+    server = await mcp_repository.refresh_mcp_server(db, server)
     return mcp_server_to_response(server)
 
 
@@ -147,6 +146,7 @@ async def refresh_mcp_server(
         server.last_error = None
     except McpClientError as exc:
         server.last_error = str(exc)
+        await mcp_repository.save_mcp_server(db, server)
         await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
@@ -160,8 +160,9 @@ async def refresh_mcp_server(
         {"tool_count": len(server.tools)},
         workspace_id=server.workspace_id,
     )
+    await mcp_repository.save_mcp_server(db, server)
     await db.commit()
-    await db.refresh(server)
+    server = await mcp_repository.refresh_mcp_server(db, server)
     return mcp_server_to_response(server)
 
 
@@ -179,7 +180,7 @@ async def delete_mcp_server(
         server.name,
         workspace_id=server.workspace_id,
     )
-    await mcp_repository.delete_mcp_server(db, server.id)
+    await mcp_repository.delete_mcp_server(db, server)
     await db.commit()
 
 

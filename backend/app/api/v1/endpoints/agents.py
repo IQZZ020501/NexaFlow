@@ -8,10 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import WorkspaceContext, get_settings, get_workspace_context_from_path
 from app.application.agents import (
+    create_agent,
     create_agent_run,
+    delete_agent,
+    get_agent,
+    get_agent_response,
     list_agent_runs,
+    list_agents,
     prepare_agent_run,
     stream_agent_run,
+    update_agent,
 )
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
@@ -21,14 +27,6 @@ from app.schemas.agent import (
     AgentRunCreateRequest,
     AgentRunResponse,
     AgentUpdateRequest,
-)
-from app.shareddomain.agents.services import (
-    create_agent,
-    delete_agent,
-    get_agent,
-    get_agent_response,
-    list_agents,
-    update_agent,
 )
 
 router = APIRouter(

@@ -2,9 +2,11 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.capabilities.llm import registry_repository as model_repository
-from app.capabilities.llm.models import RegisteredModel
-from app.domain.user import User
+from app.ports import model_registry as model_repository
+from app.ports.llm import RegisteredModel
+from app.entities.agents import Agent
+from app.entities.knowledge import KnowledgeBase
+from app.entities.user import User
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.validation import normalize_name
 from app.schemas.agent import (
@@ -12,9 +14,7 @@ from app.schemas.agent import (
     AgentResponse,
     AgentUpdateRequest,
 )
-from app.shareddomain.agents.models import Agent
 from app.shareddomain.audit.services import record_audit_log
-from app.shareddomain.knowledge.models import KnowledgeBase
 from app.shareddomain.knowledge.services import (
     get_knowledge_base,
     require_knowledge_base_permission,
@@ -263,10 +263,9 @@ async def create_agent(
         status=ACTIVE_STATUS,
         created_by_user_id=actor.id,
     )
-    db.add(agent)
 
     try:
-        await db.flush()
+        agent = await agent_repository.create_agent(db, agent)
         await agent_repository.replace_bindings(
             db,
             agent,
@@ -292,7 +291,7 @@ async def create_agent(
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent name already exists.") from exc
 
-    await db.refresh(agent)
+    agent = await agent_repository.refresh_agent(db, agent)
     return agent_to_response(
         agent,
         [knowledge_base.id for knowledge_base in knowledge_bases],
@@ -361,12 +360,13 @@ async def update_agent(
     )
 
     try:
+        await agent_repository.save_agent(db, agent)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent name already exists.") from exc
 
-    await db.refresh(agent)
+    agent = await agent_repository.refresh_agent(db, agent)
     return await get_agent_response(db, agent, actor, workspace_role)
 
 

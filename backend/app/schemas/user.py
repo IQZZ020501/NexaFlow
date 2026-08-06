@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.domain.user import User
+
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=80)
@@ -85,3 +87,22 @@ class MembershipResponse(BaseModel):
 class MeResponse(BaseModel):
     user: UserResponse
     memberships: list[MembershipResponse]
+
+
+def user_to_response(
+    user: User,
+    workspaces: list[UserWorkspaceResponse] | None = None,
+    teams: list[UserTeamResponse] | None = None,
+) -> UserResponse:
+    return UserResponse(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        name=user.name,
+        is_global_admin=user.is_global_admin,
+        must_change_password=user.must_change_password,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        workspaces=workspaces or [],
+        teams=teams or [],
+    )

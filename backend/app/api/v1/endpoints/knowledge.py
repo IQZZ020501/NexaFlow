@@ -5,8 +5,6 @@ from fastapi import (
     Body,
     Depends,
     File,
-    Form,
-    HTTPException,
     Query,
     Response,
     UploadFile,
@@ -15,7 +13,6 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
 from app.infrastructure.logger import get_logger
 from app.infrastructure.session import get_db
 from app.api.deps import (
@@ -38,52 +35,35 @@ from app.schemas.knowledge import (
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
 )
-from app.shareddomain.knowledge.orchestration import (
-    enqueue_index_knowledge_document,
-    enqueue_parse_knowledge_document,
-    enqueue_rebuild_knowledge_index,
-    get_knowledge_document,
-    list_knowledge_document_chunks,
-    list_knowledge_tasks,
-    retry_knowledge_task,
-)
-from app.infrastructure.repositories.knowledge import (
-    count_document_chunks,
-)
-from app.shareddomain.knowledge.services import (
+from app.application.knowledge import (
     create_knowledge_base,
     create_knowledge_documents_from_attachments,
     delete_knowledge_attachment,
     delete_knowledge_base_permanently,
+    dispatch_knowledge_task,
+    enqueue_index_knowledge_document,
+    enqueue_parse_knowledge_document,
+    enqueue_rebuild_knowledge_index,
     get_knowledge_base,
+    get_knowledge_document,
     list_knowledge_bases,
-    list_knowledge_documents,
-    document_to_response,
+    list_knowledge_document_chunks,
+    list_knowledge_documents_with_counts,
+    list_knowledge_tasks,
     list_resource_permissions,
     require_can_manage_permissions,
     require_knowledge_base_permission,
+    retry_knowledge_task,
     revoke_resource_permission,
     test_knowledge_base_models,
     update_knowledge_base,
     upload_knowledge_attachment,
     upsert_resource_permission,
 )
-from app.tasks.knowledge import enqueue_knowledge_task
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/knowledge-bases", tags=["knowledge"])
-
-
-async def dispatch_knowledge_task(task_id: str, settings: Settings) -> None:
-    try:
-        await enqueue_knowledge_task(task_id, settings)
-    except Exception as exc:
-        log_error(logger, "Knowledge task dispatch failed.", exc, task_id=task_id)
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Knowledge task queue is unavailable.",
-        ) from exc
 
 
 @router.get("", response_model=list[KnowledgeBaseResponse])
@@ -194,18 +174,13 @@ async def list_workspace_knowledge_base_documents(
         context.membership_role,
         {"edit"} if include_staged else {"view", "edit"},
     )
-    documents = await list_knowledge_documents(
+    return await list_knowledge_documents_with_counts(
         db,
         knowledge_base,
         include_staged=include_staged,
         limit=limit,
         offset=offset,
     )
-    chunk_counts = await count_document_chunks(db, knowledge_base)
-    return [
-        document_to_response(document, chunk_count=chunk_counts.get(document.id, 0))
-        for document in documents
-    ]
 
 
 @router.post(

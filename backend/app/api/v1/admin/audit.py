@@ -3,11 +3,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.audit import list_audit_logs
 from app.schemas.audit import AuditLogResponse
-from app.shareddomain.audit.services import list_audit_logs
 from app.infrastructure.session import get_db
 from app.api.deps import require_global_admin
-from app.domain.user import User
+from app.entities.user import User
 
 router = APIRouter(prefix="/audit-logs", tags=["audit-logs"])
 

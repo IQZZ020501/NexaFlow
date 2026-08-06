@@ -1,6 +1,34 @@
 from collections.abc import AsyncIterable
 from pathlib import Path
 import shutil
+from typing import Protocol
+
+
+class ObjectStorage(Protocol):
+    """Object storage port consumed by business domains.
+
+    Implementations (e.g. ``LocalObjectStorage``) are wired by the
+    application layer; domain code must never depend on a concrete class.
+    """
+
+    def path(self, key: str) -> Path: ...
+
+    async def put_chunks(
+        self,
+        key: str,
+        chunks: AsyncIterable[bytes],
+        max_bytes: int,
+    ) -> int: ...
+
+    def put_bytes(self, key: str, content: bytes) -> int: ...
+
+    def delete(self, key: str) -> None: ...
+
+    def delete_prefix(self, prefix: str) -> None: ...
+
+
+def create_object_storage(root: Path) -> ObjectStorage:
+    return LocalObjectStorage(root)
 
 
 class ObjectStorageError(Exception):

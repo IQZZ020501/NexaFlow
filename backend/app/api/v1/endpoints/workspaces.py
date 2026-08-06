@@ -3,8 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.audit import list_workspace_audit_logs
 from app.schemas.audit import AuditLogResponse
-from app.shareddomain.audit.services import list_workspace_audit_logs
 from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
@@ -13,7 +13,7 @@ from app.api.deps import (
     require_password_changed,
     require_workspace_path_role,
 )
-from app.domain.user import User
+from app.entities.user import User
 from app.schemas.user import UserPasswordResetResponse
 from app.schemas.workspace import (
     WorkspaceMemberCreateRequest,

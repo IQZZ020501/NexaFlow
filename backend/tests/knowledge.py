@@ -20,6 +20,7 @@ from app.shareddomain.knowledge.models import (
     KnowledgeTask,
 )
 from app.api.v1.endpoints import knowledge as knowledge_api
+from app.application import knowledge as knowledge_application
 from app.capabilities.rag import retrieval as knowledge_retrieval
 from app.capabilities.rag import vector_store as knowledge_vector_store
 from app.capabilities.embedding.pipeline import (
@@ -30,8 +31,9 @@ from app.capabilities.embedding.pipeline import (
 )
 from app.capabilities.rag.vector_store import VectorChunk, VectorHit
 from app.infrastructure.repositories import knowledge as knowledge_repository
+from app.infrastructure.repositories import user as user_repository
+from app.entities.knowledge import DOCUMENT_DELETED_STATUS
 from app.shareddomain.knowledge.orchestration import (
-    DOCUMENT_DELETED_STATUS,
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
 )
@@ -218,9 +220,18 @@ async def enqueue_recoverable_parse_task(
     actor_username: str,
 ) -> None:
     async with get_session_factory()() as db:
-        knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
-        document = await db.get(KnowledgeDocument, document_id)
-        actor = await db.scalar(select(User).where(User.username == actor_username))
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            knowledge_base_id,
+        )
+        document = await knowledge_repository.get_knowledge_document_by_id(
+            db,
+            document_id,
+        )
+        actor = await user_repository.get_active_user_by_username(
+            db,
+            actor_username,
+        )
         assert knowledge_base is not None
         assert document is not None
         assert actor is not None
@@ -234,24 +245,38 @@ async def assert_deleted_document_not_resurrected_by_parse_task(
 ) -> None:
     # 模拟 worker 已领取任务（running），随后文档在导入会话中被删除
     async with get_session_factory()() as db:
-        document = await db.get(KnowledgeDocument, document_id)
-        task = await db.get(KnowledgeTask, task_id)
+        task = await knowledge_repository.get_knowledge_task_by_id(db, task_id)
+        document = await knowledge_repository.get_knowledge_document_by_id(
+            db,
+            document_id,
+        )
         assert document is not None
         assert task is not None
         task.status = "running"
         document.status = DOCUMENT_DELETED_STATUS
+        await knowledge_repository.save_knowledge_task(db, task)
+        await knowledge_repository.save_knowledge_document(db, document)
         await db.commit()
 
         aborted = False
         caught: Exception | None = None
         async with get_session_factory()() as db:
-            knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
-            document = await db.get(KnowledgeDocument, document_id)
-            task = await db.get(KnowledgeTask, task_id)
+            knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+                db,
+                knowledge_base_id,
+            )
+            document = await knowledge_repository.get_knowledge_document_by_id(
+                db,
+                document_id,
+            )
+            task = await knowledge_repository.get_knowledge_task_by_id(db, task_id)
             assert knowledge_base is not None
             assert document is not None
             assert task is not None
-            actor = await db.get(User, task.created_by_user_id)
+            actor = await user_repository.get_user_by_id(
+                db,
+                task.created_by_user_id,
+            )
             assert actor is not None
             try:
                 await run_parse_task(
@@ -294,8 +319,14 @@ async def enqueue_recoverable_rebuild_task(
     actor_username: str,
 ) -> None:
     async with get_session_factory()() as db:
-        knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
-        actor = await db.scalar(select(User).where(User.username == actor_username))
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            knowledge_base_id,
+        )
+        actor = await user_repository.get_active_user_by_username(
+            db,
+            actor_username,
+        )
         assert knowledge_base is not None
         assert actor is not None
         await enqueue_rebuild_knowledge_index(db, knowledge_base, actor)
@@ -377,7 +408,7 @@ async def replace_document_file_with_text(
 
 
 async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_id: str) -> None:
-    original_query_vectors = knowledge_retrieval.query_vectors
+    original_query_vectors = knowledge_application.query_vectors
 
     def fake_query_vectors(*_args) -> list[VectorHit]:
         assert _args[-1] == 5
@@ -386,12 +417,12 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
             VectorHit(chunk_id=indexed_chunk_id, distance=0.1),
         ]
 
-    knowledge_retrieval.query_vectors = fake_query_vectors
+    knowledge_application.query_vectors = fake_query_vectors
     try:
         async with get_session_factory()() as db:
             knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
             assert knowledge_base is not None
-            hits = await knowledge_retrieval.query_knowledge_base(
+            hits = await knowledge_application.query_knowledge_base(
                 db,
                 knowledge_base,
                 KnowledgeQueryRequest(query="product docs", limit=1),
@@ -399,7 +430,7 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
             )
             assert [hit.chunk_id for hit in hits] == [indexed_chunk_id]
     finally:
-        knowledge_retrieval.query_vectors = original_query_vectors
+        knowledge_application.query_vectors = original_query_vectors
 
 
 def assert_vector_store_mmr_and_metadata() -> None:
@@ -432,7 +463,8 @@ def assert_vector_store_mmr_and_metadata() -> None:
 
         knowledge_vector_store.upsert_vectors(
             settings,
-            KnowledgeBase(id="knowledge-1", workspace_id="workspace-1"),
+            "knowledge-1",
+            "workspace-1",
             object(),
             [
                 VectorChunk(
@@ -549,7 +581,7 @@ async def assert_query_aggregates_hybrid_hits(
     configured_document_id: str,
     configured_chunks: list[dict],
 ) -> None:
-    original_query_vectors = knowledge_retrieval.query_vectors
+    original_query_vectors = knowledge_application.query_vectors
     original_query_keyword_chunk_ids = knowledge_repository.query_keyword_chunk_ids
     configured_by_index = {
         chunk["chunk_index"]: chunk for chunk in configured_chunks
@@ -575,20 +607,20 @@ async def assert_query_aggregates_hybrid_hits(
         assert (query, candidate_limit) == ("exact term", 10)
         return [configured_by_index[0]["id"]]
 
-    knowledge_retrieval.query_vectors = fake_query_vectors
+    knowledge_application.query_vectors = fake_query_vectors
     knowledge_repository.query_keyword_chunk_ids = fake_query_keyword_chunk_ids
     try:
         async with get_session_factory()() as db:
             knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
             assert knowledge_base is not None
-            hits = await knowledge_retrieval.query_knowledge_base(
+            hits = await knowledge_application.query_knowledge_base(
                 db,
                 knowledge_base,
                 KnowledgeQueryRequest(query="exact term", limit=2),
                 test_settings(),
             )
     finally:
-        knowledge_retrieval.query_vectors = original_query_vectors
+        knowledge_application.query_vectors = original_query_vectors
         knowledge_repository.query_keyword_chunk_ids = original_query_keyword_chunk_ids
 
     assert [hit.document_id for hit in hits] == [
@@ -731,7 +763,7 @@ async def assert_hierarchical_retrieval(
     knowledge_base_id: str,
     document_id: str,
 ) -> None:
-    original_query_vectors = knowledge_retrieval.query_vectors
+    original_query_vectors = knowledge_application.query_vectors
     original_query_keyword_chunk_ids = knowledge_repository.query_keyword_chunk_ids
     original_build_registered_reranker = (
         knowledge_retrieval.build_registered_reranker
@@ -781,18 +813,18 @@ async def assert_hierarchical_retrieval(
                     {"index": 0, "relevance_score": 0.8},
                 ]
 
-        knowledge_retrieval.query_vectors = fake_query_vectors
+        knowledge_application.query_vectors = fake_query_vectors
         knowledge_repository.query_keyword_chunk_ids = fake_query_keyword_chunk_ids
         knowledge_retrieval.build_registered_reranker = lambda *_args: FakeReranker()
         try:
-            hits = await knowledge_retrieval.query_knowledge_base(
+            hits = await knowledge_application.query_knowledge_base(
                 db,
                 knowledge_base,
                 KnowledgeQueryRequest(query="hierarchical query", limit=2),
                 test_settings(),
             )
         finally:
-            knowledge_retrieval.query_vectors = original_query_vectors
+            knowledge_application.query_vectors = original_query_vectors
             knowledge_repository.query_keyword_chunk_ids = (
                 original_query_keyword_chunk_ids
             )
@@ -1210,20 +1242,20 @@ def main() -> None:
         assert task_progress["index"] == (1, 1)
         assert task_progress["rebuild_index"] == (1, 1)
 
-        original_enqueue_knowledge_task = knowledge_api.enqueue_knowledge_task
+        original_enqueue_knowledge_task = knowledge_application.enqueue_knowledge_task
 
         async def fail_knowledge_task_dispatch(task_id: str, _settings) -> None:
             await mark_task_dispatch_failed(task_id)
             raise RuntimeError("queue unavailable")
 
-        knowledge_api.enqueue_knowledge_task = fail_knowledge_task_dispatch
+        knowledge_application.enqueue_knowledge_task = fail_knowledge_task_dispatch
         try:
             degraded_parse = client.post(
                 knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{document_id}/parse"),
                 headers=auth_headers(alice_token),
             )
         finally:
-            knowledge_api.enqueue_knowledge_task = original_enqueue_knowledge_task
+            knowledge_application.enqueue_knowledge_task = original_enqueue_knowledge_task
 
         assert degraded_parse.status_code == 503, degraded_parse.text
 

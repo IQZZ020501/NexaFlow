@@ -127,6 +127,8 @@ export function AgentsPage() {
   const [pendingQuestion, setPendingQuestion] = React.useState<string | null>(
     null
   )
+  const [askAbortController, setAskAbortController] =
+    React.useState<AbortController | null>(null)
   const [form, setForm] = React.useState<AgentFormState>(EMPTY_FORM)
   const [isLoading, setIsLoading] = React.useState(false)
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)
@@ -367,6 +369,8 @@ export function AgentsPage() {
     setQuestion("")
     setPendingQuestion(nextQuestion)
     setIsAsking(true)
+    const askAbortController = new AbortController()
+    setAskAbortController(askAbortController)
     const placeholderRun: AgentRun = {
       id: `pending-${Date.now()}`,
       workspace_id: selectedWorkspaceId,
@@ -487,9 +491,11 @@ export function AgentsPage() {
             notify("error", t("Agent 回答失败"))
           }
         },
-        !selectedAgent.published
+        !selectedAgent.published,
+        askAbortController.signal
       )
     } catch (error) {
+      const userCancelled = askAbortController.signal.aborted
       setQuestion(nextQuestion)
       setRuns((current) =>
         current.filter(
@@ -497,11 +503,22 @@ export function AgentsPage() {
             run.id !== liveRunId && !run.id.startsWith("pending-")
         )
       )
+      if (userCancelled) return
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        notify("error", t("Agent 回答超时"))
+      } else {
+        notify("error", t("Agent 回答失败"))
+      }
       reportError(error)
     } finally {
       setPendingQuestion(null)
       setIsAsking(false)
+      setAskAbortController(null)
     }
+  }
+
+  function handleCancelAsk() {
+    askAbortController?.abort()
   }
 
   if (selectedAgent) {
@@ -530,6 +547,7 @@ export function AgentsPage() {
         onSave={handleSaveAgent}
         onPublish={() => void handlePublishAgent()}
         onAsk={handleAsk}
+        onCancelAsk={handleCancelAsk}
         t={t}
       />
     )

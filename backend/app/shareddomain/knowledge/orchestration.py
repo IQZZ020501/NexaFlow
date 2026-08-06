@@ -9,19 +9,36 @@ from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
 from app.infrastructure.logger import get_logger
 from app.infrastructure.model_utils import new_id
-from app.domain.user import User
+from app.entities.user import User
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.shareddomain.knowledge.models import (
+from app.entities.knowledge import (
+    CHUNK_INDEX_FAILED_STATUS,
+    CHUNK_INDEXED_STATUS,
+    CHUNK_PREVIEW_STATUS,
+    DOCUMENT_DELETED_STATUS,
+    DOCUMENT_INDEX_FAILED_STATUS,
+    DOCUMENT_INDEX_QUEUED_STATUS,
+    DOCUMENT_INDEXED_STATUS,
+    DOCUMENT_INDEXING_STATUS,
+    DOCUMENT_PARSE_FAILED_STATUS,
+    DOCUMENT_PARSE_QUEUED_STATUS,
+    DOCUMENT_PARSED_STATUS,
+    DOCUMENT_PARSING_STATUS,
     DOCUMENT_STAGED_META_KEY,
+    TASK_FAILED_STATUS,
+    TASK_INDEX,
+    TASK_PARSE,
+    TASK_QUEUED_STATUS,
+    TASK_REBUILD_INDEX,
+    TASK_SUCCEEDED_STATUS,
     KnowledgeAsset,
     KnowledgeBase,
-    KnowledgeChunkAsset,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
     KnowledgeTask,
 )
-from app.capabilities.embedding.pipeline import (
+from app.ports.parsing import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     DocumentChunkDrafts,
@@ -34,7 +51,7 @@ from app.capabilities.embedding.pipeline import (
     extract_document,
     split_text,
 )
-from app.capabilities.rag.vector_store import delete_vectors
+from app.ports.vector_store import delete_vectors
 from app.schemas.knowledge import (
     KnowledgeAssetResponse,
     KnowledgeDocumentChunkResponse,
@@ -46,28 +63,10 @@ from app.shareddomain.knowledge.services import (
     knowledge_document_path,
     knowledge_object_storage,
 )
-from app.capabilities.llm.models import RegisteredModel
+from app.ports.llm import RegisteredModel
 
 logger = get_logger(__name__)
 
-DOCUMENT_PARSE_QUEUED_STATUS = "parse_queued"
-DOCUMENT_PARSING_STATUS = "parsing"
-DOCUMENT_PARSED_STATUS = "parsed"
-DOCUMENT_PARSE_FAILED_STATUS = "parse_failed"
-DOCUMENT_INDEX_QUEUED_STATUS = "index_queued"
-DOCUMENT_INDEXING_STATUS = "indexing"
-DOCUMENT_INDEXED_STATUS = "indexed"
-DOCUMENT_INDEX_FAILED_STATUS = "index_failed"
-DOCUMENT_DELETED_STATUS = "deleted"
-CHUNK_PREVIEW_STATUS = "preview"
-CHUNK_INDEXED_STATUS = "indexed"
-CHUNK_INDEX_FAILED_STATUS = "index_failed"
-TASK_PARSE = "parse"
-TASK_INDEX = "index"
-TASK_REBUILD_INDEX = "rebuild_index"
-TASK_QUEUED_STATUS = "queued"
-TASK_SUCCEEDED_STATUS = "succeeded"
-TASK_FAILED_STATUS = "failed"
 MAX_TASK_ATTEMPTS = 3
 ALLOWED_CLEANING_RULES = {"trim_lines", "collapse_spaces", "remove_empty_lines"}
 DEFAULT_PARSE_OPTIONS: dict[str, Any] = {
@@ -256,7 +255,8 @@ async def extract_document_chunk_contents(
 ) -> DocumentChunkDrafts:
     text, assets = await asyncio.to_thread(
         extract_document,
-        document,
+        document.filename,
+        document.content_type,
         knowledge_document_path(settings, document.storage_path),
     )
     text = clean_text(
@@ -311,8 +311,11 @@ async def replace_document_chunks(
 
     storage = knowledge_object_storage(settings)
     written_asset_keys: list[str] = []
+    assets: list[KnowledgeAsset] = []
+    parents: list[KnowledgeDocumentParentChunk] = []
+    children: list[KnowledgeDocumentChunk] = []
+    chunk_asset_links: list[tuple[str, str, int]] = []
     try:
-        assets_by_id: dict[str, KnowledgeAsset] = {}
         for index, draft in enumerate(chunks.assets):
             object_key = (
                 f"{document.workspace_id}/{document.knowledge_base_id}/assets/"
@@ -320,44 +323,38 @@ async def replace_document_chunks(
             )
             storage.put_bytes(object_key, draft.content)
             written_asset_keys.append(object_key)
-            asset = KnowledgeAsset(
-                id=draft.id,
-                workspace_id=document.workspace_id,
-                knowledge_base_id=document.knowledge_base_id,
-                document_id=document.id,
-                asset_index=index,
-                kind="image",
-                filename=draft.filename,
-                content_type=draft.content_type,
-                size_bytes=len(draft.content),
-                object_key=object_key,
-                alt_text=draft.alt_text,
-                meta={},
+            assets.append(
+                KnowledgeAsset(
+                    id=draft.id,
+                    workspace_id=document.workspace_id,
+                    knowledge_base_id=document.knowledge_base_id,
+                    document_id=document.id,
+                    asset_index=index,
+                    kind="image",
+                    filename=draft.filename,
+                    content_type=draft.content_type,
+                    size_bytes=len(draft.content),
+                    object_key=object_key,
+                    alt_text=draft.alt_text,
+                    meta={},
+                )
             )
-            assets_by_id[asset.id] = asset
-            db.add(asset)
-        if assets_by_id:
-            await db.flush()
 
-        parents: list[KnowledgeDocumentParentChunk] = []
         for index, draft in enumerate(chunks.parents):
-            parent = KnowledgeDocumentParentChunk(
-                id=new_id(),
-                workspace_id=document.workspace_id,
-                knowledge_base_id=document.knowledge_base_id,
-                document_id=document.id,
-                parent_index=index,
-                title=draft.title,
-                content=draft.content,
-                char_count=len(draft.content),
-                meta={},
+            parents.append(
+                KnowledgeDocumentParentChunk(
+                    id=new_id(),
+                    workspace_id=document.workspace_id,
+                    knowledge_base_id=document.knowledge_base_id,
+                    document_id=document.id,
+                    parent_index=index,
+                    title=draft.title,
+                    content=draft.content,
+                    char_count=len(draft.content),
+                    meta={},
+                )
             )
-            parents.append(parent)
-            db.add(parent)
-        if parents:
-            await db.flush()
 
-        pending_chunk_assets: list[tuple[str, str, int]] = []
         for index, draft in enumerate(chunks.children):
             parent = (
                 parents[draft.parent_index]
@@ -385,13 +382,13 @@ async def replace_document_chunks(
                 token_count=chunk_token_count(draft.content),
                 status=CHUNK_PREVIEW_STATUS,
             )
-            db.add(chunk)
+            children.append(chunk)
             for asset_index, document_asset_index in enumerate(
                 draft.asset_indexes
             ):
                 if not 0 <= document_asset_index < len(chunks.assets):
                     continue
-                pending_chunk_assets.append(
+                chunk_asset_links.append(
                     (
                         chunk.id,
                         chunks.assets[document_asset_index].id,
@@ -399,19 +396,15 @@ async def replace_document_chunks(
                     )
                 )
 
-        if pending_chunk_assets:
-            await db.flush()
-            for chunk_id, asset_id, asset_index in pending_chunk_assets:
-                db.add(
-                    KnowledgeChunkAsset(
-                        workspace_id=document.workspace_id,
-                        knowledge_base_id=document.knowledge_base_id,
-                        document_id=document.id,
-                        chunk_id=chunk_id,
-                        asset_id=asset_id,
-                        asset_index=asset_index,
-                    )
-                )
+        await knowledge_base_repository.replace_document_chunks(
+            db,
+            knowledge_base,
+            document.id,
+            parents,
+            children,
+            assets,
+            chunk_asset_links,
+        )
     except Exception:
         for object_key in written_asset_keys:
             storage.delete(object_key)
@@ -455,6 +448,9 @@ async def create_knowledge_task(
     else:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid knowledge task.")
 
+    if document is not None:
+        await knowledge_base_repository.save_knowledge_document(db, document)
+
     task = KnowledgeTask(
         id=new_id(),
         workspace_id=knowledge_base.workspace_id,
@@ -469,7 +465,7 @@ async def create_knowledge_task(
         options=options or {},
         created_by_user_id=actor.id,
     )
-    db.add(task)
+    task = await knowledge_base_repository.create_knowledge_task(db, task)
     record_audit_log(
         db,
         actor,
@@ -481,7 +477,7 @@ async def create_knowledge_task(
         workspace_id=knowledge_base.workspace_id,
     )
     await db.commit()
-    await db.refresh(task)
+    task = await knowledge_base_repository.refresh_knowledge_task(db, task)
     return task_to_response(task)
 
 
@@ -549,6 +545,7 @@ async def enqueue_index_knowledge_document(
         )
     if await resolve_embedding_model(db, knowledge_base) is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Embedding model is required.")
+    await knowledge_base_repository.save_knowledge_base(db, knowledge_base)
     return await create_knowledge_task(db, knowledge_base, document, TASK_INDEX, actor)
 
 
@@ -559,6 +556,7 @@ async def enqueue_rebuild_knowledge_index(
 ) -> KnowledgeTaskResponse:
     if await resolve_embedding_model(db, knowledge_base) is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Embedding model is required.")
+    await knowledge_base_repository.save_knowledge_base(db, knowledge_base)
     return await create_knowledge_task(db, knowledge_base, None, TASK_REBUILD_INDEX, actor)
 
 
@@ -590,6 +588,7 @@ async def retry_knowledge_task(
                 DOCUMENT_STAGED_META_KEY: False,
             }
         document.last_error = None
+        await knowledge_base_repository.save_knowledge_document(db, document)
 
     task.status = TASK_QUEUED_STATUS
     task.last_error = None
@@ -597,6 +596,7 @@ async def retry_knowledge_task(
     task.worker_task_id = None
     task.finished_at = None
     task.processed_items = 0
+    await knowledge_base_repository.save_knowledge_task(db, task)
     record_audit_log(
         db,
         actor,
@@ -608,7 +608,7 @@ async def retry_knowledge_task(
         workspace_id=knowledge_base.workspace_id,
     )
     await db.commit()
-    await db.refresh(task)
+    task = await knowledge_base_repository.refresh_knowledge_task(db, task)
     return task_to_response(task)
 
 

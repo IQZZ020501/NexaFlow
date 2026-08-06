@@ -62,6 +62,7 @@ type AgentDetailWorkspaceProps = {
   onSave: (event: React.FormEvent<HTMLFormElement>) => void
   onPublish: () => void
   onAsk: (event: React.FormEvent<HTMLFormElement>) => void
+  onCancelAsk: () => void
   t: TFunction
 }
 
@@ -336,6 +337,7 @@ export function AgentDetailWorkspace({
   onSave,
   onPublish,
   onAsk,
+  onCancelAsk,
   t,
 }: AgentDetailWorkspaceProps) {
   const [activePanel, setActivePanel] = React.useState<"config" | "preview">(
@@ -603,6 +605,19 @@ export function AgentDetailWorkspace({
                   maxLength={4000}
                   rows={2}
                 />
+                {isAsking ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl"
+                    aria-label={t("取消")}
+                    title={t("取消")}
+                    onClick={onCancelAsk}
+                  >
+                    <CircleXIcon />
+                    {t("取消")}
+                  </Button>
+                ) : null}
                 <Button
                   type="submit"
                   size="icon-lg"

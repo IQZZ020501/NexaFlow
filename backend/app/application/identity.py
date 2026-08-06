@@ -10,9 +10,11 @@ from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
 from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.validation import normalize_email, normalize_name, normalize_username
-from app.domain.user import RefreshSession, User
+from app.entities.user import RefreshSession, User
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import user as user_repository
+from app.infrastructure.repositories import team as team_repository
+from app.infrastructure.repositories import workspace as workspace_repository
 from app.schemas.user import (
     MembershipResponse,
     MeResponse,
@@ -23,6 +25,7 @@ from app.schemas.user import (
     UserTeamResponse,
     UserUpdateRequest,
     UserWorkspaceResponse,
+    user_to_response,
 )
 from app.infrastructure.security import (
     create_access_token,
@@ -32,8 +35,8 @@ from app.infrastructure.security import (
     verify_password,
 )
 from app.infrastructure.system_log import record_system_log
-from app.domain.team import Team, TeamMembership
-from app.domain.workspace import Workspace, WorkspaceMembership
+from app.entities.team import Team, TeamMembership
+from app.entities.workspace import Workspace, WorkspaceMembership
 
 logger = get_logger(__name__)
 
@@ -56,33 +59,15 @@ async def issue_refresh_session(
     now = utc_now()
     await user_repository.delete_expired_refresh_sessions(db, now)
     token = create_refresh_token()
-    db.add(
+    await user_repository.create_refresh_session(
+        db,
         RefreshSession(
             user_id=user.id,
             token_hash=hash_refresh_token(token),
             expires_at=now + timedelta(days=settings.refresh_token_expires_days),
-        )
+        ),
     )
     return token
-
-
-def user_to_response(
-    user: User,
-    workspaces: list[UserWorkspaceResponse] | None = None,
-    teams: list[UserTeamResponse] | None = None,
-) -> UserResponse:
-    return UserResponse(
-        id=user.id,
-        username=user.username,
-        email=user.email,
-        name=user.name,
-        is_global_admin=user.is_global_admin,
-        must_change_password=user.must_change_password,
-        is_active=user.is_active,
-        created_at=user.created_at,
-        workspaces=workspaces or [],
-        teams=teams or [],
-    )
 
 
 async def user_workspaces_by_user_id(
@@ -207,7 +192,7 @@ async def create_user(
     workspace: Workspace | None = None
     teams: list[Team] = []
     if payload.workspace_id:
-        workspace = await db.get(Workspace, payload.workspace_id)
+        workspace = await workspace_repository.get_workspace_by_id(db, payload.workspace_id)
         if workspace is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
         if workspace.status != "active":
@@ -215,7 +200,7 @@ async def create_user(
 
     if team_ids and workspace:
         for team_id in team_ids:
-            team = await db.get(Team, team_id)
+            team = await team_repository.get_team_by_id(db, team_id)
             if team is not None:
                 teams.append(team)
         if len(teams) != len(team_ids):
@@ -235,26 +220,27 @@ async def create_user(
         is_global_admin=payload.is_global_admin,
         must_change_password=True,
     )
-    db.add(user)
 
     try:
-        await db.flush()
+        user = await user_repository.create_user(db, user)
         if workspace:
-            db.add(
+            await user_repository.create_workspace_membership(
+                db,
                 WorkspaceMembership(
                     workspace_id=workspace.id,
                     user_id=user.id,
                     role="member",
-                )
+                ),
             )
         for team in teams:
-            db.add(
+            await user_repository.create_team_membership(
+                db,
                 TeamMembership(
                     workspace_id=team.workspace_id,
                     team_id=team.id,
                     user_id=user.id,
                     role="member",
-                )
+                ),
             )
         record_audit_log(
             db,
@@ -280,7 +266,7 @@ async def create_user(
             "Username or email already exists.",
         ) from exc
 
-    await db.refresh(user)
+    user = await user_repository.refresh_user(db, user)
     return UserPasswordResetResponse(
         user=await user_to_response_with_scopes(db, user),
         initial_password=initial_password,
@@ -321,6 +307,7 @@ async def update_user(
     record_audit_log(db, actor, "user.update", "user", user.id, user.name, details)
 
     try:
+        user = await user_repository.save_user(db, user)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -329,7 +316,7 @@ async def update_user(
             "Username or email already exists.",
         ) from exc
 
-    await db.refresh(user)
+    user = await user_repository.refresh_user(db, user)
     return await user_to_response_with_scopes(db, user)
 
 
@@ -342,9 +329,10 @@ async def change_user_password(
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
+    user = await user_repository.save_user(db, user)
     record_audit_log(db, actor, "user.change_password", "user", user.id, user.name)
     await db.commit()
-    await db.refresh(user)
+    user = await user_repository.refresh_user(db, user)
     return await user_to_response_with_scopes(db, user)
 
 
@@ -429,7 +417,7 @@ async def refresh_access_token(
         log_event(logger, logging.WARNING, "Refresh token rejected.", reason="invalid_token")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token.")
 
-    user = await db.get(User, session.user_id)
+    user = await user_repository.get_user_by_id(db, session.user_id)
     if user is None or not user.is_active:
         log_event(
             logger,
@@ -472,6 +460,7 @@ async def change_password(
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
+    user = await user_repository.save_user(db, user)
     refresh_token = await issue_refresh_session(db, user, settings)
     await db.commit()
     log_event(

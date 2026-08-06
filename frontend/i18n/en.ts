@@ -560,6 +560,7 @@ export const en = {
   "Agent 已创建": "Agent created",
   "确定删除 Agent“{name}”吗？": "Delete Agent \"{name}\"?",
   "Agent 已删除": "Agent deleted",
+  "Agent 回答超时": "Agent response timed out",
   "Agent 回答失败": "Agent response failed",
   "返回 Agent 列表": "Back to Agents",
   "放弃未保存的更改？": "Discard unsaved changes?",

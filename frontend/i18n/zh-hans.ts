@@ -551,6 +551,7 @@ export const zhHans = {
   "Agent 已创建": "Agent 已创建",
   "确定删除 Agent“{name}”吗？": "确定删除 Agent“{name}”吗？",
   "Agent 已删除": "Agent 已删除",
+  "Agent 回答超时": "Agent 回答超时",
   "Agent 回答失败": "Agent 回答失败",
   "返回 Agent 列表": "返回 Agent 列表",
   "放弃未保存的更改？": "放弃未保存的更改？",
