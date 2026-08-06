@@ -58,6 +58,7 @@ from app.schemas.knowledge import (
     KnowledgeDocumentParseRequest,
     KnowledgeTaskResponse,
 )
+from app.shareddomain.knowledge.permissions import require_knowledge_base_active
 from app.shareddomain.knowledge.services import (
     get_knowledge_model,
     knowledge_document_path,
@@ -420,10 +421,31 @@ async def create_knowledge_task(
     actor: User,
     options: dict[str, Any] | None = None,
 ) -> KnowledgeTaskResponse:
-    await knowledge_base_repository.lock_knowledge_base(db, knowledge_base)
+    knowledge_base = await knowledge_base_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    require_knowledge_base_active(knowledge_base)
     document_id = document.id if document else None
     if await get_conflicting_open_task(db, knowledge_base, task_type, document_id) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
+
+    if task_type in {TASK_INDEX, TASK_REBUILD_INDEX}:
+        had_embedding_model = knowledge_base.embedding_model_id is not None
+        embedding_model = await resolve_embedding_model(db, knowledge_base)
+        if embedding_model is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Embedding model is required.",
+            )
+        if not had_embedding_model:
+            await knowledge_base_repository.set_knowledge_base_embedding_model_id(
+                db,
+                knowledge_base.id,
+                embedding_model.id,
+            )
 
     total_items = 0
     if task_type == TASK_INDEX and document is not None:
@@ -543,9 +565,6 @@ async def enqueue_index_knowledge_document(
             status.HTTP_409_CONFLICT,
             "Document preview must be generated before indexing.",
         )
-    if await resolve_embedding_model(db, knowledge_base) is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Embedding model is required.")
-    await knowledge_base_repository.save_knowledge_base(db, knowledge_base)
     return await create_knowledge_task(db, knowledge_base, document, TASK_INDEX, actor)
 
 
@@ -554,9 +573,6 @@ async def enqueue_rebuild_knowledge_index(
     knowledge_base: KnowledgeBase,
     actor: User,
 ) -> KnowledgeTaskResponse:
-    if await resolve_embedding_model(db, knowledge_base) is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Embedding model is required.")
-    await knowledge_base_repository.save_knowledge_base(db, knowledge_base)
     return await create_knowledge_task(db, knowledge_base, None, TASK_REBUILD_INDEX, actor)
 
 
@@ -566,7 +582,13 @@ async def retry_knowledge_task(
     task_id: str,
     actor: User,
 ) -> KnowledgeTaskResponse:
-    await knowledge_base_repository.lock_knowledge_base(db, knowledge_base)
+    knowledge_base = await knowledge_base_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    require_knowledge_base_active(knowledge_base)
     task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
     if task is None or task.workspace_id != knowledge_base.workspace_id or task.knowledge_base_id != knowledge_base.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge task not found.")
@@ -610,5 +632,3 @@ async def retry_knowledge_task(
     await db.commit()
     task = await knowledge_base_repository.refresh_knowledge_task(db, task)
     return task_to_response(task)
-
-

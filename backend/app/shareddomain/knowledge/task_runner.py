@@ -182,10 +182,16 @@ async def run_index_task(
     lease_lost: asyncio.Event,
 ) -> None:
     ensure_knowledge_task_lease(lease_lost)
+    had_embedding_model = knowledge_base.embedding_model_id is not None
     embedding_model = await resolve_embedding_model(db, knowledge_base)
     if embedding_model is None:
         raise KnowledgePipelineError("Embedding model is required.")
-    await knowledge_base_repository.save_knowledge_base(db, knowledge_base)
+    if not had_embedding_model:
+        await knowledge_base_repository.set_knowledge_base_embedding_model_id(
+            db,
+            knowledge_base.id,
+            embedding_model.id,
+        )
 
     chunks = await knowledge_base_repository.list_indexable_chunks(
         db,

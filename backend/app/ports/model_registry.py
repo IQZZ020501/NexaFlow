@@ -42,6 +42,12 @@ class ModelRegistry(Protocol):
         model_id: str,
     ) -> None: ...
 
+    async def delete_registered_models_in_workspace(
+        self,
+        db: AsyncSession,
+        workspace_id: str,
+    ) -> None: ...
+
 
 def build_model_registry() -> ModelRegistry:
     return _registry_repository
@@ -89,10 +95,21 @@ async def delete_registered_model_by_id(
     return await _registry_repository.delete_registered_model_by_id(db, model_id)
 
 
+async def delete_registered_models_in_workspace(
+    db: AsyncSession,
+    workspace_id: str,
+) -> None:
+    return await _registry_repository.delete_registered_models_in_workspace(
+        db,
+        workspace_id,
+    )
+
+
 __all__ = [
     "ModelRegistry",
     "build_model_registry",
     "delete_registered_model_by_id",
+    "delete_registered_models_in_workspace",
     "find_registered_model_id_by_name",
     "get_registered_model_by_id",
     "list_registered_models",

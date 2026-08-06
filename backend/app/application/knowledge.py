@@ -50,11 +50,12 @@ from app.entities.knowledge import (
     KnowledgeDocument,
     KnowledgeDocumentChunk,
 )
+from app.entities.user import User
 from app.shareddomain.knowledge.services import (
     create_knowledge_base,
     create_knowledge_documents_from_attachments,
     delete_knowledge_attachment,
-    delete_knowledge_base_permanently,
+    delete_knowledge_base_permanently as delete_knowledge_base_record,
     document_to_response,
     get_knowledge_base,
     get_knowledge_model,
@@ -67,13 +68,33 @@ from app.shareddomain.knowledge.services import (
     require_knowledge_base_permission,
     revoke_resource_permission,
     test_knowledge_base_models,
+    transfer_knowledge_base_owner,
     update_knowledge_base,
     upload_knowledge_attachment,
     upsert_resource_permission,
 )
-from app.tasks.knowledge import enqueue_knowledge_task
+from app.tasks.knowledge import (
+    enqueue_knowledge_storage_cleanup,
+    enqueue_knowledge_task,
+)
 
 logger = get_logger(__name__)
+
+
+async def delete_knowledge_base_permanently(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+) -> None:
+    cleanup_id = await delete_knowledge_base_record(
+        db,
+        knowledge_base,
+        actor,
+        workspace_role,
+    )
+    await enqueue_knowledge_storage_cleanup(cleanup_id, settings)
 
 
 async def dispatch_knowledge_task(task_id: str, settings: Settings) -> None:
@@ -340,6 +361,7 @@ __all__ = [
     "revoke_resource_permission",
     "set_knowledge_document_active",
     "test_knowledge_base_models",
+    "transfer_knowledge_base_owner",
     "update_knowledge_base",
     "upload_knowledge_attachment",
     "upsert_resource_permission",

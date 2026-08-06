@@ -19,7 +19,6 @@ from app.ports.llm import (
     build_embeddings,
     build_reranker,
 )
-from app.ports.vector_store import delete_vector_collection
 from app.schemas.knowledge import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseResponse,
@@ -28,8 +27,14 @@ from app.schemas.knowledge import (
     KnowledgeModelTestResponse,
 )
 from app.shareddomain.audit.services import record_audit_log
-from app.shareddomain.knowledge.documents import knowledge_object_storage
-from app.shareddomain.knowledge.permissions import RESOURCE_TYPE, effective_permission
+from app.shareddomain.knowledge.cleanup import create_knowledge_storage_cleanup
+from app.shareddomain.knowledge.permissions import (
+    RESOURCE_TYPE,
+    effective_permission,
+    get_user_grant,
+    require_knowledge_base_active,
+    require_knowledge_base_permission,
+)
 
 ACTIVE_STATUS = "active"
 ARCHIVED_STATUS = "archived"
@@ -132,7 +137,6 @@ async def list_knowledge_bases(
         db,
         workspace_id,
         actor.id,
-        workspace_role,
         RESOURCE_TYPE,
         limit,
         offset,
@@ -221,8 +225,29 @@ async def update_knowledge_base(
     knowledge_base: KnowledgeBase,
     payload: KnowledgeBaseUpdateRequest,
     actor: User,
+    workspace_role: str | None,
 ) -> KnowledgeBaseResponse:
+    knowledge_base = await knowledge_base_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+
     details = payload.model_dump(exclude_unset=True)
+    if knowledge_base.status == ARCHIVED_STATUS:
+        if details != {"status": ACTIVE_STATUS}:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Knowledge base is archived.")
+        require_can_manage_permissions(knowledge_base, actor, workspace_role)
+    else:
+        await require_knowledge_base_permission(
+            db,
+            knowledge_base,
+            actor,
+            workspace_role,
+            {"edit"},
+        )
+
     if payload.name is not None:
         knowledge_base.name = normalize_name(payload.name)
     if payload.description is not None:
@@ -346,14 +371,18 @@ async def delete_knowledge_base_permanently(
     knowledge_base: KnowledgeBase,
     actor: User,
     workspace_role: str | None,
-    settings: Settings,
-) -> None:
+) -> str:
+    knowledge_base = await knowledge_base_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    require_knowledge_base_active(knowledge_base)
     require_can_manage_permissions(knowledge_base, actor, workspace_role)
-    await knowledge_base_repository.lock_knowledge_base(db, knowledge_base)
     if await knowledge_base_repository.get_open_knowledge_base_task(db, knowledge_base) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
 
-    storage_prefix = f"{knowledge_base.workspace_id}/{knowledge_base.id}"
     record_audit_log(
         db,
         actor,
@@ -364,11 +393,66 @@ async def delete_knowledge_base_permanently(
         {"workspace_id": knowledge_base.workspace_id},
         workspace_id=knowledge_base.workspace_id,
     )
+    cleanup_id = await create_knowledge_storage_cleanup(db, knowledge_base)
     await knowledge_base_repository.delete_knowledge_base_graph(
         db,
         knowledge_base,
         RESOURCE_TYPE,
     )
     await db.commit()
-    await asyncio.to_thread(delete_vector_collection, settings, knowledge_base.id)
-    knowledge_object_storage(settings).delete_prefix(storage_prefix)
+    return cleanup_id
+
+
+async def transfer_knowledge_base_owner(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    target_user_id: str,
+    actor: User,
+    workspace_role: str | None,
+) -> KnowledgeBaseResponse:
+    knowledge_base = await knowledge_base_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    require_can_manage_permissions(knowledge_base, actor, workspace_role)
+    if knowledge_base.status != ACTIVE_STATUS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Knowledge base is archived.")
+
+    target = await knowledge_base_repository.get_active_workspace_member(
+        db,
+        knowledge_base.workspace_id,
+        target_user_id,
+    )
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace member not found.")
+
+    previous_owner_id = knowledge_base.created_by_user_id
+    knowledge_base.created_by_user_id = target.id
+    await knowledge_base_repository.save_knowledge_base(db, knowledge_base)
+    record_audit_log(
+        db,
+        actor,
+        "knowledge_base.owner_transfer",
+        RESOURCE_TYPE,
+        knowledge_base.id,
+        knowledge_base.name,
+        {
+            "previous_owner_user_id": previous_owner_id,
+            "new_owner_user_id": target.id,
+        },
+        workspace_id=knowledge_base.workspace_id,
+    )
+    await db.commit()
+    knowledge_base = await knowledge_base_repository.refresh_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    permission = effective_permission(
+        knowledge_base,
+        actor,
+        workspace_role,
+        await get_user_grant(db, knowledge_base, actor.id),
+    )
+    return knowledge_base_to_response(knowledge_base, permission)

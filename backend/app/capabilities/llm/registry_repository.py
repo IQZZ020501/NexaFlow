@@ -44,3 +44,12 @@ async def find_registered_model_id_by_name(
 
 async def delete_registered_model_by_id(db: AsyncSession, model_id: str) -> None:
     await db.execute(delete(RegisteredModel).where(RegisteredModel.id == model_id))
+
+
+async def delete_registered_models_in_workspace(
+    db: AsyncSession,
+    workspace_id: str,
+) -> None:
+    await db.execute(
+        delete(RegisteredModel).where(RegisteredModel.workspace_id == workspace_id)
+    )

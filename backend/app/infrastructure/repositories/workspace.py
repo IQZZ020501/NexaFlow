@@ -1,6 +1,7 @@
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.resource_permission import ResourcePermission as ResourcePermissionOrm
 from app.domain.team import Team as TeamOrm
 from app.domain.team import TeamMembership as TeamMembershipOrm
 from app.domain.user import User as UserOrm
@@ -55,6 +56,15 @@ async def list_workspaces_for_user(
 
 async def get_workspace_by_id(db: AsyncSession, workspace_id: str) -> Workspace | None:
     row = await db.get(WorkspaceOrm, workspace_id)
+    return mapping.to_entity(Workspace, row) if row is not None else None
+
+
+async def lock_workspace(db: AsyncSession, workspace_id: str) -> Workspace | None:
+    row = await db.scalar(
+        select(WorkspaceOrm)
+        .where(WorkspaceOrm.id == workspace_id)
+        .with_for_update()
+    )
     return mapping.to_entity(Workspace, row) if row is not None else None
 
 
@@ -128,6 +138,12 @@ async def delete_workspace_member_graph(
     user_id: str,
 ) -> None:
     await db.execute(
+        delete(ResourcePermissionOrm).where(
+            ResourcePermissionOrm.workspace_id == workspace_id,
+            ResourcePermissionOrm.user_id == user_id,
+        )
+    )
+    await db.execute(
         delete(TeamMembershipOrm).where(
             TeamMembershipOrm.workspace_id == workspace_id,
             TeamMembershipOrm.user_id == user_id,
@@ -145,6 +161,11 @@ async def delete_workspace_graph(db: AsyncSession, workspace_id: str) -> None:
     team_ids = select(TeamOrm.id).where(TeamOrm.workspace_id == workspace_id)
     await db.execute(
         delete(TeamMembershipOrm).where(TeamMembershipOrm.team_id.in_(team_ids))
+    )
+    await db.execute(
+        delete(ResourcePermissionOrm).where(
+            ResourcePermissionOrm.workspace_id == workspace_id
+        )
     )
     await db.execute(
         delete(WorkspaceMembershipOrm).where(

@@ -1000,7 +1000,10 @@ def main() -> None:
             headers=auth_headers(bob_token),
         )
         assert bob_list.status_code == 200, bob_list.text
-        assert bob_list.json() == []
+        bob_visible_kb = next(
+            item for item in bob_list.json() if item["id"] == knowledge_base_id
+        )
+        assert bob_visible_kb["permission"] == "none"
 
         denied_cross_workspace = client.get(
             knowledge_url(default_workspace_id),
@@ -1824,6 +1827,155 @@ def main() -> None:
         assert empty_query.status_code == 200, empty_query.text
         assert empty_query.json() == []
 
+        # E: members without grants see the knowledge base list with permission "none".
+        bob_after_revoke = client.get(
+            knowledge_url(default_workspace_id),
+            headers=auth_headers(bob_token),
+        )
+        assert bob_after_revoke.status_code == 200, bob_after_revoke.text
+        bob_revoked_kb = next(
+            item
+            for item in bob_after_revoke.json()
+            if item["id"] == knowledge_base_id
+        )
+        assert bob_revoked_kb["permission"] == "none"
+
+        # C: owner transfer requires admin or current owner.
+        transfer_denied = client.put(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/owner"),
+            headers=auth_headers(bob_token),
+            json={"user_id": alice_id},
+        )
+        assert transfer_denied.status_code == 403, transfer_denied.text
+
+        transfer_missing_target = client.put(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/owner"),
+            headers=auth_headers(alice_token),
+            json={"user_id": research_admin_id},
+        )
+        assert transfer_missing_target.status_code == 404, transfer_missing_target.text
+
+        transferred = client.put(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/owner"),
+            headers=auth_headers(alice_token),
+            json={"user_id": bob_id},
+        )
+        assert transferred.status_code == 200, transferred.text
+        assert transferred.json()["created_by_user_id"] == bob_id
+        assert transferred.json()["permission"] == "none"
+
+        alice_patch_denied_after_transfer = client.patch(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(alice_token),
+            json={"description": "Alice no longer owns"},
+        )
+        assert (
+            alice_patch_denied_after_transfer.status_code == 403
+        ), alice_patch_denied_after_transfer.text
+
+        bob_patch_as_owner = client.patch(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(bob_token),
+            json={"description": "Bob owns now"},
+        )
+        assert bob_patch_as_owner.status_code == 200, bob_patch_as_owner.text
+
+        # D: archived knowledge bases block writes but allow reads; only
+        # admin/owner may restore.
+        archived_kb = client.patch(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(bob_token),
+            json={"status": "archived"},
+        )
+        assert archived_kb.status_code == 200, archived_kb.text
+        assert archived_kb.json()["status"] == "archived"
+
+        archived_upload = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/attachments"),
+            headers=auth_headers(bob_token),
+            files={"file": ("archived.txt", b"nope", "text/plain")},
+        )
+        assert archived_upload.status_code == 403, archived_upload.text
+
+        archived_rename = client.patch(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(bob_token),
+            json={"name": "Renamed while archived"},
+        )
+        assert archived_rename.status_code == 403, archived_rename.text
+
+        archived_grant = client.put(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/permissions/{alice_id}"),
+            headers=auth_headers(bob_token),
+            json={"permission": "view"},
+        )
+        assert archived_grant.status_code == 403, archived_grant.text
+
+        archived_transfer = client.put(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/owner"),
+            headers=auth_headers(bob_token),
+            json={"user_id": alice_id},
+        )
+        assert archived_transfer.status_code == 403, archived_transfer.text
+
+        archived_delete = client.delete(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(bob_token),
+        )
+        assert archived_delete.status_code == 403, archived_delete.text
+
+        archived_get = client.get(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(bob_token),
+        )
+        assert archived_get.status_code == 200, archived_get.text
+        assert archived_get.json()["status"] == "archived"
+
+        archived_query = client.post(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/query"),
+            headers=auth_headers(bob_token),
+            json={"query": "product docs", "limit": 5},
+        )
+        assert archived_query.status_code == 200, archived_query.text
+
+        restore_with_rename = client.patch(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(bob_token),
+            json={"status": "active", "name": "Restored and renamed"},
+        )
+        assert restore_with_rename.status_code == 403, restore_with_rename.text
+
+        still_archived = client.get(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(bob_token),
+        )
+        assert still_archived.status_code == 200, still_archived.text
+        assert still_archived.json()["status"] == "archived"
+
+        restored = client.patch(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(bob_token),
+            json={"status": "active"},
+        )
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["status"] == "active"
+
+        restored_rename = client.patch(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(bob_token),
+            json={"description": "Writable again"},
+        )
+        assert restored_rename.status_code == 200, restored_rename.text
+
+        # Transfer ownership back so the final delete runs as the owner.
+        transferred_back = client.put(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/owner"),
+            headers=auth_headers(bob_token),
+            json={"user_id": alice_id},
+        )
+        assert transferred_back.status_code == 200, transferred_back.text
+        assert transferred_back.json()["created_by_user_id"] == alice_id
+
         deleted = client.delete(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(alice_token),
@@ -1847,6 +1999,7 @@ def main() -> None:
         assert "knowledge_task.retry" in actions
         assert "resource_permission.grant" in actions
         assert "resource_permission.revoke" in actions
+        assert "knowledge_base.owner_transfer" in actions
         assert "knowledge_base.delete" in actions
 
 

@@ -19,6 +19,7 @@ from app.entities.knowledge import (
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
+    KnowledgeStorageCleanup,
     KnowledgeTask,
 )
 from app.entities.resource_permission import ResourcePermission
@@ -41,6 +42,7 @@ from app.shareddomain.knowledge.models import (
     KnowledgeDocument as KnowledgeDocumentORM,
     KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
     KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
+    KnowledgeStorageCleanup as KnowledgeStorageCleanupORM,
     KnowledgeTask as KnowledgeTaskORM,
 )
 
@@ -58,7 +60,6 @@ async def list_knowledge_base_rows(
     db: AsyncSession,
     workspace_id: str,
     actor_id: str,
-    workspace_role: str | None,
     resource_type: str,
     limit: int | None = None,
     offset: int = 0,
@@ -74,14 +75,6 @@ async def list_knowledge_base_rows(
         ),
     ).where(KnowledgeBaseORM.workspace_id == workspace_id)
 
-    if workspace_role != "admin":
-        statement = statement.where(
-            or_(
-                KnowledgeBaseORM.created_by_user_id == actor_id,
-                grant.id.is_not(None),
-            )
-        )
-
     statement = statement.order_by(
         KnowledgeBaseORM.created_at.desc(),
         KnowledgeBaseORM.id.desc(),
@@ -96,6 +89,74 @@ async def list_knowledge_base_rows(
     ]
 
 
+async def list_and_lock_knowledge_bases_in_workspace(
+    db: AsyncSession,
+    workspace_id: str,
+) -> list[KnowledgeBase]:
+    result = await db.scalars(
+        select(KnowledgeBaseORM)
+        .where(KnowledgeBaseORM.workspace_id == workspace_id)
+        .order_by(KnowledgeBaseORM.id)
+        .with_for_update()
+    )
+    return [to_entity(KnowledgeBase, row) for row in result.all()]
+
+
+async def create_knowledge_storage_cleanup(
+    db: AsyncSession,
+    entity: KnowledgeStorageCleanup,
+) -> KnowledgeStorageCleanup:
+    row = await save(db, KnowledgeStorageCleanupORM, entity)
+    return to_entity(KnowledgeStorageCleanup, row)
+
+
+async def lock_knowledge_storage_cleanup(
+    db: AsyncSession,
+    cleanup_id: str,
+) -> KnowledgeStorageCleanup | None:
+    row = await db.scalar(
+        select(KnowledgeStorageCleanupORM)
+        .where(KnowledgeStorageCleanupORM.id == cleanup_id)
+        .with_for_update()
+    )
+    return to_entity(KnowledgeStorageCleanup, row) if row else None
+
+
+async def list_due_knowledge_storage_cleanup_ids(
+    db: AsyncSession,
+    due_at: datetime,
+    limit: int = 100,
+) -> list[str]:
+    result = await db.scalars(
+        select(KnowledgeStorageCleanupORM.id)
+        .where(KnowledgeStorageCleanupORM.next_attempt_at <= due_at)
+        .order_by(
+            KnowledgeStorageCleanupORM.next_attempt_at,
+            KnowledgeStorageCleanupORM.id,
+        )
+        .limit(limit)
+    )
+    return list(result.all())
+
+
+async def save_knowledge_storage_cleanup(
+    db: AsyncSession,
+    entity: KnowledgeStorageCleanup,
+) -> None:
+    await save(db, KnowledgeStorageCleanupORM, entity)
+
+
+async def delete_knowledge_storage_cleanup(
+    db: AsyncSession,
+    cleanup_id: str,
+) -> None:
+    await db.execute(
+        delete(KnowledgeStorageCleanupORM).where(
+            KnowledgeStorageCleanupORM.id == cleanup_id
+        )
+    )
+
+
 async def get_knowledge_base_by_id(
     db: AsyncSession,
     knowledge_base_id: str,
@@ -104,12 +165,16 @@ async def get_knowledge_base_by_id(
     return to_entity(KnowledgeBase, row) if row else None
 
 
-async def lock_knowledge_base(db: AsyncSession, knowledge_base: KnowledgeBase) -> None:
-    await db.execute(
+async def lock_knowledge_base(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> KnowledgeBase | None:
+    row = await db.scalar(
         select(KnowledgeBaseORM)
         .where(KnowledgeBaseORM.id == knowledge_base.id)
         .with_for_update()
     )
+    return to_entity(KnowledgeBase, row) if row else None
 
 
 async def create_knowledge_base(
@@ -125,6 +190,21 @@ async def save_knowledge_base(
     entity: KnowledgeBase,
 ) -> None:
     await save(db, KnowledgeBaseORM, entity)
+
+
+async def set_knowledge_base_embedding_model_id(
+    db: AsyncSession,
+    knowledge_base_id: str,
+    embedding_model_id: str,
+) -> None:
+    await db.execute(
+        update(KnowledgeBaseORM)
+        .where(KnowledgeBaseORM.id == knowledge_base_id)
+        .values(
+            embedding_model_id=embedding_model_id,
+            updated_at=utc_now(),
+        )
+    )
 
 
 async def refresh_knowledge_base(

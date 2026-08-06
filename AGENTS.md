@@ -78,9 +78,11 @@ Correctness, safety, evidence, and validation take priority over speed.
   PostgreSQL-backed.
 - Regression suites live in `backend/tests/` and run from `backend/` with
   `uv run python -m tests.<suite>`.
-- Knowledge parsing and indexing run through Celery with Redis; API and
-  worker instances must share `KNOWLEDGE_STORAGE_DIR` and use the same
-  `QDRANT_URL`.
+- Knowledge parsing, indexing, and durable deletion cleanup run through Celery
+  with Redis; API and worker instances must share `KNOWLEDGE_STORAGE_DIR` and
+  use the same `QDRANT_URL`. Deletion cleanup intent is persisted in
+  `knowledge_storage_cleanups`; Celery Beat redispatches due records, so do not
+  replace it with best-effort post-commit cleanup.
 - MCP tools use workspace-scoped Streamable HTTP Server registrations. Bearer
   tokens are encrypted, and private-network endpoints require
   `MCP_ALLOW_PRIVATE_NETWORKS=true`.

@@ -98,4 +98,7 @@ class LocalObjectStorage:
 
     def delete_prefix(self, prefix: str) -> None:
         target = self.path(prefix)
-        shutil.rmtree(target, ignore_errors=True)
+        try:
+            shutil.rmtree(target)
+        except FileNotFoundError:
+            pass

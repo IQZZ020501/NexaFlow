@@ -1,5 +1,6 @@
 import asyncio
 
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shareddomain.audit.services import record_audit_log
@@ -13,6 +14,7 @@ from app.entities.knowledge import (
     KnowledgeDocument,
 )
 from app.ports.vector_store import delete_vectors
+from app.shareddomain.knowledge.permissions import require_knowledge_base_active
 from app.shareddomain.knowledge.services import knowledge_object_storage
 
 
@@ -23,7 +25,13 @@ async def delete_knowledge_document(
     actor: User,
     settings: Settings,
 ) -> None:
-    await knowledge_base_repository.lock_knowledge_base(db, knowledge_base)
+    knowledge_base = await knowledge_base_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    require_knowledge_base_active(knowledge_base)
     await knowledge_base_repository.fail_open_document_tasks(
         db,
         knowledge_base,

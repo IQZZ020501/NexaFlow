@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException, status
 
+from app.infrastructure.config import Settings
 from app.infrastructure.logger import get_logger, log_event
 
 logger = get_logger(__name__)
@@ -18,8 +19,13 @@ from app.schemas.user import UserCreateRequest, UserPasswordResetResponse
 from app.application.identity import create_user
 from app.schemas.user import user_to_response
 from app.entities.workspace import WORKSPACE_MEMBER_ROLES, Workspace, WorkspaceMembership
+from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import mcp as mcp_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
+from app.ports import model_registry
+from app.shareddomain.knowledge.services import delete_workspace_knowledge_bases
+from app.tasks.knowledge import enqueue_knowledge_storage_cleanup
 from app.schemas.workspace import (
     WorkspaceMemberResponse,
     WorkspaceUserCreateRequest,
@@ -225,6 +231,9 @@ async def update_workspace(
     payload: WorkspaceUpdateRequest,
     actor: User,
 ) -> WorkspaceResponse:
+    workspace = await workspace_repository.lock_workspace(db, workspace.id)
+    if workspace is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
     details = payload.model_dump(exclude_none=True)
     if payload.name is not None:
         workspace.name = normalize_name(payload.name)
@@ -411,10 +420,18 @@ async def delete_workspace_permanently(
     db: AsyncSession,
     workspace: Workspace,
     actor: User,
+    settings: Settings,
 ) -> None:
+    workspace = await workspace_repository.lock_workspace(db, workspace.id)
+    if workspace is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
     if workspace.is_default:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Default workspace cannot be deleted.")
 
+    cleanup_ids = await delete_workspace_knowledge_bases(
+        db,
+        workspace.id,
+    )
     record_audit_log(
         db,
         actor,
@@ -422,8 +439,16 @@ async def delete_workspace_permanently(
         "workspace",
         workspace.id,
         workspace.name,
-        {"description": workspace.description},
+        {
+            "description": workspace.description,
+            "knowledge_base_count": len(cleanup_ids),
+        },
         workspace_id=workspace.id,
     )
+    await agent_repository.delete_workspace_agent_graph(db, workspace.id)
+    await mcp_repository.delete_workspace_mcp_servers(db, workspace.id)
+    await model_registry.delete_registered_models_in_workspace(db, workspace.id)
     await workspace_repository.delete_workspace_graph(db, workspace.id)
     await db.commit()
+    for cleanup_id in cleanup_ids:
+        await enqueue_knowledge_storage_cleanup(cleanup_id, settings)
