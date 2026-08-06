@@ -2,10 +2,10 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
+from tests.support import settings as testing_settings
 from app.infrastructure.base import Base
 from app.infrastructure.session import get_engine
 from app.main import create_app
-from tests.support import settings as testing_settings
 
 
 def main() -> None:

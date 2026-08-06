@@ -62,6 +62,15 @@ type UploadedDocument = KnowledgeDocument & {
   chunks: KnowledgeDocumentChunk[]
 }
 
+export function resolveSelectedDocumentId(
+  documents: ReadonlyArray<{ id: string }>,
+  selectedDocumentId: string | null,
+) {
+  return documents.some((document) => document.id === selectedDocumentId)
+    ? selectedDocumentId
+    : (documents[0]?.id ?? null)
+}
+
 const UNPARSED_STATUS = "uploaded"
 const PARSING_STATUSES: Record<string, true> = {
   parse_queued: true,
@@ -149,6 +158,9 @@ export function KnowledgeUploadFlow({
   const [isParsing, setIsParsing] = React.useState(false)
   const [isRefreshing, setIsRefreshing] = React.useState(false)
   const [isIndexing, setIsIndexing] = React.useState(false)
+  const [deletingDocumentId, setDeletingDocumentId] = React.useState<
+    string | null
+  >(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const folderInputRef = React.useRef<HTMLInputElement>(null)
 
@@ -177,7 +189,11 @@ export function KnowledgeUploadFlow({
     document.status.endsWith("_failed"),
   )
   const isPreviewRunning = isUploading || isParsing || hasPendingParsing
-  const isNavigationLocked = isRefreshing || isPreviewRunning || isIndexing
+  const isNavigationLocked =
+    isRefreshing ||
+    isPreviewRunning ||
+    isIndexing ||
+    deletingDocumentId !== null
   const isSegmentInvalid =
     segmentMode === "advanced" && chunkOverlap >= chunkSize
 
@@ -224,8 +240,8 @@ export function KnowledgeUploadFlow({
   const applyPreviewDocuments = React.useCallback(
     (nextDocuments: UploadedDocument[]) => {
       setUploadedDocuments(nextDocuments)
-      setSelectedDocumentId(
-        (current) => current ?? nextDocuments[0]?.id ?? null,
+      setSelectedDocumentId((current) =>
+        resolveSelectedDocumentId(nextDocuments, current),
       )
     },
     [],
@@ -673,6 +689,43 @@ export function KnowledgeUploadFlow({
       return false
     }
     return true
+  }
+
+  async function handleRemoveDocument(document: UploadedDocument) {
+    if (
+      isNavigationLocked ||
+      document.meta.staged !== true ||
+      !(document.status in UNINDEXED_STATUSES)
+    ) {
+      return
+    }
+
+    setDeletingDocumentId(document.id)
+    try {
+      await deleteKnowledgeDocument(
+        token,
+        workspaceId,
+        knowledgeBase.id,
+        document.id,
+      )
+      const nextDocuments = uploadedDocuments.filter(
+        (item) => item.id !== document.id,
+      )
+      applyPreviewDocuments(nextDocuments)
+      if (nextDocuments.length) {
+        onRouteSegment({
+          documentIds: nextDocuments.map((item) => item.id),
+          parseSettings: routeState?.parseSettings ?? currentParseSettings(),
+        })
+      } else {
+        setFiles([])
+        onBackToFiles()
+      }
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setDeletingDocumentId(null)
+    }
   }
 
   async function handleCancel() {
@@ -1196,22 +1249,49 @@ export function KnowledgeUploadFlow({
               <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {uploadedDocuments.map((document) => (
-                    <button
+                    <div
                       key={document.id}
-                      type="button"
                       className={cn(
-                        "inline-flex h-9 max-w-64 shrink-0 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors",
+                        "group/document-tab inline-flex h-9 max-w-64 shrink-0 items-center rounded-md border text-sm font-medium transition-colors",
                         selectedDocument?.id === document.id
                           ? "border-primary bg-primary/10 text-primary"
                           : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                       )}
-                      onClick={() => setSelectedDocumentId(document.id)}
                     >
-                      <FileTextIcon className="size-4 shrink-0" />
-                      <span className="truncate">
-                        {document.filename}
-                      </span>
-                    </button>
+                      <button
+                        type="button"
+                        className="flex h-full min-w-0 items-center gap-2 rounded-l-md py-0 pr-1 pl-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                        onClick={() => setSelectedDocumentId(document.id)}
+                      >
+                        <FileTextIcon className="size-4 shrink-0" />
+                        <span className="truncate">{document.filename}</span>
+                      </button>
+                      {document.meta.staged === true &&
+                      document.status in UNINDEXED_STATUSES ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          className={cn(
+                            "mr-1 rounded-sm text-muted-foreground/60 opacity-0 transition-[color,background-color,opacity] hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:opacity-100 group-hover/document-tab:opacity-100 group-focus-within/document-tab:opacity-100",
+                            selectedDocument?.id === document.id && "opacity-100",
+                            deletingDocumentId === document.id &&
+                              "bg-destructive/10 text-destructive opacity-100",
+                          )}
+                          aria-label={t("移除 {value}", {
+                            value: document.filename,
+                          })}
+                          disabled={isNavigationLocked}
+                          onClick={() => void handleRemoveDocument(document)}
+                        >
+                          {deletingDocumentId === document.id ? (
+                            <LoaderCircleIcon className="size-3.5 animate-spin" />
+                          ) : (
+                            <XIcon className="size-3.5" />
+                          )}
+                        </Button>
+                      ) : null}
+                    </div>
                   ))}
                 </div>
 

@@ -25,6 +25,9 @@ describe("i18n", () => {
     expect(
       translate("en", "切换语言，当前为 {language}", { language: "English" })
     ).toBe("Change language, currently English")
+    expect(translate("zh-Hans", "分段 {value}", { value: 1 })).toBe("分段 1")
+    expect(translate("zh-Hant", "分段 {value}", { value: 1 })).toBe("分段 1")
+    expect(translate("en", "分段 {value}", { value: 1 })).toBe("Segment 1")
   })
 
   test("builds localized feature pages", () => {

@@ -135,34 +135,6 @@ export function ChunkPreviewList({
       }),
     [chunks]
   )
-  const parentGroups = React.useMemo(() => {
-    const groups: {
-      id: string
-      title: string | null
-      index: number | null
-      chunks: { chunk: KnowledgeDocumentChunk; index: number }[]
-    }[] = []
-    const groupsById = new Map<string, (typeof groups)[number]>()
-    for (const [index, chunk] of chunks.entries()) {
-      const id = chunk.parent_id ?? `flat:${chunk.id}`
-      const group = groupsById.get(id)
-      if (group) {
-        group.chunks.push({ chunk, index })
-      } else {
-        const nextGroup = {
-          id,
-          title: chunk.parent_title,
-          index: chunk.parent_index,
-          chunks: [{ chunk, index }],
-        }
-        groups.push(nextGroup)
-        groupsById.set(id, nextGroup)
-      }
-    }
-    return groups
-  }, [chunks])
-  const hasParentChunks = chunks.some((chunk) => chunk.parent_id)
-
   React.useEffect(() => {
     const previewRoot = previewRef.current
     if (!previewRoot || typeof Highlight === "undefined" || !CSS.highlights) {
@@ -256,33 +228,15 @@ export function ChunkPreviewList({
     <>
       <style>{CHUNK_OVERLAP_HIGHLIGHT_STYLE}</style>
       <div ref={previewRef} className="space-y-3">
-        {hasParentChunks
-          ? parentGroups.map((group) => (
-              <section key={group.id} className="space-y-2">
-                <div className="px-1">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {group.title ||
-                      t("章节 {value}", { value: (group.index ?? 0) + 1 })}
-                  </h3>
-                  <p
-                    className="truncate text-xs text-muted-foreground"
-                    title={fileName}
-                  >
-                    {fileName}
-                  </p>
-                </div>
-                <div className="space-y-3">
-                  {group.chunks.map(({ chunk, index }) =>
-                    renderChunk(
-                      chunk,
-                      index,
-                      t("片段 {value}", { value: chunk.chunk_index + 1 })
-                    )
-                  )}
-                </div>
-              </section>
-            ))
-          : chunks.map((chunk, index) => renderChunk(chunk, index, fileName))}
+        {chunks.map((chunk, index) =>
+          renderChunk(
+            chunk,
+            index,
+            chunk.parent_id
+              ? t("分段 {value}", { value: chunk.chunk_index + 1 })
+              : fileName
+          )
+        )}
       </div>
     </>
   )

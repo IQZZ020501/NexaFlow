@@ -10,6 +10,15 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
+from tests.support import (
+    RESEARCH_PASSWORD,
+    activate_admin,
+    activate_user,
+    auth_headers,
+    settings as test_settings,
+    test_client,
+)
+
 from app.infrastructure.session import get_session_factory
 from app.domain.user import User
 from app.shareddomain.knowledge.models import (
@@ -46,14 +55,6 @@ from app.tasks.knowledge import mark_task_dispatch_failed
 from app.schemas.knowledge import KnowledgeQueryRequest
 from tests.llm import ModelTestHandler, model_payload, model_test_server, models_url
 from app.domain.resource_permission import ResourcePermission
-from tests.support import (
-    RESEARCH_PASSWORD,
-    activate_admin,
-    activate_user,
-    auth_headers,
-    settings as test_settings,
-    test_client,
-)
 
 MEMBER_PASSWORD = "Member@12345."
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
