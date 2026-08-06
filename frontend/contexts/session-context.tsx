@@ -9,6 +9,7 @@ import {
   logout as endSession,
   refreshAccessToken,
   type MeResponse,
+  type User,
 } from "@/lib/api/auth"
 import {
   listTeams,
@@ -55,12 +56,17 @@ type SessionContextValue = {
   teamCreated: (team: Team) => void
   teamUpdated: (team: Team) => void
   teamDeleted: (teamId: string) => void
+  userUpdated: (user: User) => void
   passwordChanged: () => Promise<void>
 }
 
 const SessionContext = React.createContext<SessionContextValue | undefined>(
   undefined
 )
+
+export function replaceSessionUser(me: MeResponse | null, user: User) {
+  return me?.user.id === user.id ? { ...me, user } : me
+}
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { t } = useLanguage()
@@ -416,6 +422,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setTeams((current) => current.filter((item) => item.id !== teamId))
   }
 
+  function handleUserUpdated(user: User) {
+    setMe((current) => replaceSessionUser(current, user))
+  }
+
   async function handlePasswordChanged() {
     setIsSessionLoading(true)
     setSessionError(null)
@@ -473,6 +483,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     teamCreated: handleTeamCreated,
     teamUpdated: handleTeamUpdated,
     teamDeleted: handleTeamDeleted,
+    userUpdated: handleUserUpdated,
     passwordChanged: handlePasswordChanged,
   }
 
