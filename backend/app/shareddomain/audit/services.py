@@ -2,10 +2,10 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.entities.audit import AuditLog
+from app.entities.user import User
 from app.infrastructure.repositories import audit as audit_repository
-from app.shareddomain.audit.models import AuditLog
 from app.schemas.audit import AuditLogResponse
-from app.domain.user import User
 
 
 def record_audit_log(
@@ -18,7 +18,8 @@ def record_audit_log(
     details: dict[str, Any] | None = None,
     workspace_id: str | None = None,
 ) -> None:
-    db.add(
+    audit_repository.add(
+        db,
         AuditLog(
             actor_user_id=actor.id,
             actor_username=actor.username,
@@ -29,7 +30,7 @@ def record_audit_log(
             resource_id=resource_id,
             resource_name=resource_name,
             details=details or {},
-        )
+        ),
     )
 
 

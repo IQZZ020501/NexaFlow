@@ -30,6 +30,44 @@ Correctness, safety, evidence, and validation take priority over speed.
   `app/tasks/`. New features: add a self-contained module directory under
   `app/shareddomain/<feature>/` (entities + services), expose use cases
   through `app/application/`, and keep HTTP routers thin in `app/api/v1/`.
+- Layer boundaries are enforced by convention (dependency direction is one-way):
+  `api/` routers and dependencies import ONLY `application/` (plus `schemas/`
+  and `api/deps.py`); `application/` may import `shareddomain/`,
+  `capabilities/`, `infrastructure/`, `schemas/`, `domain/`; `shareddomain/`
+  may import `capabilities/`, `infrastructure/`, `schemas/`, `domain/` but
+  NEVER `application/`; `capabilities/` may import `infrastructure/` and its
+  own modules only — NEVER `shareddomain/`, `schemas/`, `domain/`, or
+  `application/`. Business rules and status constants live in
+  `shareddomain/` (repositories import them from the domain models), and
+  infrastructure is consumed through interfaces where swap-out matters
+  (e.g. `infrastructure/object_storage.py::ObjectStorage`); never import a
+  concrete implementation class into `shareddomain/`.
+- Capability contracts live in `app/ports/` (Protocols + delegate functions
+  for vector store, LLM providers, document parsing, MCP client, model
+  registry). `shareddomain/` imports capabilities ONLY through `app/ports/`;
+  `application/` does the same except for pure capability algorithms/validation
+  functions it composes directly (e.g. retrieval ranking math, credential
+  normalization). Swapping an implementation (e.g. Qdrant → Milvus) touches
+  only the capability module and its port factory.
+- Data isolation: pure domain entities live in `app/entities/` (dataclasses
+  mirroring the database columns); `app/domain/` and
+  `app/shareddomain/*/models.py` hold the SQLAlchemy database models.
+  Repositories (`app/infrastructure/repositories/`) map ORM ↔ entities via
+  `mapping.py` helpers and own all `db.add/delete/refresh/flush`; business
+  code (`shareddomain/`, `application/`) imports entities only, never ORM
+  models, and coordinates transactions via the `db` unit-of-work
+  (`db.commit()`/`db.rollback()`). New models: add the entity to
+  `app/entities/`, keep the ORM class in its current models module, and
+  expose create/save/refresh/delete wrappers on the repository.
+- `backend/tests/unit.py` is a pure unit suite (no DB, no HTTP, no network)
+  for business rules and services with mocked ports/repositories; run it like
+  the other suites with `uv run python -m tests.unit`.
+- Large domain modules are split by concern with a facade keeping the public
+  API stable: `application/agents.py` re-exports `agent_tools.py` (tool
+  construction, pure mappers) and `agent_runs.py` (run orchestration);
+  `shareddomain/knowledge/services.py` re-exports `kb.py`, `documents.py`,
+  and `permissions.py`. Keep this pattern when a domain module grows:
+  implementation files per concern, facade module for importers.
 - Hand-written SQL goes under `backend/app/infrastructure/sql/<feature>/` for
   explicit write workflows, seed data, and complex queries; keep parameter
   binding in Python services.

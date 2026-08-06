@@ -4,11 +4,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
-from app.domain.user import User
+from app.entities.user import User
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.shareddomain.knowledge.models import KnowledgeAttachment, KnowledgeBase, KnowledgeDocument
-from app.capabilities.rag.vector_store import delete_vectors
-from app.shareddomain.knowledge.orchestration import DOCUMENT_DELETED_STATUS
+from app.entities.knowledge import (
+    DOCUMENT_DELETED_STATUS,
+    KnowledgeAttachment,
+    KnowledgeBase,
+    KnowledgeDocument,
+)
+from app.ports.vector_store import delete_vectors
 from app.shareddomain.knowledge.services import knowledge_object_storage
 
 
@@ -41,9 +45,14 @@ async def delete_knowledge_document(
     document.status = DOCUMENT_DELETED_STATUS
     document.last_error = None
     if document.attachment_id:
-        attachment = await db.get(KnowledgeAttachment, document.attachment_id)
+        attachment = await knowledge_base_repository.get_knowledge_attachment_by_id(
+            db,
+            document.attachment_id,
+        )
         if attachment is not None:
             attachment.status = "deleted"
+            await knowledge_base_repository.save_knowledge_attachment(db, attachment)
+    await knowledge_base_repository.save_knowledge_document(db, document)
     record_audit_log(
         db,
         actor,
@@ -78,6 +87,7 @@ async def set_knowledge_document_active(
         return
 
     document.is_active = is_active
+    await knowledge_base_repository.save_knowledge_document(db, document)
     record_audit_log(
         db,
         actor,

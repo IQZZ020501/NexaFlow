@@ -137,44 +137,73 @@ export function listAgentRuns(
 }
 
 
+export const AGENT_STREAM_TIMEOUT_MS = 120_000
+
 export async function streamAgentRun(
   token: string,
   workspaceId: string,
   agentId: string,
   goal: string,
   onEvent: (event: AgentRunStreamEvent) => void,
-  preview = false
+  preview = false,
+  signal?: AbortSignal
 ) {
-  const response = await fetch(
-    apiUrl(agentsPath(workspaceId, `/${agentId}/runs/stream`)),
-    {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ goal, preview }),
+  const timeoutController = new AbortController()
+  const timeoutId = setTimeout(() => {
+    timeoutController.abort(
+      new DOMException("Agent stream timed out.", "TimeoutError")
+    )
+  }, AGENT_STREAM_TIMEOUT_MS)
+  try {
+    const combinedSignal = signal
+      ? AbortSignal.any([signal, timeoutController.signal])
+      : timeoutController.signal
+    const response = await fetch(
+      apiUrl(agentsPath(workspaceId, `/${agentId}/runs/stream`)),
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ goal, preview }),
+        signal: combinedSignal,
+      }
+    )
+    if (!response.ok) {
+      throw new Error(`Agent stream failed with status ${response.status}.`)
     }
-  )
-  if (!response.ok) {
-    throw new Error(`Agent stream failed with status ${response.status}.`)
-  }
-  if (!response.body) {
-    throw new Error("Agent stream did not return a response body.")
-  }
+    if (!response.body) {
+      throw new Error("Agent stream did not return a response body.")
+    }
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ""
-  while (true) {
-    const { done, value } = await reader.read()
-    buffer += decoder.decode(value, { stream: !done })
-    const lines = buffer.split("\n")
-    buffer = lines.pop() ?? ""
-    for (const line of lines) {
-      if (line.trim()) onEvent(JSON.parse(line) as AgentRunStreamEvent)
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    let settled = false
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+      for (const line of lines) {
+        if (line.trim()) {
+          const event = JSON.parse(line) as AgentRunStreamEvent
+          if (event.type === "complete" || event.type === "error") settled = true
+          onEvent(event)
+        }
+      }
+      if (done) break
     }
-    if (done) break
+    if (buffer.trim()) {
+      const event = JSON.parse(buffer) as AgentRunStreamEvent
+      if (event.type === "complete" || event.type === "error") settled = true
+      onEvent(event)
+    }
+    if (!settled) {
+      throw new Error("Agent stream ended without a completion event.")
+    }
+  } finally {
+    clearTimeout(timeoutId)
   }
-  if (buffer.trim()) onEvent(JSON.parse(buffer) as AgentRunStreamEvent)
 }

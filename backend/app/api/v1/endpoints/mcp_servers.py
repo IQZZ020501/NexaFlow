@@ -11,14 +11,14 @@ from app.api.deps import (
 )
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
-from app.schemas.mcp import McpServerCreateRequest, McpServerResponse
-from app.shareddomain.tools.services import (
+from app.application.tools import (
     create_mcp_server,
     delete_mcp_server,
     get_mcp_server,
     list_mcp_servers,
     refresh_mcp_server,
 )
+from app.schemas.mcp import McpServerCreateRequest, McpServerResponse
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/mcp-servers",

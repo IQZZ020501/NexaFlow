@@ -20,8 +20,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.infrastructure.base import Base
 from app.infrastructure.model_utils import new_id, utc_now
 
-DOCUMENT_STAGED_META_KEY = "staged"
-
 
 class KnowledgeBase(Base):
     __tablename__ = "knowledge"

@@ -6,8 +6,8 @@ from fastapi import HTTPException, status
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.validation import normalize_name
 from app.infrastructure.model_utils import new_id
-from app.domain.user import User
-from app.domain.team import Team
+from app.entities.user import User
+from app.entities.team import Team
 from app.infrastructure.repositories import team as team_repository
 from app.schemas.team import TeamCreateRequest, TeamResponse, TeamUpdateRequest
 
@@ -57,9 +57,8 @@ async def create_team(
         slug=new_id(),
         status=ACTIVE_STATUS,
     )
-    db.add(team)
     try:
-        await db.flush()
+        team = await team_repository.create_team(db, team)
         record_audit_log(
             db,
             actor,
@@ -75,7 +74,7 @@ async def create_team(
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Team already exists.") from exc
 
-    await db.refresh(team)
+    team = await team_repository.refresh_team(db, team)
     return team_to_response(team)
 
 
@@ -114,12 +113,13 @@ async def update_team(
     )
 
     try:
+        team = await team_repository.save_team(db, team)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Team already exists.") from exc
 
-    await db.refresh(team)
+    team = await team_repository.refresh_team(db, team)
     return team_to_response(team)
 
 
@@ -137,5 +137,5 @@ async def delete_team_permanently(db: AsyncSession, team: Team, actor: User) -> 
         {"description": team.description, "workspace_id": team.workspace_id},
         workspace_id=team.workspace_id,
     )
-    await team_repository.delete_team_graph(db, team.id)
+    await team_repository.delete_team_graph(db, team)
     await db.commit()

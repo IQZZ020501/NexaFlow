@@ -1,7 +1,5 @@
 from typing import Annotated
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,21 +11,19 @@ from app.api.deps import (
     get_settings,
     get_workspace_context_from_path,
 )
-from app.shareddomain.knowledge.lifecycle import (
+from app.application.knowledge import (
     delete_knowledge_document,
+    document_response_with_chunk_count,
+    get_knowledge_asset_file,
+    get_knowledge_base,
+    get_knowledge_document,
+    knowledge_document_path,
+    require_knowledge_base_permission,
     set_knowledge_document_active,
 )
-from app.shareddomain.knowledge.orchestration import get_knowledge_document
-from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.schemas.knowledge import (
     KnowledgeDocumentResponse,
     KnowledgeDocumentStatusUpdateRequest,
-)
-from app.shareddomain.knowledge.services import (
-    get_knowledge_base,
-    knowledge_document_path,
-    knowledge_object_storage,
-    require_knowledge_base_permission,
 )
 
 router = APIRouter(
@@ -98,17 +94,13 @@ async def read_workspace_knowledge_document_asset(
         {"view", "edit"},
     )
     await get_knowledge_document(db, knowledge_base, document_id)
-    asset = await knowledge_base_repository.get_document_asset(
+    asset, asset_path = await get_knowledge_asset_file(
         db,
         knowledge_base,
         document_id,
         asset_id,
+        settings,
     )
-    if asset is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge asset not found.")
-    asset_path = knowledge_object_storage(settings).path(asset.object_key)
-    if not asset_path.is_file():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge asset file is missing.")
     return FileResponse(
         asset_path,
         media_type=asset.content_type,
@@ -182,8 +174,8 @@ async def update_workspace_knowledge_base_document_status(
         context.user,
         payload.is_active,
     )
-    chunk_counts = await count_document_chunks(db, knowledge_base)
-    return document_to_response(
+    return await document_response_with_chunk_count(
+        db,
+        knowledge_base,
         document,
-        chunk_count=chunk_counts.get(document.id, 0),
     )

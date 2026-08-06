@@ -9,8 +9,6 @@ from markitdown.converters._html_converter import HtmlConverter
 
 from app.infrastructure.model_utils import new_id
 
-from app.shareddomain.knowledge.models import KnowledgeDocument
-
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150
 PARENT_CHUNK_SIZE = CHUNK_SIZE * 4
@@ -126,15 +124,19 @@ class KnowledgePipelineError(Exception):
     pass
 
 
-def extract_document(document: KnowledgeDocument, path: Path) -> tuple[str, list[DocumentAssetDraft]]:
+def extract_document(
+    filename: str,
+    content_type: str,
+    path: Path,
+) -> tuple[str, list[DocumentAssetDraft]]:
     if not path.exists():
         raise KnowledgePipelineError("Document file is missing.")
 
-    extension = Path(document.filename).suffix.lower()
+    extension = Path(filename).suffix.lower()
     if extension not in SUPPORTED_DOCUMENT_EXTENSIONS:
         raise KnowledgePipelineError("Document format is not supported.")
 
-    content_type = document.content_type.split(";", 1)[0].strip().lower()
+    content_type = content_type.split(";", 1)[0].strip().lower()
     assets: list[DocumentAssetDraft] = []
     try:
         if extension == ".docx":
@@ -182,7 +184,7 @@ def extract_document(document: KnowledgeDocument, path: Path) -> tuple[str, list
                 stream_info=StreamInfo(
                     mimetype=content_type or None,
                     extension=extension,
-                    filename=document.filename,
+                    filename=filename,
                     local_path=str(path),
                 ),
             )

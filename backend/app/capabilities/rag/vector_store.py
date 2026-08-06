@@ -12,7 +12,6 @@ from app.capabilities.llm.runtime import build_registered_embeddings
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
 from app.infrastructure.logger import get_logger, log_event
-from app.shareddomain.knowledge.models import KnowledgeBase
 
 logger = get_logger(__name__)
 
@@ -162,7 +161,8 @@ def delete_vectors(
 
 def upsert_vectors(
     settings: Settings,
-    knowledge_base: KnowledgeBase,
+    knowledge_base_id: str,
+    workspace_id: str,
     embedding_model: RegisteredModel,
     chunks: list[VectorChunk],
 ) -> None:
@@ -188,7 +188,7 @@ def upsert_vectors(
         raise ValueError("Embedding provider returned invalid document vectors.")
 
     client = _client(settings)
-    collection_name = vector_collection_name(knowledge_base.id)
+    collection_name = vector_collection_name(knowledge_base_id)
     _ensure_collection(client, collection_name, vector_size)
     started = time.monotonic()
     try:
@@ -205,8 +205,8 @@ def upsert_vectors(
                             if isinstance(value, (str, int, float, bool))
                         },
                         "chunk_id": chunk.id,
-                        "workspace_id": knowledge_base.workspace_id,
-                        "knowledge_base_id": knowledge_base.id,
+                        "workspace_id": workspace_id,
+                        "knowledge_base_id": knowledge_base_id,
                         "document_id": chunk.document_id,
                         "document_filename": chunk.document_filename,
                         "chunk_index": chunk.chunk_index,
@@ -222,7 +222,7 @@ def upsert_vectors(
             "Qdrant vector upsert failed.",
             exc,
             collection_name=collection_name,
-            knowledge_base_id=knowledge_base.id,
+            knowledge_base_id=knowledge_base_id,
             vector_count=len(chunks),
         )
         raise
@@ -231,7 +231,7 @@ def upsert_vectors(
         logging.INFO,
         "Qdrant vectors upserted.",
         collection_name=collection_name,
-        knowledge_base_id=knowledge_base.id,
+        knowledge_base_id=knowledge_base_id,
         vector_count=len(chunks),
         duration_ms=round((time.monotonic() - started) * 1000, 1),
     )
@@ -283,3 +283,50 @@ def query_vectors(
         if isinstance(point.payload, dict)
         and isinstance(chunk_id := point.payload.get("chunk_id"), str)
     ]
+
+
+class QdrantVectorStore:
+    """Adapter implementing the ``app.ports.vector_store.VectorStore`` contract."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+
+    def delete_vector_collection(self, knowledge_base_id: str) -> None:
+        delete_vector_collection(self._settings, knowledge_base_id)
+
+    def delete_vectors(
+        self,
+        knowledge_base_id: str,
+        vector_ids: list[str],
+    ) -> None:
+        delete_vectors(self._settings, knowledge_base_id, vector_ids)
+
+    def upsert_vectors(
+        self,
+        knowledge_base_id: str,
+        workspace_id: str,
+        embedding_model: RegisteredModel,
+        chunks: list[VectorChunk],
+    ) -> None:
+        upsert_vectors(
+            self._settings,
+            knowledge_base_id,
+            workspace_id,
+            embedding_model,
+            chunks,
+        )
+
+    def query_vectors(
+        self,
+        knowledge_base_id: str,
+        embedding_model: RegisteredModel,
+        query: str,
+        limit: int,
+    ) -> list[VectorHit]:
+        return query_vectors(
+            self._settings,
+            knowledge_base_id,
+            embedding_model,
+            query,
+            limit,
+        )

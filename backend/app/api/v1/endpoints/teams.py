@@ -9,14 +9,14 @@ from app.api.deps import (
     get_workspace_context_from_path,
     require_workspace_path_role,
 )
-from app.schemas.team import TeamCreateRequest, TeamResponse, TeamUpdateRequest
-from app.shareddomain.teams.services import (
+from app.application.teams import (
     create_team,
     delete_team_permanently,
     get_team,
     list_teams,
     update_team,
 )
+from app.schemas.team import TeamCreateRequest, TeamResponse, TeamUpdateRequest
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/teams", tags=["teams"])
 

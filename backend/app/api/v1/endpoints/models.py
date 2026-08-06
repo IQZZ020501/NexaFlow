@@ -12,7 +12,7 @@ from app.api.deps import (
     require_password_changed,
     require_workspace_path_role,
 )
-from app.domain.user import User
+from app.entities.user import User
 from app.schemas.model import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
@@ -22,7 +22,7 @@ from app.schemas.model import (
     RegisteredModelResponse,
     RegisteredModelUpdateRequest,
 )
-from app.capabilities.llm.registry import (
+from app.application.models import (
     create_registered_model,
     delete_registered_model,
     get_model_credential_form,

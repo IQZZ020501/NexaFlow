@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_global_admin
 from app.infrastructure.session import get_db
-from app.domain.user import User
+from app.entities.user import User
 from app.schemas.user import (
     ChangePasswordRequest,
     UserCreateRequest,

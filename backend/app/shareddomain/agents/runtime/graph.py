@@ -15,7 +15,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
-from app.capabilities.llm.runtime import (
+from app.ports.llm import (
     ModelCompletion,
     ModelProviderError,
     ModelToolCall,
@@ -31,6 +31,7 @@ from app.shareddomain.agents.runtime.tools import (
 MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12
 MAX_REASONING_CHARS = 6000
+MODEL_RESPONSE_TIMEOUT_SECONDS = 60
 
 
 class AgentRunnerError(ModelProviderError):
@@ -140,17 +141,25 @@ async def agent_node(
 
     model = runtime.context.model
     bound_model = model.bind_tools(runtime.context.tools) if runtime.context.tools else model
-    if callback.enabled:
-        aggregate: AIMessageChunk | None = None
-        async for chunk in bound_model.astream(state["messages"]):
-            if not isinstance(chunk, AIMessageChunk):
-                raise AgentRunnerError("Agent model returned an invalid stream message.")
-            await emit_reasoning_delta(reasoning_content(chunk))
-            await emit_answer_delta(chunk.text)
-            aggregate = chunk if aggregate is None else aggregate + chunk
-        message = message_chunk_to_message(aggregate or AIMessageChunk(content=""))
-    else:
-        message = await bound_model.ainvoke(state["messages"])
+    try:
+        async with asyncio.timeout(MODEL_RESPONSE_TIMEOUT_SECONDS):
+            if callback.enabled:
+                aggregate: AIMessageChunk | None = None
+                async for chunk in bound_model.astream(state["messages"]):
+                    if not isinstance(chunk, AIMessageChunk):
+                        raise AgentRunnerError(
+                            "Agent model returned an invalid stream message."
+                        )
+                    await emit_reasoning_delta(reasoning_content(chunk))
+                    await emit_answer_delta(chunk.text)
+                    aggregate = chunk if aggregate is None else aggregate + chunk
+                message = message_chunk_to_message(
+                    aggregate or AIMessageChunk(content="")
+                )
+            else:
+                message = await bound_model.ainvoke(state["messages"])
+    except TimeoutError as exc:
+        raise AgentRunnerError("Agent model response timed out.") from exc
 
     if not isinstance(message, AIMessage):
         raise AgentRunnerError("Agent model returned an invalid response message.")

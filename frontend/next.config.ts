@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
   // (multipart overhead included).
   experimental: {
     middlewareClientMaxBodySize: "101mb",
-    proxyTimeout: 120,
+    proxyTimeout: 120_000,
   },
   async rewrites() {
     return [

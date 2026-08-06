@@ -220,3 +220,42 @@ async def call_mcp_tool(
         duration_ms=round((time.perf_counter() - started_at) * 1000),
     )
     return content, bool(result.is_error)
+
+
+class StreamableHttpMcpClient:
+    """Adapter implementing the ``app.ports.mcp.McpClient`` contract."""
+
+    def normalize_mcp_url(self, value: str) -> str:
+        return normalize_mcp_url(value)
+
+    async def discover_mcp_tools(
+        self,
+        url: str,
+        bearer_token: str | None,
+        allow_private_networks: bool,
+        timeout_seconds: float,
+    ) -> list[dict[str, Any]]:
+        return await discover_mcp_tools(
+            url,
+            bearer_token,
+            allow_private_networks,
+            timeout_seconds,
+        )
+
+    async def call_mcp_tool(
+        self,
+        url: str,
+        bearer_token: str | None,
+        tool_name: str,
+        arguments: dict[str, Any],
+        allow_private_networks: bool,
+        timeout_seconds: float,
+    ) -> tuple[str, bool]:
+        return await call_mcp_tool(
+            url,
+            bearer_token,
+            tool_name,
+            arguments,
+            allow_private_networks,
+            timeout_seconds,
+        )

@@ -10,7 +10,9 @@ from tests.support import (
     test_client,
 )
 from app.api.v1.endpoints.auth import REFRESH_TOKEN_COOKIE
-from app.domain.user import RefreshSession
+from app.entities.user import RefreshSession
+from app.infrastructure.model_utils import utc_now
+from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.security import hash_refresh_token
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.system_log import SystemLog
@@ -24,10 +26,10 @@ async def get_system_log_events() -> list[str]:
 
 async def get_refresh_session(token: str) -> RefreshSession | None:
     async with get_session_factory()() as db:
-        return await db.scalar(
-            select(RefreshSession).where(
-                RefreshSession.token_hash == hash_refresh_token(token)
-            )
+        return await user_repository.get_active_refresh_session(
+            db,
+            hash_refresh_token(token),
+            utc_now(),
         )
 
 
