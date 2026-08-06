@@ -1,4 +1,22 @@
 import * as React from "react"
+import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
+import Anthropic from "@lobehub/icons/es/Anthropic"
+import Azure from "@lobehub/icons/es/Azure"
+import Bailian from "@lobehub/icons/es/Bailian"
+import Bedrock from "@lobehub/icons/es/Bedrock"
+import DeepSeek from "@lobehub/icons/es/DeepSeek"
+import Gemini from "@lobehub/icons/es/Gemini"
+import IFlyTekCloud from "@lobehub/icons/es/IFlyTekCloud"
+import Moonshot from "@lobehub/icons/es/Moonshot"
+import Ollama from "@lobehub/icons/es/Ollama"
+import OpenAI from "@lobehub/icons/es/OpenAI"
+import Tencent from "@lobehub/icons/es/Tencent"
+import TencentCloud from "@lobehub/icons/es/TencentCloud"
+import Vllm from "@lobehub/icons/es/Vllm"
+import Volcengine from "@lobehub/icons/es/Volcengine"
+import Wenxin from "@lobehub/icons/es/Wenxin"
+import Xinference from "@lobehub/icons/es/Xinference"
+import Zhipu from "@lobehub/icons/es/Zhipu"
 import {
   BrainCircuitIcon,
   ChevronDownIcon,
@@ -97,6 +115,34 @@ const PROVIDER_DISPLAY_ORDER = [
   "model_zhipu_provider",
   "model_custom_provider",
 ]
+
+type ProviderBrandIcon = {
+  Render: React.ComponentType<{ size?: number | string; className?: string }>
+  Color?: React.ComponentType<{ size?: number | string; className?: string }>
+}
+
+// Brand icons from @lobehub/icons, keyed by the catalog provider id.
+// Providers without a brand icon in the package keep the static icon
+// (`provider.icon`) or the initials fallback.
+const PROVIDER_BRAND_ICONS: Record<string, ProviderBrandIcon> = {
+  aliyun_bai_lian_model_provider: { Render: Bailian },
+  model_anthropic_provider: { Render: Anthropic },
+  model_aws_bedrock_provider: { Render: Bedrock },
+  model_azure_provider: { Render: Azure },
+  model_deepseek_provider: { Render: DeepSeek },
+  model_gemini_provider: { Render: Gemini },
+  model_kimi_provider: { Render: Moonshot },
+  model_ollama_provider: { Render: Ollama },
+  model_openai_provider: { Render: OpenAI },
+  model_tencent_cloud_provider: { Render: TencentCloud },
+  model_tencent_provider: { Render: Tencent },
+  model_vllm_provider: { Render: Vllm },
+  model_volcanic_engine_provider: { Render: Volcengine },
+  model_wenxin_provider: { Render: Wenxin },
+  model_xf_provider: { Render: IFlyTekCloud },
+  model_xinference_provider: { Render: Xinference },
+  model_zhipu_provider: { Render: Zhipu },
+}
 
 type ModelForm = {
   id: string | null
@@ -629,9 +675,23 @@ export function LlmPage() {
                                 {modelTypeLabel(model.model_type, t)}
                               </Badge>
                             </div>
-                            <p className="mt-1 truncate text-sm text-muted-foreground">
-                              {providerLabel(providerCatalog, model.provider)} ·{" "}
-                              {model.model_name}
+                            <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-muted-foreground">
+                              <span className="shrink-0">
+                                {providerLabel(
+                                  providerCatalog,
+                                  model.provider
+                                )}
+                              </span>
+                              <span className="shrink-0">·</span>
+                              <ModelIcon
+                                model={model.model_name}
+                                size={14}
+                                type="color"
+                                className="shrink-0"
+                              />
+                              <span className="truncate">
+                                {model.model_name}
+                              </span>
                             </p>
                           </div>
                         </div>
@@ -790,6 +850,19 @@ function ProviderIcon({
   frameClassName: string
   imageClassName: string
 }) {
+  const brand = provider ? PROVIDER_BRAND_ICONS[provider.provider] : undefined
+
+  if (brand) {
+    const Brand = brand.Color ?? brand.Render
+    return (
+      <span
+        className={`flex shrink-0 items-center justify-center rounded-md border bg-white ${frameClassName}`}
+      >
+        <Brand size={24} className="object-contain" />
+      </span>
+    )
+  }
+
   if (provider?.icon) {
     return (
       <span

@@ -1,4 +1,5 @@
 import * as React from "react"
+import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   ChevronDownIcon,
   CircleCheckIcon,
@@ -473,11 +474,21 @@ function KnowledgeModelSelect({
           >
             <span
               className={cn(
-                "min-w-0 flex-1 truncate text-left",
+                "flex min-w-0 flex-1 items-center gap-2 truncate text-left",
                 !selected && "text-muted-foreground"
               )}
             >
-              {selected ? modelLabel(selected) : placeholder}
+              {selected ? (
+                <ModelIcon
+                  model={selected.model_name}
+                  size={16}
+                  type="color"
+                  className="shrink-0"
+                />
+              ) : null}
+              <span className="min-w-0 truncate">
+                {selected ? modelLabel(selected) : placeholder}
+              </span>
             </span>
             <ChevronDownIcon data-icon="inline-end" />
           </Button>
@@ -501,7 +512,15 @@ function KnowledgeModelSelect({
               className="justify-between"
               onSelect={() => onChange(model.id)}
             >
-              <span className="min-w-0 truncate">{modelLabel(model)}</span>
+              <span className="flex min-w-0 items-center gap-2 truncate">
+                <ModelIcon
+                  model={model.model_name}
+                  size={16}
+                  type="color"
+                  className="shrink-0"
+                />
+                <span className="min-w-0 truncate">{modelLabel(model)}</span>
+              </span>
               {model.id === value ? (
                 <CircleCheckIcon className="text-primary" />
               ) : null}

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   AlertCircleIcon,
   ArchiveIcon,
@@ -2074,16 +2075,36 @@ function KnowledgeBasePageContent({
                       <p className="text-xs font-medium text-muted-foreground">
                         {t("Embedding 模型")}
                       </p>
-                      <p className="mt-1 truncate font-medium">
-                        {registeredModelLabel(selectedEmbeddingModel, t)}
+                      <p className="mt-1 flex items-center gap-1.5 truncate font-medium">
+                        {selectedEmbeddingModel ? (
+                          <ModelIcon
+                            model={selectedEmbeddingModel.model_name}
+                            size={14}
+                            type="color"
+                            className="shrink-0"
+                          />
+                        ) : null}
+                        <span className="truncate">
+                          {registeredModelLabel(selectedEmbeddingModel, t)}
+                        </span>
                       </p>
                     </div>
                     <div className="min-w-0 rounded-md border p-4">
                       <p className="text-xs font-medium text-muted-foreground">
                         {t("Rerank 模型")}
                       </p>
-                      <p className="mt-1 truncate font-medium">
-                        {registeredModelLabel(selectedRerankerModel, t)}
+                      <p className="mt-1 flex items-center gap-1.5 truncate font-medium">
+                        {selectedRerankerModel ? (
+                          <ModelIcon
+                            model={selectedRerankerModel.model_name}
+                            size={14}
+                            type="color"
+                            className="shrink-0"
+                          />
+                        ) : null}
+                        <span className="truncate">
+                          {registeredModelLabel(selectedRerankerModel, t)}
+                        </span>
                       </p>
                     </div>
                   </div>
