@@ -26,8 +26,6 @@ export type Team = {
 export type WorkspaceCreateResponse = {
   workspace: Workspace
   admin_user: User
-  admin_created: boolean
-  admin_initial_password: string | null
 }
 
 export type WorkspaceMember = {
@@ -58,9 +56,7 @@ export type UserPasswordForm = {
 export type WorkspaceForm = {
   name: string
   description: string
-  adminUsername: string
-  adminEmail: string
-  adminName: string
+  adminUserId: string
 }
 
 export type TeamForm = {
@@ -79,7 +75,6 @@ export type UserCreateForm = {
   username: string
   email: string
   name: string
-  isGlobalAdmin: boolean
   workspaceId: string
   teamIds: string[]
 }
@@ -89,7 +84,6 @@ export type UserForm = {
   username: string
   email: string
   name: string
-  isGlobalAdmin: boolean
 }
 
 export type UserStatusFilter = "all" | "active" | "inactive"
@@ -106,7 +100,6 @@ export function createUser(
     username: string
     email: string
     name: string
-    is_global_admin?: boolean
     workspace_id?: string | null
     team_ids?: string[]
   }
@@ -166,11 +159,7 @@ export function createWorkspace(
   payload: {
     name: string
     description: string
-    admin: {
-      username: string
-      email: string
-      name: string
-    }
+    admin_user_id: string
   }
 ) {
   return request<WorkspaceCreateResponse>("/api/v1/workspaces", {

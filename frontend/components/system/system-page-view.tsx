@@ -6,7 +6,6 @@ import type {
   Team,
   User,
   Workspace,
-  WorkspaceCreateResponse,
   WorkspaceMember,
 } from "@/lib/api/system"
 import { cn } from "@/lib/utils"
@@ -54,6 +53,7 @@ type SystemPageViewProps = {
   canCreateWorkspace: boolean
   onSelectWorkspace: (workspaceId: string) => void
   setIsWorkspaceDialogOpen: React.Dispatch<React.SetStateAction<boolean>>
+  handleOpenCreateWorkspace: () => void
   handleOpenEditWorkspace: (workspace: Workspace) => void
   handleArchiveWorkspace: (workspace: Workspace) => void | Promise<void>
   handleDeleteWorkspace: (workspace: Workspace) => void | Promise<void>
@@ -121,7 +121,6 @@ type SystemPageViewProps = {
   isWorkspaceDialogOpen: boolean
   workspaceForm: WorkspaceForm
   setWorkspaceForm: React.Dispatch<React.SetStateAction<WorkspaceForm>>
-  workspaceNotice: WorkspaceCreateResponse | null
   isCreatingWorkspace: boolean
   handleCreateWorkspace: React.FormEventHandler<HTMLFormElement>
   isTeamDialogOpen: boolean
@@ -144,6 +143,7 @@ export function SystemPageView({
   canCreateWorkspace,
   onSelectWorkspace,
   setIsWorkspaceDialogOpen,
+  handleOpenCreateWorkspace,
   handleOpenEditWorkspace,
   handleArchiveWorkspace,
   handleDeleteWorkspace,
@@ -207,7 +207,6 @@ export function SystemPageView({
   isWorkspaceDialogOpen,
   workspaceForm,
   setWorkspaceForm,
-  workspaceNotice,
   isCreatingWorkspace,
   handleCreateWorkspace,
   isTeamDialogOpen,
@@ -266,7 +265,7 @@ export function SystemPageView({
             selectedWorkspaceId={selectedWorkspaceId}
             canCreateWorkspace={canCreateWorkspace}
             onSelectWorkspace={onSelectWorkspace}
-            onOpenCreateWorkspace={() => setIsWorkspaceDialogOpen(true)}
+            onOpenCreateWorkspace={handleOpenCreateWorkspace}
             handleOpenEditWorkspace={handleOpenEditWorkspace}
             handleArchiveWorkspace={handleArchiveWorkspace}
             handleDeleteWorkspace={handleDeleteWorkspace}
@@ -365,7 +364,6 @@ export function SystemPageView({
       <EditUserDialog
         userForm={userForm}
         setUserForm={setUserForm}
-        me={me}
         isSavingUser={isSavingUser}
         handleUpdateUser={handleUpdateUser}
       />
@@ -380,7 +378,8 @@ export function SystemPageView({
         setIsWorkspaceDialogOpen={setIsWorkspaceDialogOpen}
         workspaceForm={workspaceForm}
         setWorkspaceForm={setWorkspaceForm}
-        workspaceNotice={workspaceNotice}
+        users={users}
+        isUsersLoading={isUsersLoading}
         isCreatingWorkspace={isCreatingWorkspace}
         handleCreateWorkspace={handleCreateWorkspace}
       />

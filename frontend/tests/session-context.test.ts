@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
-import { replaceSessionUser } from "../contexts/session-context"
+import {
+  addCreatedWorkspaceMembership,
+  replaceSessionUser,
+} from "../contexts/session-context"
 import type { MeResponse, User } from "../lib/api/auth"
+import type { WorkspaceCreateResponse } from "../lib/api/system"
 
 const currentUser: User = {
   id: "current-user",
@@ -35,6 +39,30 @@ describe("session user updates", () => {
     })
     expect(
       replaceSessionUser(me, { ...updatedUser, id: "another-user" })
+    ).toBe(me)
+  })
+
+  test("adds a created workspace when the current user is its admin", () => {
+    const payload: WorkspaceCreateResponse = {
+      workspace: {
+        id: "workspace-1",
+        name: "Workspace 1",
+        description: "",
+        status: "active",
+        is_default: false,
+      },
+      admin_user: currentUser,
+    }
+
+    expect(addCreatedWorkspaceMembership(me, payload)).toEqual({
+      ...me,
+      memberships: [{ workspace_id: "workspace-1", role: "admin" }],
+    })
+    expect(
+      addCreatedWorkspaceMembership(me, {
+        ...payload,
+        admin_user: { ...currentUser, id: "another-user" },
+      })
     ).toBe(me)
   })
 })

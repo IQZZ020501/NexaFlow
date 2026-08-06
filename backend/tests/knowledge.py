@@ -11,10 +11,10 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from tests.support import (
-    RESEARCH_PASSWORD,
     activate_admin,
     activate_user,
     auth_headers,
+    create_active_user,
     settings as test_settings,
     test_client,
 )
@@ -55,6 +55,7 @@ from app.tasks.knowledge import mark_task_dispatch_failed
 from app.schemas.knowledge import KnowledgeQueryRequest
 from tests.llm import ModelTestHandler, model_payload, model_test_server, models_url
 from app.domain.resource_permission import ResourcePermission
+
 
 MEMBER_PASSWORD = "Member@12345."
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -914,29 +915,22 @@ def main() -> None:
         alice_token = activate_user(client, "alice", alice_temp_password, MEMBER_PASSWORD)
         bob_token = activate_user(client, "bob", bob_temp_password, MEMBER_PASSWORD)
 
+        research_admin_id, research_token = create_active_user(
+            client,
+            admin_token,
+            "research-admin",
+        )
         created_workspace = client.post(
             "/api/v1/workspaces",
             headers=auth_headers(admin_token),
             json={
                 "name": "Research Workspace",
                 "description": "研究工作空间",
-                "admin": {
-                    "username": "research-admin",
-                    "email": "research-admin@example.com",
-                    "name": "Research Admin",
-                },
+                "admin_user_id": research_admin_id,
             },
         )
         assert created_workspace.status_code == 201, created_workspace.text
         research_workspace_id = created_workspace.json()["workspace"]["id"]
-        research_password = created_workspace.json()["admin_initial_password"]
-        assert research_password
-        research_token = activate_user(
-            client,
-            "research-admin",
-            research_password,
-            RESEARCH_PASSWORD,
-        )
 
         embedding_model = client.post(
             models_url(default_workspace_id),

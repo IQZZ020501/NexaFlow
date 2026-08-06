@@ -7,10 +7,9 @@ from app.infrastructure.session import get_session_factory
 from app.domain.user import User
 from app.domain.team import TeamMembership
 from tests.support import (
-    RESEARCH_PASSWORD,
     activate_admin,
-    activate_user,
     auth_headers,
+    create_active_user,
     test_client,
 )
 
@@ -57,36 +56,28 @@ def main() -> None:
         assert [item["name"] for item in default_teams.json()] == ["Default Team"]
         default_team_id = default_teams.json()[0]["id"]
 
+        research_admin_id, research_token = create_active_user(
+            client,
+            admin_token,
+            "research-admin",
+        )
         created_workspace = client.post(
             "/api/v1/workspaces",
             headers=auth_headers(admin_token),
             json={
                 "name": "Research Workspace",
                 "description": "研究工作空间",
-                "admin": {
-                    "username": "research-admin",
-                    "email": "research-admin@example.com",
-                    "name": "Research Admin",
-                },
+                "admin_user_id": research_admin_id,
             },
         )
         assert created_workspace.status_code == 201, created_workspace.text
         research_workspace_id = created_workspace.json()["workspace"]["id"]
-        temp_password = created_workspace.json()["admin_initial_password"]
-        assert temp_password
 
         admin_research_teams = client.get(
             teams_url(research_workspace_id),
             headers=auth_headers(admin_token),
         )
         assert admin_research_teams.status_code == 403, admin_research_teams.text
-
-        research_token = activate_user(
-            client,
-            "research-admin",
-            temp_password,
-            RESEARCH_PASSWORD,
-        )
 
         denied = client.get(
             teams_url(default_workspace_id),

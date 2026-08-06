@@ -11,23 +11,15 @@ class WorkspaceResponse(BaseModel):
     is_default: bool
 
 
-class WorkspaceAdminRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=80)
-    email: str = Field(min_length=3, max_length=255)
-    name: str = Field(min_length=1, max_length=120)
-
-
 class WorkspaceCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=2000)
-    admin: WorkspaceAdminRequest
+    admin_user_id: str = Field(min_length=1, max_length=36)
 
 
 class WorkspaceCreateResponse(BaseModel):
     workspace: WorkspaceResponse
     admin_user: UserResponse
-    admin_created: bool
-    admin_initial_password: str | None = None
 
 
 class WorkspaceUpdateRequest(BaseModel):
