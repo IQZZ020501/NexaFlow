@@ -63,9 +63,43 @@ async def list_knowledge_base_rows(
     resource_type: str,
     limit: int | None = None,
     offset: int = 0,
-) -> list[tuple[KnowledgeBase, ResourcePermission | None]]:
+) -> list[tuple[KnowledgeBase, ResourcePermission | None, int, int]]:
     grant = ResourcePermissionORM
-    statement = select(KnowledgeBaseORM, grant).outerjoin(
+    document_stats = (
+        select(
+            KnowledgeDocumentORM.knowledge_base_id.label("knowledge_base_id"),
+            func.count(KnowledgeDocumentORM.id.distinct()).label("document_count"),
+            func.coalesce(func.sum(KnowledgeDocumentChunkORM.char_count), 0).label(
+                "char_count"
+            ),
+        )
+        .outerjoin(
+            KnowledgeDocumentChunkORM,
+            (
+                (KnowledgeDocumentChunkORM.workspace_id == KnowledgeDocumentORM.workspace_id)
+                & (
+                    KnowledgeDocumentChunkORM.knowledge_base_id
+                    == KnowledgeDocumentORM.knowledge_base_id
+                )
+                & (KnowledgeDocumentChunkORM.document_id == KnowledgeDocumentORM.id)
+            ),
+        )
+        .where(
+            KnowledgeDocumentORM.workspace_id == workspace_id,
+            KnowledgeDocumentORM.status.in_(VISIBLE_DOCUMENT_STATUSES),
+            KnowledgeDocumentORM.meta[DOCUMENT_STAGED_META_KEY]
+            .as_boolean()
+            .is_not(True),
+        )
+        .group_by(KnowledgeDocumentORM.knowledge_base_id)
+        .subquery()
+    )
+    statement = select(
+        KnowledgeBaseORM,
+        grant,
+        func.coalesce(document_stats.c.document_count, 0),
+        func.coalesce(document_stats.c.char_count, 0),
+    ).outerjoin(
         grant,
         (
             (grant.workspace_id == KnowledgeBaseORM.workspace_id)
@@ -73,6 +107,9 @@ async def list_knowledge_base_rows(
             & (grant.resource_id == KnowledgeBaseORM.id)
             & (grant.user_id == actor_id)
         ),
+    ).outerjoin(
+        document_stats,
+        document_stats.c.knowledge_base_id == KnowledgeBaseORM.id,
     ).where(KnowledgeBaseORM.workspace_id == workspace_id)
 
     statement = statement.order_by(
@@ -84,8 +121,10 @@ async def list_knowledge_base_rows(
         (
             to_entity(KnowledgeBase, knowledge_base),
             to_entity(ResourcePermission, permission) if permission else None,
+            int(document_count),
+            int(char_count),
         )
-        for knowledge_base, permission in result.all()
+        for knowledge_base, permission, document_count, char_count in result.all()
     ]
 
 

@@ -21,6 +21,7 @@ from app.ports.llm import (
 )
 from app.schemas.knowledge import (
     KnowledgeBaseCreateRequest,
+    KnowledgeBaseListItemResponse,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
     KnowledgeModelTestRequest,
@@ -132,7 +133,7 @@ async def list_knowledge_bases(
     workspace_role: str | None,
     limit: int | None = None,
     offset: int = 0,
-) -> list[KnowledgeBaseResponse]:
+) -> list[KnowledgeBaseListItemResponse]:
     rows = await knowledge_base_repository.list_knowledge_base_rows(
         db,
         workspace_id,
@@ -142,11 +143,17 @@ async def list_knowledge_bases(
         offset,
     )
     return [
-        knowledge_base_to_response(
-            knowledge_base,
-            effective_permission(knowledge_base, actor, workspace_role, permission),
+        KnowledgeBaseListItemResponse(
+            **knowledge_base_to_response(
+                knowledge_base,
+                effective_permission(
+                    knowledge_base, actor, workspace_role, permission
+                ),
+            ).model_dump(),
+            document_count=document_count,
+            char_count=char_count,
         )
-        for knowledge_base, permission in rows
+        for knowledge_base, permission, document_count, char_count in rows
     ]
 
 

@@ -23,6 +23,7 @@ from app.api.deps import (
 from app.schemas.knowledge import (
     KnowledgeAttachmentResponse,
     KnowledgeBaseCreateRequest,
+    KnowledgeBaseListItemResponse,
     KnowledgeBaseOwnerTransferRequest,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
@@ -68,13 +69,13 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/workspaces/{workspace_id}/knowledge-bases", tags=["knowledge"])
 
 
-@router.get("", response_model=list[KnowledgeBaseResponse])
+@router.get("", response_model=list[KnowledgeBaseListItemResponse])
 async def list_workspace_knowledge_bases(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[KnowledgeBaseResponse]:
+) -> list[KnowledgeBaseListItemResponse]:
     return await list_knowledge_bases(
         db,
         context.workspace.id,

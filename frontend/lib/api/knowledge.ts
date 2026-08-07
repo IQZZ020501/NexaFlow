@@ -17,6 +17,8 @@ export type KnowledgeBase = {
   created_at: string
   updated_at: string
   permission: "view" | "edit" | "none"
+  document_count?: number
+  char_count?: number
 }
 
 export type ResourcePermission = {
