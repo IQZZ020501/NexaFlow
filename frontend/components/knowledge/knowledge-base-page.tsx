@@ -1142,9 +1142,9 @@ function KnowledgeBasePageContent({
         onCancel={cancelUpload}
         onRouteSegment={routeUploadSegment}
         onBackToFiles={backToUploadFiles}
-        onDone={async () => {
+        onDone={() => {
           setActiveDetailTab("documents")
-          await Promise.all([loadDocuments(), loadKnowledgeTasks()])
+          void Promise.all([loadDocuments(), loadKnowledgeTasks()])
           router.push(`/app/knowledge/${selectedKnowledgeBase.id}`)
         }}
         onNotify={notify}
