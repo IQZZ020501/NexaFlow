@@ -1,4 +1,4 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.team import Team as TeamOrm
@@ -8,6 +8,17 @@ from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.team import Team, TeamMembership
 from app.entities.user import User
 from app.infrastructure.repositories import mapping
+
+
+async def count_team_admins(db: AsyncSession, team_id: str) -> int:
+    return await db.scalar(
+        select(func.count())
+        .select_from(TeamMembershipOrm)
+        .where(
+            TeamMembershipOrm.team_id == team_id,
+            TeamMembershipOrm.role == "admin",
+        )
+    ) or 0
 
 
 async def list_teams(

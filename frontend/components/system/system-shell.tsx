@@ -9,6 +9,8 @@ import { useRouter } from "next/navigation"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import {
+  addTeamMember,
+  addWorkspaceMember,
   changeUserPassword,
   createTeam,
   createUser,
@@ -18,17 +20,23 @@ import {
   deleteUser,
   deleteWorkspace,
   listAuditLogs,
+  listTeamMembers,
   listWorkspaceMembers,
   listTeams,
   listUsers,
+  removeTeamMember,
+  removeWorkspaceMember,
   updateTeam,
+  updateTeamMember,
   updateUser,
   updateWorkspace,
+  updateWorkspaceMember,
 } from "@/lib/api/system"
 import type {
   AuditLog,
   MeResponse,
   Team,
+  TeamMember,
   User,
   Workspace,
   WorkspaceCreateResponse,
@@ -54,7 +62,10 @@ import type {
   UserStatusFilter,
   WorkspaceForm,
 } from "@/lib/api/system"
-import { getUserRoleKey } from "@/components/system/system-utils"
+import {
+  canManageTeamMembers,
+  getUserRoleKey,
+} from "@/components/system/system-utils"
 
 export type SystemTab = "workspaces" | "teams" | "users" | "audit"
 
@@ -62,7 +73,47 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
   const session = useSession()
   const router = useRouter()
 
-  if (!session.me || !session.token) {
+  const canAccessSystem = Boolean(
+    session.me &&
+    (session.me.user.is_global_admin ||
+      session.me.user.workspaces.some(
+        (workspace) => workspace.role === "admin"
+      ) ||
+      session.me.user.teams.some((team) => team.role === "admin"))
+  )
+  const canAccessUsers = Boolean(
+    session.me?.user.is_global_admin ||
+      getMembershipRole(session.me, session.selectedWorkspaceId) === "admin"
+  )
+
+  React.useEffect(() => {
+    if (!session.me) {
+      return
+    }
+
+    if (!canAccessSystem) {
+      router.replace("/app/apps")
+      return
+    }
+
+    if (
+      (activeTab === "users" &&
+        !session.isSessionLoading &&
+        !canAccessUsers) ||
+      (activeTab === "audit" && !session.me?.user.is_global_admin)
+    ) {
+      router.replace("/system/teams")
+    }
+  }, [
+    activeTab,
+    canAccessSystem,
+    canAccessUsers,
+    router,
+    session.isSessionLoading,
+    session.me,
+  ])
+
+  if (!session.me || !session.token || !canAccessSystem) {
     return null
   }
 
@@ -120,7 +171,7 @@ function SystemPageContent({
   onWorkspaceCreated: (payload: WorkspaceCreateResponse) => void
   onWorkspaceUpdated: (workspace: Workspace) => void
   onWorkspaceDeleted: (workspaceId: string) => void
-  onTeamCreated: (team: Team) => void
+  onTeamCreated: (team: Team, adminUserId?: string) => void
   onTeamUpdated: (team: Team) => void
   onTeamDeleted: (teamId: string) => void
   onUserUpdated: (user: User) => void
@@ -155,6 +206,14 @@ function SystemPageContent({
   const [workspaceMembers, setWorkspaceMembers] = React.useState<
     WorkspaceMember[]
   >([])
+  const [workspaceMembersDialogWorkspace, setWorkspaceMembersDialogWorkspace] =
+    React.useState<Workspace | null>(null)
+  const [teamMembersDialogTeam, setTeamMembersDialogTeam] =
+    React.useState<Team | null>(null)
+  const [teamMembers, setTeamMembers] = React.useState<TeamMember[]>([])
+  const [teamMemberCandidates, setTeamMemberCandidates] = React.useState<
+    WorkspaceMember[]
+  >([])
   const [auditLogs, setAuditLogs] = React.useState<AuditLog[]>([])
   const [userForm, setUserForm] = React.useState<UserForm | null>(null)
   const [userPasswordForm, setUserPasswordForm] =
@@ -181,6 +240,11 @@ function SystemPageContent({
   const [isUsersLoading, setIsUsersLoading] = React.useState(false)
   const [isWorkspaceMembersLoading, setIsWorkspaceMembersLoading] =
     React.useState(false)
+  const [isWorkspaceMembersMutating, setIsWorkspaceMembersMutating] =
+    React.useState(false)
+  const [isTeamMembersLoading, setIsTeamMembersLoading] = React.useState(false)
+  const [isTeamMembersMutating, setIsTeamMembersMutating] =
+    React.useState(false)
   const [isAuditLoading, setIsAuditLoading] = React.useState(false)
   const [isSavingUser, setIsSavingUser] = React.useState(false)
   const [isChangingUserPassword, setIsChangingUserPassword] =
@@ -192,6 +256,8 @@ function SystemPageContent({
     React.useState(false)
   const userCreateTeamsRequestId = React.useRef(0)
   const teamAdminCandidatesRequestId = React.useRef(0)
+  const workspaceMembersRequestId = React.useRef(0)
+  const teamMembersRequestId = React.useRef(0)
 
   const selectedWorkspace =
     workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null
@@ -214,6 +280,9 @@ function SystemPageContent({
   const selectedRole = getMembershipRole(me, selectedWorkspaceId)
   const canManageWorkspace = selectedRole === "admin"
   const canManageUsers = me.user.is_global_admin || canManageWorkspace
+  const canManageTeamAdmins =
+    getMembershipRole(me, teamMembersDialogTeam?.workspace_id ?? null) ===
+    "admin"
   const canCreateTeam = manageableWorkspaces.length > 0
   const canCreateWorkspace = me.user.is_global_admin
   const reportError = React.useCallback(
@@ -274,15 +343,57 @@ function SystemPageContent({
 
   const loadWorkspaceMembers = React.useCallback(
     async (workspaceId: string) => {
+      const requestId = workspaceMembersRequestId.current + 1
+      workspaceMembersRequestId.current = requestId
+      setWorkspaceMembers([])
       setIsWorkspaceMembersLoading(true)
 
       try {
-        setWorkspaceMembers(await listWorkspaceMembers(token, workspaceId))
+        const members = await listWorkspaceMembers(token, workspaceId)
+        if (requestId === workspaceMembersRequestId.current) {
+          setWorkspaceMembers(members)
+        }
       } catch (error) {
-        setWorkspaceMembers([])
-        reportError(error)
+        if (requestId === workspaceMembersRequestId.current) {
+          setWorkspaceMembers([])
+          reportError(error)
+        }
       } finally {
-        setIsWorkspaceMembersLoading(false)
+        if (requestId === workspaceMembersRequestId.current) {
+          setIsWorkspaceMembersLoading(false)
+        }
+      }
+    },
+    [reportError, token]
+  )
+
+  const loadTeamMembers = React.useCallback(
+    async (team: Team) => {
+      const requestId = teamMembersRequestId.current + 1
+      teamMembersRequestId.current = requestId
+      setTeamMembers([])
+      setTeamMemberCandidates([])
+      setIsTeamMembersLoading(true)
+
+      try {
+        const [members, candidates] = await Promise.all([
+          listTeamMembers(token, team.workspace_id, team.id),
+          listWorkspaceMembers(token, team.workspace_id),
+        ])
+        if (requestId === teamMembersRequestId.current) {
+          setTeamMembers(members)
+          setTeamMemberCandidates(candidates)
+        }
+      } catch (error) {
+        if (requestId === teamMembersRequestId.current) {
+          setTeamMembers([])
+          setTeamMemberCandidates([])
+          reportError(error)
+        }
+      } finally {
+        if (requestId === teamMembersRequestId.current) {
+          setIsTeamMembersLoading(false)
+        }
       }
     },
     [reportError, token]
@@ -437,6 +548,14 @@ function SystemPageContent({
     void loadUsers()
   }
 
+  function handleOpenWorkspaceMembers(workspace: Workspace) {
+    setWorkspaceMembersDialogWorkspace(workspace)
+    void loadWorkspaceMembers(workspace.id)
+    if (me.user.is_global_admin) {
+      void loadUsers()
+    }
+  }
+
   function handleOpenCreateUser() {
     const workspaceId = me.user.is_global_admin
       ? (activeWorkspaces.find(
@@ -492,6 +611,11 @@ function SystemPageContent({
       setTeamAdminCandidates([])
       setIsTeamAdminCandidatesLoading(false)
     }
+  }
+
+  function handleOpenTeamMembers(team: Team) {
+    setTeamMembersDialogTeam(team)
+    void loadTeamMembers(team)
   }
 
   function handleTeamWorkspaceChange(workspaceId: string) {
@@ -554,10 +678,14 @@ function SystemPageContent({
         description: teamForm.description,
         admin_user_id: teamForm.adminUserId,
       })
-      setTeamForm({ workspaceId: "", name: "", description: "", adminUserId: "" })
-      if (team.workspace_id === selectedWorkspaceId) {
-        onTeamCreated(team)
-      } else {
+      setTeamForm({
+        workspaceId: "",
+        name: "",
+        description: "",
+        adminUserId: "",
+      })
+      onTeamCreated(team, teamForm.adminUserId)
+      if (team.workspace_id !== selectedWorkspaceId) {
         onSelectWorkspace(team.workspace_id)
       }
       setIsTeamDialogOpen(false)
@@ -746,6 +874,160 @@ function SystemPageContent({
     }
   }
 
+  async function handleAddWorkspaceMember(userId: string, role: string) {
+    const workspace = workspaceMembersDialogWorkspace
+    if (!workspace) {
+      return
+    }
+
+    setIsWorkspaceMembersMutating(true)
+    try {
+      const member = await addWorkspaceMember(token, workspace.id, {
+        user_id: userId,
+        role,
+      })
+      setWorkspaceMembers((current) => [...current, member])
+      onNotify("success", t("工作空间成员已添加"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsWorkspaceMembersMutating(false)
+    }
+  }
+
+  async function handleUpdateWorkspaceMember(userId: string, role: string) {
+    const workspace = workspaceMembersDialogWorkspace
+    if (!workspace) {
+      return
+    }
+
+    setIsWorkspaceMembersMutating(true)
+    try {
+      const member = await updateWorkspaceMember(token, workspace.id, userId, {
+        role,
+      })
+      setWorkspaceMembers((current) =>
+        current.map((item) => (item.user.id === userId ? member : item))
+      )
+      onNotify("success", t("工作空间成员已更新"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsWorkspaceMembersMutating(false)
+    }
+  }
+
+  async function handleRemoveWorkspaceMember(userId: string) {
+    const workspace = workspaceMembersDialogWorkspace
+    if (!workspace) {
+      return
+    }
+
+    const member = workspaceMembers.find((item) => item.user.id === userId)
+    if (
+      member &&
+      !window.confirm(
+        t("移除 {name}？", {
+          name: member.user.name,
+        })
+      )
+    ) {
+      return
+    }
+
+    setIsWorkspaceMembersMutating(true)
+    try {
+      await removeWorkspaceMember(token, workspace.id, userId)
+      setWorkspaceMembers((current) =>
+        current.filter((item) => item.user.id !== userId)
+      )
+      onNotify("success", t("工作空间成员已移除"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsWorkspaceMembersMutating(false)
+    }
+  }
+
+  async function handleAddTeamMember(userId: string, role: string) {
+    const team = teamMembersDialogTeam
+    if (!team) {
+      return
+    }
+
+    setIsTeamMembersMutating(true)
+    try {
+      const member = await addTeamMember(token, team.workspace_id, team.id, {
+        user_id: userId,
+        role,
+      })
+      setTeamMembers((current) => [...current, member])
+      onNotify("success", t("团队成员已添加"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsTeamMembersMutating(false)
+    }
+  }
+
+  async function handleUpdateTeamMember(userId: string, role: string) {
+    const team = teamMembersDialogTeam
+    if (!team) {
+      return
+    }
+
+    setIsTeamMembersMutating(true)
+    try {
+      const member = await updateTeamMember(
+        token,
+        team.workspace_id,
+        team.id,
+        userId,
+        { role }
+      )
+      setTeamMembers((current) =>
+        current.map((item) => (item.user.id === userId ? member : item))
+      )
+      onNotify("success", t("团队成员已更新"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsTeamMembersMutating(false)
+    }
+  }
+
+  async function handleRemoveTeamMember(userId: string) {
+    const team = teamMembersDialogTeam
+    if (!team) {
+      return
+    }
+
+    const member = teamMembers.find((item) => item.user.id === userId)
+    if (
+      member &&
+      !window.confirm(
+        t("移除 {name}？", {
+          name: member.user.name,
+        })
+      )
+    ) {
+      return
+    }
+
+    setIsTeamMembersMutating(true)
+    try {
+      await removeTeamMember(token, team.workspace_id, team.id, userId)
+      setTeamMembers((current) =>
+        current.filter((item) => item.user.id !== userId)
+      )
+      onNotify("success", t("团队成员已移除"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsTeamMembersMutating(false)
+    }
+  }
+
   async function handleCreateUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -917,6 +1199,7 @@ function SystemPageContent({
       onSelectWorkspace={onSelectWorkspace}
       setIsWorkspaceDialogOpen={setIsWorkspaceDialogOpen}
       handleOpenCreateWorkspace={handleOpenCreateWorkspace}
+      handleOpenWorkspaceMembers={handleOpenWorkspaceMembers}
       handleOpenEditWorkspace={handleOpenEditWorkspace}
       handleArchiveWorkspace={handleArchiveWorkspace}
       handleDeleteWorkspace={handleDeleteWorkspace}
@@ -925,7 +1208,9 @@ function SystemPageContent({
       isTeamsLoading={isTeamsLoading}
       canCreateTeam={canCreateTeam}
       canManageWorkspace={canManageWorkspace}
+      canManageTeamMembers={(team) => canManageTeamMembers(me, team)}
       handleOpenCreateTeam={handleOpenCreateTeam}
+      handleOpenTeamMembers={handleOpenTeamMembers}
       handleOpenEditTeam={handleOpenEditTeam}
       handleArchiveTeam={handleArchiveTeam}
       handleDeleteTeam={handleDeleteTeam}
@@ -993,6 +1278,32 @@ function SystemPageContent({
       teamAdminCandidates={teamAdminCandidates}
       isTeamAdminCandidatesLoading={isTeamAdminCandidatesLoading}
       handleTeamWorkspaceChange={handleTeamWorkspaceChange}
+      workspaceMembersDialogProps={{
+        workspace: workspaceMembersDialogWorkspace,
+        setWorkspace: setWorkspaceMembersDialogWorkspace,
+        members: workspaceMembers,
+        users: me.user.is_global_admin ? users : [],
+        isLoading: isWorkspaceMembersLoading,
+        isCandidatesLoading: isUsersLoading,
+        isMutating: isWorkspaceMembersMutating,
+        canAddMembers: me.user.is_global_admin,
+        canManageAdmins: me.user.is_global_admin,
+        onAddMember: handleAddWorkspaceMember,
+        onUpdateMemberRole: handleUpdateWorkspaceMember,
+        onRemoveMember: handleRemoveWorkspaceMember,
+      }}
+      teamMembersDialogProps={{
+        team: teamMembersDialogTeam,
+        setTeam: setTeamMembersDialogTeam,
+        members: teamMembers,
+        workspaceMembers: teamMemberCandidates,
+        isLoading: isTeamMembersLoading,
+        isMutating: isTeamMembersMutating,
+        canManageTeamAdmins,
+        onAddMember: handleAddTeamMember,
+        onUpdateMemberRole: handleUpdateTeamMember,
+        onRemoveMember: handleRemoveTeamMember,
+      }}
     />
   )
 }

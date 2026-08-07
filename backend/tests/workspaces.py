@@ -335,13 +335,20 @@ def main() -> None:
         )
         assert invalid_owner_role.status_code == 422, invalid_owner_role.text
 
-        added_member = client.post(
+        add_admin_denied = client.post(
             members_url(research_workspace_id),
             headers=auth_headers(research_token),
             json={"user_id": member_user_id, "role": "admin"},
         )
+        assert add_admin_denied.status_code == 403, add_admin_denied.text
+
+        added_member = client.post(
+            members_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={"user_id": member_user_id, "role": "member"},
+        )
         assert added_member.status_code == 201, added_member.text
-        assert added_member.json()["role"] == "admin"
+        assert added_member.json()["role"] == "member"
 
         duplicate_member = client.post(
             members_url(research_workspace_id),
@@ -350,9 +357,24 @@ def main() -> None:
         )
         assert duplicate_member.status_code == 409, duplicate_member.text
 
-        updated_member = client.patch(
+        promoted_member = client.patch(
+            members_url(research_workspace_id, f"/{member_user_id}"),
+            headers=auth_headers(admin_token),
+            json={"role": "admin"},
+        )
+        assert promoted_member.status_code == 200, promoted_member.text
+        assert promoted_member.json()["role"] == "admin"
+
+        demote_admin_denied = client.patch(
             members_url(research_workspace_id, f"/{member_user_id}"),
             headers=auth_headers(research_token),
+            json={"role": "member"},
+        )
+        assert demote_admin_denied.status_code == 403, demote_admin_denied.text
+
+        updated_member = client.patch(
+            members_url(research_workspace_id, f"/{member_user_id}"),
+            headers=auth_headers(admin_token),
             json={"role": "member"},
         )
         assert updated_member.status_code == 200, updated_member.text
@@ -360,7 +382,7 @@ def main() -> None:
 
         demote_last_admin = client.patch(
             members_url(research_workspace_id, f"/{research_admin_id}"),
-            headers=auth_headers(research_token),
+            headers=auth_headers(admin_token),
             json={"role": "member"},
         )
         assert demote_last_admin.status_code == 400, demote_last_admin.text
@@ -373,7 +395,7 @@ def main() -> None:
 
         remove_last_admin = client.delete(
             members_url(research_workspace_id, f"/{research_admin_id}"),
-            headers=auth_headers(research_token),
+            headers=auth_headers(admin_token),
         )
         assert remove_last_admin.status_code == 400, remove_last_admin.text
 

@@ -25,6 +25,7 @@ type WorkspaceUsersPanelProps = {
   isWorkspaceMembersLoading: boolean
   locale: string
   handleOpenCreateUser: () => void
+  handleOpenWorkspaceMembers: () => void
 }
 
 export function WorkspaceUsersPanel({
@@ -34,6 +35,7 @@ export function WorkspaceUsersPanel({
   isWorkspaceMembersLoading,
   locale,
   handleOpenCreateUser,
+  handleOpenWorkspaceMembers,
 }: WorkspaceUsersPanelProps) {
   const { t } = useLanguage()
 
@@ -59,15 +61,27 @@ export function WorkspaceUsersPanel({
               </CardDescription>
             </div>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            disabled={!selectedWorkspaceId}
-            onClick={handleOpenCreateUser}
-          >
-            <PlusIcon data-icon="inline-start" />
-            {t("新建用户")}
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!selectedWorkspaceId}
+              onClick={handleOpenWorkspaceMembers}
+            >
+              <UserCogIcon data-icon="inline-start" />
+              {t("管理成员")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!selectedWorkspaceId}
+              onClick={handleOpenCreateUser}
+            >
+              <PlusIcon data-icon="inline-start" />
+              {t("新建用户")}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="min-w-0 px-4">
           {isWorkspaceMembersLoading ? (

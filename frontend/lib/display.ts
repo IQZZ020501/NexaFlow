@@ -47,9 +47,11 @@ export function hasWorkspaceMembership(
   workspaceId: string
 ) {
   return Boolean(
-    me?.memberships.some(
-      (membership) => membership.workspace_id === workspaceId
-    )
+    me &&
+      (me.user.is_global_admin ||
+        me.memberships.some(
+          (membership) => membership.workspace_id === workspaceId
+        ))
   )
 }
 
@@ -59,6 +61,10 @@ export function getMembershipRole(
 ) {
   if (!me || !workspaceId) {
     return null
+  }
+
+  if (me.user.is_global_admin) {
+    return "admin"
   }
 
   return (

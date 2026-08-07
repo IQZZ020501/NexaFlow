@@ -410,6 +410,9 @@ export function CreateTeamDialog({
     teamAdminCandidates.find(
       (member) => member.user.id === teamForm.adminUserId
     )?.user ?? null
+  const activeTeamAdminCandidates = teamAdminCandidates.filter(
+    (member) => member.user.is_active
+  )
 
   return (
     <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
@@ -532,34 +535,31 @@ export function CreateTeamDialog({
                   align="start"
                   className="max-h-72 w-(--radix-dropdown-menu-trigger-width) overflow-y-auto"
                 >
-                  {teamAdminCandidates.filter((member) => member.user.is_active)
-                    .length ? (
-                    teamAdminCandidates
-                      .filter((member) => member.user.is_active)
-                      .map((member) => (
-                        <DropdownMenuItem
-                          key={member.user.id}
-                          className="items-start justify-between gap-3"
-                          onSelect={() =>
-                            setTeamForm((current) => ({
-                              ...current,
-                              adminUserId: member.user.id,
-                            }))
-                          }
-                        >
-                          <span className="min-w-0">
-                            <span className="block truncate font-medium">
-                              {member.user.name}
-                            </span>
-                            <span className="block truncate text-xs text-muted-foreground">
-                              {member.user.username} · {member.user.email}
-                            </span>
+                  {activeTeamAdminCandidates.length ? (
+                    activeTeamAdminCandidates.map((member) => (
+                      <DropdownMenuItem
+                        key={member.user.id}
+                        className="items-start justify-between gap-3"
+                        onSelect={() =>
+                          setTeamForm((current) => ({
+                            ...current,
+                            adminUserId: member.user.id,
+                          }))
+                        }
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium">
+                            {member.user.name}
                           </span>
-                          {member.user.id === teamForm.adminUserId ? (
-                            <CircleCheckIcon className="mt-0.5 shrink-0" />
-                          ) : null}
-                        </DropdownMenuItem>
-                      ))
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {member.user.username} · {member.user.email}
+                          </span>
+                        </span>
+                        {member.user.id === teamForm.adminUserId ? (
+                          <CircleCheckIcon className="mt-0.5 shrink-0" />
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))
                   ) : (
                     <DropdownMenuItem disabled>
                       {t("暂无可选成员")}

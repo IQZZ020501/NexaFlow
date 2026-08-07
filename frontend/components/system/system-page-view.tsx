@@ -21,6 +21,8 @@ import {
   EditUserDialog,
   UserPasswordDialog,
 } from "@/components/system/dialogs/user-dialogs"
+import { TeamMembersDialog } from "@/components/system/dialogs/team-members-dialog"
+import { WorkspaceMembersDialog } from "@/components/system/dialogs/workspace-members-dialog"
 import { AuditPanel } from "@/components/system/panels/audit-panel"
 import { GlobalUsersPanel } from "@/components/system/panels/global-users-panel"
 import { TeamsPanel } from "@/components/system/panels/teams-panel"
@@ -54,6 +56,7 @@ type SystemPageViewProps = {
   onSelectWorkspace: (workspaceId: string) => void
   setIsWorkspaceDialogOpen: React.Dispatch<React.SetStateAction<boolean>>
   handleOpenCreateWorkspace: () => void
+  handleOpenWorkspaceMembers: (workspace: Workspace) => void
   handleOpenEditWorkspace: (workspace: Workspace) => void
   handleArchiveWorkspace: (workspace: Workspace) => void | Promise<void>
   handleDeleteWorkspace: (workspace: Workspace) => void | Promise<void>
@@ -62,7 +65,9 @@ type SystemPageViewProps = {
   isTeamsLoading: boolean
   canCreateTeam: boolean
   canManageWorkspace: boolean
+  canManageTeamMembers: (team: Team) => boolean
   handleOpenCreateTeam: () => void
+  handleOpenTeamMembers: (team: Team) => void
   handleOpenEditTeam: (team: Team) => void
   handleArchiveTeam: (team: Team) => void | Promise<void>
   handleDeleteTeam: (team: Team) => void | Promise<void>
@@ -134,6 +139,10 @@ type SystemPageViewProps = {
   teamAdminCandidates: WorkspaceMember[]
   isTeamAdminCandidatesLoading: boolean
   handleTeamWorkspaceChange: (workspaceId: string) => void
+  workspaceMembersDialogProps: React.ComponentProps<
+    typeof WorkspaceMembersDialog
+  >
+  teamMembersDialogProps: React.ComponentProps<typeof TeamMembersDialog>
 }
 
 export function SystemPageView({
@@ -147,6 +156,7 @@ export function SystemPageView({
   onSelectWorkspace,
   setIsWorkspaceDialogOpen,
   handleOpenCreateWorkspace,
+  handleOpenWorkspaceMembers,
   handleOpenEditWorkspace,
   handleArchiveWorkspace,
   handleDeleteWorkspace,
@@ -155,7 +165,9 @@ export function SystemPageView({
   isTeamsLoading,
   canCreateTeam,
   canManageWorkspace,
+  canManageTeamMembers,
   handleOpenCreateTeam,
+  handleOpenTeamMembers,
   handleOpenEditTeam,
   handleArchiveTeam,
   handleDeleteTeam,
@@ -223,12 +235,14 @@ export function SystemPageView({
   teamAdminCandidates,
   isTeamAdminCandidatesLoading,
   handleTeamWorkspaceChange,
+  workspaceMembersDialogProps,
+  teamMembersDialogProps,
 }: SystemPageViewProps) {
   const { t } = useLanguage()
 
   return (
     <div className="grid min-w-0 gap-4 lg:h-[calc(100svh-9.25rem)] lg:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="lg:sticky lg:top-20 lg:h-full lg:self-start">
+      <aside className="min-w-0 lg:sticky lg:top-20 lg:h-full lg:self-start">
         <div
           role="tablist"
           aria-label={t("系统管理")}
@@ -272,6 +286,7 @@ export function SystemPageView({
             canCreateWorkspace={canCreateWorkspace}
             onSelectWorkspace={onSelectWorkspace}
             onOpenCreateWorkspace={handleOpenCreateWorkspace}
+            handleOpenWorkspaceMembers={handleOpenWorkspaceMembers}
             handleOpenEditWorkspace={handleOpenEditWorkspace}
             handleArchiveWorkspace={handleArchiveWorkspace}
             handleDeleteWorkspace={handleDeleteWorkspace}
@@ -285,7 +300,9 @@ export function SystemPageView({
             isTeamsLoading={isTeamsLoading}
             canCreateTeam={canCreateTeam}
             canManageWorkspace={canManageWorkspace}
+            canManageTeamMembers={canManageTeamMembers}
             handleOpenCreateTeam={handleOpenCreateTeam}
+            handleOpenTeamMembers={handleOpenTeamMembers}
             handleOpenEditTeam={handleOpenEditTeam}
             handleArchiveTeam={handleArchiveTeam}
             handleDeleteTeam={handleDeleteTeam}
@@ -326,6 +343,11 @@ export function SystemPageView({
             isWorkspaceMembersLoading={isWorkspaceMembersLoading}
             locale={locale}
             handleOpenCreateUser={handleOpenCreateUser}
+            handleOpenWorkspaceMembers={() => {
+              if (selectedWorkspace) {
+                handleOpenWorkspaceMembers(selectedWorkspace)
+              }
+            }}
           />
         ) : null}
 
@@ -402,6 +424,8 @@ export function SystemPageView({
         isTeamAdminCandidatesLoading={isTeamAdminCandidatesLoading}
         handleTeamWorkspaceChange={handleTeamWorkspaceChange}
       />
+      <WorkspaceMembersDialog {...workspaceMembersDialogProps} />
+      <TeamMembersDialog {...teamMembersDialogProps} />
     </div>
   )
 }
