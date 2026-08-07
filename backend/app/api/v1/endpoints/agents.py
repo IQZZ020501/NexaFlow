@@ -11,11 +11,16 @@ from app.application.agents import (
     create_agent,
     create_agent_run,
     delete_agent,
+    enqueue_prepared_agent_run,
     get_agent,
+    get_agent_run_entity,
+    get_agent_run_response,
     get_agent_response,
+    list_agent_run_tool_calls,
     list_agent_runs,
     list_agents,
     prepare_agent_run,
+    resolve_agent_tool_approval,
     stream_agent_run,
     update_agent,
 )
@@ -26,6 +31,7 @@ from app.schemas.agent import (
     AgentResponse,
     AgentRunCreateRequest,
     AgentRunResponse,
+    AgentToolCallResponse,
     AgentUpdateRequest,
 )
 
@@ -151,6 +157,41 @@ async def create_workspace_agent_run(
     )
 
 
+@router.get("/{agent_id}/runs/{run_id}", response_model=AgentRunResponse)
+async def get_workspace_agent_run(
+    agent_id: str,
+    run_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentRunResponse:
+    return await get_agent_run_response(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        context.user,
+    )
+
+
+@router.get(
+    "/{agent_id}/runs/{run_id}/tool-calls",
+    response_model=list[AgentToolCallResponse],
+)
+async def list_workspace_agent_run_tool_calls(
+    agent_id: str,
+    run_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[AgentToolCallResponse]:
+    return await list_agent_run_tool_calls(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        context.user,
+    )
+
+
 @router.post("/{agent_id}/runs/stream", response_class=StreamingResponse)
 async def stream_workspace_agent_run(
     agent_id: str,
@@ -166,8 +207,10 @@ async def stream_workspace_agent_run(
         payload.goal,
         context.user,
         context.membership_role,
-        persist=not payload.preview,
+        persist=True,
     )
+    await enqueue_prepared_agent_run(run.id, settings)
+    await db.rollback()
 
     async def encode_events() -> AsyncIterator[bytes]:
         async for event in stream_agent_run(
@@ -177,7 +220,7 @@ async def stream_workspace_agent_run(
             context.user,
             context.membership_role,
             settings,
-            persist=not payload.preview,
+            persist=True,
         ):
             yield (json.dumps(event, ensure_ascii=False) + "\n").encode()
 
@@ -185,4 +228,101 @@ async def stream_workspace_agent_run(
         encode_events(),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get(
+    "/{agent_id}/runs/{run_id}/stream",
+    response_class=StreamingResponse,
+)
+async def reconnect_workspace_agent_run(
+    agent_id: str,
+    run_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    after: Annotated[int, Query(ge=0)] = 0,
+    live_after: Annotated[str, Query(pattern=r"^[0-9]+-[0-9]+$")] = "0-0",
+) -> StreamingResponse:
+    await get_agent_run_response(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        context.user,
+    )
+    run = await get_agent_run_entity(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        context.user,
+    )
+    await db.rollback()
+
+    async def encode_events() -> AsyncIterator[bytes]:
+        async for event in stream_agent_run(
+            db,
+            run,
+            None,
+            context.user,
+            context.membership_role,
+            settings,
+            after=after,
+            live_after=live_after,
+        ):
+            yield (json.dumps(event, ensure_ascii=False) + "\n").encode()
+
+    return StreamingResponse(
+        encode_events(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post(
+    "/{agent_id}/runs/{run_id}/tool-calls/{call_id}/approve",
+    response_model=AgentRunResponse,
+)
+async def approve_workspace_agent_tool_call(
+    agent_id: str,
+    run_id: str,
+    call_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentRunResponse:
+    return await resolve_agent_tool_approval(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        call_id,
+        context.user,
+        settings,
+        approve=True,
+    )
+
+
+@router.post(
+    "/{agent_id}/runs/{run_id}/tool-calls/{call_id}/reject",
+    response_model=AgentRunResponse,
+)
+async def reject_workspace_agent_tool_call(
+    agent_id: str,
+    run_id: str,
+    call_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentRunResponse:
+    return await resolve_agent_tool_approval(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        call_id,
+        context.user,
+        settings,
+        approve=False,
     )

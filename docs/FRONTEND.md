@@ -51,15 +51,15 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/components/knowledge/status-labels.ts` — 状态中文标签与状态点样式映射
 
 **agents/**（Agent 功能）
-- `frontend/components/agents/agents-page.tsx` — Agent 列表与 CRUD、运行流编排
-- `frontend/components/agents/agent-detail-workspace.tsx` — 运行工作台：对话、计划、工具事件流
-- `frontend/components/agents/agent-config-fields.tsx` — 配置表单字段（模型/知识库/MCP 工具）
+- `frontend/components/agents/agents-page.tsx` — Agent CRUD、持久 Run 提交、PostgreSQL/Redis 双游标重连、实时答案与审批状态合并
+- `frontend/components/agents/agent-detail-workspace.tsx` — 运行工作台：过程事件、待审批/不确定工具调用处理
+- `frontend/components/agents/agent-config-fields.tsx` — 配置表单字段（模型、显式知识检索策略、知识库/MCP）
 
 **llm/**（模型功能）
 - `frontend/components/llm/llm-page.tsx` — 模型管理页：注册模型 CRUD、凭据、目录浏览
 
 **tools/**（工具功能）
-- `frontend/components/tools/mcp-tools-page.tsx` — MCP Server 列表/CRUD/刷新/工具查看
+- `frontend/components/tools/mcp-tools-page.tsx` — MCP Server 管理与管理员工具执行策略审核
 
 **system/**（系统管理功能）
 - `frontend/components/system/system-shell.tsx` — 系统管理壳：数据加载、CRUD 编排、Tab 切换
@@ -123,9 +123,9 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 **lib/api/**（按域划分的 API 客户端）
 - `frontend/lib/api/auth.ts` — 认证 API：登录/登出/me/刷新/改密
 - `frontend/lib/api/knowledge.ts` — 知识库 API：知识库/文档/任务/chunk/检索
-- `frontend/lib/api/agents.ts` — Agent API：CRUD、运行、流式运行
+- `frontend/lib/api/agents.ts` — Agent API：CRUD、Run 提交/游标订阅/自动重连、工具审批
 - `frontend/lib/api/llm.ts` — 模型 API：目录、注册模型 CRUD、凭据
-- `frontend/lib/api/mcp.ts` — MCP Server API：CRUD、刷新、工具列表
+- `frontend/lib/api/mcp.ts` — MCP Server API：CRUD、刷新、工具列表与执行策略
 - `frontend/lib/api/system.ts` — 系统管理 API：工作空间/团队/用户/审计
 
 ### tests/（bun 测试）

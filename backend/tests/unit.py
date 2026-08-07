@@ -412,12 +412,239 @@ def test_safe_agent_error_classification() -> None:
     assert safe_agent_error(ValueError("other")) == "Agent execution failed."
 
 
+def test_agent_process_events_update_in_place() -> None:
+    from app.application.agent_executor import (
+        _completed_process_events,
+        _upsert_process_event,
+    )
+
+    knowledge = {"type": "tool", "turn": 0, "call_id": "knowledge"}
+    thought = {
+        "type": "thought",
+        "turn": 1,
+        "tool_name": "",
+        "summary": "agent.answer_ready",
+    }
+    tool = {"type": "tool", "turn": 1, "call_id": "mcp"}
+    events = [knowledge, thought, tool]
+
+    updated_thought = {**thought, "summary": "agent.tools_selected"}
+    _upsert_process_event(events, updated_thought)
+
+    assert events == [knowledge, updated_thought, tool]
+
+    first_running = {
+        "type": "tool",
+        "turn": 2,
+        "call_id": "first",
+        "status": "running",
+    }
+    second_running = {
+        "type": "tool",
+        "turn": 2,
+        "call_id": "second",
+        "status": "running",
+    }
+    parallel_events: list[dict] = []
+    for event in (first_running, second_running):
+        _upsert_process_event(parallel_events, event)
+    _upsert_process_event(parallel_events, {**second_running, "status": "succeeded"})
+    _upsert_process_event(parallel_events, {**first_running, "status": "succeeded"})
+
+    completed = _completed_process_events(parallel_events)
+    assert [event["call_id"] for event in completed] == ["first", "second"]
+
+
+def test_agent_event_replay_reads_every_page() -> None:
+    from app.application import agent_executor
+
+    rows = [
+        SimpleNamespace(id=index)
+        for index in range(1, agent_executor.AGENT_EVENT_REPLAY_PAGE_SIZE + 3)
+    ]
+    calls: list[tuple[int, int]] = []
+
+    async def list_events(_db, _run_id, after=0, limit=200):
+        calls.append((after, limit))
+        return [row for row in rows if row.id > after][:limit]
+
+    original_list_events = agent_executor.agent_repository.list_agent_run_events
+    agent_executor.agent_repository.list_agent_run_events = list_events
+    try:
+        replayed = asyncio.run(
+            agent_executor._list_all_agent_run_events(
+                SimpleNamespace(),
+                "run-1",
+            )
+        )
+    finally:
+        agent_executor.agent_repository.list_agent_run_events = original_list_events
+
+    assert replayed == rows
+    assert calls == [
+        (0, agent_executor.AGENT_EVENT_REPLAY_PAGE_SIZE),
+        (
+            agent_executor.AGENT_EVENT_REPLAY_PAGE_SIZE,
+            agent_executor.AGENT_EVENT_REPLAY_PAGE_SIZE,
+        ),
+    ]
+
+
+def test_stale_mcp_policy_requires_approval() -> None:
+    from app.application import agent_executor
+    from app.entities.agents import AgentRun
+    from app.entities.tools import McpToolPolicy
+    from app.shareddomain.agents.runtime import AgentExecutionPaused
+
+    created_calls = []
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def commit(self):
+            return None
+
+    async def get_policy(*_args, **_kwargs):
+        return McpToolPolicy(
+            definition_hash="stale-definition",
+            mode="read_only",
+        )
+
+    async def get_call(*_args, **_kwargs):
+        return None
+
+    async def create_call(_db, call):
+        created_calls.append(call)
+        return call
+
+    original_factory = agent_executor.get_session_factory
+    original_get_policy = agent_executor.get_mcp_tool_policy
+    original_get_call = agent_executor.agent_repository.get_agent_tool_call
+    original_create_call = agent_executor.agent_repository.create_agent_tool_call
+    agent_executor.get_session_factory = lambda: lambda: FakeSession()
+    agent_executor.get_mcp_tool_policy = get_policy
+    agent_executor.agent_repository.get_agent_tool_call = get_call
+    agent_executor.agent_repository.create_agent_tool_call = create_call
+
+    async def assert_paused() -> None:
+        ledger = agent_executor.DurableToolLedger(
+            AgentRun(id="run-1", workspace_id="ws-1"),
+            "worker-1",
+            SimpleNamespace(),
+            asyncio.Event(),
+        )
+        try:
+            await ledger.before(
+                1,
+                {"id": "call-1", "name": "mcp_search", "arguments": "{}"},
+                {
+                    "kind": "mcp",
+                    "server_name": "Search",
+                    "server_id": "server-1",
+                    "source_tool_name": "search",
+                    "definition_hash": "current-definition",
+                    "policy_mode": "read_only",
+                },
+                {},
+            )
+        except AgentExecutionPaused as exc:
+            assert exc.call_id == "call-1"
+            return
+        raise AssertionError("stale read-only policy did not require approval")
+
+    try:
+        asyncio.run(assert_paused())
+    finally:
+        agent_executor.get_session_factory = original_factory
+        agent_executor.get_mcp_tool_policy = original_get_policy
+        agent_executor.agent_repository.get_agent_tool_call = original_get_call
+        agent_executor.agent_repository.create_agent_tool_call = original_create_call
+
+    assert created_calls[0].policy_mode == "approval_required"
+    assert created_calls[0].approval_required is True
+
+
+def test_mcp_policy_concurrent_first_write_reloads_existing() -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    from app.entities.tools import McpToolPolicy
+    from app.infrastructure.model_utils import utc_now
+    from app.infrastructure.repositories import mcp as mcp_repository
+    from app.shareddomain.tools.models import McpToolPolicy as McpToolPolicyOrm
+
+    now = utc_now()
+    existing = McpToolPolicyOrm(
+        id="policy-existing",
+        workspace_id="ws-1",
+        mcp_server_id="server-1",
+        tool_name="search",
+        definition_hash="old-definition",
+        mode="approval_required",
+        reviewed_by_user_id="user-old",
+        reviewed_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+
+    class FakeSavepoint:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.scalar_calls = 0
+            self.flush_calls = 0
+
+        async def scalar(self, _statement):
+            self.scalar_calls += 1
+            return None if self.scalar_calls == 1 else existing
+
+        def begin_nested(self):
+            return FakeSavepoint()
+
+        def add(self, _row):
+            return None
+
+        async def flush(self):
+            self.flush_calls += 1
+            if self.flush_calls == 1:
+                raise IntegrityError("insert", {}, Exception("unique"))
+
+    async def save_policy() -> McpToolPolicy:
+        return await mcp_repository.save_mcp_tool_policy(
+            FakeSession(),  # type: ignore[arg-type]
+            McpToolPolicy(
+                workspace_id="ws-1",
+                mcp_server_id="server-1",
+                tool_name="search",
+                definition_hash="current-definition",
+                mode="read_only",
+                reviewed_by_user_id="user-new",
+                reviewed_at=now,
+            ),
+        )
+
+    saved = asyncio.run(save_policy())
+    assert saved.id == "policy-existing"
+    assert saved.definition_hash == "current-definition"
+    assert saved.mode == "read_only"
+    assert saved.reviewed_by_user_id == "user-new"
+    assert saved.created_at == now
+
+
 def test_mcp_function_name_is_stable_and_sanitized() -> None:
     import hashlib
 
     from mcp.types import Tool as McpTool
 
-    from app.application.agent_tools import mcp_function_name
+    from app.application.agent_tools import build_mcp_agent_tool, mcp_function_name
     from app.entities.tools import McpServer
     from app.shareddomain.tools.services import ResolvedMcpTool
 
@@ -428,6 +655,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
             name="order items!",
             input_schema={"type": "object"},
             description="",
+            annotations={"readOnlyHint": True, "destructiveHint": False},
         ),
     )
     name = mcp_function_name(tool)
@@ -436,6 +664,9 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
     assert name == f"mcp_order_items_{digest}"
     # deterministic for the same server/tool pair
     assert mcp_function_name(tool) == name
+    built = build_mcp_agent_tool(tool, SimpleNamespace())
+    assert built.metadata is not None
+    assert built.metadata["policy_mode"] == "read_only"
 
 
 def test_run_to_response_maps_run_fields() -> None:
@@ -470,8 +701,12 @@ def test_run_to_response_maps_run_fields() -> None:
 
 
 def test_mcp_server_to_response() -> None:
-    from app.entities.tools import McpServer
-    from app.shareddomain.tools.services import mcp_server_to_response
+    from app.entities.tools import McpServer, McpToolPolicy
+    from app.shareddomain.tools.services import (
+        mcp_server_to_response,
+        mcp_tool_definition_hash,
+    )
+    from mcp.types import Tool as McpTool
 
     server = McpServer(
         id="mcp-1",
@@ -480,18 +715,188 @@ def test_mcp_server_to_response() -> None:
         url="https://tools.example.com/mcp",
         bearer_token_ciphertext="cipher",
         bearer_token_hint="abcd",
-        tools=[],
+        tools=[
+            {
+                "name": "search",
+                "description": "Search public records.",
+                "input_schema": {"type": "object"},
+                "annotations": {
+                    "readOnlyHint": True,
+                    "destructiveHint": False,
+                },
+            },
+            {
+                "name": "unknown",
+                "description": "Unclassified operation.",
+                "input_schema": {"type": "object"},
+            },
+        ],
         status="active",
         last_error=None,
         created_by_user_id="user-1",
     )
-    response = mcp_server_to_response(server)
+    stale_policy = McpToolPolicy(
+        workspace_id="ws-1",
+        mcp_server_id="mcp-1",
+        tool_name="search",
+        definition_hash="stale",
+        mode="read_only",
+    )
+    response = mcp_server_to_response(server, [stale_policy])
     assert response.id == "mcp-1"
     assert response.workspace_id == "ws-1"
     assert response.url == "https://tools.example.com/mcp"
     assert response.has_bearer_token is True
     assert response.bearer_token_hint == "abcd"
-    assert response.tools == []
+    assert response.tools[0].policy_mode == "approval_required"
+    assert response.tools[1].policy_mode == "approval_required"
+
+    response = mcp_server_to_response(server)
+    assert response.tools[0].policy_mode == "read_only"
+    assert response.tools[1].policy_mode == "approval_required"
+    assert response.tools[0].definition_hash == mcp_tool_definition_hash(
+        McpTool(
+            name="search",
+            description="Search public records.",
+            input_schema={"type": "object"},
+            annotations={"readOnlyHint": True, "destructiveHint": False},
+        )
+    )
+
+
+def test_celery_worker_pool_is_fork_safe_on_macos() -> None:
+    from app.infrastructure.celery import worker_pool_for_platform
+
+    assert worker_pool_for_platform("darwin") == "solo"
+    assert worker_pool_for_platform("linux") == "prefork"
+
+
+def test_agent_live_stream_round_trip() -> None:
+    from app.infrastructure import agent_live_stream
+    from tests.support import settings
+
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.entries: list[tuple[str, dict[str, str]]] = []
+            self.expirations: list[tuple[str, int]] = []
+            self.read_blocks: list[int] = []
+
+        async def xadd(self, name, fields, **kwargs):
+            entry_id = f"1700000000000-{len(self.entries)}"
+            self.entries.append((entry_id, fields))
+            assert name == agent_live_stream.live_stream_key("run-1")
+            assert kwargs["maxlen"] == agent_live_stream.LIVE_STREAM_MAXLEN
+            return entry_id
+
+        async def expire(self, name, seconds):
+            self.expirations.append((name, seconds))
+            return True
+
+        def pipeline(self, transaction=False):
+            assert transaction is False
+            redis = self
+
+            class FakePipeline:
+                def __init__(self) -> None:
+                    self.commands = []
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, exc_type, exc, traceback):
+                    return False
+
+                def xadd(self, *args, **kwargs):
+                    self.commands.append(("xadd", args, kwargs))
+
+                def expire(self, *args, **kwargs):
+                    self.commands.append(("expire", args, kwargs))
+
+                async def execute(self):
+                    results = []
+                    for name, args, kwargs in self.commands:
+                        results.append(await getattr(redis, name)(*args, **kwargs))
+                    return results
+
+            return FakePipeline()
+
+        async def xread(self, streams, **kwargs):
+            self.read_blocks.append(kwargs["block"])
+            name, cursor = next(iter(streams.items()))
+            return [
+                (
+                    name,
+                    [entry for entry in self.entries if entry[0] > cursor],
+                )
+            ]
+
+        async def aclose(self):
+            return None
+
+    async def assert_round_trip() -> None:
+        fake = FakeRedis()
+        original_client = agent_live_stream._redis_client
+        agent_live_stream._redis_client = lambda _settings: fake
+        try:
+            publisher = agent_live_stream.AgentLiveStreamPublisher(
+                settings(),
+                "run-1",
+            )
+            await publisher.publish({"type": "process", "event": {}})
+            await publisher.publish(
+                {
+                    "type": "answer_delta",
+                    "delta": "hello",
+                    "stream_epoch": "worker-1",
+                }
+            )
+            await publisher.publish(
+                {
+                    "type": "reasoning_delta",
+                    "delta": "thinking",
+                    "stream_epoch": "worker-1",
+                }
+            )
+            reader = agent_live_stream.AgentLiveStreamReader(settings(), "run-1")
+            events = await reader.read(
+                "0-0",
+                agent_live_stream.LIVE_STREAM_MAX_BLOCK_MS + 1000,
+            )
+            await publisher.close()
+            await reader.close()
+        finally:
+            agent_live_stream._redis_client = original_client
+        assert events == [
+            (
+                "1700000000000-0",
+                {
+                    "type": "answer_delta",
+                    "delta": "hello",
+                    "stream_epoch": "worker-1",
+                },
+            ),
+            (
+                "1700000000000-1",
+                {
+                    "type": "reasoning_delta",
+                    "delta": "thinking",
+                    "stream_epoch": "worker-1",
+                },
+            ),
+        ]
+        assert fake.expirations == [
+            (
+                agent_live_stream.live_stream_key("run-1"),
+                agent_live_stream.LIVE_STREAM_TTL_SECONDS,
+            ),
+            (
+                agent_live_stream.live_stream_key("run-1"),
+                agent_live_stream.LIVE_STREAM_TTL_SECONDS,
+            ),
+        ]
+        assert fake.read_blocks == [agent_live_stream.LIVE_STREAM_MAX_BLOCK_MS]
+
+    asyncio.run(assert_round_trip())
 
 
 def test_team_to_response() -> None:
@@ -612,9 +1017,15 @@ def main() -> None:
     test_provider_credentials_aws_pairing_rule()
     test_run_knowledge_model_test_uses_injected_providers()
     test_safe_agent_error_classification()
+    test_agent_process_events_update_in_place()
+    test_agent_event_replay_reads_every_page()
+    test_stale_mcp_policy_requires_approval()
+    test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()
     test_mcp_server_to_response()
+    test_celery_worker_pool_is_fork_safe_on_macos()
+    test_agent_live_stream_round_trip()
     test_team_to_response()
     test_knowledge_document_and_attachment_response_mapping()
     test_knowledge_base_to_response()

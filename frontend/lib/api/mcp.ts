@@ -4,7 +4,12 @@ export type McpTool = {
   name: string
   description: string
   input_schema: Record<string, unknown>
+  annotations: Record<string, unknown> | null
+  definition_hash: string
+  policy_mode: McpToolPolicyMode
 }
+
+export type McpToolPolicyMode = "approval_required" | "read_only" | "disabled"
 
 export type McpServer = {
   id: string
@@ -61,4 +66,32 @@ export function deleteMcpServer(
     method: "DELETE",
     token,
   })
+}
+
+export function updateMcpToolPolicy(
+  token: string,
+  workspaceId: string,
+  serverId: string,
+  toolName: string,
+  mode: McpToolPolicyMode
+) {
+  return request<{
+    workspace_id: string
+    mcp_server_id: string
+    tool_name: string
+    definition_hash: string
+    mode: McpToolPolicyMode
+    reviewed_by_user_id: string | null
+    reviewed_at: string | null
+  }>(
+    mcpPath(
+      workspaceId,
+      `/${serverId}/tools/${encodeURIComponent(toolName)}/policy`
+    ),
+    {
+      method: "PUT",
+      token,
+      body: JSON.stringify({ mode }),
+    }
+  )
 }

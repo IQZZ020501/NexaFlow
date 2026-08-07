@@ -1,3 +1,5 @@
+import sys
+
 from celery import Celery
 from celery.signals import task_failure
 
@@ -6,6 +8,10 @@ from app.infrastructure.errors import log_error
 from app.infrastructure.logger import get_logger, setup_logging
 
 logger = get_logger("celery")
+
+
+def worker_pool_for_platform(platform: str) -> str:
+    return "solo" if platform == "darwin" else "prefork"
 
 
 @task_failure.connect
@@ -32,7 +38,7 @@ def create_celery_app() -> Celery:
     app = Celery(
         "app",
         broker=settings.celery_broker_url,
-        include=["app.tasks.knowledge"],
+        include=["app.tasks.knowledge", "app.tasks.agents"],
     )
     app.conf.update(
         accept_content=["json"],
@@ -40,11 +46,16 @@ def create_celery_app() -> Celery:
         task_ignore_result=True,
         task_reject_on_worker_lost=True,
         task_serializer="json",
+        worker_pool=worker_pool_for_platform(sys.platform),
         worker_prefetch_multiplier=1,
         beat_schedule={
             "recover-knowledge-storage-cleanups": {
                 "task": "app.knowledge.recover_storage_cleanups",
                 "schedule": 60.0,
+            },
+            "recover-agent-runs": {
+                "task": "app.agents.recover",
+                "schedule": 30.0,
             },
         },
     )

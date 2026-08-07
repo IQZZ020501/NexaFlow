@@ -6,6 +6,7 @@ from app.shareddomain.tools.services import (
     get_mcp_server,
     list_mcp_servers,
     refresh_mcp_server,
+    set_mcp_tool_policy,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "get_mcp_server",
     "list_mcp_servers",
     "refresh_mcp_server",
+    "set_mcp_tool_policy",
 ]

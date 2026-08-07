@@ -36,6 +36,11 @@ the bundled services, connects the API and worker to the bundled Qdrant through
 `QDRANT_URL`, and mounts the uploads volume for `KNOWLEDGE_STORAGE_DIR`.
 `JWT_EXPIRES_MINUTES` controls access token lifetime;
 `REFRESH_TOKEN_EXPIRES_DAYS` controls persisted refresh sessions.
+`AGENT_EXECUTOR_LEASE_SECONDS` and `AGENT_EXECUTOR_HEARTBEAT_SECONDS` control
+Agent worker takeover; keep the heartbeat below half the lease. Keep exactly
+one `beat` instance running so queued and expired Agent runs are redispatched.
+Celery uses `solo` automatically on macOS because HTTPS trust evaluation is
+unsafe after a multithreaded process fork; Linux containers keep `prefork`.
 
 ## Split hosting with Nginx
 
@@ -73,5 +78,13 @@ docker compose -f deploy/docker-compose.yml run --rm api alembic upgrade head
 - Bootstrap admin credentials come from env values, never code defaults.
 - Keep `JWT_SECRET_KEY` / `MODEL_SECRET_KEY` stable across restarts;
   rotating them invalidates sessions and encrypted model credentials.
+- Agent HTTP streams are observers, not executors: disconnecting a client does
+  not cancel the database-backed run. The API and worker must share PostgreSQL
+  and Redis for checkpoint, approval, lease recovery, and short-lived answer
+  delta delivery. Redis live-stream failure degrades to the durable terminal
+  answer rather than failing the Run.
+- Side-effect MCP tools require approval by default. Only tools reviewed by a
+  workspace admin as read-only can auto-run; keep `MCP_ALLOW_PRIVATE_NETWORKS`
+  false unless the deployment intentionally permits trusted internal servers.
 - Kubernetes/Helm deployment is not included yet; the compose topology is the
   reference for a future chart.

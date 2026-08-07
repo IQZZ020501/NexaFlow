@@ -35,7 +35,9 @@ import {
   deleteMcpServer,
   listMcpServers,
   refreshMcpServer,
+  updateMcpToolPolicy,
   type McpServer,
+  type McpToolPolicyMode,
 } from "@/lib/api/mcp"
 import { getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
@@ -187,6 +189,67 @@ export function McpToolsPage() {
     }
   }
 
+  async function handlePolicyChange(
+    server: McpServer,
+    toolName: string,
+    mode: McpToolPolicyMode,
+    select: HTMLSelectElement
+  ) {
+    const restore = () => {
+      select.value =
+        server.tools.find((tool) => tool.name === toolName)?.policy_mode ??
+        "approval_required"
+    }
+    if (!token || !selectedWorkspaceId || busyServerId) {
+      restore()
+      return
+    }
+    if (
+      mode === "read_only" &&
+      !window.confirm(
+        t("确认将工具“{name}”标记为只读并允许自动执行吗？", {
+          name: toolName,
+        })
+      )
+    ) {
+      restore()
+      return
+    }
+    setBusyServerId(server.id)
+    try {
+      const policy = await updateMcpToolPolicy(
+        token,
+        selectedWorkspaceId,
+        server.id,
+        toolName,
+        mode
+      )
+      setServers((current) =>
+        current.map((item) =>
+          item.id === server.id
+            ? {
+                ...item,
+                tools: item.tools.map((tool) =>
+                  tool.name === toolName
+                    ? {
+                        ...tool,
+                        policy_mode: policy.mode,
+                        definition_hash: policy.definition_hash,
+                      }
+                    : tool
+                ),
+              }
+            : item
+        )
+      )
+      notify("success", t("MCP 工具策略已更新"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setBusyServerId(null)
+    }
+  }
+
   return (
     <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -314,9 +377,46 @@ export function McpToolsPage() {
                   <div className="mt-2 divide-y rounded-md border">
                     {server.tools.map((tool) => (
                       <div key={tool.name} className="px-3 py-2">
-                        <p className="font-mono text-xs font-medium">
-                          {tool.name}
-                        </p>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-mono text-xs font-medium">
+                            {tool.name}
+                          </p>
+                          {canManage ? (
+                            <select
+                              value={tool.policy_mode}
+                              className="h-8 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              aria-label={t("工具执行策略")}
+                              disabled={busyServerId !== null}
+                              onChange={(event) =>
+                                void handlePolicyChange(
+                                  server,
+                                  tool.name,
+                                  event.currentTarget
+                                    .value as McpToolPolicyMode,
+                                  event.currentTarget
+                                )
+                              }
+                            >
+                              <option value="approval_required">
+                                {t("每次调用前审批")}
+                              </option>
+                              <option value="read_only">
+                                {t("只读自动执行")}
+                              </option>
+                              <option value="disabled">{t("禁用")}</option>
+                            </select>
+                          ) : (
+                            <Badge variant="outline">
+                              {t(
+                                tool.policy_mode === "read_only"
+                                  ? "只读自动执行"
+                                  : tool.policy_mode === "disabled"
+                                    ? "禁用"
+                                    : "每次调用前审批"
+                              )}
+                            </Badge>
+                          )}
+                        </div>
                         {tool.description ? (
                           <p className="mt-1 text-xs leading-5 text-muted-foreground">
                             {tool.description}
@@ -342,9 +442,7 @@ export function McpToolsPage() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
-              <p className="text-sm font-medium">
-                {t("从内置预设快速填写")}
-              </p>
+              <p className="text-sm font-medium">{t("从内置预设快速填写")}</p>
               <p className="text-xs text-muted-foreground">
                 {t("点击预设自动填写名称和地址。")}
               </p>
@@ -354,7 +452,7 @@ export function McpToolsPage() {
                 <button
                   key={preset.url}
                   type="button"
-                  className="group flex w-full items-start gap-3 rounded-lg border bg-background p-3.5 text-left outline-none transition-[border-color,background-color,box-shadow] hover:border-primary/50 hover:bg-muted/40 hover:shadow-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="group flex w-full items-start gap-3 rounded-lg border bg-background p-3.5 text-left transition-[border-color,background-color,box-shadow] outline-none hover:border-primary/50 hover:bg-muted/40 hover:shadow-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                   onClick={() => handleUsePreset(preset)}
                 >
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-foreground transition-colors group-hover:text-primary">

@@ -2,10 +2,12 @@ import asyncio
 import json
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
+from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from types import SimpleNamespace
 
+from fastapi import HTTPException
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.messages.tool import tool_call_chunk
 from langchain_core.tools import StructuredTool
@@ -22,7 +24,7 @@ from tests.support import (  # noqa: F401  (sets required env before app imports
     test_client,
 )
 
-from app.application import agent_runs, agent_tools
+from app.application import agent_executor, agent_runs, agent_tools
 from app.application import agents as agent_application
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import user as user_repository
@@ -39,9 +41,13 @@ from app.capabilities.mcp.client import (
     normalize_mcp_url,
 )
 from app.schemas.knowledge import KnowledgeQueryHitResponse
+from app.entities.agents import AgentToolCall
+from app.entities.knowledge import KnowledgeBase
 from app.infrastructure.session import get_session_factory
+from app.infrastructure.model_utils import utc_now
 from app.infrastructure.system_log import SystemLog
 from app.shareddomain.agents.runtime import (
+    AgentExecutionPaused,
     AgentRunnerError,
     AgentToolResult,
     create_agent_tool,
@@ -353,6 +359,41 @@ class RepeatedToolProvider:
         )
 
 
+class FinalTurnAwareProvider:
+    """Model stub that answers when the runtime removes tools on the last turn."""
+
+    def __init__(self, tool_name: str) -> None:
+        self.tool_name = tool_name
+        self.turn = 0
+        self.bound_tool_names: list[tuple[str, ...]] = []
+
+    def bind_tools(self, tools, *_args, **_kwargs):
+        self.bound_tool_names.append(tuple(tool.name for tool in tools))
+        return self
+
+    async def ainvoke(self, _messages: list[BaseMessage]) -> AIMessage:
+        self.turn += 1
+        if self.turn < agent_graph_module.MAX_AGENT_TURNS:
+            return completion_message(
+                ModelCompletion(
+                    content="",
+                    tool_calls=(
+                        ModelToolCall(
+                            f"call-{self.turn}",
+                            self.tool_name,
+                            "{}",
+                        ),
+                    ),
+                    finish_reason="tool_calls",
+                )
+            )
+        return completion_message(
+            ModelCompletion(
+                content="Final answer.", tool_calls=(), finish_reason="stop"
+            )
+        )
+
+
 class HangingStreamingProvider:
     def bind_tools(self, *_args, **_kwargs):
         return self
@@ -394,6 +435,33 @@ async def assert_hanging_model_stream_times_out() -> None:
             del agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS
         else:
             agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS = original_timeout
+
+
+async def assert_required_knowledge_timeout_is_unavailable() -> None:
+    async def execute(_arguments: str) -> AgentToolResult:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    result = await agent_executor._invoke_required_knowledge(
+        create_agent_tool(
+            name="search_knowledge",
+            description="Test required knowledge timeout",
+            parameters={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+            execute=execute,
+        ),
+        "bounded query",
+        0.01,
+    )
+    assert result.is_error is True
+    assert result.output == {
+        "query": "bounded query",
+        "hits": [],
+        "evidence_status": "unavailable",
+    }
 
 
 async def assert_truncated_tool_call_is_not_executed() -> None:
@@ -465,6 +533,109 @@ async def assert_invalid_tool_arguments_are_not_executed() -> None:
     assert executions == 0
 
 
+async def assert_invalid_tool_call_ids_are_not_executed() -> None:
+    executions = 0
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(content="ok", summary="ok")
+
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("", "test_tool", "{}"),),
+                finish_reason="tool_calls",
+            )
+        ]
+    )
+    try:
+        await run_agent(
+            provider,  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [
+                create_agent_tool(
+                    name="test_tool",
+                    description="Test tool",
+                    parameters={"type": "object"},
+                    execute=execute,
+                )
+            ],
+        )
+    except AgentRunnerError as exc:
+        assert str(exc) == "Agent model returned invalid tool call identifiers."
+    else:
+        raise AssertionError("Agent accepted an empty tool call identifier.")
+    assert executions == 0
+
+
+async def assert_checkpoint_reuses_durable_tool_result() -> None:
+    executions = 0
+    checkpoint: dict | None = None
+    stored_result: AgentToolResult | None = None
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(content="stored", summary="stored")
+
+    async def save_checkpoint(value: dict, _phase: str) -> None:
+        nonlocal checkpoint
+        checkpoint = value
+
+    async def before_tool_call(*_args):
+        return stored_result
+
+    async def save_then_crash(*args) -> None:
+        nonlocal stored_result
+        stored_result = args[-1]
+        raise RuntimeError("worker crashed after recording the tool result")
+
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "test_tool", "{}"),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    tool = create_agent_tool(
+        name="test_tool",
+        description="Test tool",
+        parameters={"type": "object"},
+        execute=execute,
+    )
+    try:
+        await run_agent(
+            provider,  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [tool],
+            on_checkpoint=save_checkpoint,
+            before_tool_call=before_tool_call,
+            after_tool_call=save_then_crash,
+        )
+    except RuntimeError as exc:
+        assert "after recording" in str(exc)
+    else:
+        raise AssertionError("Synthetic worker crash did not stop the first run.")
+
+    assert checkpoint is not None
+    assert checkpoint["pending_tool_calls"][0]["id"] == "call-1"
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [tool],
+        checkpoint=checkpoint,
+        before_tool_call=before_tool_call,
+        after_tool_call=save_then_crash,
+    )
+    assert result.content == "Done."
+    assert executions == 1
+
+
 async def assert_tool_error_returns_to_model() -> None:
     async def execute(_arguments: str) -> AgentToolResult:
         raise RuntimeError("private tool failure")
@@ -493,6 +664,177 @@ async def assert_tool_error_returns_to_model() -> None:
     )
     assert result.content == "Recovered."
     assert result.events[0]["status"] == "failed"
+
+
+async def assert_tool_timeout_returns_to_model() -> None:
+    async def execute(_arguments: str) -> AgentToolResult:
+        await asyncio.Event().wait()
+        return AgentToolResult(content="unreachable", summary="unreachable")
+
+    original_timeout = agent_graph_module.TOOL_RESPONSE_TIMEOUT_SECONDS
+    agent_graph_module.TOOL_RESPONSE_TIMEOUT_SECONDS = 0.01
+    try:
+        result = await run_agent(
+            SequenceProvider(
+                [
+                    ModelCompletion(
+                        content="",
+                        tool_calls=(ModelToolCall("call-1", "slow_tool", "{}"),),
+                        finish_reason="tool_calls",
+                    ),
+                    ModelCompletion(
+                        content="Recovered after timeout.",
+                        tool_calls=(),
+                        finish_reason="stop",
+                    ),
+                ]
+            ),  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [
+                create_agent_tool(
+                    name="slow_tool",
+                    description="Slow tool",
+                    parameters={"type": "object"},
+                    execute=execute,
+                )
+            ],
+        )
+    finally:
+        agent_graph_module.TOOL_RESPONSE_TIMEOUT_SECONDS = original_timeout
+
+    assert result.content == "Recovered after timeout."
+    assert result.events[0]["status"] == "failed"
+    assert result.events[0]["summary"] == "Tool execution timed out."
+
+
+async def assert_knowledge_source_failure_is_attributed() -> None:
+    knowledge_bases = [
+        KnowledgeBase(id="base-failed", workspace_id="workspace-1", name="Failed"),
+        KnowledgeBase(id="base-healthy", workspace_id="workspace-1", name="Healthy"),
+    ]
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class FakeSessionFactory:
+        def __call__(self):
+            return FakeSession()
+
+    original_factory = agent_tools.get_session_factory
+    original_accessible = agent_tools.accessible_agent_knowledge_bases
+    original_query = agent_tools.query_knowledge_base
+
+    async def fake_accessible(*_args, **_kwargs):
+        return knowledge_bases
+
+    async def fake_query(_db, knowledge_base, _payload, _settings):
+        if knowledge_base.id == "base-failed":
+            raise HTTPException(status_code=503, detail="source unavailable")
+        return [
+            KnowledgeQueryHitResponse(
+                chunk_id="healthy-chunk",
+                document_id="healthy-document",
+                document_filename="healthy.md",
+                chunk_index=0,
+                content="Grounded answer.",
+                distance=0.1,
+            )
+        ]
+
+    agent_tools.get_session_factory = lambda: FakeSessionFactory()
+    agent_tools.accessible_agent_knowledge_bases = fake_accessible
+    agent_tools.query_knowledge_base = fake_query
+    try:
+        tool = agent_tools.build_knowledge_search_tool(
+            knowledge_bases,
+            "workspace-1",
+            SimpleNamespace(id="user-1"),  # type: ignore[arg-type]
+            None,
+            test_settings(),
+        )
+        result = await tool.ainvoke({"query": "grounded"})
+    finally:
+        agent_tools.get_session_factory = original_factory
+        agent_tools.accessible_agent_knowledge_bases = original_accessible
+        agent_tools.query_knowledge_base = original_query
+
+    assert isinstance(result, AgentToolResult)
+    assert result.output["retrieval_stats"][0]["status"] == "unavailable"
+    assert result.output["retrieval_stats"][1]["status"] == "available"
+
+
+def assert_tool_routing_context_is_explicit() -> None:
+    knowledge_base = KnowledgeBase(
+        workspace_id="workspace-1",
+        name="Release Docs",
+        description="Approved deployment and rollback procedures.",
+    )
+    run = SimpleNamespace(
+        instructions="Use available sources.",
+        goal="What is the release process?",
+    )
+    messages = agent_runs.execution_messages(
+        run,  # type: ignore[arg-type]
+        True,
+        True,
+        knowledge_scope=agent_tools.describe_knowledge_sources([knowledge_base]),
+    )
+    system = messages[0]["content"]
+    assert "search_knowledge: first choice for workspace-specific" in system
+    assert "MCP tools: use only for current or external data" in system
+    assert "Release Docs" in system
+    assert "answer immediately without tools" not in system
+
+    no_knowledge_system = agent_runs.execution_messages(
+        run,  # type: ignore[arg-type]
+        False,
+        True,
+        knowledge_query_mode="required",
+    )[0]["content"]
+    assert "workspace retrieval was performed" not in no_knowledge_system
+    assert "No workspace knowledge source is available" in no_knowledge_system
+
+    tool = agent_tools.build_knowledge_search_tool(
+        [knowledge_base],
+        "workspace-1",
+        SimpleNamespace(id="user-1"),  # type: ignore[arg-type]
+        None,
+        test_settings(),
+    )
+    assert "Release Docs" in tool.description
+    assert (
+        "Do not use for general knowledge or current external facts" in tool.description
+    )
+
+
+async def assert_final_turn_removes_tools() -> None:
+    executions = 0
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(content="ok", summary="ok")
+
+    provider = FinalTurnAwareProvider("test_tool")
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [
+            create_agent_tool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"type": "object"},
+                execute=execute,
+            )
+        ],
+    )
+    assert result.content == "Final answer."
+    assert executions == agent_graph_module.MAX_AGENT_TURNS - 1
+    assert len(provider.bound_tool_names) == agent_graph_module.MAX_AGENT_TURNS - 1
 
 
 
@@ -609,6 +951,36 @@ async def assert_parallel_policy_is_enforced() -> None:
         [serial_tool],
     )
     assert max_parallel == 1
+
+    completed_siblings: list[str] = []
+
+    async def pause_first_call(
+        _turn,
+        call,
+        _metadata,
+        _arguments,
+    ) -> AgentToolResult | None:
+        if call["id"] == "call-0":
+            raise AgentExecutionPaused(call["id"], "approval required")
+        await asyncio.sleep(0.01)
+        completed_siblings.append(call["id"])
+        return AgentToolResult(content="already handled", summary="handled")
+
+    provider = SequenceProvider(
+        [ModelCompletion(content="", tool_calls=calls, finish_reason="tool_calls")]
+    )
+    try:
+        await run_agent(
+            provider,  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [tool],
+            before_tool_call=pause_first_call,
+        )
+    except AgentExecutionPaused as exc:
+        assert exc.call_id == "call-0"
+    else:
+        raise AssertionError("parallel pause was not propagated")
+    assert completed_siblings == ["call-1"]
 
 
 async def assert_runtime_budgets_are_enforced() -> None:
@@ -870,49 +1242,76 @@ def assert_conversation_memory_is_bounded() -> None:
     assert len(overflow) <= MAX_MEMORY_TOTAL_CHARS
 
 
-async def assert_cancelled_run_marked_failed(run_id: str) -> None:
-    cancelled_run = None
-    for _ in range(50):
-        async with get_session_factory()() as db:
-            cancelled_run = await agent_repository.get_agent_run_by_id(db, run_id)
-            if (
-                cancelled_run is not None
-                and cancelled_run.status == "failed"
-                and cancelled_run.last_error == "Agent run cancelled."
-            ):
-                return
-        await asyncio.sleep(0.1)
-    raise AssertionError(
-        f"cancelled run was not marked failed (status={cancelled_run.status if cancelled_run else None})"
-    )
-
-
-async def assert_stream_disconnect_marks_run_failed(
+async def assert_stream_disconnect_keeps_run_durable(
     workspace_id: str,
     agent_id: str,
 ) -> None:
-    started = asyncio.Event()
-    hang = asyncio.Event()
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        run, model = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Keep running after disconnect",
+            actor,
+            "admin",
+        )
+        stream = agent_runs.stream_agent_run(
+            db,
+            run,
+            model,
+            actor,
+            "admin",
+            test_settings(),
+        )
+        first_event = await anext(stream)
+        assert first_event["type"] == "run"
+        assert first_event["run"]["id"] == run.id
+        await stream.aclose()
+    async with get_session_factory()() as db:
+        durable_run = await agent_repository.get_agent_run_by_id(db, run.id)
+    assert durable_run is not None
+    assert durable_run.status == "queued"
 
-    async def hanging_run_agent(*_args, **_kwargs):
-        started.set()
-        await hang.wait()
 
-    original_run_agent = agent_runs.run_agent
-    agent_runs.run_agent = hanging_run_agent
-    try:
-        async with get_session_factory()() as db:
-            actor = await user_repository.get_active_user_by_username(db, "admin")
-            assert actor is not None
-            run, model = await agent_runs.prepare_agent_run(
+async def assert_terminal_stream_replays_past_batch_boundary(
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        run, model = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Replay every durable event",
+            actor,
+            "admin",
+        )
+        for index in range(201):
+            await agent_repository.append_agent_run_event(
                 db,
                 workspace_id,
-                agent_id,
-                "Cancel me",
-                actor,
-                "admin",
+                run.id,
+                {"type": "process", "event": {"status": "succeeded", "index": index}},
             )
-            stream = agent_runs.stream_agent_run(
+        await agent_repository.append_agent_run_event(
+            db,
+            workspace_id,
+            run.id,
+            {"type": "complete", "run": {"id": run.id}},
+        )
+        run.status = "succeeded"
+        run.result = "done"
+        run.finished_at = utc_now()
+        await agent_repository.save_agent_run(db, run)
+        await db.commit()
+
+        replayed = [
+            event
+            async for event in agent_runs.stream_agent_run(
                 db,
                 run,
                 model,
@@ -920,15 +1319,373 @@ async def assert_stream_disconnect_marks_run_failed(
                 "admin",
                 test_settings(),
             )
-            first_event = await anext(stream)
-            assert first_event["type"] == "run"
-            assert first_event["run"]["id"] == run.id
-            await asyncio.wait_for(started.wait(), timeout=1)
-            await stream.aclose()
-        await assert_cancelled_run_marked_failed(run.id)
+        ]
+    assert len([event for event in replayed if event["type"] == "process"]) == 201
+    assert replayed[-1]["type"] == "complete"
+
+
+async def assert_terminal_stream_drains_live_answer(
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    class FakeLiveReader:
+        def __init__(self, settings, run_id) -> None:
+            self.available = True
+            self.read_count = 0
+
+        async def read(self, after, block_ms):
+            self.read_count += 1
+            if self.read_count == 1:
+                return [
+                    (
+                        "1700000000000-0",
+                        {
+                            "type": "answer_delta",
+                            "delta": "streamed",
+                            "stream_epoch": "worker-1",
+                        },
+                    )
+                ]
+            return []
+
+        async def close(self) -> None:
+            return None
+
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        run, model = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Drain live answer before terminal",
+            actor,
+            "admin",
+        )
+        await agent_repository.append_agent_run_event(
+            db,
+            workspace_id,
+            run.id,
+            {"type": "complete", "run": {"id": run.id}},
+        )
+        run.status = "succeeded"
+        run.result = "streamed"
+        run.finished_at = utc_now()
+        await agent_repository.save_agent_run(db, run)
+        await db.commit()
+
+        original_reader = agent_runs.AgentLiveStreamReader
+        agent_runs.AgentLiveStreamReader = FakeLiveReader
+        try:
+            replayed = [
+                event
+                async for event in agent_runs.stream_agent_run(
+                    db,
+                    run,
+                    model,
+                    actor,
+                    "admin",
+                    test_settings(),
+                )
+            ]
+        finally:
+            agent_runs.AgentLiveStreamReader = original_reader
+    assert [event["type"] for event in replayed] == [
+        "run",
+        "answer_delta",
+        "complete",
+    ]
+    assert replayed[1]["live_sequence"] == "1700000000000-0"
+
+
+async def assert_run_lease_takeover(
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Verify durable lease takeover",
+            actor,
+            "admin",
+        )
+        now = utc_now()
+        assert await agent_repository.claim_agent_run(
+            db,
+            run.id,
+            "worker-1",
+            now,
+            now + timedelta(seconds=30),
+        )
+        assert await agent_repository.pause_agent_run(
+            db,
+            run.id,
+            "worker-1",
+            "approval",
+        )
+        assert await agent_repository.queue_agent_run(db, run.id)
+        assert await agent_repository.claim_agent_run(
+            db,
+            run.id,
+            "worker-2",
+            now,
+            now - timedelta(seconds=1),
+        )
+        assert await agent_repository.claim_agent_run(
+            db,
+            run.id,
+            "worker-3",
+            now,
+            now + timedelta(seconds=30),
+        )
+        assert not await agent_repository.save_agent_run_checkpoint(
+            db,
+            run.id,
+            "worker-2",
+            {"stale": True},
+            "agent",
+        )
+        assert await agent_repository.save_agent_run_checkpoint(
+            db,
+            run.id,
+            "worker-3",
+            {"current": True},
+            "agent",
+        )
+        assert (
+            await agent_repository.append_owned_agent_run_event(
+                db,
+                workspace_id,
+                run.id,
+                "worker-2",
+                {"type": "process", "event": {"status": "stale"}},
+            )
+            is None
+        )
+        assert (
+            await agent_repository.append_owned_agent_run_event(
+                db,
+                workspace_id,
+                run.id,
+                "worker-3",
+                {"type": "process", "event": {"status": "current"}},
+            )
+            is not None
+        )
+        assert await agent_repository.finalize_agent_run(
+            db,
+            run.id,
+            "worker-3",
+            status="succeeded",
+            result="lease verified",
+            events=[],
+            last_error=None,
+            finished_at=now,
+        )
+        await db.commit()
+        current = await agent_repository.get_agent_run_by_id(db, run.id)
+    assert current is not None
+    assert current.attempts == 2
+    assert current.checkpoint == {"current": True}
+
+
+async def assert_exhausted_run_closes_tool_ledger(
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        historical_run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Preserve historical exhausted tool calls",
+            actor,
+            "admin",
+        )
+        now = utc_now()
+        historical_run.status = "failed"
+        historical_run.attempts = historical_run.max_attempts
+        historical_run.finished_at = now - timedelta(minutes=1)
+        await agent_repository.save_agent_run(db, historical_run)
+        await agent_repository.create_agent_tool_call(
+            db,
+            AgentToolCall(
+                workspace_id=workspace_id,
+                run_id=historical_run.id,
+                turn=1,
+                call_id="historical-call",
+                tool_name="mcp_lookup",
+                tool_kind="mcp",
+                arguments_hash="historical-call",
+                idempotency_key="historical-call",
+                status="running",
+                approval_required=False,
+                worker_task_id="historical-worker",
+            ),
+        )
+        run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Verify exhausted tool cleanup",
+            actor,
+            "admin",
+        )
+        run.status = "running"
+        run.attempts = run.max_attempts
+        run.worker_task_id = "dead-worker"
+        run.lease_expires_at = now - timedelta(seconds=1)
+        await agent_repository.save_agent_run(db, run)
+        for call_id, approval_required in (
+            ("call-read-only", False),
+            ("call-side-effect", True),
+        ):
+            await agent_repository.create_agent_tool_call(
+                db,
+                AgentToolCall(
+                    workspace_id=workspace_id,
+                    run_id=run.id,
+                    turn=1,
+                    call_id=call_id,
+                    tool_name="mcp_lookup",
+                    tool_kind="mcp",
+                    arguments_hash=call_id,
+                    idempotency_key=call_id,
+                    status="running",
+                    approval_required=approval_required,
+                    worker_task_id="dead-worker",
+                    lease_expires_at=now - timedelta(seconds=1),
+                ),
+            )
+        assert await agent_repository.fail_exhausted_agent_runs(db, now) == 1
+        await db.commit()
+        current = await agent_repository.get_agent_run_by_id(db, run.id)
+        calls = await agent_repository.list_agent_tool_calls(db, run.id)
+        historical_calls = await agent_repository.list_agent_tool_calls(
+            db,
+            historical_run.id,
+        )
+
+    assert current is not None
+    assert current.status == "failed"
+    assert {call.call_id: call.status for call in calls} == {
+        "call-read-only": "failed",
+        "call-side-effect": "uncertain",
+    }
+    assert all(call.worker_task_id is None for call in calls)
+    assert all(call.lease_expires_at is None for call in calls)
+    assert historical_calls[0].status == "running"
+    assert historical_calls[0].worker_task_id == "historical-worker"
+
+
+async def assert_unhandled_scope_failure_is_terminal(
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Fail before the graph starts",
+            actor,
+            "admin",
+        )
+
+    original_load_scope = agent_executor._load_execution_scope
+
+    async def fail_scope(_run_id: str):
+        raise AgentRunnerError("Execution scope is unavailable.")
+
+    agent_executor._load_execution_scope = fail_scope
+    try:
+        outcome = await agent_executor.run_durable_agent_run(
+            run.id,
+            test_settings(),
+            worker_task_id="worker-scope-failure",
+        )
     finally:
-        agent_runs.run_agent = original_run_agent
-        hang.set()
+        agent_executor._load_execution_scope = original_load_scope
+
+    assert outcome == agent_executor.RUN_FINISHED
+    async with get_session_factory()() as db:
+        current = await agent_repository.get_agent_run_by_id(db, run.id)
+        events = await agent_repository.list_agent_run_events(db, run.id)
+    assert current is not None
+    assert current.status == "failed"
+    assert current.last_error == "Execution scope is unavailable."
+    assert events[-1].event["type"] == "error"
+
+
+async def assert_approval_before_pause_requeues_run(
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Verify approval race recovery",
+            actor,
+            "admin",
+        )
+        now = utc_now()
+        assert await agent_repository.claim_agent_run(
+            db,
+            run.id,
+            "worker-race",
+            now,
+            now + timedelta(seconds=30),
+        )
+        call = await agent_repository.create_agent_tool_call(
+            db,
+            AgentToolCall(
+                workspace_id=workspace_id,
+                run_id=run.id,
+                turn=1,
+                call_id="call-race",
+                tool_name="mcp_lookup",
+                tool_kind="mcp",
+                arguments_hash="hash",
+                idempotency_key="idempotency-key",
+                status="awaiting_approval",
+                approval_required=True,
+            ),
+        )
+        assert await agent_repository.approve_agent_tool_call(
+            db,
+            call.id,
+            actor.id,
+            now,
+        )
+        assert not await agent_repository.queue_agent_run(db, run.id)
+        await db.commit()
+
+    paused, requeued = await agent_executor._pause_agent_run_for_tool(
+        run.id,
+        "worker-race",
+        "call-race",
+        "Tool call requires user approval.",
+    )
+    assert paused
+    assert requeued
+    async with get_session_factory()() as db:
+        current = await agent_repository.get_agent_run_by_id(db, run.id)
+        events = await agent_repository.list_agent_run_events(db, run.id)
+    assert current is not None
+    assert current.status == "queued"
+    assert all(event.event.get("type") != "approval_required" for event in events)
 
 
 async def get_agent_failure_log(trace_id: str) -> SystemLog | None:
@@ -1002,9 +1759,16 @@ async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
 
 def main() -> None:
     asyncio.run(assert_hanging_model_stream_times_out())
+    asyncio.run(assert_required_knowledge_timeout_is_unavailable())
     asyncio.run(assert_truncated_tool_call_is_not_executed())
     asyncio.run(assert_invalid_tool_arguments_are_not_executed())
+    asyncio.run(assert_invalid_tool_call_ids_are_not_executed())
+    asyncio.run(assert_checkpoint_reuses_durable_tool_result())
     asyncio.run(assert_tool_error_returns_to_model())
+    asyncio.run(assert_tool_timeout_returns_to_model())
+    asyncio.run(assert_knowledge_source_failure_is_attributed())
+    asyncio.run(assert_final_turn_removes_tools())
+    assert_tool_routing_context_is_explicit()
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
     asyncio.run(assert_streaming_run_emits_process_and_answer())
     asyncio.run(assert_parallel_policy_is_enforced())
@@ -1017,9 +1781,10 @@ def main() -> None:
     original_query = agent_tools.query_knowledge_base
     original_discover = mcp_services.discover_mcp_tools
     original_call_mcp_tool = agent_tools.call_mcp_tool
-    original_run_agent = agent_runs.run_agent
+    original_run_agent = agent_executor.run_agent
     query_calls: list[tuple[str, str]] = []
-    mcp_calls: list[tuple[str, str, dict]] = []
+    mcp_calls: list[tuple[str, str, dict, str | None]] = []
+    mcp_transport_failure = False
 
     async def fake_query_knowledge_base(
         _db,
@@ -1065,9 +1830,14 @@ def main() -> None:
         arguments,
         _allow_private_networks,
         _timeout_seconds,
+        *,
+        idempotency_key=None,
     ) -> tuple[str, bool]:
+        nonlocal mcp_transport_failure
         assert bearer_token == "mcp-secret-token"
-        mcp_calls.append((url, tool_name, arguments))
+        mcp_calls.append((url, tool_name, arguments, idempotency_key))
+        if mcp_transport_failure:
+            raise McpClientError("transport interrupted")
         return json.dumps({"release": "approved"}), False
 
     agent_tools.query_knowledge_base = fake_query_knowledge_base
@@ -1120,11 +1890,12 @@ def main() -> None:
             agent_id = agent["id"]
             assert agent["can_edit"] is True
             assert agent["knowledge_base_ids"] == [knowledge_base_id]
+            assert agent["knowledge_query_mode"] == "required"
 
             async def fail_agent_run(*_args, **_kwargs):
                 raise RuntimeError("synthetic runtime failure")
 
-            agent_runs.run_agent = fail_agent_run
+            agent_executor.run_agent = fail_agent_run
             try:
                 failed_run_response = client.post(
                     agents_url(workspace_id, f"/{agent_id}/runs"),
@@ -1132,7 +1903,7 @@ def main() -> None:
                     json={"goal": "Verify failure observability"},
                 )
             finally:
-                agent_runs.run_agent = original_run_agent
+                agent_executor.run_agent = original_run_agent
             assert failed_run_response.status_code == 201, failed_run_response.text
             failed_run = failed_run_response.json()
             assert failed_run["status"] == "failed"
@@ -1144,11 +1915,40 @@ def main() -> None:
             assert failure_log.details["exception_type"] == "RuntimeError"
             assert "synthetic runtime failure" in (failure_log.stack_trace or "")
 
+            query_calls.clear()
             asyncio.run(
-                assert_stream_disconnect_marks_run_failed(
+                assert_stream_disconnect_keeps_run_durable(
                     workspace_id,
                     agent_id,
                 )
+            )
+            asyncio.run(
+                assert_terminal_stream_replays_past_batch_boundary(
+                    workspace_id,
+                    agent_id,
+                )
+            )
+            asyncio.run(
+                assert_terminal_stream_drains_live_answer(
+                    workspace_id,
+                    agent_id,
+                )
+            )
+            asyncio.run(assert_run_lease_takeover(workspace_id, agent_id))
+            asyncio.run(
+                assert_exhausted_run_closes_tool_ledger(
+                    workspace_id,
+                    agent_id,
+                )
+            )
+            asyncio.run(
+                assert_unhandled_scope_failure_is_terminal(
+                    workspace_id,
+                    agent_id,
+                )
+            )
+            asyncio.run(
+                assert_approval_before_pause_requeues_run(workspace_id, agent_id)
             )
 
             duplicate = client.post(
@@ -1218,14 +2018,43 @@ def main() -> None:
             assert executed["result"] == "Completed."
             assert executed["events"][0]["tool_name"] == "search_knowledge"
             assert "citations" not in executed
-            assert query_calls == [(knowledge_base_id, "release process")]
+            assert query_calls == [
+                (knowledge_base_id, "Prepare the release with evidence")
+            ]
             knowledge_event = executed["events"][0]
-            assert knowledge_event["call_id"] == "call-search"
-            assert knowledge_event["tool_label"] == "知识库检索"
+            assert knowledge_event["call_id"] == f"eager-knowledge-{executed['id']}"
+            assert knowledge_event["tool_label"] == "knowledge"
             assert knowledge_event["tool_kind"] == "knowledge"
-            assert knowledge_event["input"] == {"query": "release process"}
+            assert knowledge_event["input"] == {
+                "query": "Prepare the release with evidence"
+            }
+            assert knowledge_event["duration_ms"] >= 0
+            assert knowledge_event["output"]["evidence_status"] == "found"
             assert "source_id" not in knowledge_event["output"]["hits"][0]
             assert knowledge_event["output"]["hits"][0]["document"] == "release.md"
+
+            agentic_update = client.patch(
+                agents_url(workspace_id, f"/{agent_id}"),
+                headers=auth_headers(admin_token),
+                json={"knowledge_query_mode": "agentic"},
+            )
+            assert agentic_update.status_code == 200, agentic_update.text
+            assert agentic_update.json()["knowledge_query_mode"] == "agentic"
+            agentic_question = client.post(
+                agents_url(workspace_id, f"/{agent_id}/runs"),
+                headers=auth_headers(member_token),
+                json={"goal": "Search using a generated query"},
+            )
+            assert agentic_question.status_code == 201, agentic_question.text
+            agentic_run = agentic_question.json()
+            assert agentic_run["status"] == "succeeded"
+            assert agentic_run["knowledge_query_mode"] == "agentic"
+            assert next(
+                event
+                for event in agentic_run["events"]
+                if event["tool_kind"] == "knowledge"
+            )["call_id"] == "call-search"
+            assert query_calls[-1] == (knowledge_base_id, "release process")
 
             member_mcp_create = client.post(
                 mcp_url(workspace_id),
@@ -1250,6 +2079,8 @@ def main() -> None:
             mcp_server_data = mcp_server.json()
             assert mcp_server_data["has_bearer_token"] is True
             assert "bearer_token" not in mcp_server_data
+            assert mcp_server_data["tools"][0]["policy_mode"] == "approval_required"
+            assert len(mcp_server_data["tools"][0]["definition_hash"]) == 64
 
             mcp_agent = client.post(
                 agents_url(workspace_id),
@@ -1276,22 +2107,131 @@ def main() -> None:
             )
             assert mcp_question.status_code == 201, mcp_question.text
             mcp_run = mcp_question.json()
+            assert mcp_run["status"] == "awaiting_approval"
+            assert mcp_calls == []
+            tool_calls = client.get(
+                agents_url(
+                    workspace_id,
+                    f"/{mcp_agent_data['id']}/runs/{mcp_run['id']}/tool-calls",
+                ),
+                headers=auth_headers(admin_token),
+            )
+            assert tool_calls.status_code == 200, tool_calls.text
+            assert tool_calls.json()[0]["status"] == "awaiting_approval"
+
+            approval = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{mcp_agent_data['id']}/runs/{mcp_run['id']}/tool-calls/call-mcp/approve",
+                ),
+                headers=auth_headers(admin_token),
+            )
+            assert approval.status_code == 200, approval.text
+            mcp_run = approval.json()
             assert mcp_run["status"] == "succeeded"
-            assert mcp_run["events"][0]["status"] == "succeeded"
-            mcp_event = mcp_run["events"][0]
+            mcp_event = next(
+                event for event in mcp_run["events"] if event["tool_kind"] == "mcp"
+            )
+            assert mcp_event["status"] == "succeeded"
             assert mcp_event["call_id"] == "call-mcp"
             assert mcp_event["tool_label"] == "lookup_release"
             assert mcp_event["tool_kind"] == "mcp"
             assert mcp_event["server_name"] == "Release MCP"
             assert mcp_event["input"] == {"topic": "release"}
             assert mcp_event["output"] == {"release": "approved"}
-            assert mcp_calls == [
-                (
-                    "http://127.0.0.1:9999/mcp",
-                    "lookup_release",
-                    {"topic": "release"},
-                )
-            ]
+            assert len(mcp_calls) == 1
+            assert mcp_calls[0][:3] == (
+                "http://127.0.0.1:9999/mcp",
+                "lookup_release",
+                {"topic": "release"},
+            )
+            assert mcp_calls[0][3]
+
+            policy = client.put(
+                mcp_url(
+                    workspace_id,
+                    f"/{mcp_server_data['id']}/tools/lookup_release/policy",
+                ),
+                headers=auth_headers(admin_token),
+                json={"mode": "read_only"},
+            )
+            assert policy.status_code == 200, policy.text
+            assert policy.json()["mode"] == "read_only"
+            listed_mcp_servers = client.get(
+                mcp_url(workspace_id),
+                headers=auth_headers(admin_token),
+            )
+            assert listed_mcp_servers.status_code == 200, listed_mcp_servers.text
+            assert listed_mcp_servers.json()[0]["tools"][0]["policy_mode"] == "read_only"
+            refreshed_mcp_server = client.post(
+                mcp_url(workspace_id, f"/{mcp_server_data['id']}/refresh"),
+                headers=auth_headers(admin_token),
+            )
+            assert refreshed_mcp_server.status_code == 200, refreshed_mcp_server.text
+            assert refreshed_mcp_server.json()["tools"][0]["policy_mode"] == "read_only"
+            read_only_question = client.post(
+                agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
+                headers=auth_headers(admin_token),
+                json={"goal": "Check the release again"},
+            )
+            assert read_only_question.status_code == 201, read_only_question.text
+            assert read_only_question.json()["status"] == "succeeded"
+            assert len(mcp_calls) == 2
+
+            require_approval = client.put(
+                mcp_url(
+                    workspace_id,
+                    f"/{mcp_server_data['id']}/tools/lookup_release/policy",
+                ),
+                headers=auth_headers(admin_token),
+                json={"mode": "approval_required"},
+            )
+            assert require_approval.status_code == 200, require_approval.text
+            uncertain_question = client.post(
+                agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
+                headers=auth_headers(admin_token),
+                json={"goal": "Check uncertain handling"},
+            )
+            uncertain_run = uncertain_question.json()
+            assert uncertain_run["status"] == "awaiting_approval"
+            mcp_transport_failure = True
+            uncertain_approval = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{mcp_agent_data['id']}/runs/{uncertain_run['id']}/tool-calls/call-mcp/approve",
+                ),
+                headers=auth_headers(admin_token),
+            )
+            mcp_transport_failure = False
+            assert uncertain_approval.status_code == 200, uncertain_approval.text
+            assert uncertain_approval.json()["status"] == "awaiting_approval"
+            uncertain_calls = client.get(
+                agents_url(
+                    workspace_id,
+                    f"/{mcp_agent_data['id']}/runs/{uncertain_run['id']}/tool-calls",
+                ),
+                headers=auth_headers(admin_token),
+            )
+            assert uncertain_calls.status_code == 200, uncertain_calls.text
+            assert uncertain_calls.json()[0]["status"] == "uncertain"
+            unsafe_retry = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{mcp_agent_data['id']}/runs/{uncertain_run['id']}/tool-calls/call-mcp/approve",
+                ),
+                headers=auth_headers(admin_token),
+            )
+            assert unsafe_retry.status_code == 409, unsafe_retry.text
+            no_retry = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{mcp_agent_data['id']}/runs/{uncertain_run['id']}/tool-calls/call-mcp/reject",
+                ),
+                headers=auth_headers(admin_token),
+            )
+            assert no_retry.status_code == 200, no_retry.text
+            assert no_retry.json()["status"] == "succeeded"
+            assert len(mcp_calls) == 3
 
             member_agent = client.post(
                 agents_url(workspace_id),
@@ -1389,7 +2329,7 @@ def main() -> None:
         agent_tools.query_knowledge_base = original_query
         mcp_services.discover_mcp_tools = original_discover
         agent_tools.call_mcp_tool = original_call_mcp_tool
-        agent_runs.run_agent = original_run_agent
+        agent_executor.run_agent = original_run_agent
 
 
 if __name__ == "__main__":

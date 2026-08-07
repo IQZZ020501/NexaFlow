@@ -1,3 +1,5 @@
+import hashlib
+import json
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
@@ -10,10 +12,11 @@ from app.ports.mcp import (
     discover_mcp_tools,
     normalize_mcp_url,
 )
-from app.entities.tools import McpServer
+from app.entities.tools import McpServer, McpToolPolicy
 from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.repositories import mcp as mcp_repository
+from app.infrastructure.model_utils import utc_now
 from app.infrastructure.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.infrastructure.validation import normalize_name
 from app.schemas.mcp import McpServerCreateRequest, McpServerResponse
@@ -26,13 +29,80 @@ class ResolvedMcpTool:
     definition: McpTool
 
 
-def mcp_server_to_response(server: McpServer) -> McpServerResponse:
+def mcp_tool_definition_hash(definition: McpTool) -> str:
+    payload = {
+        "name": definition.name,
+        "description": definition.description or "",
+        "input_schema": definition.input_schema,
+        "annotations": (
+            definition.annotations.model_dump(
+                mode="json", by_alias=True, exclude_none=True
+            )
+            if definition.annotations is not None
+            else None
+        ),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def effective_mcp_tool_policy_mode(
+    definition: McpTool,
+    policy: McpToolPolicy | None,
+) -> str:
+    definition_hash = mcp_tool_definition_hash(definition)
+    if policy is not None:
+        return (
+            policy.mode
+            if policy.definition_hash == definition_hash
+            else "approval_required"
+        )
+    annotations = definition.annotations
+    return (
+        "read_only"
+        if annotations is not None
+        and annotations.read_only_hint is True
+        and annotations.destructive_hint is not True
+        else "approval_required"
+    )
+
+
+def _mcp_tool_definition(tool: dict) -> McpTool:
+    return McpTool(
+        name=str(tool.get("name") or ""),
+        description=str(tool.get("description") or ""),
+        input_schema=tool.get("input_schema") or {"type": "object"},
+        annotations=tool.get("annotations"),
+    )
+
+
+def mcp_server_to_response(
+    server: McpServer,
+    policies: list[McpToolPolicy] | None = None,
+) -> McpServerResponse:
+    policy_map = {
+        (policy.mcp_server_id, policy.tool_name): policy
+        for policy in policies or []
+    }
+    tools = []
+    for tool in server.tools:
+        definition = _mcp_tool_definition(tool)
+        definition_hash = mcp_tool_definition_hash(definition)
+        policy = policy_map.get((server.id, str(tool.get("name") or "")))
+        tools.append(
+            {
+                **tool,
+                "definition_hash": definition_hash,
+                "policy_mode": effective_mcp_tool_policy_mode(definition, policy),
+            }
+        )
     return McpServerResponse(
         id=server.id,
         workspace_id=server.workspace_id,
         name=server.name,
         url=server.url,
-        tools=server.tools,
+        tools=tools,
         status=server.status,
         has_bearer_token=server.bearer_token_ciphertext is not None,
         bearer_token_hint=server.bearer_token_hint,
@@ -55,8 +125,9 @@ async def list_mcp_servers(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[McpServerResponse]:
+    policies = await mcp_repository.list_mcp_tool_policies(db, workspace_id)
     return [
-        mcp_server_to_response(server)
+        mcp_server_to_response(server, policies)
         for server in await mcp_repository.list_mcp_servers(
             db,
             workspace_id,
@@ -127,7 +198,8 @@ async def create_mcp_server(
             "MCP server name already exists.",
         ) from exc
     server = await mcp_repository.refresh_mcp_server(db, server)
-    return mcp_server_to_response(server)
+    policies = await mcp_repository.list_mcp_tool_policies(db, server.workspace_id)
+    return mcp_server_to_response(server, policies)
 
 
 async def refresh_mcp_server(
@@ -163,7 +235,8 @@ async def refresh_mcp_server(
     await mcp_repository.save_mcp_server(db, server)
     await db.commit()
     server = await mcp_repository.refresh_mcp_server(db, server)
-    return mcp_server_to_response(server)
+    policies = await mcp_repository.list_mcp_tool_policies(db, server.workspace_id)
+    return mcp_server_to_response(server, policies)
 
 
 async def delete_mcp_server(
@@ -228,7 +301,58 @@ async def resolve_mcp_tools(
                     name=tool_name,
                     description=str(tool.get("description") or ""),
                     input_schema=tool.get("input_schema") or {"type": "object"},
+                    annotations=tool.get("annotations"),
                 ),
             )
         )
     return resolved
+
+
+async def get_mcp_tool_policy(
+    db: AsyncSession,
+    workspace_id: str,
+    server_id: str,
+    tool_name: str,
+) -> McpToolPolicy | None:
+    return await mcp_repository.get_mcp_tool_policy(
+        db, workspace_id, server_id, tool_name
+    )
+
+
+async def set_mcp_tool_policy(
+    db: AsyncSession,
+    server: McpServer,
+    tool_name: str,
+    mode: str,
+    actor: User,
+) -> McpToolPolicy:
+    tool = next((item for item in server.tools if item.get("name") == tool_name), None)
+    if tool is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP tool not found.")
+    definition = _mcp_tool_definition(tool)
+    policy = McpToolPolicy(
+        workspace_id=server.workspace_id,
+        mcp_server_id=server.id,
+        tool_name=tool_name,
+        definition_hash=mcp_tool_definition_hash(definition),
+        mode=mode,
+        reviewed_by_user_id=actor.id,
+        reviewed_at=utc_now(),
+    )
+    policy = await mcp_repository.save_mcp_tool_policy(db, policy)
+    record_audit_log(
+        db,
+        actor,
+        "mcp_tool.policy.update",
+        "mcp_tool_policy",
+        policy.id,
+        f"{server.name} / {tool_name}",
+        {
+            "mcp_server_id": server.id,
+            "tool_name": tool_name,
+            "mode": mode,
+            "definition_hash": policy.definition_hash,
+        },
+        workspace_id=server.workspace_id,
+    )
+    return policy

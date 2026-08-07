@@ -221,9 +221,7 @@ export function AgentConfigFields({
                             type="color"
                             className="shrink-0"
                           />
-                          <span className="min-w-0 truncate">
-                            {model.name}
-                          </span>
+                          <span className="min-w-0 truncate">{model.name}</span>
                         </span>
                         {model.id === form.modelId ? (
                           <CheckIcon className="text-primary" />
@@ -253,7 +251,7 @@ export function AgentConfigFields({
                 instructions: event.target.value,
               }))
             }
-            className="min-h-44 w-full resize-y rounded-lg border border-input bg-muted/20 px-3 py-3 text-sm leading-6 shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/20"
+            className="min-h-44 w-full resize-y rounded-lg border border-input bg-muted/20 px-3 py-3 text-sm leading-6 shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/20"
             placeholder={t("描述 Agent 的角色、回答方式和约束。")}
             maxLength={8000}
             rows={7}
@@ -302,11 +300,48 @@ export function AgentConfigFields({
             </Button>
           </div>
           {isKnowledgeOpen ? (
-            <div className="border-t px-4 py-3">
+            <div className="grid gap-3 border-t px-4 py-3">
+              <fieldset
+                disabled={readOnly || form.knowledgeBaseIds.length === 0}
+              >
+                <legend className="mb-2 text-xs font-medium text-muted-foreground">
+                  {t("知识检索策略")}
+                </legend>
+                <div className="grid grid-cols-2 rounded-lg bg-muted p-1">
+                  {(["required", "agentic"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`min-h-9 rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                        form.knowledgeQueryMode === mode
+                          ? "bg-background text-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      aria-pressed={form.knowledgeQueryMode === mode}
+                      onClick={() =>
+                        setForm((current) => ({
+                          ...current,
+                          knowledgeQueryMode: mode,
+                        }))
+                      }
+                    >
+                      {t(
+                        mode === "required"
+                          ? "每次先检索（推荐）"
+                          : "Agent 按需检索"
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
               {selectedKnowledgeBaseNames.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
                   {selectedKnowledgeBaseNames.map((name) => (
-                    <Badge key={name} variant="secondary" className="font-normal">
+                    <Badge
+                      key={name}
+                      variant="secondary"
+                      className="font-normal"
+                    >
                       {name}
                     </Badge>
                   ))}
@@ -332,7 +367,9 @@ export function AgentConfigFields({
                 <WrenchIcon className="size-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">{t("MCP 工具")}</span>
+                <span className="block text-sm font-medium">
+                  {t("MCP 工具")}
+                </span>
                 <span className="block text-xs text-muted-foreground">
                   {t("{value} 个 MCP 工具", { value: form.mcpTools.length })}
                 </span>
@@ -358,7 +395,11 @@ export function AgentConfigFields({
               {selectedMcpToolNames.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
                   {selectedMcpToolNames.map((name) => (
-                    <Badge key={name} variant="secondary" className="font-normal">
+                    <Badge
+                      key={name}
+                      variant="secondary"
+                      className="font-normal"
+                    >
                       {name}
                     </Badge>
                   ))}
@@ -480,8 +521,7 @@ export function AgentConfigFields({
                   const checked = form.knowledgeBaseIds.includes(
                     knowledgeBase.id
                   )
-                  const disabled =
-                    !checked && form.knowledgeBaseIds.length >= 4
+                  const disabled = !checked && form.knowledgeBaseIds.length >= 4
                   return (
                     <label
                       key={knowledgeBase.id}

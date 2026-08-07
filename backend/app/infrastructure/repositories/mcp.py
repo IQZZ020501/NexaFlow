@@ -1,14 +1,18 @@
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.tools import McpServer
+from app.entities.tools import McpServer, McpToolPolicy
 from app.infrastructure.repositories.mapping import (
+    apply_to_orm,
     refresh_entity,
     save,
     to_entity,
+    to_orm,
 )
 from app.shareddomain.agents.models import AgentMcpTool
 from app.shareddomain.tools.models import McpServer as McpServerOrm
+from app.shareddomain.tools.models import McpToolPolicy as McpToolPolicyOrm
 
 
 async def list_mcp_servers(
@@ -83,3 +87,68 @@ async def delete_workspace_mcp_servers(db: AsyncSession, workspace_id: str) -> N
     await db.execute(
         delete(McpServerOrm).where(McpServerOrm.workspace_id == workspace_id)
     )
+
+
+async def get_mcp_tool_policy(
+    db: AsyncSession,
+    workspace_id: str,
+    server_id: str,
+    tool_name: str,
+) -> McpToolPolicy | None:
+    row = await db.scalar(
+        select(McpToolPolicyOrm).where(
+            McpToolPolicyOrm.workspace_id == workspace_id,
+            McpToolPolicyOrm.mcp_server_id == server_id,
+            McpToolPolicyOrm.tool_name == tool_name,
+        )
+    )
+    return to_entity(McpToolPolicy, row) if row is not None else None
+
+
+async def list_mcp_tool_policies(
+    db: AsyncSession,
+    workspace_id: str,
+) -> list[McpToolPolicy]:
+    rows = await db.scalars(
+        select(McpToolPolicyOrm).where(
+            McpToolPolicyOrm.workspace_id == workspace_id
+        )
+    )
+    return [to_entity(McpToolPolicy, row) for row in rows.all()]
+
+
+async def save_mcp_tool_policy(
+    db: AsyncSession,
+    entity: McpToolPolicy,
+) -> McpToolPolicy:
+    existing = await db.scalar(
+        select(McpToolPolicyOrm).where(
+            McpToolPolicyOrm.workspace_id == entity.workspace_id,
+            McpToolPolicyOrm.mcp_server_id == entity.mcp_server_id,
+            McpToolPolicyOrm.tool_name == entity.tool_name,
+        )
+    )
+    if existing is None:
+        try:
+            async with db.begin_nested():
+                row = to_orm(McpToolPolicyOrm, entity)
+                db.add(row)
+                await db.flush()
+        except IntegrityError:
+            existing = await db.scalar(
+                select(McpToolPolicyOrm).where(
+                    McpToolPolicyOrm.workspace_id == entity.workspace_id,
+                    McpToolPolicyOrm.mcp_server_id == entity.mcp_server_id,
+                    McpToolPolicyOrm.tool_name == entity.tool_name,
+                )
+            )
+            if existing is None:
+                raise
+        else:
+            return to_entity(McpToolPolicy, row)
+
+    entity.id = existing.id
+    entity.created_at = existing.created_at
+    apply_to_orm(existing, entity)
+    await db.flush()
+    return to_entity(McpToolPolicy, existing)

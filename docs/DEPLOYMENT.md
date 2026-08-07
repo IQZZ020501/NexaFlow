@@ -28,4 +28,6 @@
 ## 关键约定
 
 - API 与 Worker 必须共享 `KNOWLEDGE_STORAGE_DIR` 并连接同一个 `QDRANT_URL`，否则 worker 会漏读上传文件或写入不同向量库。
+- API、Worker 与 Beat 必须连接同一 PostgreSQL/Redis；生产只运行一个 Beat，由它重新派发 queued/租约过期的 Agent Run。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
+- `AGENT_EXECUTOR_HEARTBEAT_SECONDS` 必须小于 `AGENT_EXECUTOR_LEASE_SECONDS` 的一半。部署更新应先执行 Alembic，再滚动更新 API/Worker；回滚则先回滚进程，再降级 migration。
 - 生产环境未配置 `QDRANT_URL` 时应用启动失败（有意强校验）。

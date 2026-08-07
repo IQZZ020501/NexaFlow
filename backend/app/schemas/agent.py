@@ -9,6 +9,9 @@ class AgentMcpToolRef(BaseModel):
     tool_name: str = Field(min_length=1, max_length=255)
 
 
+KnowledgeQueryMode = Literal["required", "agentic"]
+
+
 class AgentResponse(BaseModel):
     id: str
     workspace_id: str
@@ -16,6 +19,7 @@ class AgentResponse(BaseModel):
     description: str
     instructions: str
     model_id: str
+    knowledge_query_mode: KnowledgeQueryMode
     knowledge_base_ids: list[str]
     mcp_tools: list[AgentMcpToolRef]
     status: str
@@ -31,6 +35,7 @@ class AgentCreateRequest(BaseModel):
     description: str = Field(default="", max_length=2000)
     instructions: str = Field(default="", max_length=8000)
     model_id: str = Field(min_length=1, max_length=36)
+    knowledge_query_mode: KnowledgeQueryMode = "required"
     knowledge_base_ids: list[str] = Field(default_factory=list, max_length=4)
     mcp_tools: list[AgentMcpToolRef] = Field(default_factory=list, max_length=12)
 
@@ -40,6 +45,7 @@ class AgentUpdateRequest(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
     instructions: str | None = Field(default=None, max_length=8000)
     model_id: str | None = Field(default=None, min_length=1, max_length=36)
+    knowledge_query_mode: KnowledgeQueryMode | None = None
     knowledge_base_ids: list[str] | None = Field(default=None, max_length=4)
     mcp_tools: list[AgentMcpToolRef] | None = Field(default=None, max_length=12)
     status: str | None = Field(default=None, min_length=1, max_length=20)
@@ -48,7 +54,10 @@ class AgentUpdateRequest(BaseModel):
 
 class AgentRunCreateRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
-    preview: bool = False
+    preview: bool = Field(
+        default=False,
+        description="Deprecated compatibility field; runs are always durable.",
+    )
 
 
 class AgentPlanStepResponse(BaseModel):
@@ -70,6 +79,7 @@ class AgentRunEventResponse(BaseModel):
     server_name: str = ""
     input: dict[str, Any] = Field(default_factory=dict)
     output: Any = None
+    duration_ms: int = 0
     reasoning: str = ""
 
 
@@ -81,6 +91,7 @@ class AgentRunResponse(BaseModel):
     goal: str
     model_id: str
     model_name: str
+    knowledge_query_mode: KnowledgeQueryMode
     status: str
     plan: list[AgentPlanStepResponse]
     events: list[AgentRunEventResponse]
@@ -92,3 +103,27 @@ class AgentRunResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     trace_id: str = ""
+
+
+class AgentToolCallResponse(BaseModel):
+    call_id: str
+    turn: int
+    tool_name: str
+    tool_kind: Literal["knowledge", "mcp", "unknown"]
+    server_name: str
+    arguments: dict[str, Any]
+    status: Literal[
+        "pending",
+        "awaiting_approval",
+        "approved",
+        "running",
+        "succeeded",
+        "failed",
+        "rejected",
+        "uncertain",
+    ]
+    approval_required: bool
+    last_error: str | None
+    approved_at: datetime | None
+    started_at: datetime | None
+    finished_at: datetime | None

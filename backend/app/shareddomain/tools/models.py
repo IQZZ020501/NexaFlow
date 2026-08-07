@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     JSON,
     String,
     Text,
@@ -45,3 +46,36 @@ class McpServer(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
+
+
+class McpToolPolicy(Base):
+    __tablename__ = "mcp_tool_policies"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "mcp_server_id"],
+            ["mcp_servers.workspace_id", "mcp_servers.id"],
+            name="fk_mcp_tool_policies_server_workspace",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "mcp_server_id",
+            "tool_name",
+            name="uq_mcp_tool_policies_tool",
+        ),
+        CheckConstraint(
+            "mode IN ('approval_required', 'read_only', 'disabled')",
+            name="ck_mcp_tool_policies_mode",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    mcp_server_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    tool_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    definition_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    mode: Mapped[str] = mapped_column(String(30), nullable=False, default="approval_required")
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

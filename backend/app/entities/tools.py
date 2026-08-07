@@ -19,3 +19,17 @@ class McpServer:
     created_by_user_id: str = ""
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class McpToolPolicy:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    mcp_server_id: str = ""
+    tool_name: str = ""
+    definition_hash: str = ""
+    mode: str = "approval_required"
+    reviewed_by_user_id: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
