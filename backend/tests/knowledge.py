@@ -1556,6 +1556,20 @@ def main() -> None:
             headers=auth_headers(alice_token),
         )
         assert revoked.status_code == 204, revoked.text
+        bob_after_revoke = client.get(
+            knowledge_url(default_workspace_id),
+            headers=auth_headers(bob_token),
+        )
+        assert bob_after_revoke.status_code == 200, bob_after_revoke.text
+        bob_revoked_kb = next(
+            item
+            for item in bob_after_revoke.json()
+            if item["id"] == knowledge_base_id
+        )
+        assert bob_revoked_kb["permission"] == "none"
+        assert bob_revoked_kb["document_count"] == 0
+        assert bob_revoked_kb["char_count"] == 0
+
         bob_get_denied = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(bob_token),
@@ -1869,19 +1883,6 @@ def main() -> None:
         )
         assert empty_query.status_code == 200, empty_query.text
         assert empty_query.json() == []
-
-        # E: members without grants see the knowledge base list with permission "none".
-        bob_after_revoke = client.get(
-            knowledge_url(default_workspace_id),
-            headers=auth_headers(bob_token),
-        )
-        assert bob_after_revoke.status_code == 200, bob_after_revoke.text
-        bob_revoked_kb = next(
-            item
-            for item in bob_after_revoke.json()
-            if item["id"] == knowledge_base_id
-        )
-        assert bob_revoked_kb["permission"] == "none"
 
         # C: owner transfer requires admin or current owner.
         transfer_denied = client.put(

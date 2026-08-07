@@ -142,19 +142,25 @@ async def list_knowledge_bases(
         limit,
         offset,
     )
-    return [
-        KnowledgeBaseListItemResponse(
-            **knowledge_base_to_response(
-                knowledge_base,
-                effective_permission(
-                    knowledge_base, actor, workspace_role, permission
-                ),
-            ).model_dump(),
-            document_count=document_count,
-            char_count=char_count,
+    responses: list[KnowledgeBaseListItemResponse] = []
+    for knowledge_base, grant, document_count, char_count in rows:
+        permission = effective_permission(
+            knowledge_base,
+            actor,
+            workspace_role,
+            grant,
         )
-        for knowledge_base, permission, document_count, char_count in rows
-    ]
+        responses.append(
+            KnowledgeBaseListItemResponse(
+                **knowledge_base_to_response(
+                    knowledge_base,
+                    permission,
+                ).model_dump(),
+                document_count=document_count if permission != "none" else 0,
+                char_count=char_count if permission != "none" else 0,
+            )
+        )
+    return responses
 
 
 async def get_knowledge_base(
