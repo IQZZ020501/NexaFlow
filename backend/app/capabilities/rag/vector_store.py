@@ -54,6 +54,7 @@ def _ensure_collection(
     collection_name: str,
     vector_size: int,
 ) -> None:
+    collection_created_concurrently = False
     if not client.collection_exists(collection_name):
         try:
             created = client.create_collection(
@@ -79,6 +80,7 @@ def _ensure_collection(
                 "Qdrant collection created concurrently by another process.",
                 collection_name=collection_name,
             )
+            collection_created_concurrently = True
         else:
             if created:
                 log_event(
@@ -90,7 +92,19 @@ def _ensure_collection(
                 )
                 return
 
-    vectors_config = client.get_collection(collection_name).config.params.vectors
+    for attempt in range(3):
+        try:
+            vectors_config = client.get_collection(collection_name).config.params.vectors
+            break
+        except UnexpectedResponse as exc:
+            if (
+                not collection_created_concurrently
+                or exc.status_code != 500
+                or attempt == 2
+            ):
+                raise
+            # ponytail: three short retries cover Qdrant's post-create metadata window.
+            time.sleep(0.05)
     if (
         not isinstance(vectors_config, models.VectorParams)
         or vectors_config.size != vector_size

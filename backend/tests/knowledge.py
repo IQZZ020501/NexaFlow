@@ -529,6 +529,9 @@ def assert_vector_store_mmr_and_metadata() -> None:
             raise AssertionError("Qdrant vector size mismatch was accepted.")
 
         class RacingClient:
+            def __init__(self) -> None:
+                self.get_collection_calls = 0
+
             def collection_exists(self, _collection_name: str) -> bool:
                 return False
 
@@ -541,6 +544,14 @@ def assert_vector_store_mmr_and_metadata() -> None:
                 )
 
             def get_collection(self, _collection_name: str):
+                self.get_collection_calls += 1
+                if self.get_collection_calls == 1:
+                    raise knowledge_vector_store.UnexpectedResponse(
+                        500,
+                        "Internal Server Error",
+                        b'{"status":{"error":"Service internal error: 0 of 0 read operations failed"}}',
+                        {},
+                    )
                 return SimpleNamespace(
                     config=SimpleNamespace(
                         params=SimpleNamespace(
@@ -552,7 +563,9 @@ def assert_vector_store_mmr_and_metadata() -> None:
                     )
                 )
 
-        knowledge_vector_store._ensure_collection(RacingClient(), "race", 2)
+        racing_client = RacingClient()
+        knowledge_vector_store._ensure_collection(racing_client, "race", 2)
+        assert racing_client.get_collection_calls == 2
         knowledge_vector_store.delete_vectors(settings, "knowledge-1", [chunk_id])
         assert client.retrieve(collection_name, ids=[chunk_id]) == []
         knowledge_vector_store.delete_vector_collection(settings, "knowledge-1")
