@@ -10,6 +10,7 @@ import {
   PencilIcon,
   PlusIcon,
   SearchIcon,
+  SparklesIcon,
   Trash2Icon,
 } from "lucide-react"
 
@@ -643,7 +644,7 @@ export function AgentsPage() {
               key={agent.id}
               role="button"
               tabIndex={0}
-              className="min-h-40 cursor-pointer rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => openAgent(agent)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
@@ -655,7 +656,7 @@ export function AgentsPage() {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 gap-3">
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                    <BotIcon className="size-5 text-muted-foreground" />
+                    <SparklesIcon className="size-5 text-muted-foreground" />
                   </span>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -684,7 +685,7 @@ export function AgentsPage() {
                   </IconButton>
                 ) : null}
               </div>
-              <div className="mt-4 flex items-center justify-between gap-2">
+              <div className="mt-auto flex items-end justify-between gap-2 pt-4">
                 <dl className="grid grid-cols-2 gap-3 text-sm">
                   <Spec
                     label={t("知识库")}

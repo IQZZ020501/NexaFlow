@@ -533,5 +533,5 @@ function KnowledgeModelSelect({
 }
 
 function modelLabel(model: RegisteredModel) {
-  return `${model.name} / ${model.model_name}`
+  return model.name
 }
