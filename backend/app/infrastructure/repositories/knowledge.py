@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import (
@@ -48,12 +48,20 @@ from app.shareddomain.knowledge.models import (
 
 _QUERY_KEYWORD_CHUNK_IDS = text(
     (
-        Path(__file__).parents[1]
+        Path(__file__).parent.parent
         / "sql"
         / "knowledge"
         / "query_keyword_chunk_ids.sql"
     ).read_text(encoding="utf-8")
 )
+
+
+def _visible_document_conditions(document: KnowledgeDocumentORM):
+    """Visibility predicate shared by document listing and stats aggregation."""
+    return and_(
+        document.status.in_(VISIBLE_DOCUMENT_STATUSES),
+        document.meta[DOCUMENT_STAGED_META_KEY].as_boolean().is_not(True),
+    )
 
 
 async def list_knowledge_base_rows(
@@ -86,10 +94,7 @@ async def list_knowledge_base_rows(
         )
         .where(
             KnowledgeDocumentORM.workspace_id == workspace_id,
-            KnowledgeDocumentORM.status.in_(VISIBLE_DOCUMENT_STATUSES),
-            KnowledgeDocumentORM.meta[DOCUMENT_STAGED_META_KEY]
-            .as_boolean()
-            .is_not(True),
+            *_visible_document_conditions(KnowledgeDocumentORM),
         )
         .group_by(KnowledgeDocumentORM.knowledge_base_id)
         .subquery()
@@ -273,12 +278,7 @@ async def list_knowledge_documents(
         KnowledgeDocumentORM.status != DOCUMENT_DELETED_STATUS,
     )
     if not include_staged:
-        statement = statement.where(
-            KnowledgeDocumentORM.status.in_(VISIBLE_DOCUMENT_STATUSES),
-            KnowledgeDocumentORM.meta[DOCUMENT_STAGED_META_KEY]
-            .as_boolean()
-            .is_not(True),
-        )
+        statement = statement.where(*_visible_document_conditions(KnowledgeDocumentORM))
     statement = statement.order_by(
         KnowledgeDocumentORM.created_at.desc(),
         KnowledgeDocumentORM.id.desc(),
