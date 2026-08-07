@@ -20,6 +20,7 @@ import {
   RocketIcon,
   SaveIcon,
   SendIcon,
+  ShieldAlertIcon,
   Trash2Icon,
   Undo2Icon,
   WrenchIcon,
@@ -35,7 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { TFunction } from "@/i18n"
-import type { Agent, AgentRun } from "@/lib/api/agents"
+import type { Agent, AgentRun, AgentToolCall } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
@@ -51,6 +52,8 @@ type AgentDetailWorkspaceProps = {
   knowledgeBases: KnowledgeBase[]
   mcpServers: McpServer[]
   runs: AgentRun[]
+  toolCallsByRun: Record<string, AgentToolCall[]>
+  resolvingCallId: string | null
   question: string
   setQuestion: React.Dispatch<React.SetStateAction<string>>
   pendingQuestion: string | null
@@ -64,9 +67,30 @@ type AgentDetailWorkspaceProps = {
   onPublish: () => void
   onAsk: (event: React.FormEvent<HTMLFormElement>) => void
   onCancelAsk: () => void
+  onToolCallDecision: (
+    runId: string,
+    callId: string,
+    decision: "approve" | "reject"
+  ) => void
   t: TFunction
 }
 
+const AUTO_FOLLOW_THRESHOLD_PX = 64
+
+export function isNearScrollBottom(
+  element: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">
+) {
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight <=
+    AUTO_FOLLOW_THRESHOLD_PX
+  )
+}
+
+function previewScrollHost(element: HTMLElement) {
+  if (element.getClientRects().length === 0) return null
+  if (element.scrollHeight > element.clientHeight) return element
+  return element.ownerDocument.scrollingElement ?? element
+}
 
 function processSummary(
   event: AgentRun["events"][number],
@@ -85,7 +109,9 @@ function processSummary(
     const count = Number(event.summary.split(":")[1])
     return t("已检索 {value} 个知识片段", { value: count })
   }
-  const legacyKnowledgeMatch = event.summary.match(/^(\d+) knowledge chunks returned\.$/)
+  const legacyKnowledgeMatch = event.summary.match(
+    /^(\d+) knowledge chunks returned\.$/
+  )
   if (legacyKnowledgeMatch) {
     return t("已检索 {value} 个知识片段", {
       value: Number(legacyKnowledgeMatch[1]),
@@ -148,14 +174,18 @@ function ToolEventDetails({
       {isOpen ? (
         <div className="grid gap-3 border-t bg-muted/20 p-3 text-xs">
           <div>
-            <p className="mb-1 font-medium text-muted-foreground">{t("调用输入")}</p>
-            <pre className="max-h-44 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-3 font-mono leading-5">
+            <p className="mb-1 font-medium text-muted-foreground">
+              {t("调用输入")}
+            </p>
+            <pre className="max-h-44 overflow-auto rounded-md bg-background p-3 font-mono leading-5 break-words whitespace-pre-wrap">
               {JSON.stringify(event.input, null, 2)}
             </pre>
           </div>
           {event.output !== null && event.output !== undefined ? (
             <div>
-              <p className="mb-1 font-medium text-muted-foreground">{t("调用结果")}</p>
+              <p className="mb-1 font-medium text-muted-foreground">
+                {t("调用结果")}
+              </p>
               {event.tool_kind === "knowledge" &&
               typeof event.output === "object" &&
               event.output &&
@@ -165,12 +195,17 @@ function ToolEventDetails({
                   {event.output.hits.map((hit, index) => {
                     const item = hit as Record<string, unknown>
                     return (
-                      <article key={index} className="rounded-md border bg-background p-3">
+                      <article
+                        key={index}
+                        className="rounded-md border bg-background p-3"
+                      >
                         <div className="flex flex-wrap items-center gap-2 font-medium">
                           <span>{String(item.document ?? t("未知文档"))}</span>
-                          <span className="text-muted-foreground">{String(item.knowledge_base ?? "")}</span>
+                          <span className="text-muted-foreground">
+                            {String(item.knowledge_base ?? "")}
+                          </span>
                         </div>
-                        <p className="mt-2 whitespace-pre-wrap break-words leading-5 text-muted-foreground">
+                        <p className="mt-2 leading-5 break-words whitespace-pre-wrap text-muted-foreground">
                           {String(item.content ?? "")}
                         </p>
                       </article>
@@ -178,7 +213,7 @@ function ToolEventDetails({
                   })}
                 </div>
               ) : (
-                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-3 font-mono leading-5">
+                <pre className="max-h-64 overflow-auto rounded-md bg-background p-3 font-mono leading-5 break-words whitespace-pre-wrap">
                   {typeof event.output === "string"
                     ? event.output
                     : JSON.stringify(event.output, null, 2)}
@@ -192,8 +227,39 @@ function ToolEventDetails({
   )
 }
 
-function processTimeline(run: AgentRun) {
-  return run.events.map((event) => ({ event, count: 1 }))
+export function processTimeline(run: AgentRun) {
+  const deduplicated: AgentRun["events"] = []
+  for (const event of run.events) {
+    const eventIndex = deduplicated.findIndex((current) =>
+      event.call_id
+        ? current.call_id === event.call_id
+        : current.type === event.type &&
+          current.turn === event.turn &&
+          current.tool_name === event.tool_name
+    )
+    if (eventIndex === -1) deduplicated.push(event)
+    else deduplicated[eventIndex] = event
+  }
+
+  const eagerKnowledge = deduplicated.filter(
+    (event) =>
+      event.type === "tool" &&
+      event.turn === 0 &&
+      event.tool_kind === "knowledge"
+  )
+  if (eagerKnowledge.length === 0) {
+    return deduplicated.map((event) => ({ event, count: 1 }))
+  }
+
+  const events = deduplicated.filter(
+    (event) => !eagerKnowledge.includes(event)
+  )
+  const firstThought = events.findIndex((event) => event.type === "thought")
+  if (firstThought === -1) {
+    return deduplicated.map((event) => ({ event, count: 1 }))
+  }
+  events.splice(firstThought + 1, 0, ...eagerKnowledge)
+  return events.map((event) => ({ event, count: 1 }))
 }
 
 function CopyMessageButton({ value, t }: { value: string; t: TFunction }) {
@@ -224,7 +290,105 @@ function CopyMessageButton({ value, t }: { value: string; t: TFunction }) {
   )
 }
 
-function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
+function ToolApprovalPanel({
+  run,
+  calls,
+  resolvingCallId,
+  onDecision,
+  t,
+}: {
+  run: AgentRun
+  calls: AgentToolCall[]
+  resolvingCallId: string | null
+  onDecision: (callId: string, decision: "approve" | "reject") => void
+  t: TFunction
+}) {
+  const pendingCalls = calls.filter((call) =>
+    ["awaiting_approval", "uncertain"].includes(call.status)
+  )
+  if (pendingCalls.length === 0) return null
+
+  return (
+    <div className="mb-4 space-y-3">
+      {pendingCalls.map((call) => {
+        const isUncertain = call.status === "uncertain"
+        const isResolving = resolvingCallId === `${run.id}:${call.call_id}`
+        return (
+          <section
+            key={`${call.turn}:${call.call_id}`}
+            className="rounded-lg border border-amber-600/30 bg-amber-500/5 p-3"
+          >
+            <div className="flex items-start gap-2">
+              <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-400" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">
+                  {t(isUncertain ? "工具执行结果不确定" : "工具调用需要确认")}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {call.tool_name}
+                  {call.server_name ? ` @ ${call.server_name}` : ""}
+                </p>
+              </div>
+            </div>
+            {call.last_error ? (
+              <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                {call.last_error}
+              </p>
+            ) : null}
+            <pre className="mt-3 max-h-40 overflow-auto rounded-md border bg-background p-3 text-xs leading-5 break-words whitespace-pre-wrap">
+              {JSON.stringify(call.arguments, null, 2)}
+            </pre>
+            <div className="mt-3 flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isResolving}
+                onClick={() => onDecision(call.call_id, "reject")}
+              >
+                {isResolving ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : null}
+                {t(isUncertain ? "不重试并继续" : "拒绝")}
+              </Button>
+              {!isUncertain ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={isResolving}
+                  onClick={() => onDecision(call.call_id, "approve")}
+                >
+                  {isResolving ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : null}
+                  {t("批准并执行")}
+                </Button>
+              ) : null}
+            </div>
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
+function RunExchange({
+  run,
+  toolCalls,
+  resolvingCallId,
+  onToolCallDecision,
+  t,
+}: {
+  run: AgentRun
+  toolCalls: AgentToolCall[]
+  resolvingCallId: string | null
+  onToolCallDecision: (
+    runId: string,
+    callId: string,
+    decision: "approve" | "reject"
+  ) => void
+  t: TFunction
+}) {
   const timeline = processTimeline(run)
   const hasProcess = timeline.length > 0
   const answer = run.result
@@ -243,13 +407,22 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
+            <ToolApprovalPanel
+              run={run}
+              calls={toolCalls}
+              resolvingCallId={resolvingCallId}
+              onDecision={(callId, decision) =>
+                onToolCallDecision(run.id, callId, decision)
+              }
+              t={t}
+            />
             {hasProcess ? (
               <details
                 className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
                 open={isProcessOpen}
                 onToggle={(event) => setIsProcessOpen(event.currentTarget.open)}
               >
-                <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
                   <BrainIcon className="size-4" />
                   <span className="flex-1">{t("执行过程")}</span>
                   <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
@@ -258,7 +431,7 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
                   {timeline.map(({ event }, index) =>
                     event.type === "tool" ? (
                       <ToolEventDetails
-                        key={event.call_id || `${event.turn}-${event.tool_name}-${index}`}
+                        key={`${event.call_id || `${event.turn}-${event.tool_name}`}-${index}`}
                         event={event}
                         run={run}
                         t={t}
@@ -279,9 +452,7 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
                           <span>{processSummary(event, run, t)}</span>
                         </div>
                         {event.reasoning ? (
-                          <div className="ml-5 mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words border-l pl-3 text-foreground/80">
-                            {event.reasoning}
-                          </div>
+                          <ReasoningContent reasoning={event.reasoning} />
                         ) : null}
                       </div>
                     )
@@ -296,6 +467,14 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
               <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                 {run.last_error ?? t("Agent 未返回结果")}
               </p>
+            ) : run.status === "awaiting_approval" ? (
+              <p className="text-sm text-muted-foreground">
+                {t("等待工具调用确认")}
+              </p>
+            ) : run.status === "queued" ? (
+              <p className="text-sm text-muted-foreground">{t("等待执行")}</p>
+            ) : run.status === "cancelled" ? (
+              <p className="text-sm text-muted-foreground">{t("运行已取消")}</p>
             ) : (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span className="flex gap-1" aria-label={t("正在生成回答")}>
@@ -318,6 +497,41 @@ function RunExchange({ run, t }: { run: AgentRun; t: TFunction }) {
   )
 }
 
+function ReasoningContent({ reasoning }: { reasoning: string }) {
+  const scrollRef = React.useRef<HTMLDivElement>(null)
+  const shouldFollowRef = React.useRef(true)
+
+  React.useLayoutEffect(() => {
+    const element = scrollRef.current
+    if (!element || !shouldFollowRef.current) return
+
+    const scrollToBottom = () => {
+      if (!shouldFollowRef.current) return
+      element.scrollTop = element.scrollHeight
+    }
+    scrollToBottom()
+    const frame = requestAnimationFrame(scrollToBottom)
+    const resizeObserver = new ResizeObserver(scrollToBottom)
+    resizeObserver.observe(element)
+    return () => {
+      cancelAnimationFrame(frame)
+      resizeObserver.disconnect()
+    }
+  }, [reasoning])
+
+  return (
+    <div
+      ref={scrollRef}
+      className="mt-1 ml-5 max-h-48 overflow-y-auto border-l pl-3 break-words whitespace-pre-wrap text-foreground/80"
+      onScroll={(event) => {
+        shouldFollowRef.current = isNearScrollBottom(event.currentTarget)
+      }}
+    >
+      {reasoning}
+    </div>
+  )
+}
+
 export function AgentDetailWorkspace({
   agent,
   form,
@@ -326,6 +540,8 @@ export function AgentDetailWorkspace({
   knowledgeBases,
   mcpServers,
   runs,
+  toolCallsByRun,
+  resolvingCallId,
   question,
   setQuestion,
   pendingQuestion,
@@ -339,6 +555,7 @@ export function AgentDetailWorkspace({
   onPublish,
   onAsk,
   onCancelAsk,
+  onToolCallDecision,
   t,
 }: AgentDetailWorkspaceProps) {
   const [activePanel, setActivePanel] = React.useState<"config" | "preview">(
@@ -346,12 +563,47 @@ export function AgentDetailWorkspace({
   )
   const [isConfigVisible, setIsConfigVisible] = React.useState(true)
   const previewScrollRef = React.useRef<HTMLDivElement>(null)
+  const shouldFollowPreviewRef = React.useRef(true)
+
+  React.useEffect(() => {
+    const scrollContainer = previewScrollRef.current
+    const view = scrollContainer?.ownerDocument.defaultView
+    if (!scrollContainer || !view) return
+
+    const handlePageScroll = () => {
+      const scrollHost = previewScrollHost(scrollContainer)
+      if (scrollHost && scrollHost !== scrollContainer) {
+        shouldFollowPreviewRef.current = isNearScrollBottom(scrollHost)
+      }
+    }
+    const followContent = () => {
+      if (!shouldFollowPreviewRef.current) return
+      const scrollHost = previewScrollHost(scrollContainer)
+      if (scrollHost) scrollHost.scrollTop = scrollHost.scrollHeight
+    }
+    const resizeObserver = new ResizeObserver(followContent)
+    if (scrollContainer.firstElementChild) {
+      resizeObserver.observe(scrollContainer.firstElementChild)
+    }
+    view.addEventListener("scroll", handlePageScroll, { passive: true })
+    return () => {
+      view.removeEventListener("scroll", handlePageScroll)
+      resizeObserver.disconnect()
+    }
+  }, [])
 
   React.useLayoutEffect(() => {
     const scrollContainer = previewScrollRef.current
-    if (!scrollContainer) return
+    if (!scrollContainer || !shouldFollowPreviewRef.current) return
 
-    scrollContainer.scrollTop = scrollContainer.scrollHeight
+    const scrollToBottom = () => {
+      if (!shouldFollowPreviewRef.current) return
+      const scrollHost = previewScrollHost(scrollContainer)
+      if (scrollHost) scrollHost.scrollTop = scrollHost.scrollHeight
+    }
+    scrollToBottom()
+    const frame = requestAnimationFrame(scrollToBottom)
+    return () => cancelAnimationFrame(frame)
   }, [activePanel, isRunsLoading, pendingQuestion, runs])
   const selectedModel = models.find((model) => model.id === form.modelId)
   const visibleRuns = [...runs].reverse()
@@ -435,11 +687,7 @@ export function AgentDetailWorkspace({
               disabled={isSaving}
               onClick={onPublish}
             >
-              {agent.published ? (
-                <Undo2Icon />
-              ) : (
-                <RocketIcon />
-              )}
+              {agent.published ? <Undo2Icon /> : <RocketIcon />}
               <span className="hidden sm:inline">
                 {t(agent.published ? "取消发布" : "发布")}
               </span>
@@ -493,7 +741,10 @@ export function AgentDetailWorkspace({
         <Button
           type="button"
           variant={activePanel === "preview" ? "secondary" : "ghost"}
-          onClick={() => setActivePanel("preview")}
+          onClick={() => {
+            shouldFollowPreviewRef.current = true
+            setActivePanel("preview")
+          }}
         >
           <MessageSquareIcon />
           {t("调试预览")}
@@ -547,7 +798,10 @@ export function AgentDetailWorkspace({
                 {t("保存配置后，在这里直接提问。")}
               </p>
             </div>
-            <Badge variant="outline" className="font-normal text-muted-foreground">
+            <Badge
+              variant="outline"
+              className="font-normal text-muted-foreground"
+            >
               <span className="mr-1.5 size-1.5 rounded-full bg-emerald-500" />
               {t("预览")}
             </Badge>
@@ -556,6 +810,13 @@ export function AgentDetailWorkspace({
           <div
             ref={previewScrollRef}
             className="relative min-h-0 flex-1 overflow-y-auto bg-muted/20"
+            onScroll={(event) => {
+              if (previewScrollHost(event.currentTarget) === event.currentTarget) {
+                shouldFollowPreviewRef.current = isNearScrollBottom(
+                  event.currentTarget
+                )
+              }
+            }}
           >
             <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 py-8 sm:px-8">
               {isRunsLoading ? (
@@ -579,7 +840,14 @@ export function AgentDetailWorkspace({
               ) : (
                 <div className="space-y-8">
                   {visibleRuns.map((run) => (
-                    <RunExchange key={run.id} run={run} t={t} />
+                    <RunExchange
+                      key={run.id}
+                      run={run}
+                      toolCalls={toolCallsByRun[run.id] ?? []}
+                      resolvingCallId={resolvingCallId}
+                      onToolCallDecision={onToolCallDecision}
+                      t={t}
+                    />
                   ))}
                 </div>
               )}
@@ -589,7 +857,10 @@ export function AgentDetailWorkspace({
           <div className="shrink-0 border-t bg-background p-3 sm:p-4">
             <form
               className="mx-auto max-w-3xl rounded-2xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-md"
-              onSubmit={onAsk}
+              onSubmit={(event) => {
+                shouldFollowPreviewRef.current = true
+                onAsk(event)
+              }}
             >
               <div className="flex items-end gap-2">
                 <textarea
@@ -607,9 +878,7 @@ export function AgentDetailWorkspace({
                   }}
                   className="max-h-40 min-h-14 min-w-0 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
                   placeholder={
-                    isDirty
-                      ? t("请先保存配置后再调试")
-                      : t("向 Agent 提问...")
+                    isDirty ? t("请先保存配置后再调试") : t("向 Agent 提问...")
                   }
                   aria-label={t("向 Agent 提问")}
                   disabled={isDirty || isAsking || agent.status !== "active"}
@@ -621,12 +890,12 @@ export function AgentDetailWorkspace({
                     type="button"
                     variant="outline"
                     className="rounded-xl"
-                    aria-label={t("取消")}
-                    title={t("取消")}
+                    aria-label={t("停止查看")}
+                    title={t("停止查看")}
                     onClick={onCancelAsk}
                   >
                     <CircleXIcon />
-                    {t("取消")}
+                    {t("停止查看")}
                   </Button>
                 ) : null}
                 <Button

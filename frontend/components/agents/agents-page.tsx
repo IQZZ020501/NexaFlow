@@ -37,15 +37,21 @@ import {
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import {
+  compareLiveStreamIds,
   createAgent,
   deleteAgent,
+  listAgentRunToolCalls,
   listAgentRuns,
   listAgents,
+  observeAgentRun,
+  resolveAgentToolCall,
   streamAgentRun,
   updateAgent,
   type Agent,
   type AgentMcpToolRef,
   type AgentRun,
+  type AgentRunStreamEvent,
+  type AgentToolCall,
 } from "@/lib/api/agents"
 import { listKnowledgeBases, type KnowledgeBase } from "@/lib/api/knowledge"
 import { listRegisteredModels, type RegisteredModel } from "@/lib/api/llm"
@@ -57,6 +63,7 @@ export type AgentFormState = {
   name: string
   modelId: string
   instructions: string
+  knowledgeQueryMode: Agent["knowledge_query_mode"]
   knowledgeBaseIds: string[]
   mcpTools: AgentMcpToolRef[]
   status: Agent["status"]
@@ -67,6 +74,7 @@ const EMPTY_FORM: AgentFormState = {
   name: "",
   modelId: "",
   instructions: "",
+  knowledgeQueryMode: "required",
   knowledgeBaseIds: [],
   mcpTools: [],
   status: "active",
@@ -78,12 +86,12 @@ function formFromAgent(agent: Agent): AgentFormState {
     name: agent.name,
     modelId: agent.model_id,
     instructions: agent.instructions,
+    knowledgeQueryMode: agent.knowledge_query_mode,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
     mcpTools: agent.mcp_tools.map((tool) => ({ ...tool })),
     status: agent.status,
   }
 }
-
 
 function sameValues(left: string[], right: string[]) {
   return (
@@ -92,10 +100,159 @@ function sameValues(left: string[], right: string[]) {
 }
 
 export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
+  const keepLiveAnswer = ["queued", "running", "awaiting_approval"].includes(
+    liveRun.status
+  )
   return {
     ...liveRun,
     events: liveRun.events.length > 0 ? liveRun.events : pendingRun.events,
+    result:
+      keepLiveAnswer && !liveRun.result ? pendingRun.result : liveRun.result,
+    live_stream_epoch:
+      keepLiveAnswer && !liveRun.result
+        ? pendingRun.live_stream_epoch
+        : undefined,
+    live_stream_cursor:
+      keepLiveAnswer && !liveRun.result
+        ? pendingRun.live_stream_cursor
+        : undefined,
   }
+}
+
+export function mergeAgentRunStreamEvent(
+  runs: AgentRun[],
+  runId: string,
+  streamEvent: AgentRunStreamEvent,
+  placeholderId?: string
+): AgentRun[] {
+  if (streamEvent.type === "run") {
+    const replaced = runs.map((run) => {
+      if (placeholderId && run.id === placeholderId) {
+        return mergeInitialAgentRun(run, streamEvent.run)
+      }
+      return run.id === streamEvent.run.id
+        ? mergeInitialAgentRun(run, streamEvent.run)
+        : run
+    })
+    return replaced.some((run) => run.id === streamEvent.run.id)
+      ? replaced
+      : [streamEvent.run, ...replaced]
+  }
+  if (streamEvent.type === "process") {
+    return runs.map((run) => {
+      if (run.id !== runId) return run
+      const eventIndex = run.events.findIndex((event) =>
+        streamEvent.event.call_id
+          ? event.call_id === streamEvent.event.call_id
+          : event.type === streamEvent.event.type &&
+            event.turn === streamEvent.event.turn &&
+            event.tool_name === streamEvent.event.tool_name
+      )
+      if (eventIndex === -1) {
+        return { ...run, events: [...run.events, streamEvent.event] }
+      }
+      return {
+        ...run,
+        events: run.events.map((event, index) =>
+          index === eventIndex ? streamEvent.event : event
+        ),
+      }
+    })
+  }
+  if (streamEvent.type === "reasoning_delta") {
+    return runs.map((run) =>
+      run.id === runId
+        ? (() => {
+            const sameStream =
+              !streamEvent.stream_epoch ||
+              streamEvent.stream_epoch === run.live_stream_epoch
+            if (
+              sameStream &&
+              streamEvent.live_sequence &&
+              run.live_stream_cursor &&
+              compareLiveStreamIds(
+                streamEvent.live_sequence,
+                run.live_stream_cursor
+              ) <= 0
+            ) {
+              return run
+            }
+            return {
+              ...run,
+              result: sameStream ? run.result : "",
+              live_stream_epoch:
+                streamEvent.stream_epoch ?? run.live_stream_epoch,
+              live_stream_cursor:
+                streamEvent.live_sequence ?? run.live_stream_cursor,
+              events: run.events.map((event) =>
+                event.type === "thought" && event.turn === streamEvent.turn
+                  ? {
+                      ...event,
+                      reasoning:
+                        sameStream
+                          ? (event.reasoning ?? "") + streamEvent.delta
+                          : streamEvent.delta,
+                    }
+                  : event
+              ),
+            }
+          })()
+        : run
+    )
+  }
+  if (streamEvent.type === "answer_delta") {
+    return runs.map((run) =>
+      run.id === runId
+        ? (() => {
+            const sameStream =
+              !streamEvent.stream_epoch ||
+              streamEvent.stream_epoch === run.live_stream_epoch
+            if (
+              sameStream &&
+              streamEvent.live_sequence &&
+              run.live_stream_cursor &&
+              compareLiveStreamIds(
+                streamEvent.live_sequence,
+                run.live_stream_cursor
+              ) <= 0
+            ) {
+              return run
+            }
+            return {
+              ...run,
+              result: sameStream
+                ? run.result + streamEvent.delta
+                : streamEvent.delta,
+              live_stream_epoch:
+                streamEvent.stream_epoch ?? run.live_stream_epoch,
+              live_stream_cursor:
+                streamEvent.live_sequence ?? run.live_stream_cursor,
+            }
+          })()
+        : run
+    )
+  }
+  if (streamEvent.type === "approval_required") {
+    return runs.map((run) =>
+      run.id === runId
+        ? {
+            ...run,
+            status: "awaiting_approval" as const,
+            last_error: streamEvent.reason,
+          }
+        : run
+    )
+  }
+  if (streamEvent.type === "approval_resolved") {
+    return runs.map((run) =>
+      run.id === runId
+        ? { ...run, status: "queued" as const, last_error: null }
+        : run
+    )
+  }
+  return runs.map((run) =>
+    run.id === streamEvent.run.id ? streamEvent.run : run
+  )
 }
 
 export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
@@ -109,12 +266,12 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
     form.name.trim() !== agent.name ||
     form.modelId !== agent.model_id ||
     form.instructions.trim() !== agent.instructions ||
+    form.knowledgeQueryMode !== agent.knowledge_query_mode ||
     form.status !== agent.status ||
     !sameValues(form.knowledgeBaseIds, agent.knowledge_base_ids) ||
     !sameValues(formTools, agentTools)
   )
 }
-
 
 export function AgentsPage() {
   const router = useRouter()
@@ -129,6 +286,12 @@ export function AgentsPage() {
   )
   const [mcpServers, setMcpServers] = React.useState<McpServer[]>([])
   const [runs, setRuns] = React.useState<AgentRun[]>([])
+  const [toolCallsByRun, setToolCallsByRun] = React.useState<
+    Record<string, AgentToolCall[]>
+  >({})
+  const [resolvingCallId, setResolvingCallId] = React.useState<string | null>(
+    null
+  )
   const [question, setQuestion] = React.useState("")
   const [pendingQuestion, setPendingQuestion] = React.useState<string | null>(
     null
@@ -166,6 +329,41 @@ export function AgentsPage() {
   const reportError = React.useCallback(
     (error: unknown) => notify("error", getErrorMessage(error, t)),
     [notify, t]
+  )
+
+  const loadRunToolCalls = React.useCallback(
+    async (agentId: string, runId: string) => {
+      if (!token || !selectedWorkspaceId) return
+      const calls = await listAgentRunToolCalls(
+        token,
+        selectedWorkspaceId,
+        agentId,
+        runId
+      )
+      setToolCallsByRun((current) => ({ ...current, [runId]: calls }))
+    },
+    [selectedWorkspaceId, token]
+  )
+
+  const applyStreamEvent = React.useCallback(
+    (
+      runId: string,
+      streamEvent: AgentRunStreamEvent,
+      placeholderId?: string
+    ) => {
+      setRuns((current) =>
+        mergeAgentRunStreamEvent(current, runId, streamEvent, placeholderId)
+      )
+      if (
+        streamEvent.type === "approval_required" ||
+        streamEvent.type === "approval_resolved"
+      ) {
+        if (selectedAgentId) {
+          void loadRunToolCalls(selectedAgentId, runId).catch(reportError)
+        }
+      }
+    },
+    [loadRunToolCalls, reportError, selectedAgentId]
   )
 
   const loadWorkspaceData = React.useCallback(async () => {
@@ -214,6 +412,11 @@ export function AgentsPage() {
     setForm(formFromAgent(selectedAgent))
   }, [form.id, selectedAgent])
 
+  React.useEffect(
+    () => () => askAbortController?.abort(),
+    [askAbortController, selectedAgentId]
+  )
+
   React.useEffect(() => {
     if (
       token &&
@@ -239,13 +442,38 @@ export function AgentsPage() {
     if (!token || !selectedWorkspaceId || !selectedAgentId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRuns([])
+      setToolCallsByRun({})
       return
     }
     let isCurrent = true
+    const observers: AbortController[] = []
     setIsRunsLoading(true)
     listAgentRuns(token, selectedWorkspaceId, selectedAgentId)
       .then((nextRuns) => {
-        if (isCurrent) setRuns(nextRuns)
+        if (!isCurrent) return
+        setRuns(nextRuns)
+        for (const run of nextRuns) {
+          if (run.status === "awaiting_approval") {
+            void loadRunToolCalls(selectedAgentId, run.id).catch(reportError)
+          }
+          if (
+            !["queued", "running", "awaiting_approval"].includes(run.status)
+          ) {
+            continue
+          }
+          const controller = new AbortController()
+          observers.push(controller)
+          void observeAgentRun(
+            token,
+            selectedWorkspaceId,
+            selectedAgentId,
+            run.id,
+            (streamEvent) => applyStreamEvent(run.id, streamEvent),
+            controller.signal
+          ).catch((error: unknown) => {
+            if (!controller.signal.aborted) reportError(error)
+          })
+        }
       })
       .catch((error: unknown) => {
         if (isCurrent) {
@@ -258,8 +486,16 @@ export function AgentsPage() {
       })
     return () => {
       isCurrent = false
+      observers.forEach((controller) => controller.abort())
     }
-  }, [reportError, selectedAgentId, selectedWorkspaceId, token])
+  }, [
+    applyStreamEvent,
+    loadRunToolCalls,
+    reportError,
+    selectedAgentId,
+    selectedWorkspaceId,
+    token,
+  ])
 
   if (!token || !me) return null
 
@@ -291,7 +527,6 @@ export function AgentsPage() {
     router.push(`/app/apps/${agent.id}`)
   }
 
-
   async function handleSaveAgent(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!token || !selectedWorkspaceId || !form.name.trim() || !form.modelId)
@@ -302,6 +537,7 @@ export function AgentsPage() {
         name: form.name.trim(),
         model_id: form.modelId,
         instructions: form.instructions,
+        knowledge_query_mode: form.knowledgeQueryMode,
         knowledge_base_ids: form.knowledgeBaseIds,
         mcp_tools: form.mcpTools,
         status: form.status,
@@ -398,7 +634,9 @@ export function AgentsPage() {
       requested_by_user_id: me?.user.id ?? "",
       goal: nextQuestion,
       model_id: selectedAgent.model_id,
-      model_name: models.find((m) => m.id === selectedAgent.model_id)?.name ?? "",
+      model_name:
+        models.find((m) => m.id === selectedAgent.model_id)?.name ?? "",
+      knowledge_query_mode: selectedAgent.knowledge_query_mode,
       status: "running",
       plan: [],
       events: [
@@ -414,6 +652,7 @@ export function AgentsPage() {
           server_name: "",
           input: {},
           output: null,
+          duration_ms: 0,
           reasoning: "",
         },
       ],
@@ -424,6 +663,7 @@ export function AgentsPage() {
       finished_at: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      trace_id: "",
     }
     setRuns((current) => [placeholderRun, ...current])
     let liveRunId: string | null = null
@@ -437,98 +677,31 @@ export function AgentsPage() {
           if (streamEvent.type === "run") {
             liveRunId = streamEvent.run.id
             setPendingQuestion(null)
-            setRuns((current) =>
-              current.map((run) =>
-                run.id === placeholderRun.id
-                  ? mergeInitialAgentRun(run, streamEvent.run)
-                  : run
-              )
-            )
-            return
           }
-          if (streamEvent.type === "process") {
-            setRuns((current) =>
-              current.map((run) => {
-                if (run.id !== liveRunId) return run
-                const eventIndex = run.events.findIndex((event) =>
-                  streamEvent.event.call_id
-                    ? event.call_id === streamEvent.event.call_id
-                    : event.type === streamEvent.event.type &&
-                      event.turn === streamEvent.event.turn &&
-                      event.tool_name === streamEvent.event.tool_name
-                )
-                if (eventIndex === -1) {
-                  return { ...run, events: [...run.events, streamEvent.event] }
-                }
-                return {
-                  ...run,
-                  events: run.events.map((event, index) =>
-                    index === eventIndex ? streamEvent.event : event
-                  ),
-                }
-              })
-            )
-            return
+          const eventRunId =
+            streamEvent.type === "run" ||
+            streamEvent.type === "complete" ||
+            streamEvent.type === "error"
+              ? streamEvent.run.id
+              : liveRunId
+          if (eventRunId) {
+            applyStreamEvent(eventRunId, streamEvent, placeholderRun.id)
           }
-          if (streamEvent.type === "reasoning_delta") {
-            setRuns((current) =>
-              current.map((run) =>
-                run.id === liveRunId
-                  ? {
-                      ...run,
-                      events: run.events.map((event) =>
-                        event.type === "thought" &&
-                        event.turn === streamEvent.turn
-                          ? {
-                              ...event,
-                              reasoning:
-                                (event.reasoning ?? "") + streamEvent.delta,
-                            }
-                          : event
-                      ),
-                    }
-                  : run
-              )
-            )
-            return
-          }
-          if (streamEvent.type === "answer_delta") {
-            setRuns((current) =>
-              current.map((run) =>
-                run.id === liveRunId
-                  ? { ...run, result: run.result + streamEvent.delta }
-                  : run
-              )
-            )
-            return
-          }
-          setRuns((current) =>
-            current.map((run) =>
-              run.id === streamEvent.run.id ? streamEvent.run : run
-            )
-          )
           if (streamEvent.type === "error") {
             notify("error", t("Agent 回答失败"))
           }
         },
-        !selectedAgent.published,
         askAbortController.signal
       )
     } catch (error) {
       const userCancelled = askAbortController.signal.aborted
-      setQuestion(nextQuestion)
-      setRuns((current) =>
-        current.filter(
-          (run) =>
-            run.id !== liveRunId && !run.id.startsWith("pending-")
+      if (!liveRunId) {
+        setQuestion(nextQuestion)
+        setRuns((current) =>
+          current.filter((run) => run.id !== placeholderRun.id)
         )
-      )
-      if (userCancelled) return
-      if (error instanceof DOMException && error.name === "TimeoutError") {
-        notify("error", t("Agent 回答超时"))
-      } else {
-        notify("error", t("Agent 回答失败"))
       }
+      if (userCancelled) return
       reportError(error)
     } finally {
       setPendingQuestion(null)
@@ -541,6 +714,37 @@ export function AgentsPage() {
     askAbortController?.abort()
   }
 
+  async function handleToolCallDecision(
+    runId: string,
+    callId: string,
+    decision: "approve" | "reject"
+  ) {
+    if (!token || !selectedWorkspaceId || !selectedAgent) return
+    setResolvingCallId(`${runId}:${callId}`)
+    try {
+      const run = await resolveAgentToolCall(
+        token,
+        selectedWorkspaceId,
+        selectedAgent.id,
+        runId,
+        callId,
+        decision
+      )
+      setRuns((current) =>
+        current.map((item) => (item.id === run.id ? run : item))
+      )
+      await loadRunToolCalls(selectedAgent.id, runId)
+      notify(
+        "success",
+        t(decision === "approve" ? "工具调用已批准" : "工具调用已拒绝")
+      )
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setResolvingCallId(null)
+    }
+  }
+
   if (selectedAgent) {
     return (
       <AgentDetailWorkspace
@@ -551,6 +755,8 @@ export function AgentsPage() {
         knowledgeBases={knowledgeBases}
         mcpServers={mcpServers}
         runs={runs}
+        toolCallsByRun={toolCallsByRun}
+        resolvingCallId={resolvingCallId}
         question={question}
         setQuestion={setQuestion}
         pendingQuestion={pendingQuestion}
@@ -568,6 +774,9 @@ export function AgentsPage() {
         onPublish={() => void handlePublishAgent()}
         onAsk={handleAsk}
         onCancelAsk={handleCancelAsk}
+        onToolCallDecision={(runId, callId, decision) =>
+          void handleToolCallDecision(runId, callId, decision)
+        }
         t={t}
       />
     )
@@ -640,7 +849,7 @@ export function AgentsPage() {
               key={agent.id}
               role="button"
               tabIndex={0}
-              className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
               onClick={(event) => {
                 if (isEventFromDropdownMenu(event)) return
                 openAgent(agent)
@@ -762,5 +971,4 @@ export function AgentsPage() {
       </Dialog>
     )
   }
-
 }

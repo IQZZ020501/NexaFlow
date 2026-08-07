@@ -1,16 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import {
-  AGENT_STREAM_TIMEOUT_MS,
   streamAgentRun,
   type AgentRun,
   type AgentRunStreamEvent,
 } from "../lib/api/agents"
 
 const originalFetch = globalThis.fetch
+const originalSetTimeout = globalThis.setTimeout
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+  globalThis.setTimeout = originalSetTimeout
 })
 
 function ndjsonResponse(lines: string[]): Response {
@@ -35,6 +36,7 @@ function runSnapshot(status: AgentRun["status"]): AgentRun {
     goal: "question",
     model_id: "model-1",
     model_name: "deepseek-chat",
+    knowledge_query_mode: "required",
     status,
     plan: [],
     events: [],
@@ -45,54 +47,137 @@ function runSnapshot(status: AgentRun["status"]): AgentRun {
     finished_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    trace_id: "trace-1",
   }
 }
 
 describe("streamAgentRun", () => {
   test("delivers events and accepts a terminal complete event", async () => {
     const events: AgentRunStreamEvent[] = []
-    globalThis.fetch = (async () =>
-      ndjsonResponse([
-        JSON.stringify({ type: "run", run: runSnapshot("running") }),
+    let requestCount = 0
+    globalThis.fetch = (async () => {
+      requestCount += 1
+      if (requestCount === 1) {
+        return Response.json(runSnapshot("queued"), { status: 201 })
+      }
+      return ndjsonResponse([
+        JSON.stringify({
+          type: "run",
+          sequence: 0,
+          run: runSnapshot("running"),
+        }),
         JSON.stringify({ type: "answer_delta", delta: "hello" }),
-        JSON.stringify({ type: "complete", run: runSnapshot("succeeded") }),
-      ])) as unknown as typeof fetch
+        JSON.stringify({
+          type: "complete",
+          sequence: 3,
+          run: runSnapshot("succeeded"),
+        }),
+      ])
+    }) as unknown as typeof fetch
 
     await streamAgentRun("token", "ws-1", "agent-1", "question", (event) =>
       events.push(event)
     )
     expect(events.map((event) => event.type)).toEqual([
       "run",
+      "run",
       "answer_delta",
       "complete",
     ])
   })
 
-  test("rejects when the stream ends without a terminal event", async () => {
-    globalThis.fetch = (async () =>
-      ndjsonResponse([
-        JSON.stringify({ type: "run", run: runSnapshot("running") }),
-      ])) as unknown as typeof fetch
+  test("reconnects from the last durable event cursor", async () => {
+    const urls: string[] = []
+    let requestCount = 0
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      urls.push(String(input))
+      requestCount += 1
+      if (requestCount === 1) {
+        return Response.json(runSnapshot("queued"), { status: 201 })
+      }
+      if (requestCount === 2) {
+        return ndjsonResponse([
+          JSON.stringify({
+            type: "process",
+            sequence: 7,
+            event: {
+              type: "thought",
+              turn: 1,
+              tool_name: "",
+              status: "succeeded",
+              summary: "agent.tools_selected",
+              call_id: "",
+              tool_label: "",
+              tool_kind: "unknown",
+              server_name: "",
+              input: {},
+              output: null,
+              duration_ms: 0,
+            },
+          }),
+          JSON.stringify({
+            type: "answer_delta",
+            live_sequence: "1700000000000-0",
+            stream_epoch: "worker-1",
+            delta: "partial",
+          }),
+        ])
+      }
+      return ndjsonResponse([
+        JSON.stringify({
+          type: "complete",
+          sequence: 8,
+          run: runSnapshot("succeeded"),
+        }),
+      ])
+    }) as unknown as typeof fetch
 
-    try {
-      await streamAgentRun("token", "ws-1", "agent-1", "question", () => {})
-      throw new Error("streamAgentRun should reject")
-    } catch (error) {
-      expect((error as Error).message).toContain(
-        "ended without a completion event"
-      )
-    }
+    await streamAgentRun("token", "ws-1", "agent-1", "question", () => {})
+    expect(urls[2]).toContain("after=7")
+    expect(urls[2]).toContain("live_after=1700000000000-0")
   })
 
-  test("rejects on non-2xx responses", async () => {
-    globalThis.fetch = (async () =>
-      new Response("", { status: 500 })) as unknown as typeof fetch
+  test("backs off retryable stream failures", async () => {
+    const delays: number[] = []
+    let requestCount = 0
+    globalThis.setTimeout = ((callback: () => void, delay?: number) => {
+      delays.push(delay ?? 0)
+      queueMicrotask(callback)
+      return 1
+    }) as typeof setTimeout
+    globalThis.fetch = (async () => {
+      requestCount += 1
+      if (requestCount === 1) {
+        return Response.json(runSnapshot("queued"), { status: 201 })
+      }
+      if (requestCount < 4) return new Response("", { status: 503 })
+      return ndjsonResponse([
+        JSON.stringify({
+          type: "complete",
+          sequence: 1,
+          run: runSnapshot("succeeded"),
+        }),
+      ])
+    }) as unknown as typeof fetch
+
+    await streamAgentRun("token", "ws-1", "agent-1", "question", () => {})
+    expect(delays).toEqual([250, 500])
+  })
+
+  test("rejects on non-retryable stream responses", async () => {
+    let requestCount = 0
+    globalThis.fetch = (async () => {
+      requestCount += 1
+      return requestCount === 1
+        ? Response.json(runSnapshot("queued"), { status: 201 })
+        : new Response("", { status: 403 })
+    }) as unknown as typeof fetch
 
     try {
       await streamAgentRun("token", "ws-1", "agent-1", "question", () => {})
       throw new Error("streamAgentRun should reject")
     } catch (error) {
-      expect((error as Error).message).toContain("status 500")
+      expect((error as Error).message).toContain("status 403")
     }
   })
 
@@ -100,9 +185,7 @@ describe("streamAgentRun", () => {
     let receivedSignal: AbortSignal | null | undefined
     globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       receivedSignal = init?.signal
-      return ndjsonResponse([
-        JSON.stringify({ type: "complete", run: runSnapshot("succeeded") }),
-      ])
+      return Response.json(runSnapshot("succeeded"), { status: 201 })
     }) as unknown as typeof fetch
 
     const controller = new AbortController()
@@ -112,16 +195,10 @@ describe("streamAgentRun", () => {
       "agent-1",
       "question",
       () => {},
-      false,
       controller.signal
     )
     expect(receivedSignal?.aborted).toBe(false)
     controller.abort()
     expect(receivedSignal?.aborted).toBe(true)
-  })
-
-  test("exposes a finite stream timeout", () => {
-    expect(AGENT_STREAM_TIMEOUT_MS).toBeGreaterThan(0)
-    expect(AGENT_STREAM_TIMEOUT_MS).toBeLessThanOrEqual(300_000)
   })
 })
