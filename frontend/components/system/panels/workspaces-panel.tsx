@@ -137,7 +137,6 @@ export function WorkspacesPanel({
                             type="button"
                             variant="ghost"
                             size="icon-sm"
-                            disabled={workspace.is_default}
                             onClick={() =>
                               void handleArchiveWorkspace(workspace)
                             }
@@ -169,7 +168,6 @@ export function WorkspacesPanel({
                           type="button"
                           variant="ghost"
                           size="icon-sm"
-                          disabled={workspace.is_default}
                           onClick={() => void handleDeleteWorkspace(workspace)}
                           title={t("永久删除工作空间")}
                           aria-label={t("永久删除工作空间")}

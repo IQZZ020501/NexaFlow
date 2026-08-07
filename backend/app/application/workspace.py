@@ -256,8 +256,6 @@ async def update_workspace(
     if payload.status is not None:
         if payload.status not in WORKSPACE_STATUSES:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid workspace status.")
-        if workspace.is_default and payload.status == ARCHIVED_STATUS:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Default workspace cannot be archived.")
         workspace.status = payload.status
 
     action = "workspace.update"
@@ -445,8 +443,6 @@ async def delete_workspace_permanently(
     workspace = await workspace_repository.lock_workspace(db, workspace.id)
     if workspace is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
-    if workspace.is_default:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Default workspace cannot be deleted.")
 
     cleanup_ids = await delete_workspace_knowledge_bases(
         db,

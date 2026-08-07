@@ -136,7 +136,6 @@ export function TeamsPanel({
                             type="button"
                             variant="ghost"
                             size="icon-sm"
-                            disabled={team.is_default}
                             onClick={() => void handleArchiveTeam(team)}
                             title={isArchived ? t("恢复团队") : t("归档团队")}
                             aria-label={
@@ -149,7 +148,6 @@ export function TeamsPanel({
                             type="button"
                             variant="ghost"
                             size="icon-sm"
-                            disabled={team.is_default}
                             onClick={() => void handleDeleteTeam(team)}
                             title={t("永久删除团队")}
                             aria-label={t("永久删除团队")}

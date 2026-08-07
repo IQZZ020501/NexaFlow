@@ -35,6 +35,9 @@ def main() -> None:
         )
         assert me.status_code == 200, me.text
         assert me.json()["user"]["username"] == "admin"
+        assert me.json()["memberships"] == []
+        assert me.json()["user"]["workspaces"] == []
+        assert me.json()["user"]["teams"] == []
         assert me.headers.get("cache-control") == "no-store"
 
         unknown = client.get("/no-such-route")

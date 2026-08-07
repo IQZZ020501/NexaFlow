@@ -3,17 +3,15 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.logger import get_logger, log_event
-from app.domain.user import User
 from app.infrastructure.security import hash_password
-from app.domain.team import Team, TeamMembership
-from app.domain.workspace import Workspace, WorkspaceMembership
 
 logger = get_logger(__name__)
 
 
-async def seed_defaults(db: AsyncSession, settings: Settings) -> None:
+async def seed_bootstrap_admin(db: AsyncSession, settings: Settings) -> None:
     admin = await db.scalar(select(User).where(User.username == settings.bootstrap_admin_username))
     if admin is None:
         admin = User(
@@ -28,77 +26,10 @@ async def seed_defaults(db: AsyncSession, settings: Settings) -> None:
     else:
         admin.is_global_admin = True
 
-    workspace = await db.scalar(select(Workspace).where(Workspace.slug == settings.default_workspace_slug))
-    if workspace is None:
-        workspace = Workspace(
-            name=settings.default_workspace_name,
-            slug=settings.default_workspace_slug,
-            status="active",
-            is_default=True,
-        )
-        db.add(workspace)
-        await db.flush()
-
-    await db.flush()
-
-    membership = await db.scalar(
-        select(WorkspaceMembership).where(
-            WorkspaceMembership.workspace_id == workspace.id,
-            WorkspaceMembership.user_id == admin.id,
-        )
-    )
-    if membership is None:
-        db.add(
-            WorkspaceMembership(
-                workspace_id=workspace.id,
-                user_id=admin.id,
-                role="admin",
-            )
-        )
-    elif membership.role != "admin":
-        membership.role = "admin"
-
-    team = await db.scalar(
-        select(Team).where(
-            Team.workspace_id == workspace.id,
-            Team.slug == settings.default_team_slug,
-        )
-    )
-    if team is None:
-        team = Team(
-            workspace_id=workspace.id,
-            name=settings.default_team_name,
-            slug=settings.default_team_slug,
-            status="active",
-            is_default=True,
-        )
-        db.add(team)
-        await db.flush()
-
-    team_membership = await db.scalar(
-        select(TeamMembership).where(
-            TeamMembership.team_id == team.id,
-            TeamMembership.user_id == admin.id,
-        )
-    )
-    if team_membership is None:
-        db.add(
-            TeamMembership(
-                workspace_id=workspace.id,
-                team_id=team.id,
-                user_id=admin.id,
-                role="admin",
-            )
-        )
-    elif team_membership.role != "admin":
-        team_membership.role = "admin"
-
     await db.commit()
     log_event(
         logger,
         logging.INFO,
-        "Bootstrap defaults ensured.",
+        "Bootstrap admin ensured.",
         admin_username=admin.username,
-        workspace_slug=workspace.slug,
-        team_slug=team.slug,
     )
