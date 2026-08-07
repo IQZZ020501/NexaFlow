@@ -122,8 +122,6 @@ async def update_team(
     if payload.status is not None:
         if payload.status not in TEAM_STATUSES:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid team status.")
-        if team.is_default and payload.status == ARCHIVED_STATUS:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Default team cannot be archived.")
         team.status = payload.status
 
     action = "team.update"
@@ -154,9 +152,6 @@ async def update_team(
 
 
 async def delete_team_permanently(db: AsyncSession, team: Team, actor: User) -> None:
-    if team.is_default:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Default team cannot be deleted.")
-
     record_audit_log(
         db,
         actor,

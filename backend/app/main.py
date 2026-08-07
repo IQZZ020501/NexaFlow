@@ -9,7 +9,7 @@ from app.api.v1.api import api_router
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import classify_error, log_error
 from app.infrastructure.logger import get_logger, setup_logging
-from app.infrastructure.seed import seed_defaults
+from app.infrastructure.seed import seed_bootstrap_admin
 from app.infrastructure.session import configure_database, get_session_factory
 from app.infrastructure.system_log import record_system_log
 
@@ -25,7 +25,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.validate()
         async with get_session_factory()() as db:
-            await seed_defaults(db, settings)
+            await seed_bootstrap_admin(db, settings)
         yield
 
     app = FastAPI(title="NexaFlow API", lifespan=lifespan)

@@ -181,14 +181,14 @@ def main() -> None:
 
         workspaces = client.get("/api/v1/workspaces", headers=auth_headers(admin_token))
         assert workspaces.status_code == 200, workspaces.text
-        assert [item["name"] for item in workspaces.json()] == ["Default Workspace"]
+        assert [item["name"] for item in workspaces.json()] == ["Test Workspace"]
 
         default_workspace = client.get(
             f"/api/v1/workspaces/{default_workspace_id}",
             headers=auth_headers(admin_token),
         )
         assert default_workspace.status_code == 200, default_workspace.text
-        assert default_workspace.json()["is_default"] is True
+        assert default_workspace.json()["is_default"] is False
 
         missing_admin = client.post(
             "/api/v1/workspaces",
@@ -448,11 +448,11 @@ def main() -> None:
             for item in workspace_audit_logs
         )
 
-        delete_default = client.delete(
+        delete_initial = client.delete(
             f"/api/v1/workspaces/{default_workspace_id}",
             headers=auth_headers(admin_token),
         )
-        assert delete_default.status_code == 400, delete_default.text
+        assert delete_initial.status_code == 204, delete_initial.text
 
         deleted = client.delete(
             f"/api/v1/workspaces/{research_workspace_id}",

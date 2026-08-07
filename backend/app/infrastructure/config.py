@@ -28,10 +28,6 @@ class Settings:
     bootstrap_admin_email: str
     bootstrap_admin_name: str
     bootstrap_admin_password: str
-    default_workspace_name: str
-    default_workspace_slug: str
-    default_team_name: str
-    default_team_slug: str
     jwt_secret_key: str = ""
     model_secret_key: str = ""
     knowledge_storage_dir: Path | None = None
@@ -65,10 +61,6 @@ class Settings:
             bootstrap_admin_email=os.getenv("BOOTSTRAP_ADMIN_EMAIL", ""),
             bootstrap_admin_name=os.getenv("BOOTSTRAP_ADMIN_NAME", ""),
             bootstrap_admin_password=os.getenv("BOOTSTRAP_ADMIN_PASSWORD", ""),
-            default_workspace_name=os.getenv("DEFAULT_WORKSPACE_NAME", ""),
-            default_workspace_slug=os.getenv("DEFAULT_WORKSPACE_SLUG", ""),
-            default_team_name=os.getenv("DEFAULT_TEAM_NAME", ""),
-            default_team_slug=os.getenv("DEFAULT_TEAM_SLUG", ""),
             model_secret_key=os.getenv("MODEL_SECRET_KEY", ""),
             knowledge_storage_dir=(
                 Path(os.getenv("KNOWLEDGE_STORAGE_DIR"))
@@ -100,10 +92,6 @@ class Settings:
             "BOOTSTRAP_ADMIN_EMAIL": self.bootstrap_admin_email,
             "BOOTSTRAP_ADMIN_NAME": self.bootstrap_admin_name,
             "BOOTSTRAP_ADMIN_PASSWORD": self.bootstrap_admin_password,
-            "DEFAULT_WORKSPACE_NAME": self.default_workspace_name,
-            "DEFAULT_WORKSPACE_SLUG": self.default_workspace_slug,
-            "DEFAULT_TEAM_NAME": self.default_team_name,
-            "DEFAULT_TEAM_SLUG": self.default_team_slug,
         }
         missing = [key for key, value in required.items() if not value]
         if require_bootstrap and missing:

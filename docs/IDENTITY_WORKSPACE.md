@@ -30,7 +30,7 @@ api/{auth,workspaces,teams,mcp_servers,admin/users,admin/audit}.py
 
 ### app/shareddomain/teams/
 
-- `backend/app/shareddomain/teams/services.py` — 团队服务层：CRUD、默认团队保护、成员与权限管理
+- `backend/app/shareddomain/teams/services.py` — 团队服务层：CRUD、成员与权限管理
 
 ### app/shareddomain/audit/
 

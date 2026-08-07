@@ -52,13 +52,21 @@ def main() -> None:
     with test_client() as client:
         admin_token, default_workspace_id = activate_admin(client)
 
-        default_teams = client.get(
-            teams_url(default_workspace_id),
+        admin_me = client.get(
+            "/api/v1/auth/me",
             headers=auth_headers(admin_token),
         )
-        assert default_teams.status_code == 200, default_teams.text
-        assert [item["name"] for item in default_teams.json()] == ["Default Team"]
-        default_team_id = default_teams.json()[0]["id"]
+        assert admin_me.status_code == 200, admin_me.text
+        workspace_team = client.post(
+            teams_url(default_workspace_id),
+            headers=auth_headers(admin_token),
+            json={
+                "name": "Workspace Team",
+                "admin_user_id": admin_me.json()["user"]["id"],
+            },
+        )
+        assert workspace_team.status_code == 201, workspace_team.text
+        default_team_id = workspace_team.json()["id"]
 
         research_admin_id, research_token = create_active_user(
             client,
@@ -398,11 +406,11 @@ def main() -> None:
         )
         assert remove_last_team_admin.status_code == 400, remove_last_team_admin.text
 
-        delete_default = client.delete(
+        delete_workspace_team = client.delete(
             teams_url(default_workspace_id, f"/{default_team_id}"),
             headers=auth_headers(admin_token),
         )
-        assert delete_default.status_code == 400, delete_default.text
+        assert delete_workspace_team.status_code == 204, delete_workspace_team.text
 
         deleted = client.delete(
             teams_url(research_workspace_id, f"/{team_id}"),

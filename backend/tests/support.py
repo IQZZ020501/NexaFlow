@@ -21,10 +21,6 @@ os.environ.update(
         "BOOTSTRAP_ADMIN_EMAIL": "admin@app.local",
         "BOOTSTRAP_ADMIN_NAME": "NexaFlow Admin",
         "BOOTSTRAP_ADMIN_PASSWORD": BOOTSTRAP_ADMIN_PASSWORD,
-        "DEFAULT_WORKSPACE_NAME": "Default Workspace",
-        "DEFAULT_WORKSPACE_SLUG": "default",
-        "DEFAULT_TEAM_NAME": "Default Team",
-        "DEFAULT_TEAM_SLUG": "default",
         "ENVIRONMENT": "test",
         "CELERY_TASK_ALWAYS_EAGER": "true",
         "QDRANT_URL": ":memory:",
@@ -56,10 +52,6 @@ def settings() -> Settings:
         bootstrap_admin_email="admin@app.local",
         bootstrap_admin_name="NexaFlow Admin",
         bootstrap_admin_password=BOOTSTRAP_ADMIN_PASSWORD,
-        default_workspace_name="Default Workspace",
-        default_workspace_slug="default",
-        default_team_name="Default Team",
-        default_team_slug="default",
         environment="test",
     )
 
@@ -139,12 +131,20 @@ def create_active_user(
 
 
 def activate_admin(client: TestClient) -> tuple[str, str]:
-    payload = login(client, "admin", BOOTSTRAP_ADMIN_PASSWORD)
-    token = payload["access_token"]
-
-    me = client.get("/api/v1/auth/me", headers=auth_headers(token))
-    assert me.status_code == 200, me.text
-    default_workspace_id = me.json()["memberships"][0]["workspace_id"]
-
     admin_token = activate_user(client, "admin", BOOTSTRAP_ADMIN_PASSWORD, ADMIN_PASSWORD)
-    return admin_token, default_workspace_id
+    me = client.get("/api/v1/auth/me", headers=auth_headers(admin_token))
+    assert me.status_code == 200, me.text
+    assert me.json()["memberships"] == []
+    assert me.json()["user"]["teams"] == []
+    assert me.json()["user"]["workspaces"] == []
+
+    created = client.post(
+        "/api/v1/workspaces",
+        headers=auth_headers(admin_token),
+        json={
+            "name": "Test Workspace",
+            "admin_user_id": me.json()["user"]["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    return admin_token, created.json()["workspace"]["id"]
