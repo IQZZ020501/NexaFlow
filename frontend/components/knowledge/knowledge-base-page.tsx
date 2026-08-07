@@ -33,6 +33,7 @@ import type { MeResponse } from "@/lib/api/auth"
 import type { AppNotification } from "@/lib/notifications"
 import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
+import { isEventFromDropdownMenu } from "@/lib/dom"
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
@@ -2295,7 +2296,10 @@ function KnowledgeBasePageContent({
                         role="button"
                         tabIndex={0}
                         className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => openKnowledgeBase(knowledgeBase)}
+                        onClick={(event) => {
+                          if (isEventFromDropdownMenu(event)) return
+                          openKnowledgeBase(knowledgeBase)
+                        }}
                         onKeyDown={(event) => {
                           if (event.target !== event.currentTarget) return
                           if (event.key === "Enter" || event.key === " ") {

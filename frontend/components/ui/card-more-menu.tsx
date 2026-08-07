@@ -9,9 +9,9 @@ import {
 import { IconButton } from "@/components/ui/icon-button"
 
 /**
- * "..." trigger for a card's bottom-right action menu. Renders a ghost icon
- * button that stops click propagation so the surrounding card link stays
- * inert; pass the menu items as children.
+ * "..." trigger for a card's bottom-right action menu. Both the trigger and
+ * portalled content stop click propagation so menu actions stay inside the
+ * card; pass the menu items as children.
  */
 export function CardMoreMenu({
   label,
@@ -27,7 +27,12 @@ export function CardMoreMenu({
           <MoreHorizontalIcon className="size-4" />
         </IconButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">{children}</DropdownMenuContent>
+      <DropdownMenuContent
+        align="end"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </DropdownMenuContent>
     </DropdownMenu>
   )
 }

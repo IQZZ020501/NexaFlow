@@ -877,10 +877,16 @@ function ProviderIcon({
       <span
         className={`flex shrink-0 items-center justify-center rounded-md border bg-white ${frameClassName}`}
       >
+        {/* Local SVGs are already lightweight; next/image would add client bundle cost. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={provider.icon}
           alt=""
+          width={24}
+          height={24}
           className={`object-contain ${imageClassName}`}
+          loading="lazy"
+          decoding="async"
         />
       </span>
     )

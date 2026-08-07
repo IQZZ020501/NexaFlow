@@ -25,6 +25,7 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spec } from "@/components/ui/spec"
+import { isEventFromDropdownMenu } from "@/lib/dom"
 import {
   Dialog,
   DialogContent,
@@ -640,7 +641,10 @@ export function AgentsPage() {
               role="button"
               tabIndex={0}
               className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => openAgent(agent)}
+              onClick={(event) => {
+                if (isEventFromDropdownMenu(event)) return
+                openAgent(agent)
+              }}
               onKeyDown={(event) => {
                 if (event.target !== event.currentTarget) return
                 if (event.key === "Enter" || event.key === " ") {
