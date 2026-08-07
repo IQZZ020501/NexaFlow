@@ -174,6 +174,63 @@ def test_parse_task_options_validates_boundaries() -> None:
     )
 
 
+def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
+    from io import BytesIO
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    from app.capabilities.embedding import pipeline
+
+    images = [
+        SimpleNamespace(
+            content_type="image/png",
+            alt_text=None,
+            open=lambda: BytesIO(b"image-without-alt"),
+        ),
+        SimpleNamespace(
+            content_type="image/png",
+            alt_text="Network diagram",
+            open=lambda: BytesIO(b"image-with-alt"),
+        ),
+    ]
+
+    def fake_convert_to_html(_stream, *, convert_image):
+        return SimpleNamespace(value=[convert_image(image) for image in images])
+
+    def fake_convert_string(_converter, image_attributes):
+        markdown = "\n\n".join(
+            f"![{attributes['alt']}](nexaflow-asset://{index})"
+            for index, attributes in enumerate(image_attributes)
+        )
+        return SimpleNamespace(text_content=f"Before\n\n{markdown}\n\nAfter")
+
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "images.docx"
+        path.touch()
+        with (
+            patch.object(pipeline, "pre_process_docx", lambda stream: stream),
+            patch.object(pipeline.mammoth.images, "img_element", lambda callback: callback),
+            patch.object(pipeline.mammoth, "convert_to_html", fake_convert_to_html),
+            patch.object(pipeline.HtmlConverter, "convert_string", fake_convert_string),
+        ):
+            text, assets = pipeline.extract_document(
+                path.name,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                path,
+            )
+
+    drafts = pipeline.build_flat_chunks(
+        pipeline.split_text(text, chunk_size=1000, overlap=0)
+    )
+    assert [asset.alt_text for asset in assets] == ["", "Network diagram"]
+    assert len(drafts.children) == 1
+    assert " ".join(drafts.children[0].content.split()) == (
+        "Before Network diagram After"
+    )
+    assert drafts.children[0].asset_indexes == [0, 1]
+
+
 # ---------------------------------------------------------------- retrieval math
 
 
@@ -545,6 +602,7 @@ def main() -> None:
     test_knowledge_writes_recheck_locked_owner()
     test_clean_upload_filename_sanitizes_path_and_classification()
     test_parse_task_options_validates_boundaries()
+    test_docx_images_without_alt_text_do_not_add_placeholder_content()
     test_reciprocal_rank_fusion_merges_and_ranks()
     test_parent_context_windows_around_child_offsets()
     test_model_type_normalization()
