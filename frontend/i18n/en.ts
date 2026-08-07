@@ -211,6 +211,7 @@ export const en = {
   "负责人": "Owner",
   "例如：运营团队": "Example: Operations team",
   "知识库": "Knowledge",
+  "知识库检索": "Knowledge retrieval",
   "管理文档、数据源与向量索引，让应用可以检索你的业务知识。":
     "Manage documents, data sources, and vector indexes so apps can retrieve business knowledge.",
   "新建知识库": "Create knowledge base",

@@ -192,9 +192,18 @@ export function McpToolsPage() {
   async function handlePolicyChange(
     server: McpServer,
     toolName: string,
-    mode: McpToolPolicyMode
+    mode: McpToolPolicyMode,
+    select: HTMLSelectElement
   ) {
-    if (!token || !selectedWorkspaceId || busyServerId) return
+    const restore = () => {
+      select.value =
+        server.tools.find((tool) => tool.name === toolName)?.policy_mode ??
+        "approval_required"
+    }
+    if (!token || !selectedWorkspaceId || busyServerId) {
+      restore()
+      return
+    }
     if (
       mode === "read_only" &&
       !window.confirm(
@@ -203,6 +212,7 @@ export function McpToolsPage() {
         })
       )
     ) {
+      restore()
       return
     }
     setBusyServerId(server.id)
@@ -381,7 +391,9 @@ export function McpToolsPage() {
                                 void handlePolicyChange(
                                   server,
                                   tool.name,
-                                  event.target.value as McpToolPolicyMode
+                                  event.currentTarget
+                                    .value as McpToolPolicyMode,
+                                  event.currentTarget
                                 )
                               }
                             >

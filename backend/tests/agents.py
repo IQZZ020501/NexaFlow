@@ -47,6 +47,7 @@ from app.infrastructure.session import get_session_factory
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.system_log import SystemLog
 from app.shareddomain.agents.runtime import (
+    AgentExecutionPaused,
     AgentRunnerError,
     AgentToolResult,
     create_agent_tool,
@@ -951,6 +952,36 @@ async def assert_parallel_policy_is_enforced() -> None:
     )
     assert max_parallel == 1
 
+    completed_siblings: list[str] = []
+
+    async def pause_first_call(
+        _turn,
+        call,
+        _metadata,
+        _arguments,
+    ) -> AgentToolResult | None:
+        if call["id"] == "call-0":
+            raise AgentExecutionPaused(call["id"], "approval required")
+        await asyncio.sleep(0.01)
+        completed_siblings.append(call["id"])
+        return AgentToolResult(content="already handled", summary="handled")
+
+    provider = SequenceProvider(
+        [ModelCompletion(content="", tool_calls=calls, finish_reason="tool_calls")]
+    )
+    try:
+        await run_agent(
+            provider,  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [tool],
+            before_tool_call=pause_first_call,
+        )
+    except AgentExecutionPaused as exc:
+        assert exc.call_id == "call-0"
+    else:
+        raise AssertionError("parallel pause was not propagated")
+    assert completed_siblings == ["call-1"]
+
 
 async def assert_runtime_budgets_are_enforced() -> None:
     retrievals = 0
@@ -1469,6 +1500,35 @@ async def assert_exhausted_run_closes_tool_ledger(
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
         assert actor is not None
+        historical_run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Preserve historical exhausted tool calls",
+            actor,
+            "admin",
+        )
+        now = utc_now()
+        historical_run.status = "failed"
+        historical_run.attempts = historical_run.max_attempts
+        historical_run.finished_at = now - timedelta(minutes=1)
+        await agent_repository.save_agent_run(db, historical_run)
+        await agent_repository.create_agent_tool_call(
+            db,
+            AgentToolCall(
+                workspace_id=workspace_id,
+                run_id=historical_run.id,
+                turn=1,
+                call_id="historical-call",
+                tool_name="mcp_lookup",
+                tool_kind="mcp",
+                arguments_hash="historical-call",
+                idempotency_key="historical-call",
+                status="running",
+                approval_required=False,
+                worker_task_id="historical-worker",
+            ),
+        )
         run, _ = await agent_runs.prepare_agent_run(
             db,
             workspace_id,
@@ -1477,7 +1537,6 @@ async def assert_exhausted_run_closes_tool_ledger(
             actor,
             "admin",
         )
-        now = utc_now()
         run.status = "running"
         run.attempts = run.max_attempts
         run.worker_task_id = "dead-worker"
@@ -1508,6 +1567,10 @@ async def assert_exhausted_run_closes_tool_ledger(
         await db.commit()
         current = await agent_repository.get_agent_run_by_id(db, run.id)
         calls = await agent_repository.list_agent_tool_calls(db, run.id)
+        historical_calls = await agent_repository.list_agent_tool_calls(
+            db,
+            historical_run.id,
+        )
 
     assert current is not None
     assert current.status == "failed"
@@ -1517,6 +1580,8 @@ async def assert_exhausted_run_closes_tool_ledger(
     }
     assert all(call.worker_task_id is None for call in calls)
     assert all(call.lease_expires_at is None for call in calls)
+    assert historical_calls[0].status == "running"
+    assert historical_calls[0].worker_task_id == "historical-worker"
 
 
 async def assert_unhandled_scope_failure_is_terminal(
@@ -1958,7 +2023,7 @@ def main() -> None:
             ]
             knowledge_event = executed["events"][0]
             assert knowledge_event["call_id"] == f"eager-knowledge-{executed['id']}"
-            assert knowledge_event["tool_label"] == "知识库检索"
+            assert knowledge_event["tool_label"] == "knowledge"
             assert knowledge_event["tool_kind"] == "knowledge"
             assert knowledge_event["input"] == {
                 "query": "Prepare the release with evidence"

@@ -306,9 +306,15 @@ async function consumeAgentRunStream(
   let buffer = ""
   let terminal = false
 
-  const consumeLine = (line: string) => {
+  const consumeLine = (line: string, tolerateIncomplete = false) => {
     if (!line.trim()) return
-    const event = JSON.parse(line) as AgentRunStreamEvent
+    let event: AgentRunStreamEvent
+    try {
+      event = JSON.parse(line) as AgentRunStreamEvent
+    } catch (error) {
+      if (tolerateIncomplete) return
+      throw error
+    }
     if ("sequence" in event && typeof event.sequence === "number") {
       cursor = Math.max(cursor, event.sequence)
     }
@@ -328,10 +334,10 @@ async function consumeAgentRunStream(
     buffer += decoder.decode(value, { stream: !done })
     const lines = buffer.split("\n")
     buffer = lines.pop() ?? ""
-    lines.forEach(consumeLine)
+    lines.forEach((line) => consumeLine(line))
     if (done) break
   }
-  consumeLine(buffer)
+  consumeLine(buffer, true)
   return { cursor, liveCursor, terminal }
 }
 

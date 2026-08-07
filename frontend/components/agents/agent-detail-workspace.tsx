@@ -130,7 +130,10 @@ function ToolEventDetails({
   t: TFunction
 }) {
   const [isOpen, setIsOpen] = React.useState(false)
-  const label = event.tool_label || event.tool_name
+  const label =
+    event.tool_kind === "knowledge"
+      ? t("知识库检索")
+      : event.tool_label || event.tool_name
 
   return (
     <div className="overflow-hidden rounded-lg border bg-background/70">

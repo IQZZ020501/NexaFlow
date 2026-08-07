@@ -399,7 +399,7 @@ async def list_recoverable_agent_run_ids(
 
 
 async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
-    updated = await db.execute(
+    updated = await db.scalars(
         update(AgentRun)
         .where(
             AgentRun.attempts >= AgentRun.max_attempts,
@@ -422,11 +422,11 @@ async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
             finished_at=now,
             updated_at=now,
         )
+        .returning(AgentRun.id)
     )
-    exhausted_run_ids = select(AgentRun.id).where(
-        AgentRun.status == AGENT_RUN_FAILED_STATUS,
-        AgentRun.attempts >= AgentRun.max_attempts,
-    )
+    exhausted_run_ids = list(updated.all())
+    if not exhausted_run_ids:
+        return 0
     await db.execute(
         update(AgentToolCall)
         .where(
@@ -468,7 +468,7 @@ async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
             updated_at=now,
         )
     )
-    return int(updated.rowcount or 0)
+    return len(exhausted_run_ids)
 
 
 async def append_agent_run_event(
@@ -732,6 +732,7 @@ async def block_agent_tool_call(
     tool_call_id: str,
     reason: str,
     blocked_at: datetime,
+    result_summary: str,
 ) -> bool:
     updated = await db.execute(
         update(AgentToolCall)
@@ -745,7 +746,7 @@ async def block_agent_tool_call(
             status="rejected",
             last_error=reason,
             result_content=reason,
-            result_summary="Tool disabled by workspace policy.",
+            result_summary=result_summary,
             result_is_error=True,
             finished_at=blocked_at,
             updated_at=blocked_at,

@@ -15,11 +15,15 @@ afterEach(() => {
 })
 
 function ndjsonResponse(lines: string[]): Response {
+  return rawStreamResponse(lines.map((line) => `${line}\n`))
+}
+
+function rawStreamResponse(chunks: string[]): Response {
   const encoder = new TextEncoder()
   const body = new ReadableStream({
     start(controller) {
-      for (const line of lines) {
-        controller.enqueue(encoder.encode(`${line}\n`))
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk))
       }
       controller.close()
     },
@@ -135,6 +139,57 @@ describe("streamAgentRun", () => {
     await streamAgentRun("token", "ws-1", "agent-1", "question", () => {})
     expect(urls[2]).toContain("after=7")
     expect(urls[2]).toContain("live_after=1700000000000-0")
+  })
+
+  test("reconnects after a truncated final NDJSON line", async () => {
+    const urls: string[] = []
+    const events: AgentRunStreamEvent[] = []
+    let requestCount = 0
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      urls.push(String(input))
+      requestCount += 1
+      if (requestCount === 1) {
+        return Response.json(runSnapshot("queued"), { status: 201 })
+      }
+      if (requestCount === 2) {
+        return rawStreamResponse([
+          `${JSON.stringify({
+            type: "process",
+            sequence: 7,
+            event: {
+              type: "thought",
+              turn: 1,
+              tool_name: "",
+              status: "succeeded",
+              summary: "agent.answer_ready",
+              call_id: "",
+              tool_label: "",
+              tool_kind: "unknown",
+              server_name: "",
+              input: {},
+              output: null,
+              duration_ms: 0,
+            },
+          })}\n`,
+          '{"type":"complete"',
+        ])
+      }
+      return ndjsonResponse([
+        JSON.stringify({
+          type: "complete",
+          sequence: 8,
+          run: runSnapshot("succeeded"),
+        }),
+      ])
+    }) as unknown as typeof fetch
+
+    await streamAgentRun("token", "ws-1", "agent-1", "question", (event) =>
+      events.push(event)
+    )
+
+    expect(requestCount).toBe(3)
+    expect(urls[2]).toContain("after=7")
+    expect(events.at(-1)?.type).toBe("complete")
   })
 
   test("backs off retryable stream failures", async () => {

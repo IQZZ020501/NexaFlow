@@ -65,6 +65,7 @@ logger = get_logger(__name__)
 RUN_FINISHED = "finished"
 RUN_BUSY = "busy"
 RUN_AWAITING_APPROVAL = "awaiting_approval"
+AGENT_EVENT_REPLAY_PAGE_SIZE = 500
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,25 @@ def _completed_process_events(
     events: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     return [event for event in events if event.get("status") != "running"]
+
+
+async def _list_all_agent_run_events(db: Any, run_id: str) -> list[Any]:
+    rows: list[Any] = []
+    cursor = 0
+    while True:
+        page = await agent_repository.list_agent_run_events(
+            db,
+            run_id,
+            after=cursor,
+            limit=AGENT_EVENT_REPLAY_PAGE_SIZE,
+        )
+        rows.extend(page)
+        if len(page) < AGENT_EVENT_REPLAY_PAGE_SIZE:
+            return rows
+        last_id = page[-1].id
+        if last_id is None or last_id <= cursor:
+            raise AgentRunnerError("Agent event replay cursor did not advance.")
+        cursor = last_id
 
 
 def _arguments_hash(arguments: dict[str, Any]) -> str:
@@ -192,10 +212,13 @@ class DurableToolLedger:
                     metadata.get("server_id", ""),
                     metadata.get("source_tool_name", ""),
                 )
-                if policy is not None and policy.definition_hash == metadata.get(
-                    "definition_hash", ""
-                ):
-                    policy_mode = policy.mode
+                if policy is not None:
+                    policy_mode = (
+                        policy.mode
+                        if policy.definition_hash
+                        == metadata.get("definition_hash", "")
+                        else "approval_required"
+                    )
                 approval_required = policy_mode != "read_only"
             existing = await agent_repository.get_agent_tool_call(
                 db,
@@ -240,6 +263,7 @@ class DurableToolLedger:
                     existing.id,
                     "MCP tool definition changed after this call was created; start a new run.",
                     now,
+                    "MCP tool definition changed.",
                 )
                 await db.commit()
                 blocked = await agent_repository.get_agent_tool_call(
@@ -256,6 +280,7 @@ class DurableToolLedger:
                     existing.id,
                     "MCP tool is disabled by workspace policy.",
                     now,
+                    "Tool disabled by workspace policy.",
                 )
                 await db.commit()
                 blocked = await agent_repository.get_agent_tool_call(
@@ -401,11 +426,7 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
             run.agent_id,
             actor.id,
         )
-        event_rows = await agent_repository.list_agent_run_events(
-            db,
-            run.id,
-            limit=2000,
-        )
+        event_rows = await _list_all_agent_run_events(db, run.id)
     process_events: list[dict[str, Any]] = []
     for row in event_rows:
         event = row.event.get("event", {})
@@ -559,7 +580,7 @@ async def _execute_claimed_agent_run(
                 "status": "failed" if eager_result.is_error else "succeeded",
                 "summary": eager_result.summary,
                 "call_id": eager_call_id,
-                "tool_label": "知识库检索",
+                "tool_label": "knowledge",
                 "tool_kind": "knowledge",
                 "server_name": "",
                 "input": {"query": run.goal},
@@ -788,11 +809,7 @@ async def _fail_unhandled_claimed_run(
         run = await agent_repository.get_agent_run_by_id(db, run_id)
         if run is None:
             return RUN_FINISHED
-        event_rows = await agent_repository.list_agent_run_events(
-            db,
-            run_id,
-            limit=2000,
-        )
+        event_rows = await _list_all_agent_run_events(db, run_id)
         process_events: list[dict[str, Any]] = []
         for row in event_rows:
             if row.event.get("type") == "process":

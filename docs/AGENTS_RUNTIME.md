@@ -7,7 +7,8 @@ Agent 业务领域与运行时：Agent CRUD、知识库/工具绑定与权限校
 ## 分层关系
 
 ```text
-api/agents.py → application/agents.py（提交运行、审批、可重放事件订阅）
+api/agents.py → application/agents.py（公开用例门面）
+             → application/agent_runs.py（提交运行、审批、可重放事件订阅）
              → application/agent_executor.py（租约执行、checkpoint、工具账本）
              → shareddomain/agents/services（CRUD/绑定/权限）
              → shareddomain/agents/runtime（LangGraph 状态图执行）
@@ -32,7 +33,8 @@ application/agent_memory.py（历史成功运行 → 上下文记忆）
 
 ### application/
 
-- `backend/app/application/agents.py` — Agent 用例门面：CRUD、Run 提交/读取、审批与事件订阅
+- `backend/app/application/agents.py` — Agent 用例门面：重导出 CRUD、Run 与工具用例，保持调用方入口稳定
+- `backend/app/application/agent_runs.py` — Run 编排：提交/读取、审批与 PostgreSQL/Redis 事件订阅
 - `backend/app/application/agent_executor.py` — Celery worker 执行：Run 租约/心跳/接管、checkpoint、工具幂等账本与终态
 - `backend/app/application/agent_memory.py` — Agent 对话记忆：从历史成功运行记录格式化上下文注入（限量/限字符）
 

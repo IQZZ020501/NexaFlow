@@ -19,7 +19,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - 状态码：创建 201、删除 204、异步任务 202；错误统一 FastAPI `{"detail": ...}`。
 - 分页：所有列表端点统一 `limit`（`ge=1 le=200`，默认 100）+ `offset`（`ge=0`）查询参数。
 - 鉴权：仅 `/auth/login|refresh|logout` 与 `/health` 公开；其余全部 Bearer，且需完成初始改密（`require_password_changed`）。
-- 流式：Agent 先 `POST /runs` 持久提交，再 `GET /runs/{run_id}/stream?after={sequence}&live_after={redis_stream_id}` 订阅 NDJSON。`after` 重放 PostgreSQL 过程/终态事件，`live_after` 补发短期 Redis 答案/推理增量；终态 Run 快照始终覆盖实时片段。断线不取消 Run。请求中的旧 `preview` 字段仅为兼容保留并被忽略，所有 Run 都是持久执行。所有 `/api` 响应默认 `no-store`。
+- 流式：Agent 先 `POST /runs` 持久提交，再 `GET /runs/{run_id}/stream?after={sequence}&live_after={redis_stream_id}` 订阅 NDJSON。`after` 重放 PostgreSQL 过程/终态事件，`live_after` 补发短期 Redis 答案/推理增量；实时事件的 `stream_epoch` 变化表示新 worker 已接管，客户端必须清空已累积的答案和推理后重新累积。终态 Run 快照始终覆盖实时片段。断线不取消 Run。请求中的旧 `preview` 字段仅为兼容保留并被忽略，所有 Run 都是持久执行。所有 `/api` 响应默认 `no-store`。
 - 全局管理员仅限 `/admin/*` 与工作空间生命周期管理。
 
 ## 文件清单

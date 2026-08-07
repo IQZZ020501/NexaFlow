@@ -16,6 +16,7 @@ LIVE_EVENT_TYPES = frozenset({"answer_delta", "reasoning_delta"})
 LIVE_STREAM_MAXLEN = 4096
 LIVE_STREAM_TTL_SECONDS = 900
 LIVE_STREAM_READ_COUNT = 128
+LIVE_STREAM_MAX_BLOCK_MS = 500
 LIVE_STREAM_PUBLISH_TIMEOUT_SECONDS = 1.0
 
 
@@ -37,7 +38,6 @@ class AgentLiveStreamPublisher:
         self._redis = _redis_client(settings)
         self._key = live_stream_key(run_id)
         self._available = True
-        self._initialized = False
 
     async def publish(self, event: dict[str, Any]) -> None:
         if not self._available or event.get("type") not in LIVE_EVENT_TYPES:
@@ -46,24 +46,15 @@ class AgentLiveStreamPublisher:
             payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
             async with asyncio.timeout(LIVE_STREAM_PUBLISH_TIMEOUT_SECONDS):
                 entry_fields = {"payload": payload}
-                if self._initialized:
-                    await self._redis.xadd(
+                async with self._redis.pipeline(transaction=False) as pipe:
+                    pipe.xadd(
                         self._key,
                         entry_fields,
                         maxlen=LIVE_STREAM_MAXLEN,
                         approximate=True,
                     )
-                else:
-                    async with self._redis.pipeline(transaction=False) as pipe:
-                        pipe.xadd(
-                            self._key,
-                            entry_fields,
-                            maxlen=LIVE_STREAM_MAXLEN,
-                            approximate=True,
-                        )
-                        pipe.expire(self._key, LIVE_STREAM_TTL_SECONDS)
-                        await pipe.execute()
-                    self._initialized = True
+                    pipe.expire(self._key, LIVE_STREAM_TTL_SECONDS)
+                    await pipe.execute()
         except (RedisError, OSError, TimeoutError) as exc:
             self._available = False
             log_error(
@@ -99,7 +90,7 @@ class AgentLiveStreamReader:
             streams = await self._redis.xread(
                 {self._key: cursor},
                 count=LIVE_STREAM_READ_COUNT,
-                block=max(1, block_ms),
+                block=max(1, min(block_ms, LIVE_STREAM_MAX_BLOCK_MS)),
             )
         except (RedisError, OSError, TimeoutError) as exc:
             self._available = False

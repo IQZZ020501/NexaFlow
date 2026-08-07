@@ -314,7 +314,7 @@ def build_knowledge_search_tool(
         )[:MAX_KNOWLEDGE_TOOL_DESCRIPTION_CHARS],
         parameters=KnowledgeSearchInput.model_json_schema(),
         execute=execute,
-        display_name="知识库检索",
+        display_name="knowledge",
         kind="knowledge",
         parallel_safe=True,
     )

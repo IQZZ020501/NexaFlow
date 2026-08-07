@@ -124,6 +124,27 @@ describe("Agent preview state", () => {
     ).toEqual([liveEvent])
   })
 
+  test("keeps live cursors on non-terminal snapshots with persisted text", () => {
+    const pendingRun = {
+      id: "run-1",
+      status: "running",
+      events: [],
+      result: "partial",
+      live_stream_epoch: "worker-1",
+      live_stream_cursor: "1700000000000-1",
+    } as unknown as AgentRun
+    const merged = mergeInitialAgentRun(pendingRun, {
+      ...pendingRun,
+      result: "persisted partial",
+      live_stream_epoch: undefined,
+      live_stream_cursor: undefined,
+    })
+
+    expect(merged.result).toBe("persisted partial")
+    expect(merged.live_stream_epoch).toBe("worker-1")
+    expect(merged.live_stream_cursor).toBe("1700000000000-1")
+  })
+
   test("keeps partial text across reconnects and resets it on worker takeover", () => {
     const running = {
       id: "run-1",

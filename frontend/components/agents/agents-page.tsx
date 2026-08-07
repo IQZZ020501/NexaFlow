@@ -108,14 +108,12 @@ export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
     events: liveRun.events.length > 0 ? liveRun.events : pendingRun.events,
     result:
       keepLiveAnswer && !liveRun.result ? pendingRun.result : liveRun.result,
-    live_stream_epoch:
-      keepLiveAnswer && !liveRun.result
-        ? pendingRun.live_stream_epoch
-        : undefined,
-    live_stream_cursor:
-      keepLiveAnswer && !liveRun.result
-        ? pendingRun.live_stream_cursor
-        : undefined,
+    live_stream_epoch: keepLiveAnswer
+      ? pendingRun.live_stream_epoch
+      : undefined,
+    live_stream_cursor: keepLiveAnswer
+      ? pendingRun.live_stream_cursor
+      : undefined,
   }
 }
 

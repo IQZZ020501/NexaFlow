@@ -432,8 +432,12 @@ async def tool_node(
                     runtime.context,
                 )
                 for item in prepared_calls[index:group_end]
-            )
+            ),
+            return_exceptions=True,
         )
+        for result in group_results:
+            if isinstance(result, BaseException):
+                raise result
         for result_index, result in enumerate(group_results, start=index):
             execution_results[result_index] = result
         index = group_end
