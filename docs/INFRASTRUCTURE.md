@@ -18,15 +18,16 @@
 - `backend/app/infrastructure/validation.py` — 输入规范化：email/username/name 校验与 trim
 - `backend/app/infrastructure/system_log.py` — SystemLog ORM 模型与 `record_system_log` 系统日志落库
 - `backend/app/infrastructure/celery.py` — Celery 应用工厂（broker、序列化、ack 策略）与任务失败全局错误钩子
+- `backend/app/infrastructure/agent_live_stream.py` — Agent 答案/推理增量的有界 Redis Stream；提供短期补发游标并在 Redis 故障时安全降级
 - `backend/app/infrastructure/seed.py` — 引导数据播种：初始管理员、默认工作空间/团队/成员
 - `backend/app/infrastructure/base.py` — SQLAlchemy DeclarativeBase 基类
 
 ### infrastructure/repositories/（数据访问层）
 
-- `backend/app/infrastructure/repositories/agent.py` — Agent/知识库绑定/MCP 工具绑定/运行记录数据访问层
+- `backend/app/infrastructure/repositories/agent.py` — Agent/绑定、Run 原子租约、checkpoint、事件游标与工具调用账本数据访问层
 - `backend/app/infrastructure/repositories/knowledge.py` — 知识库/文档/分块/任务数据访问层，含关键词命中 chunk 查询
 - `backend/app/infrastructure/repositories/user.py` — 用户与刷新会话、工作空间/团队成员关系数据访问层
-- `backend/app/infrastructure/repositories/mcp.py` — MCP 服务器与 AgentMCP 工具绑定数据访问层
+- `backend/app/infrastructure/repositories/mcp.py` — MCP Server 与本地审核工具策略数据访问层
 - `backend/app/infrastructure/repositories/audit.py` — 审计日志列表查询数据访问层
 - `backend/app/infrastructure/repositories/team.py` — 团队及成员关系数据访问层（含级联删除）
 - `backend/app/infrastructure/repositories/workspace.py` — 工作空间与成员关系数据访问层（含管理员计数）
@@ -64,6 +65,9 @@
   - `202608050001_knowledge_chunk_search.py` — 知识块 content 全文检索 GIN 索引（仅 PostgreSQL）
   - `202608050002_model_provider_credentials.py` — 模型凭据改造：credential_config/secret_hints JSON 列与 provider_type 归一化
   - `202608050003_knowledge_parent_chunks.py` — 智能分段 Parent 表、Child 父级偏移及文档/租户组合外键约束
+  - `202608050004_knowledge_assets.py` — 知识附件与解析资产表
+  - `202608060001_knowledge_storage_cleanup.py` — 持久化知识存储清理任务
+  - `202608070001_agent_durable_executor.py` — Agent 检索策略、Run 租约/checkpoint/事件/工具账本与 MCP 工具策略
 
 ## backend 根配置
 

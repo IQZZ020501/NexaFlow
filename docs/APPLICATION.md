@@ -14,5 +14,6 @@ api/endpoints → application（编排/规则/审计）→ shareddomain + capabi
 
 - `backend/app/application/identity.py` — 身份与应用服务：登录认证、access/refresh token 签发、改密、用户 CRUD 及审计记录
 - `backend/app/application/workspace.py` — 工作区应用服务：创建/更新/删除、成员增删改、最后一名管理员等规则校验
-- `backend/app/application/agents.py` — Agent 运行编排层：构建知识库检索/MCP 工具、组装执行消息、准备/执行/流式运行 Agent
+- `backend/app/application/agents.py` — Agent 用例门面：Run 提交/查询、工具审批与可重放事件订阅
+- `backend/app/application/agent_executor.py` — Durable Executor：短事务装载、租约心跳/接管、节点 checkpoint、工具账本与 Redis 实时 delta 发布
 - `backend/app/application/agent_memory.py` — Agent 对话记忆：从历史成功运行记录格式化上下文注入（限量/限字符）

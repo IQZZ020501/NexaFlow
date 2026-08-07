@@ -19,7 +19,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - 状态码：创建 201、删除 204、异步任务 202；错误统一 FastAPI `{"detail": ...}`。
 - 分页：所有列表端点统一 `limit`（`ge=1 le=200`，默认 100）+ `offset`（`ge=0`）查询参数。
 - 鉴权：仅 `/auth/login|refresh|logout` 与 `/health` 公开；其余全部 Bearer，且需完成初始改密（`require_password_changed`）。
-- 流式：agent 运行流为 `application/x-ndjson`，`Cache-Control: no-cache`；所有 `/api` 响应默认 `no-store`。
+- 流式：Agent 先 `POST /runs` 持久提交，再 `GET /runs/{run_id}/stream?after={sequence}&live_after={redis_stream_id}` 订阅 NDJSON。`after` 重放 PostgreSQL 过程/终态事件，`live_after` 补发短期 Redis 答案/推理增量；终态 Run 快照始终覆盖实时片段。断线不取消 Run。请求中的旧 `preview` 字段仅为兼容保留并被忽略，所有 Run 都是持久执行。所有 `/api` 响应默认 `no-store`。
 - 全局管理员仅限 `/admin/*` 与工作空间生命周期管理。
 
 ## 文件清单
@@ -39,8 +39,8 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/endpoints/knowledge_lifecycle.py` — 同前缀文档生命周期：下载、删除、激活状态更新（PATCH）
 - `backend/app/api/v1/endpoints/knowledge_retrieval.py` — 同前缀 RAG 检索接口 `POST /{kb_id}/query`
 - `backend/app/api/v1/endpoints/models.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
-- `backend/app/api/v1/endpoints/mcp_servers.py` — `/workspaces/{workspace_id}/mcp-servers`：MCP Server 列表/创建/刷新/删除
-- `backend/app/api/v1/endpoints/agents.py` — `/workspaces/{workspace_id}/agents`：Agent CRUD 与运行接口（创建/列表/NDJSON 流式运行）
+- `backend/app/api/v1/endpoints/mcp_servers.py` — MCP Server CRUD/刷新，以及管理员按工具定义哈希审核执行策略
+- `backend/app/api/v1/endpoints/agents.py` — Agent CRUD、Run 提交/状态/工具账本、审批/拒绝与游标 NDJSON 订阅
 
 ### app/api/v1/admin/
 
