@@ -123,6 +123,14 @@ def validate_workspace_member_role(role: str) -> None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid workspace role.")
 
 
+def require_global_admin_for_workspace_admin(actor: User) -> None:
+    if not actor.is_global_admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Global admin required to manage workspace admins.",
+        )
+
+
 async def count_workspace_admins(db: AsyncSession, workspace_id: str) -> int:
     return await workspace_repository.count_workspace_admins(db, workspace_id)
 
@@ -316,6 +324,8 @@ async def add_workspace_member(
     actor: User,
 ) -> WorkspaceMemberResponse:
     validate_workspace_member_role(role)
+    if role == "admin":
+        require_global_admin_for_workspace_admin(actor)
     user = await user_repository.get_user_by_id(db, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
@@ -380,6 +390,8 @@ async def update_workspace_member_role(
 ) -> WorkspaceMemberResponse:
     validate_workspace_member_role(role)
     membership, user = await get_workspace_member(db, workspace, user_id)
+    if role == "admin" or membership.role == "admin":
+        require_global_admin_for_workspace_admin(actor)
     if role != "admin":
         await ensure_not_last_workspace_admin(db, membership)
     previous_role = membership.role
@@ -407,6 +419,8 @@ async def remove_workspace_member(
     actor: User,
 ) -> None:
     membership, user = await get_workspace_member(db, workspace, user_id)
+    if membership.role == "admin":
+        require_global_admin_for_workspace_admin(actor)
     await ensure_not_last_workspace_admin(db, membership)
     record_audit_log(
         db,

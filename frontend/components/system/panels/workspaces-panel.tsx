@@ -5,6 +5,7 @@ import {
   PlusIcon,
   RotateCcwIcon,
   Trash2Icon,
+  UserCogIcon,
 } from "lucide-react"
 import { useLanguage } from "@/contexts/language-provider"
 import { Badge } from "@/components/ui/badge"
@@ -28,6 +29,7 @@ type WorkspacesPanelProps = {
   canCreateWorkspace: boolean
   onSelectWorkspace: (workspaceId: string) => void
   onOpenCreateWorkspace: () => void
+  handleOpenWorkspaceMembers: (workspace: Workspace) => void
   handleOpenEditWorkspace: (workspace: Workspace) => void
   handleArchiveWorkspace: (workspace: Workspace) => void | Promise<void>
   handleDeleteWorkspace: (workspace: Workspace) => void | Promise<void>
@@ -40,6 +42,7 @@ export function WorkspacesPanel({
   canCreateWorkspace,
   onSelectWorkspace,
   onOpenCreateWorkspace,
+  handleOpenWorkspaceMembers,
   handleOpenEditWorkspace,
   handleArchiveWorkspace,
   handleDeleteWorkspace,
@@ -84,6 +87,8 @@ export function WorkspacesPanel({
                 const workspaceRole = getMembershipRole(me, workspace.id)
                 const canUseThisWorkspace = Boolean(workspaceRole)
                 const canManageThisWorkspace = me.user.is_global_admin
+                const canManageMembers =
+                  me.user.is_global_admin || workspaceRole === "admin"
 
                 return (
                   <div
@@ -146,6 +151,18 @@ export function WorkspacesPanel({
                             {isArchived ? <RotateCcwIcon /> : <ArchiveIcon />}
                           </Button>
                         </>
+                      ) : null}
+                      {canManageMembers ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => handleOpenWorkspaceMembers(workspace)}
+                          title={t("管理工作空间成员")}
+                          aria-label={t("管理工作空间成员")}
+                        >
+                          <UserCogIcon />
+                        </Button>
                       ) : null}
                       {canCreateWorkspace ? (
                         <Button

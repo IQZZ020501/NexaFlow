@@ -30,6 +30,7 @@ import { languageOptions } from "@/i18n"
 import { displayWorkspaceName, initials } from "@/lib/display"
 import { getPages } from "@/lib/pages"
 import { themeOptions } from "@/lib/theme-options"
+import { getUserRoleLabel } from "@/components/system/system-utils"
 
 const PAGE_LINKS: Record<string, string> = {
   apps: "/app/apps",
@@ -68,6 +69,15 @@ export function TopBar() {
   )
   const featurePages = getPages(t)
   const isSystemActive = pathname.startsWith("/system")
+  const canAccessSystem =
+    me.user.is_global_admin ||
+    me.user.workspaces.some((workspace) => workspace.role === "admin") ||
+    me.user.teams.some((team) => team.role === "admin")
+  const systemHref =
+    me.user.is_global_admin ||
+    me.user.workspaces.some((workspace) => workspace.role === "admin")
+      ? "/system/workspaces"
+      : "/system/teams"
 
   return (
     <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
@@ -141,17 +151,19 @@ export function TopBar() {
               </Button>
             )
           })}
-          <Button
-            type="button"
-            variant={isSystemActive ? "secondary" : "ghost"}
-            asChild
-            className="h-10 min-w-28 px-4 text-sm"
-          >
-            <Link href="/system/workspaces">
-              <SettingsIcon data-icon="inline-start" />
-              <span className="hidden sm:inline">{t("系统管理")}</span>
-            </Link>
-          </Button>
+          {canAccessSystem ? (
+            <Button
+              type="button"
+              variant={isSystemActive ? "secondary" : "ghost"}
+              asChild
+              className="h-10 min-w-28 px-4 text-sm"
+            >
+              <Link href={systemHref}>
+                <SettingsIcon data-icon="inline-start" />
+                <span className="hidden sm:inline">{t("系统管理")}</span>
+              </Link>
+            </Button>
+          ) : null}
         </nav>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -242,8 +254,7 @@ export function TopBar() {
               <div className="flex flex-col gap-1">
                 <span>{me.user.name}</span>
                 <span className="text-xs font-normal text-muted-foreground">
-                  {me.user.username} /{" "}
-                  {me.user.is_global_admin ? t("全局管理员") : t("成员")}
+                  {me.user.username} / {getUserRoleLabel(me.user, t)}
                 </span>
                 <span className="text-xs font-normal text-muted-foreground">
                   {me.user.email}
@@ -256,12 +267,14 @@ export function TopBar() {
                 <LockIcon />
                 {t("修改密码")}
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/system/workspaces">
-                  <SettingsIcon />
-                  {t("系统管理")}
-                </Link>
-              </DropdownMenuItem>
+              {canAccessSystem ? (
+                <DropdownMenuItem asChild>
+                  <Link href={systemHref}>
+                    <SettingsIcon />
+                    {t("系统管理")}
+                  </Link>
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem onSelect={logout}>
                 <LogOutIcon />
                 {t("退出登录")}

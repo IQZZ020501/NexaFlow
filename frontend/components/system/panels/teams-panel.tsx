@@ -4,6 +4,7 @@ import {
   PlusIcon,
   RotateCcwIcon,
   Trash2Icon,
+  UserCogIcon,
   UsersIcon,
   LoaderCircleIcon,
 } from "lucide-react"
@@ -27,7 +28,9 @@ type TeamsPanelProps = {
   isTeamsLoading: boolean
   canCreateTeam: boolean
   canManageWorkspace: boolean
+  canManageTeamMembers: (team: Team) => boolean
   handleOpenCreateTeam: () => void
+  handleOpenTeamMembers: (team: Team) => void
   handleOpenEditTeam: (team: Team) => void
   handleArchiveTeam: (team: Team) => void | Promise<void>
   handleDeleteTeam: (team: Team) => void | Promise<void>
@@ -39,7 +42,9 @@ export function TeamsPanel({
   isTeamsLoading,
   canCreateTeam,
   canManageWorkspace,
+  canManageTeamMembers,
   handleOpenCreateTeam,
+  handleOpenTeamMembers,
   handleOpenEditTeam,
   handleArchiveTeam,
   handleDeleteTeam,
@@ -103,6 +108,18 @@ export function TeamsPanel({
                         <Badge variant="outline">{t("默认")}</Badge>
                       ) : null}
                       <StatusBadge status={team.status} />
+                      {canManageTeamMembers(team) ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => handleOpenTeamMembers(team)}
+                          title={t("管理团队成员")}
+                          aria-label={t("管理团队成员")}
+                        >
+                          <UserCogIcon />
+                        </Button>
+                      ) : null}
                       {canManageWorkspace ? (
                         <>
                           <Button

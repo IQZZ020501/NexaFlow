@@ -1,8 +1,21 @@
-import { type User } from "@/lib/api/auth"
+import { type MeResponse, type User } from "@/lib/api/auth"
 import { type TFunction } from "@/i18n"
 import { AUDIT_DETAIL_LABEL_KEYS, STATUS_LABEL_KEYS } from "@/lib/constants"
 import { displayTeamName, displayWorkspaceName } from "@/lib/display"
-import type { UserRoleFilter } from "@/lib/api/system"
+import type { Team, UserRoleFilter } from "@/lib/api/system"
+
+export function canManageTeamMembers(me: MeResponse, team: Team) {
+  return Boolean(
+    me.user.is_global_admin ||
+    me.user.workspaces.some(
+      (workspace) =>
+        workspace.id === team.workspace_id && workspace.role === "admin"
+    ) ||
+    me.user.teams.some(
+      (membership) => membership.id === team.id && membership.role === "admin"
+    )
+  )
+}
 
 export function formatUserWorkspaces(user: User, t: TFunction) {
   if (!user.workspaces.length) {

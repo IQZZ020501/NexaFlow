@@ -476,7 +476,7 @@ async def change_password(
 async def get_me(db: AsyncSession, user: User) -> MeResponse:
     membership_list = await user_repository.list_workspace_memberships_for_user(db, user.id)
     return MeResponse(
-        user=user_to_response(user),
+        user=await user_to_response_with_scopes(db, user),
         memberships=[
             MembershipResponse(workspace_id=item.workspace_id, role=item.role)
             for item in membership_list

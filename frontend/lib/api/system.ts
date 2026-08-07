@@ -33,6 +33,11 @@ export type WorkspaceMember = {
   role: string
 }
 
+export type TeamMember = {
+  user: User
+  role: string
+}
+
 export type AuditLog = {
   id: string
   actor_user_id: string
@@ -193,10 +198,16 @@ export function deleteWorkspace(token: string, workspaceId: string) {
   })
 }
 
-export function listWorkspaceMembers(token: string, workspaceId: string) {
-  return request<WorkspaceMember[]>(`/api/v1/workspaces/${workspaceId}/members`, {
-    token,
-  })
+export function listWorkspaceMembers(
+  token: string,
+  workspaceId: string,
+  limit = 200,
+  offset = 0
+) {
+  return request<WorkspaceMember[]>(
+    `/api/v1/workspaces/${workspaceId}/members?limit=${limit}&offset=${offset}`,
+    { token }
+  )
 }
 
 export function addWorkspaceMember(
@@ -304,6 +315,67 @@ export function deleteTeam(token: string, workspaceId: string, teamId: string) {
     method: "DELETE",
     token,
   })
+}
+
+export function listTeamMembers(
+  token: string,
+  workspaceId: string,
+  teamId: string,
+  limit = 200,
+  offset = 0
+) {
+  return request<TeamMember[]>(
+    `/api/v1/workspaces/${workspaceId}/teams/${teamId}/members?limit=${limit}&offset=${offset}`,
+    { token }
+  )
+}
+
+export function addTeamMember(
+  token: string,
+  workspaceId: string,
+  teamId: string,
+  payload: { user_id: string; role?: string }
+) {
+  return request<TeamMember>(
+    `/api/v1/workspaces/${workspaceId}/teams/${teamId}/members`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload),
+    }
+  )
+}
+
+export function updateTeamMember(
+  token: string,
+  workspaceId: string,
+  teamId: string,
+  userId: string,
+  payload: { role: string }
+) {
+  return request<TeamMember>(
+    `/api/v1/workspaces/${workspaceId}/teams/${teamId}/members/${userId}`,
+    {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(payload),
+    }
+  )
+}
+
+export function removeTeamMember(
+  token: string,
+  workspaceId: string,
+  teamId: string,
+  userId: string
+) {
+  return request<void>(
+    `/api/v1/workspaces/${workspaceId}/teams/${teamId}/members/${userId}`,
+    {
+      method: "DELETE",
+      token,
+    }
+  )
 }
 
 export function listAuditLogs(token: string) {

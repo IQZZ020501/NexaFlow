@@ -52,7 +52,7 @@ type SessionContextValue = {
   workspaceCreated: (payload: WorkspaceCreateResponse) => void
   workspaceUpdated: (workspace: Workspace) => void
   workspaceDeleted: (workspaceId: string) => void
-  teamCreated: (team: Team) => void
+  teamCreated: (team: Team, adminUserId?: string) => void
   teamUpdated: (team: Team) => void
   teamDeleted: (teamId: string) => void
   userUpdated: (user: User) => void
@@ -88,6 +88,59 @@ export function addCreatedWorkspaceMembership(
       { workspace_id: payload.workspace.id, role: "admin" },
     ],
   }
+}
+
+export function addCreatedTeamMembership(
+  me: MeResponse | null,
+  team: Team,
+  adminUserId: string
+) {
+  if (!me || me.user.id !== adminUserId) {
+    return me
+  }
+
+  if (me.user.teams.some((item) => item.id === team.id)) {
+    return me
+  }
+
+  return {
+    ...me,
+    user: {
+      ...me.user,
+      teams: [
+        ...me.user.teams,
+        {
+          id: team.id,
+          workspace_id: team.workspace_id,
+          name: team.name,
+          is_default: team.is_default,
+          role: "admin",
+        },
+      ],
+    },
+  }
+}
+
+export function getInitialWorkspaceId(
+  me: MeResponse,
+  workspaces: Workspace[],
+  storedWorkspaceId: string | null
+) {
+  const activeWorkspaces = workspaces.filter(
+    (workspace) => workspace.status === "active"
+  )
+
+  return (
+    activeWorkspaces.find(
+      (workspace) =>
+        workspace.id === storedWorkspaceId &&
+        hasWorkspaceMembership(me, workspace.id)
+    )?.id ??
+    activeWorkspaces.find((workspace) =>
+      hasWorkspaceMembership(me, workspace.id)
+    )?.id ??
+    null
+  )
 }
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
@@ -218,22 +271,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
         const nextWorkspaces = await listWorkspaces(nextToken)
         const storedWorkspaceId = localStorage.getItem(WORKSPACE_KEY)
-        const activeNextWorkspaces = nextWorkspaces.filter(
-          (workspace) => workspace.status === "active"
+        const nextWorkspaceId = getInitialWorkspaceId(
+          nextMe,
+          nextWorkspaces,
+          storedWorkspaceId
         )
-        const membershipWorkspaceIds = new Set(
-          nextMe.memberships.map((membership) => membership.workspace_id)
-        )
-        const nextWorkspaceId =
-          activeNextWorkspaces.find(
-            (workspace) =>
-              workspace.id === storedWorkspaceId &&
-              membershipWorkspaceIds.has(workspace.id)
-          )?.id ??
-          activeNextWorkspaces.find((workspace) =>
-            membershipWorkspaceIds.has(workspace.id)
-          )?.id ??
-          null
 
         setWorkspaces(nextWorkspaces)
         setTeams([])
@@ -425,8 +467,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  function handleTeamCreated(team: Team) {
+  function handleTeamCreated(team: Team, adminUserId?: string) {
     setTeams((current) => [...current, team])
+    if (adminUserId) {
+      setMe((current) => addCreatedTeamMembership(current, team, adminUserId))
+    }
   }
 
   function handleTeamUpdated(team: Team) {

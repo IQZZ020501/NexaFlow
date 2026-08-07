@@ -209,6 +209,19 @@ def require_manages_team_admins(can_manage: bool) -> None:
         )
 
 
+async def ensure_not_last_team_admin(
+    db: AsyncSession,
+    membership: TeamMembership,
+) -> None:
+    if membership.role != "admin":
+        return
+    if await team_repository.count_team_admins(db, membership.team_id) <= 1:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Team must keep at least one admin.",
+        )
+
+
 async def list_team_members(
     db: AsyncSession,
     team: Team,
@@ -290,6 +303,8 @@ async def update_team_member_role(
         require_manages_team_admins(
             await actor_manages_team_admins(db, team.workspace_id, actor),
         )
+    if role != "admin":
+        await ensure_not_last_team_admin(db, membership)
     user = await team_repository.get_active_workspace_user(
         db,
         team.workspace_id,
@@ -333,6 +348,7 @@ async def remove_team_member(
         require_manages_team_admins(
             await actor_manages_team_admins(db, team.workspace_id, actor),
         )
+    await ensure_not_last_team_admin(db, membership)
     await team_repository.delete_team_membership(
         db,
         team.id,

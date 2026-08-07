@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  addCreatedTeamMembership,
   addCreatedWorkspaceMembership,
+  getInitialWorkspaceId,
   replaceSessionUser,
 } from "../contexts/session-context"
 import type { MeResponse, User } from "../lib/api/auth"
-import type { WorkspaceCreateResponse } from "../lib/api/system"
+import type { Team, WorkspaceCreateResponse } from "../lib/api/system"
 
 const currentUser: User = {
   id: "current-user",
@@ -64,5 +66,56 @@ describe("session user updates", () => {
         admin_user: { ...currentUser, id: "another-user" },
       })
     ).toBe(me)
+  })
+
+  test("adds a created team when the current user is its admin", () => {
+    const team: Team = {
+      id: "team-1",
+      workspace_id: "workspace-1",
+      name: "Team 1",
+      description: "",
+      status: "active",
+      is_default: false,
+    }
+
+    expect(addCreatedTeamMembership(me, team, currentUser.id)).toEqual({
+      ...me,
+      user: {
+        ...currentUser,
+        teams: [
+          {
+            id: team.id,
+            workspace_id: team.workspace_id,
+            name: team.name,
+            is_default: team.is_default,
+            role: "admin",
+          },
+        ],
+      },
+    })
+    expect(addCreatedTeamMembership(me, team, "another-user")).toBe(me)
+  })
+
+  test("selects any active workspace for a global admin", () => {
+    const workspaces = [
+      {
+        id: "workspace-1",
+        name: "Workspace 1",
+        description: "",
+        status: "active",
+        is_default: false,
+      },
+      {
+        id: "workspace-2",
+        name: "Workspace 2",
+        description: "",
+        status: "active",
+        is_default: false,
+      },
+    ]
+
+    expect(getInitialWorkspaceId(me, workspaces, "workspace-2")).toBe(
+      "workspace-2"
+    )
   })
 })

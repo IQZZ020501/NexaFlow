@@ -129,6 +129,15 @@ def main() -> None:
         assert team.json()["workspace_id"] == research_workspace_id
         assert team.json()["description"] == "应用智能团队"
         team_id = team.json()["id"]
+        research_me = client.get(
+            "/api/v1/auth/me",
+            headers=auth_headers(research_token),
+        )
+        assert research_me.status_code == 200, research_me.text
+        assert any(
+            item["id"] == team_id and item["role"] == "admin"
+            for item in research_me.json()["user"]["teams"]
+        )
         asyncio.run(assert_cross_workspace_team_membership_denied(default_workspace_id, team_id))
 
         mismatched_team_user = client.post(
@@ -375,6 +384,19 @@ def main() -> None:
             headers=auth_headers(research_token),
         )
         assert remove_team_member_again.status_code == 404, remove_team_member_again.text
+
+        demote_last_team_admin = client.patch(
+            teams_url(research_workspace_id, f"/{team_id}/members/{research_admin_id}"),
+            headers=auth_headers(research_token),
+            json={"role": "member"},
+        )
+        assert demote_last_team_admin.status_code == 400, demote_last_team_admin.text
+
+        remove_last_team_admin = client.delete(
+            teams_url(research_workspace_id, f"/{team_id}/members/{research_admin_id}"),
+            headers=auth_headers(research_token),
+        )
+        assert remove_last_team_admin.status_code == 400, remove_last_team_admin.text
 
         delete_default = client.delete(
             teams_url(default_workspace_id, f"/{default_team_id}"),
