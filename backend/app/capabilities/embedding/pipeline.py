@@ -148,7 +148,7 @@ def extract_document(
                     image_content_type,
                     image_content_type.split("/", 1)[-1] or "bin",
                 )
-                alt_text = (image.alt_text or "image")[:500]
+                alt_text = (image.alt_text or "").strip()[:500]
                 with image.open() as image_bytes:
                     image_content = image_bytes.read()
                 assets.append(
@@ -172,10 +172,7 @@ def extract_document(
                 ).value
             extracted_text = HtmlConverter().convert_string(html).text_content
             extracted_text = DOCX_ASSET_MARKDOWN_PATTERN.sub(
-                lambda match: (
-                    f"{match.group(1) or 'image'} "
-                    f"{asset_marker(int(match.group(2)))}"
-                ),
+                lambda match: f"{match.group(1)} {asset_marker(int(match.group(2)))}".strip(),
                 extracted_text,
             )
         else:
