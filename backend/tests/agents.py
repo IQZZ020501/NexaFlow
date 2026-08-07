@@ -13,6 +13,15 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from mcp.types import Tool as McpTool
 from sqlalchemy import select
 
+from tests.support import (  # noqa: F401  (sets required env before app imports)
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    settings as test_settings,
+    test_client,
+)
+
 from app.application import agent_runs, agent_tools
 from app.application import agents as agent_application
 from app.infrastructure.repositories import agent as agent_repository
@@ -42,14 +51,6 @@ from app.shareddomain.agents.runtime import (
 from app.shareddomain.agents.runtime import graph as agent_graph_module
 from app.shareddomain.agents.runtime.graph import MAX_REASONING_CHARS
 from app.shareddomain.tools import services as mcp_services
-from tests.support import (
-    activate_admin,
-    activate_user,
-    auth_headers,
-    create_active_user,
-    settings as test_settings,
-    test_client,
-)
 
 MEMBER_PASSWORD = "AgentMember@12345."
 

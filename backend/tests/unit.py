@@ -10,6 +10,8 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 import asyncio
 from types import SimpleNamespace
 
+import tests.support  # noqa: F401  (sets required env before app imports)
+
 from fastapi import HTTPException
 
 from app.capabilities.llm.registry import (
