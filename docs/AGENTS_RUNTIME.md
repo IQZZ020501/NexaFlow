@@ -37,3 +37,10 @@ application/agent_memory.py（历史成功运行 → 上下文记忆）
 ## 相关测试
 
 - `backend/tests/agents.py` — Agent 端到端测试：运行器工具调用/截断与非法参数防护、流式事件、并行与预算策略、MCP 工具发现与 URL 校验、会话记忆裁剪
+- `docs/AGENT_TOOL_ORCHESTRATION_RESEARCH.md` — Dify 经典 Agent 与 Agent v2 的工具层、knowledge layer、迭代收束和持久执行边界对照
+
+## 运行策略与生产边界
+
+- 当前自动 Agent 仍由模型在 allowlist 工具中选择；系统消息明确要求工作区问题优先 `search_knowledge`，MCP 只用于当前/外部数据或用户明确要求的外部动作。知识库名称/描述会以有界元数据提供给模型。这是路由引导，不是确定性保证；严格 KB-first 需要后续显式 `required/eager` query policy 或工作流检索路径。
+- 每次工具调用与整次在线运行都有硬超时；达到最后一轮时不再向模型暴露工具。连续两轮没有新知识证据后停止继续检索，保留 MCP 外部能力供模型决定是否需要。
+- 当前 HTTP/SSE 路径没有持久 checkpoint、工具调用幂等账本、租约 worker 或审批恢复；因此在线生产范围应限制为知识检索和部署层审核过的只读 MCP，带副作用的 MCP 仍需 Durable Executor（队列、幂等键、审批和断线恢复）完成后再开放。

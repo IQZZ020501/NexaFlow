@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -32,6 +33,7 @@ MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12
 MAX_REASONING_CHARS = 6000
 MODEL_RESPONSE_TIMEOUT_SECONDS = 60
+TOOL_RESPONSE_TIMEOUT_SECONDS = 30
 
 
 class AgentRunnerError(ModelProviderError):
@@ -43,6 +45,7 @@ class AgentRuntimeContext:
     model: BaseChatModel
     tools: list[StructuredTool]
     callback: NexaFlowCallback
+    tool_timeout_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -104,7 +107,7 @@ async def agent_node(
     state: AgentState,
     runtime: Runtime[AgentRuntimeContext],
 ) -> dict[str, Any]:
-    if state["turn"] >= MAX_AGENT_TURNS:
+    if state["turn"] > MAX_AGENT_TURNS:
         raise AgentRunnerError("Agent turn limit reached.")
 
     turn = state["turn"] + 1
@@ -140,7 +143,17 @@ async def agent_node(
         await callback.answer_delta(delta)
 
     model = runtime.context.model
-    bound_model = model.bind_tools(runtime.context.tools) if runtime.context.tools else model
+    allow_tools = turn < MAX_AGENT_TURNS
+    available_tools = runtime.context.tools
+    if state["no_new_evidence_rounds"] >= 2:
+        available_tools = [
+            tool
+            for tool in available_tools
+            if agent_tool_metadata(tool)["kind"] != "knowledge"
+        ]
+    bound_model = (
+        model.bind_tools(available_tools) if allow_tools and available_tools else model
+    )
     try:
         async with asyncio.timeout(MODEL_RESPONSE_TIMEOUT_SECONDS):
             if callback.enabled:
@@ -168,6 +181,8 @@ async def agent_node(
     messages = [*state["messages"], message]
     tool_calls = [pending_tool_call(call) for call in completion.tool_calls]
     if tool_calls:
+        if not allow_tools:
+            raise AgentRunnerError("Agent turn limit reached.")
         await callback.process(completed_thought("agent.tools_selected"))
         return {
             "messages": messages,
@@ -201,9 +216,11 @@ async def execute_tool_call(
     prepared: PreparedToolCall,
     callback: NexaFlowCallback,
     turn: int,
+    timeout_seconds: float | None,
 ) -> tuple[AgentToolResult, dict[str, Any]]:
     input_value = prepared.arguments or {}
     result = prepared.blocked_result
+    started_at = time.perf_counter()
     if result is None:
         assert prepared.tool is not None
         await callback.process(
@@ -216,7 +233,12 @@ async def execute_tool_call(
             )
         )
         try:
-            tool_output = await prepared.tool.ainvoke(input_value)
+            async with asyncio.timeout(
+                TOOL_RESPONSE_TIMEOUT_SECONDS
+                if timeout_seconds is None
+                else timeout_seconds
+            ):
+                tool_output = await prepared.tool.ainvoke(input_value)
             result = (
                 tool_output
                 if isinstance(tool_output, AgentToolResult)
@@ -225,6 +247,12 @@ async def execute_tool_call(
                     summary="Tool execution failed.",
                     is_error=True,
                 )
+            )
+        except TimeoutError:
+            result = AgentToolResult(
+                content="Tool execution timed out.",
+                summary="Tool execution timed out.",
+                is_error=True,
             )
         except Exception:
             result = AgentToolResult(
@@ -241,6 +269,7 @@ async def execute_tool_call(
         input_value=input_value,
         result=result,
     )
+    event["duration_ms"] = round((time.perf_counter() - started_at) * 1000)
     await callback.process(event)
     return result, event
 
@@ -287,6 +316,17 @@ async def tool_node(
                 summary="Unknown tool rejected.",
                 is_error=True,
             )
+        elif (
+            state["no_new_evidence_rounds"] >= 2
+            and agent_tool_metadata(tool)["kind"] == "knowledge"
+        ):
+            blocked_result = AgentToolResult(
+                content=(
+                    "Knowledge search stopped after two rounds without new evidence."
+                ),
+                summary="Knowledge search stopped after no new evidence.",
+                is_error=True,
+            )
         elif not isinstance(parsed_arguments, dict):
             blocked_result = invalid_arguments_result()
         else:
@@ -317,6 +357,7 @@ async def tool_node(
                 prepared,
                 callback,
                 state["turn"],
+                runtime.context.tool_timeout_seconds,
             )
             index += 1
             continue
@@ -329,7 +370,12 @@ async def tool_node(
             group_end += 1
         group_results = await asyncio.gather(
             *(
-                execute_tool_call(item, callback, state["turn"])
+                execute_tool_call(
+                    item,
+                    callback,
+                    state["turn"],
+                    runtime.context.tool_timeout_seconds,
+                )
                 for item in prepared_calls[index:group_end]
             )
         )
@@ -341,17 +387,18 @@ async def tool_node(
     events = list(state["events"])
     seen_evidence_ids = set(state["seen_evidence_ids"])
     round_evidence_ids: set[str] = set()
-    has_successful_retrieval = False
+    has_retrieval_attempt = False
     no_new_evidence_rounds = state["no_new_evidence_rounds"]
     for index, prepared in enumerate(prepared_calls):
         result, event = execution_results[index]
         messages.append(tool_message(prepared.call, result))
         events.append(event)
-        if prepared.metadata["kind"] == "knowledge" and not result.is_error:
-            has_successful_retrieval = True
-            round_evidence_ids.update(result.evidence_ids)
+        if prepared.metadata["kind"] == "knowledge":
+            has_retrieval_attempt = True
+            if not result.is_error:
+                round_evidence_ids.update(result.evidence_ids)
 
-    if has_successful_retrieval:
+    if has_retrieval_attempt:
         new_evidence_ids = round_evidence_ids - seen_evidence_ids
         if new_evidence_ids:
             seen_evidence_ids.update(new_evidence_ids)
@@ -368,7 +415,6 @@ async def tool_node(
                 )
             )
         )
-        no_new_evidence_rounds = 0
 
     return {
         "messages": messages,

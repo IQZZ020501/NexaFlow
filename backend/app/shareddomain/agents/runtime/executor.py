@@ -34,6 +34,8 @@ async def run_agent(
     messages: list[dict[str, Any]],
     tools: list[StructuredTool],
     on_event: AgentEventHandler | None = None,
+    *,
+    tool_timeout_seconds: float | None = None,
 ) -> AgentExecutionResult:
     initial_state: AgentState = {
         "messages": convert_to_messages(messages),
@@ -56,6 +58,7 @@ async def run_agent(
             callback=NexaFlowCallback(
                 AgentEventBus([on_event] if on_event is not None else [])
             ),
+            tool_timeout_seconds=tool_timeout_seconds,
         ),
     )
     log_event(

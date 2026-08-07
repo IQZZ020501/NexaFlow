@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from types import SimpleNamespace
 
+from fastapi import HTTPException
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.messages.tool import tool_call_chunk
 from langchain_core.tools import StructuredTool
@@ -39,6 +40,7 @@ from app.capabilities.mcp.client import (
     normalize_mcp_url,
 )
 from app.schemas.knowledge import KnowledgeQueryHitResponse
+from app.entities.knowledge import KnowledgeBase
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.system_log import SystemLog
 from app.shareddomain.agents.runtime import (
@@ -353,6 +355,41 @@ class RepeatedToolProvider:
         )
 
 
+class FinalTurnAwareProvider:
+    """Model stub that answers when the runtime removes tools on the last turn."""
+
+    def __init__(self, tool_name: str) -> None:
+        self.tool_name = tool_name
+        self.turn = 0
+        self.bound_tool_names: list[tuple[str, ...]] = []
+
+    def bind_tools(self, tools, *_args, **_kwargs):
+        self.bound_tool_names.append(tuple(tool.name for tool in tools))
+        return self
+
+    async def ainvoke(self, _messages: list[BaseMessage]) -> AIMessage:
+        self.turn += 1
+        if self.turn < agent_graph_module.MAX_AGENT_TURNS:
+            return completion_message(
+                ModelCompletion(
+                    content="",
+                    tool_calls=(
+                        ModelToolCall(
+                            f"call-{self.turn}",
+                            self.tool_name,
+                            "{}",
+                        ),
+                    ),
+                    finish_reason="tool_calls",
+                )
+            )
+        return completion_message(
+            ModelCompletion(
+                content="Final answer.", tool_calls=(), finish_reason="stop"
+            )
+        )
+
+
 class HangingStreamingProvider:
     def bind_tools(self, *_args, **_kwargs):
         return self
@@ -493,6 +530,168 @@ async def assert_tool_error_returns_to_model() -> None:
     )
     assert result.content == "Recovered."
     assert result.events[0]["status"] == "failed"
+
+
+async def assert_tool_timeout_returns_to_model() -> None:
+    async def execute(_arguments: str) -> AgentToolResult:
+        await asyncio.Event().wait()
+        return AgentToolResult(content="unreachable", summary="unreachable")
+
+    original_timeout = agent_graph_module.TOOL_RESPONSE_TIMEOUT_SECONDS
+    agent_graph_module.TOOL_RESPONSE_TIMEOUT_SECONDS = 0.01
+    try:
+        result = await run_agent(
+            SequenceProvider(
+                [
+                    ModelCompletion(
+                        content="",
+                        tool_calls=(ModelToolCall("call-1", "slow_tool", "{}"),),
+                        finish_reason="tool_calls",
+                    ),
+                    ModelCompletion(
+                        content="Recovered after timeout.",
+                        tool_calls=(),
+                        finish_reason="stop",
+                    ),
+                ]
+            ),  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [
+                create_agent_tool(
+                    name="slow_tool",
+                    description="Slow tool",
+                    parameters={"type": "object"},
+                    execute=execute,
+                )
+            ],
+        )
+    finally:
+        agent_graph_module.TOOL_RESPONSE_TIMEOUT_SECONDS = original_timeout
+
+    assert result.content == "Recovered after timeout."
+    assert result.events[0]["status"] == "failed"
+    assert result.events[0]["summary"] == "Tool execution timed out."
+
+
+async def assert_knowledge_source_failure_is_attributed() -> None:
+    knowledge_bases = [
+        KnowledgeBase(id="base-failed", workspace_id="workspace-1", name="Failed"),
+        KnowledgeBase(id="base-healthy", workspace_id="workspace-1", name="Healthy"),
+    ]
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class FakeSessionFactory:
+        def __call__(self):
+            return FakeSession()
+
+    original_factory = agent_tools.get_session_factory
+    original_accessible = agent_tools.accessible_agent_knowledge_bases
+    original_query = agent_tools.query_knowledge_base
+
+    async def fake_accessible(*_args, **_kwargs):
+        return knowledge_bases
+
+    async def fake_query(_db, knowledge_base, _payload, _settings):
+        if knowledge_base.id == "base-failed":
+            raise HTTPException(status_code=503, detail="source unavailable")
+        return [
+            KnowledgeQueryHitResponse(
+                chunk_id="healthy-chunk",
+                document_id="healthy-document",
+                document_filename="healthy.md",
+                chunk_index=0,
+                content="Grounded answer.",
+                distance=0.1,
+            )
+        ]
+
+    agent_tools.get_session_factory = lambda: FakeSessionFactory()
+    agent_tools.accessible_agent_knowledge_bases = fake_accessible
+    agent_tools.query_knowledge_base = fake_query
+    try:
+        tool = agent_tools.build_knowledge_search_tool(
+            knowledge_bases,
+            "workspace-1",
+            SimpleNamespace(id="user-1"),  # type: ignore[arg-type]
+            None,
+            test_settings(),
+        )
+        result = await tool.ainvoke({"query": "grounded"})
+    finally:
+        agent_tools.get_session_factory = original_factory
+        agent_tools.accessible_agent_knowledge_bases = original_accessible
+        agent_tools.query_knowledge_base = original_query
+
+    assert isinstance(result, AgentToolResult)
+    assert result.output["retrieval_stats"][0]["status"] == "unavailable"
+    assert result.output["retrieval_stats"][1]["status"] == "available"
+
+
+def assert_tool_routing_context_is_explicit() -> None:
+    knowledge_base = KnowledgeBase(
+        workspace_id="workspace-1",
+        name="Release Docs",
+        description="Approved deployment and rollback procedures.",
+    )
+    run = SimpleNamespace(
+        instructions="Use available sources.",
+        goal="What is the release process?",
+    )
+    messages = agent_runs.execution_messages(
+        run,  # type: ignore[arg-type]
+        True,
+        True,
+        knowledge_scope=agent_tools.describe_knowledge_sources([knowledge_base]),
+    )
+    system = messages[0]["content"]
+    assert "search_knowledge: first choice for workspace-specific" in system
+    assert "MCP tools: use only for current or external data" in system
+    assert "Release Docs" in system
+    assert "answer immediately without tools" not in system
+
+    tool = agent_tools.build_knowledge_search_tool(
+        [knowledge_base],
+        "workspace-1",
+        SimpleNamespace(id="user-1"),  # type: ignore[arg-type]
+        None,
+        test_settings(),
+    )
+    assert "Release Docs" in tool.description
+    assert (
+        "Do not use for general knowledge or current external facts" in tool.description
+    )
+
+
+async def assert_final_turn_removes_tools() -> None:
+    executions = 0
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(content="ok", summary="ok")
+
+    provider = FinalTurnAwareProvider("test_tool")
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [
+            create_agent_tool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"type": "object"},
+                execute=execute,
+            )
+        ],
+    )
+    assert result.content == "Final answer."
+    assert executions == agent_graph_module.MAX_AGENT_TURNS - 1
+    assert len(provider.bound_tool_names) == agent_graph_module.MAX_AGENT_TURNS - 1
 
 
 
@@ -1005,6 +1204,10 @@ def main() -> None:
     asyncio.run(assert_truncated_tool_call_is_not_executed())
     asyncio.run(assert_invalid_tool_arguments_are_not_executed())
     asyncio.run(assert_tool_error_returns_to_model())
+    asyncio.run(assert_tool_timeout_returns_to_model())
+    asyncio.run(assert_knowledge_source_failure_is_attributed())
+    asyncio.run(assert_final_turn_removes_tools())
+    assert_tool_routing_context_is_explicit()
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
     asyncio.run(assert_streaming_run_emits_process_and_answer())
     asyncio.run(assert_parallel_policy_is_enforced())
@@ -1224,6 +1427,8 @@ def main() -> None:
             assert knowledge_event["tool_label"] == "知识库检索"
             assert knowledge_event["tool_kind"] == "knowledge"
             assert knowledge_event["input"] == {"query": "release process"}
+            assert knowledge_event["duration_ms"] >= 0
+            assert knowledge_event["output"]["evidence_status"] == "found"
             assert "source_id" not in knowledge_event["output"]["hits"][0]
             assert knowledge_event["output"]["hits"][0]["document"] == "release.md"
 
