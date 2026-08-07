@@ -41,6 +41,12 @@ def create_celery_app() -> Celery:
         task_reject_on_worker_lost=True,
         task_serializer="json",
         worker_prefetch_multiplier=1,
+        beat_schedule={
+            "recover-knowledge-storage-cleanups": {
+                "task": "app.knowledge.recover_storage_cleanups",
+                "schedule": 60.0,
+            },
+        },
     )
     return app
 

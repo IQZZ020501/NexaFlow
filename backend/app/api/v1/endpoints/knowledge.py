@@ -23,6 +23,7 @@ from app.api.deps import (
 from app.schemas.knowledge import (
     KnowledgeAttachmentResponse,
     KnowledgeBaseCreateRequest,
+    KnowledgeBaseOwnerTransferRequest,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
     KnowledgeDocumentChunkResponse,
@@ -56,6 +57,7 @@ from app.application.knowledge import (
     retry_knowledge_task,
     revoke_resource_permission,
     test_knowledge_base_models,
+    transfer_knowledge_base_owner,
     update_knowledge_base,
     upload_knowledge_attachment,
     upsert_resource_permission,
@@ -129,14 +131,13 @@ async def patch_workspace_knowledge_base(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> KnowledgeBaseResponse:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
-    await require_knowledge_base_permission(
+    return await update_knowledge_base(
         db,
         knowledge_base,
+        payload,
         context.user,
         context.membership_role,
-        {"edit"},
     )
-    return await update_knowledge_base(db, knowledge_base, payload, context.user)
 
 
 @router.delete("/{knowledge_base_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -463,6 +464,23 @@ async def rebuild_workspace_knowledge_base_index(
     task = await enqueue_rebuild_knowledge_index(db, knowledge_base, context.user)
     await dispatch_knowledge_task(task.id, settings)
     return task
+
+
+@router.put("/{knowledge_base_id}/owner", response_model=KnowledgeBaseResponse)
+async def transfer_workspace_knowledge_base_owner(
+    knowledge_base_id: str,
+    payload: KnowledgeBaseOwnerTransferRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeBaseResponse:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    return await transfer_knowledge_base_owner(
+        db,
+        knowledge_base,
+        payload.user_id,
+        context.user,
+        context.membership_role,
+    )
 
 
 @router.get("/{knowledge_base_id}/permissions", response_model=list[ResourcePermissionResponse])

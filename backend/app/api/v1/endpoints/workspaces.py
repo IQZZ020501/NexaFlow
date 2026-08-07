@@ -5,9 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.audit import list_workspace_audit_logs
 from app.schemas.audit import AuditLogResponse
+from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
 from app.api.deps import (
     WorkspaceContext,
+    get_settings,
     get_workspace_context_from_path,
     require_global_admin,
     require_password_changed,
@@ -85,10 +87,11 @@ async def patch_workspace(
 async def delete_workspace(
     workspace_id: str,
     actor: Annotated[User, Depends(require_global_admin)],
+    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     workspace = await get_workspace_for_user(db, workspace_id, actor)
-    await delete_workspace_permanently(db, workspace, actor)
+    await delete_workspace_permanently(db, workspace, actor, settings)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

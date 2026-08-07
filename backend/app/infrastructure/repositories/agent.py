@@ -184,3 +184,16 @@ async def delete_agent_graph(db: AsyncSession, agent_id: str) -> None:
         delete(AgentKnowledgeBase).where(AgentKnowledgeBase.agent_id == agent_id)
     )
     await db.execute(delete(Agent).where(Agent.id == agent_id))
+
+
+async def delete_workspace_agent_graph(db: AsyncSession, workspace_id: str) -> None:
+    await db.execute(delete(AgentRun).where(AgentRun.workspace_id == workspace_id))
+    await db.execute(
+        delete(AgentMcpTool).where(AgentMcpTool.workspace_id == workspace_id)
+    )
+    await db.execute(
+        delete(AgentKnowledgeBase).where(
+            AgentKnowledgeBase.workspace_id == workspace_id
+        )
+    )
+    await db.execute(delete(Agent).where(Agent.workspace_id == workspace_id))

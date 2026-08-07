@@ -56,6 +56,10 @@ class ResourcePermissionUpsertRequest(BaseModel):
     permission: str = Field(min_length=1, max_length=20)
 
 
+class KnowledgeBaseOwnerTransferRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=36)
+
+
 class KnowledgeAttachmentResponse(BaseModel):
     id: str
     workspace_id: str

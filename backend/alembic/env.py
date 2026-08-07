@@ -21,6 +21,7 @@ from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
+    KnowledgeStorageCleanup,
     KnowledgeTask,
 )
 from app.shareddomain.tools.models import McpServer  # noqa: F401

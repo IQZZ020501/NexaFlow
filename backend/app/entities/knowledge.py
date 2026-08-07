@@ -177,3 +177,15 @@ class KnowledgeTask:
     finished_at: datetime | None = None
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class KnowledgeStorageCleanup:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    knowledge_base_id: str = ""
+    attempts: int = 0
+    last_error: str | None = None
+    next_attempt_at: datetime = field(default_factory=utc_now)
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)

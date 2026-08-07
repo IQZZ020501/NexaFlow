@@ -3,6 +3,8 @@ from datetime import datetime
 
 from app.infrastructure.model_utils import new_id, utc_now
 
+TEAM_MEMBER_ROLES = {"admin", "member"}
+
 
 @dataclass
 class Team:

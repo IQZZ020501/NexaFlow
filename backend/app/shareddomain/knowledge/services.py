@@ -22,6 +22,12 @@ from app.shareddomain.knowledge.documents import (
     list_knowledge_documents,
     upload_knowledge_attachment,
 )
+from app.shareddomain.knowledge.cleanup import (
+    delete_workspace_knowledge_bases,
+    list_due_knowledge_storage_cleanup_ids,
+    purge_knowledge_base_storage,
+    run_knowledge_storage_cleanup,
+)
 from app.shareddomain.knowledge.kb import (
     ACTIVE_STATUS,
     ARCHIVED_STATUS,
@@ -36,6 +42,7 @@ from app.shareddomain.knowledge.kb import (
     require_can_manage_permissions,
     run_knowledge_model_test,
     test_knowledge_base_models,
+    transfer_knowledge_base_owner,
     update_knowledge_base,
 )
 from app.shareddomain.knowledge.permissions import (
@@ -44,6 +51,7 @@ from app.shareddomain.knowledge.permissions import (
     effective_permission,
     get_user_grant,
     list_resource_permissions,
+    require_knowledge_base_active,
     require_knowledge_base_permission,
     revoke_resource_permission,
     upsert_resource_permission,
@@ -67,6 +75,7 @@ __all__ = [
     "create_knowledge_documents_from_attachments",
     "delete_knowledge_attachment",
     "delete_knowledge_base_permanently",
+    "delete_workspace_knowledge_bases",
     "document_to_response",
     "effective_permission",
     "get_default_knowledge_model",
@@ -79,11 +88,16 @@ __all__ = [
     "list_knowledge_bases",
     "list_knowledge_documents",
     "list_resource_permissions",
+    "list_due_knowledge_storage_cleanup_ids",
+    "purge_knowledge_base_storage",
     "require_can_manage_permissions",
+    "require_knowledge_base_active",
     "require_knowledge_base_permission",
     "revoke_resource_permission",
     "run_knowledge_model_test",
+    "run_knowledge_storage_cleanup",
     "test_knowledge_base_models",
+    "transfer_knowledge_base_owner",
     "update_knowledge_base",
     "upload_knowledge_attachment",
     "upsert_resource_permission",

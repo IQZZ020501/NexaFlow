@@ -31,6 +31,7 @@ import type {
   ScopeEditForm,
   TeamForm,
   WorkspaceForm,
+  WorkspaceMember,
 } from "@/lib/api/system"
 
 type EditWorkspaceDialogProps = {
@@ -386,6 +387,9 @@ type CreateTeamDialogProps = {
   setTeamForm: React.Dispatch<React.SetStateAction<TeamForm>>
   isCreatingTeam: boolean
   handleCreateTeam: React.FormEventHandler<HTMLFormElement>
+  teamAdminCandidates: WorkspaceMember[]
+  isTeamAdminCandidatesLoading: boolean
+  handleTeamWorkspaceChange: (workspaceId: string) => void
 }
 
 export function CreateTeamDialog({
@@ -397,8 +401,15 @@ export function CreateTeamDialog({
   setTeamForm,
   isCreatingTeam,
   handleCreateTeam,
+  teamAdminCandidates,
+  isTeamAdminCandidatesLoading,
+  handleTeamWorkspaceChange,
 }: CreateTeamDialogProps) {
   const { t } = useLanguage()
+  const teamAdminUser =
+    teamAdminCandidates.find(
+      (member) => member.user.id === teamForm.adminUserId
+    )?.user ?? null
 
   return (
     <Dialog open={isTeamDialogOpen} onOpenChange={setIsTeamDialogOpen}>
@@ -447,10 +458,7 @@ export function CreateTeamDialog({
                       <DropdownMenuItem
                         key={workspace.id}
                         onSelect={() =>
-                          setTeamForm((current) => ({
-                            ...current,
-                            workspaceId: workspace.id,
-                          }))
+                          handleTeamWorkspaceChange(workspace.id)
                         }
                         className="justify-between"
                       >
@@ -493,6 +501,73 @@ export function CreateTeamDialog({
                 }
               />
             </Field>
+            <Field>
+              <FieldLabel id="teamAdminLabel">{t("团队管理员")}</FieldLabel>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    id="teamAdmin"
+                    type="button"
+                    variant="outline"
+                    className="h-9 w-full justify-between px-3 font-normal"
+                    aria-labelledby="teamAdminLabel teamAdmin"
+                    disabled={isTeamAdminCandidatesLoading || !teamWorkspace}
+                  >
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-left",
+                        !teamAdminUser && "text-muted-foreground"
+                      )}
+                    >
+                      {teamAdminUser
+                        ? `${teamAdminUser.name} · ${teamAdminUser.username}`
+                        : isTeamAdminCandidatesLoading
+                          ? t("正在加载")
+                          : t("选择团队管理员")}
+                    </span>
+                    <ChevronDownIcon data-icon="inline-end" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="max-h-72 w-(--radix-dropdown-menu-trigger-width) overflow-y-auto"
+                >
+                  {teamAdminCandidates.filter((member) => member.user.is_active)
+                    .length ? (
+                    teamAdminCandidates
+                      .filter((member) => member.user.is_active)
+                      .map((member) => (
+                        <DropdownMenuItem
+                          key={member.user.id}
+                          className="items-start justify-between gap-3"
+                          onSelect={() =>
+                            setTeamForm((current) => ({
+                              ...current,
+                              adminUserId: member.user.id,
+                            }))
+                          }
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium">
+                              {member.user.name}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {member.user.username} · {member.user.email}
+                            </span>
+                          </span>
+                          {member.user.id === teamForm.adminUserId ? (
+                            <CircleCheckIcon className="mt-0.5 shrink-0" />
+                          ) : null}
+                        </DropdownMenuItem>
+                      ))
+                  ) : (
+                    <DropdownMenuItem disabled>
+                      {t("暂无可选成员")}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </Field>
           </FieldGroup>
           <DialogFooter className="pt-5">
             <Button
@@ -502,7 +577,11 @@ export function CreateTeamDialog({
             >
               {t("取消")}
             </Button>
-            <Button disabled={!teamForm.workspaceId || isCreatingTeam}>
+            <Button
+              disabled={
+                !teamForm.workspaceId || !teamForm.adminUserId || isCreatingTeam
+              }
+            >
               {isCreatingTeam ? (
                 <LoaderCircleIcon data-icon="inline-start" />
               ) : (

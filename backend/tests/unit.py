@@ -7,6 +7,7 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
     uv run python -m tests.unit
 """
 
+import asyncio
 from types import SimpleNamespace
 
 from fastapi import HTTPException
@@ -72,6 +73,66 @@ def test_effective_permission_matrix() -> None:
 
 def test_validate_permission_rejects_unknown() -> None:
     expect_http_error(lambda: validate_permission("delete"), 422)
+
+
+def test_knowledge_writes_recheck_locked_owner() -> None:
+    from app.schemas.knowledge import KnowledgeBaseUpdateRequest
+    from app.shareddomain.knowledge import kb as knowledge_kb
+
+    stale = KnowledgeBase(
+        id="kb-1",
+        workspace_id="ws-1",
+        name="Docs",
+        created_by_user_id="actor-1",
+    )
+    locked = KnowledgeBase(
+        id="kb-1",
+        workspace_id="ws-1",
+        name="Docs",
+        created_by_user_id="new-owner",
+    )
+    actor = User(id="actor-1", username="actor")
+
+    async def lock_knowledge_base(db, knowledge_base):
+        return locked
+
+    async def get_user_grant(db, knowledge_base, user_id, resource_type):
+        return None
+
+    original_lock = knowledge_kb.knowledge_base_repository.lock_knowledge_base
+    original_grant = knowledge_kb.knowledge_base_repository.get_user_grant
+    knowledge_kb.knowledge_base_repository.lock_knowledge_base = lock_knowledge_base
+    knowledge_kb.knowledge_base_repository.get_user_grant = get_user_grant
+
+    async def assert_denied() -> None:
+        for operation in (
+            knowledge_kb.update_knowledge_base(
+                SimpleNamespace(),
+                stale,
+                KnowledgeBaseUpdateRequest(description="stale write"),
+                actor,
+                None,
+            ),
+            knowledge_kb.transfer_knowledge_base_owner(
+                SimpleNamespace(),
+                stale,
+                "target-1",
+                actor,
+                None,
+            ),
+        ):
+            try:
+                await operation
+            except HTTPException as exc:
+                assert exc.status_code == 403, exc.status_code
+                continue
+            raise AssertionError("stale knowledge owner was allowed to write")
+
+    try:
+        asyncio.run(assert_denied())
+    finally:
+        knowledge_kb.knowledge_base_repository.lock_knowledge_base = original_lock
+        knowledge_kb.knowledge_base_repository.get_user_grant = original_grant
 
 
 def test_clean_upload_filename_sanitizes_path_and_classification() -> None:
@@ -479,6 +540,7 @@ def test_normalize_mcp_url() -> None:
 def main() -> None:
     test_effective_permission_matrix()
     test_validate_permission_rejects_unknown()
+    test_knowledge_writes_recheck_locked_owner()
     test_clean_upload_filename_sanitizes_path_and_classification()
     test_parse_task_options_validates_boundaries()
     test_reciprocal_rank_fusion_merges_and_ranks()

@@ -137,6 +137,7 @@ function SystemPageContent({
     workspaceId: "",
     name: "",
     description: "",
+    adminUserId: "",
   })
   const [workspaceEditForm, setWorkspaceEditForm] =
     React.useState<ScopeEditForm | null>(null)
@@ -165,6 +166,11 @@ function SystemPageContent({
     React.useState<UserRoleFilter>("all")
   const [userWorkspaceFilter, setUserWorkspaceFilter] = React.useState("all")
   const [userCreateTeams, setUserCreateTeams] = React.useState<Team[]>([])
+  const [teamAdminCandidates, setTeamAdminCandidates] = React.useState<
+    WorkspaceMember[]
+  >([])
+  const [isTeamAdminCandidatesLoading, setIsTeamAdminCandidatesLoading] =
+    React.useState(false)
   const [isCreatingWorkspace, setIsCreatingWorkspace] = React.useState(false)
   const [isSavingWorkspace, setIsSavingWorkspace] = React.useState(false)
   const [isCreatingTeam, setIsCreatingTeam] = React.useState(false)
@@ -185,6 +191,7 @@ function SystemPageContent({
   const [isUserCreateDialogOpen, setIsUserCreateDialogOpen] =
     React.useState(false)
   const userCreateTeamsRequestId = React.useRef(0)
+  const teamAdminCandidatesRequestId = React.useRef(0)
 
   const selectedWorkspace =
     workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null
@@ -196,7 +203,9 @@ function SystemPageContent({
       (workspace) => workspace.id === userCreateForm.workspaceId
     ) ?? null
   const manageableWorkspaces = activeWorkspaces.filter(
-    (workspace) => getMembershipRole(me, workspace.id) === "admin"
+    (workspace) =>
+      me.user.is_global_admin ||
+      getMembershipRole(me, workspace.id) === "admin"
   )
   const teamWorkspace =
     manageableWorkspaces.find(
@@ -311,6 +320,32 @@ function SystemPageContent({
       } finally {
         if (requestId === userCreateTeamsRequestId.current) {
           setIsUserCreateTeamsLoading(false)
+        }
+      }
+    },
+    [reportError, token]
+  )
+
+  const loadTeamAdminCandidates = React.useCallback(
+    async (workspaceId: string) => {
+      const requestId = teamAdminCandidatesRequestId.current + 1
+      teamAdminCandidatesRequestId.current = requestId
+      setTeamAdminCandidates([])
+      setIsTeamAdminCandidatesLoading(true)
+
+      try {
+        const members = await listWorkspaceMembers(token, workspaceId)
+        if (requestId === teamAdminCandidatesRequestId.current) {
+          setTeamAdminCandidates(members)
+        }
+      } catch (error) {
+        if (requestId === teamAdminCandidatesRequestId.current) {
+          setTeamAdminCandidates([])
+          reportError(error)
+        }
+      } finally {
+        if (requestId === teamAdminCandidatesRequestId.current) {
+          setIsTeamAdminCandidatesLoading(false)
         }
       }
     },
@@ -448,8 +483,30 @@ function SystemPageContent({
       manageableWorkspaces[0]?.id ??
       ""
 
-    setTeamForm({ workspaceId, name: "", description: "" })
+    setTeamForm({ workspaceId, name: "", description: "", adminUserId: "" })
     setIsTeamDialogOpen(true)
+    if (workspaceId) {
+      void loadTeamAdminCandidates(workspaceId)
+    } else {
+      teamAdminCandidatesRequestId.current += 1
+      setTeamAdminCandidates([])
+      setIsTeamAdminCandidatesLoading(false)
+    }
+  }
+
+  function handleTeamWorkspaceChange(workspaceId: string) {
+    setTeamForm((current) => ({
+      ...current,
+      workspaceId,
+      adminUserId: "",
+    }))
+    if (workspaceId) {
+      void loadTeamAdminCandidates(workspaceId)
+    } else {
+      teamAdminCandidatesRequestId.current += 1
+      setTeamAdminCandidates([])
+      setIsTeamAdminCandidatesLoading(false)
+    }
   }
 
   async function handleCreateWorkspace(
@@ -484,7 +541,8 @@ function SystemPageContent({
   async function handleCreateTeam(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    if (!teamForm.workspaceId) {
+    if (!teamForm.workspaceId || !teamForm.adminUserId) {
+      onNotify("error", t("请选择团队管理员"))
       return
     }
 
@@ -494,8 +552,9 @@ function SystemPageContent({
       const team = await createTeam(token, teamForm.workspaceId, {
         name: teamForm.name,
         description: teamForm.description,
+        admin_user_id: teamForm.adminUserId,
       })
-      setTeamForm({ workspaceId: "", name: "", description: "" })
+      setTeamForm({ workspaceId: "", name: "", description: "", adminUserId: "" })
       if (team.workspace_id === selectedWorkspaceId) {
         onTeamCreated(team)
       } else {
@@ -931,6 +990,9 @@ function SystemPageContent({
       setTeamForm={setTeamForm}
       isCreatingTeam={isCreatingTeam}
       handleCreateTeam={handleCreateTeam}
+      teamAdminCandidates={teamAdminCandidates}
+      isTeamAdminCandidatesLoading={isTeamAdminCandidatesLoading}
+      handleTeamWorkspaceChange={handleTeamWorkspaceChange}
     />
   )
 }

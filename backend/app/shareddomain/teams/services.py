@@ -6,10 +6,19 @@ from fastapi import HTTPException, status
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.validation import normalize_name
 from app.infrastructure.model_utils import new_id
+from app.entities.team import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.entities.user import User
-from app.entities.team import Team
 from app.infrastructure.repositories import team as team_repository
-from app.schemas.team import TeamCreateRequest, TeamResponse, TeamUpdateRequest
+from app.infrastructure.repositories import workspace as workspace_repository
+from app.schemas.team import (
+    TeamCreateRequest,
+    TeamMemberCreateRequest,
+    TeamMemberResponse,
+    TeamMemberUpdateRequest,
+    TeamResponse,
+    TeamUpdateRequest,
+)
+from app.schemas.user import user_to_response
 
 ACTIVE_STATUS = "active"
 ARCHIVED_STATUS = "archived"
@@ -50,6 +59,14 @@ async def create_team(
     payload: TeamCreateRequest,
     actor: User,
 ) -> TeamResponse:
+    admin = await team_repository.get_active_workspace_user(
+        db,
+        workspace_id,
+        payload.admin_user_id,
+    )
+    if admin is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace member not found.")
+
     team = Team(
         workspace_id=workspace_id,
         name=normalize_name(payload.name),
@@ -59,6 +76,15 @@ async def create_team(
     )
     try:
         team = await team_repository.create_team(db, team)
+        await team_repository.create_team_membership(
+            db,
+            TeamMembership(
+                workspace_id=workspace_id,
+                team_id=team.id,
+                user_id=admin.id,
+                role="admin",
+            ),
+        )
         record_audit_log(
             db,
             actor,
@@ -66,7 +92,11 @@ async def create_team(
             "team",
             team.id,
             team.name,
-            {"description": team.description, "workspace_id": workspace_id},
+            {
+                "description": team.description,
+                "workspace_id": workspace_id,
+                "admin_user_id": admin.id,
+            },
             workspace_id=workspace_id,
         )
         await db.commit()
@@ -138,4 +168,185 @@ async def delete_team_permanently(db: AsyncSession, team: Team, actor: User) -> 
         workspace_id=team.workspace_id,
     )
     await team_repository.delete_team_graph(db, team)
+    await db.commit()
+
+
+def team_member_to_response(
+    membership: TeamMembership,
+    user: User,
+) -> TeamMemberResponse:
+    return TeamMemberResponse(
+        user=user_to_response(user),
+        role=membership.role,
+    )
+
+
+def validate_team_member_role(role: str) -> None:
+    if role not in TEAM_MEMBER_ROLES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid team role.")
+
+
+async def actor_manages_team_admins(
+    db: AsyncSession,
+    workspace_id: str,
+    actor: User,
+) -> bool:
+    if actor.is_global_admin:
+        return True
+    membership = await workspace_repository.get_workspace_membership(
+        db,
+        workspace_id,
+        actor.id,
+    )
+    return membership is not None and membership.role == "admin"
+
+
+def require_manages_team_admins(can_manage: bool) -> None:
+    if not can_manage:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Workspace admin required to manage team admins.",
+        )
+
+
+async def list_team_members(
+    db: AsyncSession,
+    team: Team,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[TeamMemberResponse]:
+    return [
+        team_member_to_response(membership, user)
+        for membership, user in await team_repository.list_team_member_rows(
+            db,
+            team,
+            limit,
+            offset,
+        )
+    ]
+
+
+async def add_team_member(
+    db: AsyncSession,
+    team: Team,
+    user_id: str,
+    role: str,
+    actor: User,
+) -> TeamMemberResponse:
+    validate_team_member_role(role)
+    if role == "admin":
+        require_manages_team_admins(
+            await actor_manages_team_admins(db, team.workspace_id, actor),
+        )
+    user = await team_repository.get_active_workspace_user(
+        db,
+        team.workspace_id,
+        user_id,
+    )
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace member not found.")
+
+    membership = TeamMembership(
+        workspace_id=team.workspace_id,
+        team_id=team.id,
+        user_id=user.id,
+        role=role,
+    )
+    record_audit_log(
+        db,
+        actor,
+        "team.member.add",
+        "team_member",
+        user.id,
+        user.name,
+        {"team_id": team.id, "role": role},
+        workspace_id=team.workspace_id,
+    )
+    try:
+        membership = await team_repository.create_team_membership(db, membership)
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Team member already exists.",
+        ) from exc
+
+    return team_member_to_response(membership, user)
+
+
+async def update_team_member_role(
+    db: AsyncSession,
+    team: Team,
+    user_id: str,
+    role: str,
+    actor: User,
+) -> TeamMemberResponse:
+    validate_team_member_role(role)
+    membership = await team_repository.get_team_membership(db, team.id, user_id)
+    if membership is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team member not found.")
+    if role == "admin" or membership.role == "admin":
+        require_manages_team_admins(
+            await actor_manages_team_admins(db, team.workspace_id, actor),
+        )
+    user = await team_repository.get_active_workspace_user(
+        db,
+        team.workspace_id,
+        user_id,
+    )
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace member not found.")
+
+    previous_role = membership.role
+    membership.role = role
+    record_audit_log(
+        db,
+        actor,
+        "team.member.update",
+        "team_member",
+        user.id,
+        user.name,
+        {"team_id": team.id, "previous_role": previous_role, "role": role},
+        workspace_id=team.workspace_id,
+    )
+    membership = await team_repository.save_team_membership(db, membership)
+    await db.commit()
+    return team_member_to_response(membership, user)
+
+
+async def remove_team_member(
+    db: AsyncSession,
+    team: Team,
+    user_id: str,
+    actor: User,
+) -> None:
+    user = await team_repository.get_active_workspace_user(
+        db,
+        team.workspace_id,
+        user_id,
+    )
+    membership = await team_repository.get_team_membership(db, team.id, user_id)
+    if membership is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Team member not found.")
+    if membership.role == "admin":
+        require_manages_team_admins(
+            await actor_manages_team_admins(db, team.workspace_id, actor),
+        )
+    await team_repository.delete_team_membership(
+        db,
+        team.id,
+        user_id,
+    )
+
+    record_audit_log(
+        db,
+        actor,
+        "team.member.remove",
+        "team_member",
+        user_id,
+        user.name if user is not None else "",
+        {"team_id": team.id},
+        workspace_id=team.workspace_id,
+    )
     await db.commit()

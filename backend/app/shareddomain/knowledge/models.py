@@ -376,3 +376,32 @@ class KnowledgeTask(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class KnowledgeStorageCleanup(Base):
+    __tablename__ = "knowledge_storage_cleanups"
+    __table_args__ = (
+        UniqueConstraint(
+            "knowledge_base_id",
+            name="uq_knowledge_storage_cleanups_knowledge_base",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    # No foreign keys: the retry record must survive workspace and knowledge deletion.
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+    )

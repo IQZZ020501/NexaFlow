@@ -74,3 +74,12 @@ async def delete_mcp_server(db: AsyncSession, entity: McpServer) -> None:
     row = await db.get(McpServerOrm, entity.id)
     if row is not None:
         await db.delete(row)
+
+
+async def delete_workspace_mcp_servers(db: AsyncSession, workspace_id: str) -> None:
+    await db.execute(
+        delete(AgentMcpTool).where(AgentMcpTool.workspace_id == workspace_id)
+    )
+    await db.execute(
+        delete(McpServerOrm).where(McpServerOrm.workspace_id == workspace_id)
+    )

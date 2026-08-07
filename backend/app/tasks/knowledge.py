@@ -13,6 +13,10 @@ from app.shareddomain.knowledge.task_runner import (
     mark_knowledge_task_failed,
     run_knowledge_task,
 )
+from app.shareddomain.knowledge.cleanup import (
+    list_due_knowledge_storage_cleanup_ids,
+    run_knowledge_storage_cleanup,
+)
 
 logger = get_logger(__name__)
 
@@ -60,6 +64,39 @@ def run_knowledge_task_job(self, task_id: str) -> None:
         raise self.retry(countdown=TASK_LEASE_RENEW_SECONDS)
 
 
+@celery_app.task(
+    bind=True,
+    name="app.knowledge.cleanup_storage",
+    ignore_result=True,
+    max_retries=None,
+)
+def run_knowledge_storage_cleanup_job(self, cleanup_id: str) -> None:
+    settings = Settings.from_env(require_bootstrap=False)
+    configure_task_worker(settings)
+    try:
+        asyncio.run(run_knowledge_storage_cleanup(cleanup_id, settings))
+    except Exception as exc:
+        log_error(
+            logger,
+            "Knowledge storage cleanup failed; retrying.",
+            exc,
+            cleanup_id=cleanup_id,
+        )
+        raise self.retry(exc=exc, countdown=60)
+
+
+@celery_app.task(
+    name="app.knowledge.recover_storage_cleanups",
+    ignore_result=True,
+)
+def recover_knowledge_storage_cleanups_job() -> None:
+    settings = Settings.from_env(require_bootstrap=False)
+    configure_task_worker(settings)
+    cleanup_ids = asyncio.run(list_due_knowledge_storage_cleanup_ids())
+    for cleanup_id in cleanup_ids:
+        run_knowledge_storage_cleanup_job.apply_async(args=(cleanup_id,))
+
+
 async def mark_task_dispatch_failed(task_id: str) -> None:
     async with get_session_factory()() as db:
         await mark_knowledge_task_failed(
@@ -88,3 +125,37 @@ async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
         except Exception:
             pass
         raise
+
+
+async def enqueue_knowledge_storage_cleanup(
+    cleanup_id: str,
+    settings: Settings,
+) -> None:
+    if settings.celery_task_always_eager:
+        try:
+            await run_knowledge_storage_cleanup(cleanup_id, settings)
+        except Exception as exc:
+            log_error(
+                logger,
+                "Knowledge storage cleanup deferred after eager failure.",
+                exc,
+                cleanup_id=cleanup_id,
+            )
+        return
+
+    celery_app.conf.update(
+        broker_url=settings.celery_broker_url,
+        task_always_eager=False,
+    )
+    try:
+        await asyncio.to_thread(
+            run_knowledge_storage_cleanup_job.apply_async,
+            args=(cleanup_id,),
+        )
+    except Exception as exc:
+        log_error(
+            logger,
+            "Knowledge storage cleanup dispatch deferred.",
+            exc,
+            cleanup_id=cleanup_id,
+        )

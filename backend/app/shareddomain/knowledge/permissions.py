@@ -13,6 +13,7 @@ from app.shareddomain.audit.services import record_audit_log
 
 RESOURCE_TYPE = "knowledge_base"
 RESOURCE_PERMISSIONS = {"view", "edit"}
+ARCHIVED_STATUS = "archived"
 
 
 def validate_permission(permission: str) -> None:
@@ -21,6 +22,11 @@ def validate_permission(permission: str) -> None:
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Invalid resource permission.",
         )
+
+
+def require_knowledge_base_active(knowledge_base: KnowledgeBase) -> None:
+    if knowledge_base.status == ARCHIVED_STATUS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Knowledge base is archived.")
 
 
 def effective_permission(
@@ -56,6 +62,12 @@ async def require_knowledge_base_permission(
     workspace_role: str | None,
     permissions: set[str],
 ) -> str:
+    if (
+        knowledge_base.status == ARCHIVED_STATUS
+        and "edit" in permissions
+        and "view" not in permissions
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Knowledge base is archived.")
     permission = effective_permission(
         knowledge_base,
         actor,
@@ -96,6 +108,7 @@ async def upsert_resource_permission(
     permission: str,
     actor: User,
 ) -> ResourcePermissionResponse:
+    require_knowledge_base_active(knowledge_base)
     validate_permission(permission)
     target = await knowledge_base_repository.get_active_workspace_member(
         db,
@@ -151,6 +164,7 @@ async def revoke_resource_permission(
     target_user_id: str,
     actor: User,
 ) -> None:
+    require_knowledge_base_active(knowledge_base)
     deleted_count = await knowledge_base_repository.delete_resource_permission(
         db,
         knowledge_base,

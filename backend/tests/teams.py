@@ -18,6 +18,10 @@ def teams_url(workspace_id: str, suffix: str = "") -> str:
     return f"/api/v1/workspaces/{workspace_id}/teams{suffix}"
 
 
+def members_url(workspace_id: str, suffix: str = "") -> str:
+    return f"/api/v1/workspaces/{workspace_id}/members{suffix}"
+
+
 async def assert_cross_workspace_team_membership_denied(
     default_workspace_id: str,
     team_id: str,
@@ -77,7 +81,8 @@ def main() -> None:
             teams_url(research_workspace_id),
             headers=auth_headers(admin_token),
         )
-        assert admin_research_teams.status_code == 403, admin_research_teams.text
+        assert admin_research_teams.status_code == 200, admin_research_teams.text
+        assert admin_research_teams.json() == []
 
         denied = client.get(
             teams_url(default_workspace_id),
@@ -92,10 +97,33 @@ def main() -> None:
         assert empty_teams.status_code == 200, empty_teams.text
         assert empty_teams.json() == []
 
+        missing_admin = client.post(
+            teams_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={"name": "No Admin Team", "description": "缺少管理员"},
+        )
+        assert missing_admin.status_code == 422, missing_admin.text
+
+        outsider_id, _ = create_active_user(client, admin_token, "team-outsider")
+        outsider_admin = client.post(
+            teams_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={
+                "name": "Outsider Team",
+                "description": "非成员管理员",
+                "admin_user_id": outsider_id,
+            },
+        )
+        assert outsider_admin.status_code == 404, outsider_admin.text
+
         team = client.post(
             teams_url(research_workspace_id),
             headers=auth_headers(research_token),
-            json={"name": "Applied AI", "description": "应用智能团队"},
+            json={
+                "name": "Applied AI",
+                "description": "应用智能团队",
+                "admin_user_id": research_admin_id,
+            },
         )
         assert team.status_code == 201, team.text
         assert team.json()["workspace_id"] == research_workspace_id
@@ -140,6 +168,214 @@ def main() -> None:
         assert restored.status_code == 200, restored.text
         assert restored.json()["status"] == "active"
 
+        # Team member management: add/list/update/remove.
+        team_member_id, team_member_token = create_active_user(
+            client,
+            admin_token,
+            "team-member",
+        )
+        added_workspace_member = client.post(
+            members_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={"user_id": team_member_id, "role": "member"},
+        )
+        assert added_workspace_member.status_code == 201, added_workspace_member.text
+
+        empty_team_members = client.get(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(research_token),
+        )
+        assert empty_team_members.status_code == 200, empty_team_members.text
+        assert [(item["user"]["username"], item["role"]) for item in empty_team_members.json()] == [
+            ("research-admin", "admin")
+        ]
+
+        not_a_workspace_member = client.post(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(research_token),
+            json={"user_id": outsider_id, "role": "member"},
+        )
+        assert not_a_workspace_member.status_code == 404, not_a_workspace_member.text
+
+        added_team_member = client.post(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(research_token),
+            json={"user_id": team_member_id, "role": "member"},
+        )
+        assert added_team_member.status_code == 201, added_team_member.text
+        assert added_team_member.json()["role"] == "member"
+
+        team_members_denied_member = client.get(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(team_member_token),
+        )
+        assert team_members_denied_member.status_code == 403, team_members_denied_member.text
+
+        duplicate_team_member = client.post(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(research_token),
+            json={"user_id": team_member_id, "role": "admin"},
+        )
+        assert duplicate_team_member.status_code == 409, duplicate_team_member.text
+
+        invalid_team_role = client.post(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(research_token),
+            json={"user_id": team_member_id, "role": "owner"},
+        )
+        assert invalid_team_role.status_code == 422, invalid_team_role.text
+
+        team_members_super = client.get(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(admin_token),
+        )
+        assert team_members_super.status_code == 200, team_members_super.text
+        assert [(item["user"]["username"], item["role"]) for item in team_members_super.json()] == [
+            ("team-member", "member"),
+            ("research-admin", "admin"),
+        ]
+
+        member_manage_denied = client.patch(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_id}"),
+            headers=auth_headers(team_member_token),
+            json={"role": "admin"},
+        )
+        assert member_manage_denied.status_code == 403, member_manage_denied.text
+
+        updated_team_member = client.patch(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_id}"),
+            headers=auth_headers(research_token),
+            json={"role": "admin"},
+        )
+        assert updated_team_member.status_code == 200, updated_team_member.text
+        assert updated_team_member.json()["role"] == "admin"
+
+        team_members = client.get(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(research_token),
+        )
+        assert team_members.status_code == 200, team_members.text
+        assert [(item["user"]["username"], item["role"]) for item in team_members.json()] == [
+            ("team-member", "admin"),
+            ("research-admin", "admin"),
+        ]
+
+        # Team admins manage team members; workspace admins manage team admins.
+        team_member_2_id, _ = create_active_user(client, admin_token, "team-member-2")
+        added_ws_member_2 = client.post(
+            members_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={"user_id": team_member_2_id, "role": "member"},
+        )
+        assert added_ws_member_2.status_code == 201, added_ws_member_2.text
+
+        team_admin_list = client.get(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(team_member_token),
+        )
+        assert team_admin_list.status_code == 200, team_admin_list.text
+        assert [item["user"]["username"] for item in team_admin_list.json()] == [
+            "team-member",
+            "research-admin",
+        ]
+
+        added_by_team_admin = client.post(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(team_member_token),
+            json={"user_id": team_member_2_id, "role": "member"},
+        )
+        assert added_by_team_admin.status_code == 201, added_by_team_admin.text
+        assert added_by_team_admin.json()["role"] == "member"
+
+        promote_denied = client.patch(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_2_id}"),
+            headers=auth_headers(team_member_token),
+            json={"role": "admin"},
+        )
+        assert promote_denied.status_code == 403, promote_denied.text
+
+        remove_member_by_team_admin = client.delete(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_2_id}"),
+            headers=auth_headers(team_member_token),
+        )
+        assert remove_member_by_team_admin.status_code == 204, remove_member_by_team_admin.text
+
+        team_member_3_id, _ = create_active_user(client, admin_token, "team-member-3")
+        added_ws_member_3 = client.post(
+            members_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={"user_id": team_member_3_id, "role": "member"},
+        )
+        assert added_ws_member_3.status_code == 201, added_ws_member_3.text
+
+        add_admin_denied = client.post(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(team_member_token),
+            json={"user_id": team_member_3_id, "role": "admin"},
+        )
+        assert add_admin_denied.status_code == 403, add_admin_denied.text
+
+        added_team_admin = client.post(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(research_token),
+            json={"user_id": team_member_3_id, "role": "admin"},
+        )
+        assert added_team_admin.status_code == 201, added_team_admin.text
+        assert added_team_admin.json()["role"] == "admin"
+
+        remove_admin_denied = client.delete(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_3_id}"),
+            headers=auth_headers(team_member_token),
+        )
+        assert remove_admin_denied.status_code == 403, remove_admin_denied.text
+
+        demote_admin_denied = client.patch(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_3_id}"),
+            headers=auth_headers(team_member_token),
+            json={"role": "member"},
+        )
+        assert demote_admin_denied.status_code == 403, demote_admin_denied.text
+
+        # Super admin manages teams of every workspace, including team admins.
+        super_add_member = client.post(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(admin_token),
+            json={"user_id": team_member_2_id, "role": "member"},
+        )
+        assert super_add_member.status_code == 201, super_add_member.text
+
+        demoted_team_admin = client.patch(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_3_id}"),
+            headers=auth_headers(research_token),
+            json={"role": "member"},
+        )
+        assert demoted_team_admin.status_code == 200, demoted_team_admin.text
+        assert demoted_team_admin.json()["role"] == "member"
+
+        removed_team_admin = client.delete(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_3_id}"),
+            headers=auth_headers(research_token),
+        )
+        assert removed_team_admin.status_code == 204, removed_team_admin.text
+
+        removed_member_2 = client.delete(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_2_id}"),
+            headers=auth_headers(research_token),
+        )
+        assert removed_member_2.status_code == 204, removed_member_2.text
+
+        removed_team_member = client.delete(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_id}"),
+            headers=auth_headers(research_token),
+        )
+        assert removed_team_member.status_code == 204, removed_team_member.text
+
+        remove_team_member_again = client.delete(
+            teams_url(research_workspace_id, f"/{team_id}/members/{team_member_id}"),
+            headers=auth_headers(research_token),
+        )
+        assert remove_team_member_again.status_code == 404, remove_team_member_again.text
+
         delete_default = client.delete(
             teams_url(default_workspace_id, f"/{default_team_id}"),
             headers=auth_headers(admin_token),
@@ -165,6 +401,9 @@ def main() -> None:
         actions = [item["action"] for item in logs]
         assert "team.archive" in actions
         assert "team.delete" in actions
+        assert "team.member.add" in actions
+        assert "team.member.update" in actions
+        assert "team.member.remove" in actions
         assert all(
             item["workspace_id"] == research_workspace_id
             for item in logs

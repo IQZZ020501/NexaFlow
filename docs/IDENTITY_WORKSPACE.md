@@ -46,10 +46,13 @@ api/{auth,workspaces,teams,mcp_servers,admin/users,admin/audit}.py
 
 - 全局管理员（`is_global_admin`）是平台超管：创建/管理工作空间生命周期，不穿透工作空间成员/知识库/工具权限。
 - 角色只有 `admin`/`member` 两级；资源级授权通过 `ResourcePermission`（当前仅 knowledge_base 的 view/edit）。
+- 团队是组织标签：支持成员管理（添加/列表/改角色/移除，需工作区管理员），不参与资源授权；团队成员必须是工作区成员。
+- 知识库 owner（`created_by_user_id`）可通过 owner 转移接口变更；创建者与工作区管理员可管理资源权限。
+- 删除工作区会在同一事务内级联删除知识库、Agent/运行记录、MCP、模型、团队/成员及资源授权；存在 queued/running 知识任务时返回 409。向量集合和对象存储文件由持久清理记录交给 Celery 异步删除，失败后自动重试。
 - 敏感写操作（创建/修改/删除）一律 `record_audit_log`。
 
 ## 相关测试
 
 - `backend/tests/identity.py` — 身份认证端到端测试：登录/刷新/登出、刷新会话落库与审计日志
-- `backend/tests/workspaces.py` — 工作区端到端测试：CRUD、成员管理、跨工作区访问隔离
-- `backend/tests/teams.py` — 团队端到端测试：CRUD 与跨工作区团队成员约束
+- `backend/tests/workspaces.py` — 工作区端到端测试：CRUD、成员管理、跨工作区访问隔离、全资源级联与外部存储清理重试
+- `backend/tests/teams.py` — 团队端到端测试：CRUD、管理员成员管理与跨工作区团队成员约束

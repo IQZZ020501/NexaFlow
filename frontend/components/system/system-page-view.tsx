@@ -131,6 +131,9 @@ type SystemPageViewProps = {
   setTeamForm: React.Dispatch<React.SetStateAction<TeamForm>>
   isCreatingTeam: boolean
   handleCreateTeam: React.FormEventHandler<HTMLFormElement>
+  teamAdminCandidates: WorkspaceMember[]
+  isTeamAdminCandidatesLoading: boolean
+  handleTeamWorkspaceChange: (workspaceId: string) => void
 }
 
 export function SystemPageView({
@@ -217,6 +220,9 @@ export function SystemPageView({
   setTeamForm,
   isCreatingTeam,
   handleCreateTeam,
+  teamAdminCandidates,
+  isTeamAdminCandidatesLoading,
+  handleTeamWorkspaceChange,
 }: SystemPageViewProps) {
   const { t } = useLanguage()
 
@@ -392,6 +398,9 @@ export function SystemPageView({
         setTeamForm={setTeamForm}
         isCreatingTeam={isCreatingTeam}
         handleCreateTeam={handleCreateTeam}
+        teamAdminCandidates={teamAdminCandidates}
+        isTeamAdminCandidatesLoading={isTeamAdminCandidatesLoading}
+        handleTeamWorkspaceChange={handleTeamWorkspaceChange}
       />
     </div>
   )
