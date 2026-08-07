@@ -454,6 +454,7 @@ export const en = {
     "正在生成分段预览": "Generating chunk preview",
     "正在生成预览": "Generating preview",
     "每次最多上传 {value} 个文件": "Upload at most {value} files at once",
+    "队列最多保留 {value} 个文件": "Queue retains at most {value} files",
     "永久删除知识库": "Delete knowledge base permanently",
     "永久删除选中的 {value} 个文档？此操作不可恢复。": "Permanently delete {value} selected documents? This cannot be undone.",
     "没有匹配的文档": "No matching documents",

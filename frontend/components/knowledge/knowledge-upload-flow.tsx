@@ -39,6 +39,7 @@ import {
 } from "@/lib/api/knowledge"
 import { ChunkPreviewList } from "@/components/knowledge/chunk-preview-list"
 import { useKnowledgeUploadState } from "@/components/knowledge/knowledge-upload-state"
+import { appendKnowledgeUploadFiles } from "./knowledge-upload-files"
 import type {
   KnowledgeBase,
   KnowledgeDocument,
@@ -55,6 +56,8 @@ import {
 } from "@/lib/knowledge-upload-route"
 import { cn } from "@/lib/utils"
 import { formatBytes } from "@/components/knowledge/status-labels"
+
+export { appendKnowledgeUploadFiles }
 
 type SegmentMode = KnowledgeUploadParseSettings["segmentMode"]
 
@@ -280,18 +283,15 @@ export function KnowledgeUploadFlow({
         file.name.toLowerCase().endsWith(extension),
       ),
     )
-    const limitedFiles = supportedFiles.slice(
-      0,
-      MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
-    )
-    setFiles(limitedFiles)
+    const limitedFiles = appendKnowledgeUploadFiles(files, supportedFiles)
+    setFiles((current) => appendKnowledgeUploadFiles(current, supportedFiles))
     if (supportedFiles.length !== nextFiles.length) {
       onNotify("error", t("已忽略不支持的文件格式"))
     }
-    if (supportedFiles.length > MAX_KNOWLEDGE_UPLOAD_DOCUMENTS) {
+    if (limitedFiles.length < files.length + supportedFiles.length) {
       onNotify(
         "error",
-        t("每次最多上传 {value} 个文件", {
+        t("队列最多保留 {value} 个文件", {
           value: MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
         }),
       )
