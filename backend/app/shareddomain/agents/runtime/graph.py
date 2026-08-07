@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -24,6 +25,7 @@ from app.ports.llm import (
 from app.shareddomain.agents.runtime.callbacks import NexaFlowCallback
 from app.shareddomain.agents.runtime.state import AgentState, PendingToolCall
 from app.shareddomain.agents.runtime.tools import (
+    AgentExecutionPaused,
     AgentToolResult,
     agent_tool_metadata,
     is_parallel_safe,
@@ -46,6 +48,14 @@ class AgentRuntimeContext:
     tools: list[StructuredTool]
     callback: NexaFlowCallback
     tool_timeout_seconds: float | None = None
+    before_tool_call: Callable[
+        [int, PendingToolCall, dict[str, str], dict[str, Any]],
+        Awaitable[AgentToolResult | None],
+    ] | None = None
+    after_tool_call: Callable[
+        [int, PendingToolCall, dict[str, str], dict[str, Any], AgentToolResult],
+        Awaitable[None],
+    ] | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +191,11 @@ async def agent_node(
     messages = [*state["messages"], message]
     tool_calls = [pending_tool_call(call) for call in completion.tool_calls]
     if tool_calls:
+        call_ids = [call["id"] for call in tool_calls]
+        if any(not call_id for call_id in call_ids) or len(set(call_ids)) != len(
+            call_ids
+        ):
+            raise AgentRunnerError("Agent model returned invalid tool call identifiers.")
         if not allow_tools:
             raise AgentRunnerError("Agent turn limit reached.")
         await callback.process(completed_thought("agent.tools_selected"))
@@ -217,12 +232,32 @@ async def execute_tool_call(
     callback: NexaFlowCallback,
     turn: int,
     timeout_seconds: float | None,
+    runtime_context: AgentRuntimeContext | None = None,
 ) -> tuple[AgentToolResult, dict[str, Any]]:
     input_value = prepared.arguments or {}
     result = prepared.blocked_result
     started_at = time.perf_counter()
     if result is None:
         assert prepared.tool is not None
+        if runtime_context is not None and runtime_context.before_tool_call is not None:
+            result = await runtime_context.before_tool_call(
+                turn,
+                prepared.call,
+                prepared.metadata,
+                input_value,
+            )
+        if result is not None:
+            event = callback.tool_event(
+                turn=turn,
+                tool_name=prepared.call["name"],
+                call_id=prepared.call["id"],
+                metadata=prepared.metadata,
+                input_value=input_value,
+                result=result,
+            )
+            event["duration_ms"] = round((time.perf_counter() - started_at) * 1000)
+            await callback.process(event)
+            return result, event
         await callback.process(
             callback.tool_event(
                 turn=turn,
@@ -253,12 +288,30 @@ async def execute_tool_call(
                 content="Tool execution timed out.",
                 summary="Tool execution timed out.",
                 is_error=True,
+                outcome_uncertain=(
+                    prepared.metadata["kind"] == "mcp"
+                    and prepared.metadata.get("policy_mode") != "read_only"
+                ),
             )
+        except AgentExecutionPaused:
+            raise
         except Exception:
             result = AgentToolResult(
                 content="Tool execution failed.",
                 summary="Tool execution failed.",
                 is_error=True,
+                outcome_uncertain=(
+                    prepared.metadata["kind"] == "mcp"
+                    and prepared.metadata.get("policy_mode") != "read_only"
+                ),
+            )
+        if runtime_context is not None and runtime_context.after_tool_call is not None:
+            await runtime_context.after_tool_call(
+                turn,
+                prepared.call,
+                prepared.metadata,
+                input_value,
+                result,
             )
 
     event = callback.tool_event(
@@ -358,6 +411,7 @@ async def tool_node(
                 callback,
                 state["turn"],
                 runtime.context.tool_timeout_seconds,
+                runtime.context,
             )
             index += 1
             continue
@@ -375,6 +429,7 @@ async def tool_node(
                     callback,
                     state["turn"],
                     runtime.context.tool_timeout_seconds,
+                    runtime.context,
                 )
                 for item in prepared_calls[index:group_end]
             )
@@ -430,11 +485,15 @@ def route_after_agent(state: AgentState) -> Literal["tool", "__end__"]:
     return "tool" if state["pending_tool_calls"] else END
 
 
+def route_from_start(state: AgentState) -> Literal["agent", "tool"]:
+    return "tool" if state["pending_tool_calls"] else "agent"
+
+
 def build_agent_graph():
     graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
     graph.add_node("agent", agent_node)
     graph.add_node("tool", tool_node)
-    graph.add_edge(START, "agent")
+    graph.add_conditional_edges(START, route_from_start)
     graph.add_conditional_edges("agent", route_after_agent)
     graph.add_edge("tool", "agent")
     return graph.compile(name="nexaflow_agent_runtime")

@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     JSON,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -16,6 +17,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.infrastructure.base import Base
 from app.infrastructure.model_utils import new_id, utc_now
+
+AGENT_RUN_QUEUED_STATUS = "queued"
+AGENT_RUN_RUNNING_STATUS = "running"
+AGENT_RUN_AWAITING_APPROVAL_STATUS = "awaiting_approval"
+AGENT_RUN_SUCCEEDED_STATUS = "succeeded"
+AGENT_RUN_FAILED_STATUS = "failed"
+AGENT_RUN_CANCELLED_STATUS = "cancelled"
 
 
 class Agent(Base):
@@ -27,6 +35,10 @@ class Agent(Base):
             "status IN ('active', 'disabled')",
             name="ck_agents_status",
         ),
+        CheckConstraint(
+            "knowledge_query_mode IN ('required', 'agentic')",
+            name="ck_agents_knowledge_query_mode",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -37,6 +49,9 @@ class Agent(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     model_id: Mapped[str] = mapped_column(ForeignKey("model.id"), nullable=False, index=True)
+    knowledge_query_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="required", server_default="required"
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by_user_id: Mapped[str] = mapped_column(
@@ -122,8 +137,17 @@ class AgentRun(Base):
             ondelete="CASCADE",
         ),
         CheckConstraint(
-            "status IN ('planning', 'planned', 'running', 'succeeded', 'failed')",
+            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'succeeded', 'failed', 'cancelled')",
             name="ck_agent_runs_status",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_agent_runs_workspace_id",
+        ),
+        CheckConstraint(
+            "knowledge_query_mode IN ('required', 'agentic')",
+            name="ck_agent_runs_knowledge_query_mode",
         ),
     )
 
@@ -138,10 +162,30 @@ class AgentRun(Base):
     goal: Mapped[str] = mapped_column(Text, nullable=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     knowledge_base_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    knowledge_query_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="required", server_default="required"
+    )
     mcp_tools: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
     model_id: Mapped[str] = mapped_column(String(36), nullable=False)
     model_name: Mapped[str] = mapped_column(String(160), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="planning", index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default="3"
+    )
+    worker_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    checkpoint: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    checkpoint_phase: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="agent", server_default="agent"
+    )
+    trace_id: Mapped[str] = mapped_column(
+        String(36), nullable=False, default="", server_default=""
+    )
     plan: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     result: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -153,3 +197,73 @@ class AgentRun(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
+
+
+class AgentRunEvent(Base):
+    __tablename__ = "agent_run_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "run_id"],
+            ["agent_runs.workspace_id", "agent_runs.id"],
+            name="fk_agent_run_events_run_workspace",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    event: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AgentToolCall(Base):
+    __tablename__ = "agent_tool_calls"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "run_id"],
+            ["agent_runs.workspace_id", "agent_runs.id"],
+            name="fk_agent_tool_calls_run_workspace",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "run_id",
+            "turn",
+            "call_id",
+            name="uq_agent_tool_calls_run_turn_call",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'awaiting_approval', 'approved', 'running', 'succeeded', 'failed', 'rejected', 'uncertain')",
+            name="ck_agent_tool_calls_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    turn: Mapped[int] = mapped_column(Integer, nullable=False)
+    call_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    tool_kind: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
+    server_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    arguments: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    arguments_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    definition_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    policy_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="")
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending", index=True)
+    approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    approved_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    worker_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result_content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    result_summary: Mapped[str] = mapped_column(String(2000), nullable=False, default="")
+    result_output: Mapped[Any] = mapped_column(JSON, nullable=True)
+    result_is_error: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    result_evidence_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

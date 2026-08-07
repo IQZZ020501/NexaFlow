@@ -164,6 +164,15 @@ async def discover_mcp_tools(
                             :MAX_MCP_TOOL_DESCRIPTION_CHARS
                         ],
                         "input_schema": input_schema,
+                        "annotations": (
+                            getattr(tool, "annotations").model_dump(
+                                mode="json",
+                                by_alias=True,
+                                exclude_none=True,
+                            )
+                            if getattr(tool, "annotations", None) is not None
+                            else None
+                        ),
                     }
                 )
             cursor = result.next_cursor
@@ -188,6 +197,7 @@ async def call_mcp_tool(
     arguments: dict[str, Any],
     allow_private_networks: bool,
     timeout_seconds: float,
+    idempotency_key: str | None = None,
 ) -> tuple[str, bool]:
     started_at = time.perf_counter()
     async with mcp_client(
@@ -200,6 +210,11 @@ async def call_mcp_tool(
             tool_name,
             arguments,
             read_timeout_seconds=timeout_seconds,
+            meta=(
+                {"nexaflow/idempotencyKey": idempotency_key}
+                if idempotency_key
+                else None
+            ),
         )
 
     payload: Any = result.structured_content
@@ -250,6 +265,7 @@ class StreamableHttpMcpClient:
         arguments: dict[str, Any],
         allow_private_networks: bool,
         timeout_seconds: float,
+        idempotency_key: str | None = None,
     ) -> tuple[str, bool]:
         return await call_mcp_tool(
             url,
@@ -258,4 +274,5 @@ class StreamableHttpMcpClient:
             arguments,
             allow_private_networks,
             timeout_seconds,
+            idempotency_key,
         )

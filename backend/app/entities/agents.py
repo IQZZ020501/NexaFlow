@@ -13,6 +13,7 @@ class Agent:
     description: str = ""
     instructions: str = ""
     model_id: str = ""
+    knowledge_query_mode: str = "required"
     status: str = "active"
     published: bool = False
     created_by_user_id: str = ""
@@ -48,15 +49,65 @@ class AgentRun:
     goal: str = ""
     instructions: str = ""
     knowledge_base_ids: list[str] = field(default_factory=list)
+    knowledge_query_mode: str = "required"
     mcp_tools: list[dict[str, str]] = field(default_factory=list)
     model_id: str = ""
     model_name: str = ""
-    status: str = "planning"
+    status: str = "queued"
+    attempts: int = 0
+    max_attempts: int = 3
+    worker_task_id: str | None = None
+    lease_expires_at: datetime | None = None
+    checkpoint: dict[str, Any] = field(default_factory=dict)
+    checkpoint_phase: str = "agent"
+    trace_id: str = ""
     plan: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
     result: str = ""
     last_error: str | None = None
     planned_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class AgentRunEvent:
+    id: int | None = None
+    workspace_id: str = ""
+    run_id: str = ""
+    event: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class AgentToolCall:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    run_id: str = ""
+    turn: int = 0
+    call_id: str = ""
+    tool_name: str = ""
+    tool_kind: str = "unknown"
+    server_name: str = ""
+    arguments: dict[str, Any] = field(default_factory=dict)
+    arguments_hash: str = ""
+    definition_hash: str = ""
+    policy_mode: str = ""
+    idempotency_key: str = ""
+    status: str = "pending"
+    approval_required: bool = False
+    approved_by_user_id: str | None = None
+    approved_at: datetime | None = None
+    worker_task_id: str | None = None
+    lease_expires_at: datetime | None = None
+    result_content: str = ""
+    result_summary: str = ""
+    result_output: Any = None
+    result_is_error: bool = False
+    result_evidence_ids: list[str] = field(default_factory=list)
+    last_error: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime = field(default_factory=utc_now)

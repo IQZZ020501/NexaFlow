@@ -9,6 +9,8 @@ from app.shareddomain.agents.models import (  # noqa: F401
     AgentKnowledgeBase,
     AgentMcpTool,
     AgentRun,
+    AgentRunEvent,
+    AgentToolCall,
 )
 from app.shareddomain.audit.models import AuditLog  # noqa: F401
 from app.infrastructure.base import Base
@@ -24,7 +26,7 @@ from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
-from app.shareddomain.tools.models import McpServer  # noqa: F401
+from app.shareddomain.tools.models import McpServer, McpToolPolicy  # noqa: F401
 from app.capabilities.llm.models import RegisteredModel  # noqa: F401
 from app.domain.resource_permission import ResourcePermission  # noqa: F401
 from app.infrastructure.system_log import SystemLog  # noqa: F401

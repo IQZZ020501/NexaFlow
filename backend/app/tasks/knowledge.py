@@ -6,7 +6,7 @@ from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
 from app.infrastructure.logger import get_logger, log_event
-from app.infrastructure.session import configure_database, get_session_factory
+from app.infrastructure.session import get_session_factory
 from app.shareddomain.knowledge.task_runner import (
     TASK_LEASE_RENEW_SECONDS,
     TASK_RUN_BUSY,
@@ -17,21 +17,9 @@ from app.shareddomain.knowledge.cleanup import (
     list_due_knowledge_storage_cleanup_ids,
     run_knowledge_storage_cleanup,
 )
+from app.tasks import configure_task_worker
 
 logger = get_logger(__name__)
-
-_configured_process_id: int | None = None
-
-
-def configure_task_worker(settings: Settings) -> None:
-    global _configured_process_id
-
-    process_id = os.getpid()
-    if _configured_process_id == process_id:
-        return
-    configure_database(settings)
-    _configured_process_id = process_id
-
 
 @celery_app.task(
     bind=True,

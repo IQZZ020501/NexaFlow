@@ -14,7 +14,31 @@ class AgentToolResult:
     summary: str
     output: Any = None
     is_error: bool = False
+    outcome_uncertain: bool = False
     evidence_ids: frozenset[str] = frozenset()
+
+
+class AgentExecutionPaused(Exception):
+    """The durable executor must persist state before continuing this call."""
+
+    def __init__(self, call_id: str, reason: str) -> None:
+        super().__init__(reason)
+        self.call_id = call_id
+        self.reason = reason
+
+
+class AgentToolUncertain(AgentExecutionPaused):
+    """A side effect may have happened but its result was not durably recorded."""
+
+    def __init__(self, call_id: str, reason: str) -> None:
+        super().__init__(call_id, reason)
+
+
+class AgentToolBusy(AgentExecutionPaused):
+    """Another worker currently owns the tool-call lease."""
+
+    def __init__(self, call_id: str, reason: str) -> None:
+        super().__init__(call_id, reason)
 
 
 def create_agent_tool(
@@ -27,6 +51,10 @@ def create_agent_tool(
     kind: str = "unknown",
     server_name: str = "",
     parallel_safe: bool = False,
+    policy_mode: str = "",
+    server_id: str = "",
+    definition_hash: str = "",
+    source_tool_name: str = "",
 ) -> StructuredTool:
     try:
         validator_type = validators.validator_for(parameters)
@@ -57,6 +85,10 @@ def create_agent_tool(
             "kind": kind,
             "server_name": server_name,
             "parallel_safe": parallel_safe,
+            "policy_mode": policy_mode,
+            "server_id": server_id,
+            "definition_hash": definition_hash,
+            "source_tool_name": source_tool_name,
         },
     )
 
@@ -67,6 +99,10 @@ def agent_tool_metadata(tool: StructuredTool) -> dict[str, str]:
         "display_name": str(metadata.get("display_name") or tool.name),
         "kind": str(metadata.get("kind") or "unknown"),
         "server_name": str(metadata.get("server_name") or ""),
+        "policy_mode": str(metadata.get("policy_mode") or ""),
+        "server_id": str(metadata.get("server_id") or ""),
+        "definition_hash": str(metadata.get("definition_hash") or ""),
+        "source_tool_name": str(metadata.get("source_tool_name") or ""),
     }
 
 

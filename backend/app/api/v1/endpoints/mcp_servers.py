@@ -17,8 +17,14 @@ from app.application.tools import (
     get_mcp_server,
     list_mcp_servers,
     refresh_mcp_server,
+    set_mcp_tool_policy,
 )
-from app.schemas.mcp import McpServerCreateRequest, McpServerResponse
+from app.schemas.mcp import (
+    McpServerCreateRequest,
+    McpServerResponse,
+    McpToolPolicyRequest,
+    McpToolPolicyResponse,
+)
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/mcp-servers",
@@ -85,3 +91,37 @@ async def delete_workspace_mcp_server(
     server = await get_mcp_server(db, context.workspace.id, server_id)
     await delete_mcp_server(db, server, context.user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put(
+    "/{server_id}/tools/{tool_name}/policy",
+    response_model=McpToolPolicyResponse,
+)
+async def update_workspace_mcp_tool_policy(
+    server_id: str,
+    tool_name: str,
+    payload: McpToolPolicyRequest,
+    context: Annotated[
+        WorkspaceContext,
+        Depends(require_workspace_path_role({"admin"})),
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> McpToolPolicyResponse:
+    server = await get_mcp_server(db, context.workspace.id, server_id)
+    policy = await set_mcp_tool_policy(
+        db,
+        server,
+        tool_name,
+        payload.mode,
+        context.user,
+    )
+    await db.commit()
+    return McpToolPolicyResponse(
+        workspace_id=policy.workspace_id,
+        mcp_server_id=policy.mcp_server_id,
+        tool_name=policy.tool_name,
+        definition_hash=policy.definition_hash,
+        mode=policy.mode,
+        reviewed_by_user_id=policy.reviewed_by_user_id,
+        reviewed_at=policy.reviewed_at,
+    )

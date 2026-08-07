@@ -6,6 +6,7 @@ responses lives here, separate from run orchestration.
 """
 
 import asyncio
+from contextvars import ContextVar
 import hashlib
 import json
 import re
@@ -39,6 +40,8 @@ from app.shareddomain.knowledge.services import get_knowledge_model
 from app.shareddomain.tools.services import (
     ResolvedMcpTool,
     bearer_token,
+    effective_mcp_tool_policy_mode,
+    mcp_tool_definition_hash,
     resolve_mcp_tools,
 )
 
@@ -49,6 +52,14 @@ MAX_KNOWLEDGE_HITS_PER_CALL = 8
 MAX_KNOWLEDGE_CONTENT_CHARS = 2000
 MAX_KNOWLEDGE_SOURCE_METADATA_CHARS = 240
 MAX_KNOWLEDGE_TOOL_DESCRIPTION_CHARS = 1800
+
+_tool_idempotency_key: ContextVar[str | None] = ContextVar(
+    "agent_tool_idempotency_key", default=None
+)
+
+
+def set_agent_tool_idempotency_key(value: str) -> None:
+    _tool_idempotency_key.set(value)
 
 
 class KnowledgeSearchInput(BaseModel):
@@ -84,6 +95,7 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         goal=run.goal,
         model_id=run.model_id,
         model_name=run.model_name,
+        knowledge_query_mode=run.knowledge_query_mode,
         status=run.status,
         plan=run.plan,
         events=run.events,
@@ -94,7 +106,7 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         finished_at=run.finished_at,
         created_at=run.created_at,
         updated_at=run.updated_at,
-        trace_id=trace_id,
+        trace_id=trace_id or run.trace_id,
     )
 
 
@@ -318,8 +330,13 @@ def mcp_function_name(tool: ResolvedMcpTool) -> str:
 def build_mcp_agent_tool(
     tool: ResolvedMcpTool,
     settings: Settings,
+    policy_mode: str | None = None,
 ) -> StructuredTool:
     definition = tool.definition
+    effective_policy_mode = policy_mode or effective_mcp_tool_policy_mode(
+        definition,
+        None,
+    )
     reference = {"server_id": tool.server.id, "tool_name": definition.name}
 
     async def execute(arguments: str) -> AgentToolResult:
@@ -355,8 +372,16 @@ def build_mcp_agent_tool(
                     is_error=True,
                 )
             current_tool = current_tools[0]
+            if mcp_tool_definition_hash(current_tool.definition) != mcp_tool_definition_hash(
+                definition
+            ):
+                return AgentToolResult(
+                    content="MCP tool definition changed during this run.",
+                    summary=f"{tool.server.name}: {definition.name} definition changed.",
+                    is_error=True,
+                )
             try:
-                content, is_error = await call_mcp_tool(
+                call_args = (
                     current_tool.server.url,
                     bearer_token(current_tool.server, settings),
                     current_tool.definition.name,
@@ -364,11 +389,20 @@ def build_mcp_agent_tool(
                     settings.mcp_allow_private_networks,
                     settings.mcp_request_timeout_seconds,
                 )
+                idempotency_key = _tool_idempotency_key.get()
+                if idempotency_key:
+                    content, is_error = await call_mcp_tool(
+                        *call_args,
+                        idempotency_key=idempotency_key,
+                    )
+                else:
+                    content, is_error = await call_mcp_tool(*call_args)
             except McpClientError:
                 return AgentToolResult(
                     content="MCP tool request failed.",
                     summary=f"{tool.server.name}: {definition.name} request failed.",
                     is_error=True,
+                    outcome_uncertain=effective_policy_mode != "read_only",
                 )
         safe_output: Any
         try:
@@ -395,4 +429,8 @@ def build_mcp_agent_tool(
         display_name=definition.name,
         kind="mcp",
         server_name=tool.server.name,
+        policy_mode=effective_policy_mode,
+        server_id=tool.server.id,
+        definition_hash=mcp_tool_definition_hash(definition),
+        source_tool_name=definition.name,
     )

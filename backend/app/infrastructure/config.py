@@ -39,6 +39,9 @@ class Settings:
     mcp_request_timeout_seconds: float = 30.0
     agent_tool_timeout_seconds: float = 30.0
     agent_run_timeout_seconds: float = 300.0
+    agent_executor_lease_seconds: int = 90
+    agent_executor_heartbeat_seconds: int = 30
+    agent_event_poll_seconds: float = 0.5
     jwt_expires_minutes: int = 1440
     refresh_token_expires_days: int = 30
     cors_origins: tuple[str, ...] = ()
@@ -85,6 +88,15 @@ class Settings:
             agent_run_timeout_seconds=float(
                 os.getenv("AGENT_RUN_TIMEOUT_SECONDS", "300")
             ),
+            agent_executor_lease_seconds=int(
+                os.getenv("AGENT_EXECUTOR_LEASE_SECONDS", "90")
+            ),
+            agent_executor_heartbeat_seconds=int(
+                os.getenv("AGENT_EXECUTOR_HEARTBEAT_SECONDS", "30")
+            ),
+            agent_event_poll_seconds=float(
+                os.getenv("AGENT_EVENT_POLL_SECONDS", "0.5")
+            ),
             jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "1440")),
             refresh_token_expires_days=int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30")),
             cors_origins=origins,
@@ -128,6 +140,16 @@ class Settings:
             raise RuntimeError("AGENT_RUN_TIMEOUT_SECONDS must be greater than zero.")
         if self.agent_run_timeout_seconds > 1800:
             raise RuntimeError("AGENT_RUN_TIMEOUT_SECONDS must not exceed 1800.")
+        if self.agent_executor_lease_seconds < 30:
+            raise RuntimeError("AGENT_EXECUTOR_LEASE_SECONDS must be at least 30.")
+        if self.agent_executor_heartbeat_seconds <= 0:
+            raise RuntimeError("AGENT_EXECUTOR_HEARTBEAT_SECONDS must be greater than zero.")
+        if self.agent_executor_heartbeat_seconds * 2 >= self.agent_executor_lease_seconds:
+            raise RuntimeError(
+                "AGENT_EXECUTOR_HEARTBEAT_SECONDS must be less than half the lease."
+            )
+        if not 0.1 <= self.agent_event_poll_seconds <= 5:
+            raise RuntimeError("AGENT_EVENT_POLL_SECONDS must be between 0.1 and 5.")
         if self.jwt_expires_minutes <= 0:
             raise RuntimeError("JWT_EXPIRES_MINUTES must be greater than zero.")
         if self.refresh_token_expires_days <= 0:

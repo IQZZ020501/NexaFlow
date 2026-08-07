@@ -1,10 +1,15 @@
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import convert_to_messages
+from langchain_core.messages import (
+    convert_to_messages,
+    message_to_dict,
+    messages_from_dict,
+)
 from langchain_core.tools import StructuredTool
 
 from app.infrastructure.logger import get_logger, log_event
@@ -18,7 +23,8 @@ from app.shareddomain.agents.runtime.graph import (
     AgentRuntimeContext,
     agent_graph,
 )
-from app.shareddomain.agents.runtime.state import AgentState
+from app.shareddomain.agents.runtime.state import AgentState, PendingToolCall
+from app.shareddomain.agents.runtime.tools import AgentToolResult
 
 logger = get_logger(__name__)
 
@@ -29,6 +35,38 @@ class AgentExecutionResult:
     events: list[dict[str, Any]]
 
 
+CheckpointHandler = Callable[[dict[str, Any], str], Awaitable[None]]
+BeforeToolCall = Callable[
+    [int, PendingToolCall, dict[str, str], dict[str, Any]],
+    Awaitable[AgentToolResult | None],
+]
+AfterToolCall = Callable[
+    [int, PendingToolCall, dict[str, str], dict[str, Any], AgentToolResult],
+    Awaitable[None],
+]
+
+
+def serialize_agent_state(state: AgentState) -> dict[str, Any]:
+    return {
+        **state,
+        "messages": [message_to_dict(message) for message in state["messages"]],
+    }
+
+
+def deserialize_agent_state(checkpoint: dict[str, Any]) -> AgentState:
+    return {
+        "messages": messages_from_dict(checkpoint.get("messages", [])),
+        "events": list(checkpoint.get("events", [])),
+        "turn": int(checkpoint.get("turn", 0)),
+        "tool_call_count": int(checkpoint.get("tool_call_count", 0)),
+        "seen_evidence_ids": list(checkpoint.get("seen_evidence_ids", [])),
+        "no_new_evidence_rounds": int(checkpoint.get("no_new_evidence_rounds", 0)),
+        "pending_tool_calls": list(checkpoint.get("pending_tool_calls", [])),
+        "finish_reason": str(checkpoint.get("finish_reason", "")),
+        "final_answer": str(checkpoint.get("final_answer", "")),
+    }
+
+
 async def run_agent(
     model: BaseChatModel,
     messages: list[dict[str, Any]],
@@ -36,20 +74,34 @@ async def run_agent(
     on_event: AgentEventHandler | None = None,
     *,
     tool_timeout_seconds: float | None = None,
+    checkpoint: dict[str, Any] | None = None,
+    on_checkpoint: CheckpointHandler | None = None,
+    before_tool_call: BeforeToolCall | None = None,
+    after_tool_call: AfterToolCall | None = None,
 ) -> AgentExecutionResult:
-    initial_state: AgentState = {
-        "messages": convert_to_messages(messages),
-        "events": [],
-        "turn": 0,
-        "tool_call_count": 0,
-        "seen_evidence_ids": [],
-        "no_new_evidence_rounds": 0,
-        "pending_tool_calls": [],
-        "finish_reason": "",
-        "final_answer": "",
-    }
+    initial_state: AgentState = (
+        deserialize_agent_state(checkpoint)
+        if checkpoint
+        else {
+            "messages": convert_to_messages(messages),
+            "events": [],
+            "turn": 0,
+            "tool_call_count": 0,
+            "seen_evidence_ids": [],
+            "no_new_evidence_rounds": 0,
+            "pending_tool_calls": [],
+            "finish_reason": "",
+            "final_answer": "",
+        }
+    )
+    if initial_state["final_answer"]:
+        return AgentExecutionResult(
+            content=initial_state["final_answer"],
+            events=initial_state["events"],
+        )
     started_at = time.perf_counter()
-    state = await agent_graph.ainvoke(
+    state = initial_state
+    async for value in agent_graph.astream(
         initial_state,
         config={"recursion_limit": MAX_AGENT_TURNS * 2 + 1},
         context=AgentRuntimeContext(
@@ -59,8 +111,17 @@ async def run_agent(
                 AgentEventBus([on_event] if on_event is not None else [])
             ),
             tool_timeout_seconds=tool_timeout_seconds,
+            before_tool_call=before_tool_call,
+            after_tool_call=after_tool_call,
         ),
-    )
+        stream_mode="values",
+    ):
+        state = value
+        if on_checkpoint is not None:
+            phase = "done" if state["final_answer"] else (
+                "tool" if state["pending_tool_calls"] else "agent"
+            )
+            await on_checkpoint(serialize_agent_state(state), phase)
     log_event(
         logger,
         logging.INFO,

@@ -1,7 +1,7 @@
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.tools import McpServer
+from app.entities.tools import McpServer, McpToolPolicy
 from app.infrastructure.repositories.mapping import (
     refresh_entity,
     save,
@@ -9,6 +9,7 @@ from app.infrastructure.repositories.mapping import (
 )
 from app.shareddomain.agents.models import AgentMcpTool
 from app.shareddomain.tools.models import McpServer as McpServerOrm
+from app.shareddomain.tools.models import McpToolPolicy as McpToolPolicyOrm
 
 
 async def list_mcp_servers(
@@ -83,3 +84,48 @@ async def delete_workspace_mcp_servers(db: AsyncSession, workspace_id: str) -> N
     await db.execute(
         delete(McpServerOrm).where(McpServerOrm.workspace_id == workspace_id)
     )
+
+
+async def get_mcp_tool_policy(
+    db: AsyncSession,
+    workspace_id: str,
+    server_id: str,
+    tool_name: str,
+) -> McpToolPolicy | None:
+    row = await db.scalar(
+        select(McpToolPolicyOrm).where(
+            McpToolPolicyOrm.workspace_id == workspace_id,
+            McpToolPolicyOrm.mcp_server_id == server_id,
+            McpToolPolicyOrm.tool_name == tool_name,
+        )
+    )
+    return to_entity(McpToolPolicy, row) if row is not None else None
+
+
+async def list_mcp_tool_policies(
+    db: AsyncSession,
+    workspace_id: str,
+) -> list[McpToolPolicy]:
+    rows = await db.scalars(
+        select(McpToolPolicyOrm).where(
+            McpToolPolicyOrm.workspace_id == workspace_id
+        )
+    )
+    return [to_entity(McpToolPolicy, row) for row in rows.all()]
+
+
+async def save_mcp_tool_policy(
+    db: AsyncSession,
+    entity: McpToolPolicy,
+) -> McpToolPolicy:
+    existing = await db.scalar(
+        select(McpToolPolicyOrm).where(
+            McpToolPolicyOrm.workspace_id == entity.workspace_id,
+            McpToolPolicyOrm.mcp_server_id == entity.mcp_server_id,
+            McpToolPolicyOrm.tool_name == entity.tool_name,
+        )
+    )
+    if existing is not None:
+        entity.id = existing.id
+    row = await save(db, McpToolPolicyOrm, entity)
+    return to_entity(McpToolPolicy, row)

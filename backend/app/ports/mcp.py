@@ -33,6 +33,7 @@ class McpClient(Protocol):
         arguments: dict[str, Any],
         allow_private_networks: bool,
         timeout_seconds: float,
+        idempotency_key: str | None = None,
     ) -> tuple[str, bool]: ...
 
 
@@ -61,6 +62,7 @@ async def call_mcp_tool(
     arguments: dict[str, Any],
     allow_private_networks: bool,
     timeout_seconds: float,
+    idempotency_key: str | None = None,
 ) -> tuple[str, bool]:
     return await build_mcp_client().call_mcp_tool(
         url,
@@ -69,6 +71,7 @@ async def call_mcp_tool(
         arguments,
         allow_private_networks,
         timeout_seconds,
+        idempotency_key,
     )
 
 

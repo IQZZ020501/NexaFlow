@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from app.infrastructure.config import Settings
 
@@ -9,7 +9,7 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-def configure_database(settings: Settings) -> None:
+def configure_database(settings: Settings, *, worker_process: bool = False) -> None:
     global _engine, _session_factory
 
     kwargs = {}
@@ -18,6 +18,10 @@ def configure_database(settings: Settings) -> None:
             "connect_args": {"check_same_thread": False},
             "poolclass": StaticPool,
         }
+    elif worker_process:
+        # Celery jobs call asyncio.run per task; pooled connections must not
+        # be reused across the event loops those calls create.
+        kwargs["poolclass"] = NullPool
 
     _engine = create_async_engine(settings.database_url, **kwargs)
     _session_factory = async_sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)
