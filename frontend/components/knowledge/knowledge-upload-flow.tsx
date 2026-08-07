@@ -39,6 +39,7 @@ import {
 } from "@/lib/api/knowledge"
 import { ChunkPreviewList } from "@/components/knowledge/chunk-preview-list"
 import { useKnowledgeUploadState } from "@/components/knowledge/knowledge-upload-state"
+import { appendKnowledgeUploadFiles } from "./knowledge-upload-files"
 import type {
   KnowledgeBase,
   KnowledgeDocument,
@@ -56,6 +57,8 @@ import {
 import { cn } from "@/lib/utils"
 import { formatBytes } from "@/components/knowledge/status-labels"
 
+export { appendKnowledgeUploadFiles }
+
 type SegmentMode = KnowledgeUploadParseSettings["segmentMode"]
 
 type UploadedDocument = KnowledgeDocument & {
@@ -69,16 +72,6 @@ export function resolveSelectedDocumentId(
   return documents.some((document) => document.id === selectedDocumentId)
     ? selectedDocumentId
     : (documents[0]?.id ?? null)
-}
-
-export function appendKnowledgeUploadFiles(
-  currentFiles: ReadonlyArray<File>,
-  nextFiles: ReadonlyArray<File>,
-) {
-  return [...currentFiles, ...nextFiles].slice(
-    0,
-    MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
-  )
 }
 
 const UNPARSED_STATUS = "uploaded"
@@ -298,7 +291,7 @@ export function KnowledgeUploadFlow({
     if (limitedFiles.length < files.length + supportedFiles.length) {
       onNotify(
         "error",
-        t("每次最多上传 {value} 个文件", {
+        t("队列最多保留 {value} 个文件", {
           value: MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
         }),
       )
