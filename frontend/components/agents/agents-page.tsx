@@ -9,6 +9,8 @@ import {
   PencilIcon,
   PlusIcon,
   SearchIcon,
+  SparklesIcon,
+  Trash2Icon,
 } from "lucide-react"
 
 import {
@@ -18,9 +20,12 @@ import {
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { IconButton } from "@/components/ui/icon-button"
+import { CardMoreMenu } from "@/components/ui/card-more-menu"
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spec } from "@/components/ui/spec"
+import { isEventFromDropdownMenu } from "@/lib/dom"
 import {
   Dialog,
   DialogContent,
@@ -635,9 +640,13 @@ export function AgentsPage() {
               key={agent.id}
               role="button"
               tabIndex={0}
-              className="min-h-40 cursor-pointer rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => openAgent(agent)}
+              className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={(event) => {
+                if (isEventFromDropdownMenu(event)) return
+                openAgent(agent)
+              }}
               onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault()
                   openAgent(agent)
@@ -647,7 +656,7 @@ export function AgentsPage() {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 gap-3">
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                    <BotIcon className="size-5 text-muted-foreground" />
+                    <SparklesIcon className="size-5 text-muted-foreground" />
                   </span>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -676,16 +685,29 @@ export function AgentsPage() {
                   </IconButton>
                 ) : null}
               </div>
-              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                <Spec
-                  label={t("知识库")}
-                  value={String(agent.knowledge_base_ids.length)}
-                />
-                <Spec
-                  label={t("MCP 工具")}
-                  value={String(agent.mcp_tools.length)}
-                />
-              </dl>
+              <div className="mt-auto flex items-end justify-between gap-2 pt-4">
+                <dl className="grid grid-cols-2 gap-3 text-sm">
+                  <Spec
+                    label={t("知识库")}
+                    value={String(agent.knowledge_base_ids.length)}
+                  />
+                  <Spec
+                    label={t("MCP 工具")}
+                    value={String(agent.mcp_tools.length)}
+                  />
+                </dl>
+                {agent.can_edit ? (
+                  <CardMoreMenu label={t("更多")}>
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => void handleDeleteAgent(agent)}
+                    >
+                      <Trash2Icon />
+                      {t("删除")}
+                    </DropdownMenuItem>
+                  </CardMoreMenu>
+                ) : null}
+              </div>
             </div>
           ))}
         </div>

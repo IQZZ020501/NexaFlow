@@ -19,6 +19,12 @@ export type KnowledgeBase = {
   permission: "view" | "edit" | "none"
 }
 
+/** List-item variant: the list API always reports capacity stats. */
+export type KnowledgeBaseListItem = KnowledgeBase & {
+  document_count: number
+  char_count: number
+}
+
 export type ResourcePermission = {
   user: User
   permission: "view" | "edit"
@@ -146,7 +152,7 @@ export type KnowledgeModelTestResult = {
 }
 
 export function listKnowledgeBases(token: string, workspaceId: string) {
-  return request<KnowledgeBase[]>(
+  return request<KnowledgeBaseListItem[]>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases`,
     { token },
   )

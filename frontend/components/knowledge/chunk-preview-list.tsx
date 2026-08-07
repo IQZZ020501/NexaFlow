@@ -73,10 +73,14 @@ function AssetImage({
     return <div className="h-24 w-32 animate-pulse rounded bg-muted" />
   }
   return (
+    // Private blob URLs cannot be passed through Next's image optimizer.
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={objectUrl}
       alt={asset.alt_text || asset.filename}
       className="max-h-64 max-w-full rounded border object-contain"
+      loading="lazy"
+      decoding="async"
     />
   )
 }

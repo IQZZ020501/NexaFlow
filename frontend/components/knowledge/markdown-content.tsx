@@ -35,11 +35,15 @@ function MarkdownImage(
   }
   const { className, ...restProps } = omitMarkdownNode(props)
   return (
+    // Markdown may contain arbitrary external URLs that are not configured for next/image.
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       className={cn(
         "my-2 max-h-64 max-w-full rounded border object-contain",
         className
       )}
+      loading="lazy"
+      decoding="async"
       {...restProps}
     />
   )

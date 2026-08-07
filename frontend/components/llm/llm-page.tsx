@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { IconButton } from "@/components/ui/icon-button"
+import { CardMoreMenu } from "@/components/ui/card-more-menu"
 import { Spec } from "@/components/ui/spec"
 import {
   createRegisteredModel,
@@ -653,7 +654,10 @@ export function LlmPage() {
                   )
 
                   return (
-                    <div key={model.id} className="rounded-md border p-3 min-h-40">
+                    <div
+                      key={model.id}
+                      className="flex min-h-40 flex-col rounded-md border p-3"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 gap-3">
                           <ProviderIcon
@@ -696,40 +700,45 @@ export function LlmPage() {
                           </div>
                         </div>
                         {canManage ? (
-                          <div className="flex gap-1">
-                            <IconButton
-                              label={t("编辑")}
-                              onClick={() => openEditModel(model)}
-                            >
-                              <PencilIcon className="size-4" />
-                            </IconButton>
-                            <IconButton
-                              label={t("删除")}
-                              onClick={() => void handleDeleteModel(model)}
-                            >
-                              <Trash2Icon className="size-4" />
-                            </IconButton>
-                          </div>
+                          <IconButton
+                            label={t("编辑")}
+                            onClick={() => openEditModel(model)}
+                          >
+                            <PencilIcon className="size-4" />
+                          </IconButton>
                         ) : null}
                       </div>
 
-                      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                        <Spec
-                          label={t("连接地址或区域")}
-                          value={model.api_base || t("默认连接")}
-                        />
-                        <Spec
-                          label={t("访问凭据")}
-                          value={
-                            model.api_key_hint ??
-                            t(
-                              model.provider_type === "bedrock"
-                                ? "环境凭据"
-                                : "无需密钥"
-                            )
-                          }
-                        />
-                      </dl>
+                      <div className="mt-auto flex items-end justify-between gap-2 pt-4">
+                        <dl className="grid min-w-0 flex-1 gap-3 text-sm sm:grid-cols-2">
+                          <Spec
+                            label={t("连接地址")}
+                            value={model.api_base || t("默认连接")}
+                          />
+                          <Spec
+                            label={t("访问凭据")}
+                            value={
+                              model.api_key_hint ??
+                              t(
+                                model.provider_type === "bedrock"
+                                  ? "环境凭据"
+                                  : "无需密钥"
+                              )
+                            }
+                          />
+                        </dl>
+                        {canManage ? (
+                          <CardMoreMenu label={t("更多")}>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => void handleDeleteModel(model)}
+                            >
+                              <Trash2Icon />
+                              {t("删除模型")}
+                            </DropdownMenuItem>
+                          </CardMoreMenu>
+                        ) : null}
+                      </div>
                     </div>
                   )
                 })}
@@ -868,10 +877,16 @@ function ProviderIcon({
       <span
         className={`flex shrink-0 items-center justify-center rounded-md border bg-white ${frameClassName}`}
       >
+        {/* Local SVGs are already lightweight; next/image would add client bundle cost. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={provider.icon}
           alt=""
+          width={24}
+          height={24}
           className={`object-contain ${imageClassName}`}
+          loading="lazy"
+          decoding="async"
         />
       </span>
     )

@@ -1004,6 +1004,8 @@ def main() -> None:
             item for item in bob_list.json() if item["id"] == knowledge_base_id
         )
         assert bob_visible_kb["permission"] == "none"
+        assert bob_visible_kb["document_count"] == 0
+        assert bob_visible_kb["char_count"] == 0
 
         denied_cross_workspace = client.get(
             knowledge_url(default_workspace_id),
@@ -1132,6 +1134,20 @@ def main() -> None:
         assert all(chunk["char_count"] <= 100 for chunk in configured_chunks.json())
         assert {chunk["status"] for chunk in configured_chunks.json()} == {"preview"}
         assert {chunk["vector_id"] for chunk in configured_chunks.json()} == {None}
+
+        knowledge_card = client.get(
+            knowledge_url(default_workspace_id),
+            headers=auth_headers(alice_token),
+        )
+        assert knowledge_card.status_code == 200, knowledge_card.text
+        knowledge_card_payload = next(
+            item for item in knowledge_card.json() if item["id"] == knowledge_base_id
+        )
+        assert knowledge_card_payload["document_count"] == 2
+        assert knowledge_card_payload["char_count"] == sum(
+            chunk["char_count"]
+            for chunk in document_chunks.json() + configured_chunks.json()
+        )
 
         visible_documents = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents"),
@@ -1540,6 +1556,20 @@ def main() -> None:
             headers=auth_headers(alice_token),
         )
         assert revoked.status_code == 204, revoked.text
+        bob_after_revoke = client.get(
+            knowledge_url(default_workspace_id),
+            headers=auth_headers(bob_token),
+        )
+        assert bob_after_revoke.status_code == 200, bob_after_revoke.text
+        bob_revoked_kb = next(
+            item
+            for item in bob_after_revoke.json()
+            if item["id"] == knowledge_base_id
+        )
+        assert bob_revoked_kb["permission"] == "none"
+        assert bob_revoked_kb["document_count"] == 0
+        assert bob_revoked_kb["char_count"] == 0
+
         bob_get_denied = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
             headers=auth_headers(bob_token),
@@ -1684,6 +1714,19 @@ def main() -> None:
             item["id"] for item in visible_preview_documents.json()
         }
 
+        staged_knowledge_card = client.get(
+            knowledge_url(default_workspace_id),
+            headers=auth_headers(alice_token),
+        )
+        assert staged_knowledge_card.status_code == 200, staged_knowledge_card.text
+        staged_knowledge_card_payload = next(
+            item
+            for item in staged_knowledge_card.json()
+            if item["id"] == knowledge_base_id
+        )
+        assert staged_knowledge_card_payload["document_count"] == 0
+        assert staged_knowledge_card_payload["char_count"] == 0
+
         preview_document_list = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents?include_staged=true"),
             headers=auth_headers(alice_token),
@@ -1712,6 +1755,20 @@ def main() -> None:
         assert preview_document_id in {
             item["id"] for item in visible_indexed_documents.json()
         }
+        imported_knowledge_card = client.get(
+            knowledge_url(default_workspace_id),
+            headers=auth_headers(alice_token),
+        )
+        assert imported_knowledge_card.status_code == 200, imported_knowledge_card.text
+        imported_knowledge_card_payload = next(
+            item
+            for item in imported_knowledge_card.json()
+            if item["id"] == knowledge_base_id
+        )
+        assert imported_knowledge_card_payload["document_count"] == 1
+        assert imported_knowledge_card_payload["char_count"] == len(
+            "Preview synchronously"
+        )
 
         first_parent_body = "\n\n".join(
             f"FIRST paragraph {index} " + "alpha " * 40
@@ -1826,19 +1883,6 @@ def main() -> None:
         )
         assert empty_query.status_code == 200, empty_query.text
         assert empty_query.json() == []
-
-        # E: members without grants see the knowledge base list with permission "none".
-        bob_after_revoke = client.get(
-            knowledge_url(default_workspace_id),
-            headers=auth_headers(bob_token),
-        )
-        assert bob_after_revoke.status_code == 200, bob_after_revoke.text
-        bob_revoked_kb = next(
-            item
-            for item in bob_after_revoke.json()
-            if item["id"] == knowledge_base_id
-        )
-        assert bob_revoked_kb["permission"] == "none"
 
         # C: owner transfer requires admin or current owner.
         transfer_denied = client.put(

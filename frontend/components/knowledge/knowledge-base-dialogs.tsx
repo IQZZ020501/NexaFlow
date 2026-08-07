@@ -28,6 +28,7 @@ import type { WorkspaceMember } from "@/lib/api/system"
 import { cn } from "@/lib/utils"
 import { PermissionBadge } from "@/components/knowledge/status-badges"
 import type { RegisteredModel } from "@/lib/api/llm"
+import { modelLabel } from "@/lib/display"
 import type {
   KnowledgeBaseEditForm,
   KnowledgeBaseForm,
@@ -530,8 +531,4 @@ function KnowledgeModelSelect({
       </DropdownMenu>
     </Field>
   )
-}
-
-function modelLabel(model: RegisteredModel) {
-  return `${model.name} / ${model.model_name}`
 }

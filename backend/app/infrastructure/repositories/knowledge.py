@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import (
@@ -48,12 +48,20 @@ from app.shareddomain.knowledge.models import (
 
 _QUERY_KEYWORD_CHUNK_IDS = text(
     (
-        Path(__file__).parents[1]
+        Path(__file__).parent.parent
         / "sql"
         / "knowledge"
         / "query_keyword_chunk_ids.sql"
     ).read_text(encoding="utf-8")
 )
+
+
+def _visible_document_conditions(document: KnowledgeDocumentORM):
+    """Visibility predicate shared by document listing and stats aggregation."""
+    return and_(
+        document.status.in_(VISIBLE_DOCUMENT_STATUSES),
+        document.meta[DOCUMENT_STAGED_META_KEY].as_boolean().is_not(True),
+    )
 
 
 async def list_knowledge_base_rows(
@@ -63,9 +71,40 @@ async def list_knowledge_base_rows(
     resource_type: str,
     limit: int | None = None,
     offset: int = 0,
-) -> list[tuple[KnowledgeBase, ResourcePermission | None]]:
+) -> list[tuple[KnowledgeBase, ResourcePermission | None, int, int]]:
     grant = ResourcePermissionORM
-    statement = select(KnowledgeBaseORM, grant).outerjoin(
+    document_stats = (
+        select(
+            KnowledgeDocumentORM.knowledge_base_id.label("knowledge_base_id"),
+            func.count(KnowledgeDocumentORM.id.distinct()).label("document_count"),
+            func.coalesce(func.sum(KnowledgeDocumentChunkORM.char_count), 0).label(
+                "char_count"
+            ),
+        )
+        .outerjoin(
+            KnowledgeDocumentChunkORM,
+            (
+                (KnowledgeDocumentChunkORM.workspace_id == KnowledgeDocumentORM.workspace_id)
+                & (
+                    KnowledgeDocumentChunkORM.knowledge_base_id
+                    == KnowledgeDocumentORM.knowledge_base_id
+                )
+                & (KnowledgeDocumentChunkORM.document_id == KnowledgeDocumentORM.id)
+            ),
+        )
+        .where(
+            KnowledgeDocumentORM.workspace_id == workspace_id,
+            *_visible_document_conditions(KnowledgeDocumentORM),
+        )
+        .group_by(KnowledgeDocumentORM.knowledge_base_id)
+        .subquery()
+    )
+    statement = select(
+        KnowledgeBaseORM,
+        grant,
+        func.coalesce(document_stats.c.document_count, 0),
+        func.coalesce(document_stats.c.char_count, 0),
+    ).outerjoin(
         grant,
         (
             (grant.workspace_id == KnowledgeBaseORM.workspace_id)
@@ -73,6 +112,9 @@ async def list_knowledge_base_rows(
             & (grant.resource_id == KnowledgeBaseORM.id)
             & (grant.user_id == actor_id)
         ),
+    ).outerjoin(
+        document_stats,
+        document_stats.c.knowledge_base_id == KnowledgeBaseORM.id,
     ).where(KnowledgeBaseORM.workspace_id == workspace_id)
 
     statement = statement.order_by(
@@ -84,8 +126,10 @@ async def list_knowledge_base_rows(
         (
             to_entity(KnowledgeBase, knowledge_base),
             to_entity(ResourcePermission, permission) if permission else None,
+            int(document_count),
+            int(char_count),
         )
-        for knowledge_base, permission in result.all()
+        for knowledge_base, permission, document_count, char_count in result.all()
     ]
 
 
@@ -234,12 +278,7 @@ async def list_knowledge_documents(
         KnowledgeDocumentORM.status != DOCUMENT_DELETED_STATUS,
     )
     if not include_staged:
-        statement = statement.where(
-            KnowledgeDocumentORM.status.in_(VISIBLE_DOCUMENT_STATUSES),
-            KnowledgeDocumentORM.meta[DOCUMENT_STAGED_META_KEY]
-            .as_boolean()
-            .is_not(True),
-        )
+        statement = statement.where(*_visible_document_conditions(KnowledgeDocumentORM))
     statement = statement.order_by(
         KnowledgeDocumentORM.created_at.desc(),
         KnowledgeDocumentORM.id.desc(),
