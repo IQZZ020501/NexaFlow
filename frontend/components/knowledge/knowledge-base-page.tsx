@@ -35,6 +35,7 @@ import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
+import { CardMoreMenu } from "@/components/ui/card-more-menu"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -74,6 +75,7 @@ import {
 } from "@/lib/api/knowledge"
 import type {
   KnowledgeBase,
+  KnowledgeBaseListItem,
   KnowledgeDocument,
   KnowledgeModelTestResult,
   KnowledgeQueryHit,
@@ -86,7 +88,7 @@ import { listWorkspaceMembers } from "@/lib/api/system"
 import type { WorkspaceMember } from "@/lib/api/system"
 import { languageLocales, type TFunction, type TranslationKey } from "@/i18n"
 import { cn } from "@/lib/utils"
-import { formatDateTime, getMembershipRole } from "@/lib/display"
+import { formatDateTime, getMembershipRole, modelLabel } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import {
   knowledgeUploadPath,
@@ -244,9 +246,9 @@ function KnowledgeBasePageContent({
   const Icon = DatabaseIcon
   const { language, t } = useLanguage()
   const locale = languageLocales[language]
-  const [knowledgeBases, setKnowledgeBases] = React.useState<KnowledgeBase[]>(
-    []
-  )
+  const [knowledgeBases, setKnowledgeBases] = React.useState<
+    KnowledgeBaseListItem[]
+  >([])
   const [documents, setDocuments] = React.useState<KnowledgeDocument[]>([])
   const [knowledgeTasks, setKnowledgeTasks] = React.useState<KnowledgeTask[]>(
     []
@@ -490,6 +492,18 @@ function KnowledgeBasePageContent({
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadKnowledgeBases()
+  }, [loadKnowledgeBases])
+
+  const previousActiveKnowledgeBaseId = React.useRef(activeKnowledgeBaseId)
+  React.useEffect(() => {
+    // Refresh list stats only when returning from a knowledge base detail view.
+    if (
+      previousActiveKnowledgeBaseId.current !== null &&
+      activeKnowledgeBaseId === null
+    ) {
+      void loadKnowledgeBases()
+    }
+    previousActiveKnowledgeBaseId.current = activeKnowledgeBaseId
   }, [activeKnowledgeBaseId, loadKnowledgeBases])
 
   React.useEffect(() => {
@@ -594,10 +608,6 @@ function KnowledgeBasePageContent({
     return distance === null ? "-" : distance.toFixed(4)
   }
 
-  function registeredModelLabel(model: RegisteredModel | null, t: TFunction) {
-    return model ? model.name : t("未配置")
-  }
-
   function resetForm() {
     setForm({
       name: "",
@@ -643,7 +653,10 @@ function KnowledgeBasePageContent({
         selectedWorkspaceId,
         form
       )
-      setKnowledgeBases((current) => [...current, knowledgeBase])
+      setKnowledgeBases((current) => [
+        ...current,
+        { ...knowledgeBase, document_count: 0, char_count: 0 },
+      ])
       resetForm()
       setIsDialogOpen(false)
       notify("success", t("知识库已新建"))
@@ -2085,7 +2098,9 @@ function KnowledgeBasePageContent({
                           />
                         ) : null}
                         <span className="truncate">
-                          {registeredModelLabel(selectedEmbeddingModel, t)}
+                          {selectedEmbeddingModel
+                            ? modelLabel(selectedEmbeddingModel)
+                            : t("未配置")}
                         </span>
                       </p>
                     </div>
@@ -2103,7 +2118,9 @@ function KnowledgeBasePageContent({
                           />
                         ) : null}
                         <span className="truncate">
-                          {registeredModelLabel(selectedRerankerModel, t)}
+                          {selectedRerankerModel
+                            ? modelLabel(selectedRerankerModel)
+                            : t("未配置")}
                         </span>
                       </p>
                     </div>
@@ -2280,6 +2297,7 @@ function KnowledgeBasePageContent({
                         className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
                         onClick={() => openKnowledgeBase(knowledgeBase)}
                         onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault()
                             openKnowledgeBase(knowledgeBase)
@@ -2339,7 +2357,7 @@ function KnowledgeBasePageContent({
                                 {t("文档数")}
                               </dt>
                               <dd className="order-1 font-semibold">
-                                {(knowledgeBase.document_count ?? 0).toLocaleString(
+                                {knowledgeBase.document_count.toLocaleString(
                                   locale
                                 )}
                               </dd>
@@ -2350,7 +2368,7 @@ function KnowledgeBasePageContent({
                               </dt>
                               <dd className="order-1 truncate font-semibold">
                                 {`${(
-                                  (knowledgeBase.char_count ?? 0) / 1_000
+                                  knowledgeBase.char_count / 1_000
                                 ).toLocaleString(locale, {
                                   minimumFractionDigits: 1,
                                   maximumFractionDigits: 1,
@@ -2360,61 +2378,51 @@ function KnowledgeBasePageContent({
                           </dl>
                           {knowledgeBase.permission === "edit" ||
                           canManagePermissions(knowledgeBase) ? (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <IconButton
-                                  label={t("更多")}
-                                  onClick={(event) => event.stopPropagation()}
+                            <CardMoreMenu label={t("更多")}>
+                              {knowledgeBase.permission === "edit" ? (
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    void handleToggleStatus(knowledgeBase)
+                                  }
                                 >
-                                  <MoreHorizontalIcon className="size-4" />
-                                </IconButton>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                {knowledgeBase.permission === "edit" ? (
+                                  {knowledgeBase.status === "active" ? (
+                                    <ArchiveIcon />
+                                  ) : (
+                                    <RotateCcwIcon />
+                                  )}
+                                  {t(
+                                    knowledgeBase.status === "active"
+                                      ? "归档知识库"
+                                      : "恢复知识库"
+                                  )}
+                                </DropdownMenuItem>
+                              ) : null}
+                              {knowledgeBase.permission === "edit" &&
+                              canManagePermissions(knowledgeBase) ? (
+                                <DropdownMenuSeparator />
+                              ) : null}
+                              {canManagePermissions(knowledgeBase) ? (
+                                <>
                                   <DropdownMenuItem
                                     onSelect={() =>
-                                      void handleToggleStatus(knowledgeBase)
+                                      void handleOpenPermissions(knowledgeBase)
                                     }
                                   >
-                                    {knowledgeBase.status === "active" ? (
-                                      <ArchiveIcon />
-                                    ) : (
-                                      <RotateCcwIcon />
-                                    )}
-                                    {t(
-                                      knowledgeBase.status === "active"
-                                        ? "归档知识库"
-                                        : "恢复知识库"
-                                    )}
+                                    <UsersIcon />
+                                    {t("资源授权")}
                                   </DropdownMenuItem>
-                                ) : null}
-                                {knowledgeBase.permission === "edit" &&
-                                canManagePermissions(knowledgeBase) ? (
-                                  <DropdownMenuSeparator />
-                                ) : null}
-                                {canManagePermissions(knowledgeBase) ? (
-                                  <>
-                                    <DropdownMenuItem
-                                      onSelect={() =>
-                                        void handleOpenPermissions(knowledgeBase)
-                                      }
-                                    >
-                                      <UsersIcon />
-                                      {t("资源授权")}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      variant="destructive"
-                                      onSelect={() =>
-                                        void handleDelete(knowledgeBase)
-                                      }
-                                    >
-                                      <Trash2Icon />
-                                      {t("永久删除知识库")}
-                                    </DropdownMenuItem>
-                                  </>
-                                ) : null}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                                  <DropdownMenuItem
+                                    variant="destructive"
+                                    onSelect={() =>
+                                      void handleDelete(knowledgeBase)
+                                    }
+                                  >
+                                    <Trash2Icon />
+                                    {t("永久删除知识库")}
+                                  </DropdownMenuItem>
+                                </>
+                              ) : null}
+                            </CardMoreMenu>
                           ) : null}
                         </div>
                       </div>

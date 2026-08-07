@@ -22,7 +22,6 @@ import {
   ChevronDownIcon,
   CircleCheckIcon,
   LoaderCircleIcon,
-  MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
   SearchIcon,
@@ -56,6 +55,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { IconButton } from "@/components/ui/icon-button"
+import { CardMoreMenu } from "@/components/ui/card-more-menu"
 import { Spec } from "@/components/ui/spec"
 import {
   createRegisteredModel,
@@ -728,25 +728,15 @@ export function LlmPage() {
                           />
                         </dl>
                         {canManage ? (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <IconButton
-                                label={t("更多")}
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                <MoreHorizontalIcon className="size-4" />
-                              </IconButton>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                variant="destructive"
-                                onSelect={() => void handleDeleteModel(model)}
-                              >
-                                <Trash2Icon />
-                                {t("删除模型")}
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          <CardMoreMenu label={t("更多")}>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => void handleDeleteModel(model)}
+                            >
+                              <Trash2Icon />
+                              {t("删除模型")}
+                            </DropdownMenuItem>
+                          </CardMoreMenu>
                         ) : null}
                       </div>
                     </div>

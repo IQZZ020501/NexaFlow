@@ -6,7 +6,6 @@ import { useParams, useRouter } from "next/navigation"
 import {
   BotIcon,
   LoaderCircleIcon,
-  MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
   SearchIcon,
@@ -21,12 +20,8 @@ import {
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { IconButton } from "@/components/ui/icon-button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { CardMoreMenu } from "@/components/ui/card-more-menu"
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spec } from "@/components/ui/spec"
@@ -647,6 +642,7 @@ export function AgentsPage() {
               className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => openAgent(agent)}
               onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault()
                   openAgent(agent)
@@ -697,25 +693,15 @@ export function AgentsPage() {
                   />
                 </dl>
                 {agent.can_edit ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <IconButton
-                        label={t("更多")}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <MoreHorizontalIcon className="size-4" />
-                      </IconButton>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onSelect={() => void handleDeleteAgent(agent)}
-                      >
-                        <Trash2Icon />
-                        {t("删除")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <CardMoreMenu label={t("更多")}>
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => void handleDeleteAgent(agent)}
+                    >
+                      <Trash2Icon />
+                      {t("删除")}
+                    </DropdownMenuItem>
+                  </CardMoreMenu>
                 ) : null}
               </div>
             </div>

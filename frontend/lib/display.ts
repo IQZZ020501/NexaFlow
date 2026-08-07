@@ -1,5 +1,10 @@
 import { type MeResponse } from "@/lib/api/auth"
+import { type RegisteredModel } from "@/lib/api/llm"
 import { type TFunction } from "@/i18n"
+
+export function modelLabel(model: RegisteredModel) {
+  return model.name
+}
 
 export function initials(name: string) {
   const value = name.trim() || "NexaFlow"
