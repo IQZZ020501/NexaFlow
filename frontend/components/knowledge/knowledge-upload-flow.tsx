@@ -71,6 +71,16 @@ export function resolveSelectedDocumentId(
     : (documents[0]?.id ?? null)
 }
 
+export function appendKnowledgeUploadFiles(
+  currentFiles: ReadonlyArray<File>,
+  nextFiles: ReadonlyArray<File>,
+) {
+  return [...currentFiles, ...nextFiles].slice(
+    0,
+    MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
+  )
+}
+
 const UNPARSED_STATUS = "uploaded"
 const PARSING_STATUSES: Record<string, true> = {
   parse_queued: true,
@@ -280,15 +290,12 @@ export function KnowledgeUploadFlow({
         file.name.toLowerCase().endsWith(extension),
       ),
     )
-    const limitedFiles = supportedFiles.slice(
-      0,
-      MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
-    )
-    setFiles(limitedFiles)
+    const limitedFiles = appendKnowledgeUploadFiles(files, supportedFiles)
+    setFiles((current) => appendKnowledgeUploadFiles(current, supportedFiles))
     if (supportedFiles.length !== nextFiles.length) {
       onNotify("error", t("已忽略不支持的文件格式"))
     }
-    if (supportedFiles.length > MAX_KNOWLEDGE_UPLOAD_DOCUMENTS) {
+    if (limitedFiles.length < files.length + supportedFiles.length) {
       onNotify(
         "error",
         t("每次最多上传 {value} 个文件", {
