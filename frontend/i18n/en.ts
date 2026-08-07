@@ -252,6 +252,7 @@ export const en = {
   "sk-...": "sk-...",
   "编辑": "Edit",
   "删除": "Delete",
+  "更多": "More",
   "更新模型": "Update model",
   "删除模型": "Delete model",
   "模型供应商": "Model providers",

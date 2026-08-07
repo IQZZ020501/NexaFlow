@@ -249,6 +249,7 @@ export const zhHant = {
   "AWS Session Token": "AWS Session Token",
   "编辑": "編輯",
   "删除": "刪除",
+  "更多": "更多",
   "更新模型": "更新模型",
   "删除模型": "刪除模型",
   "模型供应商": "模型供應商",

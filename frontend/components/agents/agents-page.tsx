@@ -6,9 +6,11 @@ import { useParams, useRouter } from "next/navigation"
 import {
   BotIcon,
   LoaderCircleIcon,
+  MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
   SearchIcon,
+  Trash2Icon,
 } from "lucide-react"
 
 import {
@@ -18,6 +20,12 @@ import {
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { IconButton } from "@/components/ui/icon-button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spec } from "@/components/ui/spec"
@@ -676,16 +684,39 @@ export function AgentsPage() {
                   </IconButton>
                 ) : null}
               </div>
-              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                <Spec
-                  label={t("知识库")}
-                  value={String(agent.knowledge_base_ids.length)}
-                />
-                <Spec
-                  label={t("MCP 工具")}
-                  value={String(agent.mcp_tools.length)}
-                />
-              </dl>
+              <div className="mt-4 flex items-center justify-between gap-2">
+                <dl className="grid grid-cols-2 gap-3 text-sm">
+                  <Spec
+                    label={t("知识库")}
+                    value={String(agent.knowledge_base_ids.length)}
+                  />
+                  <Spec
+                    label={t("MCP 工具")}
+                    value={String(agent.mcp_tools.length)}
+                  />
+                </dl>
+                {agent.can_edit ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <IconButton
+                        label={t("更多")}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <MoreHorizontalIcon className="size-4" />
+                      </IconButton>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onSelect={() => void handleDeleteAgent(agent)}
+                      >
+                        <Trash2Icon />
+                        {t("删除")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
+              </div>
             </div>
           ))}
         </div>
