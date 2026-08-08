@@ -34,6 +34,7 @@ services:
       retries: 10
 
   api:
+    init: true
     build:
       context: ..
       dockerfile: deploy/dockerfiles/backend.Dockerfile
@@ -56,6 +57,7 @@ services:
         condition: service_healthy
 
   worker:
+    init: true
     build:
       context: ..
       dockerfile: deploy/dockerfiles/backend.Dockerfile

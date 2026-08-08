@@ -83,9 +83,13 @@ Correctness, safety, evidence, and validation take priority over speed.
   use the same `QDRANT_URL`. Deletion cleanup intent is persisted in
   `knowledge_storage_cleanups`; Celery Beat redispatches due records, so do not
   replace it with best-effort post-commit cleanup.
-- MCP tools use workspace-scoped Streamable HTTP Server registrations. Bearer
-  tokens are encrypted, and private-network endpoints require
-  `MCP_ALLOW_PRIVATE_NETWORKS=true`.
+- MCP tools use workspace-scoped Streamable HTTP, legacy SSE, or stdio Server
+  registrations. Remote Bearer tokens and full stdio configurations are
+  encrypted; remote endpoints may use HTTP or HTTPS, while private and loopback
+  addresses require `MCP_ALLOW_PRIVATE_NETWORKS=true`. Workspace admins submit
+  stdio commands, arguments, working directories, and environment values, so
+  deployments must trust MCP-managing admins with backend process-level code
+  execution.
 - `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
   and Tailwind CSS. Pages live under the `app/` route groups `(auth)`,
   `(platform)`, and `(dashboard)`; shared components in `components/`, providers
@@ -249,7 +253,7 @@ broad. Never claim a check passed unless it completed successfully.
 - `backend/` changes: use the project's Python tooling. Run `compileall` over the
   touched packages, then run the affected suite from `backend/` with
   `uv run python -m tests.<suite>` (identity, workspaces, teams, knowledge, agents,
-  llm, test_main). For migration changes, run Alembic against the target database or
+  llm, mcp_transports, test_main). For migration changes, run Alembic against the target database or
   a temporary explicit test database. For Celery wiring changes, verify the
   expected tasks register on `celery_app`.
 - If a check cannot be run, say exactly why in the final response.

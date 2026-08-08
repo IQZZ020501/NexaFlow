@@ -42,6 +42,21 @@ one `beat` instance running so queued and expired Agent runs are redispatched.
 Celery uses `solo` automatically on macOS because HTTPS trust evaluation is
 unsafe after a multithreaded process fork; Linux containers keep `prefork`.
 
+### MCP stdio Servers
+
+Workspace admins enter stdio commands, arguments, working directories, and
+environment values when registering an MCP Server. The full configuration is
+encrypted in PostgreSQL and is not returned by the API. Install and pin each
+server executable in a derived backend image; the API performs discovery and
+the worker performs Agent calls, so both must expose the same absolute command
+and working-directory paths. Avoid shells and runtime downloaders such as
+`npx`/`uvx` in production.
+
+stdio commands run with the backend container's filesystem and network access,
+so deployments must treat workspace admins as trusted code-execution
+operators. Compose enables an init process for API and worker containers so
+stdio children receive shutdown and are reaped.
+
 ## Split hosting with Nginx
 
 `deploy/nginx/default.conf` routes `/api/` and `/health` to the API and
@@ -73,6 +88,12 @@ Run migrations before first start or after upgrading:
 docker compose -f deploy/docker-compose.yml run --rm api alembic upgrade head
 ```
 
+For this migration, upgrade PostgreSQL first, roll all API and worker instances
+to the new image, and only then create SSE/stdio registrations. Existing stdio
+Profile registrations are preserved but disabled and must be recreated in the
+inline JSON form. Downgrading disables inline stdio registrations and discards
+their encrypted configuration, so they must also be recreated after re-upgrade.
+
 ## Notes
 
 - Bootstrap admin credentials come from env values, never code defaults.
@@ -83,8 +104,12 @@ docker compose -f deploy/docker-compose.yml run --rm api alembic upgrade head
   and Redis for checkpoint, approval, lease recovery, and short-lived answer
   delta delivery. Redis live-stream failure degrades to the durable terminal
   answer rather than failing the Run.
-- Side-effect MCP tools require approval by default. Only tools reviewed by a
-  workspace admin as read-only can auto-run; keep `MCP_ALLOW_PRIVATE_NETWORKS`
-  false unless the deployment intentionally permits trusted internal servers.
+- Newly discovered MCP tools default to `read_only` and auto-run. Workspace
+  admins can switch each tool to per-call approval or disabled; a changed tool
+  definition invalidates an existing policy and falls back to approval. Only
+  register MCP Servers whose tools are trusted under this default.
+- Restrict backend filesystem/network access and process counts at the container
+  or service-manager boundary. A hard host/process crash is outside cooperative
+  stdio cleanup and must be contained by the runtime's process namespace/cgroup.
 - Kubernetes/Helm deployment is not included yet; the compose topology is the
   reference for a future chart.

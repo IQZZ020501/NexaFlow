@@ -15,6 +15,7 @@
 - `backend/app/infrastructure/logger.py` — 全局日志初始化 `setup_logging`、项目前缀 logger 与结构化事件 `log_event`
 - `backend/app/infrastructure/secrets.py` — Fernet 对称加解密工具与密钥尾号提示 `secret_hint`
 - `backend/app/infrastructure/model_utils.py` — 通用工具：UUID 主键 `new_id` 与 UTC 时间 `utc_now`
+- `backend/app/infrastructure/mcp_stdio.py` — stdio 配置序列化、输入边界校验及可执行文件/工作目录运行时校验
 - `backend/app/infrastructure/validation.py` — 输入规范化：email/username/name 校验与 trim
 - `backend/app/infrastructure/system_log.py` — SystemLog ORM 模型与 `record_system_log` 系统日志落库
 - `backend/app/infrastructure/celery.py` — Celery 应用工厂（broker、序列化、ack 策略）与任务失败全局错误钩子
@@ -68,6 +69,7 @@
   - `202608050004_knowledge_assets.py` — 知识附件与解析资产表
   - `202608060001_knowledge_storage_cleanup.py` — 持久化知识存储清理任务
   - `202608070001_agent_durable_executor.py` — Agent 检索策略、Run 租约/checkpoint/事件/工具账本与 MCP 工具策略
+  - `202608080001_mcp_transports.py` — MCP Streamable HTTP/SSE/stdio 传输字段、互斥约束及可回退编码
 
 ## backend 根配置
 
@@ -81,3 +83,4 @@
 - `backend/tests/support.py` — 测试共享基础设施：内存 SQLite + eager Celery 的 TestClient 环境、Settings 构造、登录/激活管理员/激活用户辅助函数
 - `backend/tests/logger.py` — 全局日志器与错误分类（internal/external）单元测试
 - `backend/tests/test_main.py` — 应用冒烟测试：/health、bootstrap 管理员登录、auth/me、404 路由
+- `backend/tests/mcp_transports.py` — 真实子进程/HTTP Server 回归：三种传输、Bearer、Profile 漂移与超时进程回收
