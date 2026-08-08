@@ -13,8 +13,8 @@ with RAG, LLM-powered agents, and MCP tool integration — with a trilingual UI
   through Celery
 - **LLM agents** — durable queued execution, checkpoints, replayable events,
   explicit knowledge retrieval policy, MCP approval, and conversation memory
-- **MCP integration** — workspace-scoped Streamable HTTP server registrations
-  with encrypted bearer tokens and private-network controls
+- **MCP integration** — workspace-scoped Streamable HTTP, legacy SSE, and
+  operator-managed stdio registrations with transport-specific safety controls
 - **Admin audit logs** — admin actions tracked through a system log
 - **Trilingual UI** — zh-Hans / zh-Hant / en dictionaries kept in sync by
   type-checked keys
@@ -59,3 +59,20 @@ Streams while checkpoints, process events, and terminal answers stay in
 PostgreSQL. Closing an Agent event stream only stops observation; it does not
 cancel the durable run. If Redis live reads fail, the client still receives the
 durable terminal answer.
+
+## MCP transports
+
+Streamable HTTP and legacy SSE registrations accept an HTTP(S) URL and an
+optional encrypted Bearer token. Private and loopback addresses are rejected by
+default and require `MCP_ALLOW_PRIVATE_NETWORKS=true`. HTTP clients ignore proxy
+environment variables and redirects. Prefer HTTPS when credentials or sensitive
+data cross an untrusted network.
+
+Workspace admins enter each stdio Server's absolute command, arguments,
+optional absolute working directory, and environment variables in the MCP
+registration form. NexaFlow validates the executable before discovery and
+encrypts the full configuration at rest; list responses expose only the command
+path. The SDK starts the executable directly without a shell. Install the same
+pinned executable at the same path in every API and worker image. Because stdio
+commands run with the backend process's filesystem and network access, only
+trusted workspace admins should be allowed to manage MCP Servers.

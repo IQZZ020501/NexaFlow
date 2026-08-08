@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
@@ -36,7 +37,9 @@ from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.capabilities.mcp import client as mcp_client_module
 from app.capabilities.mcp.client import (
     MAX_MCP_TOOL_PAGES,
+    McpConnection,
     McpClientError,
+    McpDiscovery,
     discover_mcp_tools,
     normalize_mcp_url,
 )
@@ -1702,6 +1705,10 @@ def assert_mcp_url_validation() -> None:
     assert normalize_mcp_url("https://tools.example.com/mcp/") == (
         "https://tools.example.com/mcp"
     )
+    assert normalize_mcp_url(
+        " https://tools.example.com/sse/ ",
+        preserve_trailing_slash=True,
+    ) == "https://tools.example.com/sse/"
     for invalid_url in (
         "file:///tmp/mcp.sock",
         "https://tools.example.com/mcp?token=secret",
@@ -1743,7 +1750,13 @@ async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
 
         mcp_client_module.mcp_client = fake_client  # type: ignore[assignment]
         try:
-            await discover_mcp_tools("https://tools.example.com", None, False, 1)
+            await discover_mcp_tools(
+                McpConnection(
+                    transport="streamable_http",
+                    url="https://tools.example.com",
+                ),
+                test_settings(),
+            )
         except McpClientError:
             return
         raise AssertionError("Invalid MCP tool metadata was accepted.")
@@ -1784,6 +1797,7 @@ def main() -> None:
     original_run_agent = agent_executor.run_agent
     query_calls: list[tuple[str, str]] = []
     mcp_calls: list[tuple[str, str, dict, str | None]] = []
+    stdio_configs: list[dict[str, object]] = []
     mcp_transport_failure = False
 
     async def fake_query_knowledge_base(
@@ -1805,37 +1819,47 @@ def main() -> None:
         ]
 
     async def fake_discover_mcp_tools(
-        _url,
-        bearer_token,
-        _allow_private_networks,
-        _timeout_seconds,
-    ) -> list[dict]:
-        assert bearer_token == "mcp-secret-token"
-        return [
-            {
-                "name": "lookup_release",
-                "description": "Look up a release record.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {"topic": {"type": "string"}},
-                    "required": ["topic"],
-                },
-            }
-        ]
+        connection,
+        _settings,
+    ) -> McpDiscovery:
+        if connection.transport == "stdio":
+            assert connection.url is None
+            assert connection.bearer_token is None
+            assert connection.stdio_config is not None
+            stdio_configs.append(
+                {
+                    "command": connection.stdio_config.command,
+                    "args": connection.stdio_config.args,
+                    "env": dict(connection.stdio_config.env),
+                }
+            )
+        else:
+            assert connection.bearer_token == "mcp-secret-token"
+        return McpDiscovery(
+            tools=[
+                {
+                    "name": "lookup_release",
+                    "description": "Look up a release record.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"topic": {"type": "string"}},
+                        "required": ["topic"],
+                    },
+                }
+            ]
+        )
 
     async def fake_call_mcp_tool(
-        url,
-        bearer_token,
+        connection,
+        _settings,
         tool_name,
         arguments,
-        _allow_private_networks,
-        _timeout_seconds,
         *,
         idempotency_key=None,
     ) -> tuple[str, bool]:
         nonlocal mcp_transport_failure
-        assert bearer_token == "mcp-secret-token"
-        mcp_calls.append((url, tool_name, arguments, idempotency_key))
+        assert connection.bearer_token == "mcp-secret-token"
+        mcp_calls.append((connection.url, tool_name, arguments, idempotency_key))
         if mcp_transport_failure:
             raise McpClientError("transport interrupted")
         return json.dumps({"release": "approved"}), False
@@ -2066,6 +2090,49 @@ def main() -> None:
             )
             assert member_mcp_create.status_code == 403, member_mcp_create.text
 
+            legacy_stdio = client.post(
+                mcp_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Legacy stdio",
+                    "transport": "stdio",
+                    "stdio_profile": "missing",
+                },
+            )
+            assert legacy_stdio.status_code == 422, legacy_stdio.text
+
+            stdio_secret = "stdio-secret-value"
+            stdio_server = client.post(
+                mcp_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Local stdio",
+                    "transport": "stdio",
+                    "stdio_config": {
+                        "command": sys.executable,
+                        "args": ["-m", "tests.mcp_test_server"],
+                        "env": {"MCP_TEST_SECRET": stdio_secret},
+                    },
+                },
+            )
+            assert stdio_server.status_code == 201, stdio_server.text
+            stdio_server_data = stdio_server.json()
+            assert stdio_server_data["stdio_command"] == sys.executable
+            assert "stdio_config" not in stdio_server_data
+            assert stdio_secret not in stdio_server.text
+            refreshed_stdio = client.post(
+                mcp_url(workspace_id, f"/{stdio_server_data['id']}/refresh"),
+                headers=auth_headers(admin_token),
+            )
+            assert refreshed_stdio.status_code == 200, refreshed_stdio.text
+            assert len(stdio_configs) == 2
+            assert stdio_configs[0] == stdio_configs[1]
+            removed_stdio = client.delete(
+                mcp_url(workspace_id, f"/{stdio_server_data['id']}"),
+                headers=auth_headers(admin_token),
+            )
+            assert removed_stdio.status_code == 204, removed_stdio.text
+
             mcp_server = client.post(
                 mcp_url(workspace_id),
                 headers=auth_headers(admin_token),
@@ -2077,10 +2144,31 @@ def main() -> None:
             )
             assert mcp_server.status_code == 201, mcp_server.text
             mcp_server_data = mcp_server.json()
+            assert mcp_server_data["transport"] == "streamable_http"
+            assert mcp_server_data["stdio_command"] is None
             assert mcp_server_data["has_bearer_token"] is True
             assert "bearer_token" not in mcp_server_data
-            assert mcp_server_data["tools"][0]["policy_mode"] == "approval_required"
+            assert mcp_server_data["tools"][0]["policy_mode"] == "read_only"
             assert len(mcp_server_data["tools"][0]["definition_hash"]) == 64
+
+            sse_server = client.post(
+                mcp_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Release SSE",
+                    "transport": "sse",
+                    "url": "http://127.0.0.1:9999/sse/",
+                    "bearer_token": "mcp-secret-token",
+                },
+            )
+            assert sse_server.status_code == 201, sse_server.text
+            assert sse_server.json()["transport"] == "sse"
+            assert sse_server.json()["url"].endswith("/sse/")
+            removed_sse = client.delete(
+                mcp_url(workspace_id, f"/{sse_server.json()['id']}"),
+                headers=auth_headers(admin_token),
+            )
+            assert removed_sse.status_code == 204, removed_sse.text
 
             mcp_agent = client.post(
                 agents_url(workspace_id),
@@ -2100,6 +2188,25 @@ def main() -> None:
             mcp_agent_data = mcp_agent.json()
             assert mcp_agent_data["mcp_tools"][0]["tool_name"] == "lookup_release"
 
+            default_read_only_question = client.post(
+                agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
+                headers=auth_headers(admin_token),
+                json={"goal": "Check the release with the default policy"},
+            )
+            assert default_read_only_question.status_code == 201, default_read_only_question.text
+            assert default_read_only_question.json()["status"] == "succeeded"
+            assert len(mcp_calls) == 1
+
+            initial_approval_policy = client.put(
+                mcp_url(
+                    workspace_id,
+                    f"/{mcp_server_data['id']}/tools/lookup_release/policy",
+                ),
+                headers=auth_headers(admin_token),
+                json={"mode": "approval_required"},
+            )
+            assert initial_approval_policy.status_code == 200, initial_approval_policy.text
+
             mcp_question = client.post(
                 agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
                 headers=auth_headers(admin_token),
@@ -2108,7 +2215,7 @@ def main() -> None:
             assert mcp_question.status_code == 201, mcp_question.text
             mcp_run = mcp_question.json()
             assert mcp_run["status"] == "awaiting_approval"
-            assert mcp_calls == []
+            assert len(mcp_calls) == 1
             tool_calls = client.get(
                 agents_url(
                     workspace_id,
@@ -2139,7 +2246,7 @@ def main() -> None:
             assert mcp_event["server_name"] == "Release MCP"
             assert mcp_event["input"] == {"topic": "release"}
             assert mcp_event["output"] == {"release": "approved"}
-            assert len(mcp_calls) == 1
+            assert len(mcp_calls) == 2
             assert mcp_calls[0][:3] == (
                 "http://127.0.0.1:9999/mcp",
                 "lookup_release",
@@ -2176,7 +2283,7 @@ def main() -> None:
             )
             assert read_only_question.status_code == 201, read_only_question.text
             assert read_only_question.json()["status"] == "succeeded"
-            assert len(mcp_calls) == 2
+            assert len(mcp_calls) == 3
 
             require_approval = client.put(
                 mcp_url(
@@ -2231,7 +2338,7 @@ def main() -> None:
             )
             assert no_retry.status_code == 200, no_retry.text
             assert no_retry.json()["status"] == "succeeded"
-            assert len(mcp_calls) == 3
+            assert len(mcp_calls) == 4
 
             member_agent = client.post(
                 agents_url(workspace_id),
