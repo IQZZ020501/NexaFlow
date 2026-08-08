@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   isAgentFormDirty,
+  mergeAgentRunSnapshot,
   mergeAgentRunStreamEvent,
   mergeInitialAgentRun,
   type AgentFormState,
@@ -9,8 +10,9 @@ import {
 import {
   isNearScrollBottom,
   processTimeline,
+  unrenderedAgentToolCalls,
 } from "../components/agents/agent-detail-workspace"
-import type { Agent, AgentRun } from "../lib/api/agents"
+import type { Agent, AgentRun, AgentToolCall } from "../lib/api/agents"
 
 const agent: Agent = {
   id: "agent-1",
@@ -105,6 +107,36 @@ describe("Agent preview state", () => {
     ).toEqual([updatedThought, knowledge, mcp])
   })
 
+  test("keeps an approval inline until its tool event arrives", () => {
+    const thought = {
+      type: "thought",
+      turn: 1,
+      call_id: "",
+    } as AgentRun["events"][number]
+    const call = {
+      call_id: "call-1",
+      status: "awaiting_approval",
+    } as AgentToolCall
+    const timeline = processTimeline({ events: [thought] } as AgentRun)
+
+    expect(unrenderedAgentToolCalls(timeline, [call])).toEqual([call])
+    expect(
+      unrenderedAgentToolCalls(timeline, [{ ...call, status: "approved" }])
+    ).toHaveLength(1)
+
+    const toolEvent = {
+      type: "tool",
+      turn: 1,
+      call_id: call.call_id,
+    } as AgentRun["events"][number]
+    expect(
+      unrenderedAgentToolCalls(
+        processTimeline({ events: [thought, toolEvent] } as AgentRun),
+        [call]
+      )
+    ).toEqual([])
+  })
+
   test("keeps optimistic progress until the stream reports progress", () => {
     const pendingRun = {
       id: "pending-1",
@@ -184,5 +216,31 @@ describe("Agent preview state", () => {
       }
     )[0]
     expect(resumed.result).toBe("Restarted")
+  })
+
+  test("keeps the process timeline when approval returns a queued snapshot", () => {
+    const toolEvent = {
+      type: "tool",
+      turn: 1,
+      tool_name: "execute_sql",
+      status: "succeeded",
+      call_id: "call-1",
+    } as AgentRun["events"][number]
+    const liveRun = {
+      id: "run-1",
+      status: "awaiting_approval",
+      events: [toolEvent],
+      result: "",
+    } as unknown as AgentRun
+    const approvalResponse = {
+      ...liveRun,
+      status: "queued",
+      events: [],
+    } as unknown as AgentRun
+
+    const merged = mergeAgentRunSnapshot([liveRun], approvalResponse)[0]
+
+    expect(merged.status).toBe("queued")
+    expect(merged.events).toEqual([toolEvent])
   })
 })

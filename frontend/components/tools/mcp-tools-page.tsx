@@ -4,9 +4,12 @@ import * as React from "react"
 import {
   KeyRoundIcon,
   LoaderCircleIcon,
+  NetworkIcon,
   PlusIcon,
+  RadioTowerIcon,
   RefreshCwIcon,
   SearchIcon,
+  TerminalIcon,
   Trash2Icon,
   WrenchIcon,
 } from "lucide-react"
@@ -37,15 +40,19 @@ import {
   refreshMcpServer,
   updateMcpToolPolicy,
   type McpServer,
+  type McpServerCreatePayload,
   type McpToolPolicyMode,
+  type McpTransport,
 } from "@/lib/api/mcp"
 import { getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 
-type McpForm = {
+export type McpForm = {
   name: string
+  transport: McpTransport
   url: string
   bearerToken: string
+  stdioConfig: string
 }
 
 type McpPreset = {
@@ -56,7 +63,122 @@ type McpPreset = {
   icon: typeof SearchIcon
 }
 
-const EMPTY_FORM: McpForm = { name: "", url: "", bearerToken: "" }
+const EMPTY_FORM: McpForm = {
+  name: "",
+  transport: "streamable_http",
+  url: "",
+  bearerToken: "",
+  stdioConfig: "",
+}
+
+const STDIO_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+const STDIO_CONFIG_FIELDS = new Set([
+  "command",
+  "args",
+  "cwd",
+  "env",
+  "transport",
+])
+const STDIO_CONFIG_EXAMPLE = `{
+  "command": "/usr/local/bin/node",
+  "args": ["server.js"],
+  "cwd": "/srv/mcp",
+  "env": {
+    "API_KEY": "secret"
+  }
+}`
+const TEXTAREA_CLASS =
+  "min-h-24 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+
+function parseStdioConfig(
+  value: string
+):
+  | Extract<McpServerCreatePayload, { transport: "stdio" }>["stdio_config"]
+  | null {
+  if (!value.trim() || value.length > 65_536) return null
+  let config: unknown
+  try {
+    config = JSON.parse(value)
+  } catch {
+    return null
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config))
+    return null
+
+  const record = config as Record<string, unknown>
+  if (Object.keys(record).some((key) => !STDIO_CONFIG_FIELDS.has(key)))
+    return null
+  if (record.transport !== undefined && record.transport !== "stdio")
+    return null
+
+  const command =
+    typeof record.command === "string" ? record.command.trim() : ""
+  const args = record.args ?? []
+  const cwd = record.cwd
+  const env = record.env ?? {}
+  if (
+    !command ||
+    command.length > 1000 ||
+    !Array.isArray(args) ||
+    args.length > 64 ||
+    args.some(
+      (argument) => typeof argument !== "string" || argument.length > 2000
+    ) ||
+    (cwd !== undefined && cwd !== null && typeof cwd !== "string") ||
+    !env ||
+    typeof env !== "object" ||
+    Array.isArray(env)
+  ) {
+    return null
+  }
+
+  const environment = Object.entries(env as Record<string, unknown>)
+  if (
+    environment.length > 32 ||
+    environment.some(
+      ([name, envValue]) =>
+        name.length > 255 ||
+        !STDIO_ENV_NAME.test(name) ||
+        typeof envValue !== "string" ||
+        envValue.length > 8000
+    )
+  ) {
+    return null
+  }
+
+  const normalizedCwd = typeof cwd === "string" ? cwd.trim() : ""
+  return {
+    command,
+    args: args as string[],
+    ...(normalizedCwd ? { cwd: normalizedCwd } : {}),
+    env: Object.fromEntries(environment) as Record<string, string>,
+  }
+}
+
+export function buildMcpServerCreatePayload(
+  form: McpForm
+): McpServerCreatePayload | null {
+  const name = form.name.trim()
+  if (!name) return null
+  if (form.transport === "stdio") {
+    const stdioConfig = parseStdioConfig(form.stdioConfig)
+    if (!stdioConfig) return null
+    return {
+      name,
+      transport: "stdio",
+      stdio_config: stdioConfig,
+    }
+  }
+  const url = form.url.trim()
+  if (!url) return null
+  const bearerToken = form.bearerToken.trim()
+  return {
+    name,
+    transport: form.transport,
+    url,
+    bearer_token: bearerToken || undefined,
+  }
+}
 
 export function McpToolsPage() {
   const { t } = useLanguage()
@@ -82,11 +204,45 @@ export function McpToolsPage() {
     },
   ]
 
+  const transportOptions: Array<{
+    value: McpTransport
+    label: string
+    description: string
+    icon: typeof NetworkIcon
+  }> = [
+    {
+      value: "streamable_http",
+      label: t("Streamable HTTP"),
+      description: t("推荐的远程连接方式"),
+      icon: NetworkIcon,
+    },
+    {
+      value: "sse",
+      label: t("SSE"),
+      description: t("兼容旧版远程 Server"),
+      icon: RadioTowerIcon,
+    },
+    {
+      value: "stdio",
+      label: t("stdio"),
+      description: t("运行本地 stdio Server"),
+      icon: TerminalIcon,
+    },
+  ]
+
+  const transportLabels: Record<McpTransport, string> = {
+    streamable_http: t("Streamable HTTP"),
+    sse: t("SSE"),
+    stdio: t("stdio"),
+  }
+
   function handleUsePreset(preset: McpPreset) {
     setForm({
       name: preset.name,
+      transport: "streamable_http",
       url: preset.url,
       bearerToken: "",
+      stdioConfig: "",
     })
   }
 
@@ -102,7 +258,8 @@ export function McpToolsPage() {
     }
     setIsLoading(true)
     try {
-      setServers(await listMcpServers(token, selectedWorkspaceId))
+      const nextServers = await listMcpServers(token, selectedWorkspaceId)
+      setServers(nextServers)
     } catch (error) {
       setServers([])
       reportError(error)
@@ -120,21 +277,11 @@ export function McpToolsPage() {
 
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (
-      !token ||
-      !selectedWorkspaceId ||
-      !form.name.trim() ||
-      !form.url.trim()
-    ) {
-      return
-    }
+    const payload = buildMcpServerCreatePayload(form)
+    if (!token || !selectedWorkspaceId || !payload) return
     setIsSaving(true)
     try {
-      const created = await createMcpServer(token, selectedWorkspaceId, {
-        name: form.name.trim(),
-        url: form.url.trim(),
-        bearer_token: form.bearerToken.trim() || undefined,
-      })
+      const created = await createMcpServer(token, selectedWorkspaceId, payload)
       setServers((current) => [created, ...current])
       setForm(EMPTY_FORM)
       setIsDialogOpen(false)
@@ -144,6 +291,19 @@ export function McpToolsPage() {
     } finally {
       setIsSaving(false)
     }
+  }
+
+  function setDialogOpen(open: boolean) {
+    setIsDialogOpen(open)
+    if (!open) setForm(EMPTY_FORM)
+  }
+
+  function selectTransport(transport: McpTransport) {
+    setForm((current) => ({
+      ...EMPTY_FORM,
+      name: current.name,
+      transport,
+    }))
   }
 
   async function handleRefresh(server: McpServer) {
@@ -198,7 +358,7 @@ export function McpToolsPage() {
     const restore = () => {
       select.value =
         server.tools.find((tool) => tool.name === toolName)?.policy_mode ??
-        "approval_required"
+        "read_only"
     }
     if (!token || !selectedWorkspaceId || busyServerId) {
       restore()
@@ -256,7 +416,7 @@ export function McpToolsPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{t("MCP 工具")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {t("连接 Streamable HTTP MCP Server，供 Agent 选择和调用工具。")}
+            {t("连接远程或本地 MCP Server，供 Agent 选择和调用工具。")}
           </p>
         </div>
         {canManage ? (
@@ -297,7 +457,7 @@ export function McpToolsPage() {
             <Button
               type="button"
               className="mt-4"
-              onClick={() => setIsDialogOpen(true)}
+              onClick={() => setDialogOpen(true)}
             >
               <PlusIcon data-icon="inline-start" />
               {t("添加 MCP Server")}
@@ -318,6 +478,9 @@ export function McpToolsPage() {
                     <Badge variant="secondary">
                       {t("{value} 个工具", { value: server.tools.length })}
                     </Badge>
+                    <Badge variant="outline">
+                      {transportLabels[server.transport]}
+                    </Badge>
                     {server.has_bearer_token ? (
                       <Badge variant="outline" className="gap-1">
                         <KeyRoundIcon className="size-3" />
@@ -326,7 +489,11 @@ export function McpToolsPage() {
                     ) : null}
                   </div>
                   <p className="mt-1 truncate text-xs text-muted-foreground">
-                    {server.url}
+                    {server.transport === "stdio"
+                      ? t("stdio 命令：{command}", {
+                          command: server.stdio_command ?? "-",
+                        })
+                      : server.url}
                   </p>
                   {server.last_error ? (
                     <p className="mt-2 text-sm text-destructive">
@@ -432,58 +599,104 @@ export function McpToolsPage() {
         </div>
       )}
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-xl">
+      <Dialog open={isDialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{t("添加 MCP Server")}</DialogTitle>
             <DialogDescription>
               {t("保存时会连接 Server 并发现可用工具。")}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <p className="text-sm font-medium">{t("从内置预设快速填写")}</p>
-              <p className="text-xs text-muted-foreground">
-                {t("点击预设自动填写名称和地址。")}
-              </p>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 [&>:only-child]:sm:col-span-2">
-              {presets.map((preset) => (
-                <button
-                  key={preset.url}
-                  type="button"
-                  className="group flex w-full items-start gap-3 rounded-lg border bg-background p-3.5 text-left transition-[border-color,background-color,box-shadow] outline-none hover:border-primary/50 hover:bg-muted/40 hover:shadow-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  onClick={() => handleUsePreset(preset)}
-                >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-foreground transition-colors group-hover:text-primary">
-                    <preset.icon className="size-4" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                      {preset.name}
-                      {preset.requiresToken ? (
-                        <Badge variant="outline" className="gap-1 text-[10px]">
-                          <KeyRoundIcon className="size-3" aria-hidden="true" />
-                          {t("需要 Token")}
-                        </Badge>
-                      ) : null}
-                    </span>
-                    <span
-                      className="mt-1 block truncate font-mono text-xs text-muted-foreground"
-                      title={preset.url}
-                    >
-                      {preset.url}
-                    </span>
-                    <span className="mt-2 block text-xs leading-5 text-muted-foreground">
-                      {preset.description}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
           <form onSubmit={handleCreate}>
             <FieldGroup>
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium">{t("连接方式")}</legend>
+                <div
+                  role="radiogroup"
+                  aria-label={t("连接方式")}
+                  className="grid grid-cols-3 gap-1 rounded-md border bg-muted/30 p-1"
+                >
+                  {transportOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={form.transport === option.value}
+                      className={`flex min-h-20 min-w-0 flex-col items-center justify-center gap-1 rounded-sm px-2 py-2 text-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        form.transport === option.value
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      onClick={() => selectTransport(option.value)}
+                    >
+                      <option.icon
+                        className="size-4 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <span className="w-full text-xs font-medium break-words">
+                        {option.label}
+                      </span>
+                      <span className="hidden w-full text-[10px] leading-4 sm:block">
+                        {option.description}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+
+              {form.transport === "streamable_http" ? (
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">
+                      {t("从内置预设快速填写")}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {t("点击预设自动填写名称和地址。")}
+                    </p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 [&>:only-child]:sm:col-span-2">
+                    {presets.map((preset) => (
+                      <button
+                        key={preset.url}
+                        type="button"
+                        className="group flex w-full items-start gap-3 rounded-md border bg-background p-3.5 text-left transition-[border-color,background-color,box-shadow] outline-none hover:border-primary/50 hover:bg-muted/40 hover:shadow-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                        onClick={() => handleUsePreset(preset)}
+                      >
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-foreground transition-colors group-hover:text-primary">
+                          <preset.icon className="size-4" aria-hidden="true" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                            {preset.name}
+                            {preset.requiresToken ? (
+                              <Badge
+                                variant="outline"
+                                className="gap-1 text-[10px]"
+                              >
+                                <KeyRoundIcon
+                                  className="size-3"
+                                  aria-hidden="true"
+                                />
+                                {t("需要 Token")}
+                              </Badge>
+                            ) : null}
+                          </span>
+                          <span
+                            className="mt-1 block truncate font-mono text-xs text-muted-foreground"
+                            title={preset.url}
+                          >
+                            {preset.url}
+                          </span>
+                          <span className="mt-2 block text-xs leading-5 text-muted-foreground">
+                            {preset.description}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               <Field>
                 <FieldLabel htmlFor="mcp-name">{t("名称")}</FieldLabel>
                 <Input
@@ -500,59 +713,100 @@ export function McpToolsPage() {
                   required
                 />
               </Field>
-              <Field>
-                <FieldLabel htmlFor="mcp-url">{t("MCP 地址")}</FieldLabel>
-                <Input
-                  id="mcp-url"
-                  type="url"
-                  value={form.url}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      url: event.target.value,
-                    }))
-                  }
-                  placeholder="https://mcp.example.com/mcp"
-                  maxLength={2000}
-                  required
-                />
-                <FieldDescription>
-                  {t("公网地址必须使用 HTTPS；内网地址需由服务端显式开启。")}
-                </FieldDescription>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="mcp-token">
-                  {t("Bearer Token（可选）")}
-                </FieldLabel>
-                <Input
-                  id="mcp-token"
-                  type="password"
-                  value={form.bearerToken}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      bearerToken: event.target.value,
-                    }))
-                  }
-                  autoComplete="new-password"
-                  maxLength={8000}
-                />
-                <FieldDescription>
-                  {t("Token 会加密保存，之后不会返回明文。")}
-                </FieldDescription>
-              </Field>
+              {form.transport === "stdio" ? (
+                <Field>
+                  <FieldLabel htmlFor="mcp-stdio-config">
+                    {t("stdio 配置（JSON）")}
+                  </FieldLabel>
+                  <textarea
+                    id="mcp-stdio-config"
+                    value={form.stdioConfig}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        stdioConfig: event.target.value,
+                      }))
+                    }
+                    className={`${TEXTAREA_CLASS} font-mono`}
+                    placeholder={STDIO_CONFIG_EXAMPLE}
+                    maxLength={65536}
+                    rows={9}
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                  <FieldDescription>
+                    {form.stdioConfig.trim() &&
+                    parseStdioConfig(form.stdioConfig) === null
+                      ? t("请输入有效的 stdio JSON 配置。")
+                      : t("stdio 配置会加密保存，之后不会返回明文。")}
+                  </FieldDescription>
+                </Field>
+              ) : (
+                <>
+                  <Field>
+                    <FieldLabel htmlFor="mcp-url">{t("MCP 地址")}</FieldLabel>
+                    <Input
+                      id="mcp-url"
+                      type="url"
+                      value={form.url}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          url: event.target.value,
+                        }))
+                      }
+                      placeholder={
+                        form.transport === "sse"
+                          ? "https://mcp.example.com/sse"
+                          : "https://mcp.example.com/mcp"
+                      }
+                      maxLength={2000}
+                      required
+                    />
+                    <FieldDescription>
+                      {t(
+                        "支持 HTTP 和 HTTPS；内网地址需由部署管理员启用，HTTP 不加密。"
+                      )}
+                    </FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="mcp-token">
+                      {t("Bearer Token（可选）")}
+                    </FieldLabel>
+                    <Input
+                      id="mcp-token"
+                      type="password"
+                      value={form.bearerToken}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          bearerToken: event.target.value,
+                        }))
+                      }
+                      autoComplete="new-password"
+                      maxLength={8000}
+                    />
+                    <FieldDescription>
+                      {t("Token 会加密保存，之后不会返回明文。")}
+                    </FieldDescription>
+                  </Field>
+                </>
+              )}
             </FieldGroup>
             <DialogFooter className="pt-5">
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setIsDialogOpen(false)}
+                onClick={() => setDialogOpen(false)}
               >
                 {t("取消")}
               </Button>
               <Button
                 type="submit"
-                disabled={isSaving || !form.name.trim() || !form.url.trim()}
+                disabled={
+                  isSaving || buildMcpServerCreatePayload(form) === null
+                }
               >
                 {isSaving ? (
                   <LoaderCircleIcon className="animate-spin" />

@@ -10,12 +10,15 @@ export type McpTool = {
 }
 
 export type McpToolPolicyMode = "approval_required" | "read_only" | "disabled"
+export type McpTransport = "streamable_http" | "sse" | "stdio"
 
 export type McpServer = {
   id: string
   workspace_id: string
   name: string
-  url: string
+  transport: McpTransport
+  url: string | null
+  stdio_command: string | null
   tools: McpTool[]
   status: "active" | "disabled"
   has_bearer_token: boolean
@@ -25,6 +28,24 @@ export type McpServer = {
   created_at: string
   updated_at: string
 }
+
+export type McpServerCreatePayload =
+  | {
+      name: string
+      transport: "streamable_http" | "sse"
+      url: string
+      bearer_token?: string
+    }
+  | {
+      name: string
+      transport: "stdio"
+      stdio_config: {
+        command: string
+        args: string[]
+        cwd?: string
+        env: Record<string, string>
+      }
+    }
 
 function mcpPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/mcp-servers${suffix}`
@@ -37,7 +58,7 @@ export function listMcpServers(token: string, workspaceId: string) {
 export function createMcpServer(
   token: string,
   workspaceId: string,
-  payload: { name: string; url: string; bearer_token?: string }
+  payload: McpServerCreatePayload
 ) {
   return request<McpServer>(mcpPath(workspaceId), {
     method: "POST",
