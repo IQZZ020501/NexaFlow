@@ -8,6 +8,7 @@ import {
   type AgentFormState,
 } from "../components/agents/agents-page"
 import {
+  collapsedProcessStatusKey,
   isNearScrollBottom,
   processTimeline,
   unrenderedAgentToolCalls,
@@ -135,6 +136,14 @@ describe("Agent preview state", () => {
         [call]
       )
     ).toEqual([])
+  })
+
+  test("keeps tool progress visible when the process panel is collapsed", () => {
+    expect(collapsedProcessStatusKey("awaiting_approval", true, true)).toBeNull()
+    expect(
+      collapsedProcessStatusKey("awaiting_approval", true, false)
+    ).toBe("等待工具调用确认")
+    expect(collapsedProcessStatusKey("running", true, false)).toBe("执行过程")
   })
 
   test("keeps optimistic progress until the stream reports progress", () => {

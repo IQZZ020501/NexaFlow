@@ -66,7 +66,7 @@ def downgrade() -> None:
         batch.drop_constraint(TRANSPORT_CHECK, type_="check")
 
     op.execute(
-        "UPDATE mcp_servers SET url = 'stdio://' || stdio_profile "
+        "UPDATE mcp_servers SET url = 'stdio://' || COALESCE(stdio_profile, 'unknown') "
         "WHERE transport = 'stdio'"
     )
     op.execute(

@@ -703,6 +703,7 @@ def test_run_to_response_maps_run_fields() -> None:
 def test_mcp_server_to_response() -> None:
     from app.entities.tools import McpServer, McpToolPolicy
     from app.shareddomain.tools.services import (
+        effective_mcp_tool_policy_mode,
         mcp_server_to_response,
         mcp_tool_definition_hash,
     )
@@ -749,11 +750,22 @@ def test_mcp_server_to_response() -> None:
     assert response.has_bearer_token is True
     assert response.bearer_token_hint == "abcd"
     assert response.tools[0].policy_mode == "approval_required"
-    assert response.tools[1].policy_mode == "read_only"
+    assert response.tools[1].policy_mode == "approval_required"
 
     response = mcp_server_to_response(server)
     assert response.tools[0].policy_mode == "read_only"
-    assert response.tools[1].policy_mode == "read_only"
+    assert response.tools[1].policy_mode == "approval_required"
+    assert (
+        effective_mcp_tool_policy_mode(
+            McpTool(
+                name="delete",
+                input_schema={"type": "object"},
+                annotations={"readOnlyHint": True, "destructiveHint": True},
+            ),
+            None,
+        )
+        == "approval_required"
+    )
     assert response.tools[0].definition_hash == mcp_tool_definition_hash(
         McpTool(
             name="search",

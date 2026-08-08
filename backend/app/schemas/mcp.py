@@ -10,7 +10,9 @@ class McpToolResponse(BaseModel):
     input_schema: dict[str, Any]
     annotations: dict[str, Any] | None = None
     definition_hash: str = ""
-    policy_mode: Literal["approval_required", "read_only", "disabled"] = "read_only"
+    policy_mode: Literal["approval_required", "read_only", "disabled"] = (
+        "approval_required"
+    )
 
 
 class McpServerResponse(BaseModel):

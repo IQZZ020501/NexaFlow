@@ -70,6 +70,7 @@
   - `202608060001_knowledge_storage_cleanup.py` — 持久化知识存储清理任务
   - `202608070001_agent_durable_executor.py` — Agent 检索策略、Run 租约/checkpoint/事件/工具账本与 MCP 工具策略
   - `202608080001_mcp_transports.py` — MCP Streamable HTTP/SSE/stdio 传输字段、互斥约束及可回退编码
+  - `202608080002_mcp_stdio_inline_config.py` — stdio 内联配置（命令/参数/环境变量）加密列，并停用遗留 stdio profile 服务器
 
 ## backend 根配置
 
@@ -83,4 +84,4 @@
 - `backend/tests/support.py` — 测试共享基础设施：内存 SQLite + eager Celery 的 TestClient 环境、Settings 构造、登录/激活管理员/激活用户辅助函数
 - `backend/tests/logger.py` — 全局日志器与错误分类（internal/external）单元测试
 - `backend/tests/test_main.py` — 应用冒烟测试：/health、bootstrap 管理员登录、auth/me、404 路由
-- `backend/tests/mcp_transports.py` — 真实子进程/HTTP Server 回归：三种传输、Bearer、Profile 漂移与超时进程回收
+- `backend/tests/mcp_transports.py` — 真实子进程/HTTP Server 回归：三种传输、Bearer 校验、stdio 环境变量传递与超时进程回收

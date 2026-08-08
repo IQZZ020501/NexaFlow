@@ -70,7 +70,14 @@ def effective_mcp_tool_policy_mode(
             if policy.definition_hash == definition_hash
             else "approval_required"
         )
-    return "read_only"
+    annotations = definition.annotations
+    return (
+        "read_only"
+        if annotations is not None
+        and annotations.read_only_hint is True
+        and annotations.destructive_hint is not True
+        else "approval_required"
+    )
 
 
 def _mcp_tool_definition(tool: dict) -> McpTool:

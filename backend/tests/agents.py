@@ -1845,6 +1845,10 @@ def main() -> None:
                         "properties": {"topic": {"type": "string"}},
                         "required": ["topic"],
                     },
+                    "annotations": {
+                        "readOnlyHint": True,
+                        "destructiveHint": False,
+                    },
                 }
             ]
         )
@@ -2188,13 +2192,15 @@ def main() -> None:
             mcp_agent_data = mcp_agent.json()
             assert mcp_agent_data["mcp_tools"][0]["tool_name"] == "lookup_release"
 
-            default_read_only_question = client.post(
+            annotated_read_only_question = client.post(
                 agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
                 headers=auth_headers(admin_token),
-                json={"goal": "Check the release with the default policy"},
+                json={"goal": "Check the release with its read-only annotation"},
             )
-            assert default_read_only_question.status_code == 201, default_read_only_question.text
-            assert default_read_only_question.json()["status"] == "succeeded"
+            assert (
+                annotated_read_only_question.status_code == 201
+            ), annotated_read_only_question.text
+            assert annotated_read_only_question.json()["status"] == "succeeded"
             assert len(mcp_calls) == 1
 
             initial_approval_policy = client.put(

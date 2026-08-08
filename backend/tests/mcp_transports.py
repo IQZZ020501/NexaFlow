@@ -204,6 +204,10 @@ async def assert_stdio_timeout_reaps_process() -> None:
                 raise AssertionError("Slow stdio server did not time out")
 
             pid_path = Path(pid_file)
+            for _ in range(100):
+                if pid_path.exists():
+                    break
+                await asyncio.sleep(0.05)
             assert pid_path.exists(), "Slow stdio server did not start"
             pid = int(pid_path.read_text(encoding="utf-8"))
             for _ in range(40):

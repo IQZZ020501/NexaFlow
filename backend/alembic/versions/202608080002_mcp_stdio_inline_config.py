@@ -27,7 +27,7 @@ def upgrade() -> None:
     op.execute(
         "UPDATE mcp_servers SET status = 'disabled', "
         "last_error = 'Legacy stdio profile must be recreated with inline configuration: ' "
-        "|| stdio_profile WHERE transport = 'stdio'"
+        "|| COALESCE(stdio_profile, 'unknown') WHERE transport = 'stdio'"
     )
 
     with op.batch_alter_table("mcp_servers") as batch:

@@ -284,6 +284,16 @@ export function unrenderedAgentToolCalls(
   )
 }
 
+export function collapsedProcessStatusKey(
+  runStatus: AgentRun["status"],
+  hasActiveToolCall: boolean,
+  isProcessOpen: boolean
+): "等待工具调用确认" | "执行过程" | null {
+  if (isProcessOpen) return null
+  if (runStatus === "awaiting_approval") return "等待工具调用确认"
+  return hasActiveToolCall ? "执行过程" : null
+}
+
 function CopyMessageButton({ value, t }: { value: string; t: TFunction }) {
   const [copied, setCopied] = React.useState(false)
   const label = t(copied ? "已复制" : "复制")
@@ -437,8 +447,13 @@ function RunExchange({
     timeline.some(
       ({ event }) => event.type === "tool" && event.status === "running"
     )
-  const answer = run.result
   const [isProcessOpen, setIsProcessOpen] = React.useState(true)
+  const collapsedProcessStatus = collapsedProcessStatusKey(
+    run.status,
+    hasActiveToolCall,
+    isProcessOpen
+  )
+  const answer = run.result
   return (
     <article className="flex flex-col gap-5">
       <div className="ml-auto flex max-w-[88%] flex-col items-end gap-1">
@@ -525,8 +540,13 @@ function RunExchange({
               <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                 {run.last_error ?? t("Agent 未返回结果")}
               </p>
-            ) : run.status === "awaiting_approval" || hasActiveToolCall ? (
+            ) : (run.status === "awaiting_approval" || hasActiveToolCall) &&
+              isProcessOpen ? (
               null
+            ) : collapsedProcessStatus ? (
+              <p className="text-sm text-muted-foreground">
+                {t(collapsedProcessStatus)}
+              </p>
             ) : run.status === "queued" ? (
               <p className="text-sm text-muted-foreground">{t("等待执行")}</p>
             ) : run.status === "cancelled" ? (

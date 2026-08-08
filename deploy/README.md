@@ -104,10 +104,11 @@ their encrypted configuration, so they must also be recreated after re-upgrade.
   and Redis for checkpoint, approval, lease recovery, and short-lived answer
   delta delivery. Redis live-stream failure degrades to the durable terminal
   answer rather than failing the Run.
-- Newly discovered MCP tools default to `read_only` and auto-run. Workspace
-  admins can switch each tool to per-call approval or disabled; a changed tool
-  definition invalidates an existing policy and falls back to approval. Only
-  register MCP Servers whose tools are trusted under this default.
+- Newly discovered MCP tools auto-run as `read_only` only when they declare
+  `readOnlyHint=true` without a destructive hint. Unknown or potentially
+  destructive tools default to per-call approval. Workspace admins can override
+  each tool to read-only, per-call approval, or disabled; a changed tool
+  definition invalidates an existing policy and falls back to approval.
 - Restrict backend filesystem/network access and process counts at the container
   or service-manager boundary. A hard host/process crash is outside cooperative
   stdio cleanup and must be contained by the runtime's process namespace/cgroup.
