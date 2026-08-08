@@ -2310,8 +2310,8 @@ function KnowledgeBasePageContent({
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex min-w-0 gap-3">
-                            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                              <BookOpenTextIcon className="size-5 text-muted-foreground" />
+                            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-[#4D6BFE]/10 text-[#4D6BFE]">
+                              <BookOpenTextIcon className="size-5" />
                             </span>
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
