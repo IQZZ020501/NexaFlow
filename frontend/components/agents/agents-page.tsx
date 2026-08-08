@@ -866,8 +866,8 @@ export function AgentsPage() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 gap-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                    <SparklesIcon className="size-5 text-muted-foreground" />
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-700 dark:text-violet-400">
+                    <SparklesIcon className="size-5" />
                   </span>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
