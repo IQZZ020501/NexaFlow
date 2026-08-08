@@ -23,7 +23,7 @@
 
 ### mcp/（MCP 客户端）
 
-- `backend/app/capabilities/mcp/client.py` — MCP 客户端：URL 规范化与内网地址防护、工具发现/调用、结果截断与超时
+- `backend/app/capabilities/mcp/client.py` — 统一 MCP 客户端：Streamable HTTP、legacy SSE、加密持久化的 stdio 配置连接，HTTP URL/重定向/代理环境防护、stdio 运行时校验、工具发现/调用、结果截断与超时
 
 ### embedding/（文档解析管道）
 

@@ -117,6 +117,22 @@ export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
   }
 }
 
+export function mergeAgentRunSnapshot(
+  runs: AgentRun[],
+  snapshot: AgentRun,
+  placeholderId?: string
+): AgentRun[] {
+  const replaced = runs.map((run) => {
+    if (placeholderId && run.id === placeholderId) {
+      return mergeInitialAgentRun(run, snapshot)
+    }
+    return run.id === snapshot.id ? mergeInitialAgentRun(run, snapshot) : run
+  })
+  return replaced.some((run) => run.id === snapshot.id)
+    ? replaced
+    : [snapshot, ...replaced]
+}
+
 export function mergeAgentRunStreamEvent(
   runs: AgentRun[],
   runId: string,
@@ -124,17 +140,7 @@ export function mergeAgentRunStreamEvent(
   placeholderId?: string
 ): AgentRun[] {
   if (streamEvent.type === "run") {
-    const replaced = runs.map((run) => {
-      if (placeholderId && run.id === placeholderId) {
-        return mergeInitialAgentRun(run, streamEvent.run)
-      }
-      return run.id === streamEvent.run.id
-        ? mergeInitialAgentRun(run, streamEvent.run)
-        : run
-    })
-    return replaced.some((run) => run.id === streamEvent.run.id)
-      ? replaced
-      : [streamEvent.run, ...replaced]
+    return mergeAgentRunSnapshot(runs, streamEvent.run, placeholderId)
   }
   if (streamEvent.type === "process") {
     return runs.map((run) => {
@@ -728,9 +734,7 @@ export function AgentsPage() {
         callId,
         decision
       )
-      setRuns((current) =>
-        current.map((item) => (item.id === run.id ? run : item))
-      )
+      setRuns((current) => mergeAgentRunSnapshot(current, run))
       await loadRunToolCalls(selectedAgent.id, runId)
       notify(
         "success",

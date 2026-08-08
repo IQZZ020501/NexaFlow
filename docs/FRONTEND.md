@@ -59,7 +59,7 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/components/llm/llm-page.tsx` — 模型管理页：注册模型 CRUD、凭据、目录浏览
 
 **tools/**（工具功能）
-- `frontend/components/tools/mcp-tools-page.tsx` — MCP Server 管理与管理员工具执行策略审核
+- `frontend/components/tools/mcp-tools-page.tsx` — MCP Server 管理：Streamable HTTP/SSE URL 配置、stdio 命令/参数/工作目录/环境变量填写与管理员工具执行策略审核
 
 **system/**（系统管理功能）
 - `frontend/components/system/system-shell.tsx` — 系统管理壳：数据加载、CRUD 编排、Tab 切换
@@ -125,7 +125,7 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/lib/api/knowledge.ts` — 知识库 API：知识库/文档/任务/chunk/检索
 - `frontend/lib/api/agents.ts` — Agent API：CRUD、Run 提交/游标订阅/自动重连、工具审批
 - `frontend/lib/api/llm.ts` — 模型 API：目录、注册模型 CRUD、凭据
-- `frontend/lib/api/mcp.ts` — MCP Server API：CRUD、刷新、工具列表与执行策略
+- `frontend/lib/api/mcp.ts` — MCP Server API：三种传输契约、CRUD、刷新、工具列表与执行策略
 - `frontend/lib/api/system.ts` — 系统管理 API：工作空间/团队/用户/审计
 
 ### tests/（bun 测试）
@@ -137,6 +137,7 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/tests/dialog-dropdown-interaction.test.ts` — dropdown 事件判定
 - `frontend/tests/feature-page-catalog.test.ts` — pages 目录完整性
 - `frontend/tests/i18n.test.ts` — 词典一致性/翻译插值
+- `frontend/tests/mcp-registration.test.ts` — MCP 三种传输创建载荷与隐藏字段隔离
 
 ## 关键约定
 

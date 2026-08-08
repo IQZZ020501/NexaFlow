@@ -666,7 +666,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
     assert mcp_function_name(tool) == name
     built = build_mcp_agent_tool(tool, SimpleNamespace())
     assert built.metadata is not None
-    assert built.metadata["policy_mode"] == "read_only"
+    assert built.metadata["policy_mode"] == "approval_required"
 
 
 def test_run_to_response_maps_run_fields() -> None:
@@ -703,6 +703,7 @@ def test_run_to_response_maps_run_fields() -> None:
 def test_mcp_server_to_response() -> None:
     from app.entities.tools import McpServer, McpToolPolicy
     from app.shareddomain.tools.services import (
+        effective_mcp_tool_policy_mode,
         mcp_server_to_response,
         mcp_tool_definition_hash,
     )
@@ -752,8 +753,28 @@ def test_mcp_server_to_response() -> None:
     assert response.tools[1].policy_mode == "approval_required"
 
     response = mcp_server_to_response(server)
-    assert response.tools[0].policy_mode == "read_only"
+    assert response.tools[0].policy_mode == "approval_required"
     assert response.tools[1].policy_mode == "approval_required"
+    assert (
+        effective_mcp_tool_policy_mode(
+            McpTool(
+                name="delete",
+                input_schema={"type": "object"},
+                annotations={"readOnlyHint": True, "destructiveHint": True},
+            ),
+            None,
+        )
+        == "approval_required"
+    )
+    read_only_policy = McpToolPolicy(
+        workspace_id="ws-1",
+        mcp_server_id="mcp-1",
+        tool_name="search",
+        definition_hash=response.tools[0].definition_hash,
+        mode="read_only",
+    )
+    response = mcp_server_to_response(server, [read_only_policy])
+    assert response.tools[0].policy_mode == "read_only"
     assert response.tools[0].definition_hash == mcp_tool_definition_hash(
         McpTool(
             name="search",
@@ -987,6 +1008,9 @@ def test_normalize_mcp_url() -> None:
     assert normalize_mcp_url("  https://tools.example.com/mcp/  ") == (
         "https://tools.example.com/mcp"
     )
+    assert normalize_mcp_url("http://tools.example.com/sse") == (
+        "http://tools.example.com/sse"
+    )
     for invalid in (
         "file:///tmp/mcp.sock",
         "https://tools.example.com/mcp?token=secret",
@@ -999,6 +1023,120 @@ def test_normalize_mcp_url() -> None:
         except McpClientError:
             continue
         raise AssertionError(f"Invalid MCP URL accepted: {invalid}")
+
+
+def test_mcp_private_network_policy() -> None:
+    from app.capabilities.mcp.client import (
+        McpClientError,
+        validate_mcp_destination,
+    )
+
+    asyncio.run(validate_mcp_destination("http://8.8.8.8/mcp", False))
+    asyncio.run(validate_mcp_destination("http://127.0.0.1:8081/sse", True))
+    try:
+        asyncio.run(validate_mcp_destination("http://127.0.0.1:8081/sse", False))
+    except McpClientError as exc:
+        assert str(exc) == "Private MCP server addresses are not allowed."
+    else:
+        raise AssertionError("Private MCP address was accepted without opt-in")
+
+
+def test_mcp_stdio_configuration() -> None:
+    import os
+    import sys
+
+    from app.infrastructure.mcp_stdio import (
+        McpStdioConfigError,
+        parse_mcp_stdio_config,
+        serialize_mcp_stdio_config,
+        validate_mcp_stdio_config_runtime,
+    )
+
+    config = parse_mcp_stdio_config(
+        {
+            "command": sys.executable,
+            "args": ["-m", "tests.unit"],
+            "cwd": os.getcwd(),
+            "env": {"NEXAFLOW_TEST_SECRET": "configured-in-form"},
+        }
+    )
+    assert config.args == ("-m", "tests.unit")
+    assert dict(config.env) == {"NEXAFLOW_TEST_SECRET": "configured-in-form"}
+    assert parse_mcp_stdio_config(serialize_mcp_stdio_config(config)) == config
+    validate_mcp_stdio_config_runtime(config)
+
+    for invalid in (
+        {"command": "relative-command"},
+        {"command": sys.executable, "shell": True},
+        {"command": sys.executable, "env": {"BAD=NAME": "value"}},
+        {"command": sys.executable, "env": {"KEY": "bad\0value"}},
+    ):
+        try:
+            parse_mcp_stdio_config(invalid)
+        except McpStdioConfigError:
+            continue
+        raise AssertionError(f"Invalid stdio configuration accepted: {invalid}")
+
+
+def test_mcp_server_create_request_transport_matrix() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.mcp import McpServerCreateRequest
+
+    compatible = McpServerCreateRequest(
+        name="Existing client",
+        url="https://tools.example.com/mcp",
+    )
+    assert compatible.transport == "streamable_http"
+    assert compatible.stdio_config is None
+
+    sse = McpServerCreateRequest(
+        name="Legacy SSE",
+        transport="sse",
+        url="https://tools.example.com/sse/",
+        bearer_token="token",
+    )
+    assert sse.url == "https://tools.example.com/sse/"
+
+    stdio = McpServerCreateRequest(
+        name="Local",
+        transport="stdio",
+        stdio_config={"command": "/usr/bin/python3"},
+    )
+    assert stdio.url is None
+    assert stdio.stdio_config is not None
+
+    invalid_payloads = (
+        {"name": "Missing URL", "transport": "sse"},
+        {
+            "name": "Remote profile",
+            "url": "https://tools.example.com/mcp",
+            "stdio_config": {"command": "/usr/bin/python3"},
+        },
+        {
+            "name": "stdio URL",
+            "transport": "stdio",
+            "stdio_config": {"command": "/usr/bin/python3"},
+            "url": "https://tools.example.com/mcp",
+        },
+        {
+            "name": "stdio command",
+            "transport": "stdio",
+            "stdio_config": {"command": "/usr/bin/python3"},
+            "command": "/bin/sh",
+        },
+        {
+            "name": "legacy stdio profile",
+            "transport": "stdio",
+            "stdio_profile": "local-test",
+        },
+    )
+    for payload in invalid_payloads:
+        try:
+            McpServerCreateRequest.model_validate(payload)
+        except ValidationError:
+            continue
+        raise AssertionError(f"Invalid MCP server payload accepted: {payload}")
 
 
 def main() -> None:
@@ -1030,6 +1168,9 @@ def main() -> None:
     test_knowledge_document_and_attachment_response_mapping()
     test_knowledge_base_to_response()
     test_normalize_mcp_url()
+    test_mcp_private_network_policy()
+    test_mcp_stdio_configuration()
+    test_mcp_server_create_request_transport_matrix()
     print("UNIT_SUITE_OK")
 
 

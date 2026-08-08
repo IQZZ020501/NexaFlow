@@ -10,7 +10,10 @@ class McpServer:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""
     name: str = ""
-    url: str = ""
+    transport: str = "streamable_http"
+    url: str | None = None
+    stdio_command: str | None = None
+    stdio_config_ciphertext: str | None = None
     bearer_token_ciphertext: str | None = None
     bearer_token_hint: str | None = None
     tools: list[dict[str, Any]] = field(default_factory=list)

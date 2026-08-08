@@ -39,7 +39,7 @@ api/{auth,workspaces,teams,mcp_servers,admin/users,admin/audit}.py
 
 ### app/shareddomain/tools/
 
-- `backend/app/shareddomain/tools/services.py` — MCP 服务器服务层：CRUD、Bearer 凭据加解密、工具发现/解析为智能体工具
+- `backend/app/shareddomain/tools/services.py` — MCP 服务器服务层：三种传输 CRUD、Bearer/stdio 配置加解密、工具发现及解析为智能体工具
 - `backend/app/shareddomain/tools/models.py` — McpServer ORM 模型（mcp_servers 表）
 
 ## 关键约定
@@ -50,6 +50,7 @@ api/{auth,workspaces,teams,mcp_servers,admin/users,admin/audit}.py
 - 知识库 owner（`created_by_user_id`）可通过 owner 转移接口变更；创建者与工作区管理员可管理资源权限。
 - 删除工作区会在同一事务内级联删除知识库、Agent/运行记录、MCP、模型、团队/成员及资源授权；存在 queued/running 知识任务时返回 409。向量集合和对象存储文件由持久清理记录交给 Celery 异步删除，失败后自动重试。
 - 敏感写操作（创建/修改/删除）一律 `record_audit_log`。
+- stdio 配置由工作空间管理员提交并加密保存；命令与工作目录必须是后端运行环境中的绝对路径，列表接口不返回参数、工作目录或环境值。stdio 具备后端进程级文件系统与网络访问能力，因此部署时必须信任可管理 MCP Server 的工作空间管理员。
 
 ## 相关测试
 

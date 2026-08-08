@@ -26,6 +26,20 @@ class McpServer(Base):
             "status IN ('active', 'disabled')",
             name="ck_mcp_servers_status",
         ),
+        CheckConstraint(
+            "transport IN ('streamable_http', 'sse', 'stdio')",
+            name="ck_mcp_servers_transport",
+        ),
+        CheckConstraint(
+            "(transport IN ('streamable_http', 'sse') AND url IS NOT NULL "
+            "AND stdio_command IS NULL AND stdio_config_ciphertext IS NULL) OR "
+            "(transport = 'stdio' AND url IS NULL "
+            "AND bearer_token_ciphertext IS NULL AND bearer_token_hint IS NULL AND "
+            "((stdio_command IS NOT NULL AND stdio_config_ciphertext IS NOT NULL) OR "
+            "(status = 'disabled' AND stdio_command IS NULL "
+            "AND stdio_config_ciphertext IS NULL)))",
+            name="ck_mcp_servers_transport_configuration",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -33,7 +47,15 @@ class McpServer(Base):
         ForeignKey("workspaces.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    url: Mapped[str] = mapped_column(Text, nullable=False)
+    transport: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="streamable_http",
+        server_default="streamable_http",
+    )
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stdio_command: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stdio_config_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     bearer_token_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     bearer_token_hint: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tools: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)

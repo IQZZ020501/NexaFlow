@@ -2,19 +2,29 @@ import asyncio
 import ipaddress
 import json
 import logging
+import os
 import socket
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from typing import Any
+from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx2
 from mcp import Client
+from mcp.client.sse import sse_client
+from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
+from app.infrastructure.config import Settings
 from app.infrastructure.errors import ExternalServiceError, log_error
 from app.infrastructure.logger import get_logger, log_event
+from app.infrastructure.mcp_stdio import (
+    McpStdioConfig,
+    McpStdioConfigError,
+    validate_mcp_stdio_config_runtime,
+)
 
 logger = get_logger(__name__)
 
@@ -29,8 +39,25 @@ class McpClientError(ExternalServiceError):
     pass
 
 
-def normalize_mcp_url(value: str) -> str:
-    url = value.strip().rstrip("/")
+McpTransport = Literal["streamable_http", "sse", "stdio"]
+
+
+@dataclass(frozen=True)
+class McpConnection:
+    transport: McpTransport
+    url: str | None = None
+    bearer_token: str | None = None
+    stdio_config: McpStdioConfig | None = None
+
+
+@dataclass(frozen=True)
+class McpDiscovery:
+    tools: list[dict[str, Any]]
+
+
+def normalize_mcp_url(value: str, *, preserve_trailing_slash: bool = False) -> str:
+    stripped = value.strip()
+    url = stripped if preserve_trailing_slash else stripped.rstrip("/")
     parsed = urlparse(url)
     try:
         parsed.port
@@ -61,21 +88,17 @@ def is_private_address(value: str) -> bool:
 
 
 async def validate_mcp_destination(url: str, allow_private_networks: bool) -> None:
-    parsed = urlparse(url)
     if allow_private_networks:
         return
-    if parsed.scheme != "https":
-        raise McpClientError("Public MCP servers must use HTTPS.")
-
+    parsed = urlparse(url)
     hostname = parsed.hostname
     if hostname is None:
         raise McpClientError("Invalid MCP server URL.")
-    port = parsed.port or 443
     try:
         addresses = await asyncio.to_thread(
             socket.getaddrinfo,
             hostname,
-            port,
+            parsed.port or (80 if parsed.scheme == "http" else 443),
             type=socket.SOCK_STREAM,
         )
     except OSError as exc:
@@ -85,52 +108,125 @@ async def validate_mcp_destination(url: str, allow_private_networks: bool) -> No
 
 
 @asynccontextmanager
+async def _hardened_http_client_factory(
+    *,
+    headers: dict[str, Any] | None = None,
+    auth: httpx2.Auth | None = None,
+    timeout: httpx2.Timeout | None = None,
+) -> AsyncIterator[httpx2.AsyncClient]:
+    async with httpx2.AsyncClient(
+        headers=headers,
+        auth=auth,
+        timeout=timeout,
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
+        yield client
+
+
+@asynccontextmanager
 async def mcp_client(
-    url: str,
-    bearer_token: str | None,
-    allow_private_networks: bool,
+    connection: McpConnection,
+    settings: Settings,
     timeout_seconds: float,
 ) -> AsyncIterator[Client]:
-    normalized_url = normalize_mcp_url(url)
-    await validate_mcp_destination(normalized_url, allow_private_networks)
-    headers = {"Authorization": f"Bearer {bearer_token}"} if bearer_token else {}
+    target = connection.url or (
+        connection.stdio_config.command if connection.stdio_config else ""
+    )
     try:
-        async with httpx2.AsyncClient(
-            headers=headers,
-            timeout=timeout_seconds,
-            follow_redirects=False,
-            trust_env=False,
-        ) as http_client:
-            transport = streamable_http_client(
-                normalized_url,
-                http_client=http_client,
-            )
-            async with Client(
-                transport,
-                read_timeout_seconds=timeout_seconds,
-                cache=None,
-            ) as client:
+        async with asyncio.timeout(timeout_seconds):
+            async with AsyncExitStack() as stack:
+                if connection.transport in {"streamable_http", "sse"}:
+                    if connection.url is None:
+                        raise McpClientError("MCP server URL is required.")
+                    normalized_url = normalize_mcp_url(
+                        connection.url,
+                        preserve_trailing_slash=connection.transport == "sse",
+                    )
+                    await validate_mcp_destination(
+                        normalized_url,
+                        settings.mcp_allow_private_networks,
+                    )
+                    headers = (
+                        {"Authorization": f"Bearer {connection.bearer_token}"}
+                        if connection.bearer_token
+                        else {}
+                    )
+                    if connection.transport == "streamable_http":
+                        http_client = await stack.enter_async_context(
+                            httpx2.AsyncClient(
+                                headers=headers,
+                                timeout=timeout_seconds,
+                                follow_redirects=False,
+                                trust_env=False,
+                            )
+                        )
+                        transport = streamable_http_client(
+                            normalized_url,
+                            http_client=http_client,
+                        )
+                    else:
+                        transport = sse_client(
+                            normalized_url,
+                            headers=headers,
+                            timeout=timeout_seconds,
+                            sse_read_timeout=timeout_seconds,
+                            httpx_client_factory=_hardened_http_client_factory,
+                        )
+                elif connection.transport == "stdio":
+                    config = connection.stdio_config
+                    if config is None:
+                        raise McpClientError("MCP stdio configuration is required.")
+                    try:
+                        validate_mcp_stdio_config_runtime(config)
+                    except McpStdioConfigError as exc:
+                        raise McpClientError(str(exc)) from exc
+                    errlog = stack.enter_context(
+                        open(os.devnull, "w", encoding="utf-8")
+                    )
+                    transport = stdio_client(
+                        StdioServerParameters(
+                            command=config.command,
+                            args=list(config.args),
+                            env=dict(config.env),
+                            cwd=config.cwd,
+                        ),
+                        errlog=errlog,
+                    )
+                else:
+                    raise McpClientError("Unsupported MCP transport.")
+
+                client = await stack.enter_async_context(
+                    Client(
+                        transport,
+                        read_timeout_seconds=timeout_seconds,
+                        cache=None,
+                    )
+                )
                 yield client
     except McpClientError:
         raise
     except Exception as exc:
-        log_error(logger, "MCP server request failed.", exc, url=url)
+        log_error(
+            logger,
+            "MCP server request failed.",
+            exc,
+            transport=connection.transport,
+            target=target,
+        )
         raise McpClientError("MCP server request failed.") from exc
 
 
 async def discover_mcp_tools(
-    url: str,
-    bearer_token: str | None,
-    allow_private_networks: bool,
-    timeout_seconds: float,
-) -> list[dict[str, Any]]:
+    connection: McpConnection,
+    settings: Settings,
+) -> McpDiscovery:
     discovered: list[dict[str, Any]] = []
     names: set[str] = set()
     async with mcp_client(
-        url,
-        bearer_token,
-        allow_private_networks,
-        timeout_seconds,
+        connection,
+        settings,
+        settings.mcp_request_timeout_seconds,
     ) as client:
         cursor: str | None = None
         for _ in range(MAX_MCP_TOOL_PAGES):
@@ -185,31 +281,28 @@ async def discover_mcp_tools(
         logging.INFO,
         "MCP tool discovery completed.",
         tool_count=len(discovered),
-        url=url,
+        transport=connection.transport,
     )
-    return discovered
+    return McpDiscovery(tools=discovered)
 
 
 async def call_mcp_tool(
-    url: str,
-    bearer_token: str | None,
+    connection: McpConnection,
+    settings: Settings,
     tool_name: str,
     arguments: dict[str, Any],
-    allow_private_networks: bool,
-    timeout_seconds: float,
     idempotency_key: str | None = None,
 ) -> tuple[str, bool]:
     started_at = time.perf_counter()
     async with mcp_client(
-        url,
-        bearer_token,
-        allow_private_networks,
-        timeout_seconds,
+        connection,
+        settings,
+        settings.mcp_request_timeout_seconds,
     ) as client:
         result = await client.call_tool(
             tool_name,
             arguments,
-            read_timeout_seconds=timeout_seconds,
+            read_timeout_seconds=settings.mcp_request_timeout_seconds,
             meta=(
                 {"nexaflow/idempotencyKey": idempotency_key}
                 if idempotency_key
@@ -237,42 +330,29 @@ async def call_mcp_tool(
     return content, bool(result.is_error)
 
 
-class StreamableHttpMcpClient:
+class MultiTransportMcpClient:
     """Adapter implementing the ``app.ports.mcp.McpClient`` contract."""
 
-    def normalize_mcp_url(self, value: str) -> str:
-        return normalize_mcp_url(value)
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
 
     async def discover_mcp_tools(
         self,
-        url: str,
-        bearer_token: str | None,
-        allow_private_networks: bool,
-        timeout_seconds: float,
-    ) -> list[dict[str, Any]]:
-        return await discover_mcp_tools(
-            url,
-            bearer_token,
-            allow_private_networks,
-            timeout_seconds,
-        )
+        connection: McpConnection,
+    ) -> McpDiscovery:
+        return await discover_mcp_tools(connection, self.settings)
 
     async def call_mcp_tool(
         self,
-        url: str,
-        bearer_token: str | None,
+        connection: McpConnection,
         tool_name: str,
         arguments: dict[str, Any],
-        allow_private_networks: bool,
-        timeout_seconds: float,
         idempotency_key: str | None = None,
     ) -> tuple[str, bool]:
         return await call_mcp_tool(
-            url,
-            bearer_token,
+            connection,
+            self.settings,
             tool_name,
             arguments,
-            allow_private_networks,
-            timeout_seconds,
             idempotency_key,
         )

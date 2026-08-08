@@ -39,8 +39,8 @@ from app.shareddomain.agents.services import accessible_agent_knowledge_bases
 from app.shareddomain.knowledge.services import get_knowledge_model
 from app.shareddomain.tools.services import (
     ResolvedMcpTool,
-    bearer_token,
     effective_mcp_tool_policy_mode,
+    mcp_server_connection,
     mcp_tool_definition_hash,
     resolve_mcp_tools,
 )
@@ -382,12 +382,10 @@ def build_mcp_agent_tool(
                 )
             try:
                 call_args = (
-                    current_tool.server.url,
-                    bearer_token(current_tool.server, settings),
+                    mcp_server_connection(current_tool.server, settings),
+                    settings,
                     current_tool.definition.name,
                     payload,
-                    settings.mcp_allow_private_networks,
-                    settings.mcp_request_timeout_seconds,
                 )
                 idempotency_key = _tool_idempotency_key.get()
                 if idempotency_key:

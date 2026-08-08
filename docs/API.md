@@ -39,7 +39,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/endpoints/knowledge_lifecycle.py` — 同前缀文档生命周期：下载、删除、激活状态更新（PATCH）
 - `backend/app/api/v1/endpoints/knowledge_retrieval.py` — 同前缀 RAG 检索接口 `POST /{kb_id}/query`
 - `backend/app/api/v1/endpoints/models.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
-- `backend/app/api/v1/endpoints/mcp_servers.py` — MCP Server CRUD/刷新，以及管理员按工具定义哈希审核执行策略
+- `backend/app/api/v1/endpoints/mcp_servers.py` — MCP Server CRUD/刷新，以及管理员按工具定义哈希审核执行策略；创建请求用 `transport` 区分 `streamable_http`/`sse`（URL + 可选 Bearer）与 `stdio`（命令、参数、工作目录和环境变量）
 - `backend/app/api/v1/endpoints/agents.py` — Agent CRUD、Run 提交/状态/工具账本、审批/拒绝与游标 NDJSON 订阅
 
 ### app/api/v1/admin/
@@ -55,5 +55,5 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/schemas/knowledge.py` — 知识库、文档、分块、解析参数、任务、批量创建、检索命中等请求/响应模型
 - `backend/app/schemas/agent.py` — Agent 创建/更新/响应与运行/计划/事件/流式响应模型
 - `backend/app/schemas/model.py` — LLM 供应商目录（model-types/base-models/credential-form）与已注册模型模型
-- `backend/app/schemas/mcp.py` — MCP Server 与工具列表的请求/响应模型
+- `backend/app/schemas/mcp.py` — MCP Server、三种传输互斥配置、stdio 配置与工具列表的请求/响应模型
 - `backend/app/schemas/audit.py` — 审计日志响应模型

@@ -120,29 +120,42 @@ const PROVIDER_DISPLAY_ORDER = [
 type ProviderBrandIcon = {
   Render: React.ComponentType<{ size?: number | string; className?: string }>
   Color?: React.ComponentType<{ size?: number | string; className?: string }>
+  className?: string
 }
 
 // Brand icons from @lobehub/icons, keyed by the catalog provider id.
 // Providers without a brand icon in the package keep the static icon
 // (`provider.icon`) or the initials fallback.
 const PROVIDER_BRAND_ICONS: Record<string, ProviderBrandIcon> = {
-  aliyun_bai_lian_model_provider: { Render: Bailian },
-  model_anthropic_provider: { Render: Anthropic },
-  model_aws_bedrock_provider: { Render: Bedrock },
-  model_azure_provider: { Render: Azure },
-  model_deepseek_provider: { Render: DeepSeek },
-  model_gemini_provider: { Render: Gemini },
-  model_kimi_provider: { Render: Moonshot },
-  model_ollama_provider: { Render: Ollama },
-  model_openai_provider: { Render: OpenAI },
-  model_tencent_cloud_provider: { Render: TencentCloud },
-  model_tencent_provider: { Render: Tencent },
-  model_vllm_provider: { Render: Vllm },
-  model_volcanic_engine_provider: { Render: Volcengine },
-  model_wenxin_provider: { Render: Wenxin },
-  model_xf_provider: { Render: IFlyTekCloud },
-  model_xinference_provider: { Render: Xinference },
-  model_zhipu_provider: { Render: Zhipu },
+  aliyun_bai_lian_model_provider: { Render: Bailian, Color: Bailian.Color },
+  model_anthropic_provider: {
+    Render: Anthropic,
+    className: "text-[#cc9b7a]",
+  },
+  model_aws_bedrock_provider: { Render: Bedrock, Color: Bedrock.Color },
+  model_azure_provider: { Render: Azure, Color: Azure.Color },
+  model_deepseek_provider: { Render: DeepSeek, Color: DeepSeek.Color },
+  model_gemini_provider: { Render: Gemini, Color: Gemini.Color },
+  model_kimi_provider: { Render: Moonshot, className: "text-[#007aff]" },
+  model_ollama_provider: { Render: Ollama, className: "text-[#7c3aed]" },
+  model_openai_provider: { Render: OpenAI, className: "text-[#10a37f]" },
+  model_tencent_cloud_provider: {
+    Render: TencentCloud,
+    Color: TencentCloud.Color,
+  },
+  model_tencent_provider: { Render: Tencent, Color: Tencent.Color },
+  model_vllm_provider: { Render: Vllm, Color: Vllm.Color },
+  model_volcanic_engine_provider: {
+    Render: Volcengine,
+    Color: Volcengine.Color,
+  },
+  model_wenxin_provider: { Render: Wenxin, Color: Wenxin.Color },
+  model_xf_provider: { Render: IFlyTekCloud, Color: IFlyTekCloud.Color },
+  model_xinference_provider: {
+    Render: Xinference,
+    Color: Xinference.Color,
+  },
+  model_zhipu_provider: { Render: Zhipu, Color: Zhipu.Color },
 }
 
 type ModelForm = {
@@ -867,7 +880,10 @@ function ProviderIcon({
       <span
         className={`flex shrink-0 items-center justify-center rounded-md border bg-white ${frameClassName}`}
       >
-        <Brand size={24} className="object-contain" />
+        <Brand
+          size={24}
+          className={`object-contain ${brand.className ?? ""}`}
+        />
       </span>
     )
   }

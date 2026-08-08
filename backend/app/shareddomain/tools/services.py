@@ -1,6 +1,7 @@
 import hashlib
 import json
 from dataclasses import dataclass
+from typing import cast
 
 from fastapi import HTTPException, status
 from mcp.types import Tool as McpTool
@@ -8,7 +9,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ports.mcp import (
+    McpConnection,
     McpClientError,
+    McpTransport,
     discover_mcp_tools,
     normalize_mcp_url,
 )
@@ -17,9 +20,18 @@ from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.repositories import mcp as mcp_repository
 from app.infrastructure.model_utils import utc_now
+from app.infrastructure.mcp_stdio import (
+    McpStdioConfig,
+    McpStdioConfigError,
+    parse_mcp_stdio_config,
+    serialize_mcp_stdio_config,
+)
 from app.infrastructure.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.infrastructure.validation import normalize_name
-from app.schemas.mcp import McpServerCreateRequest, McpServerResponse
+from app.schemas.mcp import (
+    McpServerCreateRequest,
+    McpServerResponse,
+)
 from app.shareddomain.audit.services import record_audit_log
 
 
@@ -58,14 +70,7 @@ def effective_mcp_tool_policy_mode(
             if policy.definition_hash == definition_hash
             else "approval_required"
         )
-    annotations = definition.annotations
-    return (
-        "read_only"
-        if annotations is not None
-        and annotations.read_only_hint is True
-        and annotations.destructive_hint is not True
-        else "approval_required"
-    )
+    return "approval_required"
 
 
 def _mcp_tool_definition(tool: dict) -> McpTool:
@@ -101,7 +106,9 @@ def mcp_server_to_response(
         id=server.id,
         workspace_id=server.workspace_id,
         name=server.name,
+        transport=server.transport,
         url=server.url,
+        stdio_command=server.stdio_command,
         tools=tools,
         status=server.status,
         has_bearer_token=server.bearer_token_ciphertext is not None,
@@ -117,6 +124,32 @@ def bearer_token(server: McpServer, settings: Settings) -> str | None:
     if server.bearer_token_ciphertext is None:
         return None
     return decrypt_secret(server.bearer_token_ciphertext, settings.model_secret_key)
+
+
+def stdio_config(server: McpServer, settings: Settings) -> McpStdioConfig | None:
+    if server.stdio_config_ciphertext is None:
+        return None
+    try:
+        return parse_mcp_stdio_config(
+            decrypt_secret(
+                server.stdio_config_ciphertext,
+                settings.model_secret_key,
+            )
+        )
+    except McpStdioConfigError as exc:
+        raise McpClientError("Stored MCP stdio configuration is invalid.") from exc
+
+
+def mcp_server_connection(
+    server: McpServer,
+    settings: Settings,
+) -> McpConnection:
+    return McpConnection(
+        transport=cast(McpTransport, server.transport),
+        url=server.url,
+        bearer_token=bearer_token(server, settings),
+        stdio_config=stdio_config(server, settings),
+    )
 
 
 async def list_mcp_servers(
@@ -156,22 +189,49 @@ async def create_mcp_server(
     settings: Settings,
 ) -> McpServerResponse:
     try:
-        url = normalize_mcp_url(payload.url)
         token = payload.bearer_token.strip() if payload.bearer_token else None
-        tools = await discover_mcp_tools(
-            url,
-            token,
-            settings.mcp_allow_private_networks,
-            settings.mcp_request_timeout_seconds,
+        url = (
+            normalize_mcp_url(
+                payload.url or "",
+                preserve_trailing_slash=payload.transport == "sse",
+            )
+            if payload.transport != "stdio"
+            else None
         )
-    except McpClientError as exc:
+        direct_stdio_config = (
+            parse_mcp_stdio_config(payload.stdio_config.model_dump())
+            if payload.transport == "stdio" and payload.stdio_config
+            else None
+        )
+        discovery = await discover_mcp_tools(
+            McpConnection(
+                transport=payload.transport,
+                url=url,
+                bearer_token=token,
+                stdio_config=direct_stdio_config,
+            ),
+            settings,
+        )
+    except (McpClientError, McpStdioConfigError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     server = McpServer(
         workspace_id=workspace_id,
         name=normalize_name(payload.name),
+        transport=payload.transport,
         url=url,
-        tools=tools,
+        stdio_command=(
+            direct_stdio_config.command if direct_stdio_config is not None else None
+        ),
+        stdio_config_ciphertext=(
+            encrypt_secret(
+                serialize_mcp_stdio_config(direct_stdio_config),
+                settings.model_secret_key,
+            )
+            if direct_stdio_config is not None
+            else None
+        ),
+        tools=discovery.tools,
         status="active",
         created_by_user_id=actor.id,
     )
@@ -187,7 +247,12 @@ async def create_mcp_server(
             "mcp_server",
             server.id,
             server.name,
-            {"url": server.url, "tool_count": len(server.tools)},
+            {
+                "transport": server.transport,
+                "url": server.url,
+                "stdio_command": server.stdio_command,
+                "tool_count": len(server.tools),
+            },
             workspace_id=workspace_id,
         )
         await db.commit()
@@ -209,12 +274,11 @@ async def refresh_mcp_server(
     settings: Settings,
 ) -> McpServerResponse:
     try:
-        server.tools = await discover_mcp_tools(
-            server.url,
-            bearer_token(server, settings),
-            settings.mcp_allow_private_networks,
-            settings.mcp_request_timeout_seconds,
+        discovery = await discover_mcp_tools(
+            mcp_server_connection(server, settings),
+            settings,
         )
+        server.tools = discovery.tools
         server.last_error = None
     except McpClientError as exc:
         server.last_error = str(exc)
@@ -229,7 +293,7 @@ async def refresh_mcp_server(
         "mcp_server",
         server.id,
         server.name,
-        {"tool_count": len(server.tools)},
+        {"transport": server.transport, "tool_count": len(server.tools)},
         workspace_id=server.workspace_id,
     )
     await mcp_repository.save_mcp_server(db, server)

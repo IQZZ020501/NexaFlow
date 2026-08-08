@@ -9,6 +9,7 @@
 - 权限先用 RBAC + 资源级授权，不先做复杂策略引擎。
 - 知识库向量能力使用 ChromaDB 持久化索引，PostgreSQL 保留文档、切片、任务、权限和审计等权威数据。
 - 工具先接入 Streamable HTTP MCP Server；stdio、OAuth 和内置代码执行先不做。
+  > 后续进展（2026-08-08）：已补充 legacy SSE 与由工作空间管理员直接配置、加密持久化的 stdio；stdio 管理权限仅适用于可信管理员。
 - 工作流第一版只做固定节点类型，不做拖拽画布。
 - Agent MVP 先保证查得准、答得有来源、权限不出错，不先做复杂多 Agent、自主长期规划、过度自动化。
 - Open API 先用租户级 API Key 和 OpenAPI 文档，不先做 OAuth、SDK、应用市场。

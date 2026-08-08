@@ -265,6 +265,35 @@ export function processTimeline(run: AgentRun) {
   return events.map((event) => ({ event, count: 1 }))
 }
 
+export function unrenderedAgentToolCalls(
+  timeline: ReturnType<typeof processTimeline>,
+  calls: AgentToolCall[]
+) {
+  const renderedCallIds = new Set(
+    timeline.map(({ event }) => event.call_id).filter(Boolean)
+  )
+  return calls.filter(
+    (call) =>
+      [
+        "pending",
+        "awaiting_approval",
+        "approved",
+        "running",
+        "uncertain",
+      ].includes(call.status) && !renderedCallIds.has(call.call_id)
+  )
+}
+
+export function collapsedProcessStatusKey(
+  runStatus: AgentRun["status"],
+  hasActiveToolCall: boolean,
+  isProcessOpen: boolean
+): "等待工具调用确认" | "执行过程" | null {
+  if (isProcessOpen) return null
+  if (runStatus === "awaiting_approval") return "等待工具调用确认"
+  return hasActiveToolCall ? "执行过程" : null
+}
+
 function CopyMessageButton({ value, t }: { value: string; t: TFunction }) {
   const [copied, setCopied] = React.useState(false)
   const label = t(copied ? "已复制" : "复制")
@@ -293,85 +322,103 @@ function CopyMessageButton({ value, t }: { value: string; t: TFunction }) {
   )
 }
 
-function ToolApprovalPanel({
-  run,
-  calls,
+function InlineToolApproval({
+  runId,
+  call,
   resolvingCallId,
   onDecision,
   t,
 }: {
-  run: AgentRun
-  calls: AgentToolCall[]
+  runId: string
+  call: AgentToolCall
   resolvingCallId: string | null
   onDecision: (callId: string, decision: "approve" | "reject") => void
   t: TFunction
 }) {
-  const pendingCalls = calls.filter((call) =>
-    ["awaiting_approval", "uncertain"].includes(call.status)
-  )
-  if (pendingCalls.length === 0) return null
+  const isUncertain = call.status === "uncertain"
+  const isResolving = resolvingCallId === `${runId}:${call.call_id}`
 
   return (
-    <div className="mb-4 space-y-3">
-      {pendingCalls.map((call) => {
-        const isUncertain = call.status === "uncertain"
-        const isResolving = resolvingCallId === `${run.id}:${call.call_id}`
-        return (
-          <section
-            key={`${call.turn}:${call.call_id}`}
-            className="rounded-lg border border-amber-600/30 bg-amber-500/5 p-3"
+    <section className="overflow-hidden rounded-lg border border-amber-600/30 bg-background/80">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400">
+          <ShieldAlertIcon className="size-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-medium text-foreground">
+            {t(isUncertain ? "工具执行结果不确定" : "工具调用需要确认")}
+          </p>
+          <p className="truncate text-[11px] text-muted-foreground">
+            {call.tool_name}
+            {call.server_name ? ` @ ${call.server_name}` : ""}
+          </p>
+        </div>
+        <div className="ml-auto flex shrink-0 gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            disabled={isResolving}
+            onClick={() => onDecision(call.call_id, "reject")}
           >
-            <div className="flex items-start gap-2">
-              <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-400" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">
-                  {t(isUncertain ? "工具执行结果不确定" : "工具调用需要确认")}
-                </p>
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {call.tool_name}
-                  {call.server_name ? ` @ ${call.server_name}` : ""}
-                </p>
-              </div>
-            </div>
-            {call.last_error ? (
-              <p className="mt-3 text-xs leading-5 text-muted-foreground">
-                {call.last_error}
-              </p>
-            ) : null}
-            <pre className="mt-3 max-h-40 overflow-auto rounded-md border bg-background p-3 text-xs leading-5 break-words whitespace-pre-wrap">
-              {JSON.stringify(call.arguments, null, 2)}
-            </pre>
-            <div className="mt-3 flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isResolving}
-                onClick={() => onDecision(call.call_id, "reject")}
-              >
-                {isResolving ? (
-                  <LoaderCircleIcon className="animate-spin" />
-                ) : null}
-                {t(isUncertain ? "不重试并继续" : "拒绝")}
-              </Button>
-              {!isUncertain ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={isResolving}
-                  onClick={() => onDecision(call.call_id, "approve")}
-                >
-                  {isResolving ? (
-                    <LoaderCircleIcon className="animate-spin" />
-                  ) : null}
-                  {t("批准并执行")}
-                </Button>
+            {isResolving ? <LoaderCircleIcon className="animate-spin" /> : null}
+            {t(isUncertain ? "不重试并继续" : "拒绝")}
+          </Button>
+          {!isUncertain ? (
+            <Button
+              type="button"
+              size="xs"
+              disabled={isResolving}
+              onClick={() => onDecision(call.call_id, "approve")}
+            >
+              {isResolving ? (
+                <LoaderCircleIcon className="animate-spin" />
               ) : null}
-            </div>
-          </section>
-        )
-      })}
-    </div>
+              {t("批准并执行")}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      {call.last_error ? (
+        <p className="border-t px-3 py-2 text-xs leading-5 text-muted-foreground">
+          {call.last_error}
+        </p>
+      ) : null}
+      <pre className="max-h-28 overflow-auto border-t bg-muted/20 px-3 py-2 font-mono text-[11px] leading-4 break-words whitespace-pre-wrap">
+        {JSON.stringify(call.arguments, null, 2)}
+      </pre>
+    </section>
+  )
+}
+
+function PendingToolEvent({
+  call,
+  run,
+  t,
+}: {
+  call: AgentToolCall
+  run: AgentRun
+  t: TFunction
+}) {
+  return (
+    <ToolEventDetails
+      event={{
+        type: "tool",
+        turn: call.turn,
+        tool_name: call.tool_name,
+        status: "running",
+        summary: "agent.tool_running",
+        call_id: call.call_id,
+        tool_label: call.tool_name,
+        tool_kind: call.tool_kind,
+        server_name: call.server_name,
+        input: call.arguments,
+        output: null,
+        duration_ms: 0,
+      }}
+      run={run}
+      t={t}
+    />
   )
 }
 
@@ -393,9 +440,20 @@ function RunExchange({
   t: TFunction
 }) {
   const timeline = processTimeline(run)
-  const hasProcess = timeline.length > 0
-  const answer = run.result
+  const inlineToolCalls = unrenderedAgentToolCalls(timeline, toolCalls)
+  const hasProcess = timeline.length > 0 || inlineToolCalls.length > 0
+  const hasActiveToolCall =
+    inlineToolCalls.length > 0 ||
+    timeline.some(
+      ({ event }) => event.type === "tool" && event.status === "running"
+    )
   const [isProcessOpen, setIsProcessOpen] = React.useState(true)
+  const collapsedProcessStatus = collapsedProcessStatusKey(
+    run.status,
+    hasActiveToolCall,
+    isProcessOpen
+  )
+  const answer = run.result
   return (
     <article className="flex flex-col gap-5">
       <div className="ml-auto flex max-w-[88%] flex-col items-end gap-1">
@@ -410,15 +468,6 @@ function RunExchange({
         </span>
         <div className="min-w-0 flex-1">
           <div className="rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
-            <ToolApprovalPanel
-              run={run}
-              calls={toolCalls}
-              resolvingCallId={resolvingCallId}
-              onDecision={(callId, decision) =>
-                onToolCallDecision(run.id, callId, decision)
-              }
-              t={t}
-            />
             {hasProcess ? (
               <details
                 className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
@@ -460,6 +509,27 @@ function RunExchange({
                       </div>
                     )
                   )}
+                  {inlineToolCalls.map((call) =>
+                    ["awaiting_approval", "uncertain"].includes(call.status) ? (
+                      <InlineToolApproval
+                        key={call.call_id}
+                        runId={run.id}
+                        call={call}
+                        resolvingCallId={resolvingCallId}
+                        onDecision={(callId, decision) =>
+                          onToolCallDecision(run.id, callId, decision)
+                        }
+                        t={t}
+                      />
+                    ) : (
+                      <PendingToolEvent
+                        key={call.call_id}
+                        call={call}
+                        run={run}
+                        t={t}
+                      />
+                    )
+                  )}
                 </div>
               </details>
             ) : null}
@@ -470,9 +540,12 @@ function RunExchange({
               <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                 {run.last_error ?? t("Agent 未返回结果")}
               </p>
-            ) : run.status === "awaiting_approval" ? (
+            ) : (run.status === "awaiting_approval" || hasActiveToolCall) &&
+              isProcessOpen ? (
+              null
+            ) : collapsedProcessStatus ? (
               <p className="text-sm text-muted-foreground">
-                {t("等待工具调用确认")}
+                {t(collapsedProcessStatus)}
               </p>
             ) : run.status === "queued" ? (
               <p className="text-sm text-muted-foreground">{t("等待执行")}</p>
