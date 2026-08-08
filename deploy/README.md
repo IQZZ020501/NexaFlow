@@ -104,13 +104,15 @@ their encrypted configuration, so they must also be recreated after re-upgrade.
   and Redis for checkpoint, approval, lease recovery, and short-lived answer
   delta delivery. Redis live-stream failure degrades to the durable terminal
   answer rather than failing the Run.
-- Newly discovered MCP tools auto-run as `read_only` only when they declare
-  `readOnlyHint=true` without a destructive hint. Unknown or potentially
-  destructive tools default to per-call approval. Workspace admins can override
-  each tool to read-only, per-call approval, or disabled; a changed tool
-  definition invalidates an existing policy and falls back to approval.
+- Newly discovered MCP tools default to per-call approval. Workspace admins can
+  explicitly set each tool to read-only, per-call approval, or disabled; server
+  annotations such as `readOnlyHint=true` do not bypass approval on their own.
+  A changed tool definition invalidates an existing policy and falls back to
+  approval.
 - Restrict backend filesystem/network access and process counts at the container
-  or service-manager boundary. A hard host/process crash is outside cooperative
-  stdio cleanup and must be contained by the runtime's process namespace/cgroup.
+  or service-manager boundary, including process namespaces/cgroups that limit
+  child processes and resource usage. Cooperative stdio cleanup handles normal
+  child-process teardown but cannot isolate host-level crashes; host crashes
+  require separate host-level isolation.
 - Kubernetes/Helm deployment is not included yet; the compose topology is the
   reference for a future chart.

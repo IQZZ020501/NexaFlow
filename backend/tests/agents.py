@@ -2152,7 +2152,7 @@ def main() -> None:
             assert mcp_server_data["stdio_command"] is None
             assert mcp_server_data["has_bearer_token"] is True
             assert "bearer_token" not in mcp_server_data
-            assert mcp_server_data["tools"][0]["policy_mode"] == "read_only"
+            assert mcp_server_data["tools"][0]["policy_mode"] == "approval_required"
             assert len(mcp_server_data["tools"][0]["definition_hash"]) == 64
 
             sse_server = client.post(
@@ -2192,15 +2192,27 @@ def main() -> None:
             mcp_agent_data = mcp_agent.json()
             assert mcp_agent_data["mcp_tools"][0]["tool_name"] == "lookup_release"
 
-            annotated_read_only_question = client.post(
+            unconfigured_question = client.post(
                 agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
                 headers=auth_headers(admin_token),
-                json={"goal": "Check the release with its read-only annotation"},
+                json={"goal": "Check the release without an explicit tool policy"},
             )
             assert (
-                annotated_read_only_question.status_code == 201
-            ), annotated_read_only_question.text
-            assert annotated_read_only_question.json()["status"] == "succeeded"
+                unconfigured_question.status_code == 201
+            ), unconfigured_question.text
+            unconfigured_run = unconfigured_question.json()
+            assert unconfigured_run["status"] == "awaiting_approval"
+            assert len(mcp_calls) == 0
+
+            unconfigured_approval = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{mcp_agent_data['id']}/runs/{unconfigured_run['id']}/tool-calls/call-mcp/approve",
+                ),
+                headers=auth_headers(admin_token),
+            )
+            assert unconfigured_approval.status_code == 200, unconfigured_approval.text
+            assert unconfigured_approval.json()["status"] == "succeeded"
             assert len(mcp_calls) == 1
 
             initial_approval_policy = client.put(

@@ -666,7 +666,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
     assert mcp_function_name(tool) == name
     built = build_mcp_agent_tool(tool, SimpleNamespace())
     assert built.metadata is not None
-    assert built.metadata["policy_mode"] == "read_only"
+    assert built.metadata["policy_mode"] == "approval_required"
 
 
 def test_run_to_response_maps_run_fields() -> None:
@@ -753,7 +753,7 @@ def test_mcp_server_to_response() -> None:
     assert response.tools[1].policy_mode == "approval_required"
 
     response = mcp_server_to_response(server)
-    assert response.tools[0].policy_mode == "read_only"
+    assert response.tools[0].policy_mode == "approval_required"
     assert response.tools[1].policy_mode == "approval_required"
     assert (
         effective_mcp_tool_policy_mode(
@@ -766,6 +766,15 @@ def test_mcp_server_to_response() -> None:
         )
         == "approval_required"
     )
+    read_only_policy = McpToolPolicy(
+        workspace_id="ws-1",
+        mcp_server_id="mcp-1",
+        tool_name="search",
+        definition_hash=response.tools[0].definition_hash,
+        mode="read_only",
+    )
+    response = mcp_server_to_response(server, [read_only_policy])
+    assert response.tools[0].policy_mode == "read_only"
     assert response.tools[0].definition_hash == mcp_tool_definition_hash(
         McpTool(
             name="search",
