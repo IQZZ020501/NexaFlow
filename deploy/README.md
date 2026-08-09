@@ -25,6 +25,9 @@ docker compose -f deploy/docker-compose.yml up --build
 | `beat` | same backend image | celery beat |
 | `frontend` | `deploy/dockerfiles/frontend.Dockerfile` | Next.js standalone |
 
+The backend image includes Tesseract Chinese and English language data for
+PyMuPDF PDF/image OCR fallback.
+
 Persistent volumes: `db-data` (PostgreSQL), `redis-data`, `qdrant-data`, and
 `uploads` (shared `KNOWLEDGE_STORAGE_DIR` for the API and worker).
 
