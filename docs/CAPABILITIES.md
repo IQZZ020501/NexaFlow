@@ -27,4 +27,4 @@
 
 ### embedding/（文档解析管道）
 
-- `backend/app/capabilities/embedding/pipeline.py` — 文档解析管道：MarkItDown 文本抽取、清洗、平铺分块、Markdown 章节 Parent/Child 分块、精确字符偏移与 token 统计
+- `backend/app/capabilities/embedding/pipeline.py` — 文档解析管道：DOCX 经 Mammoth 提取文本与内嵌图片资产，其余格式经 MarkItDown 文本抽取；清洗、平铺分块、Markdown 章节 Parent/Child 分块、精确字符偏移与 token 统计
