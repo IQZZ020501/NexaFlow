@@ -101,10 +101,6 @@ import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dial
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import {
-  getDocumentFileIcon,
-  getDocumentFileIconColor,
-} from "@/components/knowledge/document-file-icon"
-import {
   documentStatusDotClassName,
   documentStatusLabel,
   formatBytes,
@@ -1440,16 +1436,7 @@ function KnowledgeBasePageContent({
                             </label>
                             <div className="min-w-0 pr-3">
                               <div className="flex min-w-0 items-center gap-2">
-                                {React.createElement(
-                                  getDocumentFileIcon(document.filename),
-                                  {
-                                    "aria-hidden": true,
-                                    className: cn(
-                                      "size-4 shrink-0 text-base leading-none",
-                                      getDocumentFileIconColor(document.filename),
-                                    ),
-                                  },
-                                )}
+                                <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
                                 <button
                                   type="button"
                                   className="min-w-0 cursor-pointer truncate text-left font-medium outline-none hover:text-primary focus-visible:underline"

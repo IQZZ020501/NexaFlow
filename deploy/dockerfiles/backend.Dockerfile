@@ -11,14 +11,6 @@ COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --no-dev --frozen
 
 FROM base
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        tesseract-ocr \
-        tesseract-ocr-chi-sim \
-        tesseract-ocr-chi-tra \
-        tesseract-ocr-eng \
-    && rm -rf /var/lib/apt/lists/*
-ENV TESSDATA_PREFIX="/usr/share/tesseract-ocr/5/tessdata"
 COPY --from=builder /app/.venv /app/.venv
 COPY backend/app ./app
 COPY backend/alembic ./alembic

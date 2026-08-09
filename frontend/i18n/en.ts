@@ -406,7 +406,6 @@ export const en = {
     "已删除 {value} 个文档": "Deleted {value} documents",
     "已向量化": "Indexed",
     "已忽略不支持的文件格式": "Ignored unsupported file formats",
-    "支持格式：{value}": "Supported formats: {value}",
     "已提交 {value} 个向量化任务": "Submitted {value} indexing tasks",
     "已提交 {value} 个向量化任务，{value} 个提交失败": "Submitted {value} indexing tasks, {value} failed to submit",
     "已提交向量化任务": "Indexing task submitted",

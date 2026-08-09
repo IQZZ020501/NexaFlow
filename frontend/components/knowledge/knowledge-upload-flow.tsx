@@ -86,27 +86,7 @@ const UNINDEXED_STATUSES: Record<string, true> = {
   parsed: true,
   parse_failed: true,
 }
-export const SUPPORTED_FILE_TYPES = [
-  ".docx",
-  ".md",
-  ".markdown",
-  ".pdf",
-  ".txt",
-  ".pptx",
-  ".xlsx",
-  ".xls",
-  ".html",
-  ".csv",
-  ".json",
-  ".xml",
-  ".ipynb",
-  ".epub",
-  ".zip",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".webp",
-]
+const SUPPORTED_FILE_TYPES = [".docx", ".md", ".markdown", ".pdf", ".txt"]
 const SMART_CHUNK_SIZE = DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.chunkSize
 const SMART_CHUNK_OVERLAP =
   DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.chunkOverlap
@@ -200,9 +180,6 @@ export function KnowledgeUploadFlow({
     uploadedDocuments[0] ??
     null
   const selectedFileBytes = files.reduce((total, file) => total + file.size, 0)
-  const supportedFileTypesLabel = SUPPORTED_FILE_TYPES.map((extension) =>
-    extension.slice(1).toUpperCase(),
-  ).join(t("列表分隔符"))
   const hasPendingParsing = uploadedDocuments.some((document) =>
     document.status in PARSING_STATUSES,
   )
@@ -1016,11 +993,6 @@ export function KnowledgeUploadFlow({
                       {t(
                         "保留文档标题和段落结构，表格会在预览阶段转换为 Markdown。",
                       )}
-                    </p>
-                    <p className="mx-auto max-w-3xl text-xs leading-5 text-muted-foreground">
-                      {t("支持格式：{value}", {
-                        value: supportedFileTypesLabel,
-                      })}
                     </p>
                   </div>
                   <div className="mt-6 flex flex-wrap items-center justify-center gap-2">

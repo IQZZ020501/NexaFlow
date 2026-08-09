@@ -3,35 +3,10 @@ import { describe, expect, test } from "bun:test"
 import {
   appendKnowledgeUploadFiles,
   resolveSelectedDocumentId,
-  SUPPORTED_FILE_TYPES,
 } from "../components/knowledge/knowledge-upload-flow"
 import { MAX_KNOWLEDGE_UPLOAD_DOCUMENTS } from "../lib/knowledge-upload-route"
 
 describe("knowledge upload preview selection", () => {
-  test("accepts the supported document formats", () => {
-    expect(SUPPORTED_FILE_TYPES).toEqual([
-      ".docx",
-      ".md",
-      ".markdown",
-      ".pdf",
-      ".txt",
-      ".pptx",
-      ".xlsx",
-      ".xls",
-      ".html",
-      ".csv",
-      ".json",
-      ".xml",
-      ".ipynb",
-      ".epub",
-      ".zip",
-      ".png",
-      ".jpg",
-      ".jpeg",
-      ".webp",
-    ])
-  })
-
   test("keeps an available selection and falls back after removal", () => {
     const documents = [{ id: "second" }, { id: "third" }]
 
