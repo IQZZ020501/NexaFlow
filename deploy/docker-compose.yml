@@ -1,6 +1,9 @@
 services:
   db:
     image: postgres:17-alpine
+    container_name: nexaflow-db
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-app}
       POSTGRES_USER: ${POSTGRES_USER:-app}
@@ -15,6 +18,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    container_name: nexaflow-redis
+    ports:
+      - "6379:6379"
     volumes:
       - ./data/redis:/data
     healthcheck:
@@ -25,6 +31,9 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.19.0
+    container_name: nexaflow-qdrant
+    ports:
+      - "6333:6333"
     volumes:
       - ./data/qdrant:/qdrant/storage
     healthcheck:
