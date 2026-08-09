@@ -309,11 +309,8 @@ export function LlmPage() {
     async (provider: string, modelType: string) => {
       const requestId = ++baseModelRequestId.current
       setBaseModels([])
-      if (!provider || !modelType) {
-        return []
-      }
-
-      if (!token) {
+      if (!provider || !modelType || !token) {
+        setIsBaseModelsLoading(false)
         return []
       }
 
