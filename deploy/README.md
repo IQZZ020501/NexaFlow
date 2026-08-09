@@ -13,6 +13,22 @@ docker compose -f deploy/docker-compose.yml up --build
 - API: http://localhost:8000 (`/health`, `/api/v1/...`)
 - Frontend: http://localhost:3000
 
+## Local development (infrastructure only)
+
+To run only PostgreSQL, Redis, and Qdrant (while running the backend and
+frontend directly on the host, e.g. `make dev` + `bun dev`), use the dev
+override. It publishes `5432`/`6379`/`6333` to the host and pins readable
+container names (`nexaflow-db`, `nexaflow-redis`, `nexaflow-qdrant`):
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d db redis qdrant
+```
+
+Point `backend/.env` at the published endpoints
+(`postgresql+psycopg://nexaflow:nexaflow@localhost:5432/nexaflow`,
+`redis://localhost:6379/0`, `http://127.0.0.1:6333`) and run migrations with
+`cd backend && uv run python -m alembic upgrade head`.
+
 ## Services
 
 | Service | Image / build | Command |
