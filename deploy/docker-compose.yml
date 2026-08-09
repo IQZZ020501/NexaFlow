@@ -1,18 +1,12 @@
 services:
   db:
     image: postgres:17-alpine
-    # Optional: expose the app's own DATABASE_URL (backend/.env) so the
-    # first-boot init script provisions the role/database the app expects.
-    env_file:
-      - path: ../backend/.env
-        required: false
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
       POSTGRES_USER: ${POSTGRES_USER:-nexaflow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexaflow}
     volumes:
       - ./data/postgresql:/var/lib/postgresql/data
-      - ./db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexaflow} -d ${POSTGRES_DB:-nexaflow}"]
       interval: 5s

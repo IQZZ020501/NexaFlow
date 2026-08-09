@@ -1,4 +1,0 @@
-# Shell scripts must stay LF-terminated: the postgres docker entrypoint
-# executes /docker-entrypoint-initdb.d scripts from a bind mount, where CRLF
-# line endings would break the shebang.
-*.sh text eol=lf
