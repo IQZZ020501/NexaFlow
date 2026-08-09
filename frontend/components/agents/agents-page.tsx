@@ -56,6 +56,10 @@ import {
 import { listKnowledgeBases, type KnowledgeBase } from "@/lib/api/knowledge"
 import { listRegisteredModels, type RegisteredModel } from "@/lib/api/llm"
 import { listMcpServers, type McpServer } from "@/lib/api/mcp"
+import {
+  CARD_BATCH_SIZE,
+  useInfiniteScroll,
+} from "@/lib/use-infinite-scroll"
 import { getErrorMessage } from "@/lib/errors"
 
 export type AgentFormState = {
@@ -309,6 +313,9 @@ export function AgentsPage() {
   const [isSaving, setIsSaving] = React.useState(false)
   const [isAsking, setIsAsking] = React.useState(false)
   const [agentSearch, setAgentSearch] = React.useState("")
+  const [agentsHasMore, setAgentsHasMore] = React.useState(true)
+  const [isAgentsLoadingMore, setIsAgentsLoadingMore] = React.useState(false)
+  const agentsLoadingMoreRef = React.useRef(false)
   const [hasLoadedWorkspaceData, setHasLoadedWorkspaceData] =
     React.useState(false)
 
@@ -384,12 +391,16 @@ export function AgentsPage() {
     try {
       const [nextAgents, nextModels, nextKnowledgeBases, nextMcpServers] =
         await Promise.all([
-          listAgents(token, selectedWorkspaceId),
+          listAgents(token, selectedWorkspaceId, {
+            limit: CARD_BATCH_SIZE,
+            offset: 0,
+          }),
           listRegisteredModels(token, selectedWorkspaceId),
           listKnowledgeBases(token, selectedWorkspaceId),
           listMcpServers(token, selectedWorkspaceId),
         ])
       setAgents(nextAgents)
+      setAgentsHasMore(nextAgents.length === CARD_BATCH_SIZE)
       setModels(nextModels)
       setKnowledgeBases(nextKnowledgeBases)
       setMcpServers(nextMcpServers)
@@ -404,6 +415,32 @@ export function AgentsPage() {
       setHasLoadedWorkspaceData(true)
     }
   }, [reportError, selectedWorkspaceId, token])
+
+  const loadMoreAgents = React.useCallback(async () => {
+    if (!token || !selectedWorkspaceId) {
+      return
+    }
+    if (agentsLoadingMoreRef.current || !agentsHasMore) {
+      return
+    }
+    agentsLoadingMoreRef.current = true
+    setIsAgentsLoadingMore(true)
+    try {
+      const batch = await listAgents(token, selectedWorkspaceId, {
+        limit: CARD_BATCH_SIZE,
+        offset: agents.length,
+      })
+      setAgents((current) => [...current, ...batch])
+      setAgentsHasMore(batch.length === CARD_BATCH_SIZE)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      agentsLoadingMoreRef.current = false
+      setIsAgentsLoadingMore(false)
+    }
+  }, [agents.length, agentsHasMore, reportError, selectedWorkspaceId, token])
+
+  const agentsListEndRef = useInfiniteScroll(loadMoreAgents)
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -845,8 +882,9 @@ export function AgentsPage() {
           {t("没有匹配的 Agent")}
         </div>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {filteredAgents.map((agent) => (
+        <>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {filteredAgents.map((agent) => (
             <div
               key={agent.id}
               role="button"
@@ -922,6 +960,20 @@ export function AgentsPage() {
             </div>
           ))}
         </div>
+        <div
+          ref={agentsListEndRef}
+          className="flex min-h-12 items-center justify-center gap-2 py-3 text-sm text-muted-foreground"
+        >
+          {isAgentsLoadingMore ? (
+            <>
+              <LoaderCircleIcon className="size-4 animate-spin" />
+              {t("正在加载")}
+            </>
+          ) : agents.length > 0 && !agentsHasMore ? (
+            t("已加载全部")
+          ) : null}
+          </div>
+        </>
       )}
 
       {renderAgentDialog()}

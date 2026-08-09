@@ -1,4 +1,4 @@
-import { ApiError, request, requestBlob } from "@/lib/api-client"
+import { ApiError, listQuery, request, requestBlob } from "@/lib/api-client"
 import type { User } from "@/lib/api/auth"
 
 export type { User } from "@/lib/api/auth"
@@ -151,9 +151,13 @@ export type KnowledgeModelTestResult = {
   reranker_results: number
 }
 
-export function listKnowledgeBases(token: string, workspaceId: string) {
+export function listKnowledgeBases(
+  token: string,
+  workspaceId: string,
+  options: { limit?: number; offset?: number } = {},
+) {
   return request<KnowledgeBaseListItem[]>(
-    `/api/v1/workspaces/${workspaceId}/knowledge-bases`,
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases${listQuery(options)}`,
     { token },
   )
 }

@@ -10,6 +10,8 @@ import {
   ArrowUpDownIcon,
   ArrowUpIcon,
   BookOpenTextIcon,
+  CheckIcon,
+  ChevronDownIcon,
   CircleCheckIcon,
   DatabaseIcon,
   DownloadIcon,
@@ -34,6 +36,10 @@ import type { AppNotification } from "@/lib/notifications"
 import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
 import { isEventFromDropdownMenu } from "@/lib/dom"
+import {
+  CARD_BATCH_SIZE,
+  useInfiniteScroll,
+} from "@/lib/use-infinite-scroll"
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
@@ -152,7 +158,20 @@ const PROCESSING_DOCUMENT_STATUSES: Record<string, true> = {
   indexing: true,
 }
 
-const DOCUMENT_PAGE_SIZE = 20
+export const DOCUMENT_PAGE_SIZES = [10, 20, 50, 100] as const
+export type DocumentPageSize = (typeof DOCUMENT_PAGE_SIZES)[number]
+
+export function paginateDocuments<T>(
+  items: readonly T[],
+  page: number,
+  pageSize: number,
+): T[] {
+  return items.slice((page - 1) * pageSize, page * pageSize)
+}
+
+export function documentPageCount(total: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(total / pageSize))
+}
 
 const SMART_CHUNK_SIZE = 1200
 const SMART_CHUNK_OVERLAP = 150
@@ -250,6 +269,11 @@ function KnowledgeBasePageContent({
   const [knowledgeBases, setKnowledgeBases] = React.useState<
     KnowledgeBaseListItem[]
   >([])
+  const [knowledgeBasesHasMore, setKnowledgeBasesHasMore] =
+    React.useState(true)
+  const [isKnowledgeBasesLoadingMore, setIsKnowledgeBasesLoadingMore] =
+    React.useState(false)
+  const knowledgeBasesLoadingRef = React.useRef(false)
   const [documents, setDocuments] = React.useState<KnowledgeDocument[]>([])
   const [knowledgeTasks, setKnowledgeTasks] = React.useState<KnowledgeTask[]>(
     []
@@ -266,6 +290,8 @@ function KnowledgeBasePageContent({
   const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
   const [documentSearch, setDocumentSearch] = React.useState("")
   const [documentPage, setDocumentPage] = React.useState(1)
+  const [documentPageSize, setDocumentPageSize] =
+    React.useState<DocumentPageSize>(10)
   const [documentSortKey, setDocumentSortKey] =
     React.useState<DocumentSortKey>("created_at")
   const [documentSortDirection, setDocumentSortDirection] = React.useState<
@@ -379,13 +405,14 @@ function KnowledgeBasePageContent({
     selectedDocumentIds.includes(document.id)
   )
   const selectedDocumentCount = selectedDocuments.length
-  const visibleDocuments = filteredDocuments.slice(
-    (documentPage - 1) * DOCUMENT_PAGE_SIZE,
-    documentPage * DOCUMENT_PAGE_SIZE
+  const visibleDocuments = paginateDocuments(
+    filteredDocuments,
+    documentPage,
+    documentPageSize,
   )
-  const documentPageCount = Math.max(
-    1,
-    Math.ceil(filteredDocuments.length / DOCUMENT_PAGE_SIZE)
+  const documentTotalPages = documentPageCount(
+    filteredDocuments.length,
+    documentPageSize,
   )
   const isAllFilteredDocumentsSelected =
     visibleDocuments.length > 0 &&
@@ -419,22 +446,60 @@ function KnowledgeBasePageContent({
       return
     }
 
+    knowledgeBasesLoadingRef.current = true
     setIsLoading(true)
     try {
       const [knowledgeBases, models] = await Promise.all([
-        listKnowledgeBases(token, selectedWorkspaceId),
+        listKnowledgeBases(token, selectedWorkspaceId, {
+          limit: CARD_BATCH_SIZE,
+          offset: 0,
+        }),
         listRegisteredModels(token, selectedWorkspaceId),
       ])
       setKnowledgeBases(knowledgeBases)
+      setKnowledgeBasesHasMore(knowledgeBases.length === CARD_BATCH_SIZE)
       setRegisteredModels(models)
     } catch (error) {
       setKnowledgeBases([])
       setRegisteredModels([])
       reportError(error)
     } finally {
+      knowledgeBasesLoadingRef.current = false
       setIsLoading(false)
     }
   }, [reportError, selectedWorkspaceId, token])
+
+  const loadMoreKnowledgeBases = React.useCallback(async () => {
+    if (!selectedWorkspaceId) {
+      return
+    }
+    if (knowledgeBasesLoadingRef.current || !knowledgeBasesHasMore) {
+      return
+    }
+    knowledgeBasesLoadingRef.current = true
+    setIsKnowledgeBasesLoadingMore(true)
+    try {
+      const batch = await listKnowledgeBases(token, selectedWorkspaceId, {
+        limit: CARD_BATCH_SIZE,
+        offset: knowledgeBases.length,
+      })
+      setKnowledgeBases((current) => [...current, ...batch])
+      setKnowledgeBasesHasMore(batch.length === CARD_BATCH_SIZE)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      knowledgeBasesLoadingRef.current = false
+      setIsKnowledgeBasesLoadingMore(false)
+    }
+  }, [
+    knowledgeBases.length,
+    knowledgeBasesHasMore,
+    reportError,
+    selectedWorkspaceId,
+    token,
+  ])
+
+  const knowledgeBasesListEndRef = useInfiniteScroll(loadMoreKnowledgeBases)
 
   const loadDocuments = React.useCallback(async (silent = false) => {
     if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
@@ -549,7 +614,7 @@ function KnowledgeBasePageContent({
 
   const cancelUpload = React.useCallback(() => {
     if (selectedKnowledgeBaseId) {
-      router.push(`/app/knowledge/${selectedKnowledgeBaseId}`)
+      router.replace(`/app/knowledge/${selectedKnowledgeBaseId}`)
     }
   }, [router, selectedKnowledgeBaseId])
 
@@ -564,18 +629,14 @@ function KnowledgeBasePageContent({
         routeState.documentIds,
         routeState.parseSettings
       )
-      if (uploadStep === "segment") {
-        router.replace(path)
-      } else {
-        router.push(path)
-      }
+      router.replace(path)
     },
-    [router, selectedKnowledgeBaseId, uploadStep]
+    [router, selectedKnowledgeBaseId]
   )
 
   const backToUploadFiles = React.useCallback(() => {
     if (selectedKnowledgeBaseId) {
-      router.push(knowledgeUploadPath(selectedKnowledgeBaseId))
+      router.replace(knowledgeUploadPath(selectedKnowledgeBaseId))
     }
   }, [router, selectedKnowledgeBaseId])
 
@@ -1145,7 +1206,7 @@ function KnowledgeBasePageContent({
         onDone={() => {
           setActiveDetailTab("documents")
           void Promise.all([loadDocuments(), loadKnowledgeTasks()])
-          router.push(`/app/knowledge/${selectedKnowledgeBase.id}`)
+          router.replace(`/app/knowledge/${selectedKnowledgeBase.id}`)
         }}
         onNotify={notify}
       />
@@ -1616,11 +1677,47 @@ function KnowledgeBasePageContent({
                       )}
                     </div>
                   </div>
-                  {filteredDocuments.length > DOCUMENT_PAGE_SIZE ? (
+                  {filteredDocuments.length > documentPageSize ? (
                     <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
-                      <span className="text-muted-foreground">
-                        {t("共 {value} 条", { value: filteredDocuments.length })}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">
+                          {t("共 {value} 条", { value: filteredDocuments.length })}
+                        </span>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 justify-between gap-2"
+                            >
+                              <span>
+                                {t("每页 {value} 条", {
+                                  value: documentPageSize,
+                                })}
+                              </span>
+                              <ChevronDownIcon className="size-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-36">
+                            {DOCUMENT_PAGE_SIZES.map((pageSize) => (
+                              <DropdownMenuItem
+                                key={pageSize}
+                                className="justify-between"
+                                onSelect={() => {
+                                  setDocumentPageSize(pageSize)
+                                  setDocumentPage(1)
+                                }}
+                              >
+                                {t("每页 {value} 条", { value: pageSize })}
+                                {documentPageSize === pageSize ? (
+                                  <CheckIcon className="size-3.5 text-primary" />
+                                ) : null}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                       <div className="flex items-center gap-2">
                         <Button
                           type="button"
@@ -1634,16 +1731,16 @@ function KnowledgeBasePageContent({
                           {t("上一页")}
                         </Button>
                         <span className="text-muted-foreground">
-                          {documentPage} / {documentPageCount}
+                          {documentPage} / {documentTotalPages}
                         </span>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          disabled={documentPage >= documentPageCount}
+                          disabled={documentPage >= documentTotalPages}
                           onClick={() =>
                             setDocumentPage((current) =>
-                              Math.min(documentPageCount, current + 1)
+                              Math.min(documentTotalPages, current + 1)
                             )
                           }
                         >
@@ -2438,6 +2535,19 @@ function KnowledgeBasePageContent({
                   {t("没有匹配的知识库")}
                 </div>
               )}
+              <div
+                ref={knowledgeBasesListEndRef}
+                className="flex min-h-12 items-center justify-center gap-2 py-3 text-sm text-muted-foreground"
+              >
+                {isKnowledgeBasesLoadingMore ? (
+                  <>
+                    <LoaderCircleIcon className="size-4 animate-spin" />
+                    {t("正在加载")}
+                  </>
+                ) : knowledgeBases.length > 0 && !knowledgeBasesHasMore ? (
+                  t("已加载全部")
+                ) : null}
+              </div>
             </>
           ) : (
             <div className="mx-auto flex min-h-[320px] max-w-xl flex-col items-center justify-center gap-4 p-6 text-center">

@@ -1,4 +1,4 @@
-import { request } from "@/lib/api-client"
+import { listQuery, request } from "@/lib/api-client"
 
 export type McpTool = {
   name: string
@@ -51,8 +51,14 @@ function mcpPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/mcp-servers${suffix}`
 }
 
-export function listMcpServers(token: string, workspaceId: string) {
-  return request<McpServer[]>(mcpPath(workspaceId), { token })
+export function listMcpServers(
+  token: string,
+  workspaceId: string,
+  options: { limit?: number; offset?: number } = {},
+) {
+  return request<McpServer[]>(`${mcpPath(workspaceId)}${listQuery(options)}`, {
+    token,
+  })
 }
 
 export function createMcpServer(

@@ -73,6 +73,10 @@ import type {
   RegisteredModel,
 } from "@/lib/api/llm"
 import type { TFunction, TranslationKey } from "@/i18n"
+import {
+  CARD_BATCH_SIZE,
+  useInfiniteScroll,
+} from "@/lib/use-infinite-scroll"
 
 const MODEL_TYPE_LABELS: Record<string, TranslationKey> = {
   LLM: "大语言模型",
@@ -190,6 +194,9 @@ export function LlmPage() {
     ModelProviderCatalog[]
   >([])
   const [models, setModels] = React.useState<RegisteredModel[]>([])
+  const [modelsHasMore, setModelsHasMore] = React.useState(true)
+  const [isModelsLoadingMore, setIsModelsLoadingMore] = React.useState(false)
+  const modelsLoadingRef = React.useRef(false)
   const [baseModels, setBaseModels] = React.useState<BaseModelOption[]>([])
   const [credentialFields, setCredentialFields] = React.useState<
     ModelCredentialField[]
@@ -254,15 +261,48 @@ export function LlmPage() {
     }
 
     setIsModelsLoading(true)
+    modelsLoadingRef.current = true
     try {
-      setModels(await listRegisteredModels(token, selectedWorkspaceId))
+      const batch = await listRegisteredModels(token, selectedWorkspaceId, {
+        limit: CARD_BATCH_SIZE,
+        offset: 0,
+      })
+      setModels(batch)
+      setModelsHasMore(batch.length === CARD_BATCH_SIZE)
     } catch (error) {
       setModels([])
       reportError(error)
     } finally {
+      modelsLoadingRef.current = false
       setIsModelsLoading(false)
     }
   }, [reportError, selectedWorkspaceId, token])
+
+  const loadMoreModels = React.useCallback(async () => {
+    if (!token || !selectedWorkspaceId) {
+      return
+    }
+    if (modelsLoadingRef.current || !modelsHasMore) {
+      return
+    }
+    modelsLoadingRef.current = true
+    setIsModelsLoadingMore(true)
+    try {
+      const batch = await listRegisteredModels(token, selectedWorkspaceId, {
+        limit: CARD_BATCH_SIZE,
+        offset: models.length,
+      })
+      setModels((current) => [...current, ...batch])
+      setModelsHasMore(batch.length === CARD_BATCH_SIZE)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      modelsLoadingRef.current = false
+      setIsModelsLoadingMore(false)
+    }
+  }, [models.length, modelsHasMore, reportError, selectedWorkspaceId, token])
+
+  const modelsListEndRef = useInfiniteScroll(loadMoreModels)
 
   const loadBaseModels = React.useCallback(
     async (provider: string, modelType: string) => {
@@ -771,6 +811,19 @@ export function LlmPage() {
                 }
               />
             )}
+            <div
+              ref={modelsListEndRef}
+              className="flex min-h-12 items-center justify-center gap-2 py-3 text-sm text-muted-foreground"
+            >
+              {isModelsLoadingMore ? (
+                <>
+                  <LoaderCircleIcon className="size-4 animate-spin" />
+                  {t("正在加载")}
+                </>
+              ) : models.length > 0 && !modelsHasMore ? (
+                t("已加载全部")
+              ) : null}
+            </div>
           </section>
         </>
       )}

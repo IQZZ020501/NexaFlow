@@ -1,4 +1,4 @@
-import { apiUrl, request } from "@/lib/api-client"
+import { apiUrl, listQuery, request } from "@/lib/api-client"
 
 export type KnowledgeQueryMode = "required" | "agentic"
 
@@ -153,8 +153,14 @@ function agentsPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/agents${suffix}`
 }
 
-export function listAgents(token: string, workspaceId: string) {
-  return request<Agent[]>(agentsPath(workspaceId), { token })
+export function listAgents(
+  token: string,
+  workspaceId: string,
+  options: { limit?: number; offset?: number } = {},
+) {
+  return request<Agent[]>(`${agentsPath(workspaceId)}${listQuery(options)}`, {
+    token,
+  })
 }
 
 export function createAgent(

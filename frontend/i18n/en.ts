@@ -572,6 +572,8 @@ export const en = {
     "已提交 {submitted} 个向量化任务，{failed} 个提交失败": "Submitted {submitted} indexing tasks, {failed} failed to submit",
     "向量化中 {done}/{total}": "Indexing {done}/{total}",
     "共 {value} 条": "{value} total",
+    "每页 {value} 条": "{value} per page",
+    "已加载全部": "All loaded",
     "上一页": "Previous",
     "下一页": "Next",
     "重新分段 {value}": "Re-segment {value}",
