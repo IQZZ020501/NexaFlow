@@ -27,4 +27,4 @@
 
 ### embedding/（文档解析管道）
 
-- `backend/app/capabilities/embedding/pipeline.py` — 文档解析管道：MarkItDown 文本抽取、清洗、平铺分块、Markdown 章节 Parent/Child 分块、精确字符偏移与 token 统计
+- `backend/app/capabilities/embedding/pipeline.py` — 文档解析管道：MarkItDown 抽取 DOCX、Markdown、纯文本、PPTX、XLSX、XLS、HTML、CSV、JSON、XML、IPYNB、EPUB 和 ZIP；PyMuPDF4LLM/PyMuPDF 将 PDF 转为 Markdown（优先文本层，按页对无文本页 OCR），并对 PNG、JPG、JPEG、WEBP 做 OCR；随后执行清洗、平铺分块、Markdown 章节 Parent/Child 分块、精确字符偏移与 token 统计

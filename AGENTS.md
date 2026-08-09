@@ -83,6 +83,11 @@ Correctness, safety, evidence, and validation take priority over speed.
   use the same `QDRANT_URL`. Deletion cleanup intent is persisted in
   `knowledge_storage_cleanups`; Celery Beat redispatches due records, so do not
   replace it with best-effort post-commit cleanup.
+- Knowledge parsing uses MarkItDown for DOCX, PPTX, XLSX, and XLS; PDF Markdown
+  conversion uses PyMuPDF4LLM/PyMuPDF with native text first and page-level OCR
+  fallback. The upload UI and parser accept DOCX, PDF, Markdown, text, PPTX,
+  XLSX, XLS, HTML, CSV, JSON, XML, IPYNB, EPUB, ZIP, PNG, JPG, JPEG, and WEBP.
+  The backend image must include Tesseract Chinese/English data for OCR fallback.
 - MCP tools use workspace-scoped Streamable HTTP, legacy SSE, or stdio Server
   registrations. Remote Bearer tokens and full stdio configurations are
   encrypted; remote endpoints may use HTTP or HTTPS, while private and loopback
