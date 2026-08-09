@@ -1275,7 +1275,7 @@ export function KnowledgeUploadFlow({
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-                <div className="flex gap-2 overflow-x-auto pb-1">
+                <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
                   {uploadedDocuments.map((document) => (
                     <div
                       key={document.id}

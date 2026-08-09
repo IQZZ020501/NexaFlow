@@ -8,15 +8,18 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['.next', 'out', 'next-env.d.ts']),
   {
+    plugins: {
+      '@next/next': nextPlugin,
+    },
+    rules: {},
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
       reactHooks.configs.flat.recommended,
     ],
-    plugins: {
-      '@next/next': nextPlugin,
-    },
     rules: {
       ...nextPlugin.configs.recommended.rules,
       ...nextPlugin.configs['core-web-vitals'].rules,

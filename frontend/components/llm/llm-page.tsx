@@ -213,6 +213,7 @@ export function LlmPage() {
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [isProviderPickerOpen, setIsProviderPickerOpen] = React.useState(false)
   const credentialRequestId = React.useRef(0)
+  const baseModelRequestId = React.useRef(0)
 
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
   const canManage = workspaceRole === "admin"
@@ -306,13 +307,10 @@ export function LlmPage() {
 
   const loadBaseModels = React.useCallback(
     async (provider: string, modelType: string) => {
-      if (!provider || !modelType) {
-        setBaseModels([])
-        return []
-      }
-
-      if (!token) {
-        setBaseModels([])
+      const requestId = ++baseModelRequestId.current
+      setBaseModels([])
+      if (!provider || !modelType || !token) {
+        setIsBaseModelsLoading(false)
         return []
       }
 
@@ -323,14 +321,22 @@ export function LlmPage() {
           provider,
           modelType
         )
+        if (requestId !== baseModelRequestId.current) {
+          return []
+        }
         setBaseModels(models)
         return models
       } catch (error) {
+        if (requestId !== baseModelRequestId.current) {
+          return []
+        }
         setBaseModels([])
         reportError(error)
         return []
       } finally {
-        setIsBaseModelsLoading(false)
+        if (requestId === baseModelRequestId.current) {
+          setIsBaseModelsLoading(false)
+        }
       }
     },
     [reportError, token]
@@ -445,23 +451,6 @@ export function LlmPage() {
     }
   }
 
-  async function selectFirstBaseModel(providerCode: string, modelType: string) {
-    const models = await loadBaseModels(providerCode, modelType)
-    const baseModel = models[0]
-    if (!baseModel) {
-      return
-    }
-    setModelForm((current) =>
-      current.provider === providerCode && current.model_type === modelType
-        ? {
-            ...current,
-            name: baseModel.desc || baseModel.name,
-            model_name: baseModel.name,
-          }
-        : current
-    )
-  }
-
   function openCreateModel() {
     setIsProviderPickerOpen(true)
   }
@@ -476,7 +465,7 @@ export function LlmPage() {
     setCredentialFields([])
     setIsProviderPickerOpen(false)
     setIsDialogOpen(true)
-    void selectFirstBaseModel(nextForm.provider, nextForm.model_type)
+    void loadBaseModels(nextForm.provider, nextForm.model_type)
     void loadCredentialFields(nextForm.provider)
   }
 
@@ -515,7 +504,7 @@ export function LlmPage() {
       credential_hints: {},
     }))
     setCredentialFields([])
-    void selectFirstBaseModel(providerCode, modelType)
+    void loadBaseModels(providerCode, modelType)
     void loadCredentialFields(providerCode)
   }
 
@@ -527,7 +516,7 @@ export function LlmPage() {
       model_type: modelType,
       model_name: "",
     }))
-    void selectFirstBaseModel(providerCode, modelType)
+    void loadBaseModels(providerCode, modelType)
   }
 
   async function handleModelSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -1005,8 +994,6 @@ function ModelDialog({
     (provider) => provider.provider === form.provider
   )
   const modelTypeOptions = selectedProvider?.model_types ?? ["LLM"]
-  const firstBaseModel = baseModels[0]
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent side="right">
@@ -1026,9 +1013,7 @@ function ModelDialog({
                 onChange={(event) =>
                   onFormChange({ ...form, name: event.target.value })
                 }
-                placeholder={
-                  firstBaseModel?.desc ?? selectedProvider?.name ?? t("模型名称")
-                }
+                placeholder={t("模型名称")}
                 maxLength={120}
                 required
               />
@@ -1122,15 +1107,13 @@ function ModelDialog({
                   onFormChange({ ...form, model_name: event.target.value })
                 }
                 list="base-model-options"
-                placeholder={firstBaseModel?.name ?? t("输入模型名")}
+                placeholder={t("输入模型名")}
                 maxLength={160}
                 required
               />
               <datalist id="base-model-options">
                 {baseModels.map((model) => (
-                  <option key={model.name} value={model.name}>
-                    {model.desc}
-                  </option>
+                  <option key={model.name} value={model.name} />
                 ))}
               </datalist>
               <FieldDescription>
