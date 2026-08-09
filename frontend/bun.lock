@@ -5,6 +5,7 @@
     "": {
       "name": "NexaFlow",
       "dependencies": {
+        "@ant-design/icons": "^6.3.2",
         "@fontsource-variable/geist": "^5.2.9",
         "@lobehub/icons": "^5.15.0",
         "class-variance-authority": "^0.7.1",

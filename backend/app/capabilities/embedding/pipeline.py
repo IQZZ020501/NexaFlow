@@ -1,11 +1,15 @@
 import re
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 
 import mammoth
+import pymupdf
+import pymupdf4llm
 from markitdown import MarkItDown, StreamInfo
 from markitdown.converters._docx_converter import pre_process_docx
 from markitdown.converters._html_converter import HtmlConverter
+from PIL import Image
 
 from app.infrastructure.model_utils import new_id
 
@@ -13,13 +17,44 @@ CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150
 PARENT_CHUNK_SIZE = CHUNK_SIZE * 4
 EMBED_BATCH_SIZE = 64
+PDF_OCR_LANGUAGE = "chi_sim+eng"
 MARKITDOWN = MarkItDown(enable_plugins=False)
 SPLIT_SEPARATORS = frozenset({"\n\n", "\n", "。", "."})
+IMAGE_DOCUMENT_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 SUPPORTED_DOCUMENT_EXTENSIONS = frozenset(
-    {".docx", ".md", ".markdown", ".pdf", ".txt"}
+    {
+        ".docx",
+        ".md",
+        ".markdown",
+        ".pdf",
+        ".txt",
+        ".pptx",
+        ".xlsx",
+        ".xls",
+        ".html",
+        ".csv",
+        ".json",
+        ".xml",
+        ".ipynb",
+        ".epub",
+        ".zip",
+        *IMAGE_DOCUMENT_EXTENSIONS,
+    }
 )
 MARKDOWN_HEADING_PATTERN = re.compile(
     r"^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$"
+)
+PDF_INLINE_FORMAT_TAG_PATTERN = re.compile(r"</?(?:sub|sup)>", re.IGNORECASE)
+PDF_CJK_SPACE_PATTERN = re.compile(
+    r"(?<=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]) +"
+    r"(?=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff，。！？；：、）》】」』])"
+)
+PDF_CJK_LEADING_SPACE_PATTERN = re.compile(
+    r"(?<=[（《【「『]) +(?=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])"
+)
+PDF_CJK_PUNCTUATION_SPACE_PATTERN = re.compile(
+    r"(?<=[，。！？；：、）》】」』）]) +"
+    r"(?=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])"
 )
 ASSET_MARKER_BASE = 0xE000
 ASSET_MARKER_LIMIT = 0xF8FF - ASSET_MARKER_BASE + 1
@@ -124,6 +159,47 @@ class KnowledgePipelineError(Exception):
     pass
 
 
+def normalize_pdf_markdown(filename: str, markdown: str) -> str:
+    markdown = PDF_INLINE_FORMAT_TAG_PATTERN.sub("", markdown)
+    markdown = PDF_CJK_SPACE_PATTERN.sub("", markdown)
+    markdown = PDF_CJK_LEADING_SPACE_PATTERN.sub("", markdown)
+    markdown = PDF_CJK_PUNCTUATION_SPACE_PATTERN.sub("", markdown)
+    if not any(MARKDOWN_HEADING_PATTERN.match(line) for line in markdown.splitlines()):
+        markdown = f"# {Path(filename).stem}\n\n{markdown}"
+    return markdown
+
+
+def extract_with_pymupdf(
+    filename: str,
+    source: Path | pymupdf.Document,
+    *,
+    force_ocr: bool,
+) -> str:
+    extracted_text = pymupdf4llm.to_markdown(
+        source,
+        use_ocr=True,
+        force_ocr=force_ocr,
+        ocr_language=PDF_OCR_LANGUAGE,
+        ocr_dpi=300,
+        write_images=False,
+    )
+    if not isinstance(extracted_text, str):
+        raise TypeError("PyMuPDF Markdown conversion returned an invalid result.")
+    return normalize_pdf_markdown(filename, extracted_text)
+
+
+def extract_webp_with_pymupdf(filename: str, path: Path) -> str:
+    converted = BytesIO()
+    with Image.open(path) as image:
+        image.save(converted, format="PNG")
+    document = pymupdf.open(stream=converted.getvalue(), filetype="png")
+    try:
+        return extract_with_pymupdf(filename, document, force_ocr=True)
+    finally:
+        if not document.is_closed:
+            document.close()
+
+
 def extract_document(
     filename: str,
     content_type: str,
@@ -175,6 +251,14 @@ def extract_document(
                 lambda match: f"{match.group(1)} {asset_marker(int(match.group(2)))}".strip(),
                 extracted_text,
             )
+        elif extension == ".pdf":
+            # Native PDF text is preferred; OCR runs only for pages without usable text.
+            extracted_text = extract_with_pymupdf(filename, path, force_ocr=False)
+        elif extension == ".webp":
+            extracted_text = extract_webp_with_pymupdf(filename, path)
+        elif extension in IMAGE_DOCUMENT_EXTENSIONS:
+            # Standalone images have no text layer, so OCR is always required.
+            extracted_text = extract_with_pymupdf(filename, path, force_ocr=True)
         else:
             result = MARKITDOWN.convert_local(
                 path,

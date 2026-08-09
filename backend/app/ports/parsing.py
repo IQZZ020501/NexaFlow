@@ -1,7 +1,7 @@
 """Document parsing and chunking port.
 
-The pipeline functions are pure and stateless (the markitdown/mammoth
-integration lives behind ``extract_document`` inside the capability), so this
+The pipeline functions are pure and stateless (the parser integrations live
+behind ``extract_document`` inside the capability), so this
 port re-exports the contract surface; swapping the parser implementation
 touches only ``app.capabilities.embedding.pipeline``.
 """

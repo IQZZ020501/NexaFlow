@@ -141,6 +141,7 @@ def test_clean_upload_filename_sanitizes_path_and_classification() -> None:
     assert clean_upload_filename("../../etc/passwd") == "passwd"
     expect_http_error(lambda: clean_upload_filename("报告-机密.docx"), 422)
     expect_http_error(lambda: clean_upload_filename("   "), 422)
+    assert clean_upload_filename("photo.png") == "photo.png"
 
 
 # ---------------------------------------------------------------- parse options
@@ -229,6 +230,177 @@ def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
         "Before Network diagram After"
     )
     assert drafts.children[0].asset_indexes == [0, 1]
+
+
+def test_supported_document_formats_are_accepted() -> None:
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    from app.capabilities.embedding import pipeline
+
+    expected_extensions = {
+        ".docx",
+        ".md",
+        ".markdown",
+        ".pdf",
+        ".txt",
+        ".pptx",
+        ".xlsx",
+        ".xls",
+        ".html",
+        ".csv",
+        ".json",
+        ".xml",
+        ".ipynb",
+        ".epub",
+        ".zip",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+    }
+    assert expected_extensions == pipeline.SUPPORTED_DOCUMENT_EXTENSIONS
+
+    def fake_convert_local(*_args, **_kwargs):
+        return SimpleNamespace(text_content="converted")
+
+    with TemporaryDirectory() as directory:
+        for extension in expected_extensions - {
+            ".docx",
+            ".pdf",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+        }:
+            path = Path(directory) / f"document{extension}"
+            path.write_bytes(b"content")
+            with patch.object(pipeline.MARKITDOWN, "convert_local", fake_convert_local):
+                text, assets = pipeline.extract_document(
+                    path.name,
+                    "application/octet-stream",
+                    path,
+                )
+            assert text == "converted"
+            assert assets == []
+
+
+def test_pdf_documents_use_pymupdf_markdown_with_ocr() -> None:
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    from app.capabilities.embedding import pipeline
+
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "通知.pdf"
+        path.write_bytes(b"pdf")
+        with (
+            patch.object(
+                pipeline.MARKITDOWN,
+                "convert_local",
+                side_effect=AssertionError("PDF must not use MarkItDown"),
+            ),
+            patch.object(
+                pipeline.pymupdf4llm,
+                "to_markdown",
+                return_value="提 高 思想 认识， 压 实 防 灾 责 任。",
+            ) as convert_pdf,
+        ):
+            text, assets = pipeline.extract_document(
+                path.name,
+                "application/pdf",
+                path,
+            )
+
+    assert text == "# 通知\n\n提高思想认识，压实防灾责任。"
+    assert assets == []
+    convert_pdf.assert_called_once_with(
+        path,
+        use_ocr=True,
+        force_ocr=False,
+        ocr_language="chi_sim+eng",
+        ocr_dpi=300,
+        write_images=False,
+    )
+
+
+def test_image_documents_use_pymupdf_ocr() -> None:
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    from app.capabilities.embedding import pipeline
+
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "通知.png"
+        path.write_bytes(b"png")
+        with (
+            patch.object(
+                pipeline.MARKITDOWN,
+                "convert_local",
+                side_effect=AssertionError("Images must not use MarkItDown"),
+            ),
+            patch.object(
+                pipeline.pymupdf4llm,
+                "to_markdown",
+                return_value="识 别 文 本",
+            ) as convert_image,
+        ):
+            text, assets = pipeline.extract_document(
+                path.name,
+                "image/png",
+                path,
+            )
+
+    assert text == "# 通知\n\n识别文本"
+    assert assets == []
+    convert_image.assert_called_once_with(
+        path,
+        use_ocr=True,
+        force_ocr=True,
+        ocr_language="chi_sim+eng",
+        ocr_dpi=300,
+        write_images=False,
+    )
+
+
+def test_webp_documents_are_normalized_for_pymupdf_ocr() -> None:
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    import pymupdf
+    from PIL import Image
+
+    from app.capabilities.embedding import pipeline
+
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "通知.webp"
+        Image.new("RGB", (10, 10), "white").save(path, format="WEBP")
+        with patch.object(
+            pipeline.pymupdf4llm,
+            "to_markdown",
+            return_value="识 别 文 本",
+        ) as convert_image:
+            text, assets = pipeline.extract_document(
+                path.name,
+                "image/webp",
+                path,
+            )
+
+    assert text == "# 通知\n\n识别文本"
+    assert assets == []
+    source = convert_image.call_args.args[0]
+    assert isinstance(source, pymupdf.Document)
+    assert convert_image.call_args.kwargs == {
+        "use_ocr": True,
+        "force_ocr": True,
+        "ocr_language": "chi_sim+eng",
+        "ocr_dpi": 300,
+        "write_images": False,
+    }
 
 
 # ---------------------------------------------------------------- retrieval math
@@ -1146,6 +1318,10 @@ def main() -> None:
     test_clean_upload_filename_sanitizes_path_and_classification()
     test_parse_task_options_validates_boundaries()
     test_docx_images_without_alt_text_do_not_add_placeholder_content()
+    test_supported_document_formats_are_accepted()
+    test_pdf_documents_use_pymupdf_markdown_with_ocr()
+    test_image_documents_use_pymupdf_ocr()
+    test_webp_documents_are_normalized_for_pymupdf_ocr()
     test_reciprocal_rank_fusion_merges_and_ranks()
     test_parent_context_windows_around_child_offsets()
     test_model_type_normalization()
