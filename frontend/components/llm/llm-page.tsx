@@ -213,6 +213,7 @@ export function LlmPage() {
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [isProviderPickerOpen, setIsProviderPickerOpen] = React.useState(false)
   const credentialRequestId = React.useRef(0)
+  const baseModelRequestId = React.useRef(0)
 
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
   const canManage = workspaceRole === "admin"
@@ -306,13 +307,13 @@ export function LlmPage() {
 
   const loadBaseModels = React.useCallback(
     async (provider: string, modelType: string) => {
+      const requestId = ++baseModelRequestId.current
+      setBaseModels([])
       if (!provider || !modelType) {
-        setBaseModels([])
         return []
       }
 
       if (!token) {
-        setBaseModels([])
         return []
       }
 
@@ -323,14 +324,22 @@ export function LlmPage() {
           provider,
           modelType
         )
+        if (requestId !== baseModelRequestId.current) {
+          return []
+        }
         setBaseModels(models)
         return models
       } catch (error) {
+        if (requestId !== baseModelRequestId.current) {
+          return []
+        }
         setBaseModels([])
         reportError(error)
         return []
       } finally {
-        setIsBaseModelsLoading(false)
+        if (requestId === baseModelRequestId.current) {
+          setIsBaseModelsLoading(false)
+        }
       }
     },
     [reportError, token]
