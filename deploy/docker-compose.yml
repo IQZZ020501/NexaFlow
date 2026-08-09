@@ -1,14 +1,20 @@
 services:
   db:
     image: postgres:17-alpine
+    # Optional: expose the app's own DATABASE_URL (backend/.env) so the
+    # first-boot init script provisions the role/database the app expects.
+    env_file:
+      - path: ../backend/.env
+        required: false
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-app}
-      POSTGRES_USER: ${POSTGRES_USER:-app}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
+      POSTGRES_USER: ${POSTGRES_USER:-nexaflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexaflow}
     volumes:
       - ./data/postgresql:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexaflow} -d ${POSTGRES_DB:-nexaflow}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -40,7 +46,7 @@ services:
       dockerfile: deploy/dockerfiles/backend.Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nexaflow}:${POSTGRES_PASSWORD:-nexaflow}@db:5432/${POSTGRES_DB:-nexaflow}
       CELERY_BROKER_URL: redis://redis:6379/0
       KNOWLEDGE_STORAGE_DIR: /data/knowledge
       QDRANT_URL: http://qdrant:6333
@@ -64,7 +70,7 @@ services:
     command: celery -A app.infrastructure.celery:celery_app worker --loglevel=INFO
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nexaflow}:${POSTGRES_PASSWORD:-nexaflow}@db:5432/${POSTGRES_DB:-nexaflow}
       CELERY_BROKER_URL: redis://redis:6379/0
       KNOWLEDGE_STORAGE_DIR: /data/knowledge
       QDRANT_URL: http://qdrant:6333

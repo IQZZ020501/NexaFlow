@@ -24,6 +24,16 @@ container names (`nexaflow-db`, `nexaflow-redis`, `nexaflow-qdrant`):
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d db redis qdrant
 ```
 
+No `deploy/.env` is required for this flow. On the first start of an empty
+data directory, the db container provisions the role and database named by
+`backend/.env`'s own `DATABASE_URL` — the compose file exposes `backend/.env`
+to the db service (`env_file`, optional) and
+`deploy/db-init/01-app-database.sh` runs from `/docker-entrypoint-initdb.d`
+to create them idempotently. `POSTGRES_*` overrides in `deploy/.env` still
+apply as usual (production). Note that provisioning only happens on first
+initialization: after changing credentials, reset an existing data dir with
+`rm -rf deploy/data/postgresql` and recreate the db container.
+
 Point `backend/.env` at the published endpoints
 (`postgresql+psycopg://nexaflow:nexaflow@localhost:5432/nexaflow`,
 `redis://localhost:6379/0`, `http://127.0.0.1:6333`) and run migrations with
@@ -53,6 +63,10 @@ All runtime configuration comes from `deploy/.env` (see `.env.example`).
 The compose file overrides `DATABASE_URL` and `CELERY_BROKER_URL` to point at
 the bundled services, connects the API and worker to the bundled Qdrant through
 `QDRANT_URL`, and mounts the uploads volume for `KNOWLEDGE_STORAGE_DIR`.
+PostgreSQL credentials in `deploy/.env` must stay in sync with the ones in
+`backend/.env`'s `DATABASE_URL` (default `nexaflow`/`nexaflow`/`nexaflow`) —
+they configure the same database, accessed from the host and from the compose
+network respectively.
 `JWT_EXPIRES_MINUTES` controls access token lifetime;
 `REFRESH_TOKEN_EXPIRES_DAYS` controls persisted refresh sessions.
 `AGENT_EXECUTOR_LEASE_SECONDS` and `AGENT_EXECUTOR_HEARTBEAT_SECONDS` control
