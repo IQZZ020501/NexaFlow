@@ -59,7 +59,7 @@ class Settings:
         settings = cls(
             database_url=os.getenv(
                 "DATABASE_URL",
-                "postgresql+psycopg://app:app@localhost:5432/app",
+                "postgresql+psycopg://nexaflow:nexaflow@localhost:5432/nexaflow",
             ),
             jwt_secret_key=os.getenv("JWT_SECRET_KEY", ""),
             bootstrap_admin_username=os.getenv("BOOTSTRAP_ADMIN_USERNAME", ""),
