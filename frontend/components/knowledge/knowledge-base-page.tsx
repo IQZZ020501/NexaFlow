@@ -614,7 +614,7 @@ function KnowledgeBasePageContent({
 
   const cancelUpload = React.useCallback(() => {
     if (selectedKnowledgeBaseId) {
-      router.push(`/app/knowledge/${selectedKnowledgeBaseId}`)
+      router.replace(`/app/knowledge/${selectedKnowledgeBaseId}`)
     }
   }, [router, selectedKnowledgeBaseId])
 
@@ -629,18 +629,14 @@ function KnowledgeBasePageContent({
         routeState.documentIds,
         routeState.parseSettings
       )
-      if (uploadStep === "segment") {
-        router.replace(path)
-      } else {
-        router.push(path)
-      }
+      router.replace(path)
     },
-    [router, selectedKnowledgeBaseId, uploadStep]
+    [router, selectedKnowledgeBaseId]
   )
 
   const backToUploadFiles = React.useCallback(() => {
     if (selectedKnowledgeBaseId) {
-      router.push(knowledgeUploadPath(selectedKnowledgeBaseId))
+      router.replace(knowledgeUploadPath(selectedKnowledgeBaseId))
     }
   }, [router, selectedKnowledgeBaseId])
 
@@ -1210,7 +1206,7 @@ function KnowledgeBasePageContent({
         onDone={() => {
           setActiveDetailTab("documents")
           void Promise.all([loadDocuments(), loadKnowledgeTasks()])
-          router.push(`/app/knowledge/${selectedKnowledgeBase.id}`)
+          router.replace(`/app/knowledge/${selectedKnowledgeBase.id}`)
         }}
         onNotify={notify}
       />
