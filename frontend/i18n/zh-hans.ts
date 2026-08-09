@@ -562,6 +562,7 @@ export const zhHans = {
     "已提交 {submitted} 个向量化任务，{failed} 个提交失败": "已提交 {submitted} 个向量化任务，{failed} 个提交失败",
     "向量化中 {done}/{total}": "向量化中 {done}/{total}",
     "共 {value} 条": "共 {value} 条",
+    "已加载全部": "已加载全部",
     "上一页": "上一页",
     "下一页": "下一页",
     "重新分段 {value}": "重新分段 {value}",

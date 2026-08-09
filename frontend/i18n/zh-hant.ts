@@ -565,6 +565,7 @@ export const zhHant = {
     "已提交 {submitted} 个向量化任务，{failed} 个提交失败": "已提交 {submitted} 個向量化任務，{failed} 個提交失敗",
     "向量化中 {done}/{total}": "向量化中 {done}/{total}",
     "共 {value} 条": "共 {value} 條",
+    "已加载全部": "已載入全部",
     "上一页": "上一頁",
     "下一页": "下一頁",
     "重新分段 {value}": "重新分段 {value}",

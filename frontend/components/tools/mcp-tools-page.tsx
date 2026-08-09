@@ -45,6 +45,10 @@ import {
   type McpTransport,
 } from "@/lib/api/mcp"
 import { getMembershipRole } from "@/lib/display"
+import {
+  CARD_BATCH_SIZE,
+  useInfiniteScroll,
+} from "@/lib/use-infinite-scroll"
 import { getErrorMessage } from "@/lib/errors"
 
 export type McpForm = {
@@ -184,6 +188,10 @@ export function McpToolsPage() {
   const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
   const [servers, setServers] = React.useState<McpServer[]>([])
+  const [serversHasMore, setServersHasMore] = React.useState(true)
+  const [isServersLoadingMore, setIsServersLoadingMore] =
+    React.useState(false)
+  const serversLoadingRef = React.useRef(false)
   const [form, setForm] = React.useState<McpForm>(EMPTY_FORM)
   const [isLoading, setIsLoading] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
@@ -257,16 +265,48 @@ export function McpToolsPage() {
       return
     }
     setIsLoading(true)
+    serversLoadingRef.current = true
     try {
-      const nextServers = await listMcpServers(token, selectedWorkspaceId)
+      const nextServers = await listMcpServers(token, selectedWorkspaceId, {
+        limit: CARD_BATCH_SIZE,
+        offset: 0,
+      })
       setServers(nextServers)
+      setServersHasMore(nextServers.length === CARD_BATCH_SIZE)
     } catch (error) {
       setServers([])
       reportError(error)
     } finally {
+      serversLoadingRef.current = false
       setIsLoading(false)
     }
   }, [reportError, selectedWorkspaceId, token])
+
+  const loadMoreServers = React.useCallback(async () => {
+    if (!token || !selectedWorkspaceId) {
+      return
+    }
+    if (serversLoadingRef.current || !serversHasMore) {
+      return
+    }
+    serversLoadingRef.current = true
+    setIsServersLoadingMore(true)
+    try {
+      const batch = await listMcpServers(token, selectedWorkspaceId, {
+        limit: CARD_BATCH_SIZE,
+        offset: servers.length,
+      })
+      setServers((current) => [...current, ...batch])
+      setServersHasMore(batch.length === CARD_BATCH_SIZE)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      serversLoadingRef.current = false
+      setIsServersLoadingMore(false)
+    }
+  }, [reportError, selectedWorkspaceId, servers.length, serversHasMore, token])
+
+  const serversListEndRef = useInfiniteScroll(loadMoreServers)
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -598,6 +638,19 @@ export function McpToolsPage() {
           ))}
         </div>
       )}
+      <div
+        ref={serversListEndRef}
+        className="flex min-h-12 items-center justify-center gap-2 py-3 text-sm text-muted-foreground"
+      >
+        {isServersLoadingMore ? (
+          <>
+            <LoaderCircleIcon className="size-4 animate-spin" />
+            {t("正在加载")}
+          </>
+        ) : servers.length > 0 && !serversHasMore ? (
+          t("已加载全部")
+        ) : null}
+      </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">

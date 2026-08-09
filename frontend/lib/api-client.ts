@@ -20,6 +20,18 @@ export function apiUrl(path: string) {
   return `${API_BASE_URL}${path}`
 }
 
+export function listQuery(options: { limit?: number; offset?: number }): string {
+  const params = new URLSearchParams()
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit))
+  }
+  if (options.offset !== undefined) {
+    params.set("offset", String(options.offset))
+  }
+  const query = params.toString()
+  return query ? `?${query}` : ""
+}
+
 function errorMessage(payload: unknown, fallback: string) {
   if (typeof payload === "string" && payload) {
     return payload

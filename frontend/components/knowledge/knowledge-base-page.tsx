@@ -34,6 +34,10 @@ import type { AppNotification } from "@/lib/notifications"
 import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
 import { isEventFromDropdownMenu } from "@/lib/dom"
+import {
+  CARD_BATCH_SIZE,
+  useInfiniteScroll,
+} from "@/lib/use-infinite-scroll"
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
@@ -250,6 +254,11 @@ function KnowledgeBasePageContent({
   const [knowledgeBases, setKnowledgeBases] = React.useState<
     KnowledgeBaseListItem[]
   >([])
+  const [knowledgeBasesHasMore, setKnowledgeBasesHasMore] =
+    React.useState(true)
+  const [isKnowledgeBasesLoadingMore, setIsKnowledgeBasesLoadingMore] =
+    React.useState(false)
+  const knowledgeBasesLoadingRef = React.useRef(false)
   const [documents, setDocuments] = React.useState<KnowledgeDocument[]>([])
   const [knowledgeTasks, setKnowledgeTasks] = React.useState<KnowledgeTask[]>(
     []
@@ -419,22 +428,60 @@ function KnowledgeBasePageContent({
       return
     }
 
+    knowledgeBasesLoadingRef.current = true
     setIsLoading(true)
     try {
       const [knowledgeBases, models] = await Promise.all([
-        listKnowledgeBases(token, selectedWorkspaceId),
+        listKnowledgeBases(token, selectedWorkspaceId, {
+          limit: CARD_BATCH_SIZE,
+          offset: 0,
+        }),
         listRegisteredModels(token, selectedWorkspaceId),
       ])
       setKnowledgeBases(knowledgeBases)
+      setKnowledgeBasesHasMore(knowledgeBases.length === CARD_BATCH_SIZE)
       setRegisteredModels(models)
     } catch (error) {
       setKnowledgeBases([])
       setRegisteredModels([])
       reportError(error)
     } finally {
+      knowledgeBasesLoadingRef.current = false
       setIsLoading(false)
     }
   }, [reportError, selectedWorkspaceId, token])
+
+  const loadMoreKnowledgeBases = React.useCallback(async () => {
+    if (!selectedWorkspaceId) {
+      return
+    }
+    if (knowledgeBasesLoadingRef.current || !knowledgeBasesHasMore) {
+      return
+    }
+    knowledgeBasesLoadingRef.current = true
+    setIsKnowledgeBasesLoadingMore(true)
+    try {
+      const batch = await listKnowledgeBases(token, selectedWorkspaceId, {
+        limit: CARD_BATCH_SIZE,
+        offset: knowledgeBases.length,
+      })
+      setKnowledgeBases((current) => [...current, ...batch])
+      setKnowledgeBasesHasMore(batch.length === CARD_BATCH_SIZE)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      knowledgeBasesLoadingRef.current = false
+      setIsKnowledgeBasesLoadingMore(false)
+    }
+  }, [
+    knowledgeBases.length,
+    knowledgeBasesHasMore,
+    reportError,
+    selectedWorkspaceId,
+    token,
+  ])
+
+  const knowledgeBasesListEndRef = useInfiniteScroll(loadMoreKnowledgeBases)
 
   const loadDocuments = React.useCallback(async (silent = false) => {
     if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
@@ -2438,6 +2485,19 @@ function KnowledgeBasePageContent({
                   {t("没有匹配的知识库")}
                 </div>
               )}
+              <div
+                ref={knowledgeBasesListEndRef}
+                className="flex min-h-12 items-center justify-center gap-2 py-3 text-sm text-muted-foreground"
+              >
+                {isKnowledgeBasesLoadingMore ? (
+                  <>
+                    <LoaderCircleIcon className="size-4 animate-spin" />
+                    {t("正在加载")}
+                  </>
+                ) : knowledgeBases.length > 0 && !knowledgeBasesHasMore ? (
+                  t("已加载全部")
+                ) : null}
+              </div>
             </>
           ) : (
             <div className="mx-auto flex min-h-[320px] max-w-xl flex-col items-center justify-center gap-4 p-6 text-center">

@@ -1,4 +1,4 @@
-import { request } from "@/lib/api-client"
+import { listQuery, request } from "@/lib/api-client"
 
 export type ModelProviderCatalog = {
   provider: string
@@ -90,10 +90,15 @@ export function getModelProviderForm(token: string, provider: string) {
   )
 }
 
-export function listRegisteredModels(token: string, workspaceId: string) {
-  return request<RegisteredModel[]>(`/api/v1/workspaces/${workspaceId}/models`, {
-    token,
-  })
+export function listRegisteredModels(
+  token: string,
+  workspaceId: string,
+  options: { limit?: number; offset?: number } = {},
+) {
+  return request<RegisteredModel[]>(
+    `/api/v1/workspaces/${workspaceId}/models${listQuery(options)}`,
+    { token },
+  )
 }
 
 export function createRegisteredModel(
