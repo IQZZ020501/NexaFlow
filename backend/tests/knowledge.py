@@ -1319,7 +1319,7 @@ def main() -> None:
             headers=auth_headers(alice_token),
         )
         assert pdf_chunks.status_code == 200, pdf_chunks.text
-        assert pdf_chunks.json()[0]["content"] == "Hello from PDF docs"
+        assert pdf_chunks.json()[0]["content"] == "# pdf-guide\n\nHello from PDF docs"
 
         docx_document = upload_document(
             client,
