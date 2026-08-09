@@ -131,7 +131,7 @@ export function TopBar() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <nav className="flex min-w-0 flex-1 justify-center gap-2 overflow-x-auto">
+        <nav className="flex min-w-0 flex-1 justify-center gap-2 overflow-x-auto overflow-y-hidden">
           {featurePages.map((page) => {
             const Icon = page.icon
             const isActive = pathname.startsWith(PAGE_LINKS[page.key])
