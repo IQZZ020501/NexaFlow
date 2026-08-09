@@ -10,6 +10,8 @@ import {
   ArrowUpDownIcon,
   ArrowUpIcon,
   BookOpenTextIcon,
+  CheckIcon,
+  ChevronDownIcon,
   CircleCheckIcon,
   DatabaseIcon,
   DownloadIcon,
@@ -156,7 +158,20 @@ const PROCESSING_DOCUMENT_STATUSES: Record<string, true> = {
   indexing: true,
 }
 
-const DOCUMENT_PAGE_SIZE = 20
+export const DOCUMENT_PAGE_SIZES = [10, 20, 50, 100] as const
+export type DocumentPageSize = (typeof DOCUMENT_PAGE_SIZES)[number]
+
+export function paginateDocuments<T>(
+  items: readonly T[],
+  page: number,
+  pageSize: number,
+): T[] {
+  return items.slice((page - 1) * pageSize, page * pageSize)
+}
+
+export function documentPageCount(total: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(total / pageSize))
+}
 
 const SMART_CHUNK_SIZE = 1200
 const SMART_CHUNK_OVERLAP = 150
@@ -275,6 +290,8 @@ function KnowledgeBasePageContent({
   const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
   const [documentSearch, setDocumentSearch] = React.useState("")
   const [documentPage, setDocumentPage] = React.useState(1)
+  const [documentPageSize, setDocumentPageSize] =
+    React.useState<DocumentPageSize>(10)
   const [documentSortKey, setDocumentSortKey] =
     React.useState<DocumentSortKey>("created_at")
   const [documentSortDirection, setDocumentSortDirection] = React.useState<
@@ -388,13 +405,14 @@ function KnowledgeBasePageContent({
     selectedDocumentIds.includes(document.id)
   )
   const selectedDocumentCount = selectedDocuments.length
-  const visibleDocuments = filteredDocuments.slice(
-    (documentPage - 1) * DOCUMENT_PAGE_SIZE,
-    documentPage * DOCUMENT_PAGE_SIZE
+  const visibleDocuments = paginateDocuments(
+    filteredDocuments,
+    documentPage,
+    documentPageSize,
   )
-  const documentPageCount = Math.max(
-    1,
-    Math.ceil(filteredDocuments.length / DOCUMENT_PAGE_SIZE)
+  const documentTotalPages = documentPageCount(
+    filteredDocuments.length,
+    documentPageSize,
   )
   const isAllFilteredDocumentsSelected =
     visibleDocuments.length > 0 &&
@@ -1663,11 +1681,47 @@ function KnowledgeBasePageContent({
                       )}
                     </div>
                   </div>
-                  {filteredDocuments.length > DOCUMENT_PAGE_SIZE ? (
+                  {filteredDocuments.length > documentPageSize ? (
                     <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
-                      <span className="text-muted-foreground">
-                        {t("共 {value} 条", { value: filteredDocuments.length })}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">
+                          {t("共 {value} 条", { value: filteredDocuments.length })}
+                        </span>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 justify-between gap-2"
+                            >
+                              <span>
+                                {t("每页 {value} 条", {
+                                  value: documentPageSize,
+                                })}
+                              </span>
+                              <ChevronDownIcon className="size-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-36">
+                            {DOCUMENT_PAGE_SIZES.map((pageSize) => (
+                              <DropdownMenuItem
+                                key={pageSize}
+                                className="justify-between"
+                                onSelect={() => {
+                                  setDocumentPageSize(pageSize)
+                                  setDocumentPage(1)
+                                }}
+                              >
+                                {t("每页 {value} 条", { value: pageSize })}
+                                {documentPageSize === pageSize ? (
+                                  <CheckIcon className="size-3.5 text-primary" />
+                                ) : null}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                       <div className="flex items-center gap-2">
                         <Button
                           type="button"
@@ -1681,16 +1735,16 @@ function KnowledgeBasePageContent({
                           {t("上一页")}
                         </Button>
                         <span className="text-muted-foreground">
-                          {documentPage} / {documentPageCount}
+                          {documentPage} / {documentTotalPages}
                         </span>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          disabled={documentPage >= documentPageCount}
+                          disabled={documentPage >= documentTotalPages}
                           onClick={() =>
                             setDocumentPage((current) =>
-                              Math.min(documentPageCount, current + 1)
+                              Math.min(documentTotalPages, current + 1)
                             )
                           }
                         >
