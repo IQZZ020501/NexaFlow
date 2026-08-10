@@ -587,6 +587,7 @@ export const zhHans = {
   "Agent 回答超时": "Agent 回答超时",
   "Agent 回答失败": "Agent 回答失败",
   "返回 Agent 列表": "返回 Agent 列表",
+  "新建对话": "新建对话",
   "放弃未保存的更改？": "放弃未保存的更改？",
   "未保存": "未保存",
   "删除 Agent": "删除 Agent",

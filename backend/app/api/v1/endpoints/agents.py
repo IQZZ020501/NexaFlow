@@ -123,6 +123,7 @@ async def list_workspace_agent_runs(
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    conversation_id: Annotated[str | None, Query(min_length=1, max_length=36)] = None,
 ) -> list[AgentRunResponse]:
     return await list_agent_runs(
         db,
@@ -131,6 +132,7 @@ async def list_workspace_agent_runs(
         context.user,
         limit,
         offset,
+        conversation_id,
     )
 
 
@@ -154,6 +156,7 @@ async def create_workspace_agent_run(
         context.user,
         context.membership_role,
         settings,
+        conversation_id=payload.conversation_id,
     )
 
 
@@ -208,6 +211,7 @@ async def stream_workspace_agent_run(
         context.user,
         context.membership_role,
         persist=True,
+        conversation_id=payload.conversation_id,
     )
     await enqueue_prepared_agent_run(run.id, settings)
     await db.rollback()

@@ -597,6 +597,7 @@ export const en = {
   "Agent 回答超时": "Agent response timed out",
   "Agent 回答失败": "Agent response failed",
   "返回 Agent 列表": "Back to Agents",
+  "新建对话": "New conversation",
   "放弃未保存的更改？": "Discard unsaved changes?",
   "未保存": "Unsaved",
   "删除 Agent": "Delete Agent",

@@ -20,6 +20,7 @@ from app.shareddomain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_QUEUED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_SUCCEEDED_STATUS,
 )
 
 
@@ -149,6 +150,7 @@ async def list_agent_runs(
     offset: int = 0,
     *,
     status: str | None = None,
+    conversation_id: str | None = None,
 ) -> list[AgentRunEntity]:
     statement = (
         select(AgentRun)
@@ -162,8 +164,140 @@ async def list_agent_runs(
     )
     if status is not None:
         statement = statement.where(AgentRun.status == status)
+    if conversation_id is not None:
+        statement = statement.where(AgentRun.conversation_id == conversation_id)
     result = await db.scalars(statement)
     return [to_entity(AgentRunEntity, row) for row in result.all()]
+
+
+async def latest_agent_conversation_id(
+    db: AsyncSession,
+    agent_id: str,
+    requested_by_user_id: str,
+) -> str | None:
+    return await db.scalar(
+        select(AgentRun.conversation_id)
+        .where(
+            AgentRun.agent_id == agent_id,
+            AgentRun.requested_by_user_id == requested_by_user_id,
+        )
+        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+        .limit(1)
+    )
+
+
+async def get_active_agent_run(
+    db: AsyncSession,
+    agent_id: str,
+    requested_by_user_id: str,
+    conversation_id: str,
+) -> AgentRunEntity | None:
+    row = await db.scalar(
+        select(AgentRun)
+        .where(
+            AgentRun.agent_id == agent_id,
+            AgentRun.requested_by_user_id == requested_by_user_id,
+            AgentRun.conversation_id == conversation_id,
+            AgentRun.status.in_(
+                (
+                    AGENT_RUN_QUEUED_STATUS,
+                    "planning",
+                    "planned",
+                    AGENT_RUN_RUNNING_STATUS,
+                    AGENT_RUN_AWAITING_APPROVAL_STATUS,
+                )
+            ),
+        )
+        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+        .limit(1)
+    )
+    return to_entity(AgentRunEntity, row) if row is not None else None
+
+
+async def list_conversation_memory_runs(
+    db: AsyncSession,
+    run: AgentRunEntity,
+) -> tuple[AgentRunEntity | None, list[AgentRunEntity]]:
+    scope = (
+        AgentRun.workspace_id == run.workspace_id,
+        AgentRun.agent_id == run.agent_id,
+        AgentRun.requested_by_user_id == run.requested_by_user_id,
+        AgentRun.conversation_id == run.conversation_id,
+    )
+    before_current = or_(
+        AgentRun.created_at < run.created_at,
+        and_(AgentRun.created_at == run.created_at, AgentRun.id < run.id),
+    )
+    anchor_row = await db.scalar(
+        select(AgentRun)
+        .where(
+            *scope,
+            AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
+            AgentRun.context_summary != "",
+            before_current,
+        )
+        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+        .limit(1)
+    )
+    after_anchor = None
+    if anchor_row is not None:
+        after_anchor = or_(
+            AgentRun.created_at > anchor_row.created_at,
+            and_(
+                AgentRun.created_at == anchor_row.created_at,
+                AgentRun.id > anchor_row.id,
+            ),
+        )
+    statement = (
+        select(AgentRun)
+        .where(
+            *scope,
+            AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
+            before_current,
+        )
+        .order_by(AgentRun.created_at, AgentRun.id)
+    )
+    if after_anchor is not None:
+        statement = statement.where(after_anchor)
+    rows = await db.scalars(statement)
+    return (
+        to_entity(AgentRunEntity, anchor_row) if anchor_row is not None else None,
+        [to_entity(AgentRunEntity, row) for row in rows.all()],
+    )
+
+
+async def save_conversation_summary(
+    db: AsyncSession,
+    anchor_run: AgentRunEntity,
+    summary: str,
+) -> bool:
+    updated = await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.id == anchor_run.id,
+            AgentRun.workspace_id == anchor_run.workspace_id,
+            AgentRun.agent_id == anchor_run.agent_id,
+            AgentRun.requested_by_user_id == anchor_run.requested_by_user_id,
+            AgentRun.conversation_id == anchor_run.conversation_id,
+            AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
+        )
+        .values(context_summary=summary, updated_at=func.now())
+    )
+    if not updated.rowcount:
+        return False
+    await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.workspace_id == anchor_run.workspace_id,
+            AgentRun.agent_id == anchor_run.agent_id,
+            AgentRun.requested_by_user_id == anchor_run.requested_by_user_id,
+            AgentRun.conversation_id == anchor_run.conversation_id,
+            AgentRun.id != anchor_run.id,
+            AgentRun.context_summary != "",
+        )
+        .values(context_summary="", updated_at=func.now())
+    )
+    return True
 
 
 async def get_agent_run_by_id(
@@ -259,6 +393,7 @@ async def save_agent_run_checkpoint(
         .values(
             checkpoint=checkpoint,
             checkpoint_phase=checkpoint_phase,
+            model_usage=checkpoint.get("model_usage", {}),
             updated_at=func.now(),
         )
     )
@@ -275,7 +410,20 @@ async def finalize_agent_run(
     events: list[dict],
     last_error: str | None,
     finished_at: datetime,
+    model_usage: dict | None = None,
 ) -> bool:
+    values = {
+        "status": status,
+        "result": result,
+        "events": events,
+        "last_error": last_error,
+        "finished_at": finished_at,
+        "worker_task_id": None,
+        "lease_expires_at": None,
+        "updated_at": finished_at,
+    }
+    if model_usage is not None:
+        values["model_usage"] = model_usage
     updated = await db.execute(
         update(AgentRun)
         .where(
@@ -283,16 +431,7 @@ async def finalize_agent_run(
             AgentRun.status == AGENT_RUN_RUNNING_STATUS,
             AgentRun.worker_task_id == worker_task_id,
         )
-        .values(
-            status=status,
-            result=result,
-            events=events,
-            last_error=last_error,
-            finished_at=finished_at,
-            worker_task_id=None,
-            lease_expires_at=None,
-            updated_at=finished_at,
-        )
+        .values(**values)
     )
     return bool(updated.rowcount)
 

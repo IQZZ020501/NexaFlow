@@ -281,7 +281,11 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
   )
 }
 
-export function AgentsPage() {
+type AgentsPageProps = {
+  initialConversationId?: string | null
+}
+
+export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
   const router = useRouter()
   const params = useParams<{ id?: string }>()
   const selectedAgentId = params.id ?? null
@@ -316,6 +320,9 @@ export function AgentsPage() {
   const [agentsHasMore, setAgentsHasMore] = React.useState(true)
   const [isAgentsLoadingMore, setIsAgentsLoadingMore] = React.useState(false)
   const agentsLoadingMoreRef = React.useRef(false)
+  const activeConversationIdRef = React.useRef<string | null>(
+    initialConversationId
+  )
   const [hasLoadedWorkspaceData, setHasLoadedWorkspaceData] =
     React.useState(false)
 
@@ -358,10 +365,12 @@ export function AgentsPage() {
 
   const applyStreamEvent = React.useCallback(
     (
+      conversationId: string,
       runId: string,
       streamEvent: AgentRunStreamEvent,
       placeholderId?: string
     ) => {
+      if (activeConversationIdRef.current !== conversationId) return
       setRuns((current) =>
         mergeAgentRunStreamEvent(current, runId, streamEvent, placeholderId)
       )
@@ -448,6 +457,10 @@ export function AgentsPage() {
   }, [loadWorkspaceData])
 
   React.useEffect(() => {
+    activeConversationIdRef.current = initialConversationId
+  }, [initialConversationId, selectedAgentId])
+
+  React.useEffect(() => {
     if (!selectedAgent || form.id === selectedAgent.id) return
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setForm(formFromAgent(selectedAgent))
@@ -489,11 +502,29 @@ export function AgentsPage() {
     let isCurrent = true
     const observers: AbortController[] = []
     setIsRunsLoading(true)
-    listAgentRuns(token, selectedWorkspaceId, selectedAgentId)
+    listAgentRuns(
+      token,
+      selectedWorkspaceId,
+      selectedAgentId,
+      initialConversationId
+    )
       .then((nextRuns) => {
         if (!isCurrent) return
-        setRuns(nextRuns)
-        for (const run of nextRuns) {
+        const resolvedConversationId =
+          initialConversationId ??
+          nextRuns[0]?.conversation_id ??
+          crypto.randomUUID()
+        activeConversationIdRef.current = resolvedConversationId
+        const visibleRuns = nextRuns.filter(
+          (run) => run.conversation_id === resolvedConversationId
+        )
+        setRuns(visibleRuns)
+        if (!initialConversationId) {
+          router.replace(
+            `/app/apps/${selectedAgentId}?conversation_id=${encodeURIComponent(resolvedConversationId)}`
+          )
+        }
+        for (const run of visibleRuns) {
           if (run.status === "awaiting_approval") {
             void loadRunToolCalls(selectedAgentId, run.id).catch(reportError)
           }
@@ -509,7 +540,8 @@ export function AgentsPage() {
             selectedWorkspaceId,
             selectedAgentId,
             run.id,
-            (streamEvent) => applyStreamEvent(run.id, streamEvent),
+            (streamEvent) =>
+              applyStreamEvent(resolvedConversationId, run.id, streamEvent),
             controller.signal
           ).catch((error: unknown) => {
             if (!controller.signal.aborted) reportError(error)
@@ -533,6 +565,8 @@ export function AgentsPage() {
     applyStreamEvent,
     loadRunToolCalls,
     reportError,
+    router,
+    initialConversationId,
     selectedAgentId,
     selectedWorkspaceId,
     token,
@@ -658,10 +692,21 @@ export function AgentsPage() {
       !selectedWorkspaceId ||
       !selectedAgent ||
       !nextQuestion ||
+      isRunsLoading ||
       isAsking ||
       selectedAgent.status !== "active"
     ) {
       return
+    }
+    const conversationId =
+      activeConversationIdRef.current ??
+      initialConversationId ??
+      crypto.randomUUID()
+    activeConversationIdRef.current = conversationId
+    if (!initialConversationId) {
+      router.replace(
+        `/app/apps/${selectedAgent.id}?conversation_id=${encodeURIComponent(conversationId)}`
+      )
     }
     setQuestion("")
     setPendingQuestion(nextQuestion)
@@ -673,6 +718,7 @@ export function AgentsPage() {
       workspace_id: selectedWorkspaceId,
       agent_id: selectedAgent.id,
       requested_by_user_id: me?.user.id ?? "",
+      conversation_id: conversationId,
       goal: nextQuestion,
       model_id: selectedAgent.model_id,
       model_name:
@@ -698,6 +744,7 @@ export function AgentsPage() {
         },
       ],
       result: "",
+      model_usage: {},
       last_error: null,
       planned_at: null,
       started_at: new Date().toISOString(),
@@ -726,13 +773,19 @@ export function AgentsPage() {
               ? streamEvent.run.id
               : liveRunId
           if (eventRunId) {
-            applyStreamEvent(eventRunId, streamEvent, placeholderRun.id)
+            applyStreamEvent(
+              conversationId,
+              eventRunId,
+              streamEvent,
+              placeholderRun.id
+            )
           }
           if (streamEvent.type === "error") {
             notify("error", t("Agent 回答失败"))
           }
         },
-        askAbortController.signal
+        askAbortController.signal,
+        conversationId
       )
     } catch (error) {
       const userCancelled = askAbortController.signal.aborted
@@ -753,6 +806,21 @@ export function AgentsPage() {
 
   function handleCancelAsk() {
     askAbortController?.abort()
+  }
+
+  function handleNewConversation() {
+    if (!selectedAgentId) return
+    askAbortController?.abort()
+    const conversationId = crypto.randomUUID()
+    activeConversationIdRef.current = conversationId
+    setRuns([])
+    setToolCallsByRun({})
+    setQuestion("")
+    setPendingQuestion(null)
+    setResolvingCallId(null)
+    router.push(
+      `/app/apps/${selectedAgentId}?conversation_id=${encodeURIComponent(conversationId)}`
+    )
   }
 
   async function handleToolCallDecision(
@@ -813,6 +881,7 @@ export function AgentsPage() {
         onPublish={() => void handlePublishAgent()}
         onAsk={handleAsk}
         onCancelAsk={handleCancelAsk}
+        onNewConversation={handleNewConversation}
         onToolCallDecision={(runId, callId, decision) =>
           void handleToolCallDecision(runId, callId, decision)
         }

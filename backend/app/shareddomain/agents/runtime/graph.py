@@ -30,6 +30,7 @@ from app.shareddomain.agents.runtime.tools import (
     agent_tool_metadata,
     is_parallel_safe,
 )
+from app.shareddomain.agents.runtime.usage import merge_usage, usage_from_message
 
 MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12
@@ -190,6 +191,7 @@ async def agent_node(
 
     messages = [*state["messages"], message]
     tool_calls = [pending_tool_call(call) for call in completion.tool_calls]
+    model_usage = merge_usage(state["model_usage"], usage_from_message(message))
     if tool_calls:
         call_ids = [call["id"] for call in tool_calls]
         if any(not call_id for call_id in call_ids) or len(set(call_ids)) != len(
@@ -204,6 +206,7 @@ async def agent_node(
             "turn": turn,
             "pending_tool_calls": tool_calls,
             "finish_reason": completion.finish_reason,
+            "model_usage": model_usage,
         }
 
     if completion.finish_reason == "length":
@@ -216,6 +219,7 @@ async def agent_node(
         "pending_tool_calls": [],
         "finish_reason": completion.finish_reason,
         "final_answer": completion.content,
+        "model_usage": model_usage,
     }
 
 

@@ -590,6 +590,7 @@ export const zhHant = {
   "Agent 回答超时": "Agent 回答逾時",
   "Agent 回答失败": "Agent 回答失敗",
   "返回 Agent 列表": "返回 Agent 列表",
+  "新建对话": "新增對話",
   "放弃未保存的更改？": "放棄未儲存的變更？",
   "未保存": "未儲存",
   "删除 Agent": "刪除 Agent",

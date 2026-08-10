@@ -13,6 +13,12 @@ from app.shareddomain.agents.runtime.tools import (
     AgentToolUncertain,
     create_agent_tool,
 )
+from app.shareddomain.agents.runtime.usage import (
+    add_compaction_usage,
+    empty_usage,
+    merge_usage,
+    usage_from_message,
+)
 
 __all__ = [
     "AgentExecutionResult",
@@ -26,4 +32,8 @@ __all__ = [
     "serialize_agent_state",
     "deserialize_agent_state",
     "safe_event_value",
+    "add_compaction_usage",
+    "empty_usage",
+    "merge_usage",
+    "usage_from_message",
 ]

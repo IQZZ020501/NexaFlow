@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import {
+  listAgentRuns,
   streamAgentRun,
   type AgentRun,
   type AgentRunStreamEvent,
@@ -37,6 +38,7 @@ function runSnapshot(status: AgentRun["status"]): AgentRun {
     workspace_id: "ws-1",
     agent_id: "agent-1",
     requested_by_user_id: "user-1",
+    conversation_id: "conversation-1",
     goal: "question",
     model_id: "model-1",
     model_name: "deepseek-chat",
@@ -45,6 +47,7 @@ function runSnapshot(status: AgentRun["status"]): AgentRun {
     plan: [],
     events: [],
     result: "",
+    model_usage: {},
     last_error: null,
     planned_at: null,
     started_at: new Date().toISOString(),
@@ -56,12 +59,25 @@ function runSnapshot(status: AgentRun["status"]): AgentRun {
 }
 
 describe("streamAgentRun", () => {
+  test("filters run history by conversation", async () => {
+    let requestedUrl = ""
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requestedUrl = String(input)
+      return Response.json([])
+    }) as unknown as typeof fetch
+
+    await listAgentRuns("token", "ws-1", "agent-1", "conversation-1")
+    expect(requestedUrl).toContain("conversation_id=conversation-1")
+  })
+
   test("delivers events and accepts a terminal complete event", async () => {
     const events: AgentRunStreamEvent[] = []
     let requestCount = 0
-    globalThis.fetch = (async () => {
+    let createBody = ""
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
       requestCount += 1
       if (requestCount === 1) {
+        createBody = String(init?.body ?? "")
         return Response.json(runSnapshot("queued"), { status: 201 })
       }
       return ndjsonResponse([
@@ -79,9 +95,19 @@ describe("streamAgentRun", () => {
       ])
     }) as unknown as typeof fetch
 
-    await streamAgentRun("token", "ws-1", "agent-1", "question", (event) =>
-      events.push(event)
+    await streamAgentRun(
+      "token",
+      "ws-1",
+      "agent-1",
+      "question",
+      (event) => events.push(event),
+      undefined,
+      "conversation-1"
     )
+    expect(JSON.parse(createBody)).toEqual({
+      goal: "question",
+      conversation_id: "conversation-1",
+    })
     expect(events.map((event) => event.type)).toEqual([
       "run",
       "run",

@@ -25,6 +25,7 @@ from app.shareddomain.agents.runtime.graph import (
 )
 from app.shareddomain.agents.runtime.state import AgentState, PendingToolCall
 from app.shareddomain.agents.runtime.tools import AgentToolResult
+from app.shareddomain.agents.runtime.usage import empty_usage
 
 logger = get_logger(__name__)
 
@@ -33,6 +34,7 @@ logger = get_logger(__name__)
 class AgentExecutionResult:
     content: str
     events: list[dict[str, Any]]
+    model_usage: dict[str, Any]
 
 
 CheckpointHandler = Callable[[dict[str, Any], str], Awaitable[None]]
@@ -64,6 +66,7 @@ def deserialize_agent_state(checkpoint: dict[str, Any]) -> AgentState:
         "pending_tool_calls": list(checkpoint.get("pending_tool_calls", [])),
         "finish_reason": str(checkpoint.get("finish_reason", "")),
         "final_answer": str(checkpoint.get("final_answer", "")),
+        "model_usage": dict(checkpoint.get("model_usage") or empty_usage()),
     }
 
 
@@ -78,6 +81,7 @@ async def run_agent(
     on_checkpoint: CheckpointHandler | None = None,
     before_tool_call: BeforeToolCall | None = None,
     after_tool_call: AfterToolCall | None = None,
+    initial_usage: dict[str, Any] | None = None,
 ) -> AgentExecutionResult:
     initial_state: AgentState = (
         deserialize_agent_state(checkpoint)
@@ -92,13 +96,17 @@ async def run_agent(
             "pending_tool_calls": [],
             "finish_reason": "",
             "final_answer": "",
+            "model_usage": initial_usage or empty_usage(),
         }
     )
     if initial_state["final_answer"]:
         return AgentExecutionResult(
             content=initial_state["final_answer"],
             events=initial_state["events"],
+            model_usage=initial_state["model_usage"],
         )
+    if checkpoint is None and on_checkpoint is not None:
+        await on_checkpoint(serialize_agent_state(initial_state), "agent")
     started_at = time.perf_counter()
     state = initial_state
     async for value in agent_graph.astream(
@@ -134,4 +142,5 @@ async def run_agent(
     return AgentExecutionResult(
         content=state["final_answer"],
         events=state["events"],
+        model_usage=state["model_usage"],
     )

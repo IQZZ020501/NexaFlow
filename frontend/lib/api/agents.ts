@@ -75,6 +75,7 @@ export type AgentRun = {
   workspace_id: string
   agent_id: string
   requested_by_user_id: string
+  conversation_id: string
   goal: string
   model_id: string
   model_name: string
@@ -83,6 +84,7 @@ export type AgentRun = {
   plan: AgentPlanStep[]
   events: AgentRunEvent[]
   result: string
+  model_usage: Record<string, unknown>
   last_error: string | null
   planned_at: string | null
   started_at: string | null
@@ -202,9 +204,13 @@ export function deleteAgent(
 export function listAgentRuns(
   token: string,
   workspaceId: string,
-  agentId: string
+  agentId: string,
+  conversationId?: string | null
 ) {
-  return request<AgentRun[]>(agentsPath(workspaceId, `/${agentId}/runs`), {
+  const query = conversationId
+    ? `?conversation_id=${encodeURIComponent(conversationId)}`
+    : ""
+  return request<AgentRun[]>(agentsPath(workspaceId, `/${agentId}/runs${query}`), {
     token,
   })
 }
@@ -214,12 +220,16 @@ export function createAgentRun(
   workspaceId: string,
   agentId: string,
   goal: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  conversationId?: string | null
 ) {
   return request<AgentRun>(agentsPath(workspaceId, `/${agentId}/runs`), {
     method: "POST",
     token,
-    body: JSON.stringify({ goal }),
+    body: JSON.stringify({
+      goal,
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+    }),
     signal,
   })
 }
@@ -423,14 +433,16 @@ export async function streamAgentRun(
   agentId: string,
   goal: string,
   onEvent: (event: AgentRunStreamEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  conversationId?: string | null
 ) {
   const run = await createAgentRun(
     token,
     workspaceId,
     agentId,
     goal,
-    signal
+    signal,
+    conversationId
   )
   onEvent({ type: "run", sequence: 0, run })
   if (TERMINAL_RUN_STATUSES.has(run.status)) return

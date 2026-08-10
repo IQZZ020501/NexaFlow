@@ -7,11 +7,13 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     JSON,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -149,6 +151,24 @@ class AgentRun(Base):
             "knowledge_query_mode IN ('required', 'agentic')",
             name="ck_agent_runs_knowledge_query_mode",
         ),
+        Index(
+            "ix_agent_runs_conversation_id",
+            "conversation_id",
+        ),
+        Index(
+            "uq_agent_runs_active_conversation",
+            "workspace_id",
+            "agent_id",
+            "requested_by_user_id",
+            "conversation_id",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval')"
+            ),
+            sqlite_where=text(
+                "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval')"
+            ),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -158,6 +178,9 @@ class AgentRun(Base):
     agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     requested_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(36), nullable=False, default=new_id
     )
     goal: Mapped[str] = mapped_column(Text, nullable=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
@@ -189,6 +212,12 @@ class AgentRun(Base):
     plan: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     result: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    context_summary: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=""
+    )
+    model_usage: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
