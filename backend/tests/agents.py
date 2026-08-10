@@ -29,10 +29,6 @@ from app.application import agent_executor, agent_runs, agent_tools
 from app.application import agents as agent_application
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import user as user_repository
-from app.application.agent_memory import (
-    MAX_MEMORY_TOTAL_CHARS,
-    format_conversation_memory,
-)
 from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.capabilities.mcp import client as mcp_client_module
 from app.capabilities.mcp.client import (
@@ -785,12 +781,21 @@ def assert_tool_routing_context_is_explicit() -> None:
         True,
         True,
         knowledge_scope=agent_tools.describe_knowledge_sources([knowledge_base]),
+        context_messages=[
+            {"role": "user", "content": "Earlier question"},
+            {"role": "assistant", "content": "Earlier answer"},
+        ],
     )
     system = messages[0]["content"]
     assert "search_knowledge: first choice for workspace-specific" in system
     assert "MCP tools: use only for current or external data" in system
     assert "Release Docs" in system
     assert "answer immediately without tools" not in system
+    assert [message["role"] for message in messages[1:]] == [
+        "user",
+        "assistant",
+        "user",
+    ]
 
     no_knowledge_system = agent_runs.execution_messages(
         run,  # type: ignore[arg-type]
@@ -1213,38 +1218,6 @@ async def assert_structured_tool_and_event_safety() -> None:
     assert len(safe["nested"]["value"]) == 2000
 
 
-def assert_conversation_memory_is_bounded() -> None:
-    def run(index: int, status: str = "succeeded") -> SimpleNamespace:
-        return SimpleNamespace(
-            status=status,
-            goal=f"question-{index}-" + "q" * 1000,
-            result=f"answer-{index}-" + "a" * 1000,
-        )
-
-    memory = format_conversation_memory(
-        [
-            run(12),
-            run(11),
-            run(10, "failed"),
-            *[run(index) for index in range(9, -1, -1)],
-        ]
-    )
-    assert "question-12" in memory
-    assert "question-11" in memory
-    assert "question-10" not in memory  # failed runs are excluded
-    assert "question-0" in memory  # 11 succeeded runs fit the 60000-char budget
-    assert len(memory) <= MAX_MEMORY_TOTAL_CHARS
-
-    # the total budget still caps: a 40-run history exceeds 60000 chars,
-    # so the oldest runs are dropped while the newest stay.
-    overflow = format_conversation_memory(
-        [run(index) for index in range(39, -1, -1)]
-    )
-    assert "question-39" in overflow
-    assert "question-0" not in overflow
-    assert len(overflow) <= MAX_MEMORY_TOTAL_CHARS
-
-
 async def assert_stream_disconnect_keeps_run_durable(
     workspace_id: str,
     agent_id: str,
@@ -1456,9 +1429,25 @@ async def assert_run_lease_takeover(
             db,
             run.id,
             "worker-3",
-            {"current": True},
+            {
+                "current": True,
+                "model_usage": {"model_calls": 1, "total_tokens": 12},
+            },
             "agent",
         )
+        assert await agent_repository.save_agent_run_checkpoint(
+            db,
+            run.id,
+            "worker-3",
+            {"current": "without usage"},
+            "agent",
+        )
+        checkpointed_run = await agent_repository.get_agent_run_by_id(db, run.id)
+        assert checkpointed_run is not None
+        assert checkpointed_run.model_usage == {
+            "model_calls": 1,
+            "total_tokens": 12,
+        }
         assert (
             await agent_repository.append_owned_agent_run_event(
                 db,
@@ -1493,7 +1482,8 @@ async def assert_run_lease_takeover(
         current = await agent_repository.get_agent_run_by_id(db, run.id)
     assert current is not None
     assert current.attempts == 2
-    assert current.checkpoint == {"current": True}
+    assert current.checkpoint == {"current": "without usage"}
+    assert current.model_usage == {"model_calls": 1, "total_tokens": 12}
 
 
 async def assert_exhausted_run_closes_tool_ledger(
@@ -1788,7 +1778,6 @@ def main() -> None:
     asyncio.run(assert_runtime_budgets_are_enforced())
     asyncio.run(assert_retrieval_progress_uses_evidence_ids())
     asyncio.run(assert_structured_tool_and_event_safety())
-    assert_conversation_memory_is_bounded()
     assert_mcp_url_validation()
 
     original_query = agent_tools.query_knowledge_base
@@ -2014,6 +2003,8 @@ def main() -> None:
             assert member_question.status_code == 201, member_question.text
             member_run = member_question.json()
             assert member_run["status"] == "succeeded"
+            assert member_run["conversation_id"]
+            assert member_run["model_usage"]["model_calls"] == 1
             assert member_run["plan"] == []
             plan_calls = [
                 call
@@ -2043,6 +2034,7 @@ def main() -> None:
             assert permitted_question.status_code == 201, permitted_question.text
             executed = permitted_question.json()
             assert executed["status"] == "succeeded"
+            assert executed["conversation_id"] == member_run["conversation_id"]
             assert executed["result"] == "Completed."
             assert executed["events"][0]["tool_name"] == "search_knowledge"
             assert "citations" not in executed
@@ -2071,11 +2063,16 @@ def main() -> None:
             agentic_question = client.post(
                 agents_url(workspace_id, f"/{agent_id}/runs"),
                 headers=auth_headers(member_token),
-                json={"goal": "Search using a generated query"},
+                json={
+                    "goal": "Search using a generated query",
+                    "conversation_id": "conversation-agentic",
+                },
             )
             assert agentic_question.status_code == 201, agentic_question.text
             agentic_run = agentic_question.json()
             assert agentic_run["status"] == "succeeded"
+            assert agentic_run["conversation_id"] == "conversation-agentic"
+            assert agentic_run["conversation_id"] != executed["conversation_id"]
             assert agentic_run["knowledge_query_mode"] == "agentic"
             assert next(
                 event
@@ -2083,6 +2080,15 @@ def main() -> None:
                 if event["tool_kind"] == "knowledge"
             )["call_id"] == "call-search"
             assert query_calls[-1] == (knowledge_base_id, "release process")
+            filtered_runs = client.get(
+                agents_url(
+                    workspace_id,
+                    f"/{agent_id}/runs?conversation_id=conversation-agentic",
+                ),
+                headers=auth_headers(member_token),
+            )
+            assert filtered_runs.status_code == 200, filtered_runs.text
+            assert [run["id"] for run in filtered_runs.json()] == [agentic_run["id"]]
 
             member_mcp_create = client.post(
                 mcp_url(workspace_id),

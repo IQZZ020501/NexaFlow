@@ -287,9 +287,9 @@ def run_model_test(
     credentials: dict[str, str],
     model_name: str,
     model_type: str,
-) -> None:
+) -> dict[str, bool]:
     try:
-        test_model_connection(
+        return test_model_connection(
             provider_type,
             credentials,
             model_name,
@@ -311,14 +311,11 @@ async def test_registered_model(
     credentials: dict[str, str],
     model_name: str,
     model_type: str,
-) -> None:
-    await asyncio.to_thread(
+) -> dict[str, bool]:
+    return await asyncio.to_thread(
         run_model_test,
         provider_type,
         credentials,
         model_name,
         model_type,
     )
-
-
-

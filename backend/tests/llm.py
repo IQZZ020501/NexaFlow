@@ -34,6 +34,7 @@ MEMBER_PASSWORD = "Member@12345."
 class ModelTestHandler(BaseHTTPRequestHandler):
     calls: list[dict] = []
     fail_next = False
+    reject_stream_usage = False
 
     def do_POST(self) -> None:
         length = int(self.headers.get("content-length", "0"))
@@ -54,6 +55,14 @@ class ModelTestHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/v1/chat/completions" and body.get("stream"):
+            if ModelTestHandler.reject_stream_usage and (
+                body.get("stream_options") or {}
+            ).get("include_usage"):
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"stream usage is not supported"}')
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
@@ -101,6 +110,21 @@ class ModelTestHandler(BaseHTTPRequestHandler):
                     ],
                 },
             ]
+            if (body.get("stream_options") or {}).get("include_usage"):
+                chunks.append(
+                    {
+                        "id": "test",
+                        "object": "chat.completion.chunk",
+                        "created": 0,
+                        "model": "test",
+                        "choices": [],
+                        "usage": {
+                            "prompt_tokens": 2,
+                            "completion_tokens": 1,
+                            "total_tokens": 3,
+                        },
+                    }
+                )
             for chunk in chunks:
                 self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
             self.wfile.write(b"data: [DONE]\n\n")
@@ -141,6 +165,7 @@ class ModelTestHandler(BaseHTTPRequestHandler):
 def model_test_server() -> Iterator[str]:
     ModelTestHandler.calls = []
     ModelTestHandler.fail_next = False
+    ModelTestHandler.reject_stream_usage = False
     server = HTTPServer(("127.0.0.1", 0), ModelTestHandler)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -191,7 +216,11 @@ async def assert_model_api_key(model_id: str, expected_api_key: str) -> None:
         }
 
 
-async def assert_registered_model_runtime_call(model_id: str, model_type: str) -> None:
+async def assert_registered_model_runtime_call(
+    model_id: str,
+    model_type: str,
+    expected_stream_usage: bool | None = None,
+) -> None:
     async with get_session_factory()() as db:
         model = await db.get(RegisteredModel, model_id)
         assert model is not None
@@ -212,6 +241,11 @@ async def assert_registered_model_runtime_call(model_id: str, model_type: str) -
                 str(chunk.additional_kwargs.get("reasoning_content", ""))
                 for chunk in chunks
             ) == "Inspect "
+            if expected_stream_usage is not None:
+                assert (
+                    any(chunk.usage_metadata is not None for chunk in chunks)
+                    is expected_stream_usage
+                )
         elif model_type == "EMBEDDING":
             embeddings = build_registered_embeddings(model, settings())
             assert isinstance(embeddings, Embeddings)
@@ -230,6 +264,7 @@ async def assert_openai_compatible_runtime(api_base: str) -> None:
         "openai_compatible",
         {"api_base": api_base, "api_key": "test"},
         "test",
+        stream_usage=True,
     )
     response = await chat_model.ainvoke([("human", "Hello")], max_tokens=1)
     assert response.text == "ok"
@@ -241,6 +276,14 @@ async def assert_openai_compatible_runtime(api_base: str) -> None:
         str(chunk.additional_kwargs.get("reasoning_content", ""))
         for chunk in chunks
     ) == "Inspect "
+    assert ModelTestHandler.calls[-1]["body"]["stream_options"] == {
+        "include_usage": True
+    }
+    assert any(
+        chunk.usage_metadata is not None
+        and chunk.usage_metadata["total_tokens"] == 3
+        for chunk in chunks
+    )
 
 
 async def assert_model_count(expected: int) -> None:
@@ -457,6 +500,42 @@ def main() -> None:
             json=model_payload(model_base_url),
         )
         assert member_create_denied.status_code == 403, member_create_denied.text
+
+        for stream_usage_supported in (False, True):
+            ModelTestHandler.reject_stream_usage = not stream_usage_supported
+            custom_model = client.post(
+                models_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    **model_payload(model_base_url),
+                    "name": f"Custom Chat Usage {stream_usage_supported}",
+                    "provider": "model_custom_provider",
+                    "provider_type": "openai_compatible",
+                    "model_name": "custom-chat",
+                },
+            )
+            assert custom_model.status_code == 201, custom_model.text
+            assert (
+                custom_model.json()["meta"]["stream_usage_supported"]
+                is stream_usage_supported
+            )
+            custom_model_id = custom_model.json()["id"]
+            asyncio.run(
+                assert_registered_model_runtime_call(
+                    custom_model_id,
+                    "LLM",
+                    expected_stream_usage=stream_usage_supported,
+                )
+            )
+            assert ModelTestHandler.calls[-1]["body"].get("stream_options") == (
+                {"include_usage": True} if stream_usage_supported else None
+            )
+            deleted_custom_model = client.delete(
+                models_url(workspace_id, f"/{custom_model_id}"),
+                headers=auth_headers(admin_token),
+            )
+            assert deleted_custom_model.status_code == 204
+        asyncio.run(assert_model_count(0))
 
         ModelTestHandler.fail_next = True
         failed_test = client.post(

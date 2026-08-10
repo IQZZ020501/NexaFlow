@@ -11,7 +11,10 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from app.application.agent_memory import load_conversation_memory
+from app.application.agent_memory import (
+    PreparedConversationMemory,
+    prepare_conversation_memory,
+)
 from app.application.agent_tools import (
     build_knowledge_search_tool,
     build_mcp_agent_tool,
@@ -44,6 +47,7 @@ from app.shareddomain.agents.runtime import (
     AgentToolBusy,
     AgentToolResult,
     AgentToolUncertain,
+    empty_usage,
     run_agent,
     safe_event_value,
 )
@@ -76,7 +80,6 @@ class ExecutionScope:
     model: RegisteredModel
     knowledge_bases: list[KnowledgeBase]
     mcp_tools: list[tuple[ResolvedMcpTool, str]]
-    context_summary: str
 
 
 def _upsert_process_event(
@@ -421,11 +424,6 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
             policy_mode = effective_mcp_tool_policy_mode(tool.definition, policy)
             if policy_mode != "disabled":
                 mcp_tools.append((tool, policy_mode))
-        context_summary = await load_conversation_memory(
-            db,
-            run.agent_id,
-            actor.id,
-        )
         event_rows = await _list_all_agent_run_events(db, run.id)
     process_events: list[dict[str, Any]] = []
     for row in event_rows:
@@ -440,7 +438,6 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
         model=model,
         knowledge_bases=knowledge_bases,
         mcp_tools=mcp_tools,
-        context_summary=context_summary,
     )
 
 
@@ -618,18 +615,59 @@ async def _execute_claimed_agent_run(
     )
     from app.application.agent_runs import execution_messages
 
-    messages = execution_messages(
+    chat_model = build_chat_model(settings, scope.model)
+    base_messages = execution_messages(
         run,
         knowledge_tool is not None and run.knowledge_query_mode == "agentic",
         bool(scope.mcp_tools),
-        scope.context_summary,
-        (
+        knowledge_scope=(
             describe_knowledge_sources(scope.knowledge_bases)
             if scope.knowledge_bases
             else ""
         ),
-        run.knowledge_query_mode,
-        knowledge_context,
+        knowledge_query_mode=run.knowledge_query_mode,
+        knowledge_context=knowledge_context,
+    )
+    memory = PreparedConversationMemory(messages=[], model_usage=empty_usage())
+    if not run.checkpoint:
+        try:
+            async with get_session_factory()() as memory_db:
+                memory = await prepare_conversation_memory(
+                    memory_db,
+                    run,
+                    scope.model,
+                    chat_model,
+                    base_messages,
+                    tools,
+                    timeout_seconds=min(
+                        60.0,
+                        float(settings.agent_run_timeout_seconds),
+                    ),
+                )
+                await memory_db.commit()
+        except Exception as exc:
+            # A summary is an optimization; a failed compaction must not lose the
+            # current request. The durable transcript remains available for retry.
+            log_error(
+                logger,
+                "Conversation compaction was skipped.",
+                exc,
+                agent_run_id=run.id,
+                trace_id=run.trace_id,
+            )
+            memory = PreparedConversationMemory(messages=[], model_usage=empty_usage())
+    messages = execution_messages(
+        run,
+        knowledge_tool is not None and run.knowledge_query_mode == "agentic",
+        bool(scope.mcp_tools),
+        knowledge_scope=(
+            describe_knowledge_sources(scope.knowledge_bases)
+            if scope.knowledge_bases
+            else ""
+        ),
+        knowledge_query_mode=run.knowledge_query_mode,
+        knowledge_context=knowledge_context,
+        context_messages=memory.messages,
     )
     ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
     live_stream = AgentLiveStreamPublisher(settings, run.id)
@@ -662,7 +700,6 @@ async def _execute_claimed_agent_run(
             raise AgentToolBusy("", "Agent run checkpoint lease was lost.")
 
     try:
-        chat_model = build_chat_model(settings, scope.model)
         try:
             async with asyncio.timeout(settings.agent_run_timeout_seconds):
                 result = await run_agent(
@@ -675,6 +712,7 @@ async def _execute_claimed_agent_run(
                     on_checkpoint=save_checkpoint,
                     before_tool_call=ledger.before,
                     after_tool_call=ledger.after,
+                    initial_usage=memory.model_usage,
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc
@@ -688,6 +726,7 @@ async def _execute_claimed_agent_run(
                 events=_completed_process_events(process_events),
                 last_error=None,
                 finished_at=utc_now(),
+                model_usage=result.model_usage,
             )
             await db.commit()
         if not finalized:

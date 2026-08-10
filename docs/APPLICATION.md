@@ -17,4 +17,4 @@ api/endpoints → application（编排/规则/审计）→ shareddomain + capabi
 - `backend/app/application/agents.py` — Agent 用例门面：重导出 Agent CRUD、Run 与工具用例，保持 API 层入口稳定
 - `backend/app/application/agent_runs.py` — Agent Run 编排：提交/查询、工具审批与 PostgreSQL/Redis 可重放事件订阅
 - `backend/app/application/agent_executor.py` — Durable Executor：短事务装载、租约心跳/接管、节点 checkpoint、工具账本与 Redis 实时 delta 发布
-- `backend/app/application/agent_memory.py` — Agent 对话记忆：从历史成功运行记录格式化上下文注入（限量/限字符）
+- `backend/app/application/agent_memory.py` — Agent 对话记忆：按会话恢复角色消息，并在模型上下文预算内压缩旧轮次、持久化摘要

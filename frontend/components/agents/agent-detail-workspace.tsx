@@ -14,6 +14,7 @@ import {
   DatabaseIcon,
   LoaderCircleIcon,
   MessageSquareIcon,
+  MessageSquarePlusIcon,
   MoreHorizontalIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -67,6 +68,7 @@ type AgentDetailWorkspaceProps = {
   onPublish: () => void
   onAsk: (event: React.FormEvent<HTMLFormElement>) => void
   onCancelAsk: () => void
+  onNewConversation: () => void
   onToolCallDecision: (
     runId: string,
     callId: string,
@@ -631,6 +633,7 @@ export function AgentDetailWorkspace({
   onPublish,
   onAsk,
   onCancelAsk,
+  onNewConversation,
   onToolCallDecision,
   t,
 }: AgentDetailWorkspaceProps) {
@@ -744,6 +747,16 @@ export function AgentDetailWorkspace({
           </p>
         </div>
 
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={t("新建对话")}
+          title={t("新建对话")}
+          onClick={onNewConversation}
+        >
+          <MessageSquarePlusIcon />
+        </Button>
         <Button
           type="button"
           variant="ghost"
@@ -957,7 +970,12 @@ export function AgentDetailWorkspace({
                     isDirty ? t("请先保存配置后再调试") : t("向 Agent 提问...")
                   }
                   aria-label={t("向 Agent 提问")}
-                  disabled={isDirty || isAsking || agent.status !== "active"}
+                  disabled={
+                    isDirty ||
+                    isRunsLoading ||
+                    isAsking ||
+                    agent.status !== "active"
+                  }
                   maxLength={4000}
                   rows={2}
                 />
@@ -983,6 +1001,7 @@ export function AgentDetailWorkspace({
                   disabled={
                     !question.trim() ||
                     isDirty ||
+                    isRunsLoading ||
                     isAsking ||
                     agent.status !== "active"
                   }

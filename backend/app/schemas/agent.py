@@ -54,6 +54,7 @@ class AgentUpdateRequest(BaseModel):
 
 class AgentRunCreateRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
     preview: bool = Field(
         default=False,
         description="Deprecated compatibility field; runs are always durable.",
@@ -88,6 +89,7 @@ class AgentRunResponse(BaseModel):
     workspace_id: str
     agent_id: str
     requested_by_user_id: str
+    conversation_id: str
     goal: str
     model_id: str
     model_name: str
@@ -96,6 +98,7 @@ class AgentRunResponse(BaseModel):
     plan: list[AgentPlanStepResponse]
     events: list[AgentRunEventResponse]
     result: str
+    model_usage: dict[str, Any] = Field(default_factory=dict)
     last_error: str | None
     planned_at: datetime | None
     started_at: datetime | None

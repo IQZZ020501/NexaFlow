@@ -103,6 +103,13 @@ function sameValues(left: string[], right: string[]) {
   )
 }
 
+export function isCurrentAgentConversation(
+  currentConversationId: string | null,
+  expectedConversationId: string | null
+) {
+  return currentConversationId === expectedConversationId
+}
+
 export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
   const keepLiveAnswer = ["queued", "running", "awaiting_approval"].includes(
     liveRun.status
@@ -281,7 +288,11 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
   )
 }
 
-export function AgentsPage() {
+type AgentsPageProps = {
+  initialConversationId?: string | null
+}
+
+export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
   const router = useRouter()
   const params = useParams<{ id?: string }>()
   const selectedAgentId = params.id ?? null
@@ -316,6 +327,9 @@ export function AgentsPage() {
   const [agentsHasMore, setAgentsHasMore] = React.useState(true)
   const [isAgentsLoadingMore, setIsAgentsLoadingMore] = React.useState(false)
   const agentsLoadingMoreRef = React.useRef(false)
+  const activeConversationIdRef = React.useRef<string | null>(
+    initialConversationId
+  )
   const [hasLoadedWorkspaceData, setHasLoadedWorkspaceData] =
     React.useState(false)
 
@@ -343,14 +357,31 @@ export function AgentsPage() {
   )
 
   const loadRunToolCalls = React.useCallback(
-    async (agentId: string, runId: string) => {
-      if (!token || !selectedWorkspaceId) return
+    async (agentId: string, runId: string, conversationId: string) => {
+      if (
+        !token ||
+        !selectedWorkspaceId ||
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       const calls = await listAgentRunToolCalls(
         token,
         selectedWorkspaceId,
         agentId,
         runId
       )
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       setToolCallsByRun((current) => ({ ...current, [runId]: calls }))
     },
     [selectedWorkspaceId, token]
@@ -358,10 +389,19 @@ export function AgentsPage() {
 
   const applyStreamEvent = React.useCallback(
     (
+      conversationId: string,
       runId: string,
       streamEvent: AgentRunStreamEvent,
       placeholderId?: string
     ) => {
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       setRuns((current) =>
         mergeAgentRunStreamEvent(current, runId, streamEvent, placeholderId)
       )
@@ -370,7 +410,20 @@ export function AgentsPage() {
         streamEvent.type === "approval_resolved"
       ) {
         if (selectedAgentId) {
-          void loadRunToolCalls(selectedAgentId, runId).catch(reportError)
+          void loadRunToolCalls(
+            selectedAgentId,
+            runId,
+            conversationId
+          ).catch((error: unknown) => {
+            if (
+              isCurrentAgentConversation(
+                activeConversationIdRef.current,
+                conversationId
+              )
+            ) {
+              reportError(error)
+            }
+          })
         }
       }
     },
@@ -448,6 +501,10 @@ export function AgentsPage() {
   }, [loadWorkspaceData])
 
   React.useEffect(() => {
+    activeConversationIdRef.current = initialConversationId
+  }, [initialConversationId, selectedAgentId])
+
+  React.useEffect(() => {
     if (!selectedAgent || form.id === selectedAgent.id) return
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setForm(formFromAgent(selectedAgent))
@@ -487,15 +544,57 @@ export function AgentsPage() {
       return
     }
     let isCurrent = true
+    let expectedConversationId = activeConversationIdRef.current
     const observers: AbortController[] = []
     setIsRunsLoading(true)
-    listAgentRuns(token, selectedWorkspaceId, selectedAgentId)
+    listAgentRuns(
+      token,
+      selectedWorkspaceId,
+      selectedAgentId,
+      initialConversationId
+    )
       .then((nextRuns) => {
-        if (!isCurrent) return
-        setRuns(nextRuns)
-        for (const run of nextRuns) {
+        if (
+          !isCurrent ||
+          !isCurrentAgentConversation(
+            activeConversationIdRef.current,
+            expectedConversationId
+          )
+        ) {
+          return
+        }
+        const resolvedConversationId =
+          initialConversationId ??
+          nextRuns[0]?.conversation_id ??
+          crypto.randomUUID()
+        activeConversationIdRef.current = resolvedConversationId
+        expectedConversationId = resolvedConversationId
+        const visibleRuns = nextRuns.filter(
+          (run) => run.conversation_id === resolvedConversationId
+        )
+        setRuns(visibleRuns)
+        if (!initialConversationId) {
+          router.replace(
+            `/app/apps/${selectedAgentId}?conversation_id=${encodeURIComponent(resolvedConversationId)}`
+          )
+        }
+        for (const run of visibleRuns) {
           if (run.status === "awaiting_approval") {
-            void loadRunToolCalls(selectedAgentId, run.id).catch(reportError)
+            void loadRunToolCalls(
+              selectedAgentId,
+              run.id,
+              resolvedConversationId
+            ).catch((error: unknown) => {
+              if (
+                isCurrent &&
+                isCurrentAgentConversation(
+                  activeConversationIdRef.current,
+                  resolvedConversationId
+                )
+              ) {
+                reportError(error)
+              }
+            })
           }
           if (
             !["queued", "running", "awaiting_approval"].includes(run.status)
@@ -509,21 +608,44 @@ export function AgentsPage() {
             selectedWorkspaceId,
             selectedAgentId,
             run.id,
-            (streamEvent) => applyStreamEvent(run.id, streamEvent),
+            (streamEvent) =>
+              applyStreamEvent(resolvedConversationId, run.id, streamEvent),
             controller.signal
           ).catch((error: unknown) => {
-            if (!controller.signal.aborted) reportError(error)
+            if (
+              !controller.signal.aborted &&
+              isCurrentAgentConversation(
+                activeConversationIdRef.current,
+                resolvedConversationId
+              )
+            ) {
+              reportError(error)
+            }
           })
         }
       })
       .catch((error: unknown) => {
-        if (isCurrent) {
+        if (
+          isCurrent &&
+          isCurrentAgentConversation(
+            activeConversationIdRef.current,
+            expectedConversationId
+          )
+        ) {
           setRuns([])
           reportError(error)
         }
       })
       .finally(() => {
-        if (isCurrent) setIsRunsLoading(false)
+        if (
+          isCurrent &&
+          isCurrentAgentConversation(
+            activeConversationIdRef.current,
+            expectedConversationId
+          )
+        ) {
+          setIsRunsLoading(false)
+        }
       })
     return () => {
       isCurrent = false
@@ -533,6 +655,8 @@ export function AgentsPage() {
     applyStreamEvent,
     loadRunToolCalls,
     reportError,
+    router,
+    initialConversationId,
     selectedAgentId,
     selectedWorkspaceId,
     token,
@@ -658,10 +782,21 @@ export function AgentsPage() {
       !selectedWorkspaceId ||
       !selectedAgent ||
       !nextQuestion ||
+      isRunsLoading ||
       isAsking ||
       selectedAgent.status !== "active"
     ) {
       return
+    }
+    const conversationId =
+      activeConversationIdRef.current ??
+      initialConversationId ??
+      crypto.randomUUID()
+    activeConversationIdRef.current = conversationId
+    if (!initialConversationId) {
+      router.replace(
+        `/app/apps/${selectedAgent.id}?conversation_id=${encodeURIComponent(conversationId)}`
+      )
     }
     setQuestion("")
     setPendingQuestion(nextQuestion)
@@ -673,6 +808,7 @@ export function AgentsPage() {
       workspace_id: selectedWorkspaceId,
       agent_id: selectedAgent.id,
       requested_by_user_id: me?.user.id ?? "",
+      conversation_id: conversationId,
       goal: nextQuestion,
       model_id: selectedAgent.model_id,
       model_name:
@@ -698,6 +834,7 @@ export function AgentsPage() {
         },
       ],
       result: "",
+      model_usage: {},
       last_error: null,
       planned_at: null,
       started_at: new Date().toISOString(),
@@ -715,6 +852,14 @@ export function AgentsPage() {
         selectedAgent.id,
         nextQuestion,
         (streamEvent) => {
+          if (
+            !isCurrentAgentConversation(
+              activeConversationIdRef.current,
+              conversationId
+            )
+          ) {
+            return
+          }
           if (streamEvent.type === "run") {
             liveRunId = streamEvent.run.id
             setPendingQuestion(null)
@@ -726,33 +871,68 @@ export function AgentsPage() {
               ? streamEvent.run.id
               : liveRunId
           if (eventRunId) {
-            applyStreamEvent(eventRunId, streamEvent, placeholderRun.id)
+            applyStreamEvent(
+              conversationId,
+              eventRunId,
+              streamEvent,
+              placeholderRun.id
+            )
           }
           if (streamEvent.type === "error") {
             notify("error", t("Agent 回答失败"))
           }
         },
-        askAbortController.signal
+        askAbortController.signal,
+        conversationId
       )
     } catch (error) {
       const userCancelled = askAbortController.signal.aborted
-      if (!liveRunId) {
+      const isCurrentConversation = isCurrentAgentConversation(
+        activeConversationIdRef.current,
+        conversationId
+      )
+      if (!liveRunId && isCurrentConversation) {
         setQuestion(nextQuestion)
         setRuns((current) =>
           current.filter((run) => run.id !== placeholderRun.id)
         )
       }
-      if (userCancelled) return
+      if (userCancelled || !isCurrentConversation) return
       reportError(error)
     } finally {
-      setPendingQuestion(null)
-      setIsAsking(false)
-      setAskAbortController(null)
+      if (
+        isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        setPendingQuestion(null)
+        setIsAsking(false)
+        setAskAbortController(null)
+      }
     }
   }
 
   function handleCancelAsk() {
     askAbortController?.abort()
+  }
+
+  function handleNewConversation() {
+    if (!selectedAgentId) return
+    const conversationId = crypto.randomUUID()
+    activeConversationIdRef.current = conversationId
+    askAbortController?.abort()
+    setRuns([])
+    setToolCallsByRun({})
+    setQuestion("")
+    setPendingQuestion(null)
+    setAskAbortController(null)
+    setIsAsking(false)
+    setIsRunsLoading(false)
+    setResolvingCallId(null)
+    router.push(
+      `/app/apps/${selectedAgentId}?conversation_id=${encodeURIComponent(conversationId)}`
+    )
   }
 
   async function handleToolCallDecision(
@@ -761,6 +941,8 @@ export function AgentsPage() {
     decision: "approve" | "reject"
   ) {
     if (!token || !selectedWorkspaceId || !selectedAgent) return
+    const conversationId = activeConversationIdRef.current
+    if (!conversationId) return
     setResolvingCallId(`${runId}:${callId}`)
     try {
       const run = await resolveAgentToolCall(
@@ -771,16 +953,46 @@ export function AgentsPage() {
         callId,
         decision
       )
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       setRuns((current) => mergeAgentRunSnapshot(current, run))
-      await loadRunToolCalls(selectedAgent.id, runId)
+      await loadRunToolCalls(selectedAgent.id, runId, conversationId)
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       notify(
         "success",
         t(decision === "approve" ? "工具调用已批准" : "工具调用已拒绝")
       )
     } catch (error) {
-      reportError(error)
+      if (
+        isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        reportError(error)
+      }
     } finally {
-      setResolvingCallId(null)
+      if (
+        isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        setResolvingCallId(null)
+      }
     }
   }
 
@@ -813,6 +1025,7 @@ export function AgentsPage() {
         onPublish={() => void handlePublishAgent()}
         onAsk={handleAsk}
         onCancelAsk={handleCancelAsk}
+        onNewConversation={handleNewConversation}
         onToolCallDecision={(runId, callId, decision) =>
           void handleToolCallDecision(runId, callId, decision)
         }

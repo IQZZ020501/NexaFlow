@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   isAgentFormDirty,
+  isCurrentAgentConversation,
   mergeAgentRunSnapshot,
   mergeAgentRunStreamEvent,
   mergeInitialAgentRun,
@@ -14,6 +15,50 @@ import {
   unrenderedAgentToolCalls,
 } from "../components/agents/agent-detail-workspace"
 import type { Agent, AgentRun, AgentToolCall } from "../lib/api/agents"
+
+describe("Agent conversation async guards", () => {
+  test("does not restore an aborted question after switching conversations", async () => {
+    let activeConversationId: string | null = "conversation-1"
+    const actionConversationId = activeConversationId
+    let question = ""
+    const completion = Promise.reject(new Error("aborted")).catch(() => {
+      if (
+        isCurrentAgentConversation(
+          activeConversationId,
+          actionConversationId
+        )
+      ) {
+        question = "old question"
+      }
+    })
+
+    activeConversationId = "conversation-2"
+    await completion
+
+    expect(question).toBe("")
+  })
+
+  test("does not merge a tool decision after switching conversations", async () => {
+    let activeConversationId: string | null = "conversation-1"
+    const actionConversationId = activeConversationId
+    let runIds = ["new-conversation-run"]
+    const completion = Promise.resolve("old-conversation-run").then((runId) => {
+      if (
+        isCurrentAgentConversation(
+          activeConversationId,
+          actionConversationId
+        )
+      ) {
+        runIds = [runId, ...runIds]
+      }
+    })
+
+    activeConversationId = "conversation-2"
+    await completion
+
+    expect(runIds).toEqual(["new-conversation-run"])
+  })
+})
 
 const agent: Agent = {
   id: "agent-1",

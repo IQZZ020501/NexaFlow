@@ -19,3 +19,4 @@ class AgentState(TypedDict):
     pending_tool_calls: list[PendingToolCall]
     finish_reason: str
     final_answer: str
+    model_usage: dict[str, Any]

@@ -2,16 +2,18 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
-    JSON,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    column,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,11 +21,20 @@ from app.infrastructure.base import Base
 from app.infrastructure.model_utils import new_id, utc_now
 
 AGENT_RUN_QUEUED_STATUS = "queued"
+AGENT_RUN_PLANNING_STATUS = "planning"
+AGENT_RUN_PLANNED_STATUS = "planned"
 AGENT_RUN_RUNNING_STATUS = "running"
 AGENT_RUN_AWAITING_APPROVAL_STATUS = "awaiting_approval"
 AGENT_RUN_SUCCEEDED_STATUS = "succeeded"
 AGENT_RUN_FAILED_STATUS = "failed"
 AGENT_RUN_CANCELLED_STATUS = "cancelled"
+AGENT_RUN_ACTIVE_STATUSES = (
+    AGENT_RUN_QUEUED_STATUS,
+    AGENT_RUN_PLANNING_STATUS,
+    AGENT_RUN_PLANNED_STATUS,
+    AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_AWAITING_APPROVAL_STATUS,
+)
 
 
 class Agent(Base):
@@ -149,6 +160,20 @@ class AgentRun(Base):
             "knowledge_query_mode IN ('required', 'agentic')",
             name="ck_agent_runs_knowledge_query_mode",
         ),
+        Index(
+            "ix_agent_runs_conversation_id",
+            "conversation_id",
+        ),
+        Index(
+            "uq_agent_runs_active_conversation",
+            "workspace_id",
+            "agent_id",
+            "requested_by_user_id",
+            "conversation_id",
+            unique=True,
+            postgresql_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
+            sqlite_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -158,6 +183,9 @@ class AgentRun(Base):
     agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     requested_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(36), nullable=False, default=new_id
     )
     goal: Mapped[str] = mapped_column(Text, nullable=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
@@ -189,6 +217,12 @@ class AgentRun(Base):
     plan: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     result: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    context_summary: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=""
+    )
+    model_usage: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -45,6 +45,7 @@ from app.infrastructure.logger import get_logger
 logger = get_logger(__name__)
 
 MODEL_REQUEST_TIMEOUT_SECONDS = 20
+STREAM_USAGE_SUPPORTED_META_KEY = "stream_usage_supported"
 SUPPORTED_PROVIDER_TYPES = {
     "openai_compatible",
     "anthropic",
@@ -430,12 +431,15 @@ def build_chat_model(
     provider_type: str,
     credentials: dict[str, str],
     model_name: str,
+    *,
+    stream_usage: bool = False,
 ) -> BaseChatModel:
     if provider_type == "openai_compatible":
         return OpenAICompatibleChatModel(
             model=model_name,
             api_key=_openai_api_key(credentials),
             base_url=openai_compatible_base(_required(credentials, "api_base")),
+            stream_usage=stream_usage,
             timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
             max_retries=0,
         )
@@ -604,6 +608,7 @@ def build_registered_chat_model(
         model.provider_type,
         _registered_model_credentials(model, settings, "LLM"),
         model.model_name,
+        stream_usage=(model.meta or {}).get(STREAM_USAGE_SUPPORTED_META_KEY) is True,
     )
 
 
@@ -634,13 +639,39 @@ def test_model_connection(
     credentials: dict[str, str],
     model_name: str,
     model_type: str,
-) -> None:
+) -> dict[str, bool]:
     if model_type == "LLM":
         output_limit = (
             {"num_predict": 1}
             if provider_type == "ollama"
             else {"max_tokens": 1}
         )
+        if provider_type == "openai_compatible":
+            try:
+                chunks = list(
+                    build_chat_model(
+                        provider_type,
+                        credentials,
+                        model_name,
+                        stream_usage=True,
+                    ).stream([("human", "Hello")], **output_limit)
+                )
+            except ModelProviderStatusError as exc:
+                if exc.status_code not in {400, 422}:
+                    raise
+                list(
+                    build_chat_model(
+                        provider_type,
+                        credentials,
+                        model_name,
+                    ).stream([("human", "Hello")], **output_limit)
+                )
+                return {STREAM_USAGE_SUPPORTED_META_KEY: False}
+            return {
+                STREAM_USAGE_SUPPORTED_META_KEY: any(
+                    chunk.usage_metadata is not None for chunk in chunks
+                )
+            }
         build_chat_model(provider_type, credentials, model_name).invoke(
             [("human", "Hello")],
             **output_limit,
@@ -654,3 +685,4 @@ def test_model_connection(
         )
     else:
         raise ModelProviderError("Model type is not supported.")
+    return {STREAM_USAGE_SUPPORTED_META_KEY: False}

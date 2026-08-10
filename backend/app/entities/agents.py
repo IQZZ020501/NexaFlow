@@ -46,6 +46,7 @@ class AgentRun:
     workspace_id: str = ""
     agent_id: str = ""
     requested_by_user_id: str = ""
+    conversation_id: str = field(default_factory=new_id)
     goal: str = ""
     instructions: str = ""
     knowledge_base_ids: list[str] = field(default_factory=list)
@@ -64,6 +65,8 @@ class AgentRun:
     plan: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
     result: str = ""
+    context_summary: str = ""
+    model_usage: dict[str, Any] = field(default_factory=dict)
     last_error: str | None = None
     planned_at: datetime | None = None
     started_at: datetime | None = None

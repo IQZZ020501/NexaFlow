@@ -850,23 +850,222 @@ def test_run_to_response_maps_run_fields() -> None:
         workspace_id="ws-1",
         agent_id="agent-1",
         requested_by_user_id="user-1",
+        conversation_id="conversation-1",
         goal="goal",
         instructions="instructions",
         model_id="model-1",
         model_name="deepseek-chat",
         status="succeeded",
         result="answer",
+        model_usage={"model_calls": 1, "total_tokens": 12},
     )
     response = run_to_response(run, trace_id="trace-1")
     assert response.id == "run-1"
     assert response.workspace_id == "ws-1"
     assert response.agent_id == "agent-1"
+    assert response.conversation_id == "conversation-1"
     assert response.status == "succeeded"
     assert response.result == "answer"
     assert response.model_name == "deepseek-chat"
     assert response.plan == []
     assert response.events == []
+    assert response.model_usage["total_tokens"] == 12
     assert response.trace_id == "trace-1"
+
+
+def test_agent_usage_normalizes_provider_metadata() -> None:
+    from langchain_core.messages import AIMessage
+
+    from app.shareddomain.agents.runtime import (
+        add_compaction_usage,
+        merge_usage,
+        usage_from_message,
+    )
+
+    standard = usage_from_message(
+        AIMessage(
+            content="one",
+            usage_metadata={
+                "input_tokens": 10,
+                "output_tokens": 3,
+                "total_tokens": 13,
+                "input_token_details": {"cache_read": 4},
+            },
+        )
+    )
+    openai_compatible = usage_from_message(
+        AIMessage(
+            content="two",
+            response_metadata={
+                "token_usage": {
+                    "prompt_tokens": 7,
+                    "completion_tokens": 2,
+                    "total_tokens": 9,
+                }
+            },
+        )
+    )
+    unreported = usage_from_message(AIMessage(content="three"))
+    merged = merge_usage(standard, openai_compatible, unreported)
+
+    assert merged["model_calls"] == 3
+    assert merged["reported_model_calls"] == 2
+    assert merged["input_tokens"] == 17
+    assert merged["output_tokens"] == 5
+    assert merged["total_tokens"] == 22
+    assert merged["cache_read_input_tokens"] == 4
+
+    compacted = add_compaction_usage(None, standard)
+    assert compacted["model_calls"] == 1
+    assert compacted["compaction"]["total_tokens"] == 13
+
+
+def test_agent_memory_compacts_old_turns() -> None:
+    from langchain_core.messages import AIMessage
+
+    from app.application import agent_memory
+    from app.entities.agents import AgentRun
+
+    history = [
+        AgentRun(
+            id=f"run-{index}",
+            workspace_id="ws-1",
+            agent_id="agent-1",
+            requested_by_user_id="user-1",
+            conversation_id="conversation-1",
+            goal=f"question-{index}",
+            result="x" * 3000,
+            status="succeeded",
+        )
+        for index in range(8)
+    ]
+    current = AgentRun(
+        id="run-current",
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        requested_by_user_id="user-1",
+        conversation_id="conversation-1",
+        goal="current question",
+        status="running",
+    )
+    saved: list[tuple[str, str]] = []
+    requested_limits: list[int] = []
+
+    class FakeDatabase:
+        async def flush(self) -> None:
+            return None
+
+        async def rollback(self) -> None:
+            return None
+
+    class FakeModel:
+        profile = {"max_input_tokens": 4096}
+
+        async def ainvoke(self, _messages):
+            return AIMessage(
+                content="Stable summary",
+                usage_metadata={
+                    "input_tokens": 20,
+                    "output_tokens": 4,
+                    "total_tokens": 24,
+                },
+            )
+
+    async def list_runs(_db, _run, *, limit):
+        requested_limits.append(limit)
+        return None, history
+
+    async def save_summary(_db, run, summary):
+        saved.append((run.id, summary))
+        return True
+
+    original_list = agent_memory.agent_repository.list_conversation_memory_runs
+    original_save = agent_memory.agent_repository.save_conversation_summary
+    agent_memory.agent_repository.list_conversation_memory_runs = list_runs
+    agent_memory.agent_repository.save_conversation_summary = save_summary
+    try:
+        prepared = asyncio.run(
+            agent_memory.prepare_conversation_memory(
+                FakeDatabase(),  # type: ignore[arg-type]
+                current,
+                SimpleNamespace(meta={}),
+                FakeModel(),
+                [
+                    {"role": "system", "content": "rules"},
+                    {"role": "user", "content": "current question"},
+                ],
+                [],
+            )
+        )
+    finally:
+        agent_memory.agent_repository.list_conversation_memory_runs = original_list
+        agent_memory.agent_repository.save_conversation_summary = original_save
+
+    assert saved == [("run-0", "Stable summary")]
+    assert requested_limits == [agent_memory.MAX_MEMORY_RUNS]
+    assert prepared.messages[0]["content"].endswith("Stable summary")
+    assert prepared.model_usage["compaction"]["total_tokens"] == 24
+
+    tight = agent_memory._fit_memory("s" * 1000, history[-1:], 128)
+    assert [message["role"] for message in tight] == ["user", "assistant"]
+    assert agent_memory._approx_tokens(tight) <= 128
+    assert agent_memory._memory_budget(
+        [{"role": "user", "content": "x" * 5000}],
+        [],
+        SimpleNamespace(meta={}),
+        FakeModel(),
+    ) == 0
+
+
+def test_agent_memory_query_is_bounded_and_projected() -> None:
+    from app.entities.agents import AgentRun
+    from app.infrastructure.repositories import agent as agent_repository
+    from sqlalchemy.dialects import postgresql
+
+    statements = []
+
+    class EmptyScalars:
+        def all(self):
+            return []
+
+    class FakeDatabase:
+        async def scalar(self, statement):
+            statements.append(statement)
+            return None
+
+        async def scalars(self, statement):
+            statements.append(statement)
+            return EmptyScalars()
+
+    asyncio.run(
+        agent_repository.list_conversation_memory_runs(
+            FakeDatabase(),  # type: ignore[arg-type]
+            AgentRun(
+                workspace_id="ws-1",
+                agent_id="agent-1",
+                requested_by_user_id="user-1",
+                conversation_id="conversation-1",
+            ),
+            limit=7,
+        )
+    )
+    compiled = [
+        str(
+            statement.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        for statement in statements
+    ]
+    assert "LIMIT 7" in compiled[-1]
+    for sql in compiled:
+        assert "agent_runs.goal" in sql
+        assert "agent_runs.result" in sql
+        assert "agent_runs.context_summary" in sql
+        assert "agent_runs.events" not in sql
+        assert "agent_runs.plan" not in sql
+        assert "agent_runs.checkpoint" not in sql
 
 
 # ---------------------------------------------------------------- DTO mappings
@@ -1337,6 +1536,9 @@ def main() -> None:
     test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()
+    test_agent_usage_normalizes_provider_metadata()
+    test_agent_memory_compacts_old_turns()
+    test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()
     test_celery_worker_pool_is_fork_safe_on_macos()
     test_agent_live_stream_round_trip()
