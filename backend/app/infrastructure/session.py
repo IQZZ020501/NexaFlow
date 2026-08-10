@@ -14,6 +14,10 @@ def configure_database(settings: Settings, *, worker_process: bool = False) -> N
 
     kwargs = {}
     if settings.database_url == "sqlite+aiosqlite:///:memory:":
+        if worker_process:
+            raise ValueError(
+                "Celery workers cannot use in-memory SQLite; use a file-backed database URL."
+            )
         kwargs = {
             "connect_args": {"check_same_thread": False},
             "poolclass": StaticPool,

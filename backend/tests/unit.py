@@ -1416,20 +1416,36 @@ def test_celery_worker_pool_is_fork_safe_without_prefork() -> None:
     assert worker_pool_for_platform("linux") == "prefork"
 
 
+def test_worker_database_rejects_in_memory_sqlite() -> None:
+    from app.infrastructure.session import configure_database
+    from tests.support import settings
+
+    try:
+        configure_database(settings(), worker_process=True)
+    except ValueError as exc:
+        assert "in-memory SQLite" in str(exc)
+        return
+    raise AssertionError("expected in-memory SQLite worker database to be rejected")
+
+
 def test_windows_event_loop_policy_is_selector_based() -> None:
     import asyncio
     import sys
 
     from app.infrastructure.event_loop import configure_windows_event_loop_policy
 
-    if sys.platform == "win32":
-        configure_windows_event_loop_policy()
-        policy = asyncio.get_event_loop_policy()
-        assert isinstance(policy, asyncio.WindowsSelectorEventLoopPolicy)
-    else:
-        before = asyncio.get_event_loop_policy()
-        configure_windows_event_loop_policy()
-        assert asyncio.get_event_loop_policy() is before
+    original_policy = asyncio.get_event_loop_policy()
+    try:
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            configure_windows_event_loop_policy()
+            policy = asyncio.get_event_loop_policy()
+            assert isinstance(policy, asyncio.WindowsSelectorEventLoopPolicy)
+        else:
+            configure_windows_event_loop_policy()
+            assert asyncio.get_event_loop_policy() is original_policy
+    finally:
+        asyncio.set_event_loop_policy(original_policy)
 
 
 def test_agent_live_stream_round_trip() -> None:
@@ -1813,6 +1829,7 @@ def main() -> None:
     test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()
     test_celery_worker_pool_is_fork_safe_without_prefork()
+    test_worker_database_rejects_in_memory_sqlite()
     test_windows_event_loop_policy_is_selector_based()
     test_agent_live_stream_round_trip()
     test_team_to_response()
