@@ -288,7 +288,7 @@ async def update_registered_model(
     if payload.status is not None:
         model.status = validate_status(payload.status)
     model.meta = {
-        **(payload.meta if payload.meta is not None else model.meta),
+        **(payload.meta if payload.meta is not None else (model.meta or {})),
         **capabilities,
     }
     apply_model_credentials(
