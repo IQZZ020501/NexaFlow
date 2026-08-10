@@ -175,7 +175,7 @@ async def create_registered_model(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "Model name is required.",
         )
-    await test_registered_model(
+    capabilities = await test_registered_model(
         provider_type,
         {**config, **secrets},
         model_name,
@@ -191,7 +191,7 @@ async def create_registered_model(
         model_type=model_type,
         model_name=model_name,
         status=ACTIVE_STATUS,
-        meta=payload.meta,
+        meta={**payload.meta, **capabilities},
         created_by_user_id=actor.id,
     )
     apply_model_credentials(
@@ -273,7 +273,7 @@ async def update_registered_model(
         current_secrets=current_secrets,
         current_hints=current_hints,
     )
-    await test_registered_model(
+    capabilities = await test_registered_model(
         provider_type,
         {**config, **secrets},
         model_name,
@@ -287,8 +287,10 @@ async def update_registered_model(
     model.model_name = model_name
     if payload.status is not None:
         model.status = validate_status(payload.status)
-    if payload.meta is not None:
-        model.meta = payload.meta
+    model.meta = {
+        **(payload.meta if payload.meta is not None else model.meta),
+        **capabilities,
+    }
     apply_model_credentials(
         model,
         config,
