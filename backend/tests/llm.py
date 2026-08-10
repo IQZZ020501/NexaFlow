@@ -101,6 +101,21 @@ class ModelTestHandler(BaseHTTPRequestHandler):
                     ],
                 },
             ]
+            if (body.get("stream_options") or {}).get("include_usage"):
+                chunks.append(
+                    {
+                        "id": "test",
+                        "object": "chat.completion.chunk",
+                        "created": 0,
+                        "model": "test",
+                        "choices": [],
+                        "usage": {
+                            "prompt_tokens": 2,
+                            "completion_tokens": 1,
+                            "total_tokens": 3,
+                        },
+                    }
+                )
             for chunk in chunks:
                 self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
             self.wfile.write(b"data: [DONE]\n\n")
@@ -241,6 +256,14 @@ async def assert_openai_compatible_runtime(api_base: str) -> None:
         str(chunk.additional_kwargs.get("reasoning_content", ""))
         for chunk in chunks
     ) == "Inspect "
+    assert ModelTestHandler.calls[-1]["body"]["stream_options"] == {
+        "include_usage": True
+    }
+    assert any(
+        chunk.usage_metadata is not None
+        and chunk.usage_metadata["total_tokens"] == 3
+        for chunk in chunks
+    )
 
 
 async def assert_model_count(expected: int) -> None:

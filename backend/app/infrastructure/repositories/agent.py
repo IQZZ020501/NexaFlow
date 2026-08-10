@@ -3,25 +3,60 @@ from datetime import datetime
 from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.entities.agents import Agent as AgentEntity
 from app.entities.agents import AgentRun as AgentRunEntity
 from app.entities.agents import AgentRunEvent as AgentRunEventEntity
 from app.entities.agents import AgentToolCall as AgentToolCallEntity
-from app.infrastructure.repositories.mapping import refresh_entity, save, to_entity, to_orm
+from app.infrastructure.repositories.mapping import (
+    refresh_entity,
+    save,
+    to_entity,
+    to_orm,
+)
 from app.shareddomain.agents.models import (
+    AGENT_RUN_ACTIVE_STATUSES,
+    AGENT_RUN_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_FAILED_STATUS,
+    AGENT_RUN_QUEUED_STATUS,
+    AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_SUCCEEDED_STATUS,
     Agent,
     AgentKnowledgeBase,
     AgentMcpTool,
     AgentRun,
     AgentRunEvent,
     AgentToolCall,
-    AGENT_RUN_AWAITING_APPROVAL_STATUS,
-    AGENT_RUN_FAILED_STATUS,
-    AGENT_RUN_QUEUED_STATUS,
-    AGENT_RUN_RUNNING_STATUS,
-    AGENT_RUN_SUCCEEDED_STATUS,
 )
+
+_CONVERSATION_MEMORY_COLUMNS = (
+    AgentRun.id,
+    AgentRun.workspace_id,
+    AgentRun.agent_id,
+    AgentRun.requested_by_user_id,
+    AgentRun.conversation_id,
+    AgentRun.status,
+    AgentRun.goal,
+    AgentRun.result,
+    AgentRun.context_summary,
+    AgentRun.created_at,
+)
+
+
+def _to_conversation_memory_entity(row: AgentRun) -> AgentRunEntity:
+    return AgentRunEntity(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        agent_id=row.agent_id,
+        requested_by_user_id=row.requested_by_user_id,
+        conversation_id=row.conversation_id,
+        status=row.status,
+        goal=row.goal,
+        result=row.result,
+        context_summary=row.context_summary,
+        created_at=row.created_at,
+    )
 
 
 async def list_agents(
@@ -198,15 +233,7 @@ async def get_active_agent_run(
             AgentRun.agent_id == agent_id,
             AgentRun.requested_by_user_id == requested_by_user_id,
             AgentRun.conversation_id == conversation_id,
-            AgentRun.status.in_(
-                (
-                    AGENT_RUN_QUEUED_STATUS,
-                    "planning",
-                    "planned",
-                    AGENT_RUN_RUNNING_STATUS,
-                    AGENT_RUN_AWAITING_APPROVAL_STATUS,
-                )
-            ),
+            AgentRun.status.in_(AGENT_RUN_ACTIVE_STATUSES),
         )
         .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         .limit(1)
@@ -217,6 +244,8 @@ async def get_active_agent_run(
 async def list_conversation_memory_runs(
     db: AsyncSession,
     run: AgentRunEntity,
+    *,
+    limit: int,
 ) -> tuple[AgentRunEntity | None, list[AgentRunEntity]]:
     scope = (
         AgentRun.workspace_id == run.workspace_id,
@@ -230,6 +259,7 @@ async def list_conversation_memory_runs(
     )
     anchor_row = await db.scalar(
         select(AgentRun)
+        .options(load_only(*_CONVERSATION_MEMORY_COLUMNS))
         .where(
             *scope,
             AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
@@ -250,19 +280,23 @@ async def list_conversation_memory_runs(
         )
     statement = (
         select(AgentRun)
+        .options(load_only(*_CONVERSATION_MEMORY_COLUMNS))
         .where(
             *scope,
             AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
             before_current,
         )
-        .order_by(AgentRun.created_at, AgentRun.id)
+        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+        .limit(limit)
     )
     if after_anchor is not None:
         statement = statement.where(after_anchor)
     rows = await db.scalars(statement)
     return (
-        to_entity(AgentRunEntity, anchor_row) if anchor_row is not None else None,
-        [to_entity(AgentRunEntity, row) for row in rows.all()],
+        _to_conversation_memory_entity(anchor_row)
+        if anchor_row is not None
+        else None,
+        [_to_conversation_memory_entity(row) for row in reversed(rows.all())],
     )
 
 
@@ -383,6 +417,13 @@ async def save_agent_run_checkpoint(
     checkpoint: dict,
     checkpoint_phase: str,
 ) -> bool:
+    values = {
+        "checkpoint": checkpoint,
+        "checkpoint_phase": checkpoint_phase,
+        "updated_at": func.now(),
+    }
+    if "model_usage" in checkpoint:
+        values["model_usage"] = checkpoint["model_usage"]
     result = await db.execute(
         update(AgentRun)
         .where(
@@ -390,12 +431,7 @@ async def save_agent_run_checkpoint(
             AgentRun.status == AGENT_RUN_RUNNING_STATUS,
             AgentRun.worker_task_id == worker_task_id,
         )
-        .values(
-            checkpoint=checkpoint,
-            checkpoint_phase=checkpoint_phase,
-            model_usage=checkpoint.get("model_usage", {}),
-            updated_at=func.now(),
-        )
+        .values(**values)
     )
     return bool(result.rowcount)
 

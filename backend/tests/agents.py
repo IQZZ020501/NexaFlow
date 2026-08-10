@@ -1429,9 +1429,25 @@ async def assert_run_lease_takeover(
             db,
             run.id,
             "worker-3",
-            {"current": True},
+            {
+                "current": True,
+                "model_usage": {"model_calls": 1, "total_tokens": 12},
+            },
             "agent",
         )
+        assert await agent_repository.save_agent_run_checkpoint(
+            db,
+            run.id,
+            "worker-3",
+            {"current": "without usage"},
+            "agent",
+        )
+        checkpointed_run = await agent_repository.get_agent_run_by_id(db, run.id)
+        assert checkpointed_run is not None
+        assert checkpointed_run.model_usage == {
+            "model_calls": 1,
+            "total_tokens": 12,
+        }
         assert (
             await agent_repository.append_owned_agent_run_event(
                 db,
@@ -1466,7 +1482,8 @@ async def assert_run_lease_takeover(
         current = await agent_repository.get_agent_run_by_id(db, run.id)
     assert current is not None
     assert current.attempts == 2
-    assert current.checkpoint == {"current": True}
+    assert current.checkpoint == {"current": "without usage"}
+    assert current.model_usage == {"model_calls": 1, "total_tokens": 12}
 
 
 async def assert_exhausted_run_closes_tool_ledger(

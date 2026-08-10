@@ -2,18 +2,18 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
-    JSON,
     Integer,
     String,
     Text,
     UniqueConstraint,
-    text,
+    column,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,11 +21,20 @@ from app.infrastructure.base import Base
 from app.infrastructure.model_utils import new_id, utc_now
 
 AGENT_RUN_QUEUED_STATUS = "queued"
+AGENT_RUN_PLANNING_STATUS = "planning"
+AGENT_RUN_PLANNED_STATUS = "planned"
 AGENT_RUN_RUNNING_STATUS = "running"
 AGENT_RUN_AWAITING_APPROVAL_STATUS = "awaiting_approval"
 AGENT_RUN_SUCCEEDED_STATUS = "succeeded"
 AGENT_RUN_FAILED_STATUS = "failed"
 AGENT_RUN_CANCELLED_STATUS = "cancelled"
+AGENT_RUN_ACTIVE_STATUSES = (
+    AGENT_RUN_QUEUED_STATUS,
+    AGENT_RUN_PLANNING_STATUS,
+    AGENT_RUN_PLANNED_STATUS,
+    AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_AWAITING_APPROVAL_STATUS,
+)
 
 
 class Agent(Base):
@@ -162,12 +171,8 @@ class AgentRun(Base):
             "requested_by_user_id",
             "conversation_id",
             unique=True,
-            postgresql_where=text(
-                "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval')"
-            ),
-            sqlite_where=text(
-                "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval')"
-            ),
+            postgresql_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
+            sqlite_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
         ),
     )
 

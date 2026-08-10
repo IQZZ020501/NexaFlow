@@ -17,6 +17,7 @@ from app.shareddomain.agents.runtime.usage import (
 
 MAX_MEMORY_TURN_CHARS = 6000
 MAX_MEMORY_TOKENS = 12000
+MAX_MEMORY_RUNS = 50
 RECENT_MEMORY_RUNS = 6
 MAX_SUMMARY_CHARS = 12000
 DEFAULT_CONTEXT_WINDOW_TOKENS = 32768
@@ -216,7 +217,11 @@ async def prepare_conversation_memory(
     *,
     timeout_seconds: float = 60.0,
 ) -> PreparedConversationMemory:
-    anchor, history = await agent_repository.list_conversation_memory_runs(db, run)
+    anchor, history = await agent_repository.list_conversation_memory_runs(
+        db,
+        run,
+        limit=MAX_MEMORY_RUNS,
+    )
     previous_summary = anchor.context_summary if anchor is not None else ""
     budget = _memory_budget(base_messages, tools, registered_model, chat_model)
     if budget <= 0:

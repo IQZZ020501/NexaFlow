@@ -103,6 +103,13 @@ function sameValues(left: string[], right: string[]) {
   )
 }
 
+export function isCurrentAgentConversation(
+  currentConversationId: string | null,
+  expectedConversationId: string | null
+) {
+  return currentConversationId === expectedConversationId
+}
+
 export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
   const keepLiveAnswer = ["queued", "running", "awaiting_approval"].includes(
     liveRun.status
@@ -350,14 +357,31 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
   )
 
   const loadRunToolCalls = React.useCallback(
-    async (agentId: string, runId: string) => {
-      if (!token || !selectedWorkspaceId) return
+    async (agentId: string, runId: string, conversationId: string) => {
+      if (
+        !token ||
+        !selectedWorkspaceId ||
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       const calls = await listAgentRunToolCalls(
         token,
         selectedWorkspaceId,
         agentId,
         runId
       )
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       setToolCallsByRun((current) => ({ ...current, [runId]: calls }))
     },
     [selectedWorkspaceId, token]
@@ -370,7 +394,14 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
       streamEvent: AgentRunStreamEvent,
       placeholderId?: string
     ) => {
-      if (activeConversationIdRef.current !== conversationId) return
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       setRuns((current) =>
         mergeAgentRunStreamEvent(current, runId, streamEvent, placeholderId)
       )
@@ -379,7 +410,20 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
         streamEvent.type === "approval_resolved"
       ) {
         if (selectedAgentId) {
-          void loadRunToolCalls(selectedAgentId, runId).catch(reportError)
+          void loadRunToolCalls(
+            selectedAgentId,
+            runId,
+            conversationId
+          ).catch((error: unknown) => {
+            if (
+              isCurrentAgentConversation(
+                activeConversationIdRef.current,
+                conversationId
+              )
+            ) {
+              reportError(error)
+            }
+          })
         }
       }
     },
@@ -500,6 +544,7 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
       return
     }
     let isCurrent = true
+    let expectedConversationId = activeConversationIdRef.current
     const observers: AbortController[] = []
     setIsRunsLoading(true)
     listAgentRuns(
@@ -509,12 +554,21 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
       initialConversationId
     )
       .then((nextRuns) => {
-        if (!isCurrent) return
+        if (
+          !isCurrent ||
+          !isCurrentAgentConversation(
+            activeConversationIdRef.current,
+            expectedConversationId
+          )
+        ) {
+          return
+        }
         const resolvedConversationId =
           initialConversationId ??
           nextRuns[0]?.conversation_id ??
           crypto.randomUUID()
         activeConversationIdRef.current = resolvedConversationId
+        expectedConversationId = resolvedConversationId
         const visibleRuns = nextRuns.filter(
           (run) => run.conversation_id === resolvedConversationId
         )
@@ -526,7 +580,21 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
         }
         for (const run of visibleRuns) {
           if (run.status === "awaiting_approval") {
-            void loadRunToolCalls(selectedAgentId, run.id).catch(reportError)
+            void loadRunToolCalls(
+              selectedAgentId,
+              run.id,
+              resolvedConversationId
+            ).catch((error: unknown) => {
+              if (
+                isCurrent &&
+                isCurrentAgentConversation(
+                  activeConversationIdRef.current,
+                  resolvedConversationId
+                )
+              ) {
+                reportError(error)
+              }
+            })
           }
           if (
             !["queued", "running", "awaiting_approval"].includes(run.status)
@@ -544,18 +612,40 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
               applyStreamEvent(resolvedConversationId, run.id, streamEvent),
             controller.signal
           ).catch((error: unknown) => {
-            if (!controller.signal.aborted) reportError(error)
+            if (
+              !controller.signal.aborted &&
+              isCurrentAgentConversation(
+                activeConversationIdRef.current,
+                resolvedConversationId
+              )
+            ) {
+              reportError(error)
+            }
           })
         }
       })
       .catch((error: unknown) => {
-        if (isCurrent) {
+        if (
+          isCurrent &&
+          isCurrentAgentConversation(
+            activeConversationIdRef.current,
+            expectedConversationId
+          )
+        ) {
           setRuns([])
           reportError(error)
         }
       })
       .finally(() => {
-        if (isCurrent) setIsRunsLoading(false)
+        if (
+          isCurrent &&
+          isCurrentAgentConversation(
+            activeConversationIdRef.current,
+            expectedConversationId
+          )
+        ) {
+          setIsRunsLoading(false)
+        }
       })
     return () => {
       isCurrent = false
@@ -762,6 +852,14 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
         selectedAgent.id,
         nextQuestion,
         (streamEvent) => {
+          if (
+            !isCurrentAgentConversation(
+              activeConversationIdRef.current,
+              conversationId
+            )
+          ) {
+            return
+          }
           if (streamEvent.type === "run") {
             liveRunId = streamEvent.run.id
             setPendingQuestion(null)
@@ -789,18 +887,29 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
       )
     } catch (error) {
       const userCancelled = askAbortController.signal.aborted
-      if (!liveRunId) {
+      const isCurrentConversation = isCurrentAgentConversation(
+        activeConversationIdRef.current,
+        conversationId
+      )
+      if (!liveRunId && isCurrentConversation) {
         setQuestion(nextQuestion)
         setRuns((current) =>
           current.filter((run) => run.id !== placeholderRun.id)
         )
       }
-      if (userCancelled) return
+      if (userCancelled || !isCurrentConversation) return
       reportError(error)
     } finally {
-      setPendingQuestion(null)
-      setIsAsking(false)
-      setAskAbortController(null)
+      if (
+        isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        setPendingQuestion(null)
+        setIsAsking(false)
+        setAskAbortController(null)
+      }
     }
   }
 
@@ -810,13 +919,16 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
 
   function handleNewConversation() {
     if (!selectedAgentId) return
-    askAbortController?.abort()
     const conversationId = crypto.randomUUID()
     activeConversationIdRef.current = conversationId
+    askAbortController?.abort()
     setRuns([])
     setToolCallsByRun({})
     setQuestion("")
     setPendingQuestion(null)
+    setAskAbortController(null)
+    setIsAsking(false)
+    setIsRunsLoading(false)
     setResolvingCallId(null)
     router.push(
       `/app/apps/${selectedAgentId}?conversation_id=${encodeURIComponent(conversationId)}`
@@ -829,6 +941,8 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
     decision: "approve" | "reject"
   ) {
     if (!token || !selectedWorkspaceId || !selectedAgent) return
+    const conversationId = activeConversationIdRef.current
+    if (!conversationId) return
     setResolvingCallId(`${runId}:${callId}`)
     try {
       const run = await resolveAgentToolCall(
@@ -839,16 +953,46 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
         callId,
         decision
       )
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       setRuns((current) => mergeAgentRunSnapshot(current, run))
-      await loadRunToolCalls(selectedAgent.id, runId)
+      await loadRunToolCalls(selectedAgent.id, runId, conversationId)
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       notify(
         "success",
         t(decision === "approve" ? "工具调用已批准" : "工具调用已拒绝")
       )
     } catch (error) {
-      reportError(error)
+      if (
+        isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        reportError(error)
+      }
     } finally {
-      setResolvingCallId(null)
+      if (
+        isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        setResolvingCallId(null)
+      }
     }
   }
 

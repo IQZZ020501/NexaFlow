@@ -949,6 +949,7 @@ def test_agent_memory_compacts_old_turns() -> None:
         status="running",
     )
     saved: list[tuple[str, str]] = []
+    requested_limits: list[int] = []
 
     class FakeDatabase:
         async def flush(self) -> None:
@@ -970,7 +971,8 @@ def test_agent_memory_compacts_old_turns() -> None:
                 },
             )
 
-    async def list_runs(_db, _run):
+    async def list_runs(_db, _run, *, limit):
+        requested_limits.append(limit)
         return None, history
 
     async def save_summary(_db, run, summary):
@@ -1000,6 +1002,7 @@ def test_agent_memory_compacts_old_turns() -> None:
         agent_memory.agent_repository.save_conversation_summary = original_save
 
     assert saved == [("run-0", "Stable summary")]
+    assert requested_limits == [agent_memory.MAX_MEMORY_RUNS]
     assert prepared.messages[0]["content"].endswith("Stable summary")
     assert prepared.model_usage["compaction"]["total_tokens"] == 24
 
@@ -1012,6 +1015,57 @@ def test_agent_memory_compacts_old_turns() -> None:
         SimpleNamespace(meta={}),
         FakeModel(),
     ) == 0
+
+
+def test_agent_memory_query_is_bounded_and_projected() -> None:
+    from app.entities.agents import AgentRun
+    from app.infrastructure.repositories import agent as agent_repository
+    from sqlalchemy.dialects import postgresql
+
+    statements = []
+
+    class EmptyScalars:
+        def all(self):
+            return []
+
+    class FakeDatabase:
+        async def scalar(self, statement):
+            statements.append(statement)
+            return None
+
+        async def scalars(self, statement):
+            statements.append(statement)
+            return EmptyScalars()
+
+    asyncio.run(
+        agent_repository.list_conversation_memory_runs(
+            FakeDatabase(),  # type: ignore[arg-type]
+            AgentRun(
+                workspace_id="ws-1",
+                agent_id="agent-1",
+                requested_by_user_id="user-1",
+                conversation_id="conversation-1",
+            ),
+            limit=7,
+        )
+    )
+    compiled = [
+        str(
+            statement.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        for statement in statements
+    ]
+    assert "LIMIT 7" in compiled[-1]
+    for sql in compiled:
+        assert "agent_runs.goal" in sql
+        assert "agent_runs.result" in sql
+        assert "agent_runs.context_summary" in sql
+        assert "agent_runs.events" not in sql
+        assert "agent_runs.plan" not in sql
+        assert "agent_runs.checkpoint" not in sql
 
 
 # ---------------------------------------------------------------- DTO mappings
@@ -1484,6 +1538,7 @@ def main() -> None:
     test_run_to_response_maps_run_fields()
     test_agent_usage_normalizes_provider_metadata()
     test_agent_memory_compacts_old_turns()
+    test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()
     test_celery_worker_pool_is_fork_safe_on_macos()
     test_agent_live_stream_round_trip()

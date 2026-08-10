@@ -436,6 +436,7 @@ def build_chat_model(
             model=model_name,
             api_key=_openai_api_key(credentials),
             base_url=openai_compatible_base(_required(credentials, "api_base")),
+            stream_usage=True,
             timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
             max_retries=0,
         )
