@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.api import api_router
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import classify_error, log_error
+from app.infrastructure.event_loop import configure_windows_event_loop_policy
 from app.infrastructure.logger import get_logger, setup_logging
 from app.infrastructure.seed import seed_bootstrap_admin
 from app.infrastructure.session import configure_database, get_session_factory
@@ -19,6 +20,7 @@ logger = get_logger(__name__)
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env(require_bootstrap=False)
     setup_logging(level=settings.log_level)
+    configure_windows_event_loop_policy()
     configure_database(settings)
 
     @asynccontextmanager
