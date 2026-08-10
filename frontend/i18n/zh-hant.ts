@@ -712,7 +712,7 @@ export const zhHant = {
   "Tokens 总数": "Tokens 總數",
   "一次性 API Key": "一次性 API Key",
   "了解参与对话的用户和访问来源。": "了解參與對話的使用者和存取來源。",
-  "仅 workspace 管理员可管理 API Key。": "僅 workspace 管理員可管理 API Key。",
+  "仅工作空间管理员可管理 API Key。": "僅工作空間管理員可管理 API Key。",
   "例如：生产服务": "例如：生產服務",
   "公开 Agent": "公開 Agent",
   "公开对话": "公開對話",

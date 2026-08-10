@@ -943,8 +943,8 @@ def test_external_stream_epoch_is_stable_and_sanitized() -> None:
                 "status": "succeeded",
                 "summary": "agent.answer_ready",
                 "reasoning": "Let me think",
-                "call_id": "",
-                "tool_name": "",
+                "call_id": "internal-call-1",
+                "tool_name": "mcp_internal_search",
             },
             "sequence": 1,
             "stream_epoch": raw_epoch,
@@ -971,6 +971,8 @@ def test_external_stream_epoch_is_stable_and_sanitized() -> None:
     assert len(epochs[0]) == 32
     assert raw_epoch not in repr(events)
     assert epochs[0] != raw_epoch
+    assert "internal-call-1" not in repr(events)
+    assert "mcp_internal_search" not in repr(events)
     reasoning_deltas = [event for event in events if event["type"] == "reasoning_delta"]
     assert len(reasoning_deltas) == 1
     assert {

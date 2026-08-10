@@ -305,6 +305,60 @@ async def create_agent(
     )
 
 
+def _reset_agent_publication(agent: Agent) -> None:
+    agent.published = False
+    agent.published_by_user_id = None
+    agent.published_at = None
+
+
+async def apply_agent_publication(
+    db: AsyncSession,
+    agent: Agent,
+    payload: AgentUpdateRequest,
+    actor: User,
+    workspace_role: str | None,
+    configuration_changed: bool,
+) -> None:
+    """Apply publication state transitions and keep ck_agents_publication sound."""
+    if configuration_changed and agent.published:
+        _reset_agent_publication(agent)
+
+    if agent.status == DISABLED_STATUS:
+        _reset_agent_publication(agent)
+
+    if payload.published is True:
+        if agent.status != ACTIVE_STATUS:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Disabled agents cannot be published.",
+            )
+        await get_agent_model(db, agent.workspace_id, agent.model_id)
+        publication_bindings = (
+            await agent_repository.list_binding_map(db, [agent.id])
+        )[agent.id]
+        await resolve_agent_knowledge_bases(
+            db,
+            agent.workspace_id,
+            publication_bindings,
+            actor,
+            workspace_role,
+        )
+        publication_mcp_bindings = (
+            await agent_repository.list_mcp_binding_map(db, [agent.id])
+        )[agent.id]
+        await resolve_mcp_tools(
+            db,
+            agent.workspace_id,
+            publication_mcp_bindings,
+            strict=True,
+        )
+        agent.published = True
+        agent.published_by_user_id = actor.id
+        agent.published_at = utc_now()
+    elif payload.published is False:
+        _reset_agent_publication(agent)
+
+
 async def update_agent(
     db: AsyncSession,
     agent: Agent,
@@ -387,49 +441,14 @@ async def update_agent(
             (item["server_id"], item["tool_name"]) for item in current_mcp_bindings
         }
 
-    if configuration_changed and agent.published:
-        agent.published = False
-        agent.published_by_user_id = None
-        agent.published_at = None
-
-    if agent.status == DISABLED_STATUS:
-        agent.published = False
-        agent.published_by_user_id = None
-        agent.published_at = None
-
-    if payload.published is True:
-        if agent.status != ACTIVE_STATUS:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                "Disabled agents cannot be published.",
-            )
-        await get_agent_model(db, agent.workspace_id, agent.model_id)
-        publication_bindings = (
-            await agent_repository.list_binding_map(db, [agent.id])
-        )[agent.id]
-        await resolve_agent_knowledge_bases(
-            db,
-            agent.workspace_id,
-            publication_bindings,
-            actor,
-            workspace_role,
-        )
-        publication_mcp_bindings = (
-            await agent_repository.list_mcp_binding_map(db, [agent.id])
-        )[agent.id]
-        await resolve_mcp_tools(
-            db,
-            agent.workspace_id,
-            publication_mcp_bindings,
-            strict=True,
-        )
-        agent.published = True
-        agent.published_by_user_id = actor.id
-        agent.published_at = utc_now()
-    elif payload.published is False:
-        agent.published = False
-        agent.published_by_user_id = None
-        agent.published_at = None
+    await apply_agent_publication(
+        db,
+        agent,
+        payload,
+        actor,
+        workspace_role,
+        configuration_changed,
+    )
 
     record_audit_log(
         db,

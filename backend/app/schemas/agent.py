@@ -34,7 +34,7 @@ class AgentResponse(BaseModel):
 
 class AgentCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    description: str = Field(default="", max_length=2000)
+    description: str = Field(default="", max_length=500)
     instructions: str = Field(default="", max_length=8000)
     model_id: str = Field(min_length=1, max_length=36)
     knowledge_query_mode: KnowledgeQueryMode = "required"
@@ -44,7 +44,7 @@ class AgentCreateRequest(BaseModel):
 
 class AgentUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=2000)
+    description: str | None = Field(default=None, max_length=500)
     instructions: str | None = Field(default=None, max_length=8000)
     model_id: str | None = Field(default=None, min_length=1, max_length=36)
     knowledge_query_mode: KnowledgeQueryMode | None = None

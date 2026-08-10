@@ -54,6 +54,7 @@ import {
   type AgentConversationUser,
   type AgentLog,
   type AgentMonitoring,
+  type PaginatedResponse,
 } from "@/lib/api/agents"
 import { formatDateTime } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
@@ -63,13 +64,77 @@ type PanelProps = {
   agent: Agent
   token: string
   workspaceId: string
-  canViewCredentials: boolean
-  canManageCredentials: boolean
   t: TFunction
   notify: (kind: "success" | "error", message: string) => void
 }
 
+type AgentOverviewPanelProps = PanelProps & {
+  canViewCredentials: boolean
+  canManageCredentials: boolean
+}
+
 const EMPTY_PAGINATION = { limit: 20, offset: 0 }
+
+function usePaginatedList<TItem>(
+  fetcher: (
+    pagination: { limit: number; offset: number }
+  ) => Promise<PaginatedResponse<TItem>>,
+  onError: (error: unknown) => void,
+  deps: React.DependencyList
+) {
+  const [items, setItems] = React.useState<TItem[]>([])
+  const [pagination, setPagination] = React.useState(EMPTY_PAGINATION)
+  const [total, setTotal] = React.useState(0)
+  const [loading, setLoading] = React.useState(true)
+  const fetcherRef = React.useRef(fetcher)
+  const onErrorRef = React.useRef(onError)
+  const paginationRef = React.useRef(pagination)
+  React.useEffect(() => {
+    fetcherRef.current = fetcher
+    onErrorRef.current = onError
+    paginationRef.current = pagination
+  })
+
+  const load = React.useCallback(async (offset: number) => {
+    setLoading(true)
+    try {
+      const response = await fetcherRef.current({
+        limit: paginationRef.current.limit,
+        offset,
+      })
+      setItems(response.items)
+      setTotal(response.total)
+      setPagination({ limit: response.limit, offset: response.offset })
+    } catch (error) {
+      onErrorRef.current(error)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    let current = true
+    fetcher(EMPTY_PAGINATION)
+      .then((response) => {
+        if (!current) return
+        setItems(response.items)
+        setTotal(response.total)
+        setPagination({ limit: response.limit, offset: response.offset })
+      })
+      .catch((error: unknown) => {
+        if (current) onError(error)
+      })
+      .finally(() => {
+        if (current) setLoading(false)
+      })
+    return () => {
+      current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+
+  return { items, pagination, total, loading, load }
+}
 
 function localeFor(language: string) {
   return language === "en"
@@ -108,8 +173,11 @@ async function copyText(value: string) {
   input.style.opacity = "0"
   document.body.appendChild(input)
   input.select()
-  document.execCommand("copy")
+  const copied = document.execCommand("copy")
   input.remove()
+  if (!copied) {
+    throw new Error("Copy failed; please copy the text manually.")
+  }
 }
 
 function MetricCard({
@@ -150,7 +218,7 @@ export function AgentOverviewPanel({
   canManageCredentials,
   t,
   notify,
-}: PanelProps) {
+}: AgentOverviewPanelProps) {
   const { language } = useLanguage()
   const [origin, setOrigin] = React.useState("")
   const [credentials, setCredentials] = React.useState<AgentApiCredential[]>([])
@@ -550,7 +618,7 @@ export function AgentOverviewPanel({
               </Dialog>
             ) : (
               <p className="mt-4 text-xs text-muted-foreground">
-                {t("仅 workspace 管理员可管理 API Key。")}
+                {t("仅工作空间管理员可管理 API Key。")}
               </p>
             )}
           </div>
@@ -616,49 +684,17 @@ export function AgentLogsPanel({
   notify,
 }: PanelProps) {
   const { language } = useLanguage()
-  const [items, setItems] = React.useState<AgentLog[]>([])
-  const [pagination, setPagination] = React.useState(EMPTY_PAGINATION)
-  const [total, setTotal] = React.useState(0)
-  const [loading, setLoading] = React.useState(true)
   const [selectedLog, setSelectedLog] = React.useState<AgentLog | null>(null)
-  const load = React.useCallback(
-    async (offset: number) => {
-      setLoading(true)
-      try {
-        const response = await listAgentLogs(token, workspaceId, agent.id, {
-          limit: pagination.limit,
-          offset,
-        })
-        setItems(response.items)
-        setTotal(response.total)
-        setPagination({ limit: response.limit, offset: response.offset })
-      } catch (error) {
-        notify("error", getErrorMessage(error, t))
-      } finally {
-        setLoading(false)
-      }
-    },
-    [agent.id, notify, pagination.limit, t, token, workspaceId]
+  const handleError = React.useCallback(
+    (error: unknown) => notify("error", getErrorMessage(error, t)),
+    [notify, t]
   )
-  React.useEffect(() => {
-    let current = true
-    listAgentLogs(token, workspaceId, agent.id, EMPTY_PAGINATION)
-      .then((response) => {
-        if (!current) return
-        setItems(response.items)
-        setTotal(response.total)
-        setPagination({ limit: response.limit, offset: response.offset })
-      })
-      .catch((error: unknown) => {
-        if (current) notify("error", getErrorMessage(error, t))
-      })
-      .finally(() => {
-        if (current) setLoading(false)
-      })
-    return () => {
-      current = false
-    }
-  }, [agent.id, notify, t, token, workspaceId])
+  const { items, pagination, total, loading, load } =
+    usePaginatedList<AgentLog>(
+      (params) => listAgentLogs(token, workspaceId, agent.id, params),
+      handleError,
+      [agent.id, handleError, token, workspaceId]
+    )
   return (
     <div className="space-y-4 p-4 sm:p-6">
       <div className="flex items-start justify-between gap-3">
@@ -1027,50 +1063,17 @@ export function AgentConversationUsersPanel({
   notify,
 }: PanelProps) {
   const { language } = useLanguage()
-  const [items, setItems] = React.useState<AgentConversationUser[]>([])
-  const [pagination, setPagination] = React.useState(EMPTY_PAGINATION)
-  const [total, setTotal] = React.useState(0)
-  const [loading, setLoading] = React.useState(true)
-  const load = React.useCallback(
-    async (offset: number) => {
-      setLoading(true)
-      try {
-        const response = await listAgentConversationUsers(
-          token,
-          workspaceId,
-          agent.id,
-          { limit: pagination.limit, offset }
-        )
-        setItems(response.items)
-        setTotal(response.total)
-        setPagination({ limit: response.limit, offset: response.offset })
-      } catch (error) {
-        notify("error", getErrorMessage(error, t))
-      } finally {
-        setLoading(false)
-      }
-    },
-    [agent.id, notify, pagination.limit, t, token, workspaceId]
+  const handleError = React.useCallback(
+    (error: unknown) => notify("error", getErrorMessage(error, t)),
+    [notify, t]
   )
-  React.useEffect(() => {
-    let current = true
-    listAgentConversationUsers(token, workspaceId, agent.id, EMPTY_PAGINATION)
-      .then((response) => {
-        if (!current) return
-        setItems(response.items)
-        setTotal(response.total)
-        setPagination({ limit: response.limit, offset: response.offset })
-      })
-      .catch((error: unknown) => {
-        if (current) notify("error", getErrorMessage(error, t))
-      })
-      .finally(() => {
-        if (current) setLoading(false)
-      })
-    return () => {
-      current = false
-    }
-  }, [agent.id, notify, t, token, workspaceId])
+  const { items, pagination, total, loading, load } =
+    usePaginatedList<AgentConversationUser>(
+      (params) =>
+        listAgentConversationUsers(token, workspaceId, agent.id, params),
+      handleError,
+      [agent.id, handleError, token, workspaceId]
+    )
   return (
     <div className="space-y-4 p-4 sm:p-6">
       <div className="flex items-start justify-between gap-3">

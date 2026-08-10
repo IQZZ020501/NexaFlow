@@ -728,6 +728,20 @@ export function AgentDetailWorkspace({
   const currentViewLabel =
     navigationItems.find((item) => item.view === visibleActiveView)?.label ??
     t("概览")
+  const renderNavItems = (itemClassName: string) =>
+    navigationItems.map(({ view, label, icon: Icon }) => (
+      <Button
+        key={view}
+        type="button"
+        variant={visibleActiveView === view ? "secondary" : "ghost"}
+        className={itemClassName}
+        aria-current={visibleActiveView === view ? "page" : undefined}
+        onClick={() => onViewChange(view)}
+      >
+        <Icon data-icon="inline-start" />
+        {label}
+      </Button>
+    ))
 
   return (
     <div className="-mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
@@ -878,19 +892,7 @@ export function AgentDetailWorkspace({
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-52 shrink-0 border-r bg-muted/20 p-3 lg:block">
           <nav className="space-y-1" aria-label={t("Agent 详情导航")}>
-            {navigationItems.map(({ view, label, icon: Icon }) => (
-              <Button
-                key={view}
-                type="button"
-                variant={visibleActiveView === view ? "secondary" : "ghost"}
-                className="w-full justify-start"
-                aria-current={visibleActiveView === view ? "page" : undefined}
-                onClick={() => onViewChange(view)}
-              >
-                <Icon data-icon="inline-start" />
-                {label}
-              </Button>
-            ))}
+            {renderNavItems("w-full justify-start")}
           </nav>
         </aside>
 
@@ -899,19 +901,7 @@ export function AgentDetailWorkspace({
             className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden"
             aria-label={t("Agent 详情导航")}
           >
-            {navigationItems.map(({ view, label, icon: Icon }) => (
-              <Button
-                key={view}
-                type="button"
-                variant={visibleActiveView === view ? "secondary" : "ghost"}
-                className="shrink-0"
-                aria-current={visibleActiveView === view ? "page" : undefined}
-                onClick={() => onViewChange(view)}
-              >
-                <Icon data-icon="inline-start" />
-                {label}
-              </Button>
-            ))}
+            {renderNavItems("shrink-0")}
           </nav>
 
           {visibleActiveView === "settings" ? (
@@ -1142,8 +1132,6 @@ export function AgentDetailWorkspace({
                   agent={agent}
                   token={token}
                   workspaceId={workspaceId}
-                  canViewCredentials={agent.can_edit}
-                  canManageCredentials={canManagePublishing && agent.can_edit}
                   t={t}
                   notify={notify}
                 />
@@ -1153,8 +1141,6 @@ export function AgentDetailWorkspace({
                   agent={agent}
                   token={token}
                   workspaceId={workspaceId}
-                  canViewCredentials={agent.can_edit}
-                  canManageCredentials={canManagePublishing && agent.can_edit}
                   t={t}
                   notify={notify}
                 />
@@ -1164,8 +1150,6 @@ export function AgentDetailWorkspace({
                   agent={agent}
                   token={token}
                   workspaceId={workspaceId}
-                  canViewCredentials={agent.can_edit}
-                  canManageCredentials={canManagePublishing && agent.can_edit}
                   t={t}
                   notify={notify}
                 />

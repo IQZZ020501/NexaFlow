@@ -107,6 +107,15 @@ describe("Agent form state", () => {
     expect(
       isAgentFormDirty({ ...form, instructions: "Answer briefly." }, agent)
     ).toBe(true)
+    expect(
+      isAgentFormDirty({ ...form, description: "New description" }, agent)
+    ).toBe(true)
+    expect(
+      isAgentFormDirty(
+        { ...form, description: ` ${agent.description} ` },
+        agent
+      )
+    ).toBe(false)
   })
 })
 

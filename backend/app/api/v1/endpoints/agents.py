@@ -1,6 +1,7 @@
 from typing import Annotated
 import json
 from collections.abc import AsyncIterator
+from enum import IntEnum
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import StreamingResponse
@@ -176,12 +177,18 @@ async def list_workspace_agent_conversation_users(
     )
 
 
+class AgentMonitoringDays(IntEnum):
+    WEEK = 7
+    MONTH = 30
+    QUARTER = 90
+
+
 @router.get("/{agent_id}/monitoring", response_model=AgentMonitoringResponse)
 async def get_workspace_agent_monitoring(
     agent_id: str,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    days: Annotated[int, Query()] = 7,
+    days: AgentMonitoringDays = AgentMonitoringDays.WEEK,
 ) -> AgentMonitoringResponse:
     return await get_agent_monitoring(
         db,
@@ -189,7 +196,7 @@ async def get_workspace_agent_monitoring(
         agent_id,
         context.user,
         context.membership_role,
-        days,
+        days.value,
     )
 
 

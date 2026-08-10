@@ -124,7 +124,7 @@ def external_progress_events(
         status_value = event.get("status")
         if status_value not in {"running", "succeeded", "failed"}:
             continue
-        status: Literal["running", "succeeded", "failed"] = status_value
+        event_status: Literal["running", "succeeded", "failed"] = status_value
         turn = max(0, int(event.get("turn") or 0))
         summary = str(event.get("summary") or "")
 
@@ -159,7 +159,7 @@ def external_progress_events(
                     ExternalAgentProgressEventResponse(
                         id=_external_progress_id(event, "analysis"),
                         type="analysis",
-                        status=status,
+                        status=event_status,
                         stage=stage,
                         turn=turn,
                         reasoning=str(event.get("reasoning") or ""),
@@ -184,8 +184,8 @@ def external_progress_events(
             ExternalAgentProgressEventResponse(
                 id=_external_progress_id(event, "tool"),
                 type=progress_type,
-                status=status,
-                stage=status,
+                status=event_status,
+                stage=event_status,
                 turn=turn,
                 count=count,
             )
@@ -317,7 +317,7 @@ async def list_agent_api_credentials(
     workspace_role: str | None,
 ) -> AgentApiCredentialListResponse:
     agent = await get_agent(db, workspace_id, agent_id)
-    require_agent_edit(agent, actor, workspace_role)
+    _require_workspace_admin(workspace_role)
     credentials = await agent_repository.list_agent_api_credentials(db, agent.id)
     return AgentApiCredentialListResponse(
         items=[_credential_to_response(item) for item in credentials]
@@ -487,13 +487,19 @@ async def authenticate_agent_api_credential(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.") from exc
     if credential.workspace_id != context.agent.workspace_id:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid API credential.")
-    used_at = utc_now()
-    if not await agent_repository.mark_agent_api_credential_used(
-        db, credential.id, used_at
-    ):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid API credential.")
-    await db.commit()
-    credential.last_used_at = used_at
+    now = utc_now()
+    last_used_at = credential.last_used_at
+    if last_used_at is not None and last_used_at.tzinfo is None:
+        last_used_at = last_used_at.replace(tzinfo=UTC)
+    if last_used_at is None or (now - last_used_at).total_seconds() >= 60:
+        if not await agent_repository.mark_agent_api_credential_used(
+            db, credential.id, now
+        ):
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED, "Invalid API credential."
+            )
+        await db.commit()
+        credential.last_used_at = now
     return context, credential
 
 
@@ -648,22 +654,37 @@ async def stream_external_agent_run(
         yield event
 
 
-async def _consumer_display_name(
+async def _consumer_display_names(
     db: AsyncSession,
-    access_source: str,
-    consumer_id: str,
-) -> str:
-    if access_source == "public":
-        return f"Visitor {consumer_id[:8]}"
-    if access_source == "api":
-        credential = await agent_repository.get_agent_api_credential_by_id(
-            db, consumer_id
+    rows: list[tuple[str, str]],
+) -> dict[tuple[str, str], str]:
+    api_ids = [consumer_id for source, consumer_id in rows if source == "api"]
+    user_ids = [consumer_id for source, consumer_id in rows if source == "user"]
+    api_names = {
+        credential.id: credential.name
+        for credential in await agent_repository.list_agent_api_credentials_by_ids(
+            db, api_ids
         )
-        return f"API Key: {credential.name}" if credential is not None else "API Key"
-    user = await user_repository.get_user_by_id(db, consumer_id)
-    if user is None:
-        return "Former user"
-    return user.name or user.username
+    }
+    user_names = {
+        user.id: (user.name or user.username)
+        for user in await user_repository.list_users_by_ids(db, user_ids)
+    }
+    names: dict[tuple[str, str], str] = {}
+    for source, consumer_id in rows:
+        if source == "public":
+            names[(source, consumer_id)] = f"Visitor {consumer_id[:8]}"
+        elif source == "api":
+            credential_name = api_names.get(consumer_id)
+            names[(source, consumer_id)] = (
+                f"API Key: {credential_name}"
+                if credential_name is not None
+                else "API Key"
+            )
+        else:
+            user_name = user_names.get(consumer_id)
+            names[(source, consumer_id)] = user_name or "Former user"
+    return names
 
 
 async def list_agent_logs(
@@ -681,17 +702,28 @@ async def list_agent_logs(
         db, workspace_id, agent_id, limit, offset
     )
     total = await agent_repository.count_agent_runs(db, agent_id)
+    display_names = await _consumer_display_names(
+        db,
+        [
+            (run.access_source, run.consumer_id)
+            for run in runs
+            if run.access_source != "public"
+        ],
+    )
     items = []
     for run in runs:
+        display_name = (
+            f"Visitor {run.consumer_id[:8]}"
+            if run.access_source == "public"
+            else display_names[(run.access_source, run.consumer_id)]
+        )
         items.append(
             AgentLogResponse(
                 id=run.id,
                 conversation_id=run.conversation_id,
                 access_source=run.access_source,
                 consumer_id=run.consumer_id,
-                display_name=await _consumer_display_name(
-                    db, run.access_source, run.consumer_id
-                ),
+                display_name=display_name,
                 requested_by_user_id=run.requested_by_user_id,
                 execution_user_id=run.execution_user_id,
                 question=run.goal,
@@ -722,12 +754,22 @@ async def list_agent_conversation_users(
     rows, total = await agent_repository.list_agent_consumer_stats(
         db, workspace_id, agent_id, limit, offset
     )
+    display_names = await _consumer_display_names(
+        db,
+        [
+            (row.access_source, row.consumer_id)
+            for row in rows
+            if row.access_source != "public"
+        ],
+    )
     items = [
         AgentConversationUserResponse(
             consumer_id=row.consumer_id,
             access_source=row.access_source,
-            display_name=await _consumer_display_name(
-                db, row.access_source, row.consumer_id
+            display_name=(
+                f"Visitor {row.consumer_id[:8]}"
+                if row.access_source == "public"
+                else display_names[(row.access_source, row.consumer_id)]
             ),
             first_seen_at=row.first_seen_at,
             last_seen_at=row.last_seen_at,

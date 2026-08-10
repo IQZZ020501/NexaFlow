@@ -25,6 +25,7 @@ from app.application.agent_tools import (
 from app.application.workspace import build_workspace_context
 from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
+from app.entities.tools import McpToolPolicy
 from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.agent_live_stream import AgentLiveStreamPublisher
@@ -155,7 +156,7 @@ def _stored_tool_result(call: AgentToolCall) -> AgentToolResult:
 def current_mcp_policy_mode(
     access_source: str,
     metadata: dict[str, str],
-    policy: Any,
+    policy: McpToolPolicy | None,
     current_definition_hash: str | None = None,
 ) -> str:
     """Reconcile a durable MCP call with the policy currently in the database."""
@@ -466,11 +467,13 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
                 tool.definition.name,
             )
             policy_mode = effective_mcp_tool_policy_mode(tool.definition, policy)
-            if (
+            is_external = run.access_source in {"public", "api"}
+            allowed = (
                 policy_mode == "read_only"
-                if run.access_source in {"public", "api"}
+                if is_external
                 else policy_mode != "disabled"
-            ):
+            )
+            if allowed:
                 mcp_tools.append((tool, policy_mode))
         event_rows = await _list_all_agent_run_events(db, run.id)
     process_events: list[dict[str, Any]] = []

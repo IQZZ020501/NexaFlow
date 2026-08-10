@@ -1730,6 +1730,7 @@ def assert_public_access_migration_downgrade_drops_external_runs() -> None:
 
     engine = create_engine("sqlite://")
     with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=ON"))
         connection.execute(
             text(
                 "CREATE TABLE agent_runs ("
@@ -1737,10 +1738,16 @@ def assert_public_access_migration_downgrade_drops_external_runs() -> None:
             )
         )
         connection.execute(
-            text("CREATE TABLE agent_run_events (id INTEGER, run_id TEXT)")
+            text(
+                "CREATE TABLE agent_run_events (id INTEGER, run_id TEXT "
+                "REFERENCES agent_runs(id))"
+            )
         )
         connection.execute(
-            text("CREATE TABLE agent_tool_calls (id TEXT, run_id TEXT)")
+            text(
+                "CREATE TABLE agent_tool_calls (id TEXT, run_id TEXT "
+                "REFERENCES agent_runs(id))"
+            )
         )
         connection.execute(
             text(

@@ -8,6 +8,7 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     Response,
     status,
 )
@@ -29,6 +30,8 @@ from app.application.agents import (
     public_agent_consumer_id,
     stream_external_agent_run,
 )
+from app.application.agent_access import PublishedAgentContext
+from app.entities.agents import AgentApiCredential
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
 from app.schemas.agent import (
@@ -88,8 +91,8 @@ async def public_agent_profile(
 
 @public_router.post("/session", status_code=status.HTTP_204_NO_CONTENT)
 async def create_public_agent_session(
+    request: Request,
     agent_id: str,
-    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
     session_token: Annotated[
         str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
@@ -106,7 +109,7 @@ async def create_public_agent_session(
         ),
         max_age=30 * 24 * 60 * 60,
         httponly=True,
-        secure=settings.environment == "production",
+        secure=request.url.scheme == "https",
         samesite="lax",
         path=f"/api/v1/public/agents/{agent_id}",
     )
@@ -124,6 +127,7 @@ async def public_agent_conversations(
         str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
     ] = None,
 ) -> PublicAgentConversationListResponse:
+    await get_published_agent_context(db, agent_id)
     return await list_public_agent_conversations(
         db, agent_id, _public_consumer(agent_id, session_token)
     )
@@ -142,6 +146,7 @@ async def list_public_agent_runs(
         str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
     ] = None,
 ) -> ExternalAgentRunListResponse:
+    await get_published_agent_context(db, agent_id)
     return await list_external_agent_runs(
         db,
         agent_id,
@@ -188,6 +193,7 @@ async def get_public_agent_run(
         str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
     ] = None,
 ) -> ExternalAgentRunResponse:
+    await get_published_agent_context(db, agent_id)
     run = await get_external_agent_run(
         db,
         agent_id,
@@ -230,7 +236,7 @@ async def _api_context(
     db: AsyncSession,
     agent_id: str,
     credentials: HTTPAuthorizationCredentials | None,
-):
+) -> tuple[PublishedAgentContext, AgentApiCredential]:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API credential required.")
     return await authenticate_agent_api_credential(

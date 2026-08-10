@@ -113,7 +113,7 @@
 | MVP-051 | 工作流 | 固定节点执行 | 开始、LLM、知识库检索、HTTP 工具、条件判断、结束节点能按序执行 | 工作流运行按钮能发起执行 | 待实现 |
 | MVP-052 | 工作流 | `workflow_run` 日志 | run 记录节点状态、输入、输出、耗时和错误 | run 详情显示节点执行时间线 | 待实现 |
 | MVP-055 | Open API | Agent API Key 和最小权限鉴权 | API Key 归属工作空间和 Agent；缺失、无效、已撤销、跨 Agent 调用被拒绝 | Agent 概览能创建、轮换、撤销并只展示一次明文 API Key | 实现中 |
-| MVP-056 | Open API | OpenAPI schema/API 文档 | schema 覆盖已开放接口，并声明鉴权、租户上下文、错误格式 | 开发者页面能查看 API 文档入口 | 待实现 |
+| MVP-056 | Open API | OpenAPI schema/API 文档 | schema 覆盖已开放接口，并声明鉴权、租户上下文、错误格式 | 开发者页面能查看 API 文档入口 | 实现中 |
 | MVP-057 | Open API | Open API logger | API 调用复用 durable Run，记录来源、API Key、状态、模型用量和错误；不记录明文密钥 | Agent 对话日志能查看 API 来源调用 | 实现中 |
 | MVP-060 | 运维 | `audit_log` | 敏感新增/修改/删除动作写入审计记录 | 管理端/审计页或最小日志查看入口 | 通过 |
 | MVP-061 | 运维 | 用量额度基础 | 模型和工具调用按租户产出用量计数 | 租户/管理 UI 能查看当前用量 | 待实现 |

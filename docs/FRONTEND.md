@@ -139,6 +139,7 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 
 - `frontend/tests/knowledge-upload-route.test.ts` — 上传路由状态序列化/回环测试
 - `frontend/tests/agent-draft.test.ts` — Agent 表单脏检查与运行合并逻辑
+- `frontend/tests/agent-public.test.ts` — 公开 Agent 请求、流取消/重连、脱敏过程与推理增量合并
 - `frontend/tests/api-client.test.ts` — request 封装（header/错误 detail）
 - `frontend/tests/chunk-overlap.test.ts` — 分段重叠检测边界
 - `frontend/tests/dialog-dropdown-interaction.test.ts` — dropdown 事件判定

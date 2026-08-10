@@ -709,7 +709,7 @@ export const zhHans = {
   "Tokens 总数": "Tokens 总数",
   "一次性 API Key": "一次性 API Key",
   "了解参与对话的用户和访问来源。": "了解参与对话的用户和访问来源。",
-  "仅 workspace 管理员可管理 API Key。": "仅 workspace 管理员可管理 API Key。",
+  "仅工作空间管理员可管理 API Key。": "仅工作空间管理员可管理 API Key。",
   "例如：生产服务": "例如：生产服务",
   "公开 Agent": "公开 Agent",
   "公开对话": "公开对话",

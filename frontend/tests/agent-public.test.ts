@@ -333,6 +333,7 @@ describe("public agent API", () => {
       url: string
       method: string
       auth: string | null
+      credentials: RequestCredentials | undefined
     }> = []
     globalThis.fetch = (async (
       input: RequestInfo | URL,
@@ -343,6 +344,7 @@ describe("public agent API", () => {
         url: String(input),
         method: init?.method ?? "GET",
         auth: headers.get("Authorization"),
+        credentials: init?.credentials,
       })
       return requests.length === 1
         ? new Response(null, { status: 204 })
@@ -357,6 +359,9 @@ describe("public agent API", () => {
       "GET",
     ])
     expect(requests.every(({ auth }) => auth === null)).toBe(true)
+    expect(
+      requests.every(({ credentials }) => credentials === "include")
+    ).toBe(true)
   })
 
   test("does not send Authorization while reconnecting a public stream", async () => {

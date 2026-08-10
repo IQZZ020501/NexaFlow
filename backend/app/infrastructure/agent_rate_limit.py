@@ -1,5 +1,3 @@
-from contextlib import suppress
-from dataclasses import dataclass
 import time
 
 from redis.asyncio import Redis
@@ -20,10 +18,27 @@ return {
 }
 """
 
+_redis_client: Redis | None = None
 
-@dataclass(frozen=True)
+
+def _rate_limit_redis(url: str) -> Redis:
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = Redis.from_url(
+            url,
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
+    return _redis_client
+
+
 class AgentRateLimitExceeded(Exception):
-    retry_after: int
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(
+            f"Agent run rate limit exceeded; retry after {retry_after}s."
+        )
+        self.retry_after = retry_after
 
 
 class AgentRateLimitUnavailable(Exception):
@@ -38,25 +53,16 @@ async def enforce_external_agent_rate_limit(
 ) -> None:
     window_seconds = 60
     window = int(time.time()) // window_seconds
-    client = Redis.from_url(
-        settings.celery_broker_url,
-        decode_responses=True,
-        socket_connect_timeout=1,
-        socket_timeout=1,
-    )
     try:
-        values = await client.eval(
+        values = await _rate_limit_redis(settings.celery_broker_url).eval(
             _FIXED_WINDOW_SCRIPT,
             2,
             f"nexaflow:agent-rate:{agent_id}:{window}",
             f"nexaflow:agent-rate:{agent_id}:{access_source}:{consumer_id}:{window}",
             window_seconds,
         )
-    except (RedisError, OSError, TimeoutError) as exc:
+    except (RedisError, OSError, TimeoutError, ValueError) as exc:
         raise AgentRateLimitUnavailable from exc
-    finally:
-        with suppress(RedisError, OSError, TimeoutError):
-            await client.aclose()
 
     agent_count, consumer_count, agent_ttl, consumer_ttl = map(int, values)
     if (

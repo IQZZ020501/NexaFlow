@@ -341,6 +341,8 @@ export function AgentsPage({
   )
   const [hasLoadedWorkspaceData, setHasLoadedWorkspaceData] =
     React.useState(false)
+  const [isMissingAgentLoading, setIsMissingAgentLoading] =
+    React.useState(false)
   const [activeView, setActiveView] =
     React.useState<AgentDetailView>(initialView)
 
@@ -464,15 +466,7 @@ export function AgentsPage({
           listKnowledgeBases(token, selectedWorkspaceId),
           listMcpServers(token, selectedWorkspaceId),
         ])
-      const nextAgents =
-        selectedAgentId &&
-        !listedAgents.some((agent) => agent.id === selectedAgentId)
-          ? [
-              await getAgent(token, selectedWorkspaceId, selectedAgentId),
-              ...listedAgents,
-            ]
-          : listedAgents
-      setAgents(nextAgents)
+      setAgents(listedAgents)
       setListedAgentsCount(listedAgents.length)
       setAgentsHasMore(listedAgents.length === CARD_BATCH_SIZE)
       setModels(nextModels)
@@ -489,7 +483,7 @@ export function AgentsPage({
       setIsLoading(false)
       setHasLoadedWorkspaceData(true)
     }
-  }, [reportError, selectedAgentId, selectedWorkspaceId, token])
+  }, [reportError, selectedWorkspaceId, token])
 
   const loadMoreAgents = React.useCallback(async () => {
     if (!token || !selectedWorkspaceId) {
@@ -557,11 +551,56 @@ export function AgentsPage({
 
   React.useEffect(() => {
     if (
+      !token ||
+      !selectedWorkspaceId ||
+      !selectedAgentId ||
+      !hasLoadedWorkspaceData
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsMissingAgentLoading(false)
+      return
+    }
+    if (agents.some((agent) => agent.id === selectedAgentId)) {
+      setIsMissingAgentLoading(false)
+      return
+    }
+    let current = true
+    setIsMissingAgentLoading(true)
+    getAgent(token, selectedWorkspaceId, selectedAgentId)
+      .then((agent) => {
+        if (!current) return
+        setAgents((currentAgents) =>
+          currentAgents.some((item) => item.id === agent.id)
+            ? currentAgents
+            : [agent, ...currentAgents]
+        )
+      })
+      .catch((error: unknown) => {
+        if (current) reportError(error)
+      })
+      .finally(() => {
+        if (current) setIsMissingAgentLoading(false)
+      })
+    return () => {
+      current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    hasLoadedWorkspaceData,
+    reportError,
+    selectedAgentId,
+    selectedWorkspaceId,
+    token,
+  ])
+
+  React.useEffect(() => {
+    if (
       token &&
       selectedWorkspaceId &&
       selectedAgentId &&
       hasLoadedWorkspaceData &&
       !isLoading &&
+      !isMissingAgentLoading &&
       !selectedAgent
     ) {
       router.replace("/app/apps")
@@ -569,6 +608,7 @@ export function AgentsPage({
   }, [
     hasLoadedWorkspaceData,
     isLoading,
+    isMissingAgentLoading,
     router,
     selectedAgent,
     selectedAgentId,

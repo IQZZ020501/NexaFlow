@@ -116,7 +116,6 @@ export async function observeNdjsonStream<TEvent extends NdjsonCursorEvent>(
         )
         continue
       }
-      reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
       const consumed = await consumeNdjsonStream(
         response,
         onEvent,
@@ -124,6 +123,13 @@ export async function observeNdjsonStream<TEvent extends NdjsonCursorEvent>(
         liveCursor,
         isTerminal as (event: TEvent) => boolean
       )
+      if (
+        consumed.cursor !== cursor ||
+        consumed.liveCursor !== liveCursor ||
+        consumed.terminal
+      ) {
+        reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
+      }
       cursor = consumed.cursor
       liveCursor = consumed.liveCursor
       if (consumed.terminal) return

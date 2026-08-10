@@ -31,6 +31,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { useLanguage } from "@/contexts/language-provider"
+import { compareLiveStreamIds } from "@/lib/api/agents"
 import {
   initializePublicAgent,
   listPublicAgentConversations,
@@ -119,20 +120,26 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
   const { t } = useLanguage()
   const [isOpen, setIsOpen] = React.useState(true)
   const timeline = React.useMemo(() => {
-    const events = [...run.progress]
-    for (const answer of events.filter((event) => event.type === "answer")) {
-      if (!events.some((event) => event.type === "analysis")) {
-        events.splice(events.indexOf(answer), 0, {
-          ...answer,
-          id: `${answer.id}-analysis`,
-          type: "analysis",
-          status: "succeeded",
-          stage: "completed",
-          count: null,
-        })
-      }
+    if (run.progress.some((event) => event.type === "analysis")) {
+      return run.progress
     }
-    return events
+    const firstAnswer = run.progress.find((event) => event.type === "answer")
+    if (!firstAnswer) return run.progress
+    return run.progress.flatMap((event) =>
+      event.id === firstAnswer.id
+        ? [
+            {
+              ...firstAnswer,
+              id: `${firstAnswer.id}-analysis`,
+              type: "analysis" as const,
+              status: "succeeded" as const,
+              stage: "completed" as const,
+              count: null,
+            },
+            event,
+          ]
+        : [event]
+    )
   }, [run.progress])
 
   function title(event: ExternalAgentProgressEvent) {
@@ -230,12 +237,6 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
       </div>
     </details>
   )
-}
-
-function compareLiveStreamIds(left: string, right: string) {
-  const [leftMs, leftSequence] = left.split("-").map(Number)
-  const [rightMs, rightSequence] = right.split("-").map(Number)
-  return leftMs - rightMs || leftSequence - rightSequence
 }
 
 export function mergePublicRunEvent(

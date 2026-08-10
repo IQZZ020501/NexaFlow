@@ -35,6 +35,13 @@ async def get_user_by_id(db: AsyncSession, user_id: str) -> User | None:
     return mapping.to_entity(User, row) if row is not None else None
 
 
+async def list_users_by_ids(db: AsyncSession, user_ids: list[str]) -> list[User]:
+    if not user_ids:
+        return []
+    rows = await db.scalars(select(UserOrm).where(UserOrm.id.in_(user_ids)))
+    return [mapping.to_entity(User, row) for row in rows.all()]
+
+
 async def get_active_user_by_username(db: AsyncSession, username: str) -> User | None:
     row = await db.scalar(
         select(UserOrm).where(

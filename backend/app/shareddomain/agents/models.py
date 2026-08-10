@@ -172,9 +172,7 @@ class AgentApiCredential(Base):
     )
     agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    token_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False, index=True
-    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     hint: Mapped[str] = mapped_column(String(20), nullable=False)
     created_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True

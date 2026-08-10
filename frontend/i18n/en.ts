@@ -719,7 +719,7 @@ export const en = {
   "Tokens 总数": "Total tokens",
   "一次性 API Key": "One-time API key",
   "了解参与对话的用户和访问来源。": "Understand users and access sources for conversations.",
-  "仅 workspace 管理员可管理 API Key。": "Only workspace admins can manage API keys.",
+  "仅工作空间管理员可管理 API Key。": "Only workspace admins can manage API keys.",
   "例如：生产服务": "Example: Production service",
   "公开 Agent": "Public Agent",
   "公开对话": "Public conversation",

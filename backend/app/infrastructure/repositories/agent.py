@@ -122,6 +122,18 @@ async def get_agent_api_credential_by_id(
     return to_entity(AgentApiCredentialEntity, row) if row is not None else None
 
 
+async def list_agent_api_credentials_by_ids(
+    db: AsyncSession,
+    credential_ids: list[str],
+) -> list[AgentApiCredentialEntity]:
+    if not credential_ids:
+        return []
+    rows = await db.scalars(
+        select(AgentApiCredential).where(AgentApiCredential.id.in_(credential_ids))
+    )
+    return [to_entity(AgentApiCredentialEntity, row) for row in rows.all()]
+
+
 async def get_agent_api_credential_by_hash(
     db: AsyncSession,
     token_hash: str,
