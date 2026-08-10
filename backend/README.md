@@ -44,8 +44,13 @@ Knowledge processing and Agent runs are published to Redis through Celery.
 uv run celery -A app.infrastructure.celery:celery_app worker --loglevel=INFO
 ```
 
-The app selects Celery's `solo` pool on macOS to avoid unsafe HTTPS work after
-process forks; Linux workers keep the production `prefork` pool.
+The app selects Celery's `solo` pool on macOS (unsafe HTTPS work after process
+forks) and Windows (the `prefork` pool needs `os.fork()`, which Windows lacks);
+Linux workers keep the production `prefork` pool.
+
+On Windows the API and worker also install the `WindowsSelectorEventLoopPolicy`
+so psycopg async connections work (Windows defaults to the Proactor loop,
+which psycopg rejects).
 
 Set `CELERY_BROKER_URL` for Redis. The API process and every worker must share
 the configured `KNOWLEDGE_STORAGE_DIR` and connect to the same `QDRANT_URL`;

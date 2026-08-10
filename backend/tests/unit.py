@@ -1408,11 +1408,28 @@ def test_mcp_server_to_response() -> None:
     )
 
 
-def test_celery_worker_pool_is_fork_safe_on_macos() -> None:
+def test_celery_worker_pool_is_fork_safe_without_prefork() -> None:
     from app.infrastructure.celery import worker_pool_for_platform
 
     assert worker_pool_for_platform("darwin") == "solo"
+    assert worker_pool_for_platform("win32") == "solo"
     assert worker_pool_for_platform("linux") == "prefork"
+
+
+def test_windows_event_loop_policy_is_selector_based() -> None:
+    import asyncio
+    import sys
+
+    from app.infrastructure.event_loop import configure_windows_event_loop_policy
+
+    if sys.platform == "win32":
+        configure_windows_event_loop_policy()
+        policy = asyncio.get_event_loop_policy()
+        assert isinstance(policy, asyncio.WindowsSelectorEventLoopPolicy)
+    else:
+        before = asyncio.get_event_loop_policy()
+        configure_windows_event_loop_policy()
+        assert asyncio.get_event_loop_policy() is before
 
 
 def test_agent_live_stream_round_trip() -> None:
@@ -1795,7 +1812,8 @@ def main() -> None:
     test_agent_memory_compacts_old_turns()
     test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()
-    test_celery_worker_pool_is_fork_safe_on_macos()
+    test_celery_worker_pool_is_fork_safe_without_prefork()
+    test_windows_event_loop_policy_is_selector_based()
     test_agent_live_stream_round_trip()
     test_team_to_response()
     test_knowledge_document_and_attachment_response_mapping()

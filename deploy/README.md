@@ -68,8 +68,9 @@ network respectively.
 `AGENT_EXECUTOR_LEASE_SECONDS` and `AGENT_EXECUTOR_HEARTBEAT_SECONDS` control
 Agent worker takeover; keep the heartbeat below half the lease. Keep exactly
 one `beat` instance running so queued and expired Agent runs are redispatched.
-Celery uses `solo` automatically on macOS because HTTPS trust evaluation is
-unsafe after a multithreaded process fork; Linux containers keep `prefork`.
+Celery uses `solo` automatically on macOS (HTTPS trust evaluation is unsafe
+after a multithreaded process fork) and Windows (`prefork` needs `os.fork()`,
+which Windows lacks); Linux containers keep `prefork`.
 
 ### MCP stdio Servers
 

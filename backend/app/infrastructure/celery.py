@@ -5,13 +5,18 @@ from celery.signals import task_failure
 
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
+from app.infrastructure.event_loop import configure_windows_event_loop_policy
 from app.infrastructure.logger import get_logger, setup_logging
 
 logger = get_logger("celery")
 
 
 def worker_pool_for_platform(platform: str) -> str:
-    return "solo" if platform == "darwin" else "prefork"
+    # billiard's prefork pool requires os.fork() and inherited pipe handles.
+    # Windows only has spawn, so prefork workers die with an invalid-handle
+    # error in the pool workloop; macOS avoids unsafe HTTPS work after a
+    # multithreaded fork. Both platforms run the solo pool.
+    return "solo" if platform in ("darwin", "win32") else "prefork"
 
 
 @task_failure.connect
@@ -35,6 +40,7 @@ def log_celery_task_failure(
 def create_celery_app() -> Celery:
     settings = Settings.from_env(require_bootstrap=False)
     setup_logging(level=settings.log_level)
+    configure_windows_event_loop_policy()
     app = Celery(
         "app",
         broker=settings.celery_broker_url,
