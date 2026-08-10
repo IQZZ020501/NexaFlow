@@ -9,26 +9,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import WorkspaceContext, get_settings, get_workspace_context_from_path
 from app.application.agents import (
     create_agent,
+    create_agent_api_credential,
     create_agent_run,
     delete_agent,
     enqueue_prepared_agent_run,
     get_agent,
+    get_agent_monitoring,
     get_agent_run_entity,
     get_agent_run_response,
     get_agent_response,
     list_agent_run_tool_calls,
+    list_agent_api_credentials,
+    list_agent_conversation_users,
+    list_agent_logs,
     list_agent_runs,
     list_agents,
     prepare_agent_run,
     resolve_agent_tool_approval,
+    revoke_agent_api_credential,
+    rotate_agent_api_credential,
     stream_agent_run,
     update_agent,
 )
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
 from app.schemas.agent import (
+    AgentApiCredentialCreateRequest,
+    AgentApiCredentialCreateResponse,
+    AgentApiCredentialListResponse,
+    AgentConversationUserListResponse,
     AgentCreateRequest,
     AgentResponse,
+    AgentLogListResponse,
+    AgentMonitoringResponse,
     AgentRunCreateRequest,
     AgentRunResponse,
     AgentToolCallResponse,
@@ -39,6 +52,145 @@ router = APIRouter(
     prefix="/workspaces/{workspace_id}/agents",
     tags=["agents"],
 )
+
+
+@router.get(
+    "/{agent_id}/api-credentials",
+    response_model=AgentApiCredentialListResponse,
+)
+async def list_workspace_agent_api_credentials(
+    agent_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentApiCredentialListResponse:
+    return await list_agent_api_credentials(
+        db,
+        context.workspace.id,
+        agent_id,
+        context.user,
+        context.membership_role,
+    )
+
+
+@router.post(
+    "/{agent_id}/api-credentials",
+    response_model=AgentApiCredentialCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_workspace_agent_api_credential(
+    agent_id: str,
+    payload: AgentApiCredentialCreateRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentApiCredentialCreateResponse:
+    return await create_agent_api_credential(
+        db,
+        context.workspace.id,
+        agent_id,
+        payload.name,
+        context.user,
+        context.membership_role,
+    )
+
+
+@router.delete(
+    "/{agent_id}/api-credentials/{credential_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_workspace_agent_api_credential(
+    agent_id: str,
+    credential_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    await revoke_agent_api_credential(
+        db,
+        context.workspace.id,
+        agent_id,
+        credential_id,
+        context.user,
+        context.membership_role,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{agent_id}/api-credentials/{credential_id}/rotate",
+    response_model=AgentApiCredentialCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def rotate_workspace_agent_api_credential(
+    agent_id: str,
+    credential_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentApiCredentialCreateResponse:
+    return await rotate_agent_api_credential(
+        db,
+        context.workspace.id,
+        agent_id,
+        credential_id,
+        context.user,
+        context.membership_role,
+    )
+
+
+@router.get("/{agent_id}/logs", response_model=AgentLogListResponse)
+async def list_workspace_agent_logs(
+    agent_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AgentLogListResponse:
+    return await list_agent_logs(
+        db,
+        context.workspace.id,
+        agent_id,
+        context.user,
+        context.membership_role,
+        limit,
+        offset,
+    )
+
+
+@router.get(
+    "/{agent_id}/conversation-users",
+    response_model=AgentConversationUserListResponse,
+)
+async def list_workspace_agent_conversation_users(
+    agent_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AgentConversationUserListResponse:
+    return await list_agent_conversation_users(
+        db,
+        context.workspace.id,
+        agent_id,
+        context.user,
+        context.membership_role,
+        limit,
+        offset,
+    )
+
+
+@router.get("/{agent_id}/monitoring", response_model=AgentMonitoringResponse)
+async def get_workspace_agent_monitoring(
+    agent_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    days: Annotated[int, Query()] = 7,
+) -> AgentMonitoringResponse:
+    return await get_agent_monitoring(
+        db,
+        context.workspace.id,
+        agent_id,
+        context.user,
+        context.membership_role,
+        days,
+    )
 
 
 @router.get("", response_model=list[AgentResponse])

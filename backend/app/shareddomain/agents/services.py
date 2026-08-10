@@ -8,6 +8,7 @@ from app.entities.agents import Agent
 from app.entities.knowledge import KnowledgeBase
 from app.entities.user import User
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.model_utils import utc_now
 from app.infrastructure.validation import normalize_name
 from app.schemas.agent import (
     AgentCreateRequest,
@@ -73,6 +74,8 @@ def agent_to_response(
         mcp_tools=mcp_tools if can_edit_agent(agent, actor, workspace_role) else [],
         status=agent.status,
         published=agent.published,
+        published_by_user_id=agent.published_by_user_id,
+        published_at=agent.published_at,
         created_by_user_id=agent.created_by_user_id,
         can_edit=can_edit_agent(agent, actor, workspace_role),
         created_at=agent.created_at,
@@ -311,21 +314,45 @@ async def update_agent(
 ) -> AgentResponse:
     require_agent_edit(agent, actor, workspace_role)
     details = payload.model_dump(exclude_unset=True)
+    if payload.published is not None and workspace_role != "admin":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Workspace admin required to manage public access.",
+        )
+
+    current_bindings = (
+        await agent_repository.list_binding_map(db, [agent.id])
+    )[agent.id]
+    current_mcp_bindings = (
+        await agent_repository.list_mcp_binding_map(db, [agent.id])
+    )[agent.id]
+    configuration_changed = False
 
     if payload.name is not None:
-        agent.name = normalize_name(payload.name)
+        name = normalize_name(payload.name)
+        configuration_changed = configuration_changed or name != agent.name
+        agent.name = name
     if payload.description is not None:
-        agent.description = payload.description.strip()
+        description = payload.description.strip()
+        configuration_changed = configuration_changed or description != agent.description
+        agent.description = description
     if payload.instructions is not None:
-        agent.instructions = payload.instructions.strip() or DEFAULT_AGENT_INSTRUCTIONS
+        instructions = payload.instructions.strip() or DEFAULT_AGENT_INSTRUCTIONS
+        configuration_changed = configuration_changed or instructions != agent.instructions
+        agent.instructions = instructions
     if payload.model_id is not None and payload.model_id != agent.model_id:
         agent.model_id = (await get_agent_model(db, agent.workspace_id, payload.model_id)).id
+        configuration_changed = True
     if payload.knowledge_query_mode is not None:
+        configuration_changed = (
+            configuration_changed
+            or payload.knowledge_query_mode != agent.knowledge_query_mode
+        )
         agent.knowledge_query_mode = payload.knowledge_query_mode
     if payload.status is not None:
-        agent.status = validate_agent_status(payload.status)
-    if payload.published is not None:
-        agent.published = payload.published
+        next_status = validate_agent_status(payload.status)
+        configuration_changed = configuration_changed or next_status != agent.status
+        agent.status = next_status
 
     if payload.knowledge_base_ids is not None:
         knowledge_bases = await resolve_agent_knowledge_bases(
@@ -340,6 +367,10 @@ async def update_agent(
             agent,
             [item.id for item in knowledge_bases],
         )
+        configuration_changed = (
+            configuration_changed
+            or set(payload.knowledge_base_ids) != set(current_bindings)
+        )
 
     if payload.mcp_tools is not None:
         mcp_references = [item.model_dump() for item in payload.mcp_tools]
@@ -350,6 +381,55 @@ async def update_agent(
             strict=True,
         )
         await agent_repository.replace_mcp_bindings(db, agent, mcp_references)
+        configuration_changed = configuration_changed or {
+            (item["server_id"], item["tool_name"]) for item in mcp_references
+        } != {
+            (item["server_id"], item["tool_name"]) for item in current_mcp_bindings
+        }
+
+    if configuration_changed and agent.published:
+        agent.published = False
+        agent.published_by_user_id = None
+        agent.published_at = None
+
+    if agent.status == DISABLED_STATUS:
+        agent.published = False
+        agent.published_by_user_id = None
+        agent.published_at = None
+
+    if payload.published is True:
+        if agent.status != ACTIVE_STATUS:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Disabled agents cannot be published.",
+            )
+        await get_agent_model(db, agent.workspace_id, agent.model_id)
+        publication_bindings = (
+            await agent_repository.list_binding_map(db, [agent.id])
+        )[agent.id]
+        await resolve_agent_knowledge_bases(
+            db,
+            agent.workspace_id,
+            publication_bindings,
+            actor,
+            workspace_role,
+        )
+        publication_mcp_bindings = (
+            await agent_repository.list_mcp_binding_map(db, [agent.id])
+        )[agent.id]
+        await resolve_mcp_tools(
+            db,
+            agent.workspace_id,
+            publication_mcp_bindings,
+            strict=True,
+        )
+        agent.published = True
+        agent.published_by_user_id = actor.id
+        agent.published_at = utc_now()
+    elif payload.published is False:
+        agent.published = False
+        agent.published_by_user_id = None
+        agent.published_at = None
 
     record_audit_log(
         db,

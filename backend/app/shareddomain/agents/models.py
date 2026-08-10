@@ -50,6 +50,11 @@ class Agent(Base):
             "knowledge_query_mode IN ('required', 'agentic')",
             name="ck_agents_knowledge_query_mode",
         ),
+        CheckConstraint(
+            "(published = false AND published_by_user_id IS NULL AND published_at IS NULL) "
+            "OR (published = true AND published_by_user_id IS NOT NULL AND published_at IS NOT NULL)",
+            name="ck_agents_publication",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -65,6 +70,14 @@ class Agent(Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    published_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", name="fk_agents_published_by_user_id"),
+        nullable=True,
+        index=True,
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True
     )
@@ -138,6 +151,43 @@ class AgentMcpTool(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class AgentApiCredential(Base):
+    __tablename__ = "agent_api_credentials"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "agent_id"],
+            ["agents.workspace_id", "agents.id"],
+            name="fk_agent_api_credentials_agent_workspace",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "token_hash",
+            name="uq_agent_api_credentials_token_hash",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    token_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True
+    )
+    hint: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class AgentRun(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (
@@ -160,6 +210,17 @@ class AgentRun(Base):
             "knowledge_query_mode IN ('required', 'agentic')",
             name="ck_agent_runs_knowledge_query_mode",
         ),
+        CheckConstraint(
+            "access_source IN ('console', 'public', 'api')",
+            name="ck_agent_runs_access_source",
+        ),
+        CheckConstraint(
+            "(access_source = 'console' AND requested_by_user_id IS NOT NULL "
+            "AND consumer_id = requested_by_user_id "
+            "AND execution_user_id = requested_by_user_id) OR "
+            "(access_source IN ('public', 'api') AND requested_by_user_id IS NULL)",
+            name="ck_agent_runs_access_identity",
+        ),
         Index(
             "ix_agent_runs_conversation_id",
             "conversation_id",
@@ -168,7 +229,8 @@ class AgentRun(Base):
             "uq_agent_runs_active_conversation",
             "workspace_id",
             "agent_id",
-            "requested_by_user_id",
+            "access_source",
+            "consumer_id",
             "conversation_id",
             unique=True,
             postgresql_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
@@ -181,9 +243,18 @@ class AgentRun(Base):
         ForeignKey("workspaces.id"), nullable=False, index=True
     )
     agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    requested_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+    requested_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
     )
+    execution_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", name="fk_agent_runs_execution_user_id"),
+        nullable=False,
+        index=True,
+    )
+    access_source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="console", server_default="console", index=True
+    )
+    consumer_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     conversation_id: Mapped[str] = mapped_column(
         String(36), nullable=False, default=new_id
     )

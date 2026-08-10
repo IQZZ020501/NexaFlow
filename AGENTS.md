@@ -97,9 +97,10 @@ Correctness, safety, evidence, and validation take priority over speed.
   execution.
 - `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
   and Tailwind CSS. Pages live under the `app/` route groups `(auth)`,
-  `(platform)`, and `(dashboard)`; shared components in `components/`, providers
-  in `contexts/`, trilingual dictionaries in `i18n/`, and feature API modules in
-  `lib/api/`.
+  `(platform)`, `(dashboard)`, and `(public)` (anonymous share pages for
+  published agents and Agent API docs); shared components in `components/`,
+  providers in `contexts/`, trilingual dictionaries in `i18n/`, and feature
+  API modules in `lib/api/`.
 - `docs/` stores project planning and product/engineering documentation.
 - `deploy/` holds the Docker Compose topology, Dockerfiles, and Nginx examples;
   `scripts/setup-hooks.sh` enables the repository Git hooks.

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -24,6 +24,8 @@ class AgentResponse(BaseModel):
     mcp_tools: list[AgentMcpToolRef]
     status: str
     published: bool
+    published_by_user_id: str | None
+    published_at: datetime | None
     created_by_user_id: str
     can_edit: bool
     created_at: datetime
@@ -61,6 +63,17 @@ class AgentRunCreateRequest(BaseModel):
     )
 
 
+class ExternalAgentRunCreateRequest(BaseModel):
+    goal: str = Field(min_length=1, max_length=4000)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+
+class AgentApiDocumentationResponse(BaseModel):
+    agent_id: str
+    agent_name: str
+    base_path: str
+
+
 class AgentPlanStepResponse(BaseModel):
     number: int
     title: str
@@ -88,7 +101,7 @@ class AgentRunResponse(BaseModel):
     id: str
     workspace_id: str
     agent_id: str
-    requested_by_user_id: str
+    requested_by_user_id: str | None
     conversation_id: str
     goal: str
     model_id: str
@@ -130,3 +143,148 @@ class AgentToolCallResponse(BaseModel):
     approved_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
+
+
+class AgentApiCredentialCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class AgentApiCredentialResponse(BaseModel):
+    id: str
+    workspace_id: str
+    agent_id: str
+    name: str
+    hint: str
+    created_by_user_id: str
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+    created_at: datetime
+
+
+class AgentApiCredentialListResponse(BaseModel):
+    items: list[AgentApiCredentialResponse]
+
+
+class AgentApiCredentialCreateResponse(BaseModel):
+    credential: AgentApiCredentialResponse
+    token: str
+
+
+class PublicAgentProfileResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+
+
+class ExternalAgentProgressEventResponse(BaseModel):
+    id: str
+    type: Literal["analysis", "knowledge", "tool", "answer"]
+    status: Literal["running", "succeeded", "failed"]
+    stage: Literal[
+        "analyzing",
+        "reviewing",
+        "completed",
+        "running",
+        "succeeded",
+        "failed",
+    ]
+    turn: int
+    count: int | None = None
+    reasoning: str = ""
+
+
+class ExternalAgentRunResponse(BaseModel):
+    id: str
+    conversation_id: str
+    question: str
+    status: str
+    result: str
+    error: str | None
+    progress: list[ExternalAgentProgressEventResponse]
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    updated_at: datetime
+
+
+class ExternalAgentRunListResponse(BaseModel):
+    items: list[ExternalAgentRunResponse]
+    total: int
+    offset: int
+    limit: int
+
+
+class PublicAgentConversationResponse(BaseModel):
+    conversation_id: str
+    question: str
+    status: str
+    result: str
+    run_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class PublicAgentConversationListResponse(BaseModel):
+    items: list[PublicAgentConversationResponse]
+
+
+class AgentLogResponse(BaseModel):
+    id: str
+    conversation_id: str
+    access_source: Literal["console", "public", "api"]
+    consumer_id: str
+    display_name: str
+    requested_by_user_id: str | None
+    execution_user_id: str
+    question: str
+    status: str
+    result: str
+    last_error: str | None
+    model_usage: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    updated_at: datetime
+
+
+class AgentLogListResponse(BaseModel):
+    items: list[AgentLogResponse]
+    total: int
+    offset: int
+    limit: int
+
+
+class AgentConversationUserResponse(BaseModel):
+    consumer_id: str
+    access_source: Literal["console", "public", "api"]
+    display_name: str
+    first_seen_at: datetime
+    last_seen_at: datetime
+    conversation_count: int
+    run_count: int
+
+
+class AgentConversationUserListResponse(BaseModel):
+    items: list[AgentConversationUserResponse]
+    total: int
+    offset: int
+    limit: int
+
+
+class AgentMonitoringValues(BaseModel):
+    active_users: int
+    conversations: int
+    runs: int
+    succeeded: int
+    failed: int
+    total_tokens: int
+
+
+class AgentMonitoringDailyResponse(AgentMonitoringValues):
+    date: date
+
+
+class AgentMonitoringResponse(BaseModel):
+    days: Literal[7, 30, 90]
+    summary: AgentMonitoringValues
+    daily: list[AgentMonitoringDailyResponse]

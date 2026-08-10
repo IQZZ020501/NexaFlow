@@ -156,6 +156,7 @@ async def list_agent_runs(
         for run in await agent_repository.list_agent_runs(
             db,
             agent_id,
+            "console",
             actor.id,
             limit,
             offset,
@@ -188,6 +189,8 @@ async def get_agent_run_entity(
         run is None
         or run.workspace_id != workspace_id
         or run.agent_id != agent_id
+        or run.access_source != "console"
+        or run.consumer_id != actor.id
         or run.requested_by_user_id != actor.id
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent run not found.")
@@ -328,7 +331,15 @@ async def prepare_agent_run(
     *,
     persist: bool = True,
     conversation_id: str | None = None,
+    access_source: str = "console",
+    consumer_id: str | None = None,
 ) -> tuple[AgentRun, Any]:
+    if access_source not in {"console", "public", "api"}:
+        raise ValueError("Invalid Agent run access source.")
+    if access_source == "console":
+        consumer_id = actor.id
+    elif not consumer_id:
+        raise ValueError("External Agent runs require a consumer id.")
     agent = await get_agent(db, workspace_id, agent_id)
     if agent.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent is disabled.")
@@ -341,26 +352,32 @@ async def prepare_agent_run(
         else []
     )
     if conversation_id is None:
-        conversation_id = await agent_repository.latest_agent_conversation_id(
-            db,
-            agent.id,
-            actor.id,
-        )
-        if conversation_id is None:
+        if access_source != "console":
             conversation_id = new_id()
-        elif await agent_repository.get_active_agent_run(
-            db,
-            agent.id,
-            actor.id,
-            conversation_id,
-        ) is not None:
-            # Legacy clients have no way to request a new conversation. Fork
-            # automatically when the current one is still in flight.
-            conversation_id = new_id()
+        else:
+            conversation_id = await agent_repository.latest_agent_conversation_id(
+                db,
+                agent.id,
+                access_source,
+                consumer_id,
+            )
+            if conversation_id is None:
+                conversation_id = new_id()
+            elif await agent_repository.get_active_agent_run(
+                db,
+                agent.id,
+                access_source,
+                consumer_id,
+                conversation_id,
+            ) is not None:
+                # Legacy clients have no way to request a new conversation. Fork
+                # automatically when the current one is still in flight.
+                conversation_id = new_id()
     if await agent_repository.get_active_agent_run(
         db,
         agent.id,
-        actor.id,
+        access_source,
+        consumer_id,
         conversation_id,
     ) is not None:
         raise HTTPException(
@@ -370,7 +387,10 @@ async def prepare_agent_run(
     run = AgentRun(
         workspace_id=workspace_id,
         agent_id=agent.id,
-        requested_by_user_id=actor.id,
+        requested_by_user_id=actor.id if access_source == "console" else None,
+        execution_user_id=actor.id,
+        access_source=access_source,
+        consumer_id=consumer_id,
         conversation_id=conversation_id,
         goal=goal.strip(),
         instructions=agent.instructions,
@@ -397,7 +417,8 @@ async def prepare_agent_run(
         if await agent_repository.get_active_agent_run(
             db,
             agent.id,
-            actor.id,
+            access_source,
+            consumer_id,
             conversation_id,
         ) is None:
             raise

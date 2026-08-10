@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.admin import audit, users
 from app.api.v1.endpoints import (
+    agent_access,
     agents,
     auth,
     knowledge,
@@ -29,3 +30,5 @@ api_router.include_router(knowledge_retrieval.router)
 api_router.include_router(models.router)
 api_router.include_router(mcp_servers.router)
 api_router.include_router(agents.router)
+api_router.include_router(agent_access.public_router)
+api_router.include_router(agent_access.api_router)

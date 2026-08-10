@@ -16,14 +16,19 @@ import {
   MessageSquareIcon,
   MessageSquarePlusIcon,
   MoreHorizontalIcon,
+  ChartNoAxesColumnIcon,
+  LayoutDashboardIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   RocketIcon,
   SaveIcon,
+  ScrollTextIcon,
   SendIcon,
+  SettingsIcon,
   ShieldAlertIcon,
   Trash2Icon,
   Undo2Icon,
+  UsersIcon,
   WrenchIcon,
 } from "lucide-react"
 
@@ -37,12 +42,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { TFunction } from "@/i18n"
+import type { AgentDetailView } from "@/lib/agent-views"
 import type { Agent, AgentRun, AgentToolCall } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
 
 import { AgentConfigFields } from "./agent-config-fields"
+import {
+  AgentConversationUsersPanel,
+  AgentLogsPanel,
+  AgentMonitoringPanel,
+  AgentOverviewPanel,
+} from "./agent-management-panels"
 import type { AgentFormState } from "./agents-page"
 
 type AgentDetailWorkspaceProps = {
@@ -60,12 +72,18 @@ type AgentDetailWorkspaceProps = {
   pendingQuestion: string | null
   isDirty: boolean
   isSaving: boolean
+  isPublishing: boolean
   isAsking: boolean
   isRunsLoading: boolean
+  activeView: AgentDetailView
+  token: string
+  workspaceId: string
+  canManagePublishing: boolean
   onBack: () => void
   onDelete: () => void
   onSave: (event: React.FormEvent<HTMLFormElement>) => void
   onPublish: () => void
+  onViewChange: (view: AgentDetailView) => void
   onAsk: (event: React.FormEvent<HTMLFormElement>) => void
   onCancelAsk: () => void
   onNewConversation: () => void
@@ -74,6 +92,7 @@ type AgentDetailWorkspaceProps = {
     callId: string,
     decision: "approve" | "reject"
   ) => void
+  notify: (kind: "success" | "error", message: string) => void
   t: TFunction
 }
 
@@ -256,9 +275,7 @@ export function processTimeline(run: AgentRun) {
     return deduplicated.map((event) => ({ event, count: 1 }))
   }
 
-  const events = deduplicated.filter(
-    (event) => !eagerKnowledge.includes(event)
-  )
+  const events = deduplicated.filter((event) => !eagerKnowledge.includes(event))
   const firstThought = events.findIndex((event) => event.type === "thought")
   if (firstThought === -1) {
     return deduplicated.map((event) => ({ event, count: 1 }))
@@ -543,9 +560,7 @@ function RunExchange({
                 {run.last_error ?? t("Agent 未返回结果")}
               </p>
             ) : (run.status === "awaiting_approval" || hasActiveToolCall) &&
-              isProcessOpen ? (
-              null
-            ) : collapsedProcessStatus ? (
+              isProcessOpen ? null : collapsedProcessStatus ? (
               <p className="text-sm text-muted-foreground">
                 {t(collapsedProcessStatus)}
               </p>
@@ -625,16 +640,23 @@ export function AgentDetailWorkspace({
   pendingQuestion,
   isDirty,
   isSaving,
+  isPublishing,
   isAsking,
   isRunsLoading,
+  activeView,
+  token,
+  workspaceId,
+  canManagePublishing,
   onBack,
   onDelete,
   onSave,
   onPublish,
+  onViewChange,
   onAsk,
   onCancelAsk,
   onNewConversation,
   onToolCallDecision,
+  notify,
   t,
 }: AgentDetailWorkspaceProps) {
   const [activePanel, setActivePanel] = React.useState<"config" | "preview">(
@@ -686,6 +708,26 @@ export function AgentDetailWorkspace({
   }, [activePanel, isRunsLoading, pendingQuestion, runs])
   const selectedModel = models.find((model) => model.id === form.modelId)
   const visibleRuns = [...runs].reverse()
+  const navigationItems = [
+    { view: "overview" as const, label: t("概览"), icon: LayoutDashboardIcon },
+    { view: "settings" as const, label: t("设置"), icon: SettingsIcon },
+    { view: "logs" as const, label: t("对话日志"), icon: ScrollTextIcon },
+    {
+      view: "monitoring" as const,
+      label: t("监控统计"),
+      icon: ChartNoAxesColumnIcon,
+    },
+    { view: "users" as const, label: t("对话用户"), icon: UsersIcon },
+  ].filter(
+    (item) => agent.can_edit || ["overview", "settings"].includes(item.view)
+  )
+  const visibleActiveView =
+    !agent.can_edit && ["logs", "monitoring", "users"].includes(activeView)
+      ? "overview"
+      : activeView
+  const currentViewLabel =
+    navigationItems.find((item) => item.view === visibleActiveView)?.label ??
+    t("概览")
 
   return (
     <div className="-mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
@@ -742,11 +784,13 @@ export function AgentDetailWorkspace({
               />
             ) : null}
             <span className="truncate">
-              {selectedModel?.name ?? t("未连接")} · {t("设置")}
+              {selectedModel?.name ?? t("未连接")} · {currentViewLabel}
             </span>
           </p>
         </div>
 
+        {visibleActiveView === "settings" ? (
+          <>
         <Button
           type="button"
           variant="ghost"
@@ -768,19 +812,31 @@ export function AgentDetailWorkspace({
         >
           {isConfigVisible ? <PanelLeftCloseIcon /> : <PanelLeftOpenIcon />}
         </Button>
+          </>
+        ) : null}
         {agent.can_edit ? (
           <>
+            {canManagePublishing ? (
             <Button
               type="button"
               variant="outline"
-              disabled={isSaving}
+                disabled={isSaving || isPublishing || isDirty}
+                title={isDirty ? t("请先保存更改后再发布。") : undefined}
               onClick={onPublish}
             >
-              {agent.published ? <Undo2Icon /> : <RocketIcon />}
+                {isPublishing ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : agent.published ? (
+                  <Undo2Icon />
+                ) : (
+                  <RocketIcon />
+                )}
               <span className="hidden sm:inline">
                 {t(agent.published ? "取消发布" : "发布")}
               </span>
             </Button>
+            ) : null}
+            {visibleActiveView === "settings" ? (
             <Button
               type="submit"
               form="agent-settings-form"
@@ -795,6 +851,7 @@ export function AgentDetailWorkspace({
               )}
               <span className="hidden sm:inline">{t("保存")}</span>
             </Button>
+            ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -818,6 +875,47 @@ export function AgentDetailWorkspace({
         ) : null}
       </header>
 
+      <div className="flex min-h-0 flex-1">
+        <aside className="hidden w-52 shrink-0 border-r bg-muted/20 p-3 lg:block">
+          <nav className="space-y-1" aria-label={t("Agent 详情导航")}>
+            {navigationItems.map(({ view, label, icon: Icon }) => (
+              <Button
+                key={view}
+                type="button"
+                variant={visibleActiveView === view ? "secondary" : "ghost"}
+                className="w-full justify-start"
+                aria-current={visibleActiveView === view ? "page" : undefined}
+                onClick={() => onViewChange(view)}
+              >
+                <Icon data-icon="inline-start" />
+                {label}
+              </Button>
+            ))}
+          </nav>
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <nav
+            className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden"
+            aria-label={t("Agent 详情导航")}
+          >
+            {navigationItems.map(({ view, label, icon: Icon }) => (
+              <Button
+                key={view}
+                type="button"
+                variant={visibleActiveView === view ? "secondary" : "ghost"}
+                className="shrink-0"
+                aria-current={visibleActiveView === view ? "page" : undefined}
+                onClick={() => onViewChange(view)}
+              >
+                <Icon data-icon="inline-start" />
+                {label}
+              </Button>
+            ))}
+          </nav>
+
+          {visibleActiveView === "settings" ? (
+            <>
       <nav className="grid shrink-0 grid-cols-2 border-b bg-background p-1 lg:hidden">
         <Button
           type="button"
@@ -900,7 +998,10 @@ export function AgentDetailWorkspace({
             ref={previewScrollRef}
             className="relative min-h-0 flex-1 overflow-y-auto bg-muted/20"
             onScroll={(event) => {
-              if (previewScrollHost(event.currentTarget) === event.currentTarget) {
+                      if (
+                        previewScrollHost(event.currentTarget) ===
+                        event.currentTarget
+                      ) {
                 shouldFollowPreviewRef.current = isNearScrollBottom(
                   event.currentTarget
                 )
@@ -923,7 +1024,9 @@ export function AgentDetailWorkspace({
                     {t("开始和 Agent 对话")}
                   </p>
                   <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                    {t("直接提问，Agent 会按需使用已配置的知识库和 MCP 工具。")}
+                            {t(
+                              "直接提问，Agent 会按需使用已配置的知识库和 MCP 工具。"
+                            )}
                   </p>
                 </div>
               ) : (
@@ -967,7 +1070,9 @@ export function AgentDetailWorkspace({
                   }}
                   className="max-h-40 min-h-14 min-w-0 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
                   placeholder={
-                    isDirty ? t("请先保存配置后再调试") : t("向 Agent 提问...")
+                            isDirty
+                              ? t("请先保存配置后再调试")
+                              : t("向 Agent 提问...")
                   }
                   aria-label={t("向 Agent 提问")}
                   disabled={
@@ -1017,6 +1122,58 @@ export function AgentDetailWorkspace({
           </div>
         </section>
       </main>
+            </>
+          ) : (
+            <main className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
+              {visibleActiveView === "overview" ? (
+                <AgentOverviewPanel
+                  key={`${agent.id}:overview`}
+                  agent={agent}
+                  token={token}
+                  workspaceId={workspaceId}
+                  canViewCredentials={agent.can_edit}
+                  canManageCredentials={canManagePublishing && agent.can_edit}
+                  t={t}
+                  notify={notify}
+                />
+              ) : visibleActiveView === "logs" ? (
+                <AgentLogsPanel
+                  key={`${agent.id}:logs`}
+                  agent={agent}
+                  token={token}
+                  workspaceId={workspaceId}
+                  canViewCredentials={agent.can_edit}
+                  canManageCredentials={canManagePublishing && agent.can_edit}
+                  t={t}
+                  notify={notify}
+                />
+              ) : visibleActiveView === "monitoring" ? (
+                <AgentMonitoringPanel
+                  key={`${agent.id}:monitoring`}
+                  agent={agent}
+                  token={token}
+                  workspaceId={workspaceId}
+                  canViewCredentials={agent.can_edit}
+                  canManageCredentials={canManagePublishing && agent.can_edit}
+                  t={t}
+                  notify={notify}
+                />
+              ) : (
+                <AgentConversationUsersPanel
+                  key={`${agent.id}:users`}
+                  agent={agent}
+                  token={token}
+                  workspaceId={workspaceId}
+                  canViewCredentials={agent.can_edit}
+                  canManageCredentials={canManagePublishing && agent.can_edit}
+                  t={t}
+                  notify={notify}
+                />
+              )}
+            </main>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

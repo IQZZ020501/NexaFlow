@@ -1,0 +1,323 @@
+from collections.abc import AsyncIterator
+import json
+from typing import Annotated
+
+from fastapi import (
+    APIRouter,
+    Cookie,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
+from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_settings
+from app.application.agents import (
+    authenticate_agent_api_credential,
+    create_external_agent_run,
+    create_public_agent_session_token,
+    external_run_to_response,
+    get_external_agent_run,
+    get_public_agent_profile,
+    get_published_agent_context,
+    list_external_agent_runs,
+    list_public_agent_conversations,
+    public_agent_consumer_id,
+    stream_external_agent_run,
+)
+from app.infrastructure.config import Settings
+from app.infrastructure.session import get_db
+from app.schemas.agent import (
+    AgentApiDocumentationResponse,
+    ExternalAgentRunCreateRequest,
+    ExternalAgentRunListResponse,
+    ExternalAgentRunResponse,
+    PublicAgentConversationListResponse,
+    PublicAgentProfileResponse,
+)
+
+PUBLIC_AGENT_SESSION_COOKIE = "nexaflow_agent_session"
+_PUBLIC_SESSION_TOKEN_LENGTH = 64
+_api_key_scheme = HTTPBearer(auto_error=False)
+
+public_router = APIRouter(prefix="/public/agents/{agent_id}", tags=["public-agents"])
+api_router = APIRouter(prefix="/agent-api/{agent_id}", tags=["agent-api"])
+
+
+def _valid_public_session_token(session_token: str | None) -> bool:
+    return (
+        session_token is not None
+        and len(session_token) == _PUBLIC_SESSION_TOKEN_LENGTH
+        and all(character.isalnum() or character in "-_" for character in session_token)
+    )
+
+
+def _public_consumer(agent_id: str, session_token: str | None) -> str:
+    if not _valid_public_session_token(session_token):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Public Agent session required.",
+        )
+    return public_agent_consumer_id(agent_id, session_token)
+
+
+async def _encode_events(events: AsyncIterator[dict]) -> AsyncIterator[bytes]:
+    async for event in events:
+        yield (json.dumps(event, ensure_ascii=False) + "\n").encode()
+
+
+def _stream_response(events: AsyncIterator[dict]) -> StreamingResponse:
+    return StreamingResponse(
+        _encode_events(events),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@public_router.get("/profile", response_model=PublicAgentProfileResponse)
+async def public_agent_profile(
+    agent_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PublicAgentProfileResponse:
+    return await get_public_agent_profile(db, agent_id)
+
+
+@public_router.post("/session", status_code=status.HTTP_204_NO_CONTENT)
+async def create_public_agent_session(
+    agent_id: str,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_token: Annotated[
+        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
+    ] = None,
+) -> Response:
+    await get_published_agent_context(db, agent_id)
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    response.set_cookie(
+        PUBLIC_AGENT_SESSION_COOKIE,
+        (
+            session_token
+            if _valid_public_session_token(session_token)
+            else create_public_agent_session_token()
+        ),
+        max_age=30 * 24 * 60 * 60,
+        httponly=True,
+        secure=settings.environment == "production",
+        samesite="lax",
+        path=f"/api/v1/public/agents/{agent_id}",
+    )
+    return response
+
+
+@public_router.get(
+    "/conversations",
+    response_model=PublicAgentConversationListResponse,
+)
+async def public_agent_conversations(
+    agent_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_token: Annotated[
+        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
+    ] = None,
+) -> PublicAgentConversationListResponse:
+    return await list_public_agent_conversations(
+        db, agent_id, _public_consumer(agent_id, session_token)
+    )
+
+
+@public_router.get("/runs", response_model=ExternalAgentRunListResponse)
+async def list_public_agent_runs(
+    agent_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    conversation_id: Annotated[
+        str | None, Query(min_length=1, max_length=36)
+    ] = None,
+    session_token: Annotated[
+        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
+    ] = None,
+) -> ExternalAgentRunListResponse:
+    return await list_external_agent_runs(
+        db,
+        agent_id,
+        "public",
+        _public_consumer(agent_id, session_token),
+        limit,
+        offset,
+        conversation_id,
+    )
+
+
+@public_router.post(
+    "/runs",
+    response_model=ExternalAgentRunResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_public_agent_run(
+    agent_id: str,
+    payload: ExternalAgentRunCreateRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_token: Annotated[
+        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
+    ] = None,
+) -> ExternalAgentRunResponse:
+    context = await get_published_agent_context(db, agent_id)
+    return await create_external_agent_run(
+        db,
+        context,
+        "public",
+        _public_consumer(agent_id, session_token),
+        payload.goal,
+        settings,
+        payload.conversation_id,
+    )
+
+
+@public_router.get("/runs/{run_id}", response_model=ExternalAgentRunResponse)
+async def get_public_agent_run(
+    agent_id: str,
+    run_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_token: Annotated[
+        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
+    ] = None,
+) -> ExternalAgentRunResponse:
+    run = await get_external_agent_run(
+        db,
+        agent_id,
+        run_id,
+        "public",
+        _public_consumer(agent_id, session_token),
+    )
+    return external_run_to_response(run)
+
+
+@public_router.get("/runs/{run_id}/stream", response_class=StreamingResponse)
+async def stream_public_agent_run(
+    agent_id: str,
+    run_id: str,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    after: Annotated[int, Query(ge=0)] = 0,
+    live_after: Annotated[str, Query(pattern=r"^[0-9]+-[0-9]+$")] = "0-0",
+    session_token: Annotated[
+        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
+    ] = None,
+) -> StreamingResponse:
+    consumer_id = _public_consumer(agent_id, session_token)
+    context = await get_published_agent_context(db, agent_id)
+    run = await get_external_agent_run(db, agent_id, run_id, "public", consumer_id)
+    await db.rollback()
+    return _stream_response(
+        stream_external_agent_run(
+            db,
+            context,
+            run,
+            settings,
+            after=after,
+            live_after=live_after,
+        )
+    )
+
+
+async def _api_context(
+    db: AsyncSession,
+    agent_id: str,
+    credentials: HTTPAuthorizationCredentials | None,
+):
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API credential required.")
+    return await authenticate_agent_api_credential(
+        db, agent_id, credentials.credentials
+    )
+
+
+@api_router.get("/documentation", response_model=AgentApiDocumentationResponse)
+async def get_api_agent_documentation(
+    agent_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_api_key_scheme)
+    ],
+) -> AgentApiDocumentationResponse:
+    context, _ = await _api_context(db, agent_id, credentials)
+    return AgentApiDocumentationResponse(
+        agent_id=context.agent.id,
+        agent_name=context.agent.name,
+        base_path=f"/api/v1/agent-api/{context.agent.id}",
+    )
+
+
+@api_router.post(
+    "/runs",
+    response_model=ExternalAgentRunResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_api_agent_run(
+    agent_id: str,
+    payload: ExternalAgentRunCreateRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_api_key_scheme)
+    ],
+) -> ExternalAgentRunResponse:
+    context, credential = await _api_context(db, agent_id, credentials)
+    return await create_external_agent_run(
+        db,
+        context,
+        "api",
+        credential.id,
+        payload.goal,
+        settings,
+        payload.conversation_id,
+    )
+
+
+@api_router.get("/runs/{run_id}", response_model=ExternalAgentRunResponse)
+async def get_api_agent_run(
+    agent_id: str,
+    run_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_api_key_scheme)
+    ],
+) -> ExternalAgentRunResponse:
+    _, credential = await _api_context(db, agent_id, credentials)
+    run = await get_external_agent_run(
+        db, agent_id, run_id, "api", credential.id
+    )
+    return external_run_to_response(run)
+
+
+@api_router.get("/runs/{run_id}/stream", response_class=StreamingResponse)
+async def stream_api_agent_run(
+    agent_id: str,
+    run_id: str,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_api_key_scheme)
+    ],
+    after: Annotated[int, Query(ge=0)] = 0,
+    live_after: Annotated[str, Query(pattern=r"^[0-9]+-[0-9]+$")] = "0-0",
+) -> StreamingResponse:
+    context, credential = await _api_context(db, agent_id, credentials)
+    run = await get_external_agent_run(db, agent_id, run_id, "api", credential.id)
+    await db.rollback()
+    return _stream_response(
+        stream_external_agent_run(
+            db,
+            context,
+            run,
+            settings,
+            after=after,
+            live_after=live_after,
+        )
+    )

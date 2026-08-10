@@ -153,7 +153,7 @@ export function AgentConfigFields({
               </p>
             </div>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="agent-name">{t("Agent 名称")}</FieldLabel>
               <Input
@@ -231,6 +231,25 @@ export function AgentConfigFields({
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
+            </Field>
+
+            <Field className="sm:col-span-2">
+              <FieldLabel htmlFor="agent-description">{t("描述")}</FieldLabel>
+              <textarea
+                id="agent-description"
+                value={form.description}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    description: event.target.value,
+                  }))
+                }
+                className="min-h-20 w-full resize-y rounded-lg border border-input bg-muted/20 px-3 py-2 text-sm leading-6 shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/20"
+                placeholder={t("说明 Agent 的用途和适用场景。")}
+                maxLength={500}
+                rows={3}
+                disabled={readOnly}
+              />
             </Field>
           </div>
         </section>

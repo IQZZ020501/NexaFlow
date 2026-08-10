@@ -10,7 +10,7 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 
 - `frontend/package.json` — 项目清单与 bun 脚本（dev/build/start/lint/test/typecheck）
 - `frontend/tsconfig.json` — 严格模式 TS 配置，`@/*` 路径别名
-- `frontend/next.config.ts` — Next.js 配置：`/api` 与 `/health` 代理到 FastAPI（`NEXAFLOW_API_PROXY`），standalone 输出
+- `frontend/next.config.ts` — Next.js 配置：`/api`、完整 Swagger `/docs`/`/openapi.json` 与 `/health` 代理到 FastAPI（`NEXAFLOW_API_PROXY`），standalone 输出
 - `frontend/postcss.config.mjs` — Tailwind v4 PostCSS 插件配置
 - `frontend/eslint.config.js` — ESLint flat config（TS + React Hooks 规则）
 - `frontend/components.json` — shadcn 注册表配置
@@ -32,6 +32,8 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/app/(platform)/app/tools/page.tsx` — MCP 工具管理页
 - `frontend/app/(platform)/app/apps/page.tsx` — Agent 应用列表页
 - `frontend/app/(platform)/app/apps/[id]/page.tsx` — Agent 详情页
+- `frontend/app/(public)/chat/[id]/page.tsx` — 已发布 Agent 的匿名公开对话页
+- `frontend/app/(public)/agent-api/[id]/docs/page.tsx` — API Key 解锁的单 Agent API 文档页
 - `frontend/app/(platform)/app/models/page.tsx` — 模型管理页
 - `frontend/app/(auth)/login/page.tsx` — 登录页（登录回调与已登录跳转）
 - `frontend/app/(dashboard)/system/layout.tsx` — 系统管理布局
@@ -54,6 +56,9 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/components/agents/agents-page.tsx` — Agent CRUD、持久 Run 提交、PostgreSQL/Redis 双游标重连、实时答案与审批状态合并
 - `frontend/components/agents/agent-detail-workspace.tsx` — 运行工作台：过程事件、待审批/不确定工具调用处理
 - `frontend/components/agents/agent-config-fields.tsx` — 配置表单字段（模型、显式知识检索策略、知识库/MCP）
+- `frontend/components/agents/agent-management-panels.tsx` — Agent 概览、API 凭据、对话日志、监控统计与对话用户面板
+- `frontend/components/agents/public-agent-chat.tsx` — 匿名公开对话历史、提问、脱敏执行摘要与答案流；最终回答沿用调试页的 Markdown 展示，执行链展示模型思考过程但不暴露工具名称/参数或检索原文
+- `frontend/components/agents/agent-api-documentation.tsx` — 校验 Agent API Key 后仅展示当前 Agent 的 API 调用文档
 
 **llm/**（模型功能）
 - `frontend/components/llm/llm-page.tsx` — 模型管理页：注册模型 CRUD、凭据、目录浏览
@@ -123,7 +128,9 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 **lib/api/**（按域划分的 API 客户端）
 - `frontend/lib/api/auth.ts` — 认证 API：登录/登出/me/刷新/改密
 - `frontend/lib/api/knowledge.ts` — 知识库 API：知识库/文档/任务/chunk/检索
-- `frontend/lib/api/agents.ts` — Agent API：CRUD、Run 提交/游标订阅/自动重连、工具审批
+- `frontend/lib/api/agents.ts` — Agent API：CRUD、发布、API 凭据、日志/统计/用户、Run 提交/游标订阅/自动重连、工具审批
+- `frontend/lib/api/public-agents.ts` — 公开 Agent 资料、访客会话、历史和脱敏 Run 流
+- `frontend/lib/api/run-stream.ts` — 登录态与公开 Run 共用的 NDJSON 双游标重连器
 - `frontend/lib/api/llm.ts` — 模型 API：目录、注册模型 CRUD、凭据
 - `frontend/lib/api/mcp.ts` — MCP Server API：三种传输契约、CRUD、刷新、工具列表与执行策略
 - `frontend/lib/api/system.ts` — 系统管理 API：工作空间/团队/用户/审计

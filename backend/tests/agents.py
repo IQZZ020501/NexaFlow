@@ -1,10 +1,12 @@
 import asyncio
+import importlib.util
 import json
 import sys
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
 
@@ -14,7 +16,7 @@ from langchain_core.messages.tool import tool_call_chunk
 from langchain_core.tools import StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from mcp.types import Tool as McpTool
-from sqlalchemy import select
+from sqlalchemy import create_engine, select, text
 
 from tests.support import (  # noqa: F401  (sets required env before app imports)
     activate_admin,
@@ -25,7 +27,7 @@ from tests.support import (  # noqa: F401  (sets required env before app imports
     test_client,
 )
 
-from app.application import agent_executor, agent_runs, agent_tools
+from app.application import agent_access, agent_executor, agent_runs, agent_tools
 from app.application import agents as agent_application
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import user as user_repository
@@ -1711,6 +1713,66 @@ def assert_mcp_url_validation() -> None:
         raise AssertionError(f"Invalid MCP URL was accepted: {invalid_url}")
 
 
+def assert_public_access_migration_downgrade_drops_external_runs() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "202608100003_agent_public_access.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "agent_public_access_migration",
+        migration_path,
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE agent_runs ("
+                "id TEXT PRIMARY KEY, requested_by_user_id TEXT NULL)"
+            )
+        )
+        connection.execute(
+            text("CREATE TABLE agent_run_events (id INTEGER, run_id TEXT)")
+        )
+        connection.execute(
+            text("CREATE TABLE agent_tool_calls (id TEXT, run_id TEXT)")
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_runs (id, requested_by_user_id) VALUES "
+                "('console-run', 'user-1'), ('public-run', NULL), ('api-run', NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_run_events (id, run_id) VALUES "
+                "(1, 'console-run'), (2, 'public-run'), (3, 'api-run')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO agent_tool_calls (id, run_id) VALUES "
+                "('console-call', 'console-run'), ('public-call', 'public-run'), "
+                "('api-call', 'api-run')"
+            )
+        )
+        migration._delete_external_runs(connection)
+        assert connection.execute(text("SELECT id FROM agent_runs")).scalars().all() == [
+            "console-run"
+        ]
+        assert connection.execute(
+            text("SELECT run_id FROM agent_run_events")
+        ).scalars().all() == ["console-run"]
+        assert connection.execute(
+            text("SELECT run_id FROM agent_tool_calls")
+        ).scalars().all() == ["console-run"]
+
+
 async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
     original_client = mcp_client_module.mcp_client
 
@@ -1760,6 +1822,606 @@ async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
         mcp_client_module.mcp_client = original_client
 
 
+def assert_external_agent_access() -> None:
+    from app.api.v1.endpoints.agent_access import PUBLIC_AGENT_SESSION_COOKIE
+    from app.infrastructure.agent_rate_limit import (
+        AgentRateLimitExceeded,
+        AgentRateLimitUnavailable,
+    )
+
+    original_rate_limit = agent_access.enforce_external_agent_rate_limit
+    original_run_agent = agent_executor.run_agent
+
+    async def allow_rate_limit(*_args, **_kwargs) -> None:
+        return None
+
+    async def credential_snapshot(credential_id: str):
+        async with get_session_factory()() as db:
+            return await agent_repository.get_agent_api_credential_by_id(
+                db, credential_id
+            )
+
+    async def run_snapshot(run_id: str):
+        async with get_session_factory()() as db:
+            return await agent_repository.get_agent_run_by_id(db, run_id)
+
+    async def conversation_memory_snapshot(run_id: str):
+        async with get_session_factory()() as db:
+            run = await agent_repository.get_agent_run_by_id(db, run_id)
+            assert run is not None
+            return await agent_repository.list_conversation_memory_runs(
+                db,
+                run,
+                limit=10,
+            )
+
+    agent_access.enforce_external_agent_rate_limit = allow_rate_limit
+    try:
+        with test_client() as client, agent_model_server() as model_base_url:
+            admin_token, workspace_id = activate_admin(client)
+            _, temporary_password = create_workspace_user(
+                client, admin_token, workspace_id
+            )
+            member_token = activate_user(
+                client,
+                "agent-member",
+                temporary_password,
+                MEMBER_PASSWORD,
+            )
+            model = client.post(
+                f"/api/v1/workspaces/{workspace_id}/models",
+                headers=auth_headers(admin_token),
+                json=model_payload(model_base_url, "Public Agent Model"),
+            )
+            assert model.status_code == 201, model.text
+            model_id = model.json()["id"]
+
+            created = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Public Support",
+                    "description": "Answers public questions",
+                    "instructions": "Answer directly.",
+                    "model_id": model_id,
+                },
+            )
+            assert created.status_code == 201, created.text
+            agent_id = created.json()["id"]
+            public_base = f"/api/v1/public/agents/{agent_id}"
+            management_base = agents_url(workspace_id, f"/{agent_id}")
+
+            unpublished = client.get(f"{public_base}/profile")
+            assert unpublished.status_code == 404, unpublished.text
+
+            owner_agent = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(member_token),
+                json={
+                    "name": "Member Owned",
+                    "instructions": "Answer.",
+                    "model_id": model_id,
+                },
+            )
+            assert owner_agent.status_code == 201, owner_agent.text
+            owner_agent_id = owner_agent.json()["id"]
+            owner_logs = client.get(
+                agents_url(workspace_id, f"/{owner_agent_id}/logs"),
+                headers=auth_headers(member_token),
+            )
+            assert owner_logs.status_code == 200, owner_logs.text
+            owner_publish = client.patch(
+                agents_url(workspace_id, f"/{owner_agent_id}"),
+                headers=auth_headers(member_token),
+                json={"published": True},
+            )
+            assert owner_publish.status_code == 403, owner_publish.text
+            owner_key = client.post(
+                agents_url(workspace_id, f"/{owner_agent_id}/api-credentials"),
+                headers=auth_headers(member_token),
+                json={"name": "Owner key"},
+            )
+            assert owner_key.status_code == 403, owner_key.text
+            non_owner_logs = client.get(
+                f"{management_base}/logs",
+                headers=auth_headers(member_token),
+            )
+            assert non_owner_logs.status_code == 403, non_owner_logs.text
+
+            published = client.patch(
+                management_base,
+                headers=auth_headers(admin_token),
+                json={"published": True},
+            )
+            assert published.status_code == 200, published.text
+            assert published.json()["published"] is True
+            assert published.json()["published_by_user_id"]
+            assert published.json()["published_at"]
+            profile = client.get(f"{public_base}/profile")
+            assert profile.status_code == 200, profile.text
+            assert set(profile.json()) == {"id", "name", "description"}
+            openapi = client.get("/openapi.json")
+            assert openapi.status_code == 200, openapi.text
+            docs = client.get("/docs")
+            assert docs.status_code == 200, docs.text
+            openapi_payload = openapi.json()
+            assert {
+                "/api/v1/workspaces/{workspace_id}/agents/{agent_id}",
+                "/api/v1/public/agents/{agent_id}/profile",
+                "/api/v1/agent-api/{agent_id}/documentation",
+                "/api/v1/agent-api/{agent_id}/runs",
+            }.issubset(openapi_payload["paths"])
+            external_create_schema = openapi_payload["components"]["schemas"][
+                "ExternalAgentRunCreateRequest"
+            ]
+            assert set(external_create_schema["properties"]) == {
+                "goal",
+                "conversation_id",
+            }
+            for path in (
+                "/api/v1/public/agents/{agent_id}/runs",
+                "/api/v1/agent-api/{agent_id}/runs",
+            ):
+                schema_ref = openapi_payload["paths"][path]["post"]["requestBody"][
+                    "content"
+                ]["application/json"]["schema"]["$ref"]
+                assert schema_ref.endswith("/ExternalAgentRunCreateRequest")
+
+            second_agent = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Second Public Support",
+                    "instructions": "Answer.",
+                    "model_id": model_id,
+                },
+            )
+            assert second_agent.status_code == 201, second_agent.text
+            second_agent_id = second_agent.json()["id"]
+            second_publish = client.patch(
+                agents_url(workspace_id, f"/{second_agent_id}"),
+                headers=auth_headers(admin_token),
+                json={"published": True},
+            )
+            assert second_publish.status_code == 200, second_publish.text
+
+            session_one = client.post(f"{public_base}/session")
+            assert session_one.status_code == 204, session_one.text
+            visitor_one = session_one.cookies.get(PUBLIC_AGENT_SESSION_COOKIE)
+            assert visitor_one and len(visitor_one) >= 40
+            assert (
+                f"Path=/api/v1/public/agents/{agent_id}"
+                in session_one.headers["set-cookie"]
+            )
+            repeated_session = client.post(f"{public_base}/session")
+            assert repeated_session.status_code == 204, repeated_session.text
+            assert repeated_session.cookies.get(PUBLIC_AGENT_SESSION_COOKIE) == visitor_one
+            second_session = client.post(
+                f"/api/v1/public/agents/{second_agent_id}/session"
+            )
+            visitor_other_agent = second_session.cookies.get(
+                PUBLIC_AGENT_SESSION_COOKIE
+            )
+            assert visitor_other_agent and visitor_other_agent != visitor_one
+            repeated_after_other_agent = client.post(f"{public_base}/session")
+            assert (
+                repeated_after_other_agent.cookies.get(PUBLIC_AGENT_SESSION_COOKIE)
+                == visitor_one
+            )
+
+            new_chat_one = client.post(
+                f"{public_base}/runs",
+                json={"goal": "First new chat"},
+            )
+            new_chat_two = client.post(
+                f"{public_base}/runs",
+                json={"goal": "Second new chat"},
+            )
+            assert new_chat_one.status_code == 201, new_chat_one.text
+            assert new_chat_two.status_code == 201, new_chat_two.text
+            assert (
+                new_chat_one.json()["conversation_id"]
+                != new_chat_two.json()["conversation_id"]
+            )
+            continued_chat = client.post(
+                f"{public_base}/runs",
+                json={
+                    "goal": "Continue first chat",
+                    "conversation_id": new_chat_one.json()["conversation_id"],
+                },
+            )
+            assert continued_chat.status_code == 201, continued_chat.text
+            assert (
+                continued_chat.json()["conversation_id"]
+                == new_chat_one.json()["conversation_id"]
+            )
+
+            conversation_id = "shared-public-conversation"
+            public_run_one = client.post(
+                f"{public_base}/runs",
+                json={"goal": "Visitor one", "conversation_id": conversation_id},
+            )
+            assert public_run_one.status_code == 201, public_run_one.text
+            public_run_one_payload = public_run_one.json()
+            assert set(public_run_one_payload) == {
+                "id",
+                "conversation_id",
+                "question",
+                "status",
+                "result",
+                "error",
+                "progress",
+                "created_at",
+                "started_at",
+                "finished_at",
+                "updated_at",
+            }
+            assert "workspace_id" not in public_run_one_payload
+            assert "trace_id" not in public_run_one_payload
+            assert isinstance(public_run_one_payload["progress"], list)
+
+            client.cookies.delete(
+                PUBLIC_AGENT_SESSION_COOKIE,
+                path=f"/api/v1/public/agents/{agent_id}",
+            )
+            session_two = client.post(f"{public_base}/session")
+            visitor_two = session_two.cookies.get(PUBLIC_AGENT_SESSION_COOKIE)
+            assert visitor_two and visitor_two != visitor_one
+            public_run_two = client.post(
+                f"{public_base}/runs",
+                json={"goal": "Visitor two", "conversation_id": conversation_id},
+            )
+            assert public_run_two.status_code == 201, public_run_two.text
+            public_run_two_payload = public_run_two.json()
+            stored_public_one = asyncio.run(
+                run_snapshot(public_run_one_payload["id"])
+            )
+            stored_public_two = asyncio.run(
+                run_snapshot(public_run_two_payload["id"])
+            )
+            assert stored_public_one is not None and stored_public_two is not None
+            assert stored_public_one.requested_by_user_id is None
+            assert stored_public_one.access_source == "public"
+            assert stored_public_one.consumer_id == agent_access.public_agent_consumer_id(
+                agent_id, visitor_one
+            )
+            assert stored_public_two.consumer_id != stored_public_one.consumer_id
+            assert visitor_one not in repr(stored_public_one)
+            cross_visitor_read = client.get(
+                f"{public_base}/runs/{public_run_one_payload['id']}"
+            )
+            assert cross_visitor_read.status_code == 404, cross_visitor_read.text
+            public_run_two_followup = client.post(
+                f"{public_base}/runs",
+                json={
+                    "goal": "Visitor two follow-up",
+                    "conversation_id": conversation_id,
+                },
+            )
+            assert public_run_two_followup.status_code == 201, public_run_two_followup.text
+            _, visitor_two_memory = asyncio.run(
+                conversation_memory_snapshot(public_run_two_followup.json()["id"])
+            )
+            assert [run.id for run in visitor_two_memory] == [
+                public_run_two_payload["id"]
+            ]
+
+            credential_responses = []
+            for name in ("Integration A", "Integration B"):
+                credential_response = client.post(
+                    f"{management_base}/api-credentials",
+                    headers=auth_headers(admin_token),
+                    json={"name": name},
+                )
+                assert credential_response.status_code == 201, credential_response.text
+                credential_responses.append(credential_response.json())
+            credential_a, credential_b = credential_responses
+            token_a = credential_a["token"]
+            token_b = credential_b["token"]
+            assert token_a.startswith("nxf_") and token_b.startswith("nxf_")
+            cross_agent_key = client.post(
+                f"/api/v1/agent-api/{second_agent_id}/runs",
+                headers={"Authorization": f"Bearer {token_a}"},
+                json={"goal": "Wrong agent"},
+            )
+            assert cross_agent_key.status_code == 401, cross_agent_key.text
+            assert "token_hash" not in credential_a["credential"]
+            stored_credential = asyncio.run(
+                credential_snapshot(credential_a["credential"]["id"])
+            )
+            assert stored_credential is not None
+            assert stored_credential.token_hash == agent_access.hash_agent_access_token(
+                token_a
+            )
+            assert token_a not in repr(stored_credential)
+            listed_credentials = client.get(
+                f"{management_base}/api-credentials",
+                headers=auth_headers(admin_token),
+            )
+            assert listed_credentials.status_code == 200, listed_credentials.text
+            assert "token" not in listed_credentials.text
+            assert "token_hash" not in listed_credentials.text
+
+            documentation_url = f"/api/v1/agent-api/{agent_id}/documentation"
+            assert client.get(documentation_url).status_code == 401
+            invalid_documentation = client.get(
+                documentation_url,
+                headers={"Authorization": "Bearer nxf_invalid"},
+            )
+            assert invalid_documentation.status_code == 401
+            cross_agent_documentation = client.get(
+                f"/api/v1/agent-api/{second_agent_id}/documentation",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
+            assert cross_agent_documentation.status_code == 401
+            documentation = client.get(
+                documentation_url,
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
+            assert documentation.status_code == 200, documentation.text
+            assert documentation.json() == {
+                "agent_id": agent_id,
+                "agent_name": "Public Support",
+                "base_path": f"/api/v1/agent-api/{agent_id}",
+            }
+
+            api_conversation = "shared-api-conversation"
+            api_run_a = client.post(
+                f"/api/v1/agent-api/{agent_id}/runs",
+                headers={"Authorization": f"Bearer {token_a}"},
+                json={"goal": "Key A", "conversation_id": api_conversation},
+            )
+            api_run_b = client.post(
+                f"/api/v1/agent-api/{agent_id}/runs",
+                headers={"Authorization": f"Bearer {token_b}"},
+                json={"goal": "Key B", "conversation_id": api_conversation},
+            )
+            assert api_run_a.status_code == 201, api_run_a.text
+            assert api_run_b.status_code == 201, api_run_b.text
+            stored_api_a = asyncio.run(run_snapshot(api_run_a.json()["id"]))
+            stored_api_b = asyncio.run(run_snapshot(api_run_b.json()["id"]))
+            assert stored_api_a is not None and stored_api_b is not None
+            assert stored_api_a.requested_by_user_id is None
+            assert stored_api_a.execution_user_id == published.json()[
+                "published_by_user_id"
+            ]
+            assert stored_api_a.consumer_id == credential_a["credential"]["id"]
+            assert stored_api_b.consumer_id == credential_b["credential"]["id"]
+            cross_key_read = client.get(
+                f"/api/v1/agent-api/{agent_id}/runs/{api_run_b.json()['id']}",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
+            assert cross_key_read.status_code == 404, cross_key_read.text
+
+            rotated = client.post(
+                f"{management_base}/api-credentials/"
+                f"{credential_a['credential']['id']}/rotate",
+                headers=auth_headers(admin_token),
+            )
+            assert rotated.status_code == 201, rotated.text
+            rotated_payload = rotated.json()
+            rotated_token = rotated_payload["token"]
+            assert rotated_payload["credential"]["id"] == credential_a["credential"]["id"]
+            assert rotated_token != token_a
+            old_token_read = client.get(
+                f"/api/v1/agent-api/{agent_id}/runs/{api_run_a.json()['id']}",
+                headers={"Authorization": f"Bearer {token_a}"},
+            )
+            assert old_token_read.status_code == 401, old_token_read.text
+            continued_read = client.get(
+                f"/api/v1/agent-api/{agent_id}/runs/{api_run_a.json()['id']}",
+                headers={"Authorization": f"Bearer {rotated_token}"},
+            )
+            assert continued_read.status_code == 200, continued_read.text
+            continued_run = client.post(
+                f"/api/v1/agent-api/{agent_id}/runs",
+                headers={"Authorization": f"Bearer {rotated_token}"},
+                json={
+                    "goal": "Key A follow-up",
+                    "conversation_id": api_conversation,
+                },
+            )
+            assert continued_run.status_code == 201, continued_run.text
+            _, rotated_key_memory = asyncio.run(
+                conversation_memory_snapshot(continued_run.json()["id"])
+            )
+            assert [run.id for run in rotated_key_memory] == [api_run_a.json()["id"]]
+
+            logs = client.get(
+                f"{management_base}/logs",
+                headers=auth_headers(admin_token),
+            )
+            assert logs.status_code == 200, logs.text
+            assert logs.json()["total"] >= 6
+            assert all(item["display_name"] for item in logs.json()["items"])
+            users = client.get(
+                f"{management_base}/conversation-users",
+                headers=auth_headers(admin_token),
+            )
+            assert users.status_code == 200, users.text
+            assert users.json()["total"] >= 4
+            assert all(item["display_name"] for item in users.json()["items"])
+            monitoring = client.get(
+                f"{management_base}/monitoring?days=7",
+                headers=auth_headers(admin_token),
+            )
+            assert monitoring.status_code == 200, monitoring.text
+            assert monitoring.json()["summary"]["runs"] >= 6
+            assert monitoring.json()["summary"]["active_users"] >= 4
+            assert len(monitoring.json()["daily"]) == 7
+
+            stream = client.get(
+                f"/api/v1/agent-api/{agent_id}/runs/{api_run_a.json()['id']}/stream",
+                headers={"Authorization": f"Bearer {rotated_token}"},
+            )
+            assert stream.status_code == 200, stream.text
+            assert stream.headers["content-type"].startswith("application/x-ndjson")
+            progress_events = []
+            for line in stream.text.splitlines():
+                event = json.loads(line)
+                assert event["type"] in {
+                    "run",
+                    "progress",
+                    "reasoning_delta",
+                    "answer_delta",
+                    "complete",
+                    "error",
+                }
+                if event["type"] == "progress":
+                    progress_events.append(event["event"])
+                    assert set(event["event"]) == {
+                        "id",
+                        "type",
+                        "status",
+                        "stage",
+                        "turn",
+                        "count",
+                        "reasoning",
+                    }
+                    assert isinstance(event["event"]["reasoning"], str)
+                serialized = json.dumps(event)
+                for forbidden in (
+                    "workspace_id",
+                    "requested_by_user_id",
+                    "model_id",
+                    "trace_id",
+                    "tool_name",
+                    "last_error",
+                ):
+                    assert forbidden not in serialized
+            assert progress_events
+
+            async def fail_external_run(*_args, **_kwargs):
+                raise RuntimeError("sensitive external failure")
+
+            agent_executor.run_agent = fail_external_run
+            try:
+                failed_external = client.post(
+                    f"/api/v1/agent-api/{agent_id}/runs",
+                    headers={"Authorization": f"Bearer {token_b}"},
+                    json={"goal": "Fail safely"},
+                )
+            finally:
+                agent_executor.run_agent = original_run_agent
+            assert failed_external.status_code == 201, failed_external.text
+            assert failed_external.json()["error"] == "Agent run failed."
+            assert "sensitive external failure" not in failed_external.text
+
+            async def exceed_rate_limit(*_args, **_kwargs) -> None:
+                raise AgentRateLimitExceeded(17)
+
+            agent_access.enforce_external_agent_rate_limit = exceed_rate_limit
+            limited = client.post(
+                f"/api/v1/agent-api/{agent_id}/runs",
+                headers={"Authorization": f"Bearer {token_b}"},
+                json={"goal": "Limited"},
+            )
+            assert limited.status_code == 429, limited.text
+            assert limited.headers["retry-after"] == "17"
+
+            async def unavailable_rate_limit(*_args, **_kwargs) -> None:
+                raise AgentRateLimitUnavailable
+
+            agent_access.enforce_external_agent_rate_limit = unavailable_rate_limit
+            unavailable = client.post(
+                f"/api/v1/agent-api/{agent_id}/runs",
+                headers={"Authorization": f"Bearer {token_b}"},
+                json={"goal": "Unavailable"},
+            )
+            assert unavailable.status_code == 503, unavailable.text
+            agent_access.enforce_external_agent_rate_limit = allow_rate_limit
+
+            revoked = client.delete(
+                f"{management_base}/api-credentials/"
+                f"{credential_a['credential']['id']}",
+                headers=auth_headers(admin_token),
+            )
+            assert revoked.status_code == 204, revoked.text
+            revoked_read = client.get(
+                f"/api/v1/agent-api/{agent_id}/runs/{api_run_a.json()['id']}",
+                headers={"Authorization": f"Bearer {rotated_token}"},
+            )
+            assert revoked_read.status_code == 401, revoked_read.text
+            revoked_documentation = client.get(
+                documentation_url,
+                headers={"Authorization": f"Bearer {rotated_token}"},
+            )
+            assert revoked_documentation.status_code == 401
+
+            unpublished_manually = client.patch(
+                management_base,
+                headers=auth_headers(admin_token),
+                json={"published": False},
+            )
+            assert unpublished_manually.status_code == 200, unpublished_manually.text
+            assert unpublished_manually.json()["published"] is False
+            public_run_while_unpublished = client.post(
+                f"{public_base}/runs",
+                json={"goal": "Unavailable public run"},
+            )
+            assert public_run_while_unpublished.status_code == 404
+            api_run_while_unpublished = client.post(
+                f"/api/v1/agent-api/{agent_id}/runs",
+                headers={"Authorization": f"Bearer {token_b}"},
+                json={"goal": "Unavailable API run"},
+            )
+            assert api_run_while_unpublished.status_code == 404
+            api_history_while_unpublished = client.get(
+                f"/api/v1/agent-api/{agent_id}/runs/{api_run_b.json()['id']}",
+                headers={"Authorization": f"Bearer {token_b}"},
+            )
+            assert api_history_while_unpublished.status_code == 404
+
+            republished = client.patch(
+                management_base,
+                headers=auth_headers(admin_token),
+                json={"published": True},
+            )
+            assert republished.status_code == 200, republished.text
+            assert republished.json()["published"] is True
+
+            changed = client.patch(
+                management_base,
+                headers=auth_headers(admin_token),
+                json={"description": "Changed after publishing"},
+            )
+            assert changed.status_code == 200, changed.text
+            assert changed.json()["published"] is False
+            assert changed.json()["published_by_user_id"] is None
+            assert changed.json()["published_at"] is None
+            assert client.get(f"{public_base}/profile").status_code == 404
+            unpublished_documentation = client.get(
+                documentation_url,
+                headers={"Authorization": f"Bearer {token_b}"},
+            )
+            assert unpublished_documentation.status_code == 404
+            assert (
+                client.post(
+                    f"{public_base}/runs",
+                    json={"goal": "Unavailable after configuration change"},
+                ).status_code
+                == 404
+            )
+            assert (
+                client.post(
+                    f"/api/v1/agent-api/{agent_id}/runs",
+                    headers={"Authorization": f"Bearer {token_b}"},
+                    json={"goal": "Unavailable after configuration change"},
+                ).status_code
+                == 404
+            )
+            assert (
+                client.get(
+                    f"/api/v1/agent-api/{agent_id}/runs/{api_run_b.json()['id']}",
+                    headers={"Authorization": f"Bearer {token_b}"},
+                ).status_code
+                == 404
+            )
+    finally:
+        agent_access.enforce_external_agent_rate_limit = original_rate_limit
+        agent_executor.run_agent = original_run_agent
+
+
 def main() -> None:
     asyncio.run(assert_hanging_model_stream_times_out())
     asyncio.run(assert_required_knowledge_timeout_is_unavailable())
@@ -1779,6 +2441,8 @@ def main() -> None:
     asyncio.run(assert_retrieval_progress_uses_evidence_ids())
     asyncio.run(assert_structured_tool_and_event_safety())
     assert_mcp_url_validation()
+    assert_public_access_migration_downgrade_drops_external_runs()
+    assert_external_agent_access()
 
     original_query = agent_tools.query_knowledge_base
     original_discover = mcp_services.discover_mcp_tools

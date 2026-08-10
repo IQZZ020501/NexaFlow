@@ -6,6 +6,7 @@ from sqlalchemy import engine_from_config, pool
 from app.infrastructure.config import Settings
 from app.shareddomain.agents.models import (  # noqa: F401
     Agent,
+    AgentApiCredential,
     AgentKnowledgeBase,
     AgentMcpTool,
     AgentRun,
