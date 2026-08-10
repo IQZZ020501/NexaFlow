@@ -16,6 +16,8 @@ class Agent:
     knowledge_query_mode: str = "required"
     status: str = "active"
     published: bool = False
+    published_by_user_id: str | None = None
+    published_at: datetime | None = None
     created_by_user_id: str = ""
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
@@ -41,11 +43,28 @@ class AgentMcpTool:
 
 
 @dataclass
+class AgentApiCredential:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    agent_id: str = ""
+    name: str = ""
+    token_hash: str = ""
+    hint: str = ""
+    created_by_user_id: str = ""
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
 class AgentRun:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""
     agent_id: str = ""
-    requested_by_user_id: str = ""
+    requested_by_user_id: str | None = None
+    execution_user_id: str = ""
+    access_source: str = "console"
+    consumer_id: str = ""
     conversation_id: str = field(default_factory=new_id)
     goal: str = ""
     instructions: str = ""
@@ -73,6 +92,11 @@ class AgentRun:
     finished_at: datetime | None = None
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        if self.access_source == "console" and self.requested_by_user_id:
+            self.execution_user_id = self.execution_user_id or self.requested_by_user_id
+            self.consumer_id = self.consumer_id or self.requested_by_user_id
 
 
 @dataclass

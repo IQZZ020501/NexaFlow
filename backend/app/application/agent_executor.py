@@ -25,6 +25,7 @@ from app.application.agent_tools import (
 from app.application.workspace import build_workspace_context
 from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
+from app.entities.tools import McpToolPolicy
 from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.agent_live_stream import AgentLiveStreamPublisher
@@ -152,6 +153,30 @@ def _stored_tool_result(call: AgentToolCall) -> AgentToolResult:
     )
 
 
+def current_mcp_policy_mode(
+    access_source: str,
+    metadata: dict[str, str],
+    policy: McpToolPolicy | None,
+    current_definition_hash: str | None = None,
+) -> str:
+    """Reconcile a durable MCP call with the policy currently in the database."""
+    if access_source in {"public", "api"}:
+        snapshot_definition_hash = metadata.get("definition_hash", "")
+        if (
+            policy is not None
+            and policy.mode == "read_only"
+            and current_definition_hash == snapshot_definition_hash
+            and policy.definition_hash == current_definition_hash
+        ):
+            return "read_only"
+        return "disabled"
+    if policy is None:
+        return metadata.get("policy_mode", "")
+    if policy.definition_hash != metadata.get("definition_hash", ""):
+        return "approval_required"
+    return policy.mode
+
+
 async def _invoke_required_knowledge(
     tool: StructuredTool,
     query: str,
@@ -215,14 +240,34 @@ class DurableToolLedger:
                     metadata.get("server_id", ""),
                     metadata.get("source_tool_name", ""),
                 )
-                if policy is not None:
-                    policy_mode = (
-                        policy.mode
-                        if policy.definition_hash
-                        == metadata.get("definition_hash", "")
-                        else "approval_required"
+                current_definition_hash = None
+                if self.run.access_source in {"public", "api"}:
+                    resolved_tools = await resolve_mcp_tools(
+                        db,
+                        self.run.workspace_id,
+                        [
+                            {
+                                "server_id": metadata.get("server_id", ""),
+                                "tool_name": metadata.get("source_tool_name", ""),
+                            }
+                        ],
+                        strict=False,
                     )
-                approval_required = policy_mode != "read_only"
+                    if resolved_tools:
+                        current_definition_hash = mcp_tool_definition_hash(
+                            resolved_tools[0].definition
+                        )
+                policy_mode = current_mcp_policy_mode(
+                    self.run.access_source,
+                    metadata,
+                    policy,
+                    current_definition_hash,
+                )
+                approval_required = (
+                    metadata["kind"] == "mcp"
+                    and policy_mode != "read_only"
+                    and self.run.access_source not in {"public", "api"}
+                )
             existing = await agent_repository.get_agent_tool_call(
                 db,
                 self.run.id,
@@ -395,7 +440,7 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
         if run is None or run.status != AGENT_RUN_RUNNING_STATUS:
             raise AgentRunnerError("Agent run is not executable.")
-        actor = await user_repository.get_user_by_id(db, run.requested_by_user_id)
+        actor = await user_repository.get_user_by_id(db, run.execution_user_id)
         if actor is None or not actor.is_active:
             raise AgentRunnerError("Agent run user is unavailable.")
         context = await build_workspace_context(db, actor, run.workspace_id)
@@ -422,7 +467,13 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
                 tool.definition.name,
             )
             policy_mode = effective_mcp_tool_policy_mode(tool.definition, policy)
-            if policy_mode != "disabled":
+            is_external = run.access_source in {"public", "api"}
+            allowed = (
+                policy_mode == "read_only"
+                if is_external
+                else policy_mode != "disabled"
+            )
+            if allowed:
                 mcp_tools.append((tool, policy_mode))
         event_rows = await _list_all_agent_run_events(db, run.id)
     process_events: list[dict[str, Any]] = []
@@ -870,7 +921,7 @@ async def _fail_unhandled_claimed_run(
                 event="agent.execution_failed",
                 message=error,
                 status_code=500,
-                user_id=run.requested_by_user_id,
+                user_id=run.execution_user_id,
                 details={
                     "agent_id": run.agent_id,
                     "agent_run_id": run.id,

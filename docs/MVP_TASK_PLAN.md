@@ -12,7 +12,7 @@
   > 后续进展（2026-08-08）：已补充 legacy SSE 与由工作空间管理员直接配置、加密持久化的 stdio；stdio 管理权限仅适用于可信管理员。
 - 工作流第一版只做固定节点类型，不做拖拽画布。
 - Agent MVP 先保证查得准、答得有来源、权限不出错，不先做复杂多 Agent、自主长期规划、过度自动化。
-- Open API 先用租户级 API Key 和 OpenAPI 文档，不先做 OAuth、SDK、应用市场。
+- Open API 先用 Agent 级最小权限 API Key 和 OpenAPI 文档，不先做 OAuth、SDK、应用市场。
 
 ## 状态约定
 
@@ -71,8 +71,8 @@
 ## Open API MVP 范围
 
 - 对外提供 OpenAPI schema/API 文档，覆盖 MVP 需要开放的核心接口。
-- 外部调用必须使用租户绑定的 API Key，并走同一套 `tenant_id` 和资源权限过滤。
-- Open API logger 记录 `request_id`、`tenant_id`、`api_key_id`、method、path、status、耗时和错误。
+- 外部调用使用 Agent 绑定的 API Key；Key 不能跨 Agent 使用，运行仍走同一套 `workspace_id`、发布身份和资源权限过滤。
+- Open API logger 复用 durable Agent Run，记录 `workspace_id`、`agent_id`、`api_key_id`、状态、用量和错误；HTTP 基础访问日志继续负责 request id、method、path、status 与耗时。
 - logger 不记录明文 API Key，不默认记录敏感 request/response body。
 
 ## MVP 任务总表
@@ -112,9 +112,9 @@
 | MVP-050 | 工作流 | `workflow`、`workflow_node`、`workflow_edge` CRUD | CRUD API 校验固定节点类型和边关系 | 工作流列表/详情编辑页，不做画布 | 待实现 |
 | MVP-051 | 工作流 | 固定节点执行 | 开始、LLM、知识库检索、HTTP 工具、条件判断、结束节点能按序执行 | 工作流运行按钮能发起执行 | 待实现 |
 | MVP-052 | 工作流 | `workflow_run` 日志 | run 记录节点状态、输入、输出、耗时和错误 | run 详情显示节点执行时间线 | 待实现 |
-| MVP-055 | Open API | Open API Key 和租户鉴权 | API Key 归属租户；缺失、无效、跨租户调用被拒绝 | 开发者设置页能创建、禁用、复制一次性 API Key | 待实现 |
-| MVP-056 | Open API | OpenAPI schema/API 文档 | schema 覆盖已开放接口，并声明鉴权、租户上下文、错误格式 | 开发者页面能查看 API 文档入口 | 待实现 |
-| MVP-057 | Open API | Open API logger | 每次外部调用写入 request_id、tenant_id、api_key_id、method、path、status、耗时、错误；不记录明文密钥 | 开发者页面能查看最近 API 调用日志 | 待实现 |
+| MVP-055 | Open API | Agent API Key 和最小权限鉴权 | API Key 归属工作空间和 Agent；缺失、无效、已撤销、跨 Agent 调用被拒绝 | Agent 概览能创建、轮换、撤销并只展示一次明文 API Key | 实现中 |
+| MVP-056 | Open API | OpenAPI schema/API 文档 | schema 覆盖已开放接口，并声明鉴权、租户上下文、错误格式 | 开发者页面能查看 API 文档入口 | 实现中 |
+| MVP-057 | Open API | Open API logger | API 调用复用 durable Run，记录来源、API Key、状态、模型用量和错误；不记录明文密钥 | Agent 对话日志能查看 API 来源调用 | 实现中 |
 | MVP-060 | 运维 | `audit_log` | 敏感新增/修改/删除动作写入审计记录 | 管理端/审计页或最小日志查看入口 | 通过 |
 | MVP-061 | 运维 | 用量额度基础 | 模型和工具调用按租户产出用量计数 | 租户/管理 UI 能查看当前用量 | 待实现 |
 
@@ -129,7 +129,7 @@
 | LATER-005 | 复杂沙箱 | 代码执行或不可信工具执行进入范围。 |
 | LATER-006 | 模型微调 | prompt、RAG、模型配置已经无法满足效果要求。 |
 | LATER-007 | 计费 | 用量统计可信，价格规则稳定。 |
-| LATER-008 | 监控看板 | 日志和审计数据已经存在，并且需要运营视图。 |
+| LATER-008 | 跨 Agent 运维看板 | 单 Agent 监控已经不足以支持工作空间级运营时。 |
 | LATER-009 | 长期记忆和个性化管理 | 用户需要跨会话偏好，并且有查看、修改、删除记忆的产品入口。 |
 | LATER-010 | 复杂多 Agent | 单 Agent + 工具调用已经不够表达团队流程。 |
 | LATER-011 | 混合检索、重排、冲突/过期提示 | 基础向量检索和引用已经跑通，并且检索质量成为主要问题。 |

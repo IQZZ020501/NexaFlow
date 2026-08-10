@@ -18,8 +18,9 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - 工作空间上下文：路径参数 `/workspaces/{workspace_id}/...`，非成员 403，工作空间非 active 403。
 - 状态码：创建 201、删除 204、异步任务 202；错误统一 FastAPI `{"detail": ...}`。
 - 分页：所有列表端点统一 `limit`（`ge=1 le=200`，默认 100）+ `offset`（`ge=0`）查询参数。
-- 鉴权：仅 `/auth/login|refresh|logout` 与 `/health` 公开；其余全部 Bearer，且需完成初始改密（`require_password_changed`）。
-- 流式：Agent 先 `POST /runs` 持久提交，再 `GET /runs/{run_id}/stream?after={sequence}&live_after={redis_stream_id}` 订阅 NDJSON。`after` 重放 PostgreSQL 过程/终态事件，`live_after` 补发短期 Redis 答案/推理增量；实时事件的 `stream_epoch` 变化表示新 worker 已接管，客户端必须清空已累积的答案和推理后重新累积。终态 Run 快照始终覆盖实时片段。断线不取消 Run。请求中的旧 `preview` 字段仅为兼容保留并被忽略，所有 Run 都是持久执行。所有 `/api` 响应默认 `no-store`。
+- 鉴权：`/auth/login|refresh|logout`、`/health` 与已发布 Agent 的 `/public/agents/{agent_id}/*` 不要求登录；公开 Agent 会话使用 HttpOnly 访客 Cookie 隔离。`/agent-api/{agent_id}/*` 使用 Agent 级 API Key Bearer 鉴权，其中 `/documentation` 用于校验 Key 并解锁该 Agent 的专属文档页；其余接口使用登录 Bearer，且需完成初始改密（`require_password_changed`）。
+- API 文档：后端 `/docs` 与 `/openapi.json` 始终保留完整 FastAPI 文档，覆盖登录态管理、公开访问和 Agent API 全部接口。Agent 概览的“API 文档”入口跳转到 `/agent-api/{agent_id}/docs`，输入该 Agent 的有效 API Key 后只展示该 Agent 的 Run 创建、查询和流式订阅接口。
+- 流式：登录态 Agent 先 `POST /runs` 持久提交，再 `GET /runs/{run_id}/stream?after={sequence}&live_after={redis_stream_id}` 订阅 NDJSON。`after` 重放 PostgreSQL 过程/终态事件，`live_after` 补发短期 Redis 答案/推理增量；实时事件的 `stream_epoch` 变化表示新 worker 已接管，客户端必须清空已累积的答案和推理后重新累积。公开/API Key 流复用同一 durable Run，只输出固定枚举的安全进度摘要、知识片段数量、答案增量、模型思考过程（`reasoning_delta` 增量与 progress 累积文本）和终态白名单，不返回工具名称/参数、检索原文、System Prompt 或 trace。终态 Run 快照始终覆盖实时片段，断线不取消 Run。请求中的旧 `preview` 字段仅为兼容保留并被忽略，所有 Run 都是持久执行。所有 `/api` 响应默认 `no-store`。
 - 全局管理员仅限 `/admin/*` 与工作空间生命周期管理。
 
 ## 文件清单
@@ -40,7 +41,8 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/endpoints/knowledge_retrieval.py` — 同前缀 RAG 检索接口 `POST /{kb_id}/query`
 - `backend/app/api/v1/endpoints/models.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
 - `backend/app/api/v1/endpoints/mcp_servers.py` — MCP Server CRUD/刷新，以及管理员按工具定义哈希审核执行策略；创建请求用 `transport` 区分 `streamable_http`/`sse`（URL + 可选 Bearer）与 `stdio`（命令、参数、工作目录和环境变量）
-- `backend/app/api/v1/endpoints/agents.py` — Agent CRUD、Run 提交/状态/工具账本、审批/拒绝与游标 NDJSON 订阅
+- `backend/app/api/v1/endpoints/agents.py` — Agent CRUD、发布、API 凭据、跨来源对话日志/用户/统计，以及登录态 Run 提交、工具账本、审批/拒绝与游标 NDJSON 订阅
+- `backend/app/api/v1/endpoints/agent_access.py` — `/public/agents/{agent_id}` 提供已发布 Agent 的公开资料、访客会话、对话历史和安全 Run 流；`/agent-api/{agent_id}` 提供 Agent API Key 校验、专属文档解锁、Run 提交、查询和安全流
 
 ### app/api/v1/admin/
 

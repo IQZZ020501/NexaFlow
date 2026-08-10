@@ -1,4 +1,5 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
+import { observeNdjsonStream } from "@/lib/api/run-stream"
 
 export type KnowledgeQueryMode = "required" | "agentic"
 
@@ -14,6 +15,8 @@ export type Agent = {
   mcp_tools: AgentMcpToolRef[]
   status: "active" | "disabled"
   published: boolean
+  published_by_user_id: string | null
+  published_at: string | null
   created_by_user_id: string
   can_edit: boolean
   created_at: string
@@ -151,6 +154,82 @@ export type AgentRunStreamEvent =
     }
   | { type: "complete" | "error"; sequence: number; run: AgentRun }
 
+export type AgentApiCredential = {
+  id: string
+  agent_id: string
+  workspace_id: string
+  name: string
+  hint: string
+  created_by_user_id: string
+  last_used_at: string | null
+  revoked_at: string | null
+  created_at: string
+}
+
+export type AgentApiCredentialSecret = {
+  credential: AgentApiCredential
+  token: string
+}
+
+export type AgentApiDocumentation = {
+  agent_id: string
+  agent_name: string
+  base_path: string
+}
+
+export type AgentAccessSource = "console" | "public" | "api"
+
+export type AgentLog = {
+  id: string
+  conversation_id: string
+  access_source: AgentAccessSource
+  consumer_id: string
+  display_name: string
+  requested_by_user_id: string | null
+  execution_user_id: string
+  question: string
+  status: string
+  result: string
+  last_error: string | null
+  model_usage: Record<string, unknown>
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  updated_at: string
+}
+
+export type AgentConversationUser = {
+  consumer_id: string
+  access_source: AgentAccessSource
+  display_name: string
+  first_seen_at: string
+  last_seen_at: string
+  conversation_count: number
+  run_count: number
+}
+
+export type AgentMonitoringValues = {
+  active_users: number
+  conversations: number
+  runs: number
+  succeeded: number
+  failed: number
+  total_tokens: number
+}
+
+export type AgentMonitoring = {
+  days: 7 | 30 | 90
+  summary: AgentMonitoringValues
+  daily: Array<AgentMonitoringValues & { date: string }>
+}
+
+export type PaginatedResponse<T> = {
+  items: T[]
+  total: number
+  offset: number
+  limit: number
+}
+
 function agentsPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/agents${suffix}`
 }
@@ -163,6 +242,10 @@ export function listAgents(
   return request<Agent[]>(`${agentsPath(workspaceId)}${listQuery(options)}`, {
     token,
   })
+}
+
+export function getAgent(token: string, workspaceId: string, agentId: string) {
+  return request<Agent>(agentsPath(workspaceId, `/${agentId}`), { token })
 }
 
 export function createAgent(
@@ -201,6 +284,102 @@ export function deleteAgent(
   })
 }
 
+export function listAgentApiCredentials(
+  token: string,
+  workspaceId: string,
+  agentId: string
+) {
+  return request<{ items: AgentApiCredential[] }>(
+    agentsPath(workspaceId, `/${agentId}/api-credentials`),
+    { token }
+  )
+}
+
+export function createAgentApiCredential(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  name: string
+) {
+  return request<AgentApiCredentialSecret>(
+    agentsPath(workspaceId, `/${agentId}/api-credentials`),
+    { method: "POST", token, body: JSON.stringify({ name }) }
+  )
+}
+
+export function rotateAgentApiCredential(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  credentialId: string
+) {
+  return request<AgentApiCredentialSecret>(
+    agentsPath(
+      workspaceId,
+      `/${agentId}/api-credentials/${credentialId}/rotate`
+    ),
+    { method: "POST", token }
+  )
+}
+
+export function revokeAgentApiCredential(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  credentialId: string
+) {
+  return request<void>(
+    agentsPath(workspaceId, `/${agentId}/api-credentials/${credentialId}`),
+    { method: "DELETE", token }
+  )
+}
+
+export function getAgentApiDocumentation(agentId: string, apiKey: string) {
+  return request<AgentApiDocumentation>(
+    `/api/v1/agent-api/${agentId}/documentation`,
+    { token: apiKey }
+  )
+}
+
+export function listAgentLogs(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  options: { limit?: number; offset?: number } = {}
+) {
+  return request<PaginatedResponse<AgentLog>>(
+    agentsPath(workspaceId, `/${agentId}/logs${listQuery(options)}`),
+    { token }
+  )
+}
+
+export function listAgentConversationUsers(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  options: { limit?: number; offset?: number } = {}
+) {
+  return request<PaginatedResponse<AgentConversationUser>>(
+    agentsPath(
+      workspaceId,
+      `/${agentId}/conversation-users${listQuery(options)}`
+    ),
+    { token }
+  )
+}
+
+export function getAgentMonitoring(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  days: 7 | 30 | 90
+) {
+  return request<AgentMonitoring>(
+    agentsPath(workspaceId, `/${agentId}/monitoring?days=${days}`),
+    { token }
+  )
+}
+
 export function listAgentRuns(
   token: string,
   workspaceId: string,
@@ -210,9 +389,12 @@ export function listAgentRuns(
   const query = conversationId
     ? `?conversation_id=${encodeURIComponent(conversationId)}`
     : ""
-  return request<AgentRun[]>(agentsPath(workspaceId, `/${agentId}/runs${query}`), {
-    token,
-  })
+  return request<AgentRun[]>(
+    agentsPath(workspaceId, `/${agentId}/runs${query}`),
+    {
+      token,
+    },
+  )
 }
 
 export function createAgentRun(
@@ -280,81 +462,10 @@ const TERMINAL_RUN_STATUSES = new Set<AgentRunStatus>([
   "failed",
   "cancelled",
 ])
-const INITIAL_RECONNECT_DELAY_MS = 250
-const MAX_RECONNECT_DELAY_MS = 5_000
-
 export function compareLiveStreamIds(left: string, right: string) {
   const [leftMs, leftSequence] = left.split("-").map(Number)
   const [rightMs, rightSequence] = right.split("-").map(Number)
   return leftMs - rightMs || leftSequence - rightSequence
-}
-
-function waitForReconnect(delayMs: number, signal?: AbortSignal) {
-  return new Promise<void>((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason ?? new DOMException("Aborted", "AbortError"))
-      return
-    }
-    const onAbort = () => {
-      clearTimeout(timeout)
-      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"))
-    }
-    const timeout = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort)
-      resolve()
-    }, delayMs)
-    signal?.addEventListener("abort", onAbort, { once: true })
-  })
-}
-
-async function consumeAgentRunStream(
-  response: Response,
-  onEvent: (event: AgentRunStreamEvent) => void,
-  cursor: number,
-  liveCursor: string,
-  onCursor: (cursor: number, liveCursor: string) => void
-) {
-  if (!response.body) {
-    throw new Error("Agent stream did not return a response body.")
-  }
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ""
-  let terminal = false
-
-  const consumeLine = (line: string, tolerateIncomplete = false) => {
-    if (!line.trim()) return
-    let event: AgentRunStreamEvent
-    try {
-      event = JSON.parse(line) as AgentRunStreamEvent
-    } catch (error) {
-      if (tolerateIncomplete) return
-      throw error
-    }
-    if ("sequence" in event && typeof event.sequence === "number") {
-      cursor = Math.max(cursor, event.sequence)
-    }
-    if (
-      "live_sequence" in event &&
-      typeof event.live_sequence === "string"
-    ) {
-      liveCursor = event.live_sequence
-    }
-    onCursor(cursor, liveCursor)
-    if (event.type === "complete" || event.type === "error") terminal = true
-    onEvent(event)
-  }
-
-  while (true) {
-    const { done, value } = await reader.read()
-    buffer += decoder.decode(value, { stream: !done })
-    const lines = buffer.split("\n")
-    buffer = lines.pop() ?? ""
-    lines.forEach((line) => consumeLine(line))
-    if (done) break
-  }
-  consumeLine(buffer, true)
-  return { cursor, liveCursor, terminal }
 }
 
 export async function observeAgentRun(
@@ -367,12 +478,9 @@ export async function observeAgentRun(
   after = 0,
   liveAfter = "0-0"
 ) {
-  let cursor = after
-  let liveCursor = liveAfter
-  let reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
-  while (!signal?.aborted) {
-    try {
-      const response = await fetch(
+  return observeNdjsonStream<AgentRunStreamEvent>(
+    (cursor, liveCursor, streamSignal) =>
+      fetch(
         apiUrl(
           agentsPath(
             workspaceId,
@@ -382,49 +490,12 @@ export async function observeAgentRun(
         {
           headers: { Authorization: `Bearer ${token}` },
           credentials: "include",
-          signal,
-        }
-      )
-      if (!response.ok) {
-        if (response.status < 500 && response.status !== 429) {
-          throw new Error(`Agent stream failed with status ${response.status}.`)
-        }
-        await waitForReconnect(reconnectDelayMs, signal)
-        reconnectDelayMs = Math.min(
-          reconnectDelayMs * 2,
-          MAX_RECONNECT_DELAY_MS
-        )
-        continue
-      }
-      reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
-      const consumed = await consumeAgentRunStream(
-        response,
-        onEvent,
-        cursor,
-        liveCursor,
-        (nextCursor, nextLiveCursor) => {
-          cursor = nextCursor
-          liveCursor = nextLiveCursor
-        }
-      )
-      cursor = consumed.cursor
-      liveCursor = consumed.liveCursor
-      if (consumed.terminal) return
-    } catch (error) {
-      if (signal?.aborted) throw signal.reason ?? error
-      if (
-        error instanceof Error &&
-        error.message.startsWith("Agent stream failed with status")
-      ) {
-        throw error
-      }
-    }
-    await waitForReconnect(reconnectDelayMs, signal)
-    reconnectDelayMs = Math.min(
-      reconnectDelayMs * 2,
-      MAX_RECONNECT_DELAY_MS
-    )
-  }
+          signal: streamSignal,
+        },
+      ),
+    onEvent,
+    { signal, after, liveAfter, errorLabel: "Agent stream" },
+  )
 }
 
 export async function streamAgentRun(

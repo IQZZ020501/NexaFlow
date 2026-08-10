@@ -40,6 +40,7 @@ import {
   compareLiveStreamIds,
   createAgent,
   deleteAgent,
+  getAgent,
   listAgentRunToolCalls,
   listAgentRuns,
   listAgents,
@@ -56,15 +57,15 @@ import {
 import { listKnowledgeBases, type KnowledgeBase } from "@/lib/api/knowledge"
 import { listRegisteredModels, type RegisteredModel } from "@/lib/api/llm"
 import { listMcpServers, type McpServer } from "@/lib/api/mcp"
-import {
-  CARD_BATCH_SIZE,
-  useInfiniteScroll,
-} from "@/lib/use-infinite-scroll"
+import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { getErrorMessage } from "@/lib/errors"
+import { getMembershipRole } from "@/lib/display"
+import type { AgentDetailView } from "@/lib/agent-views"
 
 export type AgentFormState = {
   id: string | null
   name: string
+  description: string
   modelId: string
   instructions: string
   knowledgeQueryMode: Agent["knowledge_query_mode"]
@@ -76,6 +77,7 @@ export type AgentFormState = {
 const EMPTY_FORM: AgentFormState = {
   id: null,
   name: "",
+  description: "",
   modelId: "",
   instructions: "",
   knowledgeQueryMode: "required",
@@ -88,6 +90,7 @@ function formFromAgent(agent: Agent): AgentFormState {
   return {
     id: agent.id,
     name: agent.name,
+    description: agent.description,
     modelId: agent.model_id,
     instructions: agent.instructions,
     knowledgeQueryMode: agent.knowledge_query_mode,
@@ -203,8 +206,7 @@ export function mergeAgentRunStreamEvent(
                 event.type === "thought" && event.turn === streamEvent.turn
                   ? {
                       ...event,
-                      reasoning:
-                        sameStream
+                      reasoning: sameStream
                           ? (event.reasoning ?? "") + streamEvent.delta
                           : streamEvent.delta,
                     }
@@ -279,6 +281,7 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
   )
   return (
     form.name.trim() !== agent.name ||
+    form.description.trim() !== agent.description ||
     form.modelId !== agent.model_id ||
     form.instructions.trim() !== agent.instructions ||
     form.knowledgeQueryMode !== agent.knowledge_query_mode ||
@@ -290,9 +293,13 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
 
 type AgentsPageProps = {
   initialConversationId?: string | null
+  initialView?: AgentDetailView
 }
 
-export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
+export function AgentsPage({
+  initialConversationId = null,
+  initialView = "overview",
+}: AgentsPageProps) {
   const router = useRouter()
   const params = useParams<{ id?: string }>()
   const selectedAgentId = params.id ?? null
@@ -322,9 +329,11 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
+  const [isPublishing, setIsPublishing] = React.useState(false)
   const [isAsking, setIsAsking] = React.useState(false)
   const [agentSearch, setAgentSearch] = React.useState("")
   const [agentsHasMore, setAgentsHasMore] = React.useState(true)
+  const [listedAgentsCount, setListedAgentsCount] = React.useState(0)
   const [isAgentsLoadingMore, setIsAgentsLoadingMore] = React.useState(false)
   const agentsLoadingMoreRef = React.useRef(false)
   const activeConversationIdRef = React.useRef<string | null>(
@@ -332,10 +341,16 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
   )
   const [hasLoadedWorkspaceData, setHasLoadedWorkspaceData] =
     React.useState(false)
+  const [isMissingAgentLoading, setIsMissingAgentLoading] =
+    React.useState(false)
+  const [activeView, setActiveView] =
+    React.useState<AgentDetailView>(initialView)
 
   const selectedAgent =
     agents.find((agent) => agent.id === selectedAgentId) ?? null
   const isDirty = selectedAgent ? isAgentFormDirty(form, selectedAgent) : false
+  const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
+  const canManagePublishing = workspaceRole === "admin"
   const activeModels = models.filter(
     (model) => model.model_type === "LLM" && model.status === "active"
   )
@@ -410,11 +425,8 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
         streamEvent.type === "approval_resolved"
       ) {
         if (selectedAgentId) {
-          void loadRunToolCalls(
-            selectedAgentId,
-            runId,
-            conversationId
-          ).catch((error: unknown) => {
+          void loadRunToolCalls(selectedAgentId, runId, conversationId).catch(
+            (error: unknown) => {
             if (
               isCurrentAgentConversation(
                 activeConversationIdRef.current,
@@ -423,7 +435,8 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
             ) {
               reportError(error)
             }
-          })
+            }
+          )
         }
       }
     },
@@ -436,13 +449,14 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
       setModels([])
       setKnowledgeBases([])
       setMcpServers([])
+      setListedAgentsCount(0)
       setHasLoadedWorkspaceData(false)
       return
     }
     setIsLoading(true)
     setHasLoadedWorkspaceData(false)
     try {
-      const [nextAgents, nextModels, nextKnowledgeBases, nextMcpServers] =
+      const [listedAgents, nextModels, nextKnowledgeBases, nextMcpServers] =
         await Promise.all([
           listAgents(token, selectedWorkspaceId, {
             limit: CARD_BATCH_SIZE,
@@ -452,8 +466,9 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
           listKnowledgeBases(token, selectedWorkspaceId),
           listMcpServers(token, selectedWorkspaceId),
         ])
-      setAgents(nextAgents)
-      setAgentsHasMore(nextAgents.length === CARD_BATCH_SIZE)
+      setAgents(listedAgents)
+      setListedAgentsCount(listedAgents.length)
+      setAgentsHasMore(listedAgents.length === CARD_BATCH_SIZE)
       setModels(nextModels)
       setKnowledgeBases(nextKnowledgeBases)
       setMcpServers(nextMcpServers)
@@ -462,6 +477,7 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
       setModels([])
       setKnowledgeBases([])
       setMcpServers([])
+      setListedAgentsCount(0)
       reportError(error)
     } finally {
       setIsLoading(false)
@@ -481,9 +497,16 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
     try {
       const batch = await listAgents(token, selectedWorkspaceId, {
         limit: CARD_BATCH_SIZE,
-        offset: agents.length,
+        offset: listedAgentsCount,
       })
-      setAgents((current) => [...current, ...batch])
+      setAgents((current) => {
+        const existingIds = new Set(current.map((agent) => agent.id))
+        return [
+          ...current,
+          ...batch.filter((agent) => !existingIds.has(agent.id)),
+        ]
+      })
+      setListedAgentsCount((current) => current + batch.length)
       setAgentsHasMore(batch.length === CARD_BATCH_SIZE)
     } catch (error) {
       reportError(error)
@@ -491,7 +514,13 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
       agentsLoadingMoreRef.current = false
       setIsAgentsLoadingMore(false)
     }
-  }, [agents.length, agentsHasMore, reportError, selectedWorkspaceId, token])
+  }, [
+    agentsHasMore,
+    listedAgentsCount,
+    reportError,
+    selectedWorkspaceId,
+    token,
+  ])
 
   const agentsListEndRef = useInfiniteScroll(loadMoreAgents)
 
@@ -503,6 +532,11 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
   React.useEffect(() => {
     activeConversationIdRef.current = initialConversationId
   }, [initialConversationId, selectedAgentId])
+
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setActiveView(initialView)
+  }, [initialView, selectedAgentId])
 
   React.useEffect(() => {
     if (!selectedAgent || form.id === selectedAgent.id) return
@@ -517,11 +551,56 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
 
   React.useEffect(() => {
     if (
+      !token ||
+      !selectedWorkspaceId ||
+      !selectedAgentId ||
+      !hasLoadedWorkspaceData
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsMissingAgentLoading(false)
+      return
+    }
+    if (agents.some((agent) => agent.id === selectedAgentId)) {
+      setIsMissingAgentLoading(false)
+      return
+    }
+    let current = true
+    setIsMissingAgentLoading(true)
+    getAgent(token, selectedWorkspaceId, selectedAgentId)
+      .then((agent) => {
+        if (!current) return
+        setAgents((currentAgents) =>
+          currentAgents.some((item) => item.id === agent.id)
+            ? currentAgents
+            : [agent, ...currentAgents]
+        )
+      })
+      .catch((error: unknown) => {
+        if (current) reportError(error)
+      })
+      .finally(() => {
+        if (current) setIsMissingAgentLoading(false)
+      })
+    return () => {
+      current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    hasLoadedWorkspaceData,
+    reportError,
+    selectedAgentId,
+    selectedWorkspaceId,
+    token,
+  ])
+
+  React.useEffect(() => {
+    if (
       token &&
       selectedWorkspaceId &&
       selectedAgentId &&
       hasLoadedWorkspaceData &&
       !isLoading &&
+      !isMissingAgentLoading &&
       !selectedAgent
     ) {
       router.replace("/app/apps")
@@ -529,6 +608,7 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
   }, [
     hasLoadedWorkspaceData,
     isLoading,
+    isMissingAgentLoading,
     router,
     selectedAgent,
     selectedAgentId,
@@ -541,6 +621,9 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRuns([])
       setToolCallsByRun({})
+      return
+    }
+    if (activeView !== "settings") {
       return
     }
     let isCurrent = true
@@ -575,7 +658,7 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
         setRuns(visibleRuns)
         if (!initialConversationId) {
           router.replace(
-            `/app/apps/${selectedAgentId}?conversation_id=${encodeURIComponent(resolvedConversationId)}`
+            `/app/apps/${selectedAgentId}?view=settings&conversation_id=${encodeURIComponent(resolvedConversationId)}`
           )
         }
         for (const run of visibleRuns) {
@@ -660,6 +743,7 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
     selectedAgentId,
     selectedWorkspaceId,
     token,
+    activeView,
   ])
 
   if (!token || !me) return null
@@ -700,6 +784,7 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
     try {
       const payload = {
         name: form.name.trim(),
+        description: form.description.trim(),
         model_id: form.modelId,
         instructions: form.instructions,
         knowledge_query_mode: form.knowledgeQueryMode,
@@ -735,7 +820,17 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
   }
 
   async function handlePublishAgent() {
-    if (!token || !selectedWorkspaceId || !selectedAgent) return
+    if (
+      !token ||
+      !selectedWorkspaceId ||
+      !selectedAgent ||
+      !canManagePublishing ||
+      isDirty ||
+      isPublishing
+    ) {
+      return
+    }
+    setIsPublishing(true)
     try {
       const updated = await updateAgent(
         token,
@@ -753,7 +848,20 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
       )
     } catch (error) {
       reportError(error)
+    } finally {
+      setIsPublishing(false)
     }
+  }
+
+  function handleViewChange(view: AgentDetailView) {
+    if (!selectedAgentId) return
+    setActiveView(view)
+    const query = new URLSearchParams()
+    query.set("view", view)
+    if (activeConversationIdRef.current) {
+      query.set("conversation_id", activeConversationIdRef.current)
+    }
+    router.replace(`/app/apps/${selectedAgentId}?${query.toString()}`)
   }
 
   async function handleDeleteAgent(agent: Agent) {
@@ -795,7 +903,7 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
     activeConversationIdRef.current = conversationId
     if (!initialConversationId) {
       router.replace(
-        `/app/apps/${selectedAgent.id}?conversation_id=${encodeURIComponent(conversationId)}`
+        `/app/apps/${selectedAgent.id}?view=settings&conversation_id=${encodeURIComponent(conversationId)}`
       )
     }
     setQuestion("")
@@ -931,7 +1039,7 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
     setIsRunsLoading(false)
     setResolvingCallId(null)
     router.push(
-      `/app/apps/${selectedAgentId}?conversation_id=${encodeURIComponent(conversationId)}`
+      `/app/apps/${selectedAgentId}?view=settings&conversation_id=${encodeURIComponent(conversationId)}`
     )
   }
 
@@ -996,7 +1104,7 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
     }
   }
 
-  if (selectedAgent) {
+  if (selectedAgent && selectedWorkspaceId) {
     return (
       <AgentDetailWorkspace
         agent={selectedAgent}
@@ -1023,6 +1131,13 @@ export function AgentsPage({ initialConversationId = null }: AgentsPageProps) {
         onDelete={() => void handleDeleteAgent(selectedAgent)}
         onSave={handleSaveAgent}
         onPublish={() => void handlePublishAgent()}
+        isPublishing={isPublishing}
+        activeView={activeView}
+        onViewChange={handleViewChange}
+        token={token}
+        workspaceId={selectedWorkspaceId}
+        canManagePublishing={canManagePublishing}
+        notify={notify}
         onAsk={handleAsk}
         onCancelAsk={handleCancelAsk}
         onNewConversation={handleNewConversation}

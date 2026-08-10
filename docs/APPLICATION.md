@@ -15,6 +15,7 @@ api/endpoints → application（编排/规则/审计）→ shareddomain + capabi
 - `backend/app/application/identity.py` — 身份与应用服务：登录认证、access/refresh token 签发、改密、用户 CRUD 及审计记录
 - `backend/app/application/workspace.py` — 工作区应用服务：创建/更新/删除、成员增删改、最后一名管理员等规则校验
 - `backend/app/application/agents.py` — Agent 用例门面：重导出 Agent CRUD、Run 与工具用例，保持 API 层入口稳定
-- `backend/app/application/agent_runs.py` — Agent Run 编排：提交/查询、工具审批与 PostgreSQL/Redis 可重放事件订阅
+- `backend/app/application/agent_runs.py` — Agent Run 编排：登录态与公开/API Key 提交、按来源主体查询、工具审批及 PostgreSQL/Redis 可重放事件订阅；外部响应经过独立白名单收敛
+- `backend/app/application/agent_access.py` — Agent 外部访问用例：发布资料、HttpOnly 访客会话、Agent 级 API Key 创建/轮换/撤销、跨来源日志/用户/监控聚合、公开/API 流安全投影与 Redis 成本限流
 - `backend/app/application/agent_executor.py` — Durable Executor：短事务装载、租约心跳/接管、节点 checkpoint、工具账本与 Redis 实时 delta 发布
 - `backend/app/application/agent_memory.py` — Agent 对话记忆：按会话恢复角色消息，并在模型上下文预算内压缩旧轮次、持久化摘要

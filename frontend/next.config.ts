@@ -21,6 +21,11 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       { source: "/api/:path*", destination: `${BACKEND_ORIGIN}/api/:path*` },
+      { source: "/docs", destination: `${BACKEND_ORIGIN}/docs` },
+      {
+        source: "/openapi.json",
+        destination: `${BACKEND_ORIGIN}/openapi.json`,
+      },
       { source: "/health", destination: `${BACKEND_ORIGIN}/health` },
     ]
   },

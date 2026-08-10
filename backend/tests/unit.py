@@ -740,6 +740,258 @@ def test_stale_mcp_policy_requires_approval() -> None:
     assert created_calls[0].approval_required is True
 
 
+def test_external_mcp_policy_must_remain_exactly_read_only() -> None:
+    from app.application.agent_executor import current_mcp_policy_mode
+    from app.entities.tools import McpToolPolicy
+
+    metadata = {
+        "definition_hash": "current-definition",
+        "policy_mode": "read_only",
+    }
+    current = McpToolPolicy(
+        definition_hash="current-definition",
+        mode="read_only",
+    )
+    assert (
+        current_mcp_policy_mode(
+            "public",
+            metadata,
+            current,
+            "current-definition",
+        )
+        == "read_only"
+    )
+    assert (
+        current_mcp_policy_mode(
+            "api",
+            metadata,
+            None,
+            "current-definition",
+        )
+        == "disabled"
+    )
+    assert current_mcp_policy_mode(
+        "public",
+        metadata,
+        McpToolPolicy(
+            definition_hash="stale-definition",
+            mode="read_only",
+        ),
+        "current-definition",
+    ) == "disabled"
+    assert current_mcp_policy_mode(
+        "api",
+        metadata,
+        McpToolPolicy(
+            definition_hash="current-definition",
+            mode="approval_required",
+        ),
+        "current-definition",
+    ) == "disabled"
+    assert current_mcp_policy_mode(
+        "public",
+        metadata,
+        current,
+        "drifted-definition",
+    ) == "disabled"
+
+
+def test_external_mcp_policy_drift_is_blocked_without_approval() -> None:
+    from app.application import agent_executor
+    from app.entities.agents import AgentRun
+    from app.entities.tools import McpToolPolicy
+
+    created_calls = []
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def commit(self):
+            return None
+
+    async def get_policy(*_args, **_kwargs):
+        return McpToolPolicy(
+            definition_hash="current-definition",
+            mode="approval_required",
+        )
+
+    async def get_call(*_args, **_kwargs):
+        return created_calls[0] if created_calls else None
+
+    async def resolve_tools(*_args, **_kwargs):
+        return [SimpleNamespace(definition=SimpleNamespace())]
+
+    async def create_call(_db, call):
+        created_calls.append(call)
+        return call
+
+    async def block_call(_db, _call_id, reason, blocked_at, result_summary):
+        call = created_calls[0]
+        call.status = "rejected"
+        call.last_error = reason
+        call.result_content = reason
+        call.result_summary = result_summary
+        call.result_is_error = True
+        call.finished_at = blocked_at
+        return True
+
+    original_factory = agent_executor.get_session_factory
+    original_get_policy = agent_executor.get_mcp_tool_policy
+    original_get_call = agent_executor.agent_repository.get_agent_tool_call
+    original_create_call = agent_executor.agent_repository.create_agent_tool_call
+    original_block_call = agent_executor.agent_repository.block_agent_tool_call
+    original_resolve_tools = agent_executor.resolve_mcp_tools
+    original_definition_hash = agent_executor.mcp_tool_definition_hash
+    agent_executor.get_session_factory = lambda: lambda: FakeSession()
+    agent_executor.get_mcp_tool_policy = get_policy
+    agent_executor.agent_repository.get_agent_tool_call = get_call
+    agent_executor.agent_repository.create_agent_tool_call = create_call
+    agent_executor.agent_repository.block_agent_tool_call = block_call
+    agent_executor.resolve_mcp_tools = resolve_tools
+    agent_executor.mcp_tool_definition_hash = lambda _definition: "current-definition"
+
+    async def assert_blocked() -> None:
+        ledger = agent_executor.DurableToolLedger(
+            AgentRun(
+                id="run-1",
+                workspace_id="ws-1",
+                access_source="public",
+                consumer_id="visitor-1",
+            ),
+            "worker-1",
+            SimpleNamespace(),
+            asyncio.Event(),
+        )
+        result = await ledger.before(
+            1,
+            {"id": "call-1", "name": "mcp_search", "arguments": "{}"},
+            {
+                "kind": "mcp",
+                "server_name": "Search",
+                "server_id": "server-1",
+                "source_tool_name": "search",
+                "definition_hash": "current-definition",
+                "policy_mode": "read_only",
+            },
+            {},
+        )
+        assert result is not None and result.is_error is True
+
+    try:
+        asyncio.run(assert_blocked())
+    finally:
+        agent_executor.get_session_factory = original_factory
+        agent_executor.get_mcp_tool_policy = original_get_policy
+        agent_executor.agent_repository.get_agent_tool_call = original_get_call
+        agent_executor.agent_repository.create_agent_tool_call = original_create_call
+        agent_executor.agent_repository.block_agent_tool_call = original_block_call
+        agent_executor.resolve_mcp_tools = original_resolve_tools
+        agent_executor.mcp_tool_definition_hash = original_definition_hash
+
+    assert created_calls[0].policy_mode == "disabled"
+    assert created_calls[0].approval_required is False
+    assert created_calls[0].status == "rejected"
+
+
+def test_external_stream_epoch_is_stable_and_sanitized() -> None:
+    from app.application.agent_access import sanitize_external_agent_stream
+    from app.infrastructure.model_utils import utc_now
+
+    now = utc_now()
+    raw_epoch = "worker-task-internal-epoch"
+    running = {
+        "id": "run-1",
+        "conversation_id": "conversation-1",
+        "goal": "Question",
+        "status": "running",
+        "result": "",
+        "created_at": now,
+        "started_at": now,
+        "finished_at": None,
+        "updated_at": now,
+    }
+    completed = {
+        **running,
+        "status": "succeeded",
+        "result": "Answer",
+        "finished_at": now,
+    }
+
+    async def source():
+        yield {
+            "type": "run",
+            "run": running,
+            "sequence": 0,
+            "stream_epoch": raw_epoch,
+        }
+        yield {
+            "type": "reasoning_delta",
+            "turn": 1,
+            "delta": "Let me think",
+            "live_sequence": "1-0",
+            "stream_epoch": raw_epoch,
+        }
+        yield {
+            "type": "process",
+            "event": {
+                "type": "thought",
+                "turn": 1,
+                "status": "succeeded",
+                "summary": "agent.answer_ready",
+                "reasoning": "Let me think",
+                "call_id": "internal-call-1",
+                "tool_name": "mcp_internal_search",
+            },
+            "sequence": 1,
+            "stream_epoch": raw_epoch,
+        }
+        yield {
+            "type": "answer_delta",
+            "delta": "Answer",
+            "live_sequence": "2-0",
+            "stream_epoch": raw_epoch,
+        }
+        yield {
+            "type": "complete",
+            "run": completed,
+            "sequence": 2,
+            "stream_epoch": raw_epoch,
+        }
+
+    async def collect():
+        return [event async for event in sanitize_external_agent_stream(source())]
+
+    events = asyncio.run(collect())
+    epochs = [event["stream_epoch"] for event in events]
+    assert len(set(epochs)) == 1
+    assert len(epochs[0]) == 32
+    assert raw_epoch not in repr(events)
+    assert epochs[0] != raw_epoch
+    assert "internal-call-1" not in repr(events)
+    assert "mcp_internal_search" not in repr(events)
+    reasoning_deltas = [event for event in events if event["type"] == "reasoning_delta"]
+    assert len(reasoning_deltas) == 1
+    assert {
+        key: reasoning_deltas[0][key]
+        for key in ("type", "turn", "delta")
+    } == {"type": "reasoning_delta", "turn": 1, "delta": "Let me think"}
+    progress_events = [event for event in events if event["type"] == "progress"]
+    assert len(progress_events) == 1
+    assert progress_events[0]["event"] == {
+        "id": progress_events[0]["event"]["id"],
+        "type": "answer",
+        "status": "running",
+        "stage": "running",
+        "turn": 1,
+        "count": None,
+        "reasoning": "Let me think",
+    }
+
+
 def test_mcp_policy_concurrent_first_write_reloads_existing() -> None:
     from sqlalchemy.exc import IntegrityError
 
@@ -1533,6 +1785,9 @@ def main() -> None:
     test_agent_process_events_update_in_place()
     test_agent_event_replay_reads_every_page()
     test_stale_mcp_policy_requires_approval()
+    test_external_mcp_policy_must_remain_exactly_read_only()
+    test_external_mcp_policy_drift_is_blocked_without_approval()
+    test_external_stream_epoch_is_stable_and_sanitized()
     test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()

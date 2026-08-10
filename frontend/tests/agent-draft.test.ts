@@ -72,6 +72,8 @@ const agent: Agent = {
   mcp_tools: [{ server_id: "server-1", tool_name: "search" }],
   status: "active",
   published: false,
+  published_by_user_id: null,
+  published_at: null,
   created_by_user_id: "user-1",
   can_edit: true,
   created_at: "2026-08-03T00:00:00Z",
@@ -81,6 +83,7 @@ const agent: Agent = {
 const form: AgentFormState = {
   id: agent.id,
   name: agent.name,
+  description: agent.description,
   modelId: agent.model_id,
   instructions: agent.instructions,
   knowledgeQueryMode: agent.knowledge_query_mode,
@@ -104,6 +107,15 @@ describe("Agent form state", () => {
     expect(
       isAgentFormDirty({ ...form, instructions: "Answer briefly." }, agent)
     ).toBe(true)
+    expect(
+      isAgentFormDirty({ ...form, description: "New description" }, agent)
+    ).toBe(true)
+    expect(
+      isAgentFormDirty(
+        { ...form, description: ` ${agent.description} ` },
+        agent
+      )
+    ).toBe(false)
   })
 })
 

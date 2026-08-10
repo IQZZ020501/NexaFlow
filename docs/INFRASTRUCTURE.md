@@ -8,7 +8,7 @@
 
 ### app/infrastructure/
 
-- `backend/app/infrastructure/config.py` — Settings 配置 dataclass：.env 加载、数据库/JWT/Qdrant/Celery 等全部环境配置与生产强校验
+- `backend/app/infrastructure/config.py` — Settings 配置 dataclass：.env 加载、数据库/JWT/Qdrant/Celery、Agent 外部请求限流等全部环境配置与生产强校验
 - `backend/app/infrastructure/session.py` — 异步数据库引擎与会话工厂，提供 FastAPI 依赖 `get_db`
 - `backend/app/infrastructure/security.py` — 密码哈希（pwdlib）、JWT access token 签发/校验、refresh token 生成与哈希
 - `backend/app/infrastructure/errors.py` — 错误日志入口 `log_error`：内部/外部（上游服务）错误来源分类与 `ExternalServiceError` 基类
@@ -25,7 +25,7 @@
 
 ### infrastructure/repositories/（数据访问层）
 
-- `backend/app/infrastructure/repositories/agent.py` — Agent/绑定、Run 原子租约、checkpoint、事件游标与工具调用账本数据访问层
+- `backend/app/infrastructure/repositories/agent.py` — Agent/绑定/API 凭据、按来源主体隔离的 Run、原子租约、checkpoint、事件游标、对话统计与工具调用账本数据访问层
 - `backend/app/infrastructure/repositories/knowledge.py` — 知识库/文档/分块/任务数据访问层，含关键词命中 chunk 查询
 - `backend/app/infrastructure/repositories/user.py` — 用户与刷新会话、工作空间/团队成员关系数据访问层
 - `backend/app/infrastructure/repositories/mcp.py` — MCP Server 与本地审核工具策略数据访问层
@@ -71,11 +71,14 @@
   - `202608070001_agent_durable_executor.py` — Agent 检索策略、Run 租约/checkpoint/事件/工具账本与 MCP 工具策略
   - `202608080001_mcp_transports.py` — MCP Streamable HTTP/SSE/stdio 传输字段、互斥约束及可回退编码
   - `202608080002_mcp_stdio_inline_config.py` — stdio 内联配置（命令/参数/环境变量）加密列，并停用遗留 stdio profile 服务器
+  - `202608100001_agent_conversation_memory.py` — Agent 会话边界、持久摘要和模型用量
+  - `202608100002_localize_default_agent_instructions.py` — 本地化默认 Agent 指令
+  - `202608100003_agent_public_access.py` — Agent 发布身份、外部来源主体、API 凭据与会话隔离索引；回滚时删除无法还原为登录用户语义的外部 Run
 
 ## backend 根配置
 
 - `backend/pyproject.toml` — 项目元数据与依赖声明（FastAPI/Celery/LangChain/LangGraph/MCP/Qdrant/Alembic 等）
-- `backend/.env.example` — 环境变量模板：环境/日志/数据库/JWT/模型密钥/知识存储/Qdrant/Redis/MCP/CORS/引导管理员与默认工作区
+- `backend/.env.example` — 环境变量模板：环境/日志/数据库/JWT/模型密钥/知识存储/Qdrant/Redis/MCP/CORS/Agent 外部请求限流/引导管理员与默认工作区
 - `backend/README.md` — 后台 worker 运行说明（Celery 命令与共享 `KNOWLEDGE_STORAGE_DIR`/`QDRANT_URL` 要求）
 - `backend/uv.lock` — uv 依赖锁文件
 

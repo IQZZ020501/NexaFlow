@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
 from app.entities.agents import Agent as AgentEntity
+from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
 from app.entities.agents import AgentRun as AgentRunEntity
 from app.entities.agents import AgentRunEvent as AgentRunEventEntity
 from app.entities.agents import AgentToolCall as AgentToolCallEntity
@@ -23,6 +24,7 @@ from app.shareddomain.agents.models import (
     AGENT_RUN_RUNNING_STATUS,
     AGENT_RUN_SUCCEEDED_STATUS,
     Agent,
+    AgentApiCredential,
     AgentKnowledgeBase,
     AgentMcpTool,
     AgentRun,
@@ -35,6 +37,9 @@ _CONVERSATION_MEMORY_COLUMNS = (
     AgentRun.workspace_id,
     AgentRun.agent_id,
     AgentRun.requested_by_user_id,
+    AgentRun.execution_user_id,
+    AgentRun.access_source,
+    AgentRun.consumer_id,
     AgentRun.conversation_id,
     AgentRun.status,
     AgentRun.goal,
@@ -50,6 +55,9 @@ def _to_conversation_memory_entity(row: AgentRun) -> AgentRunEntity:
         workspace_id=row.workspace_id,
         agent_id=row.agent_id,
         requested_by_user_id=row.requested_by_user_id,
+        execution_user_id=row.execution_user_id,
+        access_source=row.access_source,
+        consumer_id=row.consumer_id,
         conversation_id=row.conversation_id,
         status=row.status,
         goal=row.goal,
@@ -92,6 +100,110 @@ async def save_agent(db: AsyncSession, entity: AgentEntity) -> AgentEntity:
 
 async def refresh_agent(db: AsyncSession, entity: AgentEntity) -> AgentEntity:
     return await refresh_entity(db, Agent, AgentEntity, entity)
+
+
+async def list_agent_api_credentials(
+    db: AsyncSession,
+    agent_id: str,
+) -> list[AgentApiCredentialEntity]:
+    rows = await db.scalars(
+        select(AgentApiCredential)
+        .where(AgentApiCredential.agent_id == agent_id)
+        .order_by(AgentApiCredential.created_at.desc(), AgentApiCredential.id.desc())
+    )
+    return [to_entity(AgentApiCredentialEntity, row) for row in rows.all()]
+
+
+async def get_agent_api_credential_by_id(
+    db: AsyncSession,
+    credential_id: str,
+) -> AgentApiCredentialEntity | None:
+    row = await db.get(AgentApiCredential, credential_id)
+    return to_entity(AgentApiCredentialEntity, row) if row is not None else None
+
+
+async def list_agent_api_credentials_by_ids(
+    db: AsyncSession,
+    credential_ids: list[str],
+) -> list[AgentApiCredentialEntity]:
+    if not credential_ids:
+        return []
+    rows = await db.scalars(
+        select(AgentApiCredential).where(AgentApiCredential.id.in_(credential_ids))
+    )
+    return [to_entity(AgentApiCredentialEntity, row) for row in rows.all()]
+
+
+async def get_agent_api_credential_by_hash(
+    db: AsyncSession,
+    token_hash: str,
+) -> AgentApiCredentialEntity | None:
+    row = await db.scalar(
+        select(AgentApiCredential).where(
+            AgentApiCredential.token_hash == token_hash,
+            AgentApiCredential.revoked_at.is_(None),
+        )
+    )
+    return to_entity(AgentApiCredentialEntity, row) if row is not None else None
+
+
+async def create_agent_api_credential(
+    db: AsyncSession,
+    entity: AgentApiCredentialEntity,
+) -> AgentApiCredentialEntity:
+    orm = await save(db, AgentApiCredential, entity)
+    return to_entity(AgentApiCredentialEntity, orm)
+
+
+async def mark_agent_api_credential_used(
+    db: AsyncSession,
+    credential_id: str,
+    used_at: datetime,
+) -> bool:
+    result = await db.execute(
+        update(AgentApiCredential)
+        .where(
+            AgentApiCredential.id == credential_id,
+            AgentApiCredential.revoked_at.is_(None),
+        )
+        .values(last_used_at=used_at)
+    )
+    return bool(result.rowcount)
+
+
+async def revoke_agent_api_credential(
+    db: AsyncSession,
+    credential_id: str,
+    revoked_at: datetime,
+) -> bool:
+    result = await db.execute(
+        update(AgentApiCredential)
+        .where(
+            AgentApiCredential.id == credential_id,
+            AgentApiCredential.revoked_at.is_(None),
+        )
+        .values(revoked_at=revoked_at)
+    )
+    return bool(result.rowcount)
+
+
+async def rotate_agent_api_credential(
+    db: AsyncSession,
+    credential_id: str,
+    current_token_hash: str,
+    token_hash: str,
+    hint: str,
+) -> bool:
+    result = await db.execute(
+        update(AgentApiCredential)
+        .where(
+            AgentApiCredential.id == credential_id,
+            AgentApiCredential.token_hash == current_token_hash,
+            AgentApiCredential.revoked_at.is_(None),
+        )
+        .values(token_hash=token_hash, hint=hint)
+    )
+    return bool(result.rowcount)
 
 
 async def list_binding_map(
@@ -180,7 +292,8 @@ async def replace_mcp_bindings(
 async def list_agent_runs(
     db: AsyncSession,
     agent_id: str,
-    requested_by_user_id: str,
+    access_source: str,
+    consumer_id: str,
     limit: int | None = None,
     offset: int = 0,
     *,
@@ -191,7 +304,8 @@ async def list_agent_runs(
         select(AgentRun)
         .where(
             AgentRun.agent_id == agent_id,
-            AgentRun.requested_by_user_id == requested_by_user_id,
+            AgentRun.access_source == access_source,
+            AgentRun.consumer_id == consumer_id,
         )
         .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         .limit(limit)
@@ -205,16 +319,178 @@ async def list_agent_runs(
     return [to_entity(AgentRunEntity, row) for row in result.all()]
 
 
+async def count_agent_runs(
+    db: AsyncSession,
+    agent_id: str,
+    *,
+    access_source: str | None = None,
+    consumer_id: str | None = None,
+    conversation_id: str | None = None,
+) -> int:
+    statement = select(func.count()).select_from(AgentRun).where(
+        AgentRun.agent_id == agent_id
+    )
+    if access_source is not None:
+        statement = statement.where(AgentRun.access_source == access_source)
+    if consumer_id is not None:
+        statement = statement.where(AgentRun.consumer_id == consumer_id)
+    if conversation_id is not None:
+        statement = statement.where(AgentRun.conversation_id == conversation_id)
+    return int(await db.scalar(statement) or 0)
+
+
+async def list_agent_runs_for_management(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    limit: int,
+    offset: int,
+) -> list[AgentRunEntity]:
+    rows = await db.scalars(
+        select(AgentRun)
+        .where(
+            AgentRun.workspace_id == workspace_id,
+            AgentRun.agent_id == agent_id,
+        )
+        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return [to_entity(AgentRunEntity, row) for row in rows.all()]
+
+
+async def list_agent_consumer_stats(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    limit: int,
+    offset: int,
+) -> tuple[list[tuple], int]:
+    grouped = (
+        select(
+            AgentRun.access_source.label("access_source"),
+            AgentRun.consumer_id.label("consumer_id"),
+            func.min(AgentRun.created_at).label("first_seen_at"),
+            func.max(AgentRun.created_at).label("last_seen_at"),
+            func.count(func.distinct(AgentRun.conversation_id)).label(
+                "conversation_count"
+            ),
+            func.count().label("run_count"),
+        )
+        .where(
+            AgentRun.workspace_id == workspace_id,
+            AgentRun.agent_id == agent_id,
+        )
+        .group_by(AgentRun.access_source, AgentRun.consumer_id)
+        .subquery()
+    )
+    total = int(
+        await db.scalar(select(func.count()).select_from(grouped)) or 0
+    )
+    result = await db.execute(
+        select(grouped)
+        .order_by(grouped.c.last_seen_at.desc(), grouped.c.consumer_id)
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(result.all()), total
+
+
+async def list_agent_monitoring_rows(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    since: datetime,
+) -> list[tuple]:
+    result = await db.execute(
+        select(
+            AgentRun.created_at,
+            AgentRun.access_source,
+            AgentRun.consumer_id,
+            AgentRun.conversation_id,
+            AgentRun.status,
+            AgentRun.model_usage,
+        ).where(
+            AgentRun.workspace_id == workspace_id,
+            AgentRun.agent_id == agent_id,
+            AgentRun.created_at >= since,
+        )
+    )
+    return list(result.all())
+
+
+async def list_consumer_conversations(
+    db: AsyncSession,
+    agent_id: str,
+    access_source: str,
+    consumer_id: str,
+) -> list[tuple]:
+    scope = (
+        AgentRun.agent_id == agent_id,
+        AgentRun.access_source == access_source,
+        AgentRun.consumer_id == consumer_id,
+    )
+    aggregates = (
+        select(
+            AgentRun.conversation_id.label("conversation_id"),
+            func.count().label("run_count"),
+            func.min(AgentRun.created_at).label("created_at"),
+            func.max(AgentRun.updated_at).label("updated_at"),
+        )
+        .where(*scope)
+        .group_by(AgentRun.conversation_id)
+        .subquery()
+    )
+    ranked = (
+        select(
+            AgentRun.conversation_id.label("conversation_id"),
+            AgentRun.goal.label("goal"),
+            AgentRun.status.label("status"),
+            AgentRun.result.label("result"),
+            func.row_number()
+            .over(
+                partition_by=AgentRun.conversation_id,
+                order_by=(AgentRun.created_at.desc(), AgentRun.id.desc()),
+            )
+            .label("rank"),
+        )
+        .where(*scope)
+        .subquery()
+    )
+    result = await db.execute(
+        select(
+            aggregates.c.conversation_id,
+            ranked.c.goal,
+            ranked.c.status,
+            ranked.c.result,
+            aggregates.c.run_count,
+            aggregates.c.created_at,
+            aggregates.c.updated_at,
+        )
+        .join(
+            ranked,
+            and_(
+                ranked.c.conversation_id == aggregates.c.conversation_id,
+                ranked.c.rank == 1,
+            ),
+        )
+        .order_by(aggregates.c.updated_at.desc(), aggregates.c.conversation_id)
+    )
+    return list(result.all())
+
+
 async def latest_agent_conversation_id(
     db: AsyncSession,
     agent_id: str,
-    requested_by_user_id: str,
+    access_source: str,
+    consumer_id: str,
 ) -> str | None:
     return await db.scalar(
         select(AgentRun.conversation_id)
         .where(
             AgentRun.agent_id == agent_id,
-            AgentRun.requested_by_user_id == requested_by_user_id,
+            AgentRun.access_source == access_source,
+            AgentRun.consumer_id == consumer_id,
         )
         .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         .limit(1)
@@ -224,14 +500,16 @@ async def latest_agent_conversation_id(
 async def get_active_agent_run(
     db: AsyncSession,
     agent_id: str,
-    requested_by_user_id: str,
+    access_source: str,
+    consumer_id: str,
     conversation_id: str,
 ) -> AgentRunEntity | None:
     row = await db.scalar(
         select(AgentRun)
         .where(
             AgentRun.agent_id == agent_id,
-            AgentRun.requested_by_user_id == requested_by_user_id,
+            AgentRun.access_source == access_source,
+            AgentRun.consumer_id == consumer_id,
             AgentRun.conversation_id == conversation_id,
             AgentRun.status.in_(AGENT_RUN_ACTIVE_STATUSES),
         )
@@ -250,7 +528,8 @@ async def list_conversation_memory_runs(
     scope = (
         AgentRun.workspace_id == run.workspace_id,
         AgentRun.agent_id == run.agent_id,
-        AgentRun.requested_by_user_id == run.requested_by_user_id,
+        AgentRun.access_source == run.access_source,
+        AgentRun.consumer_id == run.consumer_id,
         AgentRun.conversation_id == run.conversation_id,
     )
     before_current = or_(
@@ -311,7 +590,8 @@ async def save_conversation_summary(
             AgentRun.id == anchor_run.id,
             AgentRun.workspace_id == anchor_run.workspace_id,
             AgentRun.agent_id == anchor_run.agent_id,
-            AgentRun.requested_by_user_id == anchor_run.requested_by_user_id,
+            AgentRun.access_source == anchor_run.access_source,
+            AgentRun.consumer_id == anchor_run.consumer_id,
             AgentRun.conversation_id == anchor_run.conversation_id,
             AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
         )
@@ -324,7 +604,8 @@ async def save_conversation_summary(
         .where(
             AgentRun.workspace_id == anchor_run.workspace_id,
             AgentRun.agent_id == anchor_run.agent_id,
-            AgentRun.requested_by_user_id == anchor_run.requested_by_user_id,
+            AgentRun.access_source == anchor_run.access_source,
+            AgentRun.consumer_id == anchor_run.consumer_id,
             AgentRun.conversation_id == anchor_run.conversation_id,
             AgentRun.id != anchor_run.id,
             AgentRun.context_summary != "",
@@ -955,6 +1236,9 @@ async def require_agent_tool_call_approval(
 
 async def delete_agent_graph(db: AsyncSession, agent_id: str) -> None:
     await db.execute(delete(AgentRun).where(AgentRun.agent_id == agent_id))
+    await db.execute(
+        delete(AgentApiCredential).where(AgentApiCredential.agent_id == agent_id)
+    )
     await db.execute(delete(AgentMcpTool).where(AgentMcpTool.agent_id == agent_id))
     await db.execute(
         delete(AgentKnowledgeBase).where(AgentKnowledgeBase.agent_id == agent_id)
@@ -964,6 +1248,11 @@ async def delete_agent_graph(db: AsyncSession, agent_id: str) -> None:
 
 async def delete_workspace_agent_graph(db: AsyncSession, workspace_id: str) -> None:
     await db.execute(delete(AgentRun).where(AgentRun.workspace_id == workspace_id))
+    await db.execute(
+        delete(AgentApiCredential).where(
+            AgentApiCredential.workspace_id == workspace_id
+        )
+    )
     await db.execute(
         delete(AgentMcpTool).where(AgentMcpTool.workspace_id == workspace_id)
     )
