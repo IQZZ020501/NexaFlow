@@ -1,28 +1,11 @@
-"use client"
+import { LoginPageContent } from "@/components/auth/login-page-content"
 
-import * as React from "react"
-import { useRouter } from "next/navigation"
+type LoginPageProps = {
+  searchParams: Promise<{ next?: string | string[] }>
+}
 
-import { LoginScreen } from "@/components/auth/login-screen"
-import { useSession } from "@/contexts/session-context"
-
-export default function LoginPage() {
-  const router = useRouter()
-  const { token, isSessionRestored, login, notify } = useSession()
-
-  React.useEffect(() => {
-    if (isSessionRestored && token) {
-      router.replace("/app/apps")
-    }
-  }, [isSessionRestored, router, token])
-
-  return (
-    <LoginScreen
-      onLogin={(token, mustChangePassword, expiresIn) => {
-        login(token, mustChangePassword, expiresIn)
-        router.replace("/app/apps")
-      }}
-      onNotify={notify}
-    />
-  )
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const query = await searchParams
+  const next = Array.isArray(query.next) ? query.next[0] : query.next
+  return <LoginPageContent next={next} />
 }

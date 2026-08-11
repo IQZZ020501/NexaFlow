@@ -69,14 +69,6 @@ def hash_agent_access_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def public_agent_consumer_id(agent_id: str, session_token: str) -> str:
-    return hash_agent_access_token(f"{agent_id}:{session_token}")
-
-
-def create_public_agent_session_token() -> str:
-    return secrets.token_urlsafe(48)
-
-
 def create_agent_api_token() -> str:
     return f"nxf_{secrets.token_urlsafe(36)}"
 
@@ -436,11 +428,33 @@ async def get_published_agent_context(
     return PublishedAgentContext(agent=agent, publisher=publisher, workspace=workspace)
 
 
+async def get_workspace_published_agent_context(
+    db: AsyncSession,
+    agent_id: str,
+    user: User,
+) -> PublishedAgentContext:
+    context = await get_published_agent_context(db, agent_id)
+    try:
+        await build_workspace_context(db, user, context.agent.workspace_id)
+    except HTTPException as exc:
+        if exc.status_code in {
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
+        }:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "Published agent not found.",
+            ) from exc
+        raise
+    return context
+
+
 async def get_public_agent_profile(
     db: AsyncSession,
     agent_id: str,
+    user: User,
 ) -> PublicAgentProfileResponse:
-    context = await get_published_agent_context(db, agent_id)
+    context = await get_workspace_published_agent_context(db, agent_id, user)
     return PublicAgentProfileResponse(
         id=context.agent.id,
         name=context.agent.name,
@@ -798,7 +812,11 @@ async def _consumer_display_names(
     rows: list[tuple[str, str]],
 ) -> dict[tuple[str, str], str]:
     api_ids = [consumer_id for source, consumer_id in rows if source == "api"]
-    user_ids = [consumer_id for source, consumer_id in rows if source == "user"]
+    user_ids = [
+        consumer_id
+        for source, consumer_id in rows
+        if source in {"console", "public"}
+    ]
     api_names = {
         credential.id: credential.name
         for credential in await agent_repository.list_agent_api_credentials_by_ids(
@@ -812,7 +830,8 @@ async def _consumer_display_names(
     names: dict[tuple[str, str], str] = {}
     for source, consumer_id in rows:
         if source == "public":
-            names[(source, consumer_id)] = f"Visitor {consumer_id[:8]}"
+            user_name = user_names.get(consumer_id)
+            names[(source, consumer_id)] = user_name or f"Visitor {consumer_id[:8]}"
         elif source == "api":
             credential_name = api_names.get(consumer_id)
             names[(source, consumer_id)] = (
@@ -846,16 +865,11 @@ async def list_agent_logs(
         [
             (run.access_source, run.consumer_id)
             for run in runs
-            if run.access_source != "public"
         ],
     )
     items = []
     for run in runs:
-        display_name = (
-            f"Visitor {run.consumer_id[:8]}"
-            if run.access_source == "public"
-            else display_names[(run.access_source, run.consumer_id)]
-        )
+        display_name = display_names[(run.access_source, run.consumer_id)]
         items.append(
             AgentLogResponse(
                 id=run.id,
@@ -898,18 +912,13 @@ async def list_agent_conversation_users(
         [
             (row.access_source, row.consumer_id)
             for row in rows
-            if row.access_source != "public"
         ],
     )
     items = [
         AgentConversationUserResponse(
             consumer_id=row.consumer_id,
             access_source=row.access_source,
-            display_name=(
-                f"Visitor {row.consumer_id[:8]}"
-                if row.access_source == "public"
-                else display_names[(row.access_source, row.consumer_id)]
-            ),
+            display_name=display_names[(row.access_source, row.consumer_id)],
             first_seen_at=row.first_seen_at,
             last_seen_at=row.last_seen_at,
             conversation_count=row.conversation_count,

@@ -333,7 +333,7 @@ describe("public agent API", () => {
     expect(parseAgentDetailView("unknown")).toBe("overview")
   })
 
-  test("creates the cookie session before loading the profile", async () => {
+  test("loads the profile and conversations with the session token", async () => {
     const requests: Array<{
       url: string
       method: string
@@ -351,25 +351,23 @@ describe("public agent API", () => {
         auth: headers.get("Authorization"),
         credentials: init?.credentials,
       })
-      return requests.length === 1
-        ? new Response(null, { status: 204 })
+      return String(input).includes("/conversations")
+        ? Response.json({ items: [], total: 0 })
         : Response.json({ id: "agent-1", name: "Public", description: "" })
     }) as unknown as typeof fetch
 
-    await initializePublicAgent("agent-1")
+    await initializePublicAgent("agent-1", "access-token")
 
-    expect(requests[0]?.method).toBe("POST")
-    expect(requests.slice(1).map(({ method }) => method)).toEqual([
-      "GET",
-      "GET",
-    ])
-    expect(requests.every(({ auth }) => auth === null)).toBe(true)
+    expect(requests.map(({ method }) => method)).toEqual(["GET", "GET"])
+    expect(requests.every(({ auth }) => auth === "Bearer access-token")).toBe(
+      true
+    )
     expect(
       requests.every(({ credentials }) => credentials === "include")
     ).toBe(true)
   })
 
-  test("does not send Authorization while reconnecting a public stream", async () => {
+  test("sends Authorization while reconnecting a public stream", async () => {
     const requests: Array<{ url: string; auth: string | null }> = []
     let streamRequest = 0
     globalThis.setTimeout = ((callback: () => void) => {
@@ -422,12 +420,14 @@ describe("public agent API", () => {
 
     const events: string[] = []
     const response = await import("../lib/api/public-agents")
-    await response.streamPublicAgentRun("agent-1", "hello", (event) =>
+    await response.streamPublicAgentRun("agent-1", "access-token", "hello", (event) =>
       events.push(event.type)
     )
 
     expect(events).toEqual(["run", "complete"])
-    expect(requests.every(({ auth }) => auth === null)).toBe(true)
+    expect(
+      requests.every(({ auth }) => auth === "Bearer access-token")
+    ).toBe(true)
     expect(requests.at(-1)?.url).toContain("after=0")
   })
 
@@ -467,7 +467,7 @@ describe("public agent API", () => {
     }) as unknown as typeof fetch
 
     const events: string[] = []
-    await observePublicAgentRun("agent-1", "run-1", (event) =>
+    await observePublicAgentRun("agent-1", "access-token", "run-1", (event) =>
       events.push(event.type)
     )
     expect(events).toEqual(["answer_delta", "complete"])
