@@ -197,6 +197,14 @@ class ExternalAgentProgressEventResponse(BaseModel):
     turn: int
     count: int | None = None
     reasoning: str = ""
+    tool_name: str = ""
+    tool_label: str = ""
+    tool_kind: Literal["knowledge", "mcp", "unknown"] = "unknown"
+    server_name: str = ""
+    input: dict[str, Any] = Field(default_factory=dict)
+    output: Any = None
+    input_truncated: bool = False
+    output_truncated: bool = False
     hits: list[ExternalAgentKnowledgeHitResponse] = Field(default_factory=list)
 
 

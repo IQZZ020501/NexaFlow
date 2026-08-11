@@ -1048,6 +1048,14 @@ def test_external_stream_epoch_is_stable_and_sanitized() -> None:
         "turn": 1,
         "count": None,
         "reasoning": "Let me think",
+        "tool_name": "",
+        "tool_label": "",
+        "tool_kind": "unknown",
+        "server_name": "",
+        "input": {},
+        "output": None,
+        "input_truncated": False,
+        "output_truncated": False,
         "hits": [],
     }
 
@@ -1110,6 +1118,91 @@ def test_external_progress_events_carry_knowledge_hits() -> None:
             "content": "Tag with semantic versions.",
         },
     ]
+
+
+def test_external_progress_events_carry_mcp_tool_details() -> None:
+    from app.application.agent_access import external_progress_events
+
+    progress = external_progress_events(
+        [
+            {
+                "type": "tool",
+                "turn": 1,
+                "tool_name": "web_search",
+                "tool_label": "Web search",
+                "tool_kind": "mcp",
+                "server_name": "Tavily",
+                "status": "succeeded",
+                "summary": "agent.tool_running",
+                "call_id": "call-2",
+                "input": {"query": "GitHub trending"},
+                "output": {"results": [{"title": "NexaFlow"}]},
+            }
+        ],
+        "succeeded",
+    )
+
+    assert len(progress) == 1
+    event = progress[0]
+    assert event.tool_name == "web_search"
+    assert event.tool_label == "Web search"
+    assert event.tool_kind == "mcp"
+    assert event.server_name == "Tavily"
+    assert event.input == {"query": "GitHub trending"}
+    assert event.output == {"results": [{"title": "NexaFlow"}]}
+
+
+def test_external_progress_events_bound_tool_payloads() -> None:
+    import json
+
+    from app.application.agent_access import (
+        TOOL_PAYLOAD_MAX_STRING,
+        _bounded_tool_payload,
+        external_progress_events,
+    )
+
+    oversized = {
+        "query": "x" * (TOOL_PAYLOAD_MAX_STRING + 100),
+        "nested": {"deep": {"deeper": {"deepest": {"value": "too deep"}}}},
+        "items": list(range(100)),
+    }
+    bounded, truncated = _bounded_tool_payload(oversized)
+    assert truncated
+    assert len(bounded["query"]) <= TOOL_PAYLOAD_MAX_STRING + 1
+    assert len(bounded["items"]) <= 25
+    assert bounded["nested"]["deep"]["deeper"]["deepest"] == "…"
+    assert len(json.dumps(bounded)) < 4000
+
+    # 全局预算：结构巨大时整体受限（或替换为截断标记），序列化保持有界
+    huge = {"key": {f"k{i}": "v" * 200 for i in range(100)}}
+    bounded_huge, huge_truncated = _bounded_tool_payload(huge)
+    assert huge_truncated
+    assert len(json.dumps(bounded_huge)) < 4000
+
+    # 扁平超大 dict：只消费前 TOOL_PAYLOAD_MAX_ITEMS 项，不 materialize 全部
+    flat = {f"key-{i}": "value" for i in range(10000)}
+    bounded_flat, flat_truncated = _bounded_tool_payload(flat)
+    assert flat_truncated
+    assert len(bounded_flat) <= 25
+
+    progress = external_progress_events(
+        [
+            {
+                "type": "tool",
+                "turn": 1,
+                "tool_kind": "mcp",
+                "status": "succeeded",
+                "summary": "agent.tool_running",
+                "call_id": "call-3",
+                "input": {"query": "x" * (TOOL_PAYLOAD_MAX_STRING + 50)},
+                "output": {"rows": list(range(500))},
+            }
+        ],
+        "succeeded",
+    )
+    assert progress[0].input_truncated is True
+    assert progress[0].output_truncated is True
+    assert len(progress[0].output["rows"]) <= 25
 
 
 def test_external_progress_events_knowledge_failure_has_no_hits() -> None:
@@ -1968,6 +2061,8 @@ def main() -> None:
     test_external_mcp_policy_must_remain_exactly_read_only()
     test_external_mcp_policy_drift_is_blocked_without_approval()
     test_external_stream_epoch_is_stable_and_sanitized()
+    test_external_progress_events_carry_mcp_tool_details()
+    test_external_progress_events_bound_tool_payloads()
     test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()

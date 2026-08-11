@@ -637,6 +637,7 @@ export const en = {
   "已检索 {value} 个知识片段": "Retrieved {value} knowledge chunks",
   "调用输入": "Input",
   "调用结果": "Result",
+  "内容过长已截断": "Content too long, truncated",
   "未知文档": "Unknown document",
   "未检索到相关知识片段": "No relevant knowledge fragments found",
   "发送问题": "Send question",

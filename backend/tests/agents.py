@@ -2285,6 +2285,14 @@ def assert_external_agent_access() -> None:
                         "count",
                         "reasoning",
                         "hits",
+                        "tool_name",
+                        "tool_label",
+                        "tool_kind",
+                        "server_name",
+                        "input",
+                        "output",
+                        "input_truncated",
+                        "output_truncated",
                     }
                     assert isinstance(event["event"]["reasoning"], str)
                 serialized = json.dumps(event)
@@ -2293,7 +2301,6 @@ def assert_external_agent_access() -> None:
                     "requested_by_user_id",
                     "model_id",
                     "trace_id",
-                    "tool_name",
                     "last_error",
                 ):
                     assert forbidden not in serialized

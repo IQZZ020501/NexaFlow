@@ -2,6 +2,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 import hashlib
+import json
+from itertools import islice
 import secrets
 from typing import Any, Literal
 
@@ -107,6 +109,95 @@ def _external_progress_id(event: dict[str, Any], suffix: str = "") -> str:
     return hashlib.sha256(f"external-progress:{identity}".encode()).hexdigest()[:16]
 
 
+TOOL_PAYLOAD_MAX_STRING = 500
+TOOL_PAYLOAD_MAX_DEPTH = 4
+TOOL_PAYLOAD_MAX_ITEMS = 25
+TOOL_PAYLOAD_MAX_TOTAL_ITEMS = 200
+TOOL_PAYLOAD_MAX_TOTAL_CHARS = 4000
+TOOL_PAYLOAD_MAX_SERIALIZED = 4000
+TOOL_PAYLOAD_ELLIPSIS = "…"
+
+
+def _limit_tool_payload(
+    value: object,
+    depth: int,
+    budget: list[int],
+) -> tuple[object, bool]:
+    """递归限制工具载荷，返回 (受限副本, 是否截断)。
+
+    budget = [剩余元素数, 剩余字符数]，遍历途中耗尽即截断，
+    避免 materialize 超大容器或保留超限结构。
+    """
+    if depth >= TOOL_PAYLOAD_MAX_DEPTH:
+        return TOOL_PAYLOAD_ELLIPSIS, True
+    if budget[0] <= 0 or budget[1] <= 0:
+        return TOOL_PAYLOAD_ELLIPSIS, True
+    if isinstance(value, dict):
+        limited: dict[str, object] = {}
+        truncated = False
+        for key, item in islice(value.items(), TOOL_PAYLOAD_MAX_ITEMS):
+            if budget[0] <= 0 or budget[1] <= 0:
+                truncated = True
+                break
+            budget[0] -= 1
+            safe_key = key if isinstance(key, str) else str(key)
+            if len(safe_key) > TOOL_PAYLOAD_MAX_STRING:
+                safe_key = safe_key[:TOOL_PAYLOAD_MAX_STRING] + TOOL_PAYLOAD_ELLIPSIS
+                truncated = True
+            budget[1] -= len(safe_key)
+            limited[safe_key], item_truncated = _limit_tool_payload(
+                item, depth + 1, budget
+            )
+            truncated = truncated or item_truncated
+        if len(value) > len(limited):
+            truncated = True
+        return limited, truncated
+    if isinstance(value, list):
+        limited: list[object] = []
+        truncated = False
+        for item in islice(value, TOOL_PAYLOAD_MAX_ITEMS):
+            if budget[0] <= 0 or budget[1] <= 0:
+                truncated = True
+                break
+            budget[0] -= 1
+            limited_item, item_truncated = _limit_tool_payload(
+                item, depth + 1, budget
+            )
+            limited.append(limited_item)
+            truncated = truncated or item_truncated
+        if len(value) > len(limited):
+            truncated = True
+        return limited, truncated
+    if isinstance(value, str):
+        budget[1] -= min(len(value), TOOL_PAYLOAD_MAX_STRING)
+        if len(value) > TOOL_PAYLOAD_MAX_STRING:
+            return value[:TOOL_PAYLOAD_MAX_STRING] + TOOL_PAYLOAD_ELLIPSIS, True
+        return value, False
+    if value is None or isinstance(value, (bool, int, float)):
+        budget[1] -= len(str(value))
+        return value, False
+    text = str(value)
+    budget[1] -= min(len(text), TOOL_PAYLOAD_MAX_STRING)
+    if len(text) > TOOL_PAYLOAD_MAX_STRING:
+        return text[:TOOL_PAYLOAD_MAX_STRING] + TOOL_PAYLOAD_ELLIPSIS, True
+    return text, False
+
+
+def _bounded_tool_payload(value: object) -> tuple[object, bool]:
+    """限制工具 input/output 载荷，保证元素数与序列化大小都有界。"""
+    budget = [
+        TOOL_PAYLOAD_MAX_TOTAL_ITEMS,
+        TOOL_PAYLOAD_MAX_TOTAL_CHARS,
+    ]
+    limited, truncated = _limit_tool_payload(value, 0, budget)
+    serialized = json.dumps(limited, ensure_ascii=False, default=str)
+    if len(serialized) > TOOL_PAYLOAD_MAX_SERIALIZED:
+        # 结构截断后仍超限：整体替换为截断标记，避免嵌入原始序列化文本
+        # 导致再序列化时引号转义膨胀。
+        return {"truncated": True}, True
+    return limited, truncated
+
+
 def external_progress_events(
     events: list[dict[str, Any]],
     run_status: str,
@@ -173,6 +264,10 @@ def external_progress_events(
         progress_type: Literal["knowledge", "tool"] = (
             "knowledge" if event.get("tool_kind") == "knowledge" else "tool"
         )
+        tool_kind = str(event.get("tool_kind") or "unknown")
+        if tool_kind not in {"knowledge", "mcp", "unknown"}:
+            tool_kind = "unknown"
+        raw_input = event.get("input")
         count = None
         if progress_type == "knowledge" and summary.startswith(
             "agent.knowledge_chunks_returned:"
@@ -195,6 +290,12 @@ def external_progress_events(
                             content=str(raw_hit.get("content") or ""),
                         )
                     )
+        bounded_input, input_truncated = _bounded_tool_payload(
+            raw_input if isinstance(raw_input, dict) else {}
+        )
+        bounded_output, output_truncated = _bounded_tool_payload(
+            event.get("output")
+        )
         upsert(
             ExternalAgentProgressEventResponse(
                 id=_external_progress_id(event, "tool"),
@@ -203,6 +304,14 @@ def external_progress_events(
                 stage=event_status,
                 turn=turn,
                 count=count,
+                tool_name=str(event.get("tool_name") or ""),
+                tool_label=str(event.get("tool_label") or ""),
+                tool_kind=tool_kind,
+                server_name=str(event.get("server_name") or ""),
+                input=bounded_input,
+                output=bounded_output,
+                input_truncated=input_truncated,
+                output_truncated=output_truncated,
                 hits=hits,
             )
         )
