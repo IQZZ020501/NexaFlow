@@ -10,6 +10,7 @@ from app.entities.knowledge import KnowledgeBase
 from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
+from app.infrastructure.repositories import resource_permission as permission_repository
 from app.infrastructure.validation import normalize_name
 from app.ports import model_registry as model_repository
 from app.ports.llm import (
@@ -139,6 +140,7 @@ async def list_knowledge_bases(
         workspace_id,
         actor.id,
         RESOURCE_TYPE,
+        workspace_role == "admin",
         limit,
         offset,
     )
@@ -156,8 +158,8 @@ async def list_knowledge_bases(
                     knowledge_base,
                     permission,
                 ).model_dump(),
-                document_count=document_count if permission != "none" else 0,
-                char_count=char_count if permission != "none" else 0,
+                document_count=document_count,
+                char_count=char_count,
             )
         )
     return responses
@@ -433,7 +435,7 @@ async def transfer_knowledge_base_owner(
     if knowledge_base.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Knowledge base is archived.")
 
-    target = await knowledge_base_repository.get_active_workspace_member(
+    target = await permission_repository.get_active_workspace_member(
         db,
         knowledge_base.workspace_id,
         target_user_id,

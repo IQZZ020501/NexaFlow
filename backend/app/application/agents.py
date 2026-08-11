@@ -56,6 +56,12 @@ from app.shareddomain.agents.services import (
     list_agents,
     update_agent,
 )
+from app.shareddomain.agents.permissions import (
+    list_agent_permissions,
+    require_agent_edit,
+    revoke_agent_permission,
+    upsert_agent_permission,
+)
 
 __all__ = [
     "ACTIVE_STATUS",
@@ -88,17 +94,21 @@ __all__ = [
     "list_agent_api_credentials",
     "list_agent_conversation_users",
     "list_agent_logs",
+    "list_agent_permissions",
     "list_agents",
     "list_external_agent_runs",
     "list_public_agent_conversations",
     "mcp_function_name",
     "prepare_agent_run",
+    "require_agent_edit",
     "resolve_agent_tool_approval",
     "revoke_agent_api_credential",
+    "revoke_agent_permission",
     "rotate_agent_api_credential",
     "run_to_response",
     "safe_agent_error",
     "stream_agent_run",
     "stream_external_agent_run",
     "update_agent",
+    "upsert_agent_permission",
 ]

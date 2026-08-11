@@ -23,7 +23,6 @@ from app.entities.knowledge import (
     KnowledgeTask,
 )
 from app.entities.resource_permission import ResourcePermission
-from app.entities.user import User as UserEntity
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories.mapping import (
     refresh_entity,
@@ -32,8 +31,6 @@ from app.infrastructure.repositories.mapping import (
     to_orm,
 )
 from app.domain.resource_permission import ResourcePermission as ResourcePermissionORM
-from app.domain.user import User as UserORM
-from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipORM
 from app.shareddomain.knowledge.models import (
     KnowledgeAsset as KnowledgeAssetORM,
     KnowledgeAttachment as KnowledgeAttachmentORM,
@@ -69,6 +66,7 @@ async def list_knowledge_base_rows(
     workspace_id: str,
     actor_id: str,
     resource_type: str,
+    include_all: bool,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[tuple[KnowledgeBase, ResourcePermission | None, int, int]]:
@@ -116,6 +114,14 @@ async def list_knowledge_base_rows(
         document_stats,
         document_stats.c.knowledge_base_id == KnowledgeBaseORM.id,
     ).where(KnowledgeBaseORM.workspace_id == workspace_id)
+
+    if not include_all:
+        statement = statement.where(
+            or_(
+                KnowledgeBaseORM.created_by_user_id == actor_id,
+                grant.id.is_not(None),
+            )
+        )
 
     statement = statement.order_by(
         KnowledgeBaseORM.created_at.desc(),
@@ -871,86 +877,6 @@ async def fail_open_document_tasks(
         task.finished_at = utc_now()
 
 
-async def get_user_grant(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-    user_id: str,
-    resource_type: str,
-) -> ResourcePermission | None:
-    row = await db.scalar(
-        select(ResourcePermissionORM).where(
-            ResourcePermissionORM.workspace_id == knowledge_base.workspace_id,
-            ResourcePermissionORM.resource_type == resource_type,
-            ResourcePermissionORM.resource_id == knowledge_base.id,
-            ResourcePermissionORM.user_id == user_id,
-        )
-    )
-    return to_entity(ResourcePermission, row) if row else None
-
-
-async def create_resource_permission(
-    db: AsyncSession,
-    entity: ResourcePermission,
-) -> ResourcePermission:
-    row = await save(db, ResourcePermissionORM, entity)
-    return to_entity(ResourcePermission, row)
-
-
-async def save_resource_permission(
-    db: AsyncSession,
-    entity: ResourcePermission,
-) -> None:
-    await save(db, ResourcePermissionORM, entity)
-
-
-async def list_resource_permission_rows(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-    resource_type: str,
-    limit: int | None = None,
-    offset: int = 0,
-) -> list[tuple[ResourcePermission, UserEntity]]:
-    result = await db.execute(
-        select(ResourcePermissionORM, UserORM)
-        .join(UserORM, UserORM.id == ResourcePermissionORM.user_id)
-        .where(
-            ResourcePermissionORM.workspace_id == knowledge_base.workspace_id,
-            ResourcePermissionORM.resource_type == resource_type,
-            ResourcePermissionORM.resource_id == knowledge_base.id,
-        )
-        .order_by(UserORM.name, UserORM.id)
-        .limit(limit)
-        .offset(offset)
-    )
-    return [
-        (
-            to_entity(ResourcePermission, permission),
-            to_entity(UserEntity, user),
-        )
-        for permission, user in result.all()
-    ]
-
-
-async def get_active_workspace_member(
-    db: AsyncSession,
-    workspace_id: str,
-    user_id: str,
-) -> UserEntity | None:
-    row = await db.scalar(
-        select(UserORM)
-        .join(
-            WorkspaceMembershipORM,
-            WorkspaceMembershipORM.user_id == UserORM.id,
-        )
-        .where(
-            WorkspaceMembershipORM.workspace_id == workspace_id,
-            WorkspaceMembershipORM.user_id == user_id,
-            UserORM.is_active.is_(True),
-        )
-    )
-    return to_entity(UserEntity, row) if row else None
-
-
 async def delete_knowledge_base_graph(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
@@ -1010,20 +936,3 @@ async def delete_knowledge_base_graph(
     await db.execute(
         delete(KnowledgeBaseORM).where(KnowledgeBaseORM.id == knowledge_base.id)
     )
-
-
-async def delete_resource_permission(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-    target_user_id: str,
-    resource_type: str,
-) -> int:
-    result = await db.execute(
-        delete(ResourcePermissionORM).where(
-            ResourcePermissionORM.workspace_id == knowledge_base.workspace_id,
-            ResourcePermissionORM.resource_type == resource_type,
-            ResourcePermissionORM.resource_id == knowledge_base.id,
-            ResourcePermissionORM.user_id == target_user_id,
-        )
-    )
-    return result.rowcount

@@ -25,6 +25,7 @@ import {
   ScrollTextIcon,
   SendIcon,
   SettingsIcon,
+  ShieldCheckIcon,
   ShieldAlertIcon,
   Trash2Icon,
   Undo2Icon,
@@ -81,6 +82,7 @@ type AgentDetailWorkspaceProps = {
   canManagePublishing: boolean
   onBack: () => void
   onDelete: () => void
+  onManagePermissions: () => void
   onSave: (event: React.FormEvent<HTMLFormElement>) => void
   onPublish: () => void
   onViewChange: (view: AgentDetailView) => void
@@ -649,6 +651,7 @@ export function AgentDetailWorkspace({
   canManagePublishing,
   onBack,
   onDelete,
+  onManagePermissions,
   onSave,
   onPublish,
   onViewChange,
@@ -879,6 +882,10 @@ export function AgentDetailWorkspace({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={onManagePermissions}>
+                  <ShieldCheckIcon />
+                  {t("资源授权")}
+                </DropdownMenuItem>
                 <DropdownMenuItem variant="destructive" onSelect={onDelete}>
                   <Trash2Icon />
                   {t("删除 Agent")}
