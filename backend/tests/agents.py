@@ -2613,8 +2613,7 @@ def main() -> None:
                 headers=auth_headers(admin_token),
                 json={"app_type": "agent"},
             )
-            assert workflow_updated.status_code == 200, workflow_updated.text
-            assert workflow_updated.json()["app_type"] == "agent"
+            assert workflow_updated.status_code == 409, workflow_updated.text
 
             async def fail_agent_run(*_args, **_kwargs):
                 raise RuntimeError("synthetic runtime failure")

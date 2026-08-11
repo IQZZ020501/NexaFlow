@@ -56,6 +56,31 @@ services:
       qdrant:
         condition: service_healthy
 
+  sandbox:
+    init: true
+    build:
+      context: ..
+      dockerfile: deploy/dockerfiles/sandbox.Dockerfile
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    volumes:
+      - sandbox-socket:/run/sandbox
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - KILL
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+
   worker:
     init: true
     build:
@@ -70,12 +95,15 @@ services:
       QDRANT_URL: http://qdrant:6333
     volumes:
       - ./data/uploads:/data
+      - sandbox-socket:/run/sandbox
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
       qdrant:
+        condition: service_healthy
+      sandbox:
         condition: service_healthy
 
   beat:
@@ -85,11 +113,16 @@ services:
     command: celery -A app.infrastructure.celery:celery_app beat --loglevel=INFO
     env_file: .env
     environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nexaflow}:${POSTGRES_PASSWORD:-nexaflow}@db:5432/${POSTGRES_DB:-nexaflow}
       CELERY_BROKER_URL: redis://redis:6379/0
       KNOWLEDGE_STORAGE_DIR: /data/knowledge
       QDRANT_URL: http://qdrant:6333
     depends_on:
+      db:
+        condition: service_healthy
       redis:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
 
   frontend:
@@ -104,3 +137,6 @@ services:
       - "3000:3000"
     depends_on:
       - api
+
+volumes:
+  sandbox-socket:

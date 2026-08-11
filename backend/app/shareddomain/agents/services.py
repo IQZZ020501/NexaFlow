@@ -5,9 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ports import model_registry as model_repository
 from app.ports.llm import RegisteredModel
 from app.entities.agents import Agent
+from app.entities.workflows import WorkflowDefinition
 from app.entities.knowledge import KnowledgeBase
 from app.entities.user import User
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.validation import normalize_name
 from app.schemas.agent import (
@@ -27,6 +29,8 @@ from app.shareddomain.knowledge.services import (
     require_knowledge_base_permission,
 )
 from app.shareddomain.tools.services import resolve_mcp_tools
+from app.shareddomain.workflows.defaults import default_workflow_graph
+from app.shareddomain.workflows.engine import graph_hash
 
 ACTIVE_STATUS = "active"
 DISABLED_STATUS = "disabled"
@@ -269,6 +273,18 @@ async def create_agent(
 
     try:
         agent = await agent_repository.create_agent(db, agent)
+        if agent.app_type == "workflow":
+            graph = default_workflow_graph()
+            await workflow_repository.create_definition(
+                db,
+                WorkflowDefinition(
+                    workspace_id=workspace_id,
+                    agent_id=agent.id,
+                    graph=graph.model_dump(by_alias=True, mode="json"),
+                    graph_hash=graph_hash(graph),
+                    updated_by_user_id=actor.id,
+                ),
+            )
         await agent_repository.replace_bindings(
             db,
             agent,
@@ -319,6 +335,13 @@ async def apply_agent_publication(
     configuration_changed: bool,
 ) -> None:
     """Apply publication state transitions and keep ck_agents_publication sound."""
+    if agent.app_type == "workflow":
+        if payload.published is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Publish workflows through the workflow version endpoint.",
+            )
+        return
     if configuration_changed and agent.published:
         _reset_agent_publication(agent)
 
@@ -386,10 +409,11 @@ async def update_agent(
         configuration_changed = configuration_changed or name != agent.name
         agent.name = name
     if payload.app_type is not None:
-        configuration_changed = (
-            configuration_changed or payload.app_type != agent.app_type
-        )
-        agent.app_type = payload.app_type
+        if payload.app_type != agent.app_type:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Application type cannot be changed after creation.",
+            )
     if payload.description is not None:
         description = payload.description.strip()
         configuration_changed = configuration_changed or description != agent.description

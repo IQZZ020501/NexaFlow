@@ -420,6 +420,7 @@ async def get_published_agent_context(
     agent = await agent_repository.get_agent_by_id(db, agent_id)
     if (
         agent is None
+        or agent.app_type != "agent"
         or agent.status != ACTIVE_STATUS
         or not agent.published
         or not agent.published_by_user_id
@@ -481,6 +482,7 @@ async def list_agent_api_credentials(
     workspace_role: str | None,
 ) -> AgentApiCredentialListResponse:
     agent = await get_agent(db, workspace_id, agent_id)
+    _require_agent_application(agent)
     _require_workspace_admin(workspace_role)
     credentials = await agent_repository.list_agent_api_credentials(db, agent.id)
     return AgentApiCredentialListResponse(
@@ -491,6 +493,14 @@ async def list_agent_api_credentials(
 def _require_workspace_admin(workspace_role: str | None) -> None:
     if workspace_role != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace admin required.")
+
+
+def _require_agent_application(agent: Agent) -> None:
+    if agent.app_type != "agent":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Agent API credentials are not available for workflows.",
+        )
 
 
 async def _new_agent_api_credential(
@@ -520,6 +530,7 @@ async def create_agent_api_credential(
     workspace_role: str | None,
 ) -> AgentApiCredentialCreateResponse:
     agent = await get_agent(db, workspace_id, agent_id)
+    _require_agent_application(agent)
     _require_workspace_admin(workspace_role)
     try:
         credential, token = await _new_agent_api_credential(db, agent, name, actor)
@@ -554,6 +565,7 @@ async def revoke_agent_api_credential(
     workspace_role: str | None,
 ) -> None:
     agent = await get_agent(db, workspace_id, agent_id)
+    _require_agent_application(agent)
     _require_workspace_admin(workspace_role)
     credential = await agent_repository.get_agent_api_credential_by_id(
         db, credential_id
@@ -586,6 +598,7 @@ async def rotate_agent_api_credential(
     workspace_role: str | None,
 ) -> AgentApiCredentialCreateResponse:
     agent = await get_agent(db, workspace_id, agent_id)
+    _require_agent_application(agent)
     _require_workspace_admin(workspace_role)
     previous = await agent_repository.get_agent_api_credential_by_id(
         db, credential_id

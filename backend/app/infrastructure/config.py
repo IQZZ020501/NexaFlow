@@ -44,6 +44,8 @@ class Settings:
     agent_event_poll_seconds: float = 0.5
     agent_external_agent_runs_per_minute: int = 60
     agent_external_consumer_runs_per_minute: int = 10
+    workflow_sandbox_socket: str = "/run/sandbox/sandbox.sock"
+    workflow_sandbox_timeout_seconds: float = 5.0
     jwt_expires_minutes: int = 1440
     refresh_token_expires_days: int = 30
     cors_origins: tuple[str, ...] = ()
@@ -105,6 +107,13 @@ class Settings:
             agent_external_consumer_runs_per_minute=int(
                 os.getenv("AGENT_EXTERNAL_CONSUMER_RUNS_PER_MINUTE", "10")
             ),
+            workflow_sandbox_socket=os.getenv(
+                "WORKFLOW_SANDBOX_SOCKET",
+                "/run/sandbox/sandbox.sock",
+            ),
+            workflow_sandbox_timeout_seconds=float(
+                os.getenv("WORKFLOW_SANDBOX_TIMEOUT_SECONDS", "5")
+            ),
             jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "1440")),
             refresh_token_expires_days=int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30")),
             cors_origins=origins,
@@ -165,6 +174,12 @@ class Settings:
         if self.agent_external_consumer_runs_per_minute <= 0:
             raise RuntimeError(
                 "AGENT_EXTERNAL_CONSUMER_RUNS_PER_MINUTE must be greater than zero."
+            )
+        if not self.workflow_sandbox_socket.startswith("/"):
+            raise RuntimeError("WORKFLOW_SANDBOX_SOCKET must be an absolute path.")
+        if not 0.1 <= self.workflow_sandbox_timeout_seconds <= 30:
+            raise RuntimeError(
+                "WORKFLOW_SANDBOX_TIMEOUT_SECONDS must be between 0.1 and 30."
             )
         if self.jwt_expires_minutes <= 0:
             raise RuntimeError("JWT_EXPIRES_MINUTES must be greater than zero.")

@@ -1,7 +1,8 @@
 # NexaFlow container deployment
 
 Runs the full stack with Docker Compose: PostgreSQL, Redis, Qdrant, FastAPI
-(`api`), Celery worker and beat, and the Next.js frontend.
+(`api`), Celery worker and beat, the isolated Python sandbox, and the Next.js
+frontend.
 
 ## Quick start
 
@@ -45,6 +46,7 @@ Point `backend/.env` at the published endpoints
 | `api` | `deploy/dockerfiles/backend.Dockerfile` | uvicorn |
 | `worker` | same backend image | celery worker |
 | `beat` | same backend image | celery beat |
+| `sandbox` | `deploy/dockerfiles/sandbox.Dockerfile` | isolated Python runner over a Unix socket |
 | `frontend` | `deploy/dockerfiles/frontend.Dockerfile` | Next.js standalone |
 
 The backend image includes Tesseract Chinese and English language data for
@@ -71,6 +73,40 @@ one `beat` instance running so queued and expired Agent runs are redispatched.
 Celery uses `solo` automatically on macOS (HTTPS trust evaluation is unsafe
 after a multithreaded process fork) and Windows (`prefork` needs `os.fork()`,
 which Windows lacks); Linux containers keep `prefork`.
+
+### Python code sandbox
+
+Workflow Python nodes run in the separate `sandbox` container. The container
+has no network namespace, a read-only root filesystem, a size-limited `/tmp`,
+drops all default capabilities and restores only `CHOWN`, `KILL`, `SETGID`, and
+`SETUID` for child isolation and cleanup. It also has explicit container CPU,
+memory, and PID limits. Only the Celery worker mounts the `sandbox-socket`
+volume at `/run/sandbox`.
+
+The sandbox accepts one JSON object per Unix-socket line at
+`/run/sandbox/sandbox.sock`:
+
+```json
+{"code":"print(input())","stdin":"hello","limits":{"timeout_ms":1000}}
+```
+
+The response is one JSON line with `ok`, `stdout`, `stderr`, `exit_code`, and
+`error`. Requests are limited to 768 KiB; code and stdin are each limited to
+256 KiB. The optional `limits` object accepts `timeout_ms`, `cpu_seconds`,
+`memory_bytes`, `max_output_bytes`, `max_file_bytes`, `max_processes`, and
+`max_open_files`; unknown keys are rejected. Requested limits may only reduce
+the hard defaults: 5 seconds wall time, 5 CPU seconds, 256 MiB address space,
+16 processes, 64 open files, 1 MiB per file, and 64 KiB each for stdout and
+stderr. Child Python processes run as UID/GID 65532 with isolated imports and a
+minimal environment.
+
+Run the standalone self-check locally or in the built image:
+
+```bash
+python3 -m sandbox.self_check
+docker build -f deploy/dockerfiles/sandbox.Dockerfile -t nexaflow-sandbox .
+docker run --rm --network none --entrypoint python nexaflow-sandbox -m sandbox.self_check
+```
 
 ### MCP stdio Servers
 

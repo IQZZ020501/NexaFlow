@@ -1,0 +1,501 @@
+import asyncio
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+import json
+import time
+import traceback
+
+from app.application.agent_executor import (
+    DurableToolLedger,
+    RUN_BUSY,
+    RUN_FINISHED,
+    maintain_agent_run_lease,
+)
+from app.application.workflow_nodes import WorkflowNodeScope, execute_workflow_node
+from app.application.workspace import build_workspace_context
+from app.entities.agents import AgentRun
+from app.entities.knowledge import KnowledgeBase
+from app.entities.tools import McpToolPolicy
+from app.entities.user import User
+from app.entities.workflows import WorkflowNodeExecution, WorkflowRunDetail
+from app.infrastructure.code_sandbox import WorkflowSandboxError
+from app.infrastructure.config import Settings
+from app.infrastructure.errors import classify_error
+from app.infrastructure.model_utils import new_id, utc_now
+from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import user as user_repository
+from app.infrastructure.repositories import workflow as workflow_repository
+from app.infrastructure.session import get_session_factory
+from app.infrastructure.system_log import record_system_log
+from app.ports.llm import ModelProviderError, RegisteredModel
+from app.schemas.workflow import WorkflowGraph
+from app.shareddomain.agents.models import (
+    AGENT_RUN_FAILED_STATUS,
+    AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_SUCCEEDED_STATUS,
+)
+from app.shareddomain.agents.runtime import (
+    empty_usage,
+    merge_usage,
+    safe_event_value,
+)
+from app.shareddomain.agents.services import (
+    accessible_agent_knowledge_bases,
+    get_agent_model,
+)
+from app.shareddomain.tools.services import (
+    ResolvedMcpTool,
+    effective_mcp_tool_policy_mode,
+    get_mcp_tool_policy,
+    resolve_mcp_tools,
+)
+from app.shareddomain.workflows.engine import (
+    NodeState,
+    NodeTransition,
+    WorkflowEngine,
+    WorkflowEngineError,
+    WorkflowEngineState,
+)
+
+MAX_WORKFLOW_OUTPUT_BYTES = 256 * 1024
+
+
+@dataclass(frozen=True)
+class WorkflowExecutionScope:
+    run: AgentRun
+    detail: WorkflowRunDetail
+    actor: User
+    workspace_role: str | None
+    models: dict[str, RegisteredModel]
+    knowledge_bases: dict[str, KnowledgeBase]
+    mcp_tools: dict[tuple[str, str], tuple[ResolvedMcpTool, McpToolPolicy]]
+
+
+async def _load_scope(run_id: str) -> WorkflowExecutionScope:
+    async with get_session_factory()() as db:
+        run = await agent_repository.get_agent_run_by_id(db, run_id)
+        detail = await workflow_repository.get_run_detail(db, run_id)
+        if run is None or detail is None or run.status != AGENT_RUN_RUNNING_STATUS:
+            raise WorkflowEngineError("Workflow run is not executable.")
+        agent = await agent_repository.get_agent_by_id(db, run.agent_id)
+        if agent is None or agent.app_type != "workflow" or agent.status != "active":
+            raise WorkflowEngineError("Workflow application is unavailable.")
+        actor = await user_repository.get_user_by_id(db, run.execution_user_id)
+        if actor is None or not actor.is_active:
+            raise WorkflowEngineError("Workflow run user is unavailable.")
+        context = await build_workspace_context(db, actor, run.workspace_id)
+        graph = WorkflowGraph.model_validate(detail.graph_snapshot)
+        model_ids = {run.model_id}
+        model_ids.update(
+            str(node.data.config["model_id"])
+            for node in graph.nodes
+            if node.data.type in {"llm", "classifier"}
+            and node.data.config.get("model_id")
+        )
+        models = {
+            model_id: await get_agent_model(db, run.workspace_id, model_id)
+            for model_id in model_ids
+        }
+        knowledge_bases = await accessible_agent_knowledge_bases(
+            db,
+            run.workspace_id,
+            run.knowledge_base_ids,
+            actor,
+            context.membership_role,
+        )
+        resolved_mcp = await resolve_mcp_tools(
+            db,
+            run.workspace_id,
+            run.mcp_tools,
+            strict=False,
+        )
+        mcp_tools = {}
+        for tool in resolved_mcp:
+            policy = await get_mcp_tool_policy(
+                db,
+                run.workspace_id,
+                tool.server.id,
+                tool.definition.name,
+            )
+            if (
+                policy is not None
+                and effective_mcp_tool_policy_mode(tool.definition, policy)
+                == "read_only"
+            ):
+                mcp_tools[(tool.server.id, tool.definition.name)] = (tool, policy)
+    return WorkflowExecutionScope(
+        run=run,
+        detail=detail,
+        actor=actor,
+        workspace_role=context.membership_role,
+        models=models,
+        knowledge_bases={item.id: item for item in knowledge_bases},
+        mcp_tools=mcp_tools,
+    )
+
+
+def _safe_node_error(exc: Exception) -> str:
+    if isinstance(exc, ModelProviderError):
+        return "Workflow model request failed."
+    if isinstance(exc, WorkflowSandboxError):
+        return str(exc)
+    if isinstance(exc, (ValueError, RuntimeError)):
+        return str(exc)[:1000]
+    return "Workflow node execution failed."
+
+
+def _safe_run_error(exc: Exception) -> str:
+    if isinstance(exc, WorkflowEngineError):
+        return str(exc)[:1000]
+    return "Workflow execution failed."
+
+
+async def _execute_claimed_workflow_run(
+    run_id: str,
+    worker_task_id: str,
+    settings: Settings,
+    lease_lost: asyncio.Event,
+) -> str:
+    scope = await _load_scope(run_id)
+    run, detail = scope.run, scope.detail
+    graph = WorkflowGraph.model_validate(detail.graph_snapshot)
+    node_order = {node.id: index for index, node in enumerate(graph.nodes)}
+    ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
+    node_scope = WorkflowNodeScope(
+        run=run,
+        actor=scope.actor,
+        workspace_role=scope.workspace_role,
+        settings=settings,
+        models=scope.models,
+        knowledge_bases=scope.knowledge_bases,
+        mcp_tools=scope.mcp_tools,
+        ledger=ledger,
+        node_order=node_order,
+    )
+    engine = WorkflowEngine(
+        graph,
+        max_steps=detail.max_steps,
+        max_model_tokens=detail.max_model_tokens,
+        deadline_at=detail.deadline_at,
+    )
+    checkpoint = run.checkpoint or {}
+    engine_checkpoint = checkpoint.get("workflow_engine")
+    state = WorkflowEngineState.from_dict(engine_checkpoint) if engine_checkpoint else None
+    node_executions = {
+        item.node_id: item
+        for item in await _list_node_executions(run.id)
+    }
+    started_at: dict[str, datetime] = {}
+    persistence_lock = asyncio.Lock()
+    usage_total = merge_usage(
+        empty_usage(),
+        checkpoint.get("model_usage", run.model_usage),
+    )
+
+    async def execute(node, context):
+        if lease_lost.is_set():
+            raise WorkflowEngineError("Workflow run lease was lost.")
+        try:
+            result = await execute_workflow_node(node_scope, node, context)
+            encoded = json.dumps(
+                result.outputs,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            if len(encoded.encode()) > MAX_WORKFLOW_OUTPUT_BYTES:
+                raise WorkflowEngineError(
+                    "Workflow node output exceeds 256 KiB.",
+                    node_id=node.id,
+                )
+            return result
+        except Exception as exc:
+            raise RuntimeError(_safe_node_error(exc)) from exc
+
+    async def on_started(node, sequence):
+        async with persistence_lock:
+            now = utc_now()
+            started_at[node.id] = now
+            async with get_session_factory()() as db:
+                item = await workflow_repository.start_node_execution(
+                    db,
+                    workspace_id=run.workspace_id,
+                    run_id=run.id,
+                    worker_task_id=worker_task_id,
+                    node_id=node.id,
+                    node_type=node.data.type,
+                    sequence=sequence,
+                    started_at=now,
+                )
+                if item is None:
+                    lease_lost.set()
+                    raise WorkflowEngineError("Workflow run lease was lost.")
+                node_executions[node.id] = item
+                event = await agent_repository.append_owned_agent_run_event(
+                    db,
+                    run.workspace_id,
+                    run.id,
+                    worker_task_id,
+                    {
+                        "type": "workflow_node_started",
+                        "node_id": node.id,
+                        "node_type": node.data.type,
+                        "sequence": sequence,
+                    },
+                )
+                if event is None:
+                    lease_lost.set()
+                    raise WorkflowEngineError("Workflow run lease was lost.")
+                await db.commit()
+
+    async def on_finished(transition: NodeTransition, current: WorkflowEngineState):
+        nonlocal usage_total
+        async with persistence_lock:
+            now = utc_now()
+            async with get_session_factory()() as db:
+                item = node_executions.get(transition.node.id)
+                if item is None:
+                    item = await workflow_repository.start_node_execution(
+                        db,
+                        workspace_id=run.workspace_id,
+                        run_id=run.id,
+                        worker_task_id=worker_task_id,
+                        node_id=transition.node.id,
+                        node_type=transition.node.data.type,
+                        sequence=transition.sequence,
+                        started_at=now,
+                    )
+                if item is None:
+                    lease_lost.set()
+                    raise WorkflowEngineError("Workflow run lease was lost.")
+                start = started_at.get(transition.node.id) or item.started_at or now
+                item.status = transition.status.value
+                item.sequence = transition.sequence
+                item.inputs = transition.result.inputs
+                item.outputs = transition.result.outputs
+                item.model_usage = transition.result.model_usage
+                item.error = transition.error
+                item.started_at = start
+                item.finished_at = now
+                item.duration_ms = max(0, round((now - start).total_seconds() * 1000))
+                item.updated_at = now
+                usage_total = merge_usage(usage_total, transition.result.model_usage)
+                detail.step_count = current.step_count
+                detail.token_usage = current.model_tokens
+                checkpoint_payload = {
+                    "workflow_engine": current.to_dict(),
+                    "model_usage": usage_total,
+                }
+                saved = await workflow_repository.finish_node_execution(
+                    db, item, worker_task_id
+                )
+                checkpoint_saved = await agent_repository.save_agent_run_checkpoint(
+                    db,
+                    run.id,
+                    worker_task_id,
+                    checkpoint_payload,
+                    "workflow",
+                )
+                detail_saved = await workflow_repository.save_owned_run_detail(
+                    db, detail, worker_task_id
+                )
+                event = await agent_repository.append_owned_agent_run_event(
+                    db,
+                    run.workspace_id,
+                    run.id,
+                    worker_task_id,
+                    {
+                        "type": "workflow_node",
+                        "node_id": transition.node.id,
+                        "node_type": transition.node.data.type,
+                        "status": transition.status.value,
+                        "execution_sequence": transition.sequence,
+                        "inputs": safe_event_value(transition.result.inputs),
+                        "outputs": safe_event_value(transition.result.outputs),
+                        "model_usage": transition.result.model_usage,
+                        "error": transition.error,
+                        "duration_ms": item.duration_ms,
+                    },
+                )
+                if not (saved and checkpoint_saved and detail_saved) or event is None:
+                    lease_lost.set()
+                    raise WorkflowEngineError("Workflow run lease was lost.")
+                node_executions[transition.node.id] = item
+                await db.commit()
+
+    result = await engine.run(
+        detail.inputs,
+        execute,
+        state=state,
+        on_node_started=on_started,
+        on_node_finished=on_finished,
+    )
+    encoded_output = json.dumps(
+        result.outputs,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if len(encoded_output.encode()) > MAX_WORKFLOW_OUTPUT_BYTES:
+        raise WorkflowEngineError("Workflow output exceeds 256 KiB.")
+    finished = utc_now()
+    detail.outputs = result.outputs
+    detail.step_count = result.state.step_count
+    detail.token_usage = result.state.model_tokens
+    async with get_session_factory()() as db:
+        saved_detail = await workflow_repository.save_owned_run_detail(
+            db, detail, worker_task_id
+        )
+        finalized = await agent_repository.finalize_agent_run(
+            db,
+            run.id,
+            worker_task_id,
+            status=AGENT_RUN_SUCCEEDED_STATUS,
+            result=encoded_output,
+            events=[],
+            last_error=None,
+            finished_at=finished,
+            model_usage=usage_total,
+        )
+        if finalized and saved_detail:
+            current_run = await agent_repository.get_agent_run_by_id(db, run.id)
+            current_detail = await workflow_repository.get_run_detail(db, run.id)
+            assert current_run is not None and current_detail is not None
+            await agent_repository.append_agent_run_event(
+                db,
+                run.workspace_id,
+                run.id,
+                {
+                    "type": "complete",
+                    "run": _run_payload(current_run, current_detail),
+                },
+            )
+        await db.commit()
+    return RUN_FINISHED if finalized and saved_detail else RUN_BUSY
+
+
+async def _list_node_executions(run_id: str) -> list[WorkflowNodeExecution]:
+    async with get_session_factory()() as db:
+        return await workflow_repository.list_node_executions(db, run_id)
+
+
+def _run_payload(run: AgentRun, detail: WorkflowRunDetail) -> dict:
+    return {
+        "id": run.id,
+        "workspace_id": run.workspace_id,
+        "agent_id": run.agent_id,
+        "requested_by_user_id": run.requested_by_user_id,
+        "status": run.status,
+        "source": detail.source,
+        "definition_revision": detail.definition_revision,
+        "version_number": detail.version_number,
+        "graph_hash": detail.graph_hash,
+        "inputs": detail.inputs,
+        "outputs": detail.outputs,
+        "max_steps": detail.max_steps,
+        "max_model_tokens": detail.max_model_tokens,
+        "step_count": detail.step_count,
+        "token_usage": detail.token_usage,
+        "last_error": run.last_error,
+        "trace_id": run.trace_id,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "created_at": run.created_at.isoformat(),
+        "updated_at": run.updated_at.isoformat(),
+    }
+
+
+async def _fail_claimed_workflow_run(
+    run_id: str,
+    worker_task_id: str,
+    exc: Exception,
+) -> str:
+    error = _safe_run_error(exc)
+    finished = utc_now()
+    async with get_session_factory()() as db:
+        run = await agent_repository.get_agent_run_by_id(db, run_id)
+        detail = await workflow_repository.get_run_detail(db, run_id)
+        if run is None or detail is None:
+            return RUN_FINISHED
+        finalized = await agent_repository.finalize_agent_run(
+            db,
+            run_id,
+            worker_task_id,
+            status=AGENT_RUN_FAILED_STATUS,
+            result="",
+            events=[],
+            last_error=error,
+            finished_at=finished,
+            model_usage=(run.checkpoint or {}).get("model_usage", run.model_usage),
+        )
+        if finalized:
+            current = await agent_repository.get_agent_run_by_id(db, run_id)
+            assert current is not None
+            await agent_repository.append_agent_run_event(
+                db,
+                run.workspace_id,
+                run.id,
+                {"type": "error", "run": _run_payload(current, detail)},
+            )
+            record_system_log(
+                db,
+                level="error",
+                event="workflow.execution_failed",
+                message=error,
+                status_code=500,
+                user_id=run.execution_user_id,
+                details={
+                    "agent_id": run.agent_id,
+                    "agent_run_id": run.id,
+                    "exception_type": exc.__class__.__name__,
+                    "source": classify_error(exc),
+                    "trace_id": run.trace_id,
+                    "workspace_id": run.workspace_id,
+                },
+                stack_trace="".join(traceback.format_exception(exc)),
+            )
+        await db.commit()
+    return RUN_FINISHED if finalized else RUN_BUSY
+
+
+async def run_durable_workflow_run(
+    run_id: str,
+    settings: Settings,
+    worker_task_id: str | None = None,
+) -> str:
+    worker_task_id = worker_task_id or new_id()
+    now = utc_now()
+    async with get_session_factory()() as db:
+        claimed = await agent_repository.claim_agent_run(
+            db,
+            run_id,
+            worker_task_id,
+            now,
+            now + timedelta(seconds=settings.agent_executor_lease_seconds),
+        )
+        if claimed:
+            await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
+        await db.commit()
+    if not claimed:
+        async with get_session_factory()() as db:
+            current = await agent_repository.get_agent_run_by_id(db, run_id)
+        return (
+            RUN_BUSY
+            if current is not None and current.status == AGENT_RUN_RUNNING_STATUS
+            else RUN_FINISHED
+        )
+
+    lease_lost = asyncio.Event()
+    heartbeat = asyncio.create_task(
+        maintain_agent_run_lease(run_id, worker_task_id, settings, lease_lost)
+    )
+    try:
+        try:
+            return await _execute_claimed_workflow_run(
+                run_id, worker_task_id, settings, lease_lost
+            )
+        except Exception as exc:
+            return await _fail_claimed_workflow_run(run_id, worker_task_id, exc)
+    finally:
+        heartbeat.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat

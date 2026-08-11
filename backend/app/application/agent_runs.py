@@ -389,6 +389,11 @@ async def prepare_agent_run(
     elif not consumer_id:
         raise ValueError("External Agent runs require a consumer id.")
     agent = await get_agent(db, workspace_id, agent_id)
+    if agent.app_type != "agent":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Run workflows through the workflow run endpoint.",
+        )
     if access_source == "console":
         await require_agent_view(db, agent, actor, workspace_role)
     if agent.status != ACTIVE_STATUS:

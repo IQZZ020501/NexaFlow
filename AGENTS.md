@@ -101,9 +101,15 @@ Correctness, safety, evidence, and validation take priority over speed.
   published agents and Agent API docs); shared components in `components/`,
   providers in `contexts/`, trilingual dictionaries in `i18n/`, and feature
   API modules in `lib/api/`.
+- `sandbox/` is a standard-library Python execution service for Workflow code
+  nodes. It accepts bounded JSON-line requests over a shared Unix socket and
+  runs each program in a deprivileged subprocess with CPU, memory, process,
+  file, wall-clock, input, and output limits. Keep it independent from
+  `backend/app/`; only the Celery worker may mount its socket.
 - `docs/` stores project planning and product/engineering documentation.
-- `deploy/` holds the Docker Compose topology, Dockerfiles, and Nginx examples;
-  `scripts/setup-hooks.sh` enables the repository Git hooks.
+- `deploy/` holds the Docker Compose topology, Dockerfiles, and Nginx examples,
+  including the network-disabled sandbox service and its worker-only Unix
+  socket volume; `scripts/setup-hooks.sh` enables the repository Git hooks.
 - Use `rg` / `rg --files` for code search. Do not invent project commands;
   inspect local scripts first.
 
@@ -258,10 +264,11 @@ broad. Never claim a check passed unless it completed successfully.
   (typecheck, lint, test, build as applicable).
 - `backend/` changes: use the project's Python tooling. Run `compileall` over the
   touched packages, then run the affected suite from `backend/` with
-  `uv run python -m tests.<suite>` (identity, workspaces, teams, knowledge, agents,
-  llm, mcp_transports, test_main). For migration changes, run Alembic against the target database or
-  a temporary explicit test database. For Celery wiring changes, verify the
-  expected tasks register on `celery_app`.
+  `uv run python -m tests.<suite>` (identity, workspaces, teams, knowledge,
+  agents, workflows, llm, mcp_transports, test_main). For migration changes,
+  run Alembic against the target database or a temporary explicit test
+  database. For Celery wiring changes, verify the expected tasks register on
+  `celery_app`.
 - If a check cannot be run, say exactly why in the final response.
 
 ## 9. Keeping This File Current

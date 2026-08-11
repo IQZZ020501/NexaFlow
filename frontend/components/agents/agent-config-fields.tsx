@@ -11,6 +11,7 @@ import {
   PlusIcon,
   SearchIcon,
   SlidersHorizontalIcon,
+  WorkflowIcon,
   WrenchIcon,
 } from "lucide-react"
 
@@ -92,9 +93,15 @@ export function AgentConfigFields({
         .includes(query)
     )
   }, [activeKnowledgeBases, knowledgeSearch])
-  const activeMcpServers = mcpServers.filter(
-    (server) => server.status === "active"
-  )
+  const activeMcpServers = mcpServers
+    .filter((server) => server.status === "active")
+    .map((server) => ({
+      ...server,
+      tools:
+        form.appType === "workflow"
+          ? server.tools.filter((tool) => tool.policy_mode === "read_only")
+          : server.tools,
+    }))
   const selectedModel = configurableModels.find(
     (model) => model.id === form.modelId
   )
@@ -144,18 +151,28 @@ export function AgentConfigFields({
         <section className="rounded-xl border bg-background p-4 shadow-xs">
           <div className="mb-4 flex items-center gap-3">
             <span className="flex size-9 items-center justify-center rounded-lg bg-foreground text-background">
-              <BotIcon className="size-4" />
+              {form.appType === "workflow" ? (
+                <WorkflowIcon className="size-4" />
+              ) : (
+                <BotIcon className="size-4" />
+              )}
             </span>
             <div>
               <h3 className="text-sm font-semibold">{t("基本信息")}</h3>
               <p className="text-xs text-muted-foreground">
-                {t("配置 Agent 使用的模型、知识库和 MCP 工具。")}
+                {t(
+                  form.appType === "workflow"
+                    ? "配置工作流使用的默认模型、知识库和只读 MCP 工具。"
+                    : "配置 Agent 使用的模型、知识库和 MCP 工具。"
+                )}
               </p>
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="agent-name">{t("Agent 名称")}</FieldLabel>
+              <FieldLabel htmlFor="agent-name">
+                {t(form.appType === "workflow" ? "工作流名称" : "Agent 名称")}
+              </FieldLabel>
               <Input
                 id="agent-name"
                 value={form.name}
@@ -245,7 +262,11 @@ export function AgentConfigFields({
                   }))
                 }
                 className="min-h-20 w-full resize-y rounded-lg border border-input bg-muted/20 px-3 py-2 text-sm leading-6 shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/20"
-                placeholder={t("说明 Agent 的用途和适用场景。")}
+                placeholder={t(
+                  form.appType === "workflow"
+                    ? "说明工作流的用途和适用场景。"
+                    : "说明 Agent 的用途和适用场景。"
+                )}
                 maxLength={500}
                 rows={3}
                 disabled={readOnly}
@@ -254,7 +275,8 @@ export function AgentConfigFields({
           </div>
         </section>
 
-        <section className="rounded-xl border bg-background p-4 shadow-xs">
+        {form.appType === "agent" ? (
+          <section className="rounded-xl border bg-background p-4 shadow-xs">
           <div className="mb-3 flex items-center gap-2">
             <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
             <FieldLabel htmlFor="agent-instructions">
@@ -276,7 +298,8 @@ export function AgentConfigFields({
             rows={7}
             disabled={readOnly}
           />
-        </section>
+          </section>
+        ) : null}
 
         <section className="rounded-xl border bg-background shadow-xs">
           <div className="flex items-center gap-2 px-4 py-3">
@@ -320,9 +343,10 @@ export function AgentConfigFields({
           </div>
           {isKnowledgeOpen ? (
             <div className="grid gap-3 border-t px-4 py-3">
-              <fieldset
-                disabled={readOnly || form.knowledgeBaseIds.length === 0}
-              >
+              {form.appType === "agent" ? (
+                <fieldset
+                  disabled={readOnly || form.knowledgeBaseIds.length === 0}
+                >
                 <legend className="mb-2 text-xs font-medium text-muted-foreground">
                   {t("知识检索策略")}
                 </legend>
@@ -352,7 +376,8 @@ export function AgentConfigFields({
                     </button>
                   ))}
                 </div>
-              </fieldset>
+                </fieldset>
+              ) : null}
               {selectedKnowledgeBaseNames.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
                   {selectedKnowledgeBaseNames.map((name) => (
@@ -616,7 +641,12 @@ export function AgentConfigFields({
               <div className="min-w-0 pt-0.5">
                 <DialogTitle>{t("MCP 工具")}</DialogTitle>
                 <DialogDescription className="mt-1.5 leading-5">
-                  {t("按需选择 MCP 工具，最多 {value} 个。", { value: 12 })}
+                  {t(
+                    form.appType === "workflow"
+                      ? "选择工作流可自动执行的只读 MCP 工具，最多 {value} 个。"
+                      : "按需选择 MCP 工具，最多 {value} 个。",
+                    { value: 12 }
+                  )}
                 </DialogDescription>
               </div>
             </div>

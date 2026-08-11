@@ -72,6 +72,9 @@ jobs:
       - name: Run agent tests
         run: uv run python -m tests.agents
 
+      - name: Run workflow tests
+        run: uv run python -m tests.workflows
+
       - name: Run main smoke tests
         run: uv run python -m tests.test_main
 
