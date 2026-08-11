@@ -17,6 +17,12 @@ export type PublicAgentConversation = {
   updated_at: string
 }
 
+export type ExternalAgentKnowledgeHit = {
+  knowledge_base: string
+  document: string
+  content: string
+}
+
 export type ExternalAgentProgressEvent = {
   id: string
   type: "analysis" | "knowledge" | "tool" | "answer"
@@ -31,6 +37,7 @@ export type ExternalAgentProgressEvent = {
   turn: number
   count: number | null
   reasoning?: string
+  hits: ExternalAgentKnowledgeHit[]
 }
 
 export type ExternalAgentRun = {

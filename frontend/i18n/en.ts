@@ -638,6 +638,7 @@ export const en = {
   "调用输入": "Input",
   "调用结果": "Result",
   "未知文档": "Unknown document",
+  "未检索到相关知识片段": "No relevant knowledge fragments found",
   "发送问题": "Send question",
   "智能 Agent": "Agent",
   "选择模型、知识库和 MCP 工具，创建可以直接对话的 Agent。": "Choose a model, knowledge bases, and MCP tools to create a conversational Agent.",

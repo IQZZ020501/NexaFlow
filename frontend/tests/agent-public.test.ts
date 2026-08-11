@@ -154,6 +154,7 @@ describe("public agent API", () => {
           stage: "running",
           turn: 1,
           count: null,
+          hits: [],
         },
       },
       "pending-1"
@@ -171,6 +172,7 @@ describe("public agent API", () => {
           stage: "succeeded",
           turn: 1,
           count: 3,
+          hits: [],
         },
       },
       "pending-1"
@@ -199,6 +201,7 @@ describe("public agent API", () => {
           stage: "analyzing" as const,
           turn: 1,
           count: null,
+          hits: [],
         },
       ],
       created_at: "2026-08-10T00:00:00Z",
@@ -284,6 +287,7 @@ describe("public agent API", () => {
           turn: 1,
           count: null,
           reasoning: "Let me think",
+          hits: [],
         },
       ],
       created_at: "2026-08-10T00:00:00Z",
@@ -305,6 +309,7 @@ describe("public agent API", () => {
           turn: 1,
           count: null,
           reasoning: "Let me think",
+          hits: [],
         },
       },
       "pending-1"

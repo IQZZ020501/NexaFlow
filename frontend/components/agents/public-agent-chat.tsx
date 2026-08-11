@@ -116,6 +116,94 @@ function ReasoningBlock({ reasoning }: { reasoning: string }) {
   )
 }
 
+function PublicToolEventRow({
+  event,
+  title,
+  detail,
+  statusIcon,
+}: {
+  event: ExternalAgentProgressEvent
+  title: string
+  detail: string | null
+  statusIcon: React.ReactNode
+}) {
+  const { t } = useLanguage()
+  const [isOpen, setIsOpen] = React.useState(false)
+  const canExpand =
+    event.type === "knowledge" && event.status === "succeeded"
+
+  const leading = (
+    <>
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
+        {event.type === "knowledge" ? (
+          <DatabaseIcon className="size-3.5" />
+        ) : (
+          <WrenchIcon className="size-3.5" />
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground">
+          {title}
+        </span>
+        {detail ? (
+          <span className="block truncate text-xs text-muted-foreground">
+            {detail}
+          </span>
+        ) : null}
+      </span>
+      {statusIcon}
+    </>
+  )
+
+  return (
+    <div className="overflow-hidden rounded-lg border bg-background/70">
+      {canExpand ? (
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
+          aria-expanded={isOpen}
+          onClick={() => setIsOpen((current) => !current)}
+        >
+          {leading}
+          <ChevronDownIcon
+            className={`size-4 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+      ) : (
+        <div className="flex items-center gap-2 px-3 py-2">{leading}</div>
+      )}
+      {canExpand && isOpen ? (
+        <div className="border-t bg-muted/20 p-3 text-xs">
+          {event.hits.length > 0 ? (
+            <div className="space-y-2">
+              {event.hits.map((hit, index) => (
+                <article
+                  key={index}
+                  className="rounded-md border bg-background p-3"
+                >
+                  <div className="flex flex-wrap items-center gap-2 font-medium">
+                    <span>{hit.document || t("未知文档")}</span>
+                    <span className="text-muted-foreground">
+                      {hit.knowledge_base}
+                    </span>
+                  </div>
+                  <p className="mt-2 leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+                    {hit.content}
+                  </p>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground">
+              {t("未检索到相关知识片段")}
+            </p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
   const { t } = useLanguage()
   const [isOpen, setIsOpen] = React.useState(true)
@@ -195,29 +283,13 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
           timeline.map((event) => {
             const eventDetail = detail(event)
             return event.type === "knowledge" || event.type === "tool" ? (
-              <div
+              <PublicToolEventRow
                 key={event.id}
-                className="flex items-center gap-2 rounded-lg border bg-background/70 px-3 py-2"
-              >
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
-                  {event.type === "knowledge" ? (
-                    <DatabaseIcon className="size-3.5" />
-                  ) : (
-                    <WrenchIcon className="size-3.5" />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-foreground">
-                    {title(event)}
-                  </span>
-                  {eventDetail ? (
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {eventDetail}
-                    </span>
-                  ) : null}
-                </span>
-                {statusIcon(event)}
-              </div>
+                event={event}
+                title={title(event)}
+                detail={eventDetail}
+                statusIcon={statusIcon(event)}
+              />
             ) : (
               <div
                 key={event.id}
@@ -344,6 +416,7 @@ export function mergePublicRunEvent(
           turn: event.turn,
           count: null,
           reasoning: event.delta,
+          hits: [],
         })
       } else {
         const current = progress[index]
