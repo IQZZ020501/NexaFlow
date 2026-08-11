@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 import hashlib
 import json
+from itertools import islice
 import secrets
 from typing import Any, Literal
 
@@ -111,55 +112,84 @@ def _external_progress_id(event: dict[str, Any], suffix: str = "") -> str:
 TOOL_PAYLOAD_MAX_STRING = 500
 TOOL_PAYLOAD_MAX_DEPTH = 4
 TOOL_PAYLOAD_MAX_ITEMS = 25
+TOOL_PAYLOAD_MAX_TOTAL_ITEMS = 200
+TOOL_PAYLOAD_MAX_TOTAL_CHARS = 4000
 TOOL_PAYLOAD_MAX_SERIALIZED = 4000
 TOOL_PAYLOAD_ELLIPSIS = "…"
 
 
-def _limit_tool_payload(value: object, depth: int) -> tuple[object, bool]:
-    """递归限制工具载荷，返回 (受限副本, 是否截断)。"""
+def _limit_tool_payload(
+    value: object,
+    depth: int,
+    budget: list[int],
+) -> tuple[object, bool]:
+    """递归限制工具载荷，返回 (受限副本, 是否截断)。
+
+    budget = [剩余元素数, 剩余字符数]，遍历途中耗尽即截断，
+    避免 materialize 超大容器或保留超限结构。
+    """
     if depth >= TOOL_PAYLOAD_MAX_DEPTH:
         return TOOL_PAYLOAD_ELLIPSIS, True
+    if budget[0] <= 0 or budget[1] <= 0:
+        return TOOL_PAYLOAD_ELLIPSIS, True
     if isinstance(value, dict):
-        truncated = False
-        items = list(value.items())
-        if len(items) > TOOL_PAYLOAD_MAX_ITEMS:
-            items = items[:TOOL_PAYLOAD_MAX_ITEMS]
-            truncated = True
         limited: dict[str, object] = {}
-        for key, item in items:
+        truncated = False
+        for key, item in islice(value.items(), TOOL_PAYLOAD_MAX_ITEMS):
+            if budget[0] <= 0 or budget[1] <= 0:
+                truncated = True
+                break
+            budget[0] -= 1
             safe_key = key if isinstance(key, str) else str(key)
             if len(safe_key) > TOOL_PAYLOAD_MAX_STRING:
                 safe_key = safe_key[:TOOL_PAYLOAD_MAX_STRING] + TOOL_PAYLOAD_ELLIPSIS
                 truncated = True
+            budget[1] -= len(safe_key)
             limited[safe_key], item_truncated = _limit_tool_payload(
-                item, depth + 1
+                item, depth + 1, budget
             )
             truncated = truncated or item_truncated
+        if len(value) > len(limited):
+            truncated = True
         return limited, truncated
     if isinstance(value, list):
-        truncated = len(value) > TOOL_PAYLOAD_MAX_ITEMS
-        items = value[:TOOL_PAYLOAD_MAX_ITEMS]
         limited: list[object] = []
-        for item in items:
-            limited_item, item_truncated = _limit_tool_payload(item, depth + 1)
+        truncated = False
+        for item in islice(value, TOOL_PAYLOAD_MAX_ITEMS):
+            if budget[0] <= 0 or budget[1] <= 0:
+                truncated = True
+                break
+            budget[0] -= 1
+            limited_item, item_truncated = _limit_tool_payload(
+                item, depth + 1, budget
+            )
             limited.append(limited_item)
             truncated = truncated or item_truncated
+        if len(value) > len(limited):
+            truncated = True
         return limited, truncated
     if isinstance(value, str):
+        budget[1] -= min(len(value), TOOL_PAYLOAD_MAX_STRING)
         if len(value) > TOOL_PAYLOAD_MAX_STRING:
             return value[:TOOL_PAYLOAD_MAX_STRING] + TOOL_PAYLOAD_ELLIPSIS, True
         return value, False
     if value is None or isinstance(value, (bool, int, float)):
+        budget[1] -= len(str(value))
         return value, False
     text = str(value)
+    budget[1] -= min(len(text), TOOL_PAYLOAD_MAX_STRING)
     if len(text) > TOOL_PAYLOAD_MAX_STRING:
         return text[:TOOL_PAYLOAD_MAX_STRING] + TOOL_PAYLOAD_ELLIPSIS, True
     return text, False
 
 
 def _bounded_tool_payload(value: object) -> tuple[object, bool]:
-    """限制工具 input/output 载荷，保证序列化大小有界。"""
-    limited, truncated = _limit_tool_payload(value, 0)
+    """限制工具 input/output 载荷，保证元素数与序列化大小都有界。"""
+    budget = [
+        TOOL_PAYLOAD_MAX_TOTAL_ITEMS,
+        TOOL_PAYLOAD_MAX_TOTAL_CHARS,
+    ]
+    limited, truncated = _limit_tool_payload(value, 0, budget)
     serialized = json.dumps(limited, ensure_ascii=False, default=str)
     if len(serialized) > TOOL_PAYLOAD_MAX_SERIALIZED:
         # 结构截断后仍超限：整体替换为截断标记，避免嵌入原始序列化文本

@@ -1173,12 +1173,17 @@ def test_external_progress_events_bound_tool_payloads() -> None:
     assert bounded["nested"]["deep"]["deeper"]["deepest"] == "…"
     assert len(json.dumps(bounded)) < 4000
 
-    # 序列化总长兜底：结构巨大时整体替换为截断标记
+    # 全局预算：结构巨大时整体受限（或替换为截断标记），序列化保持有界
     huge = {"key": {f"k{i}": "v" * 200 for i in range(100)}}
     bounded_huge, huge_truncated = _bounded_tool_payload(huge)
     assert huge_truncated
-    assert bounded_huge == {"truncated": True}
     assert len(json.dumps(bounded_huge)) < 4000
+
+    # 扁平超大 dict：只消费前 TOOL_PAYLOAD_MAX_ITEMS 项，不 materialize 全部
+    flat = {f"key-{i}": "value" for i in range(10000)}
+    bounded_flat, flat_truncated = _bounded_tool_payload(flat)
+    assert flat_truncated
+    assert len(bounded_flat) <= 25
 
     progress = external_progress_events(
         [
