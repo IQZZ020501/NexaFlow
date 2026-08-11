@@ -112,6 +112,9 @@ class TextSpan:
     content: str
     start_offset: int
     end_offset: int
+    # 表格续段在内容开头重复的表头+对齐行（首段与普通文本为 None）。
+    # content == table_header_prefix + text[start_offset:end_offset]。
+    table_header_prefix: str | None = None
 
 
 @dataclass(frozen=True)
@@ -291,6 +294,126 @@ def split_text(
     ]
 
 
+def _is_table_row_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("|") and stripped.endswith("|")
+
+
+def _is_table_alignment_line(line: str) -> bool:
+    stripped = line.strip()
+    if not (stripped.startswith("|") and stripped.endswith("|")):
+        return False
+    return any(
+        cell and set(cell) <= {"-", ":"}
+        for cell in (part.strip() for part in stripped[1:-1].split("|"))
+    )
+
+
+def _find_table_blocks(text: str) -> list[tuple[int, int]]:
+    """定位 markdown 管道表格块（表头行 + 对齐行 + 连续数据行）的字符区间。"""
+    blocks: list[tuple[int, int]] = []
+    lines = text.splitlines(keepends=True)
+    line_starts: list[int] = []
+    offset = 0
+    for line in lines:
+        line_starts.append(offset)
+        offset += len(line)
+
+    index = 0
+    while index < len(lines):
+        if (
+            _is_table_row_line(lines[index])
+            and index + 1 < len(lines)
+            and _is_table_alignment_line(lines[index + 1])
+        ):
+            end_index = index + 2
+            while end_index < len(lines) and (
+                _is_table_row_line(lines[end_index])
+                and not _is_table_alignment_line(lines[end_index])
+            ):
+                end_index += 1
+            blocks.append(
+                (
+                    line_starts[index],
+                    line_starts[end_index - 1] + len(lines[end_index - 1]),
+                )
+            )
+            index = end_index
+        else:
+            index += 1
+    return blocks
+
+
+def _split_table_block(
+    text: str,
+    table_start: int,
+    table_end: int,
+    chunk_size: int,
+) -> list[TextSpan]:
+    """表格 ≤ chunk_size 时整体保留；否则只在数据行之间切分，续段重复表头。"""
+    lines: list[str] = []
+    line_starts: list[int] = []
+    pos = table_start
+    while pos < table_end:
+        newline = text.find("\n", pos)
+        line_starts.append(pos)
+        if newline == -1 or newline >= table_end:
+            lines.append(text[pos:table_end])
+            break
+        lines.append(text[pos : newline + 1])
+        pos = newline + 1
+
+    if table_end - table_start <= chunk_size:
+        return [
+            TextSpan(
+                content=text[table_start:table_end],
+                start_offset=table_start,
+                end_offset=table_end,
+            )
+        ]
+
+    data_lines = lines[2:]
+    if not data_lines:
+        # 仅有表头+对齐行且超限：整体保留，允许超限。
+        return [
+            TextSpan(
+                content=text[table_start:table_end],
+                start_offset=table_start,
+                end_offset=table_end,
+            )
+        ]
+    prefix = lines[0] + lines[1]
+    budget = chunk_size - len(prefix)
+
+    spans: list[TextSpan] = []
+    row_start = 0
+    while row_start < len(data_lines):
+        row_end = row_start
+        size = 0
+        while (
+            row_end < len(data_lines)
+            and size + len(data_lines[row_end]) <= budget
+        ):
+            size += len(data_lines[row_end])
+            row_end += 1
+        if row_end == row_start:
+            # 表头+单行仍超限：允许该段超限，不切单元格。
+            row_end = row_start + 1
+        rows = data_lines[row_start:row_end]
+        data_start = line_starts[row_start + 2]
+        data_end = line_starts[row_end + 1] + len(data_lines[row_end - 1])
+        spans.append(
+            TextSpan(
+                content=prefix + "".join(rows),
+                start_offset=table_start if row_start == 0 else data_start,
+                end_offset=data_end,
+                table_header_prefix=prefix if row_start > 0 else None,
+            )
+        )
+        row_start = row_end
+    return spans
+
+
 def split_text_spans(
     text: str,
     chunk_size: int = CHUNK_SIZE,
@@ -298,12 +421,32 @@ def split_text_spans(
     separator: str = "\n\n",
 ) -> list[TextSpan]:
     chunks: list[TextSpan] = []
-    start = 0
     text_length = len(text)
+    table_blocks = _find_table_blocks(text)
+    block_index = 0
+    start = 0
 
     while start < text_length:
-        end = min(start + chunk_size, text_length)
-        if end < text_length:
+        if block_index < len(table_blocks):
+            table_start, table_end = table_blocks[block_index]
+            if start <= table_start and text[start:table_start].strip() == "":
+                start = table_start
+                chunks.extend(
+                    _split_table_block(text, table_start, table_end, chunk_size)
+                )
+                block_index += 1
+                start = table_end
+                while start < text_length and text[start].isspace():
+                    start += 1
+                continue
+
+        run_end = (
+            table_blocks[block_index][0]
+            if block_index < len(table_blocks)
+            else text_length
+        )
+        end = min(start + chunk_size, run_end)
+        if end < run_end:
             split_at = text.rfind(separator, start, end)
             if split_at > start:
                 end = split_at + len(separator)
@@ -325,13 +468,16 @@ def split_text_spans(
                     end_offset=content_end,
                 )
             )
-        if end >= text_length:
-            break
+        if end >= run_end:
+            if run_end == text_length:
+                break
+            start = run_end
+            continue
 
         next_start = max(end - overlap, 0)
         if next_start <= start:
             next_start = end
-        while next_start < text_length and text[next_start].isspace():
+        while next_start < run_end and text[next_start].isspace():
             next_start += 1
         start = next_start
 
@@ -417,12 +563,17 @@ def build_hierarchical_chunks(
                 + span_leading
                 - parent_leading
             )
+            if span.table_header_prefix is not None:
+                # 续段 content 含重复表头，偏移区间仅覆盖其数据行。
+                end_offset = start_offset + len(content) - len(span.table_header_prefix)
+            else:
+                end_offset = start_offset + len(content)
             children.append(
                 ChildChunkDraft(
                     content=content,
                     parent_index=parent_index,
                     start_offset=start_offset,
-                    end_offset=start_offset + len(content),
+                    end_offset=end_offset,
                     asset_indexes=extract_asset_indexes(span.content),
                 )
             )
