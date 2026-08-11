@@ -203,6 +203,8 @@ class ExternalAgentProgressEventResponse(BaseModel):
     server_name: str = ""
     input: dict[str, Any] = Field(default_factory=dict)
     output: Any = None
+    input_truncated: bool = False
+    output_truncated: bool = False
     hits: list[ExternalAgentKnowledgeHitResponse] = Field(default_factory=list)
 
 

@@ -1054,6 +1054,8 @@ def test_external_stream_epoch_is_stable_and_sanitized() -> None:
         "server_name": "",
         "input": {},
         "output": None,
+        "input_truncated": False,
+        "output_truncated": False,
         "hits": [],
     }
 
@@ -1148,6 +1150,54 @@ def test_external_progress_events_carry_mcp_tool_details() -> None:
     assert event.server_name == "Tavily"
     assert event.input == {"query": "GitHub trending"}
     assert event.output == {"results": [{"title": "NexaFlow"}]}
+
+
+def test_external_progress_events_bound_tool_payloads() -> None:
+    import json
+
+    from app.application.agent_access import (
+        TOOL_PAYLOAD_MAX_STRING,
+        _bounded_tool_payload,
+        external_progress_events,
+    )
+
+    oversized = {
+        "query": "x" * (TOOL_PAYLOAD_MAX_STRING + 100),
+        "nested": {"deep": {"deeper": {"deepest": {"value": "too deep"}}}},
+        "items": list(range(100)),
+    }
+    bounded, truncated = _bounded_tool_payload(oversized)
+    assert truncated
+    assert len(bounded["query"]) <= TOOL_PAYLOAD_MAX_STRING + 1
+    assert len(bounded["items"]) <= 25
+    assert bounded["nested"]["deep"]["deeper"]["deepest"] == "…"
+    assert len(json.dumps(bounded)) < 4000
+
+    # 序列化总长兜底：结构巨大时整体替换为截断标记
+    huge = {"key": {f"k{i}": "v" * 200 for i in range(100)}}
+    bounded_huge, huge_truncated = _bounded_tool_payload(huge)
+    assert huge_truncated
+    assert bounded_huge == {"truncated": True}
+    assert len(json.dumps(bounded_huge)) < 4000
+
+    progress = external_progress_events(
+        [
+            {
+                "type": "tool",
+                "turn": 1,
+                "tool_kind": "mcp",
+                "status": "succeeded",
+                "summary": "agent.tool_running",
+                "call_id": "call-3",
+                "input": {"query": "x" * (TOOL_PAYLOAD_MAX_STRING + 50)},
+                "output": {"rows": list(range(500))},
+            }
+        ],
+        "succeeded",
+    )
+    assert progress[0].input_truncated is True
+    assert progress[0].output_truncated is True
+    assert len(progress[0].output["rows"]) <= 25
 
 
 def test_external_progress_events_knowledge_failure_has_no_hits() -> None:
@@ -2007,6 +2057,7 @@ def main() -> None:
     test_external_mcp_policy_drift_is_blocked_without_approval()
     test_external_stream_epoch_is_stable_and_sanitized()
     test_external_progress_events_carry_mcp_tool_details()
+    test_external_progress_events_bound_tool_payloads()
     test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()
