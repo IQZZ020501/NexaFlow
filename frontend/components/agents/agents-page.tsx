@@ -18,6 +18,7 @@ import {
   PermissionBadge,
   StatusBadge,
 } from "@/components/knowledge/status-badges"
+import { TopLoadingBar } from "@/components/app/top-progress"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
@@ -332,7 +333,7 @@ export function AgentsPage({
   const [askAbortController, setAskAbortController] =
     React.useState<AbortController | null>(null)
   const [form, setForm] = React.useState<AgentFormState>(EMPTY_FORM)
-  const [isLoading, setIsLoading] = React.useState(false)
+  const [isLoading, setIsLoading] = React.useState(true)
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
@@ -1281,6 +1282,7 @@ export function AgentsPage({
 
   return (
     <>
+      {isLoading ? <TopLoadingBar progress={35} /> : null}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{t("应用")}</h1>
@@ -1310,12 +1312,7 @@ export function AgentsPage({
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex min-h-[220px] items-center justify-center rounded-lg border bg-background shadow-sm">
-          <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
-          {t("正在加载")}
-        </div>
-      ) : agents.length === 0 ? (
+      {isLoading && agents.length === 0 ? null : agents.length === 0 ? (
         <div className="mx-auto flex min-h-[320px] max-w-xl flex-col items-center justify-center gap-4 p-6 text-center">
           <span className="flex size-14 items-center justify-center rounded-lg bg-muted">
             <BotIcon className="size-5 text-muted-foreground" />

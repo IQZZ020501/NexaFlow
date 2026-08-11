@@ -19,6 +19,8 @@ type ThemeProviderState = {
 
 const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)"
 const THEME_VALUES: Theme[] = ["dark", "light", "system"]
+const LIGHT_BACKGROUND = "oklch(1 0 0)"
+const DARK_BACKGROUND = "oklch(0.145 0 0)"
 
 const ThemeProviderContext = React.createContext<
   ThemeProviderState | undefined
@@ -30,6 +32,19 @@ function isTheme(value: string | null): value is Theme {
   }
 
   return THEME_VALUES.includes(value as Theme)
+}
+
+function getInitialTheme(defaultTheme: Theme, storageKey: string) {
+  if (typeof window === "undefined") {
+    return defaultTheme
+  }
+
+  try {
+    const storedTheme = window.localStorage.getItem(storageKey)
+    return isTheme(storedTheme) ? storedTheme : defaultTheme
+  } catch {
+    return defaultTheme
+  }
 }
 
 function getSystemTheme(): ResolvedTheme {
@@ -85,15 +100,9 @@ export function ThemeProvider({
   disableTransitionOnChange = true,
   ...props
 }: ThemeProviderProps) {
-  const [theme, setThemeState] = React.useState<Theme>(defaultTheme)
-
-  React.useEffect(() => {
-    const storedTheme = localStorage.getItem(storageKey)
-    if (isTheme(storedTheme)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setThemeState(storedTheme)
-    }
-  }, [storageKey, defaultTheme])
+  const [theme, setThemeState] = React.useState<Theme>(() =>
+    getInitialTheme(defaultTheme, storageKey)
+  )
 
   const setTheme = React.useCallback(
     (nextTheme: Theme) => {
@@ -114,6 +123,9 @@ export function ThemeProvider({
 
       root.classList.remove("light", "dark")
       root.classList.add(resolvedTheme)
+      root.style.colorScheme = resolvedTheme
+      root.style.backgroundColor =
+        resolvedTheme === "dark" ? DARK_BACKGROUND : LIGHT_BACKGROUND
 
       if (restoreTransitions) {
         restoreTransitions()

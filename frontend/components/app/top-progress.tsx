@@ -7,6 +7,22 @@ const START_ANIMATION_MS = 250
 const HOLD_AT_90_MS = 120
 const COMPLETE_ANIMATION_MS = 180
 
+export function TopLoadingBar({ progress = 35 }: { progress?: number }) {
+  return (
+    <div
+      className="fixed inset-x-0 top-0 z-[60] h-0.5 overflow-hidden bg-muted/70"
+      aria-hidden="true"
+    >
+      <div
+        className="relative h-full bg-primary transition-[width] duration-500 ease-out"
+        style={{ width: `${progress}%` }}
+      >
+        <span className="top-loading-bar-indicator" />
+      </div>
+    </div>
+  )
+}
+
 export function TopProgress() {
   const pathname = usePathname()
   const [visible, setVisible] = React.useState(false)
