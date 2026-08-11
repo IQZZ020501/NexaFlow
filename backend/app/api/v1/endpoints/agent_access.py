@@ -4,34 +4,30 @@ from typing import Annotated
 
 from fastapi import (
     APIRouter,
-    Cookie,
     Depends,
     HTTPException,
     Query,
-    Request,
-    Response,
     status,
 )
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_settings
+from app.api.deps import get_settings, require_password_changed
 from app.application.agents import (
     authenticate_agent_api_credential,
     create_external_agent_run,
-    create_public_agent_session_token,
     external_run_to_response,
     get_external_agent_run,
     get_public_agent_profile,
-    get_published_agent_context,
+    get_workspace_published_agent_context,
     list_external_agent_runs,
     list_public_agent_conversations,
-    public_agent_consumer_id,
     stream_external_agent_run,
 )
 from app.application.agent_access import PublishedAgentContext
 from app.entities.agents import AgentApiCredential
+from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
 from app.schemas.agent import (
@@ -43,30 +39,10 @@ from app.schemas.agent import (
     PublicAgentProfileResponse,
 )
 
-PUBLIC_AGENT_SESSION_COOKIE = "nexaflow_agent_session"
-_PUBLIC_SESSION_TOKEN_LENGTH = 64
 _api_key_scheme = HTTPBearer(auto_error=False)
 
 public_router = APIRouter(prefix="/public/agents/{agent_id}", tags=["public-agents"])
 api_router = APIRouter(prefix="/agent-api/{agent_id}", tags=["agent-api"])
-
-
-def _valid_public_session_token(session_token: str | None) -> bool:
-    return (
-        session_token is not None
-        and len(session_token) == _PUBLIC_SESSION_TOKEN_LENGTH
-        and all(character.isalnum() or character in "-_" for character in session_token)
-    )
-
-
-def _public_consumer(agent_id: str, session_token: str | None) -> str:
-    if not _valid_public_session_token(session_token):
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            "Public Agent session required.",
-        )
-    return public_agent_consumer_id(agent_id, session_token)
-
 
 async def _encode_events(events: AsyncIterator[dict]) -> AsyncIterator[bytes]:
     async for event in events:
@@ -85,35 +61,9 @@ def _stream_response(events: AsyncIterator[dict]) -> StreamingResponse:
 async def public_agent_profile(
     agent_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
 ) -> PublicAgentProfileResponse:
-    return await get_public_agent_profile(db, agent_id)
-
-
-@public_router.post("/session", status_code=status.HTTP_204_NO_CONTENT)
-async def create_public_agent_session(
-    request: Request,
-    agent_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    session_token: Annotated[
-        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
-    ] = None,
-) -> Response:
-    await get_published_agent_context(db, agent_id)
-    response = Response(status_code=status.HTTP_204_NO_CONTENT)
-    response.set_cookie(
-        PUBLIC_AGENT_SESSION_COOKIE,
-        (
-            session_token
-            if _valid_public_session_token(session_token)
-            else create_public_agent_session_token()
-        ),
-        max_age=30 * 24 * 60 * 60,
-        httponly=True,
-        secure=request.url.scheme == "https",
-        samesite="lax",
-        path=f"/api/v1/public/agents/{agent_id}",
-    )
-    return response
+    return await get_public_agent_profile(db, agent_id, user)
 
 
 @public_router.get(
@@ -123,35 +73,29 @@ async def create_public_agent_session(
 async def public_agent_conversations(
     agent_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    session_token: Annotated[
-        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
-    ] = None,
+    user: Annotated[User, Depends(require_password_changed)],
 ) -> PublicAgentConversationListResponse:
-    await get_published_agent_context(db, agent_id)
-    return await list_public_agent_conversations(
-        db, agent_id, _public_consumer(agent_id, session_token)
-    )
+    await get_workspace_published_agent_context(db, agent_id, user)
+    return await list_public_agent_conversations(db, agent_id, user.id)
 
 
 @public_router.get("/runs", response_model=ExternalAgentRunListResponse)
 async def list_public_agent_runs(
     agent_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     conversation_id: Annotated[
         str | None, Query(min_length=1, max_length=36)
     ] = None,
-    session_token: Annotated[
-        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
-    ] = None,
 ) -> ExternalAgentRunListResponse:
-    await get_published_agent_context(db, agent_id)
+    await get_workspace_published_agent_context(db, agent_id, user)
     return await list_external_agent_runs(
         db,
         agent_id,
         "public",
-        _public_consumer(agent_id, session_token),
+        user.id,
         limit,
         offset,
         conversation_id,
@@ -168,16 +112,14 @@ async def create_public_agent_run(
     payload: ExternalAgentRunCreateRequest,
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    session_token: Annotated[
-        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
-    ] = None,
+    user: Annotated[User, Depends(require_password_changed)],
 ) -> ExternalAgentRunResponse:
-    context = await get_published_agent_context(db, agent_id)
+    context = await get_workspace_published_agent_context(db, agent_id, user)
     return await create_external_agent_run(
         db,
         context,
         "public",
-        _public_consumer(agent_id, session_token),
+        user.id,
         payload.goal,
         settings,
         payload.conversation_id,
@@ -189,17 +131,15 @@ async def get_public_agent_run(
     agent_id: str,
     run_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    session_token: Annotated[
-        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
-    ] = None,
+    user: Annotated[User, Depends(require_password_changed)],
 ) -> ExternalAgentRunResponse:
-    await get_published_agent_context(db, agent_id)
+    await get_workspace_published_agent_context(db, agent_id, user)
     run = await get_external_agent_run(
         db,
         agent_id,
         run_id,
         "public",
-        _public_consumer(agent_id, session_token),
+        user.id,
     )
     return external_run_to_response(run)
 
@@ -210,15 +150,12 @@ async def stream_public_agent_run(
     run_id: str,
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
     after: Annotated[int, Query(ge=0)] = 0,
     live_after: Annotated[str, Query(pattern=r"^[0-9]+-[0-9]+$")] = "0-0",
-    session_token: Annotated[
-        str | None, Cookie(alias=PUBLIC_AGENT_SESSION_COOKIE)
-    ] = None,
 ) -> StreamingResponse:
-    consumer_id = _public_consumer(agent_id, session_token)
-    context = await get_published_agent_context(db, agent_id)
-    run = await get_external_agent_run(db, agent_id, run_id, "public", consumer_id)
+    context = await get_workspace_published_agent_context(db, agent_id, user)
+    run = await get_external_agent_run(db, agent_id, run_id, "public", user.id)
     await db.rollback()
     return _stream_response(
         stream_external_agent_run(

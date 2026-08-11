@@ -31,6 +31,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { useLanguage } from "@/contexts/language-provider"
+import { useSession } from "@/contexts/session-context"
 import { compareLiveStreamIds } from "@/lib/api/agents"
 import {
   initializePublicAgent,
@@ -585,6 +586,7 @@ export function PublicAgentChat({
 }: PublicAgentChatProps) {
   const router = useRouter()
   const { t } = useLanguage()
+  const { token, isSessionRestored } = useSession()
   const [profile, setProfile] = React.useState<PublicAgentProfile | null>(null)
   const [conversations, setConversations] = React.useState<
     PublicAgentConversation[]
@@ -606,24 +608,47 @@ export function PublicAgentChat({
   const initialConversationIdRef = React.useRef(initialConversationId)
   const routerRef = React.useRef(router)
   const tRef = React.useRef(t)
+  const tokenRef = React.useRef(token)
+  const initializedAgentIdRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
     routerRef.current = router
     tRef.current = t
-  }, [router, t])
-
-  const refreshConversations = React.useCallback(async () => {
-    const response = await listPublicAgentConversations(agentId)
-    setConversations(response.items)
-    return response.items
-  }, [agentId])
+    tokenRef.current = token
+  }, [router, t, token])
 
   React.useEffect(() => {
+    if (!isSessionRestored || token) return
+    streamControllerRef.current?.abort()
+    const conversationId = initialConversationIdRef.current
+    const next = conversationId
+      ? `/chat/${agentId}?conversation_id=${encodeURIComponent(conversationId)}`
+      : `/chat/${agentId}`
+    router.replace(`/login?next=${encodeURIComponent(next)}`)
+  }, [agentId, isSessionRestored, router, token])
+
+  React.useEffect(() => {
+    return () => streamControllerRef.current?.abort()
+  }, [agentId])
+
+  const refreshConversations = React.useCallback(async () => {
+    if (!token) return []
+    const response = await listPublicAgentConversations(agentId, token)
+    setConversations(response.items)
+    return response.items
+  }, [agentId, token])
+
+  React.useEffect(() => {
+    if (!isSessionRestored) return
+    const currentToken = tokenRef.current
+    if (!currentToken) return
+    if (initializedAgentIdRef.current === agentId) return
+    initializedAgentIdRef.current = agentId
     let current = true
     ;(async () => {
       try {
         const { profile: nextProfile, conversations: nextConversations } =
-          await initializePublicAgent(agentId)
+          await initializePublicAgent(agentId, currentToken)
         if (!current) return
         setProfile(nextProfile)
         setConversations(nextConversations.items)
@@ -649,19 +674,20 @@ export function PublicAgentChat({
     })()
     return () => {
       current = false
-      streamControllerRef.current?.abort()
     }
-  }, [agentId])
+  }, [agentId, isSessionRestored, token])
 
   React.useEffect(() => {
-    if (!sessionReady) return
+    if (!sessionReady || !token) return
     if (streamControllerRef.current) return
     if (!activeConversationId) return
     let current = true
-    listPublicAgentRuns(agentId, activeConversationId, {
-      limit: 200,
-      offset: 0,
-    })
+    listPublicAgentRuns(
+      agentId,
+      activeConversationId,
+      token,
+      { limit: 200, offset: 0 }
+    )
       .then((response) => {
         if (current) setRuns(response.items)
       })
@@ -674,7 +700,7 @@ export function PublicAgentChat({
     return () => {
       current = false
     }
-  }, [activeConversationId, agentId, sessionReady, t])
+  }, [activeConversationId, agentId, sessionReady, t, token])
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current
@@ -708,7 +734,7 @@ export function PublicAgentChat({
   async function handleAsk(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const nextQuestion = question.trim()
-    if (!nextQuestion || isSending) return
+    if (!nextQuestion || isSending || !token) return
     setQuestion("")
     setSendError(null)
     setIsSending(true)
@@ -733,6 +759,7 @@ export function PublicAgentChat({
     try {
       await streamPublicAgentRun(
         agentId,
+        token,
         nextQuestion,
         (streamEvent) => {
           if (streamControllerRef.current !== controller) return

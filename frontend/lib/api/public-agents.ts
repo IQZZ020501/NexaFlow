@@ -100,27 +100,23 @@ function publicAgentPath(agentId: string, suffix = "") {
   return `/api/v1/public/agents/${agentId}${suffix}`
 }
 
-export function createPublicAgentSession(agentId: string) {
-  return request<void>(publicAgentPath(agentId, "/session"), {
-    method: "POST",
+export function getPublicAgentProfile(agentId: string, token: string) {
+  return request<PublicAgentProfile>(publicAgentPath(agentId, "/profile"), {
+    token,
   })
 }
 
-export function getPublicAgentProfile(agentId: string) {
-  return request<PublicAgentProfile>(publicAgentPath(agentId, "/profile"))
-}
-
-export function listPublicAgentConversations(agentId: string) {
+export function listPublicAgentConversations(agentId: string, token: string) {
   return request<{ items: PublicAgentConversation[] }>(
-    publicAgentPath(agentId, "/conversations")
+    publicAgentPath(agentId, "/conversations"),
+    { token }
   )
 }
 
-export async function initializePublicAgent(agentId: string) {
-  await createPublicAgentSession(agentId)
+export async function initializePublicAgent(agentId: string, token: string) {
   const [profile, conversations] = await Promise.all([
-    getPublicAgentProfile(agentId),
-    listPublicAgentConversations(agentId),
+    getPublicAgentProfile(agentId, token),
+    listPublicAgentConversations(agentId, token),
   ])
   return { profile, conversations }
 }
@@ -128,17 +124,20 @@ export async function initializePublicAgent(agentId: string) {
 export function listPublicAgentRuns(
   agentId: string,
   conversationId: string,
+  token: string,
   options: { limit?: number; offset?: number } = {}
 ) {
   const params = new URLSearchParams(listQuery(options).slice(1))
   params.set("conversation_id", conversationId)
   return request<PublicAgentRunList>(
-    publicAgentPath(agentId, `/runs?${params.toString()}`)
+    publicAgentPath(agentId, `/runs?${params.toString()}`),
+    { token }
   )
 }
 
 export function createPublicAgentRun(
   agentId: string,
+  token: string,
   goal: string,
   conversationId?: string | null,
   signal?: AbortSignal
@@ -150,15 +149,19 @@ export function createPublicAgentRun(
       ...(conversationId ? { conversation_id: conversationId } : {}),
     }),
     signal,
+    token,
   })
 }
 
-export function getPublicAgentRun(agentId: string, runId: string) {
-  return request<ExternalAgentRun>(publicAgentPath(agentId, `/runs/${runId}`))
+export function getPublicAgentRun(agentId: string, token: string, runId: string) {
+  return request<ExternalAgentRun>(publicAgentPath(agentId, `/runs/${runId}`), {
+    token,
+  })
 }
 
 export function observePublicAgentRun(
   agentId: string,
+  token: string,
   runId: string,
   onEvent: (event: PublicAgentRunStreamEvent) => void,
   signal?: AbortSignal,
@@ -174,7 +177,11 @@ export function observePublicAgentRun(
             `/runs/${runId}/stream?after=${cursor}&live_after=${encodeURIComponent(liveCursor)}`
           )
         ),
-        { credentials: "include", signal: streamSignal }
+        {
+          credentials: "include",
+          headers: { Authorization: `Bearer ${token}` },
+          signal: streamSignal,
+        }
       ),
     onEvent,
     { signal, after, liveAfter, errorLabel: "Public Agent stream" }
@@ -185,13 +192,20 @@ const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"])
 
 export async function streamPublicAgentRun(
   agentId: string,
+  token: string,
   goal: string,
   onEvent: (event: PublicAgentRunStreamEvent) => void,
   signal?: AbortSignal,
   conversationId?: string | null
 ) {
-  const run = await createPublicAgentRun(agentId, goal, conversationId, signal)
+  const run = await createPublicAgentRun(
+    agentId,
+    token,
+    goal,
+    conversationId,
+    signal
+  )
   onEvent({ type: "run", sequence: 0, run })
   if (TERMINAL_STATUSES.has(run.status)) return
-  await observePublicAgentRun(agentId, run.id, onEvent, signal)
+  await observePublicAgentRun(agentId, token, run.id, onEvent, signal)
 }

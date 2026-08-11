@@ -1830,7 +1830,6 @@ async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
 
 
 def assert_external_agent_access() -> None:
-    from app.api.v1.endpoints.agent_access import PUBLIC_AGENT_SESSION_COOKIE
     from app.infrastructure.agent_rate_limit import (
         AgentRateLimitExceeded,
         AgentRateLimitUnavailable,
@@ -1866,7 +1865,7 @@ def assert_external_agent_access() -> None:
     try:
         with test_client() as client, agent_model_server() as model_base_url:
             admin_token, workspace_id = activate_admin(client)
-            _, temporary_password = create_workspace_user(
+            member_user_id, temporary_password = create_workspace_user(
                 client, admin_token, workspace_id
             )
             member_token = activate_user(
@@ -1898,7 +1897,12 @@ def assert_external_agent_access() -> None:
             public_base = f"/api/v1/public/agents/{agent_id}"
             management_base = agents_url(workspace_id, f"/{agent_id}")
 
-            unpublished = client.get(f"{public_base}/profile")
+            unauthenticated_profile = client.get(f"{public_base}/profile")
+            assert unauthenticated_profile.status_code == 401, unauthenticated_profile.text
+            unpublished = client.get(
+                f"{public_base}/profile",
+                headers=auth_headers(admin_token),
+            )
             assert unpublished.status_code == 404, unpublished.text
 
             owner_agent = client.post(
@@ -1944,7 +1948,10 @@ def assert_external_agent_access() -> None:
             assert published.json()["published"] is True
             assert published.json()["published_by_user_id"]
             assert published.json()["published_at"]
-            profile = client.get(f"{public_base}/profile")
+            profile = client.get(
+                f"{public_base}/profile",
+                headers=auth_headers(admin_token),
+            )
             assert profile.status_code == 200, profile.text
             assert set(profile.json()) == {"id", "name", "description"}
             openapi = client.get("/openapi.json")
@@ -1992,36 +1999,24 @@ def assert_external_agent_access() -> None:
             )
             assert second_publish.status_code == 200, second_publish.text
 
-            session_one = client.post(f"{public_base}/session")
-            assert session_one.status_code == 204, session_one.text
-            visitor_one = session_one.cookies.get(PUBLIC_AGENT_SESSION_COOKIE)
-            assert visitor_one and len(visitor_one) >= 40
-            assert (
-                f"Path=/api/v1/public/agents/{agent_id}"
-                in session_one.headers["set-cookie"]
+            member_profile = client.get(
+                f"{public_base}/profile",
+                headers=auth_headers(member_token),
             )
-            repeated_session = client.post(f"{public_base}/session")
-            assert repeated_session.status_code == 204, repeated_session.text
-            assert repeated_session.cookies.get(PUBLIC_AGENT_SESSION_COOKIE) == visitor_one
-            second_session = client.post(
-                f"/api/v1/public/agents/{second_agent_id}/session"
-            )
-            visitor_other_agent = second_session.cookies.get(
-                PUBLIC_AGENT_SESSION_COOKIE
-            )
-            assert visitor_other_agent and visitor_other_agent != visitor_one
-            repeated_after_other_agent = client.post(f"{public_base}/session")
-            assert (
-                repeated_after_other_agent.cookies.get(PUBLIC_AGENT_SESSION_COOKIE)
-                == visitor_one
-            )
+            assert member_profile.status_code == 200, member_profile.text
+            admin_user_id = client.get(
+                "/api/v1/auth/me",
+                headers=auth_headers(admin_token),
+            ).json()["user"]["id"]
 
             new_chat_one = client.post(
                 f"{public_base}/runs",
+                headers=auth_headers(admin_token),
                 json={"goal": "First new chat"},
             )
             new_chat_two = client.post(
                 f"{public_base}/runs",
+                headers=auth_headers(admin_token),
                 json={"goal": "Second new chat"},
             )
             assert new_chat_one.status_code == 201, new_chat_one.text
@@ -2032,6 +2027,7 @@ def assert_external_agent_access() -> None:
             )
             continued_chat = client.post(
                 f"{public_base}/runs",
+                headers=auth_headers(admin_token),
                 json={
                     "goal": "Continue first chat",
                     "conversation_id": new_chat_one.json()["conversation_id"],
@@ -2046,6 +2042,7 @@ def assert_external_agent_access() -> None:
             conversation_id = "shared-public-conversation"
             public_run_one = client.post(
                 f"{public_base}/runs",
+                headers=auth_headers(admin_token),
                 json={"goal": "Visitor one", "conversation_id": conversation_id},
             )
             assert public_run_one.status_code == 201, public_run_one.text
@@ -2067,15 +2064,9 @@ def assert_external_agent_access() -> None:
             assert "trace_id" not in public_run_one_payload
             assert isinstance(public_run_one_payload["progress"], list)
 
-            client.cookies.delete(
-                PUBLIC_AGENT_SESSION_COOKIE,
-                path=f"/api/v1/public/agents/{agent_id}",
-            )
-            session_two = client.post(f"{public_base}/session")
-            visitor_two = session_two.cookies.get(PUBLIC_AGENT_SESSION_COOKIE)
-            assert visitor_two and visitor_two != visitor_one
             public_run_two = client.post(
                 f"{public_base}/runs",
+                headers=auth_headers(member_token),
                 json={"goal": "Visitor two", "conversation_id": conversation_id},
             )
             assert public_run_two.status_code == 201, public_run_two.text
@@ -2089,17 +2080,17 @@ def assert_external_agent_access() -> None:
             assert stored_public_one is not None and stored_public_two is not None
             assert stored_public_one.requested_by_user_id is None
             assert stored_public_one.access_source == "public"
-            assert stored_public_one.consumer_id == agent_access.public_agent_consumer_id(
-                agent_id, visitor_one
-            )
+            assert stored_public_one.consumer_id == admin_user_id
+            assert stored_public_two.consumer_id == member_user_id
             assert stored_public_two.consumer_id != stored_public_one.consumer_id
-            assert visitor_one not in repr(stored_public_one)
             cross_visitor_read = client.get(
-                f"{public_base}/runs/{public_run_one_payload['id']}"
+                f"{public_base}/runs/{public_run_one_payload['id']}",
+                headers=auth_headers(member_token),
             )
             assert cross_visitor_read.status_code == 404, cross_visitor_read.text
             public_run_two_followup = client.post(
                 f"{public_base}/runs",
+                headers=auth_headers(member_token),
                 json={
                     "goal": "Visitor two follow-up",
                     "conversation_id": conversation_id,
@@ -2371,6 +2362,7 @@ def assert_external_agent_access() -> None:
             assert unpublished_manually.json()["published"] is False
             public_run_while_unpublished = client.post(
                 f"{public_base}/runs",
+                headers=auth_headers(admin_token),
                 json={"goal": "Unavailable public run"},
             )
             assert public_run_while_unpublished.status_code == 404
@@ -2403,7 +2395,13 @@ def assert_external_agent_access() -> None:
             assert changed.json()["published"] is False
             assert changed.json()["published_by_user_id"] is None
             assert changed.json()["published_at"] is None
-            assert client.get(f"{public_base}/profile").status_code == 404
+            assert (
+                client.get(
+                    f"{public_base}/profile",
+                    headers=auth_headers(admin_token),
+                ).status_code
+                == 404
+            )
             unpublished_documentation = client.get(
                 documentation_url,
                 headers={"Authorization": f"Bearer {token_b}"},
@@ -2412,6 +2410,7 @@ def assert_external_agent_access() -> None:
             assert (
                 client.post(
                     f"{public_base}/runs",
+                    headers=auth_headers(admin_token),
                     json={"goal": "Unavailable after configuration change"},
                 ).status_code
                 == 404
