@@ -2585,6 +2585,36 @@ def main() -> None:
             assert agent["can_edit"] is True
             assert agent["knowledge_base_ids"] == [knowledge_base_id]
             assert agent["knowledge_query_mode"] == "required"
+            assert agent["app_type"] == "agent"
+
+            workflow_created = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Release Workflow",
+                    "description": "Fixed pipeline",
+                    "instructions": "Follow the steps.",
+                    "model_id": model_id,
+                    "app_type": "workflow",
+                },
+            )
+            assert workflow_created.status_code == 201, workflow_created.text
+            assert workflow_created.json()["app_type"] == "workflow"
+            workflow_id = workflow_created.json()["id"]
+            workflow_fetched = client.get(
+                agents_url(workspace_id, f"/{workflow_id}"),
+                headers=auth_headers(admin_token),
+            )
+            assert workflow_fetched.status_code == 200, workflow_fetched.text
+            assert workflow_fetched.json()["app_type"] == "workflow"
+
+            workflow_updated = client.patch(
+                agents_url(workspace_id, f"/{workflow_id}"),
+                headers=auth_headers(admin_token),
+                json={"app_type": "agent"},
+            )
+            assert workflow_updated.status_code == 200, workflow_updated.text
+            assert workflow_updated.json()["app_type"] == "agent"
 
             async def fail_agent_run(*_args, **_kwargs):
                 raise RuntimeError("synthetic runtime failure")

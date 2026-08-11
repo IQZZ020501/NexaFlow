@@ -198,6 +198,16 @@ export const en = {
   "编排业务流程、知识库和模型能力，构建可运行的 AI 应用。":
     "Orchestrate business flows, knowledge bases, and model capabilities into runnable AI apps.",
   "新建应用": "Create app",
+  "选择要创建的应用类型": "Choose the type of app to create",
+  "根据使用方式选择应用类型，创建后可在设置中调整。":
+    "Choose based on how you will use the app; you can adjust it later in settings.",
+  "Agent": "Agent",
+  "工作流": "Workflow",
+  "即将推出": "Coming soon",
+  "智能对话助手，自动规划并使用模型、知识和工具。":
+    "A conversational assistant that plans and uses models, knowledge, and tools.",
+  "按预设步骤编排固定流程，适合确定性的处理任务。":
+    "Run a fixed pipeline of preset steps for deterministic tasks.",
   "还没有应用": "No apps yet",
   "创建应用后，可以编排对话、检索和工具调用流程。":
     "Create an app to orchestrate chat, retrieval, and tool-calling flows.",

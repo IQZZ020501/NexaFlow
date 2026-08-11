@@ -54,6 +54,7 @@ def agent_to_response(
         id=agent.id,
         workspace_id=agent.workspace_id,
         name=agent.name,
+        app_type=agent.app_type,
         description=agent.description,
         instructions=agent.instructions,
         model_id=agent.model_id,
@@ -257,6 +258,7 @@ async def create_agent(
     agent = Agent(
         workspace_id=workspace_id,
         name=normalize_name(payload.name),
+        app_type=payload.app_type,
         description=payload.description.strip(),
         instructions=payload.instructions.strip() or DEFAULT_AGENT_INSTRUCTIONS,
         model_id=model.id,
@@ -383,6 +385,11 @@ async def update_agent(
         name = normalize_name(payload.name)
         configuration_changed = configuration_changed or name != agent.name
         agent.name = name
+    if payload.app_type is not None:
+        configuration_changed = (
+            configuration_changed or payload.app_type != agent.app_type
+        )
+        agent.app_type = payload.app_type
     if payload.description is not None:
         description = payload.description.strip()
         configuration_changed = configuration_changed or description != agent.description
