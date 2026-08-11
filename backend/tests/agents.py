@@ -3071,6 +3071,65 @@ def main() -> None:
             assert member_approval.json()["status"] == "succeeded"
             assert len(mcp_calls) == 5
 
+            # Public link runs (published agent, authenticated visitor) must
+            # follow the tool policy: approval-required tools pause the run
+            # for the visitor's approval; read-only tools execute directly.
+            published_agent = client.patch(
+                agents_url(workspace_id, f"/{mcp_agent_data['id']}"),
+                headers=auth_headers(admin_token),
+                json={"published": True},
+            )
+            assert published_agent.status_code == 200, published_agent.text
+            assert published_agent.json()["published"] is True
+
+            public_base = f"/api/v1/public/agents/{mcp_agent_data['id']}"
+            calls_before_public = len(mcp_calls)
+            public_run = client.post(
+                f"{public_base}/runs",
+                headers=auth_headers(member_token),
+                json={"goal": "Check the release"},
+            )
+            assert public_run.status_code == 201, public_run.text
+            public_run_data = public_run.json()
+            assert public_run_data["status"] == "awaiting_approval"
+            public_tool_calls = client.get(
+                f"{public_base}/runs/{public_run_data['id']}/tool-calls",
+                headers=auth_headers(member_token),
+            )
+            assert public_tool_calls.status_code == 200, public_tool_calls.text
+            assert public_tool_calls.json()[0]["status"] == "awaiting_approval"
+            assert len(mcp_calls) == calls_before_public
+            public_approval = client.post(
+                f"{public_base}/runs/{public_run_data['id']}/tool-calls/call-mcp/approve",
+                headers=auth_headers(member_token),
+            )
+            assert public_approval.status_code == 200, public_approval.text
+            assert public_approval.json()["status"] == "succeeded"
+            assert len(mcp_calls) == calls_before_public + 1
+
+            read_only_public_policy = client.put(
+                mcp_url(
+                    workspace_id,
+                    f"/{mcp_server_data['id']}/tools/lookup_release/policy",
+                ),
+                headers=auth_headers(admin_token),
+                json={"mode": "read_only"},
+            )
+            assert read_only_public_policy.status_code == 200, (
+                read_only_public_policy.text
+            )
+            calls_before_read_only = len(mcp_calls)
+            read_only_public_run = client.post(
+                f"{public_base}/runs",
+                headers=auth_headers(member_token),
+                json={"goal": "Check the release"},
+            )
+            assert read_only_public_run.status_code == 201, (
+                read_only_public_run.text
+            )
+            assert read_only_public_run.json()["status"] == "succeeded"
+            assert len(mcp_calls) == calls_before_read_only + 1
+
             member_agent = client.post(
                 agents_url(workspace_id),
                 headers=auth_headers(member_token),

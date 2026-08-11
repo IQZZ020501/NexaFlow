@@ -160,7 +160,9 @@ def current_mcp_policy_mode(
     current_definition_hash: str | None = None,
 ) -> str:
     """Reconcile a durable MCP call with the policy currently in the database."""
-    if access_source in {"public", "api"}:
+    if access_source == "api":
+        # API consumers are machine-to-machine: only verified read-only tools
+        # are allowed; anything else is disabled.
         snapshot_definition_hash = metadata.get("definition_hash", "")
         if (
             policy is not None
@@ -266,7 +268,7 @@ class DurableToolLedger:
                 approval_required = (
                     metadata["kind"] == "mcp"
                     and policy_mode != "read_only"
-                    and self.run.access_source not in {"public", "api"}
+                    and self.run.access_source != "api"
                 )
             existing = await agent_repository.get_agent_tool_call(
                 db,
@@ -467,10 +469,9 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
                 tool.definition.name,
             )
             policy_mode = effective_mcp_tool_policy_mode(tool.definition, policy)
-            is_external = run.access_source in {"public", "api"}
             allowed = (
                 policy_mode == "read_only"
-                if is_external
+                if run.access_source == "api"
                 else policy_mode != "disabled"
             )
             if allowed:

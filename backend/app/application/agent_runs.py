@@ -227,21 +227,17 @@ async def list_agent_run_tool_calls(
     ]
 
 
-async def resolve_agent_tool_approval(
+async def resolve_agent_run_tool_approval(
     db: AsyncSession,
-    workspace_id: str,
-    agent_id: str,
-    run_id: str,
+    run: AgentRun,
     call_id: str,
     actor: User,
     settings: Settings,
     *,
     approve: bool,
-) -> AgentRunResponse:
-    await get_agent_run_response(db, workspace_id, agent_id, run_id, actor)
-    run = await agent_repository.get_agent_run_by_id(db, run_id)
-    assert run is not None
-    call = await agent_repository.get_agent_tool_call_by_call_id(db, run_id, call_id)
+) -> AgentRun:
+    """Resolve a pending tool call approval for an already-authorized run."""
+    call = await agent_repository.get_agent_tool_call_by_call_id(db, run.id, call_id)
     if call is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent tool call not found.")
     if (
@@ -249,7 +245,7 @@ async def resolve_agent_tool_approval(
         and call.approved_by_user_id == actor.id
         and call.status in {"approved", "running", "succeeded", "failed"}
     ):
-        return run_to_response(run, trace_id=run.trace_id)
+        return await agent_repository.refresh_agent_run(db, run)
     if call.status in {"succeeded", "failed", "running"}:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -296,17 +292,17 @@ async def resolve_agent_tool_approval(
             call.id,
             call.tool_name,
             {
-                "agent_id": agent_id,
-                "agent_run_id": run_id,
+                "agent_id": run.agent_id,
+                "agent_run_id": run.id,
                 "call_id": call_id,
                 "turn": call.turn,
             },
-            workspace_id=workspace_id,
+            workspace_id=run.workspace_id,
         )
         await agent_repository.append_agent_run_event(
             db,
-            workspace_id,
-            run_id,
+            run.workspace_id,
+            run.id,
             {
                 "type": "approval_resolved",
                 "call_id": call_id,
@@ -316,7 +312,31 @@ async def resolve_agent_tool_approval(
     await db.commit()
     if queued:
         await enqueue_prepared_agent_run(run.id, settings)
-    run = await agent_repository.refresh_agent_run(db, run)
+    return await agent_repository.refresh_agent_run(db, run)
+
+
+async def resolve_agent_tool_approval(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    run_id: str,
+    call_id: str,
+    actor: User,
+    settings: Settings,
+    *,
+    approve: bool,
+) -> AgentRunResponse:
+    await get_agent_run_response(db, workspace_id, agent_id, run_id, actor)
+    run = await agent_repository.get_agent_run_by_id(db, run_id)
+    assert run is not None
+    run = await resolve_agent_run_tool_approval(
+        db,
+        run,
+        call_id,
+        actor,
+        settings,
+        approve=approve,
+    )
     return run_to_response(run, trace_id=run.trace_id)
 
 

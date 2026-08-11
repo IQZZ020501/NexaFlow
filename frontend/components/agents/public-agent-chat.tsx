@@ -17,6 +17,7 @@ import {
   MenuIcon,
   MessageSquarePlusIcon,
   SendIcon,
+  ShieldAlertIcon,
   UserIcon,
   WrenchIcon,
 } from "lucide-react"
@@ -32,11 +33,15 @@ import {
 } from "@/components/ui/dialog"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
+import type { TFunction } from "@/i18n"
 import { compareLiveStreamIds } from "@/lib/api/agents"
+import type { AgentToolCall } from "@/lib/api/agents"
 import {
   initializePublicAgent,
   listPublicAgentConversations,
   listPublicAgentRuns,
+  listPublicAgentRunToolCalls,
+  resolvePublicAgentRunToolCall,
   streamPublicAgentRun,
   type ExternalAgentProgressEvent,
   type ExternalAgentRun,
@@ -250,6 +255,64 @@ function PublicToolEventRow({
         </div>
       ) : null}
     </div>
+  )
+}
+
+function PublicToolApproval({
+  runId,
+  call,
+  resolvingCallId,
+  onDecision,
+  t,
+}: {
+  runId: string
+  call: AgentToolCall
+  resolvingCallId: string | null
+  onDecision: (callId: string, decision: "approve" | "reject") => void
+  t: TFunction
+}) {
+  const isResolving = resolvingCallId === `${runId}:${call.call_id}`
+  return (
+    <section className="overflow-hidden rounded-lg border border-amber-600/30 bg-background/80">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400">
+          <ShieldAlertIcon className="size-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-medium text-foreground">
+            {t("工具调用需要确认")}
+          </p>
+          <p className="truncate text-[11px] text-muted-foreground">
+            {call.tool_name}
+            {call.server_name ? ` @ ${call.server_name}` : ""}
+          </p>
+        </div>
+        <div className="ml-auto flex shrink-0 gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            disabled={isResolving}
+            onClick={() => onDecision(call.call_id, "reject")}
+          >
+            {isResolving ? <LoaderCircleIcon className="animate-spin" /> : null}
+            {t("拒绝")}
+          </Button>
+          <Button
+            type="button"
+            size="xs"
+            disabled={isResolving}
+            onClick={() => onDecision(call.call_id, "approve")}
+          >
+            {isResolving ? <LoaderCircleIcon className="animate-spin" /> : null}
+            {t("批准并执行")}
+          </Button>
+        </div>
+      </div>
+      <pre className="max-h-28 overflow-auto border-t bg-muted/20 px-3 py-2 font-mono text-[11px] leading-4 break-words whitespace-pre-wrap">
+        {JSON.stringify(call.arguments, null, 2)}
+      </pre>
+    </section>
   )
 }
 
@@ -484,6 +547,11 @@ export function mergePublicRunEvent(
       }
     })
   }
+  if (event.type === "approval_required") {
+    return runs.map((run) =>
+      run.id === runId ? { ...run, status: "awaiting_approval" } : run
+    )
+  }
   return runs.map((run) =>
     run.id === event.run.id
       ? {
@@ -602,6 +670,12 @@ export function PublicAgentChat({
   const [fatalError, setFatalError] = React.useState<string | null>(null)
   const [sendError, setSendError] = React.useState<string | null>(null)
   const [isHistoryOpen, setIsHistoryOpen] = React.useState(false)
+  const [toolCallsByRun, setToolCallsByRun] = React.useState<
+    Record<string, AgentToolCall[]>
+  >({})
+  const [resolvingCallId, setResolvingCallId] = React.useState<string | null>(
+    null
+  )
   const [sessionReady, setSessionReady] = React.useState(false)
   const streamControllerRef = React.useRef<AbortController | null>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
@@ -610,6 +684,20 @@ export function PublicAgentChat({
   const tRef = React.useRef(t)
   const tokenRef = React.useRef(token)
   const initializedAgentIdRef = React.useRef<string | null>(null)
+
+  const loadRunToolCalls = React.useCallback(
+    async (runId: string, controller?: AbortController) => {
+      if (!token) return
+      try {
+        const calls = await listPublicAgentRunToolCalls(agentId, token, runId)
+        if (controller && streamControllerRef.current !== controller) return
+        setToolCallsByRun((current) => ({ ...current, [runId]: calls }))
+      } catch {
+        // A failed fetch is not fatal; the next stream event retries it.
+      }
+    },
+    [agentId, token]
+  )
 
   React.useEffect(() => {
     routerRef.current = router
@@ -689,7 +777,14 @@ export function PublicAgentChat({
       { limit: 200, offset: 0 }
     )
       .then((response) => {
-        if (current) setRuns(response.items)
+        if (current) {
+          setRuns(response.items)
+          for (const run of response.items) {
+            if (run.status === "awaiting_approval") {
+              void loadRunToolCalls(run.id)
+            }
+          }
+        }
       })
       .catch((error: unknown) => {
         if (current) setSendError(getErrorMessage(error, t))
@@ -700,7 +795,7 @@ export function PublicAgentChat({
     return () => {
       current = false
     }
-  }, [activeConversationId, agentId, sessionReady, t, token])
+  }, [activeConversationId, agentId, loadRunToolCalls, sessionReady, t, token])
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current
@@ -723,12 +818,53 @@ export function PublicAgentChat({
     cancelPublicAgentStream(streamControllerRef)
     setActiveConversationId(null)
     setRuns([])
+    setToolCallsByRun({})
+    setResolvingCallId(null)
     setQuestion("")
     setSendError(null)
     setIsSending(false)
     setIsRunsLoading(false)
     setIsHistoryOpen(false)
     router.replace(`/chat/${agentId}`)
+  }
+
+  async function handleToolCallDecision(
+    runId: string,
+    callId: string,
+    decision: "approve" | "reject"
+  ) {
+    if (!token || resolvingCallId) return
+    setResolvingCallId(`${runId}:${callId}`)
+    try {
+      const run = await resolvePublicAgentRunToolCall(
+        agentId,
+        token,
+        runId,
+        callId,
+        decision
+      )
+      setRuns((current) =>
+        current.map((item) =>
+          item.id === runId
+            ? {
+                ...run,
+                progress:
+                  run.progress.length > 0 ? run.progress : item.progress,
+              }
+            : item
+        )
+      )
+      setToolCallsByRun((current) => {
+        const next = { ...current }
+        delete next[runId]
+        return next
+      })
+    } catch (error) {
+      const message = getErrorMessage(error, t)
+      setSendError(message)
+    } finally {
+      setResolvingCallId(null)
+    }
   }
 
   async function handleAsk(event: React.FormEvent<HTMLFormElement>) {
@@ -775,6 +911,9 @@ export function PublicAgentChat({
           setRuns((current) =>
             mergePublicRunEvent(current, liveRunId, streamEvent, placeholderId)
           )
+          if (streamEvent.type === "approval_required") {
+            void loadRunToolCalls(liveRunId, controller)
+          }
           if (streamEvent.type === "error") {
             setSendError(streamEvent.run.error || t("回答失败，请稍后重试。"))
           }
@@ -920,6 +1059,22 @@ export function PublicAgentChat({
                       <div className="min-w-0 flex-1">
                         <div className="rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
                           <PublicExecutionProcess run={run} />
+                          {toolCallsByRun[run.id]
+                            ?.filter(
+                              (call) => call.status === "awaiting_approval"
+                            )
+                            .map((call) => (
+                              <PublicToolApproval
+                                key={call.call_id}
+                                runId={run.id}
+                                call={call}
+                                resolvingCallId={resolvingCallId}
+                                onDecision={(callId, decision) =>
+                                  handleToolCallDecision(run.id, callId, decision)
+                                }
+                                t={t}
+                              />
+                            ))}
                           {run.result ? (
                             <MarkdownContent
                               content={run.result}

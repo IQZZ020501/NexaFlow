@@ -22,7 +22,9 @@ from app.application.agents import (
     get_public_agent_profile,
     get_workspace_published_agent_context,
     list_external_agent_runs,
+    list_external_agent_run_tool_calls,
     list_public_agent_conversations,
+    resolve_external_agent_tool_approval,
     stream_external_agent_run,
 )
 from app.application.agent_access import PublishedAgentContext
@@ -32,6 +34,7 @@ from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
 from app.schemas.agent import (
     AgentApiDocumentationResponse,
+    AgentToolCallResponse,
     ExternalAgentRunCreateRequest,
     ExternalAgentRunListResponse,
     ExternalAgentRunResponse,
@@ -166,6 +169,76 @@ async def stream_public_agent_run(
             after=after,
             live_after=live_after,
         )
+    )
+
+
+@public_router.get(
+    "/runs/{run_id}/tool-calls",
+    response_model=list[AgentToolCallResponse],
+)
+async def list_public_agent_run_tool_calls(
+    agent_id: str,
+    run_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> list[AgentToolCallResponse]:
+    await get_workspace_published_agent_context(db, agent_id, user)
+    return await list_external_agent_run_tool_calls(
+        db,
+        agent_id,
+        run_id,
+        "public",
+        user.id,
+    )
+
+
+@public_router.post(
+    "/runs/{run_id}/tool-calls/{call_id}/approve",
+    response_model=ExternalAgentRunResponse,
+)
+async def approve_public_agent_run_tool_call(
+    agent_id: str,
+    run_id: str,
+    call_id: str,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> ExternalAgentRunResponse:
+    await get_workspace_published_agent_context(db, agent_id, user)
+    return await resolve_external_agent_tool_approval(
+        db,
+        agent_id,
+        run_id,
+        call_id,
+        "public",
+        user,
+        settings,
+        approve=True,
+    )
+
+
+@public_router.post(
+    "/runs/{run_id}/tool-calls/{call_id}/reject",
+    response_model=ExternalAgentRunResponse,
+)
+async def reject_public_agent_run_tool_call(
+    agent_id: str,
+    run_id: str,
+    call_id: str,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> ExternalAgentRunResponse:
+    await get_workspace_published_agent_context(db, agent_id, user)
+    return await resolve_external_agent_tool_approval(
+        db,
+        agent_id,
+        run_id,
+        call_id,
+        "public",
+        user,
+        settings,
+        approve=False,
     )
 
 

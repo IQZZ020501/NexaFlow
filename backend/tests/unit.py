@@ -799,7 +799,7 @@ def test_stale_mcp_policy_requires_approval() -> None:
     assert created_calls[0].approval_required is True
 
 
-def test_external_mcp_policy_must_remain_exactly_read_only() -> None:
+def test_external_mcp_policy_public_reconciles_like_console() -> None:
     from app.application.agent_executor import current_mcp_policy_mode
     from app.entities.tools import McpToolPolicy
 
@@ -829,6 +829,8 @@ def test_external_mcp_policy_must_remain_exactly_read_only() -> None:
         )
         == "disabled"
     )
+    # Public runs reconcile like console runs: a stale or drifted policy
+    # definition falls back to approval, never to a silent disable.
     assert current_mcp_policy_mode(
         "public",
         metadata,
@@ -837,7 +839,7 @@ def test_external_mcp_policy_must_remain_exactly_read_only() -> None:
             mode="read_only",
         ),
         "current-definition",
-    ) == "disabled"
+    ) == "approval_required"
     assert current_mcp_policy_mode(
         "api",
         metadata,
@@ -847,15 +849,38 @@ def test_external_mcp_policy_must_remain_exactly_read_only() -> None:
         ),
         "current-definition",
     ) == "disabled"
+    # The live definition hash only gates the API read-only path; public
+    # runs reconcile the call snapshot against the stored policy like
+    # console runs do.
     assert current_mcp_policy_mode(
         "public",
         metadata,
         current,
         "drifted-definition",
+    ) == "read_only"
+    # Disabled stays disabled everywhere.
+    assert current_mcp_policy_mode(
+        "public",
+        metadata,
+        McpToolPolicy(
+            definition_hash="current-definition",
+            mode="disabled",
+        ),
+        "current-definition",
     ) == "disabled"
+    # Approval-required policies now reach the approval flow on public runs.
+    assert current_mcp_policy_mode(
+        "public",
+        metadata,
+        McpToolPolicy(
+            definition_hash="current-definition",
+            mode="approval_required",
+        ),
+        "current-definition",
+    ) == "approval_required"
 
 
-def test_external_mcp_policy_drift_is_blocked_without_approval() -> None:
+def test_external_mcp_policy_drift_requires_public_approval_but_blocks_api() -> None:
     from app.application import agent_executor
     from app.entities.agents import AgentRun
     from app.entities.tools import McpToolPolicy
@@ -878,8 +903,11 @@ def test_external_mcp_policy_drift_is_blocked_without_approval() -> None:
             mode="approval_required",
         )
 
-    async def get_call(*_args, **_kwargs):
-        return created_calls[0] if created_calls else None
+    async def get_call(_db, run_id, _turn, _call_id):
+        for call in reversed(created_calls):
+            if call.run_id == run_id:
+                return call
+        return None
 
     async def resolve_tools(*_args, **_kwargs):
         return [SimpleNamespace(definition=SimpleNamespace())]
@@ -889,7 +917,7 @@ def test_external_mcp_policy_drift_is_blocked_without_approval() -> None:
         return call
 
     async def block_call(_db, _call_id, reason, blocked_at, result_summary):
-        call = created_calls[0]
+        call = created_calls[-1]
         call.status = "rejected"
         call.last_error = reason
         call.result_content = reason
@@ -913,7 +941,16 @@ def test_external_mcp_policy_drift_is_blocked_without_approval() -> None:
     agent_executor.resolve_mcp_tools = resolve_tools
     agent_executor.mcp_tool_definition_hash = lambda _definition: "current-definition"
 
-    async def assert_blocked() -> None:
+    metadata = {
+        "kind": "mcp",
+        "server_name": "Search",
+        "server_id": "server-1",
+        "source_tool_name": "search",
+        "definition_hash": "current-definition",
+        "policy_mode": "read_only",
+    }
+
+    async def assert_public_requires_approval() -> None:
         ledger = agent_executor.DurableToolLedger(
             AgentRun(
                 id="run-1",
@@ -925,23 +962,48 @@ def test_external_mcp_policy_drift_is_blocked_without_approval() -> None:
             SimpleNamespace(),
             asyncio.Event(),
         )
+        try:
+            await ledger.before(
+                1,
+                {"id": "call-1", "name": "mcp_search", "arguments": "{}"},
+                metadata,
+                {},
+            )
+        except agent_executor.AgentExecutionPaused:
+            return
+        raise AssertionError("expected AgentExecutionPaused")
+
+    async def assert_api_stays_blocked() -> None:
+        ledger = agent_executor.DurableToolLedger(
+            AgentRun(
+                id="run-2",
+                workspace_id="ws-1",
+                access_source="api",
+                consumer_id="credential-1",
+            ),
+            "worker-1",
+            SimpleNamespace(),
+            asyncio.Event(),
+        )
         result = await ledger.before(
             1,
-            {"id": "call-1", "name": "mcp_search", "arguments": "{}"},
-            {
-                "kind": "mcp",
-                "server_name": "Search",
-                "server_id": "server-1",
-                "source_tool_name": "search",
-                "definition_hash": "current-definition",
-                "policy_mode": "read_only",
-            },
+            {"id": "call-2", "name": "mcp_search", "arguments": "{}"},
+            metadata,
             {},
         )
         assert result is not None and result.is_error is True
 
     try:
-        asyncio.run(assert_blocked())
+        asyncio.run(assert_public_requires_approval())
+        public_call = created_calls[-1]
+        assert public_call.policy_mode == "approval_required"
+        assert public_call.approval_required is True
+        assert public_call.status == "awaiting_approval"
+        asyncio.run(assert_api_stays_blocked())
+        api_call = created_calls[-1]
+        assert api_call.policy_mode == "disabled"
+        assert api_call.approval_required is False
+        assert api_call.status == "rejected"
     finally:
         agent_executor.get_session_factory = original_factory
         agent_executor.get_mcp_tool_policy = original_get_policy
@@ -950,10 +1012,6 @@ def test_external_mcp_policy_drift_is_blocked_without_approval() -> None:
         agent_executor.agent_repository.block_agent_tool_call = original_block_call
         agent_executor.resolve_mcp_tools = original_resolve_tools
         agent_executor.mcp_tool_definition_hash = original_definition_hash
-
-    assert created_calls[0].policy_mode == "disabled"
-    assert created_calls[0].approval_required is False
-    assert created_calls[0].status == "rejected"
 
 
 def test_external_stream_epoch_is_stable_and_sanitized() -> None:
@@ -2063,8 +2121,8 @@ def main() -> None:
     test_agent_process_events_update_in_place()
     test_agent_event_replay_reads_every_page()
     test_stale_mcp_policy_requires_approval()
-    test_external_mcp_policy_must_remain_exactly_read_only()
-    test_external_mcp_policy_drift_is_blocked_without_approval()
+    test_external_mcp_policy_public_reconciles_like_console()
+    test_external_mcp_policy_drift_requires_public_approval_but_blocks_api()
     test_external_stream_epoch_is_stable_and_sanitized()
     test_external_progress_events_carry_mcp_tool_details()
     test_external_progress_events_bound_tool_inputs_and_pass_output()

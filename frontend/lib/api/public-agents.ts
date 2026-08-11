@@ -1,5 +1,6 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
+import type { AgentToolCall } from "@/lib/api/agents"
 
 export type PublicAgentProfile = {
   id: string
@@ -85,6 +86,11 @@ export type PublicAgentRunStreamEvent =
       event: ExternalAgentProgressEvent
     })
   | (PublicAgentStreamCursor & {
+      type: "approval_required"
+      call_id: string
+      reason: string
+    })
+  | (PublicAgentStreamCursor & {
       type: "complete" | "error"
       run: ExternalAgentRun
     })
@@ -157,6 +163,33 @@ export function getPublicAgentRun(agentId: string, token: string, runId: string)
   return request<ExternalAgentRun>(publicAgentPath(agentId, `/runs/${runId}`), {
     token,
   })
+}
+
+export function listPublicAgentRunToolCalls(
+  agentId: string,
+  token: string,
+  runId: string
+) {
+  return request<AgentToolCall[]>(
+    publicAgentPath(agentId, `/runs/${runId}/tool-calls`),
+    { token }
+  )
+}
+
+export function resolvePublicAgentRunToolCall(
+  agentId: string,
+  token: string,
+  runId: string,
+  callId: string,
+  decision: "approve" | "reject"
+) {
+  return request<ExternalAgentRun>(
+    publicAgentPath(agentId, `/runs/${runId}/tool-calls/${callId}/${decision}`),
+    {
+      method: "POST",
+      token,
+    }
+  )
 }
 
 export function observePublicAgentRun(
