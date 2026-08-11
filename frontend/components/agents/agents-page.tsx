@@ -9,6 +9,7 @@ import {
   PencilIcon,
   PlusIcon,
   SearchIcon,
+  ShieldCheckIcon,
   SparklesIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -19,6 +20,7 @@ import {
 } from "@/components/knowledge/status-badges"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
+import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
 import { IconButton } from "@/components/ui/icon-button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
@@ -40,16 +42,20 @@ import {
   compareLiveStreamIds,
   createAgent,
   deleteAgent,
+  grantAgentPermission,
   getAgent,
+  listAgentPermissions,
   listAgentRunToolCalls,
   listAgentRuns,
   listAgents,
   observeAgentRun,
   resolveAgentToolCall,
+  revokeAgentPermission,
   streamAgentRun,
   updateAgent,
   type Agent,
   type AgentMcpToolRef,
+  type AgentPermission,
   type AgentRun,
   type AgentRunStreamEvent,
   type AgentToolCall,
@@ -57,6 +63,7 @@ import {
 import { listKnowledgeBases, type KnowledgeBase } from "@/lib/api/knowledge"
 import { listRegisteredModels, type RegisteredModel } from "@/lib/api/llm"
 import { listMcpServers, type McpServer } from "@/lib/api/mcp"
+import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/api/system"
 import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { getErrorMessage } from "@/lib/errors"
 import { getMembershipRole } from "@/lib/display"
@@ -335,6 +342,18 @@ export function AgentsPage({
   const [agentsHasMore, setAgentsHasMore] = React.useState(true)
   const [listedAgentsCount, setListedAgentsCount] = React.useState(0)
   const [isAgentsLoadingMore, setIsAgentsLoadingMore] = React.useState(false)
+  const [permissionAgent, setPermissionAgent] = React.useState<Agent | null>(
+    null
+  )
+  const [permissionMembers, setPermissionMembers] = React.useState<
+    WorkspaceMember[]
+  >([])
+  const [agentPermissions, setAgentPermissions] = React.useState<
+    AgentPermission[]
+  >([])
+  const [isPermissionsLoading, setIsPermissionsLoading] = React.useState(false)
+  const [isPermissionsSaving, setIsPermissionsSaving] = React.useState(false)
+  const permissionRequestRef = React.useRef(0)
   const agentsLoadingMoreRef = React.useRef(false)
   const activeConversationIdRef = React.useRef<string | null>(
     initialConversationId
@@ -444,6 +463,12 @@ export function AgentsPage({
   )
 
   const loadWorkspaceData = React.useCallback(async () => {
+    permissionRequestRef.current += 1
+    setPermissionAgent(null)
+    setPermissionMembers([])
+    setAgentPermissions([])
+    setIsPermissionsLoading(false)
+    setIsPermissionsSaving(false)
     if (!token || !selectedWorkspaceId) {
       setAgents([])
       setModels([])
@@ -882,6 +907,96 @@ export function AgentsPage({
     }
   }
 
+  function closeAgentPermissions() {
+    permissionRequestRef.current += 1
+    setPermissionAgent(null)
+    setPermissionMembers([])
+    setAgentPermissions([])
+    setIsPermissionsLoading(false)
+    setIsPermissionsSaving(false)
+  }
+
+  async function handleOpenAgentPermissions(agent: Agent) {
+    if (!token || !selectedWorkspaceId || !agent.can_edit) return
+    const requestId = permissionRequestRef.current + 1
+    permissionRequestRef.current = requestId
+    setPermissionAgent(agent)
+    setPermissionMembers([])
+    setAgentPermissions([])
+    setIsPermissionsLoading(true)
+    setIsPermissionsSaving(false)
+    try {
+      const [members, permissions] = await Promise.all([
+        listWorkspaceMembers(token, selectedWorkspaceId),
+        listAgentPermissions(token, selectedWorkspaceId, agent.id),
+      ])
+      if (permissionRequestRef.current !== requestId) return
+      setPermissionMembers(members)
+      setAgentPermissions(permissions)
+    } catch (error) {
+      if (permissionRequestRef.current !== requestId) return
+      closeAgentPermissions()
+      reportError(error)
+    } finally {
+      if (permissionRequestRef.current === requestId) {
+        setIsPermissionsLoading(false)
+      }
+    }
+  }
+
+  async function handleGrantAgentPermission(userId: string) {
+    if (!token || !selectedWorkspaceId || !permissionAgent) return
+    const agentId = permissionAgent.id
+    const requestId = permissionRequestRef.current
+    setIsPermissionsSaving(true)
+    try {
+      const permission = await grantAgentPermission(
+        token,
+        selectedWorkspaceId,
+        agentId,
+        userId
+      )
+      if (permissionRequestRef.current !== requestId) return
+      setAgentPermissions((current) => [
+        ...current.filter((item) => item.user.id !== permission.user.id),
+        permission,
+      ])
+      notify("success", t("授权已保存"))
+    } catch (error) {
+      if (permissionRequestRef.current === requestId) reportError(error)
+    } finally {
+      if (permissionRequestRef.current === requestId) {
+        setIsPermissionsSaving(false)
+      }
+    }
+  }
+
+  async function handleRevokeAgentPermission(userId: string) {
+    if (!token || !selectedWorkspaceId || !permissionAgent) return
+    const agentId = permissionAgent.id
+    const requestId = permissionRequestRef.current
+    setIsPermissionsSaving(true)
+    try {
+      await revokeAgentPermission(
+        token,
+        selectedWorkspaceId,
+        agentId,
+        userId
+      )
+      if (permissionRequestRef.current !== requestId) return
+      setAgentPermissions((current) =>
+        current.filter((item) => item.user.id !== userId)
+      )
+      notify("success", t("授权已撤销"))
+    } catch (error) {
+      if (permissionRequestRef.current === requestId) reportError(error)
+    } finally {
+      if (permissionRequestRef.current === requestId) {
+        setIsPermissionsSaving(false)
+      }
+    }
+  }
+
   async function handleAsk(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const nextQuestion = question.trim()
@@ -1106,46 +1221,61 @@ export function AgentsPage({
 
   if (selectedAgent && selectedWorkspaceId) {
     return (
-      <AgentDetailWorkspace
-        agent={selectedAgent}
-        form={form}
-        setForm={setForm}
-        models={models}
-        knowledgeBases={knowledgeBases}
-        mcpServers={mcpServers}
-        runs={runs}
-        toolCallsByRun={toolCallsByRun}
-        resolvingCallId={resolvingCallId}
-        question={question}
-        setQuestion={setQuestion}
-        pendingQuestion={pendingQuestion}
-        isDirty={isDirty}
-        isSaving={isSaving}
-        isAsking={isAsking}
-        isRunsLoading={isRunsLoading}
-        onBack={() => {
-          if (!isDirty || window.confirm(t("放弃未保存的更改？"))) {
-            router.push("/app/apps")
+      <>
+        <AgentDetailWorkspace
+          agent={selectedAgent}
+          form={form}
+          setForm={setForm}
+          models={models}
+          knowledgeBases={knowledgeBases}
+          mcpServers={mcpServers}
+          runs={runs}
+          toolCallsByRun={toolCallsByRun}
+          resolvingCallId={resolvingCallId}
+          question={question}
+          setQuestion={setQuestion}
+          pendingQuestion={pendingQuestion}
+          isDirty={isDirty}
+          isSaving={isSaving}
+          isAsking={isAsking}
+          isRunsLoading={isRunsLoading}
+          onBack={() => {
+            if (!isDirty || window.confirm(t("放弃未保存的更改？"))) {
+              router.push("/app/apps")
+            }
+          }}
+          onDelete={() => void handleDeleteAgent(selectedAgent)}
+          onManagePermissions={() =>
+            void handleOpenAgentPermissions(selectedAgent)
           }
-        }}
-        onDelete={() => void handleDeleteAgent(selectedAgent)}
-        onSave={handleSaveAgent}
-        onPublish={() => void handlePublishAgent()}
-        isPublishing={isPublishing}
-        activeView={activeView}
-        onViewChange={handleViewChange}
-        token={token}
-        workspaceId={selectedWorkspaceId}
-        canManagePublishing={canManagePublishing}
-        notify={notify}
-        onAsk={handleAsk}
-        onCancelAsk={handleCancelAsk}
-        onNewConversation={handleNewConversation}
-        onToolCallDecision={(runId, callId, decision) =>
-          void handleToolCallDecision(runId, callId, decision)
-        }
-        t={t}
-      />
+          onSave={handleSaveAgent}
+          onPublish={() => void handlePublishAgent()}
+          isPublishing={isPublishing}
+          activeView={activeView}
+          onViewChange={handleViewChange}
+          token={token}
+          workspaceId={selectedWorkspaceId}
+          canManagePublishing={canManagePublishing}
+          notify={notify}
+          onAsk={handleAsk}
+          onCancelAsk={handleCancelAsk}
+          onNewConversation={handleNewConversation}
+          onToolCallDecision={(runId, callId, decision) =>
+            void handleToolCallDecision(runId, callId, decision)
+          }
+          t={t}
+        />
+        <AgentPermissionsDialog
+          agent={permissionAgent}
+          members={permissionMembers}
+          permissions={agentPermissions}
+          isLoading={isPermissionsLoading}
+          isSaving={isPermissionsSaving}
+          onClose={closeAgentPermissions}
+          onGrant={handleGrantAgentPermission}
+          onRevoke={handleRevokeAgentPermission}
+        />
+      </>
     )
   }
 
@@ -1276,6 +1406,12 @@ export function AgentsPage({
                 {agent.can_edit ? (
                   <CardMoreMenu label={t("更多")}>
                     <DropdownMenuItem
+                      onSelect={() => void handleOpenAgentPermissions(agent)}
+                    >
+                      <ShieldCheckIcon />
+                      {t("资源授权")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
                       variant="destructive"
                       onSelect={() => void handleDeleteAgent(agent)}
                     >
@@ -1305,6 +1441,16 @@ export function AgentsPage({
       )}
 
       {renderAgentDialog()}
+      <AgentPermissionsDialog
+        agent={permissionAgent}
+        members={permissionMembers}
+        permissions={agentPermissions}
+        isLoading={isPermissionsLoading}
+        isSaving={isPermissionsSaving}
+        onClose={closeAgentPermissions}
+        onGrant={handleGrantAgentPermission}
+        onRevoke={handleRevokeAgentPermission}
+      />
     </>
   )
 

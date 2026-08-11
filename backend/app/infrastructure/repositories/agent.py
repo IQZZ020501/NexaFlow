@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
+from app.domain.resource_permission import ResourcePermission as ResourcePermissionORM
 from app.entities.agents import Agent as AgentEntity
 from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
 from app.entities.agents import AgentRun as AgentRunEntity
@@ -70,12 +71,35 @@ def _to_conversation_memory_entity(row: AgentRun) -> AgentRunEntity:
 async def list_agents(
     db: AsyncSession,
     workspace_id: str,
+    actor_id: str,
+    resource_type: str,
+    include_all: bool,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[AgentEntity]:
-    result = await db.scalars(
+    grant = ResourcePermissionORM
+    statement = (
         select(Agent)
+        .outerjoin(
+            grant,
+            (
+                (grant.workspace_id == Agent.workspace_id)
+                & (grant.resource_type == resource_type)
+                & (grant.resource_id == Agent.id)
+                & (grant.user_id == actor_id)
+            ),
+        )
         .where(Agent.workspace_id == workspace_id)
+    )
+    if not include_all:
+        statement = statement.where(
+            or_(
+                Agent.created_by_user_id == actor_id,
+                grant.id.is_not(None),
+            )
+        )
+    result = await db.scalars(
+        statement
         .order_by(Agent.created_at.desc(), Agent.id.desc())
         .limit(limit)
         .offset(offset)
@@ -1234,7 +1258,12 @@ async def require_agent_tool_call_approval(
     return bool(updated.rowcount)
 
 
-async def delete_agent_graph(db: AsyncSession, agent_id: str) -> None:
+async def delete_agent_graph(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    resource_type: str,
+) -> None:
     await db.execute(delete(AgentRun).where(AgentRun.agent_id == agent_id))
     await db.execute(
         delete(AgentApiCredential).where(AgentApiCredential.agent_id == agent_id)
@@ -1242,6 +1271,13 @@ async def delete_agent_graph(db: AsyncSession, agent_id: str) -> None:
     await db.execute(delete(AgentMcpTool).where(AgentMcpTool.agent_id == agent_id))
     await db.execute(
         delete(AgentKnowledgeBase).where(AgentKnowledgeBase.agent_id == agent_id)
+    )
+    await db.execute(
+        delete(ResourcePermissionORM).where(
+            ResourcePermissionORM.workspace_id == workspace_id,
+            ResourcePermissionORM.resource_type == resource_type,
+            ResourcePermissionORM.resource_id == agent_id,
+        )
     )
     await db.execute(delete(Agent).where(Agent.id == agent_id))
 

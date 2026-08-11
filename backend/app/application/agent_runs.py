@@ -33,6 +33,7 @@ from app.shareddomain.agents.services import (
     get_agent,
     get_agent_model,
 )
+from app.shareddomain.agents.permissions import require_agent_view
 
 AGENT_EVENT_PAGE_SIZE = 200
 
@@ -145,11 +146,13 @@ async def list_agent_runs(
     workspace_id: str,
     agent_id: str,
     actor: User,
+    workspace_role: str | None,
     limit: int | None = None,
     offset: int = 0,
     conversation_id: str | None = None,
 ) -> list[AgentRunResponse]:
-    await get_agent(db, workspace_id, agent_id)
+    agent = await get_agent(db, workspace_id, agent_id)
+    await require_agent_view(db, agent, actor, workspace_role)
     return [
         run_to_response(run)
         for run in await agent_repository.list_agent_runs(
@@ -170,8 +173,16 @@ async def get_agent_run_response(
     agent_id: str,
     run_id: str,
     actor: User,
+    workspace_role: str | None,
 ) -> AgentRunResponse:
-    run = await get_agent_run_entity(db, workspace_id, agent_id, run_id, actor)
+    run = await get_agent_run_entity(
+        db,
+        workspace_id,
+        agent_id,
+        run_id,
+        actor,
+        workspace_role,
+    )
     return run_to_response(run, trace_id=run.trace_id)
 
 
@@ -181,8 +192,10 @@ async def get_agent_run_entity(
     agent_id: str,
     run_id: str,
     actor: User,
+    workspace_role: str | None,
 ) -> AgentRun:
-    await get_agent(db, workspace_id, agent_id)
+    agent = await get_agent(db, workspace_id, agent_id)
+    await require_agent_view(db, agent, actor, workspace_role)
     run = await agent_repository.get_agent_run_by_id(db, run_id)
     if (
         run is None
@@ -219,8 +232,16 @@ async def list_agent_run_tool_calls(
     agent_id: str,
     run_id: str,
     actor: User,
+    workspace_role: str | None,
 ) -> list[AgentToolCallResponse]:
-    await get_agent_run_response(db, workspace_id, agent_id, run_id, actor)
+    await get_agent_run_response(
+        db,
+        workspace_id,
+        agent_id,
+        run_id,
+        actor,
+        workspace_role,
+    )
     return [
         tool_call_to_response(call)
         for call in await agent_repository.list_agent_tool_calls(db, run_id)
@@ -322,11 +343,19 @@ async def resolve_agent_tool_approval(
     run_id: str,
     call_id: str,
     actor: User,
+    workspace_role: str | None,
     settings: Settings,
     *,
     approve: bool,
 ) -> AgentRunResponse:
-    await get_agent_run_response(db, workspace_id, agent_id, run_id, actor)
+    await get_agent_run_response(
+        db,
+        workspace_id,
+        agent_id,
+        run_id,
+        actor,
+        workspace_role,
+    )
     run = await agent_repository.get_agent_run_by_id(db, run_id)
     assert run is not None
     run = await resolve_agent_run_tool_approval(
@@ -360,6 +389,8 @@ async def prepare_agent_run(
     elif not consumer_id:
         raise ValueError("External Agent runs require a consumer id.")
     agent = await get_agent(db, workspace_id, agent_id)
+    if access_source == "console":
+        await require_agent_view(db, agent, actor, workspace_role)
     if agent.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent is disabled.")
     model = await get_agent_model(db, workspace_id, agent.model_id)

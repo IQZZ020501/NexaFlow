@@ -1,5 +1,6 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
+import type { User } from "@/lib/api/auth"
 
 export type KnowledgeQueryMode = "required" | "agentic"
 
@@ -26,6 +27,11 @@ export type Agent = {
 export type AgentMcpToolRef = {
   server_id: string
   tool_name: string
+}
+
+export type AgentPermission = {
+  user: User
+  permission: "view"
 }
 
 export type AgentPayload = {
@@ -282,6 +288,45 @@ export function deleteAgent(
     method: "DELETE",
     token,
   })
+}
+
+export function listAgentPermissions(
+  token: string,
+  workspaceId: string,
+  agentId: string
+) {
+  return request<AgentPermission[]>(
+    agentsPath(workspaceId, `/${agentId}/permissions`),
+    { token }
+  )
+}
+
+export function grantAgentPermission(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  userId: string
+) {
+  return request<AgentPermission>(
+    agentsPath(workspaceId, `/${agentId}/permissions/${userId}`),
+    {
+      method: "PUT",
+      token,
+      body: JSON.stringify({ permission: "view" }),
+    }
+  )
+}
+
+export function revokeAgentPermission(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  userId: string
+) {
+  return request<void>(
+    agentsPath(workspaceId, `/${agentId}/permissions/${userId}`),
+    { method: "DELETE", token }
+  )
 }
 
 export function listAgentApiCredentials(

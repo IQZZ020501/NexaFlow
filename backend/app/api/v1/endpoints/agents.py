@@ -19,6 +19,7 @@ from app.application.agents import (
     get_agent_run_entity,
     get_agent_run_response,
     get_agent_response,
+    list_agent_permissions,
     list_agent_run_tool_calls,
     list_agent_api_credentials,
     list_agent_conversation_users,
@@ -26,11 +27,14 @@ from app.application.agents import (
     list_agent_runs,
     list_agents,
     prepare_agent_run,
+    require_agent_edit,
     resolve_agent_tool_approval,
     revoke_agent_api_credential,
+    revoke_agent_permission,
     rotate_agent_api_credential,
     stream_agent_run,
     update_agent,
+    upsert_agent_permission,
 )
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
@@ -43,6 +47,8 @@ from app.schemas.agent import (
     AgentResponse,
     AgentLogListResponse,
     AgentMonitoringResponse,
+    AgentPermissionResponse,
+    AgentPermissionUpsertRequest,
     AgentRunCreateRequest,
     AgentRunResponse,
     AgentToolCallResponse,
@@ -247,6 +253,60 @@ async def get_workspace_agent(
     )
 
 
+@router.get(
+    "/{agent_id}/permissions",
+    response_model=list[AgentPermissionResponse],
+)
+async def list_workspace_agent_permissions(
+    agent_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[AgentPermissionResponse]:
+    agent = await get_agent(db, context.workspace.id, agent_id)
+    require_agent_edit(agent, context.user, context.membership_role)
+    return await list_agent_permissions(db, agent, limit, offset)
+
+
+@router.put(
+    "/{agent_id}/permissions/{user_id}",
+    response_model=AgentPermissionResponse,
+)
+async def grant_workspace_agent_permission(
+    agent_id: str,
+    user_id: str,
+    payload: AgentPermissionUpsertRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentPermissionResponse:
+    agent = await get_agent(db, context.workspace.id, agent_id)
+    require_agent_edit(agent, context.user, context.membership_role)
+    return await upsert_agent_permission(
+        db,
+        agent,
+        user_id,
+        payload.permission,
+        context.user,
+    )
+
+
+@router.delete(
+    "/{agent_id}/permissions/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_workspace_agent_permission(
+    agent_id: str,
+    user_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    agent = await get_agent(db, context.workspace.id, agent_id)
+    require_agent_edit(agent, context.user, context.membership_role)
+    await revoke_agent_permission(db, agent, user_id, context.user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.patch("/{agent_id}", response_model=AgentResponse)
 async def patch_workspace_agent(
     agent_id: str,
@@ -289,6 +349,7 @@ async def list_workspace_agent_runs(
         context.workspace.id,
         agent_id,
         context.user,
+        context.membership_role,
         limit,
         offset,
         conversation_id,
@@ -332,6 +393,7 @@ async def get_workspace_agent_run(
         agent_id,
         run_id,
         context.user,
+        context.membership_role,
     )
 
 
@@ -351,6 +413,7 @@ async def list_workspace_agent_run_tool_calls(
         agent_id,
         run_id,
         context.user,
+        context.membership_role,
     )
 
 
@@ -413,6 +476,7 @@ async def reconnect_workspace_agent_run(
         agent_id,
         run_id,
         context.user,
+        context.membership_role,
     )
     run = await get_agent_run_entity(
         db,
@@ -420,6 +484,7 @@ async def reconnect_workspace_agent_run(
         agent_id,
         run_id,
         context.user,
+        context.membership_role,
     )
     await db.rollback()
 
@@ -462,6 +527,7 @@ async def approve_workspace_agent_tool_call(
         run_id,
         call_id,
         context.user,
+        context.membership_role,
         settings,
         approve=True,
     )
@@ -486,6 +552,7 @@ async def reject_workspace_agent_tool_call(
         run_id,
         call_id,
         context.user,
+        context.membership_role,
         settings,
         approve=False,
     )

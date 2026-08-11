@@ -23,7 +23,7 @@ class ResourcePermission(Base):
             name="fk_resource_permission_workspace_user",
         ),
         CheckConstraint(
-            "resource_type IN ('knowledge_base')",
+            "resource_type IN ('knowledge_base', 'agent')",
             name="ck_resource_permissions_resource_type",
         ),
         CheckConstraint(

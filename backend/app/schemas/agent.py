@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.user import UserResponse
+
 
 class AgentMcpToolRef(BaseModel):
     server_id: str = Field(min_length=1, max_length=36)
@@ -52,6 +54,15 @@ class AgentUpdateRequest(BaseModel):
     mcp_tools: list[AgentMcpToolRef] | None = Field(default=None, max_length=12)
     status: str | None = Field(default=None, min_length=1, max_length=20)
     published: bool | None = None
+
+
+class AgentPermissionResponse(BaseModel):
+    user: UserResponse
+    permission: Literal["view"]
+
+
+class AgentPermissionUpsertRequest(BaseModel):
+    permission: Literal["view"]
 
 
 class AgentRunCreateRequest(BaseModel):
