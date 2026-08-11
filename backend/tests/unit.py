@@ -175,6 +175,65 @@ def test_parse_task_options_validates_boundaries() -> None:
     )
 
 
+def test_markdown_tables_split_only_between_rows_and_repeat_headers() -> None:
+    from app.capabilities.embedding.pipeline import split_text
+
+    header = "| Name | Description |"
+    alignment = "| --- | --- |"
+    rows = [
+        "| alpha | first value |",
+        "| beta | second value |",
+        "| gamma | third value |",
+    ]
+    table = "\n".join([header, alignment, *rows])
+
+    chunks = split_text(table, chunk_size=55, overlap=20, separator=".")
+
+    assert len(chunks) == 3
+    assert all(chunk.splitlines()[:2] == [header, alignment] for chunk in chunks)
+    assert all(row in chunk for row, chunk in zip(rows, chunks, strict=True))
+    assert all(row not in "\n".join(chunks[index + 1 :]) for index, row in enumerate(rows))
+
+
+def test_markdown_table_keeps_single_overlong_row_intact() -> None:
+    from app.capabilities.embedding.pipeline import split_text
+
+    long_cell = "word " * 30
+    row = f"| 1 | {long_cell.strip()} |"
+    table = f"| ID | Notes |\n| --- | --- |\n{row}"
+
+    chunks = split_text(table, chunk_size=40, overlap=0)
+
+    assert len(chunks) == 1
+    assert row in chunks[0]
+
+
+def test_markdown_table_rules_apply_to_parent_and_child_chunks() -> None:
+    from app.capabilities.embedding.pipeline import (
+        build_hierarchical_chunks,
+        split_parent_chunks,
+    )
+
+    header = "| Key | Value |"
+    alignment = "| --- | --- |"
+    rows = [f"| {index} | value-{index} |" for index in range(8)]
+    table = "\n".join([header, alignment, *rows])
+
+    parents = split_parent_chunks(table, max_size=90)
+    drafts = build_hierarchical_chunks(table, chunk_size=45, overlap=0, separator=".")
+
+    assert all(parent.content.splitlines()[:2] == [header, alignment] for parent in parents)
+    assert all(child.content.splitlines()[:2] == [header, alignment] for child in drafts.children)
+    assert all(
+        drafts.parents[child.parent_index].content[child.start_offset : child.end_offset]
+        == child.content
+        or child.content.endswith(
+            drafts.parents[child.parent_index].content[child.start_offset : child.end_offset]
+        )
+        for child in drafts.children
+    )
+
+
 def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
     from io import BytesIO
     from pathlib import Path
@@ -1886,6 +1945,9 @@ def main() -> None:
     test_knowledge_writes_recheck_locked_owner()
     test_clean_upload_filename_sanitizes_path_and_classification()
     test_parse_task_options_validates_boundaries()
+    test_markdown_tables_split_only_between_rows_and_repeat_headers()
+    test_markdown_table_keeps_single_overlong_row_intact()
+    test_markdown_table_rules_apply_to_parent_and_child_chunks()
     test_docx_images_without_alt_text_do_not_add_placeholder_content()
     test_supported_document_formats_are_accepted()
     test_pdf_documents_use_pymupdf_markdown_with_ocr()
