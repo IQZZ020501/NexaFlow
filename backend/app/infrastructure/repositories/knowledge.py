@@ -936,4 +936,3 @@ async def delete_knowledge_base_graph(
     await db.execute(
         delete(KnowledgeBaseORM).where(KnowledgeBaseORM.id == knowledge_base.id)
     )
-
