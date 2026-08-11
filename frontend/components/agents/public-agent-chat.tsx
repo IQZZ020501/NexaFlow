@@ -199,7 +199,7 @@ function PublicToolEventRow({
                   <span className="ml-1">({t("内容过长已截断")})</span>
                 ) : null}
               </p>
-              <pre className="max-h-44 overflow-auto rounded-md bg-background p-3 font-mono leading-5 break-words whitespace-pre-wrap">
+              <pre className="max-h-44 overflow-auto rounded-md bg-background p-3 font-mono leading-5 whitespace-pre">
                 {JSON.stringify(event.input, null, 2)}
               </pre>
             </div>
@@ -239,7 +239,7 @@ function PublicToolEventRow({
               <p className="mb-1 font-medium text-muted-foreground">
                 {t("调用结果")}
               </p>
-              <pre className="max-h-64 overflow-auto rounded-md bg-background p-3 font-mono leading-5 break-words whitespace-pre-wrap">
+              <pre className="max-h-64 overflow-auto rounded-md bg-background p-3 font-mono leading-5 whitespace-pre">
                 {typeof event.output === "string"
                   ? event.output
                   : JSON.stringify(event.output, null, 2)}
