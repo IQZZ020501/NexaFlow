@@ -849,15 +849,15 @@ def test_external_mcp_policy_public_reconciles_like_console() -> None:
         ),
         "current-definition",
     ) == "disabled"
-    # The live definition hash only gates the API read-only path; public
-    # runs reconcile the call snapshot against the stored policy like
-    # console runs do.
+    # A live definition that drifted from the durable call snapshot requires
+    # renewed approval on public runs; only the API read-only gate compares
+    # the live hash directly.
     assert current_mcp_policy_mode(
         "public",
         metadata,
         current,
         "drifted-definition",
-    ) == "read_only"
+    ) == "approval_required"
     # Disabled stays disabled everywhere.
     assert current_mcp_policy_mode(
         "public",

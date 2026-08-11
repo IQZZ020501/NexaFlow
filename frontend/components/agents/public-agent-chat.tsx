@@ -41,6 +41,7 @@ import {
   listPublicAgentConversations,
   listPublicAgentRuns,
   listPublicAgentRunToolCalls,
+  observePublicAgentRun,
   resolvePublicAgentRunToolCall,
   streamPublicAgentRun,
   type ExternalAgentProgressEvent,
@@ -859,6 +860,46 @@ export function PublicAgentChat({
         delete next[runId]
         return next
       })
+      if (!streamControllerRef.current) {
+        // This run was resumed from a paused conversation, not an active
+        // stream. The backend requeued it; observe it until it reaches a
+        // terminal status so the completed result is delivered.
+        const controller = new AbortController()
+        streamControllerRef.current = controller
+        const observedRunId = runId
+        void observePublicAgentRun(
+          agentId,
+          token,
+          runId,
+          (streamEvent) => {
+            if (streamControllerRef.current !== controller) return
+            setRuns((current) =>
+              mergePublicRunEvent(
+                current,
+                observedRunId,
+                streamEvent,
+                observedRunId
+              )
+            )
+            if (streamEvent.type === "approval_required") {
+              void loadRunToolCalls(observedRunId, controller)
+            }
+            if (streamEvent.type === "error") {
+              setSendError(streamEvent.run.error || t("回答失败，请稍后重试。"))
+            }
+          },
+          controller.signal
+        )
+          .catch((error: unknown) => {
+            const message = getErrorMessage(error, t)
+            setSendError(message)
+          })
+          .finally(() => {
+            if (streamControllerRef.current === controller) {
+              streamControllerRef.current = null
+            }
+          })
+      }
     } catch (error) {
       const message = getErrorMessage(error, t)
       setSendError(message)

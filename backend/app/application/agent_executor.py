@@ -176,6 +176,13 @@ def current_mcp_policy_mode(
         return metadata.get("policy_mode", "")
     if policy.definition_hash != metadata.get("definition_hash", ""):
         return "approval_required"
+    if (
+        current_definition_hash is not None
+        and current_definition_hash != metadata.get("definition_hash", "")
+    ):
+        # The live tool definition drifted from the durable call snapshot;
+        # require renewed approval before the call may resume.
+        return "approval_required"
     return policy.mode
 
 
