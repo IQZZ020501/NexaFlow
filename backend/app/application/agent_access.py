@@ -38,6 +38,7 @@ from app.schemas.agent import (
     AgentMonitoringDailyResponse,
     AgentMonitoringResponse,
     AgentMonitoringValues,
+    ExternalAgentKnowledgeHitResponse,
     ExternalAgentProgressEventResponse,
     ExternalAgentRunListResponse,
     ExternalAgentRunResponse,
@@ -180,6 +181,20 @@ def external_progress_events(
                 count = max(0, int(summary.rsplit(":", 1)[1]))
             except ValueError:
                 count = None
+        hits: list[ExternalAgentKnowledgeHitResponse] = []
+        if progress_type == "knowledge":
+            output = event.get("output")
+            if isinstance(output, dict) and isinstance(output.get("hits"), list):
+                for raw_hit in output["hits"]:
+                    if not isinstance(raw_hit, dict):
+                        continue
+                    hits.append(
+                        ExternalAgentKnowledgeHitResponse(
+                            knowledge_base=str(raw_hit.get("knowledge_base") or ""),
+                            document=str(raw_hit.get("document") or ""),
+                            content=str(raw_hit.get("content") or ""),
+                        )
+                    )
         upsert(
             ExternalAgentProgressEventResponse(
                 id=_external_progress_id(event, "tool"),
@@ -188,6 +203,7 @@ def external_progress_events(
                 stage=event_status,
                 turn=turn,
                 count=count,
+                hits=hits,
             )
         )
     return progress

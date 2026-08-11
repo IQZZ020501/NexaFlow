@@ -989,7 +989,92 @@ def test_external_stream_epoch_is_stable_and_sanitized() -> None:
         "turn": 1,
         "count": None,
         "reasoning": "Let me think",
+        "hits": [],
     }
+
+
+def test_external_progress_events_carry_knowledge_hits() -> None:
+    from app.application.agent_access import external_progress_events
+
+    events = [
+        {
+            "type": "tool",
+            "turn": 0,
+            "tool_name": "search_knowledge",
+            "tool_kind": "knowledge",
+            "status": "running",
+            "summary": "agent.tool_running",
+            "call_id": "call-1",
+        },
+        {
+            "type": "tool",
+            "turn": 0,
+            "tool_name": "search_knowledge",
+            "tool_kind": "knowledge",
+            "status": "succeeded",
+            "summary": "agent.knowledge_chunks_returned:2",
+            "call_id": "call-1",
+            "output": {
+                "query": "release process",
+                "hits": [
+                    {
+                        "knowledge_base": "Release KB",
+                        "document": "release.md",
+                        "content": "Cut the release on Fridays.",
+                    },
+                    {
+                        "knowledge_base": "Release KB",
+                        "document": "handbook.md",
+                        "content": "Tag with semantic versions.",
+                    },
+                    "not-a-dict",
+                ],
+                "evidence_status": "found",
+            },
+        },
+    ]
+    progress = external_progress_events(events, "succeeded")
+    assert len(progress) == 1
+    event = progress[0]
+    assert event.type == "knowledge"
+    assert event.status == "succeeded"
+    assert event.count == 2
+    assert [hit.model_dump() for hit in event.hits] == [
+        {
+            "knowledge_base": "Release KB",
+            "document": "release.md",
+            "content": "Cut the release on Fridays.",
+        },
+        {
+            "knowledge_base": "Release KB",
+            "document": "handbook.md",
+            "content": "Tag with semantic versions.",
+        },
+    ]
+
+
+def test_external_progress_events_knowledge_failure_has_no_hits() -> None:
+    from app.application.agent_access import external_progress_events
+
+    progress = external_progress_events(
+        [
+            {
+                "type": "tool",
+                "turn": 0,
+                "tool_name": "search_knowledge",
+                "tool_kind": "knowledge",
+                "status": "failed",
+                "summary": "Knowledge search unavailable.",
+                "call_id": "call-1",
+                "output": {"query": "missing", "hits": [], "evidence_status": "unavailable"},
+            }
+        ],
+        "failed",
+    )
+    assert len(progress) == 1
+    event = progress[0]
+    assert event.status == "failed"
+    assert event.hits == []
 
 
 def test_mcp_policy_concurrent_first_write_reloads_existing() -> None:

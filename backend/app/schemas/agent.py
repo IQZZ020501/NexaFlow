@@ -176,6 +176,12 @@ class PublicAgentProfileResponse(BaseModel):
     description: str
 
 
+class ExternalAgentKnowledgeHitResponse(BaseModel):
+    knowledge_base: str = ""
+    document: str = ""
+    content: str = ""
+
+
 class ExternalAgentProgressEventResponse(BaseModel):
     id: str
     type: Literal["analysis", "knowledge", "tool", "answer"]
@@ -191,6 +197,7 @@ class ExternalAgentProgressEventResponse(BaseModel):
     turn: int
     count: int | None = None
     reasoning: str = ""
+    hits: list[ExternalAgentKnowledgeHitResponse] = Field(default_factory=list)
 
 
 class ExternalAgentRunResponse(BaseModel):
