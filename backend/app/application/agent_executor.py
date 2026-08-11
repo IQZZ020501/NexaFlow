@@ -174,6 +174,10 @@ def current_mcp_policy_mode(
         return "disabled"
     if policy is None:
         return metadata.get("policy_mode", "")
+    if policy.mode == "disabled":
+        # An explicit disable is authoritative; a drifted definition must
+        # not make the tool approvable again.
+        return "disabled"
     if policy.definition_hash != metadata.get("definition_hash", ""):
         return "approval_required"
     if (

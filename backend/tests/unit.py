@@ -897,7 +897,7 @@ def test_external_mcp_policy_public_reconciles_like_console() -> None:
         current,
         "drifted-definition",
     ) == "approval_required"
-    # Disabled stays disabled everywhere.
+    # Disabled stays disabled everywhere, including during live drift.
     assert current_mcp_policy_mode(
         "public",
         metadata,
@@ -906,6 +906,15 @@ def test_external_mcp_policy_public_reconciles_like_console() -> None:
             mode="disabled",
         ),
         "current-definition",
+    ) == "disabled"
+    assert current_mcp_policy_mode(
+        "public",
+        metadata,
+        McpToolPolicy(
+            definition_hash="stale-definition",
+            mode="disabled",
+        ),
+        "drifted-definition",
     ) == "disabled"
     # Approval-required policies now reach the approval flow on public runs.
     assert current_mcp_policy_mode(
