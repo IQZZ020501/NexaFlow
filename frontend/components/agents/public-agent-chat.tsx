@@ -208,9 +208,6 @@ function PublicToolEventRow({
             <div>
               <p className="mb-1 font-medium text-muted-foreground">
                 {t("调用结果")}
-                {event.output_truncated ? (
-                  <span className="ml-1">({t("内容过长已截断")})</span>
-                ) : null}
               </p>
               {event.hits.length > 0 ? (
                 <div className="space-y-2">
@@ -241,9 +238,6 @@ function PublicToolEventRow({
             <div>
               <p className="mb-1 font-medium text-muted-foreground">
                 {t("调用结果")}
-                {event.output_truncated ? (
-                  <span className="ml-1">({t("内容过长已截断")})</span>
-                ) : null}
               </p>
               <pre className="max-h-64 overflow-auto rounded-md bg-background p-3 font-mono leading-5 break-words whitespace-pre-wrap">
                 {typeof event.output === "string"

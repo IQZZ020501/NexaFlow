@@ -109,44 +109,61 @@ def _external_progress_id(event: dict[str, Any], suffix: str = "") -> str:
     return hashlib.sha256(f"external-progress:{identity}".encode()).hexdigest()[:16]
 
 
-TOOL_PAYLOAD_MAX_STRING = 500
-TOOL_PAYLOAD_MAX_DEPTH = 4
-TOOL_PAYLOAD_MAX_ITEMS = 25
-TOOL_PAYLOAD_MAX_TOTAL_ITEMS = 200
-TOOL_PAYLOAD_MAX_TOTAL_CHARS = 4000
-TOOL_PAYLOAD_MAX_SERIALIZED = 4000
 TOOL_PAYLOAD_ELLIPSIS = "…"
+
+
+@dataclass(frozen=True)
+class ToolPayloadLimits:
+    max_string: int
+    max_depth: int
+    max_items: int
+    max_total_items: int
+    max_total_chars: int
+    max_serialized: int
+
+
+# 调用参数通常很小：收紧限制防止异常参数撑爆公开流。
+# 调用结果（output）完整透传，不做截断。
+TOOL_INPUT_LIMITS = ToolPayloadLimits(
+    max_string=500,
+    max_depth=4,
+    max_items=25,
+    max_total_items=200,
+    max_total_chars=4000,
+    max_serialized=4000,
+)
 
 
 def _limit_tool_payload(
     value: object,
     depth: int,
     budget: list[int],
+    limits: ToolPayloadLimits,
 ) -> tuple[object, bool]:
     """递归限制工具载荷，返回 (受限副本, 是否截断)。
 
     budget = [剩余元素数, 剩余字符数]，遍历途中耗尽即截断，
     避免 materialize 超大容器或保留超限结构。
     """
-    if depth >= TOOL_PAYLOAD_MAX_DEPTH:
+    if depth >= limits.max_depth:
         return TOOL_PAYLOAD_ELLIPSIS, True
     if budget[0] <= 0 or budget[1] <= 0:
         return TOOL_PAYLOAD_ELLIPSIS, True
     if isinstance(value, dict):
         limited: dict[str, object] = {}
         truncated = False
-        for key, item in islice(value.items(), TOOL_PAYLOAD_MAX_ITEMS):
+        for key, item in islice(value.items(), limits.max_items):
             if budget[0] <= 0 or budget[1] <= 0:
                 truncated = True
                 break
             budget[0] -= 1
             safe_key = key if isinstance(key, str) else str(key)
-            if len(safe_key) > TOOL_PAYLOAD_MAX_STRING:
-                safe_key = safe_key[:TOOL_PAYLOAD_MAX_STRING] + TOOL_PAYLOAD_ELLIPSIS
+            if len(safe_key) > limits.max_string:
+                safe_key = safe_key[: limits.max_string] + TOOL_PAYLOAD_ELLIPSIS
                 truncated = True
             budget[1] -= len(safe_key)
             limited[safe_key], item_truncated = _limit_tool_payload(
-                item, depth + 1, budget
+                item, depth + 1, budget, limits
             )
             truncated = truncated or item_truncated
         if len(value) > len(limited):
@@ -155,13 +172,13 @@ def _limit_tool_payload(
     if isinstance(value, list):
         limited: list[object] = []
         truncated = False
-        for item in islice(value, TOOL_PAYLOAD_MAX_ITEMS):
+        for item in islice(value, limits.max_items):
             if budget[0] <= 0 or budget[1] <= 0:
                 truncated = True
                 break
             budget[0] -= 1
             limited_item, item_truncated = _limit_tool_payload(
-                item, depth + 1, budget
+                item, depth + 1, budget, limits
             )
             limited.append(limited_item)
             truncated = truncated or item_truncated
@@ -169,29 +186,29 @@ def _limit_tool_payload(
             truncated = True
         return limited, truncated
     if isinstance(value, str):
-        budget[1] -= min(len(value), TOOL_PAYLOAD_MAX_STRING)
-        if len(value) > TOOL_PAYLOAD_MAX_STRING:
-            return value[:TOOL_PAYLOAD_MAX_STRING] + TOOL_PAYLOAD_ELLIPSIS, True
+        budget[1] -= min(len(value), limits.max_string)
+        if len(value) > limits.max_string:
+            return value[: limits.max_string] + TOOL_PAYLOAD_ELLIPSIS, True
         return value, False
     if value is None or isinstance(value, (bool, int, float)):
         budget[1] -= len(str(value))
         return value, False
     text = str(value)
-    budget[1] -= min(len(text), TOOL_PAYLOAD_MAX_STRING)
-    if len(text) > TOOL_PAYLOAD_MAX_STRING:
-        return text[:TOOL_PAYLOAD_MAX_STRING] + TOOL_PAYLOAD_ELLIPSIS, True
+    budget[1] -= min(len(text), limits.max_string)
+    if len(text) > limits.max_string:
+        return text[: limits.max_string] + TOOL_PAYLOAD_ELLIPSIS, True
     return text, False
 
 
-def _bounded_tool_payload(value: object) -> tuple[object, bool]:
-    """限制工具 input/output 载荷，保证元素数与序列化大小都有界。"""
-    budget = [
-        TOOL_PAYLOAD_MAX_TOTAL_ITEMS,
-        TOOL_PAYLOAD_MAX_TOTAL_CHARS,
-    ]
-    limited, truncated = _limit_tool_payload(value, 0, budget)
+def _bounded_tool_payload(
+    value: object,
+    limits: ToolPayloadLimits,
+) -> tuple[object, bool]:
+    """按给定限制约束工具载荷，保证元素数与序列化大小都有界。"""
+    budget = [limits.max_total_items, limits.max_total_chars]
+    limited, truncated = _limit_tool_payload(value, 0, budget, limits)
     serialized = json.dumps(limited, ensure_ascii=False, default=str)
-    if len(serialized) > TOOL_PAYLOAD_MAX_SERIALIZED:
+    if len(serialized) > limits.max_serialized:
         # 结构截断后仍超限：整体替换为截断标记，避免嵌入原始序列化文本
         # 导致再序列化时引号转义膨胀。
         return {"truncated": True}, True
@@ -291,10 +308,8 @@ def external_progress_events(
                         )
                     )
         bounded_input, input_truncated = _bounded_tool_payload(
-            raw_input if isinstance(raw_input, dict) else {}
-        )
-        bounded_output, output_truncated = _bounded_tool_payload(
-            event.get("output")
+            raw_input if isinstance(raw_input, dict) else {},
+            TOOL_INPUT_LIMITS,
         )
         upsert(
             ExternalAgentProgressEventResponse(
@@ -309,9 +324,8 @@ def external_progress_events(
                 tool_kind=tool_kind,
                 server_name=str(event.get("server_name") or ""),
                 input=bounded_input,
-                output=bounded_output,
+                output=event.get("output"),
                 input_truncated=input_truncated,
-                output_truncated=output_truncated,
                 hits=hits,
             )
         )

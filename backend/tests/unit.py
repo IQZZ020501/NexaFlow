@@ -1055,7 +1055,6 @@ def test_external_stream_epoch_is_stable_and_sanitized() -> None:
         "input": {},
         "output": None,
         "input_truncated": False,
-        "output_truncated": False,
         "hits": [],
     }
 
@@ -1152,39 +1151,46 @@ def test_external_progress_events_carry_mcp_tool_details() -> None:
     assert event.output == {"results": [{"title": "NexaFlow"}]}
 
 
-def test_external_progress_events_bound_tool_payloads() -> None:
+def test_external_progress_events_bound_tool_inputs_and_pass_output() -> None:
     import json
 
     from app.application.agent_access import (
-        TOOL_PAYLOAD_MAX_STRING,
+        TOOL_INPUT_LIMITS,
         _bounded_tool_payload,
         external_progress_events,
     )
 
+    # input 用紧限制：字符串/深度/集合/全局预算都被约束
     oversized = {
-        "query": "x" * (TOOL_PAYLOAD_MAX_STRING + 100),
+        "query": "x" * (TOOL_INPUT_LIMITS.max_string + 100),
         "nested": {"deep": {"deeper": {"deepest": {"value": "too deep"}}}},
         "items": list(range(100)),
     }
-    bounded, truncated = _bounded_tool_payload(oversized)
+    bounded, truncated = _bounded_tool_payload(oversized, TOOL_INPUT_LIMITS)
     assert truncated
-    assert len(bounded["query"]) <= TOOL_PAYLOAD_MAX_STRING + 1
-    assert len(bounded["items"]) <= 25
+    assert len(bounded["query"]) <= TOOL_INPUT_LIMITS.max_string + 1
+    assert len(bounded["items"]) <= TOOL_INPUT_LIMITS.max_items
     assert bounded["nested"]["deep"]["deeper"]["deepest"] == "…"
-    assert len(json.dumps(bounded)) < 4000
+    assert len(json.dumps(bounded)) < TOOL_INPUT_LIMITS.max_serialized
 
-    # 全局预算：结构巨大时整体受限（或替换为截断标记），序列化保持有界
+    # input 全局预算：结构巨大时整体受限，序列化保持有界
     huge = {"key": {f"k{i}": "v" * 200 for i in range(100)}}
-    bounded_huge, huge_truncated = _bounded_tool_payload(huge)
+    bounded_huge, huge_truncated = _bounded_tool_payload(huge, TOOL_INPUT_LIMITS)
     assert huge_truncated
-    assert len(json.dumps(bounded_huge)) < 4000
+    assert len(json.dumps(bounded_huge)) < TOOL_INPUT_LIMITS.max_serialized
 
-    # 扁平超大 dict：只消费前 TOOL_PAYLOAD_MAX_ITEMS 项，不 materialize 全部
+    # input 扁平超大 dict：只消费前 max_items 项，不 materialize 全部
     flat = {f"key-{i}": "value" for i in range(10000)}
-    bounded_flat, flat_truncated = _bounded_tool_payload(flat)
+    bounded_flat, flat_truncated = _bounded_tool_payload(flat, TOOL_INPUT_LIMITS)
     assert flat_truncated
-    assert len(bounded_flat) <= 25
+    assert len(bounded_flat) <= TOOL_INPUT_LIMITS.max_items
 
+    # output 完整透传：事件中的任意大小/深度结果原样返回，不截断
+    huge_output = {
+        "text": "z" * 50000,
+        "nested": {"a": {"b": {"c": {"d": {"e": {"f": {"g": "deep"}}}}}}},
+        "rows": list(range(5000)),
+    }
     progress = external_progress_events(
         [
             {
@@ -1194,15 +1200,14 @@ def test_external_progress_events_bound_tool_payloads() -> None:
                 "status": "succeeded",
                 "summary": "agent.tool_running",
                 "call_id": "call-3",
-                "input": {"query": "x" * (TOOL_PAYLOAD_MAX_STRING + 50)},
-                "output": {"rows": list(range(500))},
+                "input": {"query": "x" * (TOOL_INPUT_LIMITS.max_string + 50)},
+                "output": huge_output,
             }
         ],
         "succeeded",
     )
     assert progress[0].input_truncated is True
-    assert progress[0].output_truncated is True
-    assert len(progress[0].output["rows"]) <= 25
+    assert progress[0].output == huge_output
 
 
 def test_external_progress_events_knowledge_failure_has_no_hits() -> None:
@@ -2062,7 +2067,7 @@ def main() -> None:
     test_external_mcp_policy_drift_is_blocked_without_approval()
     test_external_stream_epoch_is_stable_and_sanitized()
     test_external_progress_events_carry_mcp_tool_details()
-    test_external_progress_events_bound_tool_payloads()
+    test_external_progress_events_bound_tool_inputs_and_pass_output()
     test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()

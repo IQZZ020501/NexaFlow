@@ -2292,7 +2292,6 @@ def assert_external_agent_access() -> None:
                         "input",
                         "output",
                         "input_truncated",
-                        "output_truncated",
                     }
                     assert isinstance(event["event"]["reasoning"], str)
                 serialized = json.dumps(event)
