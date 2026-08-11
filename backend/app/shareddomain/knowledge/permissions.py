@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.entities.knowledge import KnowledgeBase
 from app.entities.resource_permission import ResourcePermission
 from app.entities.user import User
-from app.infrastructure.repositories import knowledge as knowledge_base_repository
+from app.infrastructure.repositories import resource_permission as permission_repository
 from app.schemas.knowledge import ResourcePermissionResponse
 from app.schemas.user import user_to_response
 from app.shareddomain.audit.services import record_audit_log
@@ -47,11 +47,12 @@ async def get_user_grant(
     knowledge_base: KnowledgeBase,
     user_id: str,
 ) -> ResourcePermission | None:
-    return await knowledge_base_repository.get_user_grant(
+    return await permission_repository.get_user_grant(
         db,
-        knowledge_base,
-        user_id,
+        knowledge_base.workspace_id,
         RESOURCE_TYPE,
+        knowledge_base.id,
+        user_id,
     )
 
 
@@ -85,10 +86,11 @@ async def list_resource_permissions(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[ResourcePermissionResponse]:
-    rows = await knowledge_base_repository.list_resource_permission_rows(
+    rows = await permission_repository.list_resource_permission_rows(
         db,
-        knowledge_base,
+        knowledge_base.workspace_id,
         RESOURCE_TYPE,
+        knowledge_base.id,
         limit,
         offset,
     )
@@ -110,7 +112,7 @@ async def upsert_resource_permission(
 ) -> ResourcePermissionResponse:
     require_knowledge_base_active(knowledge_base)
     validate_permission(permission)
-    target = await knowledge_base_repository.get_active_workspace_member(
+    target = await permission_repository.get_active_workspace_member(
         db,
         knowledge_base.workspace_id,
         target_user_id,
@@ -129,14 +131,14 @@ async def upsert_resource_permission(
             created_by_user_id=actor.id,
         )
         resource_permission = (
-            await knowledge_base_repository.create_resource_permission(
+            await permission_repository.create_resource_permission(
                 db,
                 resource_permission,
             )
         )
     else:
         resource_permission.permission = permission
-        await knowledge_base_repository.save_resource_permission(
+        await permission_repository.save_resource_permission(
             db,
             resource_permission,
         )
@@ -165,11 +167,12 @@ async def revoke_resource_permission(
     actor: User,
 ) -> None:
     require_knowledge_base_active(knowledge_base)
-    deleted_count = await knowledge_base_repository.delete_resource_permission(
+    deleted_count = await permission_repository.delete_resource_permission(
         db,
-        knowledge_base,
-        target_user_id,
+        knowledge_base.workspace_id,
         RESOURCE_TYPE,
+        knowledge_base.id,
+        target_user_id,
     )
     if deleted_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Resource permission not found.")

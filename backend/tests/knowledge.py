@@ -993,6 +993,27 @@ def main() -> None:
         assert knowledge_base.json()["reranker_model_id"] == reranker_model_id
         asyncio.run(clear_knowledge_base_embedding_model(knowledge_base_id))
 
+        bob_owned_knowledge_base = client.post(
+            knowledge_url(default_workspace_id),
+            headers=auth_headers(bob_token),
+            json={"name": "Bob Notes", "description": "Bob private notes"},
+        )
+        assert bob_owned_knowledge_base.status_code == 201, bob_owned_knowledge_base.text
+        alice_newer_knowledge_base = client.post(
+            knowledge_url(default_workspace_id),
+            headers=auth_headers(alice_token),
+            json={"name": "Alice Notes", "description": "Alice private notes"},
+        )
+        assert alice_newer_knowledge_base.status_code == 201, alice_newer_knowledge_base.text
+        bob_first_page = client.get(
+            knowledge_url(default_workspace_id) + "?limit=1&offset=0",
+            headers=auth_headers(bob_token),
+        )
+        assert bob_first_page.status_code == 200, bob_first_page.text
+        assert [item["id"] for item in bob_first_page.json()] == [
+            bob_owned_knowledge_base.json()["id"]
+        ]
+
         model_test = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/model-test"),
             headers=auth_headers(alice_token),
@@ -1013,12 +1034,7 @@ def main() -> None:
             headers=auth_headers(bob_token),
         )
         assert bob_list.status_code == 200, bob_list.text
-        bob_visible_kb = next(
-            item for item in bob_list.json() if item["id"] == knowledge_base_id
-        )
-        assert bob_visible_kb["permission"] == "none"
-        assert bob_visible_kb["document_count"] == 0
-        assert bob_visible_kb["char_count"] == 0
+        assert knowledge_base_id not in {item["id"] for item in bob_list.json()}
 
         denied_cross_workspace = client.get(
             knowledge_url(default_workspace_id),
@@ -1034,6 +1050,18 @@ def main() -> None:
         assert view_grant.status_code == 200, view_grant.text
         assert view_grant.json()["permission"] == "view"
         asyncio.run(assert_cross_workspace_permission_denied(default_workspace_id, knowledge_base_id))
+
+        bob_list_after_grant = client.get(
+            knowledge_url(default_workspace_id),
+            headers=auth_headers(bob_token),
+        )
+        assert bob_list_after_grant.status_code == 200, bob_list_after_grant.text
+        bob_visible_kb = next(
+            item
+            for item in bob_list_after_grant.json()
+            if item["id"] == knowledge_base_id
+        )
+        assert bob_visible_kb["permission"] == "view"
 
         bob_get = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
@@ -1574,14 +1602,9 @@ def main() -> None:
             headers=auth_headers(bob_token),
         )
         assert bob_after_revoke.status_code == 200, bob_after_revoke.text
-        bob_revoked_kb = next(
-            item
-            for item in bob_after_revoke.json()
-            if item["id"] == knowledge_base_id
-        )
-        assert bob_revoked_kb["permission"] == "none"
-        assert bob_revoked_kb["document_count"] == 0
-        assert bob_revoked_kb["char_count"] == 0
+        assert knowledge_base_id not in {
+            item["id"] for item in bob_after_revoke.json()
+        }
 
         bob_get_denied = client.get(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),

@@ -131,13 +131,19 @@ def test_knowledge_writes_recheck_locked_owner() -> None:
     async def lock_knowledge_base(db, knowledge_base):
         return locked
 
-    async def get_user_grant(db, knowledge_base, user_id, resource_type):
+    async def get_user_grant(
+        db,
+        workspace_id,
+        resource_type,
+        resource_id,
+        user_id,
+    ):
         return None
 
     original_lock = knowledge_kb.knowledge_base_repository.lock_knowledge_base
-    original_grant = knowledge_kb.knowledge_base_repository.get_user_grant
+    original_grant = knowledge_kb.permission_repository.get_user_grant
     knowledge_kb.knowledge_base_repository.lock_knowledge_base = lock_knowledge_base
-    knowledge_kb.knowledge_base_repository.get_user_grant = get_user_grant
+    knowledge_kb.permission_repository.get_user_grant = get_user_grant
 
     async def assert_denied() -> None:
         for operation in (
@@ -167,7 +173,7 @@ def test_knowledge_writes_recheck_locked_owner() -> None:
         asyncio.run(assert_denied())
     finally:
         knowledge_kb.knowledge_base_repository.lock_knowledge_base = original_lock
-        knowledge_kb.knowledge_base_repository.get_user_grant = original_grant
+        knowledge_kb.permission_repository.get_user_grant = original_grant
 
 
 def test_clean_upload_filename_sanitizes_path_and_classification() -> None:
