@@ -166,7 +166,10 @@ export function AgentPermissionsDialog({
                   disabled={isSaving || !selectedTarget}
                 >
                   {isSaving ? (
-                    <LoaderCircleIcon data-icon="inline-start" />
+                    <LoaderCircleIcon
+                      data-icon="inline-start"
+                      className="animate-spin"
+                    />
                   ) : null}
                   {t("保存授权")}
                 </Button>
