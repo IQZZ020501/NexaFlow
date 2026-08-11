@@ -564,8 +564,10 @@ def build_hierarchical_chunks(
                 - parent_leading
             )
             if span.table_header_prefix is not None:
-                # 续段 content 含重复表头，偏移区间仅覆盖其数据行。
-                end_offset = start_offset + len(content) - len(span.table_header_prefix)
+                # 续段 content 含重复表头，偏移区间仅覆盖其数据行；
+                # 表头/对齐行可能含 asset marker，须用清除后的长度计算。
+                cleaned_prefix = remove_asset_markers(span.table_header_prefix)
+                end_offset = start_offset + len(content) - len(cleaned_prefix)
             else:
                 end_offset = start_offset + len(content)
             children.append(

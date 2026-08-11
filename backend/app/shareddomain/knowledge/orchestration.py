@@ -365,8 +365,13 @@ async def replace_document_chunks(
             if parent is not None and (
                 draft.start_offset is None
                 or draft.end_offset is None
-                or parent.content[draft.start_offset : draft.end_offset]
-                != draft.content
+                or (
+                    parent.content[draft.start_offset : draft.end_offset]
+                    != draft.content
+                    and not draft.content.endswith(
+                        parent.content[draft.start_offset : draft.end_offset]
+                    )
+                )
             ):
                 raise KnowledgePipelineError("Knowledge chunk offsets are invalid.")
             chunk = KnowledgeDocumentChunk(

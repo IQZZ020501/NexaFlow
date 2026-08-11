@@ -191,7 +191,7 @@ def test_markdown_tables_split_only_between_rows_and_repeat_headers() -> None:
 
     assert len(chunks) == 3
     assert all(chunk.splitlines()[:2] == [header, alignment] for chunk in chunks)
-    assert all(row in chunk for row, chunk in zip(rows, chunks))
+    assert all(row in chunk for row, chunk in zip(rows, chunks, strict=True))
     assert all(row not in "\n".join(chunks[index + 1 :]) for index, row in enumerate(rows))
 
 
