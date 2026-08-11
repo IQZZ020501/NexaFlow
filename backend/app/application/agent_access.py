@@ -173,6 +173,10 @@ def external_progress_events(
         progress_type: Literal["knowledge", "tool"] = (
             "knowledge" if event.get("tool_kind") == "knowledge" else "tool"
         )
+        tool_kind = str(event.get("tool_kind") or "unknown")
+        if tool_kind not in {"knowledge", "mcp", "unknown"}:
+            tool_kind = "unknown"
+        raw_input = event.get("input")
         count = None
         if progress_type == "knowledge" and summary.startswith(
             "agent.knowledge_chunks_returned:"
@@ -203,6 +207,12 @@ def external_progress_events(
                 stage=event_status,
                 turn=turn,
                 count=count,
+                tool_name=str(event.get("tool_name") or ""),
+                tool_label=str(event.get("tool_label") or ""),
+                tool_kind=tool_kind,
+                server_name=str(event.get("server_name") or ""),
+                input=raw_input if isinstance(raw_input, dict) else {},
+                output=event.get("output"),
                 hits=hits,
             )
         )

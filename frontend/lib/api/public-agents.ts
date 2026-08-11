@@ -37,6 +37,12 @@ export type ExternalAgentProgressEvent = {
   turn: number
   count: number | null
   reasoning?: string
+  tool_name?: string
+  tool_label?: string
+  tool_kind?: "knowledge" | "mcp" | "unknown"
+  server_name?: string
+  input?: Record<string, unknown>
+  output?: unknown
   hits: ExternalAgentKnowledgeHit[]
 }
 

@@ -1048,6 +1048,12 @@ def test_external_stream_epoch_is_stable_and_sanitized() -> None:
         "turn": 1,
         "count": None,
         "reasoning": "Let me think",
+        "tool_name": "",
+        "tool_label": "",
+        "tool_kind": "unknown",
+        "server_name": "",
+        "input": {},
+        "output": None,
         "hits": [],
     }
 
@@ -1110,6 +1116,38 @@ def test_external_progress_events_carry_knowledge_hits() -> None:
             "content": "Tag with semantic versions.",
         },
     ]
+
+
+def test_external_progress_events_carry_mcp_tool_details() -> None:
+    from app.application.agent_access import external_progress_events
+
+    progress = external_progress_events(
+        [
+            {
+                "type": "tool",
+                "turn": 1,
+                "tool_name": "web_search",
+                "tool_label": "Web search",
+                "tool_kind": "mcp",
+                "server_name": "Tavily",
+                "status": "succeeded",
+                "summary": "agent.tool_running",
+                "call_id": "call-2",
+                "input": {"query": "GitHub trending"},
+                "output": {"results": [{"title": "NexaFlow"}]},
+            }
+        ],
+        "succeeded",
+    )
+
+    assert len(progress) == 1
+    event = progress[0]
+    assert event.tool_name == "web_search"
+    assert event.tool_label == "Web search"
+    assert event.tool_kind == "mcp"
+    assert event.server_name == "Tavily"
+    assert event.input == {"query": "GitHub trending"}
+    assert event.output == {"results": [{"title": "NexaFlow"}]}
 
 
 def test_external_progress_events_knowledge_failure_has_no_hits() -> None:
@@ -1968,6 +2006,7 @@ def main() -> None:
     test_external_mcp_policy_must_remain_exactly_read_only()
     test_external_mcp_policy_drift_is_blocked_without_approval()
     test_external_stream_epoch_is_stable_and_sanitized()
+    test_external_progress_events_carry_mcp_tool_details()
     test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()

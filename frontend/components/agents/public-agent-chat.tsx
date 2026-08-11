@@ -116,6 +116,19 @@ function ReasoningBlock({ reasoning }: { reasoning: string }) {
   )
 }
 
+export function publicToolName(event: ExternalAgentProgressEvent) {
+  return event.tool_label || event.tool_name || ""
+}
+
+export function hasPublicToolDetails(event: ExternalAgentProgressEvent) {
+  if (event.type === "knowledge") return event.status === "succeeded"
+  if (event.type !== "tool") return false
+  return (
+    Object.keys(event.input ?? {}).length > 0 ||
+    (event.output !== null && event.output !== undefined)
+  )
+}
+
 function PublicToolEventRow({
   event,
   title,
@@ -129,8 +142,7 @@ function PublicToolEventRow({
 }) {
   const { t } = useLanguage()
   const [isOpen, setIsOpen] = React.useState(false)
-  const canExpand =
-    event.type === "knowledge" && event.status === "succeeded"
+  const canExpand = hasPublicToolDetails(event)
 
   const leading = (
     <>
@@ -144,6 +156,11 @@ function PublicToolEventRow({
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-foreground">
           {title}
+          {event.server_name ? (
+            <span className="ml-1 font-normal text-muted-foreground">
+              @ {event.server_name}
+            </span>
+          ) : null}
         </span>
         {detail ? (
           <span className="block truncate text-xs text-muted-foreground">
@@ -173,31 +190,59 @@ function PublicToolEventRow({
         <div className="flex items-center gap-2 px-3 py-2">{leading}</div>
       )}
       {canExpand && isOpen ? (
-        <div className="border-t bg-muted/20 p-3 text-xs">
-          {event.hits.length > 0 ? (
-            <div className="space-y-2">
-              {event.hits.map((hit, index) => (
-                <article
-                  key={index}
-                  className="rounded-md border bg-background p-3"
-                >
-                  <div className="flex flex-wrap items-center gap-2 font-medium">
-                    <span>{hit.document || t("未知文档")}</span>
-                    <span className="text-muted-foreground">
-                      {hit.knowledge_base}
-                    </span>
-                  </div>
-                  <p className="mt-2 leading-5 break-words whitespace-pre-wrap text-muted-foreground">
-                    {hit.content}
-                  </p>
-                </article>
-              ))}
+        <div className="grid gap-3 border-t bg-muted/20 p-3 text-xs">
+          {Object.keys(event.input ?? {}).length > 0 ? (
+            <div>
+              <p className="mb-1 font-medium text-muted-foreground">
+                {t("调用输入")}
+              </p>
+              <pre className="max-h-44 overflow-auto rounded-md bg-background p-3 font-mono leading-5 break-words whitespace-pre-wrap">
+                {JSON.stringify(event.input, null, 2)}
+              </pre>
             </div>
-          ) : (
-            <p className="text-muted-foreground">
-              {t("未检索到相关知识片段")}
-            </p>
-          )}
+          ) : null}
+          {event.type === "knowledge" ? (
+            <div>
+              <p className="mb-1 font-medium text-muted-foreground">
+                {t("调用结果")}
+              </p>
+              {event.hits.length > 0 ? (
+                <div className="space-y-2">
+                  {event.hits.map((hit, index) => (
+                    <article
+                      key={index}
+                      className="rounded-md border bg-background p-3"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 font-medium">
+                        <span>{hit.document || t("未知文档")}</span>
+                        <span className="text-muted-foreground">
+                          {hit.knowledge_base}
+                        </span>
+                      </div>
+                      <p className="mt-2 leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+                        {hit.content}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-muted-foreground">
+                  {t("未检索到相关知识片段")}
+                </p>
+              )}
+            </div>
+          ) : event.output !== null && event.output !== undefined ? (
+            <div>
+              <p className="mb-1 font-medium text-muted-foreground">
+                {t("调用结果")}
+              </p>
+              <pre className="max-h-64 overflow-auto rounded-md bg-background p-3 font-mono leading-5 break-words whitespace-pre-wrap">
+                {typeof event.output === "string"
+                  ? event.output
+                  : JSON.stringify(event.output, null, 2)}
+              </pre>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -232,7 +277,7 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
 
   function title(event: ExternalAgentProgressEvent) {
     if (event.type === "knowledge") return t("知识库检索")
-    if (event.type === "tool") return t("工具")
+    if (event.type === "tool") return publicToolName(event) || t("工具")
     if (event.type === "answer")
       return t(event.status === "succeeded" ? "回答已生成" : "正在生成回答")
     if (event.stage === "reviewing") return t("正在整理工具结果")
@@ -827,9 +872,12 @@ export function PublicAgentChat({
               <div className="space-y-8">
                 {visibleRuns.map((run) => (
                   <article key={run.id} className="space-y-4">
-                    <div className="flex justify-end gap-2">
-                      <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 break-words whitespace-pre-wrap text-primary-foreground [overflow-wrap:anywhere]">
-                        {run.question}
+                    <div className="flex items-start gap-2">
+                      <div className="ml-auto flex max-w-[85%] flex-col items-end gap-1">
+                        <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 break-words whitespace-pre-wrap text-primary-foreground [overflow-wrap:anywhere]">
+                          {run.question}
+                        </div>
+                        <CopyMessageButton value={run.question} />
                       </div>
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
                         <UserIcon className="size-3.5" />
