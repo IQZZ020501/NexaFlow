@@ -27,8 +27,14 @@ from app.capabilities.rag.retrieval import (
     reciprocal_rank_fusion,
 )
 from app.capabilities.rag.vector_store import VectorHit
+from app.entities.agents import Agent
 from app.entities.knowledge import KnowledgeBase
+from app.entities.resource_permission import ResourcePermission
 from app.entities.user import User
+from app.shareddomain.agents.permissions import (
+    effective_agent_permission,
+    validate_agent_permission,
+)
 from app.shareddomain.knowledge.orchestration import parse_task_options
 from app.shareddomain.knowledge.services import (
     clean_upload_filename,
@@ -75,6 +81,33 @@ def test_effective_permission_matrix() -> None:
 
 def test_validate_permission_rejects_unknown() -> None:
     expect_http_error(lambda: validate_permission("delete"), 422)
+
+
+def test_effective_agent_permission_matrix() -> None:
+    agent = Agent(
+        id="agent-1",
+        workspace_id="ws-1",
+        created_by_user_id="owner-1",
+    )
+    owner = User(id="owner-1", username="owner")
+    member = User(id="member-1", username="member")
+    grant = ResourcePermission(
+        workspace_id="ws-1",
+        resource_type="agent",
+        resource_id="agent-1",
+        user_id="member-1",
+        permission="view",
+    )
+
+    assert effective_agent_permission(agent, owner, "member") == "edit"
+    assert effective_agent_permission(agent, member, "admin") == "edit"
+    assert effective_agent_permission(agent, member, "member") == "none"
+    assert effective_agent_permission(agent, member, "member", grant) == "view"
+
+
+def test_validate_agent_permission_only_accepts_view() -> None:
+    validate_agent_permission("view")
+    expect_http_error(lambda: validate_agent_permission("edit"), 422)
 
 
 def test_knowledge_writes_recheck_locked_owner() -> None:
