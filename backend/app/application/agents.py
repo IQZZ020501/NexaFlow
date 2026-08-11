@@ -39,9 +39,11 @@ from app.application.agent_access import (
     list_agent_conversation_users,
     list_agent_logs,
     list_external_agent_runs,
+    list_external_agent_run_tool_calls,
     list_public_agent_conversations,
     revoke_agent_api_credential,
     rotate_agent_api_credential,
+    resolve_external_agent_tool_approval,
     stream_external_agent_run,
 )
 from app.shareddomain.agents.services import (
@@ -97,6 +99,7 @@ __all__ = [
     "list_agent_permissions",
     "list_agents",
     "list_external_agent_runs",
+    "list_external_agent_run_tool_calls",
     "list_public_agent_conversations",
     "mcp_function_name",
     "prepare_agent_run",
@@ -105,6 +108,7 @@ __all__ = [
     "revoke_agent_api_credential",
     "revoke_agent_permission",
     "rotate_agent_api_credential",
+    "resolve_external_agent_tool_approval",
     "run_to_response",
     "safe_agent_error",
     "stream_agent_run",

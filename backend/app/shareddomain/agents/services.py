@@ -59,7 +59,7 @@ def agent_to_response(
         model_id=agent.model_id,
         knowledge_query_mode=agent.knowledge_query_mode,
         knowledge_base_ids=knowledge_base_ids,
-        mcp_tools=mcp_tools if can_edit_agent(agent, actor, workspace_role) else [],
+        mcp_tools=mcp_tools,
         status=agent.status,
         published=agent.published,
         published_by_user_id=agent.published_by_user_id,

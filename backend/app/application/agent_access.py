@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.agent_runs import (
     enqueue_prepared_agent_run,
     prepare_agent_run,
+    resolve_agent_run_tool_approval,
     stream_agent_run,
+    tool_call_to_response,
 )
 from app.application.workspace import WorkspaceContext, build_workspace_context
 from app.entities.agents import Agent, AgentApiCredential, AgentRun
@@ -40,6 +42,7 @@ from app.schemas.agent import (
     AgentMonitoringDailyResponse,
     AgentMonitoringResponse,
     AgentMonitoringValues,
+    AgentToolCallResponse,
     ExternalAgentKnowledgeHitResponse,
     ExternalAgentProgressEventResponse,
     ExternalAgentRunListResponse,
@@ -377,6 +380,14 @@ async def sanitize_external_agent_stream(
                 }
                 _copy_external_stream_metadata(event, sanitized)
                 yield sanitized
+        elif event_type == "approval_required":
+            sanitized = {
+                "type": "approval_required",
+                "call_id": str(event.get("call_id") or ""),
+                "reason": str(event.get("reason") or ""),
+            }
+            _copy_external_stream_metadata(event, sanitized)
+            yield sanitized
         elif event_type in {"run", "complete", "error"} and isinstance(
             event.get("run"), dict
         ):
@@ -722,6 +733,43 @@ async def get_external_agent_run(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent run not found.")
     return run
+
+
+async def list_external_agent_run_tool_calls(
+    db: AsyncSession,
+    agent_id: str,
+    run_id: str,
+    access_source: ExternalAccessSource,
+    consumer_id: str,
+) -> list[AgentToolCallResponse]:
+    await get_external_agent_run(db, agent_id, run_id, access_source, consumer_id)
+    return [
+        tool_call_to_response(call)
+        for call in await agent_repository.list_agent_tool_calls(db, run_id)
+    ]
+
+
+async def resolve_external_agent_tool_approval(
+    db: AsyncSession,
+    agent_id: str,
+    run_id: str,
+    call_id: str,
+    access_source: ExternalAccessSource,
+    user: User,
+    settings: Settings,
+    *,
+    approve: bool,
+) -> ExternalAgentRunResponse:
+    run = await get_external_agent_run(db, agent_id, run_id, access_source, user.id)
+    run = await resolve_agent_run_tool_approval(
+        db,
+        run,
+        call_id,
+        user,
+        settings,
+        approve=approve,
+    )
+    return external_run_to_response(run)
 
 
 async def list_external_agent_runs(
