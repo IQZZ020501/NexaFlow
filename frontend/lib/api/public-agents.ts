@@ -44,7 +44,6 @@ export type ExternalAgentProgressEvent = {
   input?: Record<string, unknown>
   output?: unknown
   input_truncated?: boolean
-  output_truncated?: boolean
   hits: ExternalAgentKnowledgeHit[]
 }
 
