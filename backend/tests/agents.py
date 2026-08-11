@@ -3041,6 +3041,36 @@ def main() -> None:
             assert no_retry.json()["status"] == "succeeded"
             assert len(mcp_calls) == 4
 
+            # Members who can run the agent must carry its MCP tools too;
+            # approval is per-caller, so a member run pauses for approval.
+            member_run = client.post(
+                agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
+                headers=auth_headers(member_token),
+                json={"goal": "Check the release"},
+            )
+            assert member_run.status_code == 201, member_run.text
+            member_run_data = member_run.json()
+            assert member_run_data["status"] == "awaiting_approval"
+            member_tool_calls = client.get(
+                agents_url(
+                    workspace_id,
+                    f"/{mcp_agent_data['id']}/runs/{member_run_data['id']}/tool-calls",
+                ),
+                headers=auth_headers(member_token),
+            )
+            assert member_tool_calls.status_code == 200, member_tool_calls.text
+            assert member_tool_calls.json()[0]["status"] == "awaiting_approval"
+            member_approval = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{mcp_agent_data['id']}/runs/{member_run_data['id']}/tool-calls/call-mcp/approve",
+                ),
+                headers=auth_headers(member_token),
+            )
+            assert member_approval.status_code == 200, member_approval.text
+            assert member_approval.json()["status"] == "succeeded"
+            assert len(mcp_calls) == 5
+
             member_agent = client.post(
                 agents_url(workspace_id),
                 headers=auth_headers(member_token),

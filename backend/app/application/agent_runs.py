@@ -30,7 +30,6 @@ from app.schemas.agent import AgentRunResponse, AgentToolCallResponse
 from app.shareddomain.audit.services import record_audit_log
 from app.shareddomain.agents.services import (
     ACTIVE_STATUS,
-    can_edit_agent,
     get_agent,
     get_agent_model,
 )
@@ -346,11 +345,7 @@ async def prepare_agent_run(
     model = await get_agent_model(db, workspace_id, agent.model_id)
     knowledge_bindings = await agent_repository.list_binding_map(db, [agent.id])
     mcp_bindings = await agent_repository.list_mcp_binding_map(db, [agent.id])
-    selected_mcp_tools = (
-        mcp_bindings[agent.id]
-        if can_edit_agent(agent, actor, workspace_role)
-        else []
-    )
+    selected_mcp_tools = mcp_bindings[agent.id]
     if conversation_id is None:
         if access_source != "console":
             conversation_id = new_id()
