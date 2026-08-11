@@ -32,6 +32,7 @@ from app.shareddomain.agents.models import (
     AgentRunEvent,
     AgentToolCall,
 )
+from app.shareddomain.workflows.models import WorkflowNodeExecution
 
 _CONVERSATION_MEMORY_COLUMNS = (
     AgentRun.id,
@@ -944,6 +945,22 @@ async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
             ),
             worker_task_id=None,
             lease_expires_at=None,
+            finished_at=now,
+            updated_at=now,
+        )
+    )
+    await db.execute(
+        update(WorkflowNodeExecution)
+        .where(
+            WorkflowNodeExecution.run_id.in_(exhausted_run_ids),
+            WorkflowNodeExecution.status == "running",
+        )
+        .values(
+            status="failed",
+            error=(
+                "Workflow run retry limit reached before the node result was "
+                "durably recorded."
+            ),
             finished_at=now,
             updated_at=now,
         )

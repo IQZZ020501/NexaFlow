@@ -17,7 +17,7 @@ from app.shareddomain.workflows.engine import (
     WorkflowValidationError,
     validate_graph,
 )
-from tests.support import activate_admin, auth_headers, test_client
+from tests.support import activate_admin, activate_user, auth_headers, test_client
 
 
 def graph(*, condition: bool = False) -> dict:
@@ -242,8 +242,50 @@ def test_workflow_engine_propagates_worker_cancellation() -> None:
     asyncio.run(run())
 
 
+async def assert_exhausted_workflow_closes_running_node(run_id: str) -> None:
+    from app.infrastructure.model_utils import utc_now
+    from app.infrastructure.repositories import agent as agent_repository
+    from app.infrastructure.repositories import workflow as workflow_repository
+    from app.infrastructure.session import get_session_factory
+
+    now = utc_now()
+    async with get_session_factory()() as db:
+        run = await agent_repository.get_agent_run_by_id(db, run_id)
+        assert run is not None
+        run.status = "running"
+        run.attempts = run.max_attempts
+        run.worker_task_id = "expired-workflow-worker"
+        run.lease_expires_at = now - timedelta(seconds=1)
+        run.finished_at = None
+        await agent_repository.save_agent_run(db, run)
+        started = await workflow_repository.start_node_execution(
+            db,
+            workspace_id=run.workspace_id,
+            run_id=run.id,
+            worker_task_id="expired-workflow-worker",
+            node_id="start",
+            node_type="start",
+            sequence=1,
+            started_at=now - timedelta(seconds=2),
+        )
+        assert started is not None
+        await db.commit()
+
+    async with get_session_factory()() as db:
+        assert await agent_repository.fail_exhausted_agent_runs(db, now) == 1
+        await db.commit()
+        run = await agent_repository.get_agent_run_by_id(db, run_id)
+        nodes = await workflow_repository.list_node_executions(db, run_id)
+
+    assert run is not None and run.status == "failed"
+    start = next(item for item in nodes if item.node_id == "start")
+    assert start.status == "failed"
+    assert start.finished_at is not None
+    assert "retry limit reached" in (start.error or "")
+
+
 def test_workflow_api_definition_publish_run_and_audit() -> None:
-    from tests.agents import agent_model_server, model_payload
+    from tests.agents import agent_model_server, create_workspace_user, model_payload
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id = activate_admin(client)
@@ -310,6 +352,29 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert published.json()["version_number"] == 1
         assert published.json()["definition_revision"] == 2
 
+        member_id, temporary_password = create_workspace_user(
+            client, token, workspace_id
+        )
+        member_token = activate_user(
+            client,
+            "agent-member",
+            temporary_password,
+            "WorkflowMember@123!",
+        )
+        member_headers = auth_headers(member_token)
+        grant = client.put(
+            f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}/permissions/{member_id}",
+            headers=headers,
+            json={"permission": "view"},
+        )
+        assert grant.status_code == 200, grant.text
+        member_draft = client.post(
+            f"{base}/runs",
+            headers=member_headers,
+            json={"source": "draft", "inputs": {"input": "not-allowed"}},
+        )
+        assert member_draft.status_code == 403, member_draft.text
+
         workflow_graph["nodes"][2]["data"]["config"] = {
             "outputs": {"result": "draft-two"}
         }
@@ -345,6 +410,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert event_types[0] == "run"
         assert "workflow_node" in event_types
         assert event_types[-1] == "complete"
+        asyncio.run(assert_exhausted_workflow_closes_running_node(run_id))
 
         published_run = client.post(
             f"{base}/runs",
@@ -360,6 +426,30 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert published_run.json()["outputs"] == {"result": "version-one"}
         assert published_run.json()["version_number"] == 1
 
+        member_run = client.post(
+            f"{base}/runs",
+            headers=member_headers,
+            json={
+                "source": "published",
+                "version_number": 1,
+                "inputs": {"input": "member-version"},
+            },
+        )
+        assert member_run.status_code == 201, member_run.text
+        assert member_run.json()["outputs"] == {"result": "member-version"}
+        member_own_run = client.get(
+            f"{base}/runs/{member_run.json()['id']}", headers=member_headers
+        )
+        assert member_own_run.status_code == 200, member_own_run.text
+        member_admin_run = client.get(
+            f"{base}/runs/{run_id}", headers=member_headers
+        )
+        assert member_admin_run.status_code == 404, member_admin_run.text
+        admin_member_run = client.get(
+            f"{base}/runs/{member_run.json()['id']}", headers=headers
+        )
+        assert admin_member_run.status_code == 404, admin_member_run.text
+
         versions = client.get(f"{base}/versions", headers=headers)
         assert versions.status_code == 200, versions.text
         assert [item["version_number"] for item in versions.json()["items"]] == [1]
@@ -369,6 +459,34 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert restored.json()["graph"]["nodes"][2]["data"]["config"] == {
             "outputs": {"result": "{{value.value}}"}
         }
+
+        failure_graph = restored.json()["graph"]
+        failure_graph["nodes"][1]["data"]["config"] = {
+            "value": "{{start.missing}}"
+        }
+        failure_draft = client.put(
+            f"{base}/definition",
+            headers=headers,
+            json={"expected_revision": 4, "graph": failure_graph},
+        )
+        assert failure_draft.status_code == 200, failure_draft.text
+        failed_run = client.post(
+            f"{base}/runs",
+            headers=headers,
+            json={"source": "draft", "inputs": {"input": "runtime-error"}},
+        )
+        assert failed_run.status_code == 201, failed_run.text
+        assert failed_run.json()["status"] == "failed"
+        assert "reference path not found" in failed_run.json()["last_error"]
+        failed_nodes = client.get(
+            f"{base}/runs/{failed_run.json()['id']}/nodes", headers=headers
+        )
+        assert failed_nodes.status_code == 200, failed_nodes.text
+        assert [item["status"] for item in failed_nodes.json()["items"]] == [
+            "succeeded",
+            "failed",
+        ]
+        assert "reference path not found" in failed_nodes.json()["items"][1]["error"]
 
         wrong_runtime = client.post(
             f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}/runs",

@@ -394,25 +394,27 @@ export function WorkflowDetailWorkspace({
             </Button>
           </>
         ) : null}
-        <Button
-          type="button"
-          variant="outline"
-          disabled={
-            agent.status !== "active" ||
-            isRunning ||
-            isAppDirty ||
-            Boolean(currentRun && !TERMINAL_STATUSES.has(currentRun.status))
-          }
-          title={isAppDirty ? t("请先保存配置后再调试") : undefined}
-          onClick={() => {
-            setRunInputs(JSON.stringify(initialWorkflowInputs(graph), null, 2))
-            setRunInputsInvalid(false)
-            setRunOpen(true)
-          }}
-        >
-          <PlayIcon />
-          {t("调试运行")}
-        </Button>
+        {agent.can_edit ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={
+              agent.status !== "active" ||
+              isRunning ||
+              isAppDirty ||
+              Boolean(currentRun && !TERMINAL_STATUSES.has(currentRun.status))
+            }
+            title={isAppDirty ? t("请先保存配置后再调试") : undefined}
+            onClick={() => {
+              setRunInputs(JSON.stringify(initialWorkflowInputs(graph), null, 2))
+              setRunInputsInvalid(false)
+              setRunOpen(true)
+            }}
+          >
+            <PlayIcon />
+            {t("调试运行")}
+          </Button>
+        ) : null}
         {canManagePublishing ? (
           <Button
             type="button"

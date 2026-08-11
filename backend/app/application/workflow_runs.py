@@ -21,7 +21,7 @@ from app.schemas.workflow import (
     WorkflowRunCreateRequest,
     WorkflowRunResponse,
 )
-from app.shareddomain.agents.permissions import require_agent_view
+from app.shareddomain.agents.permissions import require_agent_edit, require_agent_view
 from app.shareddomain.agents.services import ACTIVE_STATUS, get_agent_model
 from app.shareddomain.workflows.services import (
     get_or_create_definition,
@@ -123,7 +123,10 @@ async def create_workflow_run(
             "Workflow inputs exceed 128 KiB.",
         )
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    await require_agent_view(db, agent, actor, workspace_role)
+    if payload.source == "draft":
+        require_agent_edit(agent, actor, workspace_role)
+    else:
+        await require_agent_view(db, agent, actor, workspace_role)
     if agent.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_409_CONFLICT, "Workflow is disabled.")
     definition = await get_or_create_definition(db, agent, actor, workspace_role)
@@ -208,6 +211,9 @@ async def get_workflow_run(
         or detail is None
         or run.workspace_id != workspace_id
         or run.agent_id != agent_id
+        or run.access_source != "console"
+        or run.consumer_id != actor.id
+        or run.requested_by_user_id != actor.id
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
     return workflow_run_to_response(run, detail)
