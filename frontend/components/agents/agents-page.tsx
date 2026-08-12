@@ -1282,10 +1282,14 @@ export function AgentsPage({
             canManagePublishing={canManagePublishing}
             isAppDirty={isDirty}
             isSavingApp={isSaving}
+            activeView={activeView}
             onBack={() => router.push("/app/apps")}
             onDelete={() => void handleDeleteAgent(selectedAgent)}
-            onManagePermissions={() => void handleOpenAgentPermissions(selectedAgent)}
+            onManagePermissions={() =>
+              void handleOpenAgentPermissions(selectedAgent)
+            }
             onSaveApp={handleSaveAgent}
+            onViewChange={handleViewChange}
             notify={notify}
             t={t}
           />

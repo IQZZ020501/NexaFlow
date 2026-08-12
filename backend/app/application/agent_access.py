@@ -417,25 +417,46 @@ async def get_published_agent_context(
     db: AsyncSession,
     agent_id: str,
 ) -> PublishedAgentContext:
+    return await get_published_application_context(db, agent_id, "agent")
+
+
+async def get_published_workflow_context(
+    db: AsyncSession,
+    workflow_id: str,
+) -> PublishedAgentContext:
+    return await get_published_application_context(db, workflow_id, "workflow")
+
+
+async def get_published_application_context(
+    db: AsyncSession,
+    agent_id: str,
+    application_type: Literal["agent", "workflow"],
+) -> PublishedAgentContext:
     agent = await agent_repository.get_agent_by_id(db, agent_id)
     if (
         agent is None
-        or agent.app_type != "agent"
+        or agent.app_type != application_type
         or agent.status != ACTIVE_STATUS
         or not agent.published
         or not agent.published_by_user_id
         or agent.published_at is None
     ):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"Published {application_type} not found.",
+        )
     publisher = await user_repository.get_user_by_id(db, agent.published_by_user_id)
     if publisher is None or not publisher.is_active:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"Published {application_type} not found.",
+        )
     try:
         workspace = await build_workspace_context(db, publisher, agent.workspace_id)
     except HTTPException as exc:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            "Published agent not found.",
+            f"Published {application_type} not found.",
         ) from exc
     return PublishedAgentContext(agent=agent, publisher=publisher, workspace=workspace)
 
@@ -445,7 +466,26 @@ async def get_workspace_published_agent_context(
     agent_id: str,
     user: User,
 ) -> PublishedAgentContext:
-    context = await get_published_agent_context(db, agent_id)
+    return await get_workspace_published_application_context(db, agent_id, user, "agent")
+
+
+async def get_workspace_published_workflow_context(
+    db: AsyncSession,
+    workflow_id: str,
+    user: User,
+) -> PublishedAgentContext:
+    return await get_workspace_published_application_context(
+        db, workflow_id, user, "workflow"
+    )
+
+
+async def get_workspace_published_application_context(
+    db: AsyncSession,
+    agent_id: str,
+    user: User,
+    application_type: Literal["agent", "workflow"],
+) -> PublishedAgentContext:
+    context = await get_published_application_context(db, agent_id, application_type)
     try:
         await build_workspace_context(db, user, context.agent.workspace_id)
     except HTTPException as exc:
@@ -455,7 +495,7 @@ async def get_workspace_published_agent_context(
         }:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND,
-                "Published agent not found.",
+                f"Published {application_type} not found.",
             ) from exc
         raise
     return context
@@ -482,7 +522,6 @@ async def list_agent_api_credentials(
     workspace_role: str | None,
 ) -> AgentApiCredentialListResponse:
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_agent_application(agent)
     _require_workspace_admin(workspace_role)
     credentials = await agent_repository.list_agent_api_credentials(db, agent.id)
     return AgentApiCredentialListResponse(
@@ -493,14 +532,6 @@ async def list_agent_api_credentials(
 def _require_workspace_admin(workspace_role: str | None) -> None:
     if workspace_role != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace admin required.")
-
-
-def _require_agent_application(agent: Agent) -> None:
-    if agent.app_type != "agent":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "Agent API credentials are not available for workflows.",
-        )
 
 
 async def _new_agent_api_credential(
@@ -530,7 +561,6 @@ async def create_agent_api_credential(
     workspace_role: str | None,
 ) -> AgentApiCredentialCreateResponse:
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_agent_application(agent)
     _require_workspace_admin(workspace_role)
     try:
         credential, token = await _new_agent_api_credential(db, agent, name, actor)
@@ -565,7 +595,6 @@ async def revoke_agent_api_credential(
     workspace_role: str | None,
 ) -> None:
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_agent_application(agent)
     _require_workspace_admin(workspace_role)
     credential = await agent_repository.get_agent_api_credential_by_id(
         db, credential_id
@@ -598,7 +627,6 @@ async def rotate_agent_api_credential(
     workspace_role: str | None,
 ) -> AgentApiCredentialCreateResponse:
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_agent_application(agent)
     _require_workspace_admin(workspace_role)
     previous = await agent_repository.get_agent_api_credential_by_id(
         db, credential_id
@@ -650,6 +678,7 @@ async def authenticate_agent_api_credential(
     db: AsyncSession,
     agent_id: str,
     token: str,
+    application_type: Literal["agent", "workflow"] = "agent",
 ) -> tuple[PublishedAgentContext, AgentApiCredential]:
     if not token.startswith("nxf_"):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid API credential.")
@@ -659,9 +688,14 @@ async def authenticate_agent_api_credential(
     if credential is None or credential.agent_id != agent_id:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid API credential.")
     try:
-        context = await get_published_agent_context(db, agent_id)
+        context = await get_published_application_context(
+            db, agent_id, application_type
+        )
     except HTTPException as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.") from exc
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"Published {application_type} not found.",
+        ) from exc
     if credential.workspace_id != context.agent.workspace_id:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid API credential.")
     now = utc_now()

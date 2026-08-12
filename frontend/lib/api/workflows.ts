@@ -85,6 +85,7 @@ export type WorkflowRunStatus =
 
 export type WorkflowRun = {
   id: string
+  conversation_id: string
   workspace_id: string
   agent_id: string
   requested_by_user_id: string | null

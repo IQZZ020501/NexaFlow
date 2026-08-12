@@ -205,7 +205,15 @@ Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全�
 | GET | `/runs/{run_id}/nodes` | 查询逐节点输入输出、耗时、usage、错误 |
 | GET | `/runs/{run_id}/stream?after={sequence}` | NDJSON 快照、事件重放和终态 |
 
-现有 `/agents/{id}/runs`、公开 Agent、Agent API credential 路由显式拒绝 workflow，避免类型串线。工作流运行目前通过工作空间认证接口创建；若后续开放外部生产调用，应单独定义 workflow credential、速率限制和公开响应脱敏，而不是复用 Agent 对话协议。
+现有 `/agents/{id}/runs`、公开 Agent 与 Agent API 运行路由显式拒绝 workflow，避免类型串线。工作流可复用应用发布、API Key、速率限制、会话归属、日志与 NDJSON 基础设施，但使用独立协议和执行入口：
+
+- `GET /public/workflows/{workflow_id}/profile`：返回已发布 Start 节点输入定义；
+- `GET /public/workflows/{workflow_id}/conversations`：当前登录用户的工作流会话；
+- `POST /public/workflows/{workflow_id}/runs`：以结构化 `inputs` 运行最新发布版本；
+- `GET /public/workflows/{workflow_id}/runs/{run_id}/stream`：仅返回脱敏的节点状态、类型、耗时与终态输出；
+- `/workflow-api/{workflow_id}/documentation|runs|runs/{run_id}|runs/{run_id}/stream`：API Key 访问的同构接口。
+
+外部 workflow run 创建时固定写入 `workflow_run_details`，统一 worker 根据该记录分派到确定性的工作流执行器；同一 workflow ID 访问 `/public/agents` 或 `/agent-api` 返回 404，不会进入 Agent 的提示词/工具循环。执行身份固定为发布者快照所属用户，访问者仅作为 `consumer_id` 参与隔离和审计。外部响应不暴露节点输入、节点输出、图快照或内部错误，只暴露节点进度与 End 节点最终输出。
 
 草稿调试只允许应用所有者或工作空间管理员；有查看授权的成员只能运行已发布版本。控制台运行与 Agent 保持相同的调用者隔离：列表、详情、节点审计和事件流只返回当前用户自己发起的运行。
 

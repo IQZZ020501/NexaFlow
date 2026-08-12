@@ -29,17 +29,33 @@ from app.application.workflow_runs import (
     list_workflow_runs,
     stream_workflow_run,
 )
+from app.application.workflow_access import (
+    create_external_workflow_run,
+    get_external_workflow_run,
+    get_public_workflow_profile,
+    get_workflow_api_documentation,
+    list_external_workflow_runs,
+    list_public_workflow_conversations,
+    stream_external_workflow_run,
+)
 
 __all__ = [
     "create_workflow_run",
+    "create_external_workflow_run",
+    "get_external_workflow_run",
     "get_workflow_definition",
     "get_workflow_run",
+    "get_public_workflow_profile",
+    "get_workflow_api_documentation",
+    "list_external_workflow_runs",
+    "list_public_workflow_conversations",
     "list_workflow_node_executions",
     "list_workflow_runs",
     "list_workflow_versions",
     "publish_workflow_definition",
     "restore_workflow_version",
     "stream_workflow_run",
+    "stream_external_workflow_run",
     "update_workflow_definition",
     "validate_workflow_definition",
 ]

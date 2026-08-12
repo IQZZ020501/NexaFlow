@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.agents import AgentRun
@@ -42,6 +43,7 @@ def workflow_run_to_response(
 ) -> WorkflowRunResponse:
     return WorkflowRunResponse(
         id=run.id,
+        conversation_id=run.conversation_id,
         workspace_id=run.workspace_id,
         agent_id=run.agent_id,
         requested_by_user_id=run.requested_by_user_id,
@@ -115,7 +117,20 @@ async def create_workflow_run(
     actor: User,
     workspace_role: str | None,
     settings: Settings,
+    *,
+    access_source: str = "console",
+    consumer_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> WorkflowRunResponse:
+    if access_source not in {"console", "public", "api"}:
+        raise ValueError("Invalid workflow run access source.")
+    if access_source != "console" and payload.source != "published":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "External workflow runs must use a published version.",
+        )
+    if access_source != "console" and not consumer_id:
+        raise ValueError("External workflow runs require a consumer id.")
     encoded_inputs = json.dumps(payload.inputs, ensure_ascii=False, separators=(",", ":"))
     if len(encoded_inputs.encode()) > WORKFLOW_MAX_INPUT_BYTES:
         raise HTTPException(
@@ -123,7 +138,7 @@ async def create_workflow_run(
             "Workflow inputs exceed 128 KiB.",
         )
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    if payload.source == "draft":
+    if payload.source == "draft" and access_source == "console":
         require_agent_edit(agent, actor, workspace_role)
     else:
         await require_agent_view(db, agent, actor, workspace_role)
@@ -147,14 +162,26 @@ async def create_workflow_run(
         agent.id
     ]
     now = utc_now()
+    run_conversation_id = conversation_id or new_id()
+    if conversation_id and await agent_repository.get_active_agent_run(
+        db,
+        agent.id,
+        access_source,
+        consumer_id or actor.id,
+        conversation_id,
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This workflow conversation already has an active run.",
+        )
     run = AgentRun(
         workspace_id=workspace_id,
         agent_id=agent.id,
-        requested_by_user_id=actor.id,
+        requested_by_user_id=actor.id if access_source == "console" else None,
         execution_user_id=actor.id,
-        access_source="console",
-        consumer_id=actor.id,
-        conversation_id=new_id(),
+        access_source=access_source,
+        consumer_id=consumer_id or actor.id,
+        conversation_id=run_conversation_id,
         goal=encoded_inputs[:4000],
         instructions=agent.instructions,
         knowledge_base_ids=knowledge_bindings,
@@ -183,10 +210,17 @@ async def create_workflow_run(
         max_model_tokens=WORKFLOW_MAX_MODEL_TOKENS,
         deadline_at=now + timedelta(seconds=settings.agent_run_timeout_seconds),
     )
-    run = await agent_repository.create_agent_run(db, run)
-    detail.run_id = run.id
-    detail = await workflow_repository.create_run_detail(db, detail)
-    await db.commit()
+    try:
+        run = await agent_repository.create_agent_run(db, run)
+        detail.run_id = run.id
+        detail = await workflow_repository.create_run_detail(db, detail)
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This workflow conversation already has an active run.",
+        ) from exc
     await enqueue_agent_run(run.id, settings)
     current = await agent_repository.get_agent_run_by_id(db, run.id)
     current_detail = await workflow_repository.get_run_detail(db, run.id)

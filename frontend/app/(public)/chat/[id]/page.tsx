@@ -1,4 +1,4 @@
-import { PublicAgentChat } from "@/components/agents/public-agent-chat"
+import { PublicApplicationChat } from "@/components/apps/public-application-chat"
 
 type PublicAgentChatPageProps = {
   params: Promise<{ id: string }>
@@ -14,5 +14,10 @@ export default async function PublicAgentChatPage({
   const conversationId = Array.isArray(value)
     ? (value[0] ?? null)
     : (value ?? null)
-  return <PublicAgentChat agentId={id} initialConversationId={conversationId} />
+  return (
+    <PublicApplicationChat
+      applicationId={id}
+      initialConversationId={conversationId}
+    />
+  )
 }

@@ -468,6 +468,7 @@ async def list_consumer_conversations(
     )
     ranked = (
         select(
+            AgentRun.id.label("run_id"),
             AgentRun.conversation_id.label("conversation_id"),
             AgentRun.goal.label("goal"),
             AgentRun.status.label("status"),
@@ -484,6 +485,7 @@ async def list_consumer_conversations(
     )
     result = await db.execute(
         select(
+            ranked.c.run_id,
             aggregates.c.conversation_id,
             ranked.c.goal,
             ranked.c.status,

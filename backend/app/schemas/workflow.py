@@ -216,6 +216,7 @@ class WorkflowNodeExecutionResponse(BaseModel):
 
 class WorkflowRunResponse(BaseModel):
     id: str
+    conversation_id: str
     workspace_id: str
     agent_id: str
     requested_by_user_id: str | None
@@ -240,3 +241,73 @@ class WorkflowRunResponse(BaseModel):
 
 class WorkflowNodeExecutionListResponse(BaseModel):
     items: list[WorkflowNodeExecutionResponse]
+
+
+class PublicWorkflowInputFieldResponse(BaseModel):
+    name: str
+    type: Literal["string", "number", "boolean", "object", "array"]
+    required: bool
+    default: Any = None
+
+
+class PublicWorkflowProfileResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    inputs: list[PublicWorkflowInputFieldResponse] = Field(default_factory=list)
+
+
+class PublicWorkflowConversationResponse(BaseModel):
+    conversation_id: str
+    inputs: dict[str, Any]
+    outputs: dict[str, Any]
+    status: str
+    run_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class PublicWorkflowConversationListResponse(BaseModel):
+    items: list[PublicWorkflowConversationResponse]
+
+
+class ExternalWorkflowRunCreateRequest(BaseModel):
+    inputs: dict[str, Any] = Field(default_factory=dict, max_length=100)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+
+class ExternalWorkflowProgressEventResponse(BaseModel):
+    id: str
+    node_id: str
+    node_type: WorkflowNodeType
+    status: Literal["running", "succeeded", "failed", "skipped"]
+    error: str | None = None
+    duration_ms: int | None = None
+
+
+class ExternalWorkflowRunResponse(BaseModel):
+    id: str
+    conversation_id: str
+    inputs: dict[str, Any]
+    outputs: dict[str, Any]
+    status: str
+    error: str | None
+    progress: list[ExternalWorkflowProgressEventResponse] = Field(default_factory=list)
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    updated_at: datetime
+
+
+class ExternalWorkflowRunListResponse(BaseModel):
+    items: list[ExternalWorkflowRunResponse]
+    total: int
+    offset: int
+    limit: int
+
+
+class WorkflowApiDocumentationResponse(BaseModel):
+    workflow_id: str
+    workflow_name: str
+    base_path: str
+    inputs: list[PublicWorkflowInputFieldResponse] = Field(default_factory=list)

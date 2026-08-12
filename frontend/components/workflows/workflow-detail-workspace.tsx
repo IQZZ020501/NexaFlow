@@ -6,18 +6,28 @@ import {
   ArrowLeftIcon,
   Clock3Icon,
   HistoryIcon,
+  LayoutDashboardIcon,
   LoaderCircleIcon,
-  PencilIcon,
   PlayIcon,
   SaveIcon,
+  ScrollTextIcon,
   SettingsIcon,
   ShieldCheckIcon,
+  MoreHorizontalIcon,
   Trash2Icon,
   UploadIcon,
+  UsersIcon,
+  ChartNoAxesColumnIcon,
   WorkflowIcon,
 } from "lucide-react"
 
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
+import {
+  AgentConversationUsersPanel,
+  AgentLogsPanel,
+  AgentMonitoringPanel,
+  AgentOverviewPanel,
+} from "@/components/agents/agent-management-panels"
 import type { AgentFormState } from "@/components/agents/agents-page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -29,8 +39,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { IconButton } from "@/components/ui/icon-button"
 import type { TFunction } from "@/i18n"
+import type { AgentDetailView } from "@/lib/agent-views"
 import type { Agent } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
@@ -81,10 +98,12 @@ type WorkflowDetailWorkspaceProps = {
   canManagePublishing: boolean
   isAppDirty: boolean
   isSavingApp: boolean
+  activeView: AgentDetailView
   onBack: () => void
   onDelete: () => void
   onManagePermissions: () => void
   onSaveApp: React.FormEventHandler<HTMLFormElement>
+  onViewChange: (view: AgentDetailView) => void
   notify: (kind: "success" | "error", message: string) => void
   t: TFunction
 }
@@ -127,18 +146,24 @@ export function WorkflowDetailWorkspace({
   canManagePublishing,
   isAppDirty,
   isSavingApp,
+  activeView,
   onBack,
   onDelete,
   onManagePermissions,
   onSaveApp,
+  onViewChange,
   notify,
   t,
 }: WorkflowDetailWorkspaceProps) {
-  const [definition, setDefinition] = React.useState<WorkflowDefinition | null>(null)
+  const [definition, setDefinition] = React.useState<WorkflowDefinition | null>(
+    null
+  )
   const [graph, setGraph] = React.useState<WorkflowGraph | null>(null)
   const [versions, setVersions] = React.useState<WorkflowVersion[]>([])
   const [currentRun, setCurrentRun] = React.useState<WorkflowRun | null>(null)
-  const [executions, setExecutions] = React.useState<WorkflowNodeExecution[]>([])
+  const [executions, setExecutions] = React.useState<WorkflowNodeExecution[]>(
+    []
+  )
   const [runtimeStatuses, setRuntimeStatuses] = React.useState<
     Record<string, WorkflowNodeExecution["status"]>
   >({})
@@ -152,8 +177,9 @@ export function WorkflowDetailWorkspace({
   const [runDetailsOpen, setRunDetailsOpen] = React.useState(false)
   const [runInputs, setRunInputs] = React.useState("{}")
   const [runInputsInvalid, setRunInputsInvalid] = React.useState(false)
-  const [runVersionNumber, setRunVersionNumber] = React.useState<number | null>(null)
-  const [view, setView] = React.useState<"details" | "canvas">("details")
+  const [runVersionNumber, setRunVersionNumber] = React.useState<number | null>(
+    null
+  )
   const runAbortRef = React.useRef<AbortController | null>(null)
 
   const isDirty = Boolean(
@@ -162,8 +188,6 @@ export function WorkflowDetailWorkspace({
       workflowGraphSignature(definition.graph) !== workflowGraphSignature(graph)
   )
   const hasUnsavedChanges = isDirty || isAppDirty
-  const nodeCount = graph?.nodes.length ?? 0
-  const edgeCount = graph?.edges.length ?? 0
   const latestPublishedVersion = versions.reduce(
     (latest, version) => Math.max(latest, version.version_number),
     0
@@ -173,6 +197,40 @@ export function WorkflowDetailWorkspace({
     versions,
     runVersionNumber
   )
+  const navigationItems = [
+    { view: "overview" as const, label: t("概览"), icon: LayoutDashboardIcon },
+    { view: "settings" as const, label: t("设置"), icon: SettingsIcon },
+    { view: "logs" as const, label: t("对话日志"), icon: ScrollTextIcon },
+    {
+      view: "monitoring" as const,
+      label: t("监控统计"),
+      icon: ChartNoAxesColumnIcon,
+    },
+    { view: "users" as const, label: t("对话用户"), icon: UsersIcon },
+  ].filter(
+    (item) => agent.can_edit || ["overview", "settings"].includes(item.view)
+  )
+  const visibleActiveView =
+    !agent.can_edit && ["logs", "monitoring", "users"].includes(activeView)
+      ? "overview"
+      : activeView
+  const currentViewLabel =
+    navigationItems.find((item) => item.view === visibleActiveView)?.label ??
+    t("概览")
+  const renderNavItems = (itemClassName: string) =>
+    navigationItems.map(({ view: navView, label, icon: Icon }) => (
+      <Button
+        key={navView}
+        type="button"
+        variant={visibleActiveView === navView ? "secondary" : "ghost"}
+        className={itemClassName}
+        aria-current={visibleActiveView === navView ? "page" : undefined}
+        onClick={() => onViewChange(navView)}
+      >
+        <Icon data-icon="inline-start" />
+        {label}
+      </Button>
+    ))
 
   const reportError = React.useCallback(
     (error: unknown) => notify("error", getErrorMessage(error, t)),
@@ -189,7 +247,9 @@ export function WorkflowDetailWorkspace({
       )
       setExecutions(response.items)
       setRuntimeStatuses(
-        Object.fromEntries(response.items.map((item) => [item.node_id, item.status]))
+        Object.fromEntries(
+          response.items.map((item) => [item.node_id, item.status])
+      )
       )
     },
     [agent.id, token, workspaceId]
@@ -199,11 +259,15 @@ export function WorkflowDetailWorkspace({
     (event: WorkflowRunStreamEvent) => {
       if ("run" in event) {
         setCurrentRun(event.run)
-        if (event.type !== "run") void loadExecutions(event.run.id).catch(reportError)
+        if (event.type !== "run")
+          void loadExecutions(event.run.id).catch(reportError)
         return
       }
       if (event.type === "workflow_node_started") {
-        setRuntimeStatuses((current) => ({ ...current, [event.node_id]: "running" }))
+        setRuntimeStatuses((current) => ({
+          ...current,
+          [event.node_id]: "running",
+        }))
         return
       }
       setRuntimeStatuses((current) => ({
@@ -293,9 +357,16 @@ export function WorkflowDetailWorkspace({
     try {
       if (isDirty && !(await saveDraft())) return
       const version = await publishWorkflow(token, workspaceId, agent.id)
-      const nextVersions = await listWorkflowVersions(token, workspaceId, agent.id)
+      const nextVersions = await listWorkflowVersions(
+        token,
+        workspaceId,
+        agent.id
+      )
       setVersions(nextVersions.items)
-      notify("success", t("工作流版本 v{version} 已发布", { version: version.version_number }))
+      notify(
+        "success",
+        t("工作流版本 v{version} 已发布", { version: version.version_number })
+      )
     } catch (error) {
       reportError(error)
     } finally {
@@ -317,7 +388,8 @@ export function WorkflowDetailWorkspace({
     if (runTarget.source === "draft" && isAppDirty) return
     setIsRunning(true)
     try {
-      if (runTarget.source === "draft" && isDirty && !(await saveDraft())) return
+      if (runTarget.source === "draft" && isDirty && !(await saveDraft()))
+        return
       const run = await createWorkflowRun(
         token,
         workspaceId,
@@ -352,7 +424,11 @@ export function WorkflowDetailWorkspace({
       : latestPublishedVersion || null
   ) {
     if (!graph) return
-    const target = selectWorkflowRunTarget(agent.can_edit, versions, versionNumber)
+    const target = selectWorkflowRunTarget(
+      agent.can_edit,
+      versions,
+      versionNumber
+    )
     if (!target) return
     setRunVersionNumber(versionNumber)
     setRunInputs(
@@ -366,7 +442,9 @@ export function WorkflowDetailWorkspace({
     if (
       !agent.can_edit ||
       !window.confirm(
-        t("将版本 v{version} 恢复为当前草稿？", { version: version.version_number })
+        t("将版本 v{version} 恢复为当前草稿？", {
+          version: version.version_number,
+        })
       )
     ) {
       return
@@ -397,81 +475,116 @@ export function WorkflowDetailWorkspace({
   }
 
   return (
-    <div className="flex min-h-[calc(100dvh-6rem)] flex-col overflow-hidden rounded-md border bg-background">
-      <header className="flex min-h-16 flex-wrap items-center gap-2 px-3 py-2 sm:px-4">
-        <IconButton
-          label={t("返回")}
+    <div className="-mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
+      <header className="z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={t("返回")}
+          title={t("返回")}
           onClick={() => {
-            if (view === "canvas") {
-              setView("details")
+            if (visibleActiveView === "settings") {
+              onViewChange("overview")
               return
             }
-            if (!hasUnsavedChanges || window.confirm(t("放弃未保存的更改？"))) onBack()
+            if (!hasUnsavedChanges || window.confirm(t("放弃未保存的更改？")))
+              onBack()
           }}
         >
           <ArrowLeftIcon />
-        </IconButton>
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+        </Button>
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background shadow-sm">
           <WorkflowIcon className="size-5" />
         </span>
-        <div className="mr-auto min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="max-w-64 truncate text-base font-semibold sm:max-w-md">{agent.name}</h1>
-            <Badge variant="secondary">{t("工作流")}</Badge>
-            <Badge variant="outline">v{definition.revision}</Badge>
-            {hasUnsavedChanges ? <Badge variant="destructive">{t("未保存")}</Badge> : null}
+            <h1 className="max-w-52 truncate text-base font-semibold sm:max-w-none">
+              {form.name || agent.name}
+            </h1>
+            <Badge
+              variant="outline"
+              className={
+                agent.status === "active"
+                  ? "border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  : "text-muted-foreground"
+              }
+            >
+              <span
+                className={`mr-1.5 size-1.5 rounded-full ${agent.status === "active" ? "bg-emerald-500" : "bg-muted-foreground"}`}
+              />
+              {t(agent.status === "active" ? "已启用" : "已停用")}
+            </Badge>
+            {agent.published ? (
+              <Badge
+                variant="outline"
+                className="border-blue-600/20 bg-blue-500/10 text-blue-700 dark:text-blue-400"
+              >
+                {t("已发布")}
+              </Badge>
+            ) : null}
+            {hasUnsavedChanges ? (
+              <Badge variant="secondary">{t("未保存")}</Badge>
+            ) : null}
           </div>
-          <p className="mt-0.5 max-w-96 truncate text-xs text-muted-foreground">
-            {agent.description || t("暂无描述")}
+          <p className="mt-0.5 hidden truncate text-xs text-muted-foreground sm:block">
+            {t("工作流")} · {currentViewLabel} · v{definition.revision}
           </p>
         </div>
-        <IconButton label={t("版本历史")} onClick={() => setHistoryOpen(true)}>
-          <HistoryIcon />
-        </IconButton>
-        {agent.can_edit ? (
-          <>
-            <IconButton label={t("应用设置")} onClick={() => setSettingsOpen(true)}>
-              <SettingsIcon />
-            </IconButton>
-            <IconButton label={t("资源授权")} onClick={onManagePermissions}>
-              <ShieldCheckIcon />
-            </IconButton>
-            <IconButton label={t("删除工作流")} onClick={onDelete}>
-              <Trash2Icon />
-            </IconButton>
-          </>
+        {visibleActiveView === "settings" ? (
+          <IconButton
+            label={t("版本历史")}
+            onClick={() => setHistoryOpen(true)}
+          >
+            <HistoryIcon />
+          </IconButton>
         ) : null}
-        {view === "canvas" && agent.can_edit ? (
-          <Button type="button" variant="outline" disabled={!isDirty || isSaving} onClick={() => void saveDraft()}>
-            {isSaving ? <LoaderCircleIcon className="animate-spin" /> : <SaveIcon />}
-            {t("保存")}
+        {visibleActiveView === "settings" && agent.can_edit ? (
+          <IconButton
+            label={t("应用设置")}
+            onClick={() => setSettingsOpen(true)}
+          >
+            <SettingsIcon />
+          </IconButton>
+        ) : null}
+        {visibleActiveView === "settings" && agent.can_edit ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!isDirty || isSaving}
+            onClick={() => void saveDraft()}
+          >
+            {isSaving ? (
+              <LoaderCircleIcon className="animate-spin" />
+            ) : (
+              <SaveIcon />
+            )}
+            <span className="hidden sm:inline">{t("保存")}</span>
           </Button>
         ) : null}
-        {view === "details" ? (
-          <Button type="button" variant="outline" onClick={() => setView("canvas")}>
-            <PencilIcon />
-            {agent.can_edit ? t("编辑画布") : t("查看画布")}
+        {visibleActiveView === "settings" ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={
+              agent.status !== "active" ||
+              isRunning ||
+              (!agent.can_edit && !latestPublishedVersion) ||
+              Boolean(currentRun && !TERMINAL_STATUSES.has(currentRun.status))
+            }
+            title={
+              !agent.can_edit && !latestPublishedVersion
+                ? t("暂无可运行的已发布版本")
+                : undefined
+            }
+            onClick={() => openRunDialog()}
+          >
+            <PlayIcon />
+            <span className="hidden sm:inline">
+              {agent.can_edit ? t("调试运行") : t("运行已发布版本")}
+            </span>
           </Button>
         ) : null}
-        <Button
-          type="button"
-          variant="outline"
-          disabled={
-            agent.status !== "active" ||
-            isRunning ||
-            (!agent.can_edit && !latestPublishedVersion) ||
-            Boolean(currentRun && !TERMINAL_STATUSES.has(currentRun.status))
-          }
-          title={
-            !agent.can_edit && !latestPublishedVersion
-              ? t("暂无可运行的已发布版本")
-              : undefined
-          }
-          onClick={() => openRunDialog()}
-        >
-          <PlayIcon />
-          {agent.can_edit ? t("调试运行") : t("运行已发布版本")}
-        </Button>
         {canManagePublishing ? (
           <Button
             type="button"
@@ -479,115 +592,149 @@ export function WorkflowDetailWorkspace({
             title={isAppDirty ? t("请先保存更改后再发布。") : undefined}
             onClick={() => void handlePublish()}
           >
-            {isPublishing ? <LoaderCircleIcon className="animate-spin" /> : <UploadIcon />}
-            {t("发布版本")}
+            {isPublishing ? (
+              <LoaderCircleIcon className="animate-spin" />
+            ) : (
+              <UploadIcon />
+            )}
+            <span className="hidden sm:inline">{t("发布版本")}</span>
           </Button>
+        ) : null}
+        {agent.can_edit ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("设置")}
+                title={t("设置")}
+              >
+                <MoreHorizontalIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={onManagePermissions}>
+                <ShieldCheckIcon />
+                {t("资源授权")}
+              </DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+                <Trash2Icon />
+                {t("删除工作流")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
       </header>
 
-      {view === "details" ? (
-        <main className="flex-1 border-t">
-          <section className="grid grid-cols-2 divide-x border-b sm:grid-cols-4">
-            <div className="grid gap-1 px-4 py-4">
-              <span className="text-xs text-muted-foreground">{t("节点数量")}</span>
-              <strong className="text-xl font-semibold tabular-nums">{nodeCount}</strong>
-            </div>
-            <div className="grid gap-1 px-4 py-4 sm:border-r">
-              <span className="text-xs text-muted-foreground">{t("连线数量")}</span>
-              <strong className="text-xl font-semibold tabular-nums">{edgeCount}</strong>
-            </div>
-            <div className="grid gap-1 border-t px-4 py-4 sm:border-t-0 sm:border-r">
-              <span className="text-xs text-muted-foreground">{t("草稿修订")}</span>
-              <strong className="text-xl font-semibold tabular-nums">v{definition.revision}</strong>
-            </div>
-            <div className="grid gap-1 border-t px-4 py-4 sm:border-t-0">
-              <span className="text-xs text-muted-foreground">{t("已发布版本")}</span>
-              <strong className="text-xl font-semibold tabular-nums">
-                {latestPublishedVersion ? `v${latestPublishedVersion}` : "-"}
-              </strong>
-            </div>
-          </section>
-          <section className="grid gap-8 p-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(16rem,0.8fr)] lg:p-8">
-            <div className="grid content-start gap-4">
-              <div>
-                <h2 className="text-lg font-semibold">{t("工作流详情")}</h2>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                  {agent.description || t("暂无描述")}
-                </p>
-              </div>
-              <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-                {t("当前草稿包含 {nodes} 个节点和 {edges} 条连线。", {
-                  nodes: nodeCount,
-                  edges: edgeCount,
-                })}
-              </p>
-              <div>
-                <Button type="button" onClick={() => setView("canvas")}>
-                  <PencilIcon />
-                  {agent.can_edit ? t("编辑画布") : t("查看画布")}
-                </Button>
-              </div>
-            </div>
-            <div className="grid content-start gap-3 border-t pt-5 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
-              <h2 className="text-sm font-semibold">{t("最近运行")}</h2>
-              {currentRun ? (
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Badge variant={currentRun.status === "failed" ? "destructive" : "outline"}>
-                    {runStatusLabel(currentRun, t)}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {t("已执行 {count} 个节点", { count: currentRun.step_count })}
-                  </span>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setRunDetailsOpen(true)}>
-                    {t("查看运行结果")}
-                  </Button>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t("尚未运行")}</p>
-              )}
-            </div>
-          </section>
-        </main>
-      ) : null}
-
-      {view === "canvas" && currentRun ? (
-        <div className="flex flex-wrap items-center gap-3 border-t bg-muted/25 px-4 py-2 text-xs">
-          <Badge
-            variant={currentRun.status === "failed" ? "destructive" : "outline"}
-            className={cn(currentRun.status === "running" && "border-sky-500 text-sky-700 dark:text-sky-400")}
+      <div className="flex min-h-0 flex-1">
+        <aside className="hidden w-52 shrink-0 border-r bg-muted/20 p-3 lg:block">
+          <nav className="space-y-1" aria-label={t("工作流详情导航")}>
+            {renderNavItems("w-full justify-start")}
+          </nav>
+        </aside>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <nav
+            className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden"
+            aria-label={t("工作流详情导航")}
           >
-            {runStatusLabel(currentRun, t)}
-          </Badge>
-          <span className="text-muted-foreground">
-            {t("已执行 {count} 个节点", { count: currentRun.step_count })}
-          </span>
-          <span className="text-muted-foreground">
-            {t("令牌 {count}", { count: currentRun.token_usage })}
-          </span>
-          <Button type="button" variant="ghost" size="sm" className="ml-auto" onClick={() => setRunDetailsOpen(true)}>
-            {t("查看运行结果")}
-          </Button>
+            {renderNavItems("shrink-0")}
+          </nav>
+          {visibleActiveView === "settings" && currentRun ? (
+            <div className="flex flex-wrap items-center gap-3 border-b bg-muted/25 px-4 py-2 text-xs">
+              <Badge
+                variant={
+                  currentRun.status === "failed" ? "destructive" : "outline"
+                }
+                className={cn(
+                  currentRun.status === "running" &&
+                    "border-sky-500 text-sky-700 dark:text-sky-400"
+                )}
+              >
+                {runStatusLabel(currentRun, t)}
+              </Badge>
+              <span className="text-muted-foreground">
+                {t("已执行 {count} 个节点", { count: currentRun.step_count })}
+              </span>
+              <span className="text-muted-foreground">
+                {t("令牌 {count}", { count: currentRun.token_usage })}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="ml-auto"
+                onClick={() => setRunDetailsOpen(true)}
+              >
+                {t("查看运行结果")}
+              </Button>
+            </div>
+          ) : null}
+          {visibleActiveView === "settings" ? (
+            <WorkflowCanvas
+              key={`${definition.id}:${definition.revision}`}
+              agent={agent}
+              graph={graph}
+              models={models}
+              knowledgeBases={knowledgeBases}
+              mcpServers={mcpServers}
+              runtimeStatuses={runtimeStatuses}
+              readOnly={!agent.can_edit}
+              onChange={setGraph}
+              t={t}
+            />
+          ) : (
+            <main className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
+              {visibleActiveView === "overview" ? (
+                <AgentOverviewPanel
+                  key={`${agent.id}:overview`}
+                  agent={agent}
+                  token={token}
+                  workspaceId={workspaceId}
+                  canViewCredentials={agent.can_edit}
+                  canManageCredentials={canManagePublishing && agent.can_edit}
+                  t={t}
+                  notify={notify}
+                />
+              ) : visibleActiveView === "logs" ? (
+                <AgentLogsPanel
+                  key={`${agent.id}:logs`}
+                  agent={agent}
+                  token={token}
+                  workspaceId={workspaceId}
+                  t={t}
+                  notify={notify}
+                />
+              ) : visibleActiveView === "monitoring" ? (
+                <AgentMonitoringPanel
+                  key={`${agent.id}:monitoring`}
+                  agent={agent}
+                  token={token}
+                  workspaceId={workspaceId}
+                  t={t}
+                  notify={notify}
+                />
+              ) : (
+                <AgentConversationUsersPanel
+                  key={`${agent.id}:users`}
+                  agent={agent}
+                  token={token}
+                  workspaceId={workspaceId}
+                  t={t}
+                  notify={notify}
+                />
+              )}
+            </main>
+          )}
         </div>
-      ) : null}
-
-      {view === "canvas" ? (
-        <WorkflowCanvas
-          key={`${definition.id}:${definition.revision}`}
-          agent={agent}
-          graph={graph}
-          models={models}
-          knowledgeBases={knowledgeBases}
-          mcpServers={mcpServers}
-          runtimeStatuses={runtimeStatuses}
-          readOnly={!agent.can_edit}
-          onChange={setGraph}
-          t={t}
-        />
-      ) : null}
+      </div>
 
       <Dialog open={runOpen} onOpenChange={setRunOpen}>
         <DialogContent className="max-w-xl">
-          <form className="grid gap-4" onSubmit={(event) => void handleRun(event)}>
+          <form
+            className="grid gap-4"
+            onSubmit={(event) => void handleRun(event)}
+          >
             <DialogHeader>
               <DialogTitle>{t("运行工作流")}</DialogTitle>
               <DialogDescription>
@@ -598,30 +745,53 @@ export function WorkflowDetailWorkspace({
                   : t("输入将从开始节点注入当前草稿。")}
               </DialogDescription>
             </DialogHeader>
-            <label className="grid gap-2 text-sm font-medium" htmlFor="workflow-run-version">
+            <label
+              className="grid gap-2 text-sm font-medium"
+              htmlFor="workflow-run-version"
+            >
               {t("运行版本")}
               <select
                 id="workflow-run-version"
                 className="h-9 rounded-md border bg-background px-2 text-sm"
                 value={runVersionNumber ?? "draft"}
                 onChange={(event) => {
-                  const nextVersion = event.target.value === "draft" ? null : Number(event.target.value)
-                  const target = selectWorkflowRunTarget(agent.can_edit, versions, nextVersion)
+                  const nextVersion =
+                    event.target.value === "draft"
+                      ? null
+                      : Number(event.target.value)
+                  const target = selectWorkflowRunTarget(
+                    agent.can_edit,
+                    versions,
+                    nextVersion
+                  )
                   if (!target) return
                   setRunVersionNumber(nextVersion)
-                  setRunInputs(JSON.stringify(initialWorkflowInputs(target.graph ?? graph), null, 2))
+                  setRunInputs(
+                    JSON.stringify(
+                      initialWorkflowInputs(target.graph ?? graph),
+                      null,
+                      2
+                    )
+                  )
                   setRunInputsInvalid(false)
                 }}
               >
-                {agent.can_edit ? <option value="draft">{t("当前草稿")}</option> : null}
+                {agent.can_edit ? (
+                  <option value="draft">{t("当前草稿")}</option>
+                ) : null}
                 {versions.map((version) => (
                   <option key={version.id} value={version.version_number}>
-                    {t("已发布版本 v{version}", { version: version.version_number })}
+                    {t("已发布版本 v{version}", {
+                      version: version.version_number,
+                    })}
                   </option>
                 ))}
               </select>
             </label>
-            <label className="grid gap-2 text-sm font-medium" htmlFor="workflow-run-inputs">
+            <label
+              className="grid gap-2 text-sm font-medium"
+              htmlFor="workflow-run-inputs"
+            >
               {t("运行输入")}
               <textarea
                 id="workflow-run-inputs"
@@ -630,10 +800,20 @@ export function WorkflowDetailWorkspace({
                 aria-invalid={runInputsInvalid}
                 onChange={(event) => setRunInputs(event.target.value)}
               />
-              {runInputsInvalid ? <span className="text-xs font-normal text-destructive">{t("请输入 JSON 对象")}</span> : null}
+              {runInputsInvalid ? (
+                <span className="text-xs font-normal text-destructive">
+                  {t("请输入 JSON 对象")}
+                </span>
+              ) : null}
             </label>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setRunOpen(false)}>{t("取消")}</Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRunOpen(false)}
+              >
+                {t("取消")}
+              </Button>
               <Button
                 type="submit"
                 disabled={
@@ -647,8 +827,14 @@ export function WorkflowDetailWorkspace({
                     : undefined
                 }
               >
-                {isRunning ? <LoaderCircleIcon className="animate-spin" /> : <PlayIcon />}
-                {runTarget?.source === "published" ? t("开始运行") : t("开始调试")}
+                {isRunning ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : (
+                  <PlayIcon />
+                )}
+                {runTarget?.source === "published"
+                  ? t("开始运行")
+                  : t("开始调试")}
               </Button>
             </DialogFooter>
           </form>
@@ -659,15 +845,25 @@ export function WorkflowDetailWorkspace({
         <DialogContent className="max-h-[calc(100svh-2rem)] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("版本历史")}</DialogTitle>
-            <DialogDescription>{t("已发布版本不可修改，可恢复为新的草稿修订。")}</DialogDescription>
+            <DialogDescription>
+              {t("已发布版本不可修改，可恢复为新的草稿修订。")}
+            </DialogDescription>
           </DialogHeader>
           <div className="divide-y rounded-md border">
-            {versions.length ? versions.map((version) => (
+            {versions.length ? (
+              versions.map((version) => (
               <div key={version.id} className="flex items-center gap-3 p-3">
                 <Badge>v{version.version_number}</Badge>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{t("草稿修订 {revision}", { revision: version.definition_revision })}</p>
-                  <p className="truncate text-xs text-muted-foreground">{new Date(version.created_at).toLocaleString()} · {version.graph_hash.slice(0, 12)}</p>
+                    <p className="text-sm font-medium">
+                      {t("草稿修订 {revision}", {
+                        revision: version.definition_revision,
+                      })}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {new Date(version.created_at).toLocaleString()} ·{" "}
+                      {version.graph_hash.slice(0, 12)}
+                    </p>
                 </div>
                 <Button
                   type="button"
@@ -676,7 +872,9 @@ export function WorkflowDetailWorkspace({
                   disabled={
                     agent.status !== "active" ||
                     isRunning ||
-                    Boolean(currentRun && !TERMINAL_STATUSES.has(currentRun.status))
+                      Boolean(
+                        currentRun && !TERMINAL_STATUSES.has(currentRun.status)
+                      )
                   }
                   onClick={() => {
                     setHistoryOpen(false)
@@ -686,9 +884,23 @@ export function WorkflowDetailWorkspace({
                   <PlayIcon />
                   {t("运行")}
                 </Button>
-                {agent.can_edit ? <Button type="button" variant="outline" size="sm" onClick={() => void handleRestore(version)}>{t("恢复")}</Button> : null}
+                  {agent.can_edit ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleRestore(version)}
+                    >
+                      {t("恢复")}
+                    </Button>
+                  ) : null}
               </div>
-            )) : <p className="p-6 text-center text-sm text-muted-foreground">{t("暂无已发布版本")}</p>}
+              ))
+            ) : (
+              <p className="p-6 text-center text-sm text-muted-foreground">
+                {t("暂无已发布版本")}
+              </p>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -697,13 +909,25 @@ export function WorkflowDetailWorkspace({
         <DialogContent className="max-h-[calc(100svh-2rem)] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("运行结果")}</DialogTitle>
-            <DialogDescription>{currentRun ? `${runStatusLabel(currentRun, t)} · ${currentRun.trace_id}` : ""}</DialogDescription>
+            <DialogDescription>
+              {currentRun
+                ? `${runStatusLabel(currentRun, t)} · ${currentRun.trace_id}`
+                : ""}
+            </DialogDescription>
           </DialogHeader>
           {currentRun ? (
             <div className="grid gap-5">
               <section className="grid gap-2">
-                <h3 className="text-sm font-semibold">{currentRun.last_error ? t("错误") : t("结果")}</h3>
-                {currentRun.last_error ? <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{currentRun.last_error}</p> : <JsonBlock value={currentRun.outputs} />}
+                <h3 className="text-sm font-semibold">
+                  {currentRun.last_error ? t("错误") : t("结果")}
+                </h3>
+                {currentRun.last_error ? (
+                  <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                    {currentRun.last_error}
+                  </p>
+                ) : (
+                  <JsonBlock value={currentRun.outputs} />
+                )}
               </section>
               <section className="grid gap-2">
                 <h3 className="text-sm font-semibold">{t("节点执行记录")}</h3>
@@ -711,14 +935,45 @@ export function WorkflowDetailWorkspace({
                   {executions.map((execution) => (
                     <div key={execution.id} className="grid gap-2 p-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium">{execution.node_id}</span>
-                        <Badge variant={execution.status === "failed" ? "destructive" : "outline"}>{execution.status === "succeeded" ? t("运行成功") : execution.status === "failed" ? t("运行失败") : execution.status === "running" ? t("运行中") : t("已跳过")}</Badge>
-                        {execution.duration_ms !== null ? <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground"><Clock3Icon className="size-3.5" />{t("{duration} 毫秒", { duration: execution.duration_ms })}</span> : null}
+                        <span className="text-sm font-medium">
+                          {execution.node_id}
+                        </span>
+                        <Badge
+                          variant={
+                            execution.status === "failed"
+                              ? "destructive"
+                              : "outline"
+                          }
+                        >
+                          {execution.status === "succeeded"
+                            ? t("运行成功")
+                            : execution.status === "failed"
+                              ? t("运行失败")
+                              : execution.status === "running"
+                                ? t("运行中")
+                                : t("已跳过")}
+                        </Badge>
+                        {execution.duration_ms !== null ? (
+                          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock3Icon className="size-3.5" />
+                            {t("{duration} 毫秒", {
+                              duration: execution.duration_ms,
+                            })}
+                          </span>
+                        ) : null}
                       </div>
-                      {execution.error ? <p className="text-xs text-destructive">{execution.error}</p> : null}
+                      {execution.error ? (
+                        <p className="text-xs text-destructive">
+                          {execution.error}
+                        </p>
+                      ) : null}
                     </div>
                   ))}
-                  {!executions.length ? <p className="p-4 text-sm text-muted-foreground">{t("暂无节点执行记录")}</p> : null}
+                  {!executions.length ? (
+                    <p className="p-4 text-sm text-muted-foreground">
+                      {t("暂无节点执行记录")}
+                    </p>
+                  ) : null}
                 </div>
               </section>
             </div>
@@ -737,14 +992,34 @@ export function WorkflowDetailWorkspace({
         <DialogContent className="max-h-[calc(100svh-2rem)] max-w-xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("工作流设置")}</DialogTitle>
-            <DialogDescription>{t("配置默认模型以及节点可使用的知识库和只读 MCP 工具。")}</DialogDescription>
+            <DialogDescription>
+              {t("配置默认模型以及节点可使用的知识库和只读 MCP 工具。")}
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={onSaveApp}>
-            <AgentConfigFields form={form} setForm={setForm} models={models} knowledgeBases={knowledgeBases} mcpServers={mcpServers} readOnly={!agent.can_edit} t={t} />
+            <AgentConfigFields
+              form={form}
+              setForm={setForm}
+              models={models}
+              knowledgeBases={knowledgeBases}
+              mcpServers={mcpServers}
+              readOnly={!agent.can_edit}
+              t={t}
+            />
             <DialogFooter className="pt-5">
-              <Button type="button" variant="outline" onClick={() => setSettingsOpen(false)}>{t("关闭")}</Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSettingsOpen(false)}
+              >
+                {t("关闭")}
+              </Button>
               <Button type="submit" disabled={isSavingApp}>
-                {isSavingApp ? <LoaderCircleIcon className="animate-spin" /> : <SaveIcon />}
+                {isSavingApp ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : (
+                  <SaveIcon />
+                )}
                 {t("保存")}
               </Button>
             </DialogFooter>

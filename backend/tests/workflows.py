@@ -534,7 +534,83 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}/api-credentials",
             headers=headers,
         )
-        assert credentials.status_code == 409, credentials.text
+        assert credentials.status_code == 200, credentials.text
+
+        public_profile = client.get(
+            f"/api/v1/public/workflows/{workflow_id}/profile",
+            headers=member_headers,
+        )
+        assert public_profile.status_code == 200, public_profile.text
+        assert public_profile.json()["inputs"] == [
+            {
+                "name": "input",
+                "type": "string",
+                "required": True,
+                "default": None,
+            }
+        ]
+        wrong_public_runtime = client.get(
+            f"/api/v1/public/agents/{workflow_id}/profile",
+            headers=member_headers,
+        )
+        assert wrong_public_runtime.status_code == 404, wrong_public_runtime.text
+
+        public_run = client.post(
+            f"/api/v1/public/workflows/{workflow_id}/runs",
+            headers=member_headers,
+            json={"inputs": {"input": "public-workflow"}},
+        )
+        assert public_run.status_code == 201, public_run.text
+        public_payload = public_run.json()
+        assert public_payload["status"] == "succeeded"
+        assert public_payload["outputs"] == {"result": "public-workflow"}
+        public_events = client.get(
+            f"/api/v1/public/workflows/{workflow_id}/runs/{public_payload['id']}/stream",
+            headers=member_headers,
+        )
+        assert public_events.status_code == 200, public_events.text
+        public_event_types = [
+            json.loads(line)["type"] for line in public_events.text.splitlines()
+        ]
+        assert "progress" in public_event_types
+        assert public_event_types[-1] == "complete"
+        public_conversations = client.get(
+            f"/api/v1/public/workflows/{workflow_id}/conversations",
+            headers=member_headers,
+        )
+        assert public_conversations.status_code == 200, public_conversations.text
+        assert public_conversations.json()["items"][0]["outputs"] == {
+            "result": "public-workflow"
+        }
+
+        credential = client.post(
+            f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}/api-credentials",
+            headers=headers,
+            json={"name": "Workflow integration"},
+        )
+        assert credential.status_code == 201, credential.text
+        api_headers = {
+            "Authorization": f"Bearer {credential.json()['token']}"
+        }
+        documentation = client.get(
+            f"/api/v1/workflow-api/{workflow_id}/documentation",
+            headers=api_headers,
+        )
+        assert documentation.status_code == 200, documentation.text
+        assert documentation.json()["inputs"] == public_profile.json()["inputs"]
+        api_run = client.post(
+            f"/api/v1/workflow-api/{workflow_id}/runs",
+            headers=api_headers,
+            json={"inputs": {"input": "api-workflow"}},
+        )
+        assert api_run.status_code == 201, api_run.text
+        assert api_run.json()["outputs"] == {"result": "api-workflow"}
+        wrong_api_runtime = client.post(
+            f"/api/v1/agent-api/{workflow_id}/runs",
+            headers=api_headers,
+            json={"goal": "must not run as an agent"},
+        )
+        assert wrong_api_runtime.status_code == 404, wrong_api_runtime.text
 
 
 def main() -> None:

@@ -253,12 +253,13 @@ export function AgentOverviewPanel({
   }, [agent.id, canViewCredentials, notify, t, token, workspaceId])
 
   const publicUrl = origin ? `${origin}/chat/${agent.id}` : `/chat/${agent.id}`
+  const apiKind = agent.app_type === "workflow" ? "workflow-api" : "agent-api"
   const apiBaseUrl = origin
-    ? `${origin}/api/v1/agent-api/${agent.id}/runs`
-    : `/api/v1/agent-api/${agent.id}/runs`
+    ? `${origin}/api/v1/${apiKind}/${agent.id}/runs`
+    : `/api/v1/${apiKind}/${agent.id}/runs`
   const docsUrl = origin
-    ? `${origin}/agent-api/${agent.id}/docs`
-    : `/agent-api/${agent.id}/docs`
+    ? `${origin}/${apiKind}/${agent.id}/docs`
+    : `/${apiKind}/${agent.id}/docs`
 
   async function handleCopy(value: string, successMessage = t("已复制")) {
     try {
@@ -832,7 +833,11 @@ export function AgentLogsPanel({
                     />
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      {t("Agent 未返回结果")}
+                      {t(
+                        agent.app_type === "workflow"
+                          ? "工作流未返回结果"
+                          : "Agent 未返回结果"
+                      )}
                     </p>
                   )}
                 </div>
@@ -901,7 +906,11 @@ export function AgentMonitoringPanel({
         <div>
           <h2 className="text-lg font-semibold">{t("监控统计")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t("按时间范围查看 Agent 的使用与运行情况。")}
+            {t(
+              agent.app_type === "workflow"
+                ? "按时间范围查看工作流的使用与运行情况。"
+                : "按时间范围查看 Agent 的使用与运行情况。"
+            )}
           </p>
         </div>
         <div className="w-40 shrink-0">
