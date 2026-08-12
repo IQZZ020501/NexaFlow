@@ -217,6 +217,17 @@ export function WorkflowDetailWorkspace({
   const currentViewLabel =
     navigationItems.find((item) => item.view === visibleActiveView)?.label ??
     t("概览")
+  const changeView = (view: AgentDetailView) => {
+    if (
+      visibleActiveView === "settings" &&
+      view !== "settings" &&
+      hasUnsavedChanges &&
+      !window.confirm(t("放弃未保存的更改？"))
+    ) {
+      return
+    }
+    onViewChange(view)
+  }
   const renderNavItems = (itemClassName: string) =>
     navigationItems.map(({ view: navView, label, icon: Icon }) => (
       <Button
@@ -225,7 +236,7 @@ export function WorkflowDetailWorkspace({
         variant={visibleActiveView === navView ? "secondary" : "ghost"}
         className={itemClassName}
         aria-current={visibleActiveView === navView ? "page" : undefined}
-        onClick={() => onViewChange(navView)}
+        onClick={() => changeView(navView)}
       >
         <Icon data-icon="inline-start" />
         {label}
@@ -485,7 +496,7 @@ export function WorkflowDetailWorkspace({
           title={t("返回")}
           onClick={() => {
             if (visibleActiveView === "settings") {
-              onViewChange("overview")
+              changeView("overview")
               return
             }
             if (!hasUnsavedChanges || window.confirm(t("放弃未保存的更改？")))

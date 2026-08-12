@@ -72,7 +72,7 @@ import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/api/system"
 import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { getErrorMessage } from "@/lib/errors"
 import { getMembershipRole } from "@/lib/display"
-import type { AgentDetailView } from "@/lib/agent-views"
+import { appViewPath, type AgentDetailView } from "@/lib/agent-views"
 
 const WorkflowDetailWorkspace = dynamic(
   () =>
@@ -317,11 +317,13 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
 type AgentsPageProps = {
   initialConversationId?: string | null
   initialView?: AgentDetailView
+  workflowCanvasMode?: boolean
 }
 
 export function AgentsPage({
   initialConversationId = null,
   initialView = "overview",
+  workflowCanvasMode = false,
 }: AgentsPageProps) {
   const router = useRouter()
   const params = useParams<{ id?: string }>()
@@ -636,6 +638,27 @@ export function AgentsPage({
   ])
 
   React.useEffect(() => {
+    if (!selectedAgent || !selectedAgentId) return
+    if (workflowCanvasMode && selectedAgent.app_type !== "workflow") {
+      router.replace(appViewPath(selectedAgentId, "agent", "overview"))
+      return
+    }
+    if (
+      !workflowCanvasMode &&
+      selectedAgent.app_type === "workflow" &&
+      activeView === "settings"
+    ) {
+      router.replace(appViewPath(selectedAgentId, "workflow", "settings"))
+    }
+  }, [
+    activeView,
+    router,
+    selectedAgent,
+    selectedAgentId,
+    workflowCanvasMode,
+  ])
+
+  React.useEffect(() => {
     if (
       token &&
       selectedWorkspaceId &&
@@ -915,14 +938,23 @@ export function AgentsPage({
   }
 
   function handleViewChange(view: AgentDetailView) {
-    if (!selectedAgentId) return
-    setActiveView(view)
-    const query = new URLSearchParams()
-    query.set("view", view)
-    if (activeConversationIdRef.current) {
-      query.set("conversation_id", activeConversationIdRef.current)
+    if (!selectedAgentId || !selectedAgent) return
+    const path = appViewPath(
+      selectedAgentId,
+      selectedAgent.app_type,
+      view,
+      activeConversationIdRef.current
+    )
+    if (
+      selectedAgent.app_type === "workflow" &&
+      view === "settings" &&
+      !workflowCanvasMode
+    ) {
+      router.push(path)
+      return
     }
-    router.replace(`/app/apps/${selectedAgentId}?${query.toString()}`)
+    setActiveView(view)
+    router.replace(path)
   }
 
   async function handleDeleteAgent(agent: Agent) {
@@ -1282,8 +1314,14 @@ export function AgentsPage({
             canManagePublishing={canManagePublishing}
             isAppDirty={isDirty}
             isSavingApp={isSaving}
-            activeView={activeView}
-            onBack={() => router.push("/app/apps")}
+            activeView={workflowCanvasMode ? "settings" : activeView}
+            onBack={() =>
+              workflowCanvasMode
+                ? router.replace(
+                    appViewPath(selectedAgent.id, "workflow", "overview")
+                  )
+                : router.push("/app/apps")
+            }
             onDelete={() => void handleDeleteAgent(selectedAgent)}
             onManagePermissions={() =>
               void handleOpenAgentPermissions(selectedAgent)

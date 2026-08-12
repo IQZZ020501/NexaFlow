@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { parseAgentDetailView } from "../lib/agent-views"
+import { appViewPath, parseAgentDetailView } from "../lib/agent-views"
 import {
   cancelPublicAgentStream,
   mergePublicRunEvent,
@@ -331,6 +331,15 @@ describe("public agent API", () => {
     expect(parseAgentDetailView("monitoring")).toBe("monitoring")
     expect(parseAgentDetailView(["users", "ignored"])).toBe("users")
     expect(parseAgentDetailView("unknown")).toBe("overview")
+  })
+
+  test("opens workflow settings on the dedicated canvas route", () => {
+    expect(appViewPath("workflow-1", "workflow", "settings")).toBe(
+      "/app/apps/workflow-1/workflow"
+    )
+    expect(appViewPath("workflow-1", "workflow", "overview")).toBe(
+      "/app/apps/workflow-1?view=overview"
+    )
   })
 
   test("loads the profile and conversations with the session token", async () => {
