@@ -123,20 +123,34 @@ def _start_result(config: StartNodeConfig, inputs: dict[str, Any]) -> NodeResult
     return NodeResult(inputs=dict(inputs), outputs=output)
 
 
+def _model_output_limit(provider_type: str, remaining_model_tokens: int) -> dict[str, int]:
+    if provider_type == "google_genai":
+        return {"max_output_tokens": remaining_model_tokens}
+    if provider_type == "ollama":
+        return {"num_predict": remaining_model_tokens}
+    return {"max_tokens": remaining_model_tokens}
+
+
 async def _model_result(
     scope: WorkflowNodeScope,
     model_id: str,
     system_prompt: str,
     prompt: str,
+    remaining_model_tokens: int,
 ) -> tuple[str, dict[str, Any]]:
     model = scope.models.get(model_id)
     if model is None:
         raise ValueError("Workflow model is unavailable.")
+    if remaining_model_tokens <= 0:
+        raise ValueError("Workflow model token budget exceeded.")
     messages = []
     if system_prompt:
         messages.append(SystemMessage(content=system_prompt))
     messages.append(HumanMessage(content=prompt))
-    message = await build_chat_model(scope.settings, model).ainvoke(messages)
+    output_limit = _model_output_limit(model.provider_type, remaining_model_tokens)
+    message = await build_chat_model(scope.settings, model).ainvoke(
+        messages, **output_limit
+    )
     usage = usage_from_message(message)
     return model_completion(message).content, usage
 
@@ -200,7 +214,7 @@ async def execute_workflow_node(
         system_prompt = str(resolve_value(parsed.system_prompt, context))
         model_id = parsed.model_id or scope.run.model_id
         content, usage = await _model_result(
-            scope, model_id, system_prompt, prompt
+            scope, model_id, system_prompt, prompt, context.remaining_model_tokens
         )
         return NodeResult(
             inputs={"prompt": prompt, "system_prompt": system_prompt, "model_id": model_id},
@@ -220,7 +234,9 @@ async def execute_workflow_node(
             f"Classes:\n{class_lines}\nInput:\n{json.dumps(value, ensure_ascii=False)}"
         )
         model_id = parsed.model_id or scope.run.model_id
-        content, usage = await _model_result(scope, model_id, "", prompt)
+        content, usage = await _model_result(
+            scope, model_id, "", prompt, context.remaining_model_tokens
+        )
         selected = content.strip() if content.strip() in handles else parsed.default_handle
         return NodeResult(
             inputs={"input": value, "model_id": model_id},

@@ -420,9 +420,29 @@ class WorkflowEngine:
                         message, node_id=node.id
                     )
                     continue
+                projected_model_tokens = current.model_tokens + result.model_tokens
+                if projected_model_tokens > self.max_model_tokens:
+                    current.node_states[node.id] = NodeState.FAILED
+                    current.model_tokens = projected_model_tokens
+                    current.step_count += 1
+                    message = "Workflow model token budget exceeded."
+                    await on_node_finished(
+                        NodeTransition(
+                            node=node,
+                            status=NodeState.FAILED,
+                            sequence=sequence,
+                            result=result,
+                            error=message,
+                        ),
+                        current,
+                    )
+                    first_error = first_error or WorkflowEngineError(
+                        message, node_id=node.id
+                    )
+                    continue
                 current.node_states[node.id] = NodeState.SUCCEEDED
                 current.node_outputs[node.id] = dict(result.outputs)
-                current.model_tokens += result.model_tokens
+                current.model_tokens = projected_model_tokens
                 selected = result.selected_handles
                 for edge in self.outgoing[node.id]:
                     current.edge_states[edge.id] = (
@@ -442,8 +462,6 @@ class WorkflowEngine:
                 )
             if first_error:
                 raise first_error
-            if current.model_tokens > self.max_model_tokens:
-                raise WorkflowEngineError("Workflow model token budget exceeded.")
 
         end = next(node for node in self.graph.nodes if node.data.type == "end")
         if current.node_states[end.id] != NodeState.SUCCEEDED:

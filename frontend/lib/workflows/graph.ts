@@ -3,6 +3,7 @@ import type {
   WorkflowGraph,
   WorkflowNode,
   WorkflowNodeType,
+  WorkflowVersion,
 } from "@/lib/api/workflows"
 
 export const WORKFLOW_NODE_TYPES: WorkflowNodeType[] = [
@@ -156,4 +157,28 @@ export function initialWorkflowInputs(graph: WorkflowGraph) {
       return [[item.name, value]]
     })
   )
+}
+
+export function selectWorkflowRunTarget(
+  canEdit: boolean,
+  versions: Pick<WorkflowVersion, "version_number" | "graph">[],
+  selectedVersionNumber?: number | null
+) {
+  if (canEdit && selectedVersionNumber == null) {
+    return { source: "draft" as const, versionNumber: undefined, graph: null }
+  }
+  const version = selectedVersionNumber
+    ? versions.find((item) => item.version_number === selectedVersionNumber)
+    : versions.reduce<(typeof versions)[number] | null>(
+        (latest, item) =>
+          !latest || item.version_number > latest.version_number ? item : latest,
+        null
+      )
+  return version
+    ? {
+        source: "published" as const,
+        versionNumber: version.version_number,
+        graph: version.graph,
+      }
+    : null
 }

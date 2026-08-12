@@ -55,6 +55,7 @@ import {
 import { getErrorMessage } from "@/lib/errors"
 import {
   initialWorkflowInputs,
+  selectWorkflowRunTarget,
   workflowGraphSignature,
 } from "@/lib/workflows/graph"
 import { cn } from "@/lib/utils"
@@ -151,6 +152,7 @@ export function WorkflowDetailWorkspace({
   const [runDetailsOpen, setRunDetailsOpen] = React.useState(false)
   const [runInputs, setRunInputs] = React.useState("{}")
   const [runInputsInvalid, setRunInputsInvalid] = React.useState(false)
+  const [runVersionNumber, setRunVersionNumber] = React.useState<number | null>(null)
   const [view, setView] = React.useState<"details" | "canvas">("details")
   const runAbortRef = React.useRef<AbortController | null>(null)
 
@@ -165,6 +167,11 @@ export function WorkflowDetailWorkspace({
   const latestPublishedVersion = versions.reduce(
     (latest, version) => Math.max(latest, version.version_number),
     0
+  )
+  const runTarget = selectWorkflowRunTarget(
+    agent.can_edit,
+    versions,
+    runVersionNumber
   )
 
   const reportError = React.useCallback(
@@ -306,21 +313,53 @@ export function WorkflowDetailWorkspace({
       setRunInputsInvalid(true)
       return
     }
+    if (!runTarget) return
+    if (runTarget.source === "draft" && isAppDirty) return
     setIsRunning(true)
     try {
-      if (isDirty && !(await saveDraft())) return
-      const run = await createWorkflowRun(token, workspaceId, agent.id, inputs)
+      if (runTarget.source === "draft" && isDirty && !(await saveDraft())) return
+      const run = await createWorkflowRun(
+        token,
+        workspaceId,
+        agent.id,
+        inputs,
+        runTarget.source,
+        runTarget.versionNumber
+      )
       setCurrentRun(run)
       setExecutions([])
       setRuntimeStatuses({})
       setRunOpen(false)
       observeRun(run)
-      notify("success", t("工作流调试已开始"))
+      notify(
+        "success",
+        t(
+          runTarget.source === "published"
+            ? "工作流运行已开始"
+            : "工作流调试已开始"
+        )
+      )
     } catch (error) {
       reportError(error)
     } finally {
       setIsRunning(false)
     }
+  }
+
+  function openRunDialog(
+    versionNumber: number | null = agent.can_edit
+      ? null
+      : latestPublishedVersion || null
+  ) {
+    if (!graph) return
+    const target = selectWorkflowRunTarget(agent.can_edit, versions, versionNumber)
+    if (!target) return
+    setRunVersionNumber(versionNumber)
+    setRunInputs(
+      JSON.stringify(initialWorkflowInputs(target.graph ?? graph), null, 2)
+    )
+    setRunInputsInvalid(false)
+    setRunOpen(true)
   }
 
   async function handleRestore(version: WorkflowVersion) {
@@ -414,27 +453,25 @@ export function WorkflowDetailWorkspace({
             {agent.can_edit ? t("编辑画布") : t("查看画布")}
           </Button>
         ) : null}
-        {agent.can_edit ? (
-          <Button
-            type="button"
-            variant="outline"
-            disabled={
-              agent.status !== "active" ||
-              isRunning ||
-              isAppDirty ||
-              Boolean(currentRun && !TERMINAL_STATUSES.has(currentRun.status))
-            }
-            title={isAppDirty ? t("请先保存配置后再调试") : undefined}
-            onClick={() => {
-              setRunInputs(JSON.stringify(initialWorkflowInputs(graph), null, 2))
-              setRunInputsInvalid(false)
-              setRunOpen(true)
-            }}
-          >
-            <PlayIcon />
-            {t("调试运行")}
-          </Button>
-        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          disabled={
+            agent.status !== "active" ||
+            isRunning ||
+            (!agent.can_edit && !latestPublishedVersion) ||
+            Boolean(currentRun && !TERMINAL_STATUSES.has(currentRun.status))
+          }
+          title={
+            !agent.can_edit && !latestPublishedVersion
+              ? t("暂无可运行的已发布版本")
+              : undefined
+          }
+          onClick={() => openRunDialog()}
+        >
+          <PlayIcon />
+          {agent.can_edit ? t("调试运行") : t("运行已发布版本")}
+        </Button>
         {canManagePublishing ? (
           <Button
             type="button"
@@ -552,9 +589,38 @@ export function WorkflowDetailWorkspace({
         <DialogContent className="max-w-xl">
           <form className="grid gap-4" onSubmit={(event) => void handleRun(event)}>
             <DialogHeader>
-              <DialogTitle>{t("调试工作流")}</DialogTitle>
-              <DialogDescription>{t("输入将从开始节点注入当前草稿。")}</DialogDescription>
+              <DialogTitle>{t("运行工作流")}</DialogTitle>
+              <DialogDescription>
+                {runTarget?.source === "published"
+                  ? t("输入将从开始节点注入已发布版本 v{version}。", {
+                      version: runTarget.versionNumber ?? "",
+                    })
+                  : t("输入将从开始节点注入当前草稿。")}
+              </DialogDescription>
             </DialogHeader>
+            <label className="grid gap-2 text-sm font-medium" htmlFor="workflow-run-version">
+              {t("运行版本")}
+              <select
+                id="workflow-run-version"
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+                value={runVersionNumber ?? "draft"}
+                onChange={(event) => {
+                  const nextVersion = event.target.value === "draft" ? null : Number(event.target.value)
+                  const target = selectWorkflowRunTarget(agent.can_edit, versions, nextVersion)
+                  if (!target) return
+                  setRunVersionNumber(nextVersion)
+                  setRunInputs(JSON.stringify(initialWorkflowInputs(target.graph ?? graph), null, 2))
+                  setRunInputsInvalid(false)
+                }}
+              >
+                {agent.can_edit ? <option value="draft">{t("当前草稿")}</option> : null}
+                {versions.map((version) => (
+                  <option key={version.id} value={version.version_number}>
+                    {t("已发布版本 v{version}", { version: version.version_number })}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="grid gap-2 text-sm font-medium" htmlFor="workflow-run-inputs">
               {t("运行输入")}
               <textarea
@@ -568,9 +634,21 @@ export function WorkflowDetailWorkspace({
             </label>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setRunOpen(false)}>{t("取消")}</Button>
-              <Button type="submit" disabled={isRunning}>
+              <Button
+                type="submit"
+                disabled={
+                  isRunning ||
+                  !runTarget ||
+                  (runTarget.source === "draft" && isAppDirty)
+                }
+                title={
+                  runTarget?.source === "draft" && isAppDirty
+                    ? t("请先保存配置后再调试")
+                    : undefined
+                }
+              >
                 {isRunning ? <LoaderCircleIcon className="animate-spin" /> : <PlayIcon />}
-                {t("开始调试")}
+                {runTarget?.source === "published" ? t("开始运行") : t("开始调试")}
               </Button>
             </DialogFooter>
           </form>
@@ -591,6 +669,23 @@ export function WorkflowDetailWorkspace({
                   <p className="text-sm font-medium">{t("草稿修订 {revision}", { revision: version.definition_revision })}</p>
                   <p className="truncate text-xs text-muted-foreground">{new Date(version.created_at).toLocaleString()} · {version.graph_hash.slice(0, 12)}</p>
                 </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={
+                    agent.status !== "active" ||
+                    isRunning ||
+                    Boolean(currentRun && !TERMINAL_STATUSES.has(currentRun.status))
+                  }
+                  onClick={() => {
+                    setHistoryOpen(false)
+                    openRunDialog(version.version_number)
+                  }}
+                >
+                  <PlayIcon />
+                  {t("运行")}
+                </Button>
                 {agent.can_edit ? <Button type="button" variant="outline" size="sm" onClick={() => void handleRestore(version)}>{t("恢复")}</Button> : null}
               </div>
             )) : <p className="p-6 text-center text-sm text-muted-foreground">{t("暂无已发布版本")}</p>}

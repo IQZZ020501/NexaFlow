@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.agent_tools import (
     run_to_response,
 )
-from app.entities.agents import AgentRun
+from app.entities.agents import Agent, AgentRun
 from app.entities.user import User
 from app.infrastructure.agent_live_stream import (
     LIVE_EVENT_TYPES,
@@ -36,6 +36,14 @@ from app.shareddomain.agents.services import (
 from app.shareddomain.agents.permissions import require_agent_view
 
 AGENT_EVENT_PAGE_SIZE = 200
+
+
+def _require_agent_run_application(agent: Agent) -> None:
+    if agent.app_type != "agent":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Run workflows through the workflow run endpoint.",
+        )
 
 
 async def enqueue_prepared_agent_run(run_id: str, settings: Settings) -> None:
@@ -152,6 +160,7 @@ async def list_agent_runs(
     conversation_id: str | None = None,
 ) -> list[AgentRunResponse]:
     agent = await get_agent(db, workspace_id, agent_id)
+    _require_agent_run_application(agent)
     await require_agent_view(db, agent, actor, workspace_role)
     return [
         run_to_response(run)
@@ -195,6 +204,7 @@ async def get_agent_run_entity(
     workspace_role: str | None,
 ) -> AgentRun:
     agent = await get_agent(db, workspace_id, agent_id)
+    _require_agent_run_application(agent)
     await require_agent_view(db, agent, actor, workspace_role)
     run = await agent_repository.get_agent_run_by_id(db, run_id)
     if (
@@ -389,11 +399,7 @@ async def prepare_agent_run(
     elif not consumer_id:
         raise ValueError("External Agent runs require a consumer id.")
     agent = await get_agent(db, workspace_id, agent_id)
-    if agent.app_type != "agent":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "Run workflows through the workflow run endpoint.",
-        )
+    _require_agent_run_application(agent)
     if access_source == "console":
         await require_agent_view(db, agent, actor, workspace_role)
     if agent.status != ACTIVE_STATUS:

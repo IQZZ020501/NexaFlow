@@ -379,29 +379,9 @@ async def _list_node_executions(run_id: str) -> list[WorkflowNodeExecution]:
 
 
 def _run_payload(run: AgentRun, detail: WorkflowRunDetail) -> dict:
-    return {
-        "id": run.id,
-        "workspace_id": run.workspace_id,
-        "agent_id": run.agent_id,
-        "requested_by_user_id": run.requested_by_user_id,
-        "status": run.status,
-        "source": detail.source,
-        "definition_revision": detail.definition_revision,
-        "version_number": detail.version_number,
-        "graph_hash": detail.graph_hash,
-        "inputs": detail.inputs,
-        "outputs": detail.outputs,
-        "max_steps": detail.max_steps,
-        "max_model_tokens": detail.max_model_tokens,
-        "step_count": detail.step_count,
-        "token_usage": detail.token_usage,
-        "last_error": run.last_error,
-        "trace_id": run.trace_id,
-        "started_at": run.started_at.isoformat() if run.started_at else None,
-        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-        "created_at": run.created_at.isoformat(),
-        "updated_at": run.updated_at.isoformat(),
-    }
+    from app.application.workflow_runs import workflow_run_to_response
+
+    return workflow_run_to_response(run, detail).model_dump(mode="json")
 
 
 async def _fail_claimed_workflow_run(

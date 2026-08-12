@@ -9,8 +9,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   addEdge,
-  applyEdgeChanges,
-  applyNodeChanges,
   useReactFlow,
   type AriaLabelConfig,
   type Connection,
@@ -40,6 +38,11 @@ import {
   removeWorkflowNode,
   serializeWorkflowGraph,
 } from "@/lib/workflows/graph"
+import {
+  applyWorkflowEdgeChanges,
+  applyWorkflowNodeChanges,
+  persistedWorkflowViewport,
+} from "@/lib/workflows/canvas"
 
 import {
   NODE_ICONS,
@@ -698,7 +701,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
             elementsSelectable
             onNodesChange={(changes: NodeChange[]) =>
               setNodes((current) =>
-                applyNodeChanges(changes, current) as WorkflowNode[]
+                applyWorkflowNodeChanges(current, changes, props.readOnly)
               )
             }
             onEdgesChange={(changes: EdgeChange[]) => {
@@ -711,7 +714,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
                 setSelectedEdgeId(null)
               }
               setEdges((current) =>
-                applyEdgeChanges(changes, current) as WorkflowEdge[]
+                applyWorkflowEdgeChanges(current, changes, props.readOnly)
               )
             }}
             onConnect={(connection: Connection) => {
@@ -756,8 +759,12 @@ function CanvasInner(props: WorkflowCanvasProps) {
                 setSelectedEdgeId(selectedEdges[0].id)
               }
             }}
-            deleteKeyCode={["Backspace", "Delete"]}
-            onMoveEnd={(_event, nextViewport) => setViewport(nextViewport)}
+            deleteKeyCode={props.readOnly ? null : ["Backspace", "Delete"]}
+            onMoveEnd={(_event, nextViewport) =>
+              setViewport((current) =>
+                persistedWorkflowViewport(current, nextViewport, props.readOnly)
+              )
+            }
             onDragOver={(event) => {
               event.preventDefault()
               event.dataTransfer.dropEffect = "move"

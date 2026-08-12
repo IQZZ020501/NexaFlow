@@ -211,14 +211,33 @@ def test_workflow_engine_enforces_step_and_token_budgets() -> None:
             max_model_tokens=5,
             deadline_at=datetime.now(UTC) + timedelta(seconds=5),
         )
+        token_transitions = []
+
+        async def token_finished(transition, _state):
+            token_transitions.append(transition)
+
         try:
-            await token_engine.run({"input": "x"}, execute)
+            await token_engine.run(
+                {"input": "x"}, execute, on_node_finished=token_finished
+            )
         except WorkflowEngineError as exc:
             assert "token budget" in str(exc)
         else:
             raise AssertionError("token budget was not enforced")
+        assert len(token_transitions) == 1
+        assert token_transitions[0].node.id == "start"
+        assert token_transitions[0].status == NodeState.FAILED
+        assert "token budget" in (token_transitions[0].error or "")
 
     asyncio.run(run())
+
+
+def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
+    from app.application.workflow_nodes import _model_output_limit
+
+    assert _model_output_limit("openai_compatible", 12) == {"max_tokens": 12}
+    assert _model_output_limit("google_genai", 12) == {"max_output_tokens": 12}
+    assert _model_output_limit("ollama", 12) == {"num_predict": 12}
 
 
 def test_workflow_engine_propagates_worker_cancellation() -> None:
@@ -308,6 +327,17 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert workflow.status_code == 201, workflow.text
         workflow_id = workflow.json()["id"]
         base = f"/api/v1/workspaces/{workspace_id}/workflows/{workflow_id}"
+
+        agent_runs = client.get(
+            f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}/runs",
+            headers=headers,
+        )
+        assert agent_runs.status_code == 409, agent_runs.text
+        agent_run = client.get(
+            f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}/runs/missing",
+            headers=headers,
+        )
+        assert agent_run.status_code == 409, agent_run.text
 
         definition = client.get(f"{base}/definition", headers=headers)
         assert definition.status_code == 200, definition.text

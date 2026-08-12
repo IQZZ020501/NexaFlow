@@ -5,9 +5,15 @@ import {
   defaultNodeConfig,
   initialWorkflowInputs,
   removeWorkflowNode,
+  selectWorkflowRunTarget,
   serializeWorkflowGraph,
   workflowGraphSignature,
 } from "../lib/workflows/graph"
+import {
+  applyWorkflowEdgeChanges,
+  applyWorkflowNodeChanges,
+  persistedWorkflowViewport,
+} from "../lib/workflows/canvas"
 
 describe("workflow graph", () => {
   test("serializes only durable React Flow fields", () => {
@@ -101,5 +107,66 @@ describe("workflow graph", () => {
         viewport: { x: 0, y: 0, zoom: 1 },
       })
     ).toEqual({ query: "", limit: 3 })
+  })
+
+  test("keeps read-only canvas graph mutations out of the draft", () => {
+    const nodes = [
+      {
+        id: "start",
+        type: "workflow",
+        position: { x: 0, y: 0 },
+        data: { type: "start", title: "Start", config: {} },
+      },
+    ] as never
+    const edges = [{ id: "edge-1", source: "start", target: "end" }]
+
+    expect(
+      applyWorkflowNodeChanges(nodes, [{ id: "start", type: "remove" }], true)
+    ).toEqual(nodes)
+    expect(
+      applyWorkflowEdgeChanges(edges, [{ id: "edge-1", type: "remove" }], true)
+    ).toEqual(edges)
+    expect(
+      persistedWorkflowViewport(
+        { x: 0, y: 0, zoom: 1 },
+        { x: 20, y: 30, zoom: 1.2 },
+        true
+      )
+    ).toEqual({ x: 0, y: 0, zoom: 1 })
+  })
+
+  test("selects the latest published version for a read-only run", () => {
+    const versionGraph = (x: number) => ({
+      nodes: [],
+      edges: [],
+      viewport: { x, y: 0, zoom: 1 },
+    })
+    const target = selectWorkflowRunTarget(false, [
+      { version_number: 1, graph: versionGraph(1) },
+      { version_number: 3, graph: versionGraph(3) },
+      { version_number: 2, graph: versionGraph(2) },
+    ] as never)
+
+    if (!target) throw new Error("expected a published run target")
+    expect(target.source).toBe("published")
+    expect(target.versionNumber).toBe(3)
+    expect(target.graph).toEqual(versionGraph(3))
+  })
+
+  test("lets editors select a specific published version", () => {
+    const published = {
+      nodes: [],
+      edges: [],
+      viewport: { x: 4, y: 0, zoom: 1 },
+    }
+    const target = selectWorkflowRunTarget(true, [
+      { version_number: 4, graph: published },
+    ] as never, 4)
+
+    expect(target).toEqual({
+      source: "published",
+      versionNumber: 4,
+      graph: published,
+    })
   })
 })
