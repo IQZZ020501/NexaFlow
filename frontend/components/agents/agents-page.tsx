@@ -686,7 +686,8 @@ export function AgentsPage({
       !token ||
       !selectedWorkspaceId ||
       !selectedAgentId ||
-      selectedAgent?.app_type === "workflow"
+      !selectedAgent ||
+      selectedAgent.app_type === "workflow"
     ) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRuns([])
@@ -811,7 +812,7 @@ export function AgentsPage({
     router,
     initialConversationId,
     selectedAgentId,
-    selectedAgent?.app_type,
+    selectedAgent,
     selectedWorkspaceId,
     token,
     activeView,
@@ -1315,6 +1316,7 @@ export function AgentsPage({
             isAppDirty={isDirty}
             isSavingApp={isSaving}
             activeView={workflowCanvasMode ? "settings" : activeView}
+            standalone={workflowCanvasMode}
             onBack={() =>
               workflowCanvasMode
                 ? router.replace(
