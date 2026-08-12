@@ -662,6 +662,7 @@ export const en = {
   "{value} 个 MCP 工具": "{value} MCP tools",
   "编辑 Agent": "Edit Agent",
   "只需选择 Agent 可以使用的模型、知识和工具。": "Choose only the model, knowledge, and tools this Agent can use.",
+  "填写应用名称、描述和模型。": "Enter the app name, description, and model.",
   "Agent 名称": "Agent name",
   "选择模型": "Select a model",
   "系统提示词": "System prompt",

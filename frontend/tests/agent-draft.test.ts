@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 
+import { AgentConfigFields } from "../components/agents/agent-config-fields"
 import {
   isAgentFormDirty,
   isCurrentAgentConversation,
@@ -118,6 +121,31 @@ describe("Agent form state", () => {
         agent
       )
     ).toBe(false)
+  })
+
+  test("shows advanced configuration only after creation", () => {
+    const renderForm = (agentForm: AgentFormState) =>
+      renderToStaticMarkup(
+        createElement(AgentConfigFields, {
+          form: agentForm,
+          setForm: () => undefined,
+          models: [],
+          knowledgeBases: [],
+          mcpServers: [],
+          readOnly: false,
+          t: (key) => key,
+        })
+      )
+
+    const creationMarkup = renderForm({ ...form, id: null })
+    expect(creationMarkup).not.toContain("系统提示词")
+    expect(creationMarkup).not.toContain("关联知识库")
+    expect(creationMarkup).not.toContain("MCP 工具")
+
+    const editMarkup = renderForm(form)
+    expect(editMarkup).toContain("系统提示词")
+    expect(editMarkup).toContain("关联知识库")
+    expect(editMarkup).toContain("MCP 工具")
   })
 })
 

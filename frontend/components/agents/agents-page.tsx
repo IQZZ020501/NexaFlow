@@ -1629,7 +1629,9 @@ export function AgentsPage({
             </DialogTitle>
             <DialogDescription>
               {t(
-                form.appType === "workflow"
+                !form.id
+                  ? "填写应用名称、描述和模型。"
+                  : form.appType === "workflow"
                   ? "设置工作流默认模型和可使用的资源，创建后进入画布编排。"
                   : "只需选择 Agent 可以使用的模型、知识和工具。"
               )}

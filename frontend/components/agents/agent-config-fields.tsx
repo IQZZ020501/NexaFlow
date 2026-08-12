@@ -161,7 +161,9 @@ export function AgentConfigFields({
               <h3 className="text-sm font-semibold">{t("基本信息")}</h3>
               <p className="text-xs text-muted-foreground">
                 {t(
-                  form.appType === "workflow"
+                  !form.id
+                    ? "填写应用名称、描述和模型。"
+                    : form.appType === "workflow"
                     ? "配置工作流使用的默认模型、知识库和只读 MCP 工具。"
                     : "配置 Agent 使用的模型、知识库和 MCP 工具。"
                 )}
@@ -275,33 +277,34 @@ export function AgentConfigFields({
           </div>
         </section>
 
-        {form.appType === "agent" ? (
+        {form.id && form.appType === "agent" ? (
           <section className="rounded-xl border bg-background p-4 shadow-xs">
-          <div className="mb-3 flex items-center gap-2">
-            <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
-            <FieldLabel htmlFor="agent-instructions">
-              {t("系统提示词")}
-            </FieldLabel>
-          </div>
-          <textarea
-            id="agent-instructions"
-            value={form.instructions}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                instructions: event.target.value,
-              }))
-            }
-            className="min-h-44 w-full resize-y rounded-lg border border-input bg-muted/20 px-3 py-3 text-sm leading-6 shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/20"
-            placeholder={t("描述 Agent 的角色、回答方式和约束。")}
-            maxLength={8000}
-            rows={7}
-            disabled={readOnly}
-          />
+            <div className="mb-3 flex items-center gap-2">
+              <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
+              <FieldLabel htmlFor="agent-instructions">
+                {t("系统提示词")}
+              </FieldLabel>
+            </div>
+            <textarea
+              id="agent-instructions"
+              value={form.instructions}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  instructions: event.target.value,
+                }))
+              }
+              className="min-h-44 w-full resize-y rounded-lg border border-input bg-muted/20 px-3 py-3 text-sm leading-6 shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/20"
+              placeholder={t("描述 Agent 的角色、回答方式和约束。")}
+              maxLength={8000}
+              rows={7}
+              disabled={readOnly}
+            />
           </section>
         ) : null}
 
-        <section className="rounded-xl border bg-background shadow-xs">
+        {form.id ? (
+          <section className="rounded-xl border bg-background shadow-xs">
           <div className="flex items-center gap-2 px-4 py-3">
             <button
               type="button"
@@ -397,9 +400,11 @@ export function AgentConfigFields({
               )}
             </div>
           ) : null}
-        </section>
+          </section>
+        ) : null}
 
-        <section className="rounded-xl border bg-background shadow-xs">
+        {form.id ? (
+          <section className="rounded-xl border bg-background shadow-xs">
           <div className="flex items-center gap-2 px-4 py-3">
             <button
               type="button"
@@ -455,7 +460,8 @@ export function AgentConfigFields({
               )}
             </div>
           ) : null}
-        </section>
+          </section>
+        ) : null}
 
         {form.id ? (
           <section className="rounded-xl border bg-background p-4 shadow-xs">
