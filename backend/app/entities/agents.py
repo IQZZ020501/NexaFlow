@@ -17,6 +17,7 @@ class Agent:
     knowledge_query_mode: str = "required"
     status: str = "active"
     published: bool = False
+    published_snapshot: dict[str, Any] | None = None
     published_by_user_id: str | None = None
     published_at: datetime | None = None
     created_by_user_id: str = ""

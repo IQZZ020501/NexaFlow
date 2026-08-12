@@ -854,8 +854,8 @@ export function AgentsPage({
     router.push(`/app/apps/${agent.id}`)
   }
 
-  async function handleSaveAgent(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function handleSaveAgent(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     if (!token || !selectedWorkspaceId || !form.name.trim() || !form.modelId)
       return
     setIsSaving(true)
@@ -917,11 +917,13 @@ export function AgentsPage({
     }
     setIsPublishing(true)
     try {
+      const publishing =
+        !selectedAgent.published || selectedAgent.has_unpublished_changes
       const updated = await updateAgent(
         token,
         selectedWorkspaceId,
         selectedAgent.id,
-        { published: !selectedAgent.published }
+        { published: publishing }
       )
       setAgents((current) =>
         current.map((agent) => (agent.id === updated.id ? updated : agent))

@@ -70,7 +70,7 @@ export function PublicApplicationChat({
   return (
     <main className="flex min-h-svh items-center justify-center p-6 text-sm text-muted-foreground">
       {kind === "missing" ? (
-        t("此应用未发布或不可访问。")
+        t("未发布")
       ) : (
         <>
           <LoaderCircleIcon className="mr-2 size-4 animate-spin" />

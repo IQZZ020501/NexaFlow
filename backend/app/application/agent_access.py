@@ -53,6 +53,9 @@ from app.schemas.agent import (
 )
 from app.shareddomain.agents.services import (
     ACTIVE_STATUS,
+    AgentPublication,
+    agent_publication,
+    agent_publication_from_snapshot,
     get_agent,
     require_agent_edit,
 )
@@ -66,6 +69,7 @@ class PublishedAgentContext:
     agent: Agent
     publisher: User
     workspace: WorkspaceContext
+    publication: AgentPublication | None = None
 
 
 def hash_agent_access_token(token: str) -> str:
@@ -458,7 +462,21 @@ async def get_published_application_context(
             status.HTTP_404_NOT_FOUND,
             f"Published {application_type} not found.",
         ) from exc
-    return PublishedAgentContext(agent=agent, publisher=publisher, workspace=workspace)
+    publication = agent_publication_from_snapshot(agent)
+    if application_type == "agent" and publication is None:
+        knowledge_base_ids = (
+            await agent_repository.list_binding_map(db, [agent.id])
+        )[agent.id]
+        mcp_tools = (
+            await agent_repository.list_mcp_binding_map(db, [agent.id])
+        )[agent.id]
+        publication = agent_publication(agent, knowledge_base_ids, mcp_tools)
+    return PublishedAgentContext(
+        agent=agent,
+        publisher=publisher,
+        workspace=workspace,
+        publication=publication,
+    )
 
 
 async def get_workspace_published_agent_context(
@@ -507,10 +525,11 @@ async def get_public_agent_profile(
     user: User,
 ) -> PublicAgentProfileResponse:
     context = await get_workspace_published_agent_context(db, agent_id, user)
+    assert context.publication is not None
     return PublicAgentProfileResponse(
         id=context.agent.id,
-        name=context.agent.name,
-        description=context.agent.description,
+        name=context.publication.name,
+        description=context.publication.description,
     )
 
 
@@ -747,6 +766,7 @@ async def create_external_agent_run(
     conversation_id: str | None = None,
 ) -> ExternalAgentRunResponse:
     await _enforce_rate_limit(settings, context.agent.id, access_source, consumer_id)
+    assert context.publication is not None
     run, _ = await prepare_agent_run(
         db,
         context.agent.workspace_id,
@@ -757,6 +777,7 @@ async def create_external_agent_run(
         conversation_id=conversation_id,
         access_source=access_source,
         consumer_id=consumer_id,
+        publication=context.publication,
     )
     await enqueue_prepared_agent_run(run.id, settings)
     current = await agent_repository.refresh_agent_run(db, run)

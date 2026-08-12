@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +43,17 @@ DEFAULT_AGENT_INSTRUCTIONS = (
 )
 
 
+@dataclass(frozen=True)
+class AgentPublication:
+    name: str
+    description: str
+    instructions: str
+    model_id: str
+    knowledge_query_mode: str
+    knowledge_base_ids: list[str]
+    mcp_tools: list[dict[str, str]]
+
+
 def validate_agent_status(value: str) -> str:
     if value not in AGENT_STATUSES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid agent status.")
@@ -67,6 +80,13 @@ def agent_to_response(
         mcp_tools=mcp_tools,
         status=agent.status,
         published=agent.published,
+        has_unpublished_changes=(
+            agent.published
+            and agent.app_type == "agent"
+            and agent.published_snapshot is not None
+            and agent.published_snapshot
+            != agent_publication_snapshot(agent, knowledge_base_ids, mcp_tools)
+        ),
         published_by_user_id=agent.published_by_user_id,
         published_at=agent.published_at,
         created_by_user_id=agent.created_by_user_id,
@@ -74,6 +94,48 @@ def agent_to_response(
         created_at=agent.created_at,
         updated_at=agent.updated_at,
     )
+
+
+def agent_publication(
+    agent: Agent,
+    knowledge_base_ids: list[str],
+    mcp_tools: list[dict[str, str]],
+) -> AgentPublication:
+    return AgentPublication(
+        name=agent.name,
+        description=agent.description,
+        instructions=agent.instructions,
+        model_id=agent.model_id,
+        knowledge_query_mode=agent.knowledge_query_mode,
+        knowledge_base_ids=sorted(knowledge_base_ids),
+        mcp_tools=sorted(
+            mcp_tools,
+            key=lambda item: (item["server_id"], item["tool_name"]),
+        ),
+    )
+
+
+def agent_publication_snapshot(
+    agent: Agent,
+    knowledge_base_ids: list[str],
+    mcp_tools: list[dict[str, str]],
+) -> dict[str, object]:
+    publication = agent_publication(agent, knowledge_base_ids, mcp_tools)
+    return {
+        "name": publication.name,
+        "description": publication.description,
+        "instructions": publication.instructions,
+        "model_id": publication.model_id,
+        "knowledge_query_mode": publication.knowledge_query_mode,
+        "knowledge_base_ids": publication.knowledge_base_ids,
+        "mcp_tools": publication.mcp_tools,
+    }
+
+
+def agent_publication_from_snapshot(agent: Agent) -> AgentPublication | None:
+    if agent.published_snapshot is None:
+        return None
+    return AgentPublication(**agent.published_snapshot)
 
 
 async def accessible_agent_knowledge_bases(
@@ -322,6 +384,7 @@ async def create_agent(
 
 def _reset_agent_publication(agent: Agent) -> None:
     agent.published = False
+    agent.published_snapshot = None
     agent.published_by_user_id = None
     agent.published_at = None
 
@@ -332,7 +395,6 @@ async def apply_agent_publication(
     payload: AgentUpdateRequest,
     actor: User,
     workspace_role: str | None,
-    configuration_changed: bool,
 ) -> None:
     """Apply publication state transitions and keep ck_agents_publication sound."""
     if agent.app_type == "workflow":
@@ -342,9 +404,6 @@ async def apply_agent_publication(
                 "Publish workflows through the workflow version endpoint.",
             )
         return
-    if configuration_changed and agent.published:
-        _reset_agent_publication(agent)
-
     if agent.status == DISABLED_STATUS:
         _reset_agent_publication(agent)
 
@@ -375,6 +434,11 @@ async def apply_agent_publication(
             strict=True,
         )
         agent.published = True
+        agent.published_snapshot = agent_publication_snapshot(
+            agent,
+            publication_bindings,
+            publication_mcp_bindings,
+        )
         agent.published_by_user_id = actor.id
         agent.published_at = utc_now()
     elif payload.published is False:
@@ -402,6 +466,13 @@ async def update_agent(
     current_mcp_bindings = (
         await agent_repository.list_mcp_binding_map(db, [agent.id])
     )[agent.id]
+    legacy_publication_snapshot = (
+        agent_publication_snapshot(agent, current_bindings, current_mcp_bindings)
+        if agent.app_type == "agent"
+        and agent.published
+        and agent.published_snapshot is None
+        else None
+    )
     configuration_changed = False
 
     if payload.name is not None:
@@ -469,14 +540,10 @@ async def update_agent(
             (item["server_id"], item["tool_name"]) for item in current_mcp_bindings
         }
 
-    await apply_agent_publication(
-        db,
-        agent,
-        payload,
-        actor,
-        workspace_role,
-        configuration_changed,
-    )
+    if configuration_changed and legacy_publication_snapshot is not None:
+        agent.published_snapshot = legacy_publication_snapshot
+
+    await apply_agent_publication(db, agent, payload, actor, workspace_role)
 
     record_audit_log(
         db,

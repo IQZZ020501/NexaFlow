@@ -29,6 +29,7 @@ class AgentResponse(BaseModel):
     mcp_tools: list[AgentMcpToolRef]
     status: str
     published: bool
+    has_unpublished_changes: bool
     published_by_user_id: str | None
     published_at: datetime | None
     created_by_user_id: str

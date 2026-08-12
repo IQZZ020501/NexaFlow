@@ -1946,6 +1946,7 @@ def assert_external_agent_access() -> None:
             )
             assert published.status_code == 200, published.text
             assert published.json()["published"] is True
+            assert published.json()["has_unpublished_changes"] is False
             assert published.json()["published_by_user_id"]
             assert published.json()["published_at"]
             profile = client.get(
@@ -2389,47 +2390,65 @@ def assert_external_agent_access() -> None:
             changed = client.patch(
                 management_base,
                 headers=auth_headers(admin_token),
-                json={"description": "Changed after publishing"},
+                json={
+                    "name": "Updated Public Support",
+                    "description": "Changed after publishing",
+                    "instructions": "Use the updated draft instructions.",
+                },
             )
             assert changed.status_code == 200, changed.text
-            assert changed.json()["published"] is False
-            assert changed.json()["published_by_user_id"] is None
-            assert changed.json()["published_at"] is None
-            assert (
-                client.get(
-                    f"{public_base}/profile",
-                    headers=auth_headers(admin_token),
-                ).status_code
-                == 404
+            assert changed.json()["published"] is True
+            assert changed.json()["has_unpublished_changes"] is True
+            assert changed.json()["published_by_user_id"]
+            assert changed.json()["published_at"]
+            unchanged_profile = client.get(
+                f"{public_base}/profile",
+                headers=auth_headers(admin_token),
             )
-            unpublished_documentation = client.get(
+            assert unchanged_profile.status_code == 200, unchanged_profile.text
+            assert unchanged_profile.json()["name"] == "Public Support"
+            assert unchanged_profile.json()["description"] == "Answers public questions"
+            unchanged_documentation = client.get(
                 documentation_url,
                 headers={"Authorization": f"Bearer {token_b}"},
             )
-            assert unpublished_documentation.status_code == 404
-            assert (
-                client.post(
-                    f"{public_base}/runs",
-                    headers=auth_headers(admin_token),
-                    json={"goal": "Unavailable after configuration change"},
-                ).status_code
-                == 404
+            assert unchanged_documentation.status_code == 200
+            assert unchanged_documentation.json()["agent_name"] == "Public Support"
+            unchanged_run = client.post(
+                f"{public_base}/runs",
+                headers=auth_headers(admin_token),
+                json={"goal": "Available after configuration change"},
             )
-            assert (
-                client.post(
-                    f"/api/v1/agent-api/{agent_id}/runs",
-                    headers={"Authorization": f"Bearer {token_b}"},
-                    json={"goal": "Unavailable after configuration change"},
-                ).status_code
-                == 404
+            assert unchanged_run.status_code == 201, unchanged_run.text
+            stored_unchanged_run = asyncio.run(
+                run_snapshot(unchanged_run.json()["id"])
             )
-            assert (
-                client.get(
-                    f"/api/v1/agent-api/{agent_id}/runs/{api_run_b.json()['id']}",
-                    headers={"Authorization": f"Bearer {token_b}"},
-                ).status_code
-                == 404
+            assert stored_unchanged_run is not None
+            assert stored_unchanged_run.instructions == "Answer directly."
+
+            published_update = client.patch(
+                management_base,
+                headers=auth_headers(admin_token),
+                json={"published": True},
             )
+            assert published_update.status_code == 200, published_update.text
+            assert published_update.json()["has_unpublished_changes"] is False
+            updated_profile = client.get(
+                f"{public_base}/profile",
+                headers=auth_headers(admin_token),
+            )
+            assert updated_profile.status_code == 200, updated_profile.text
+            assert updated_profile.json()["name"] == "Updated Public Support"
+            assert updated_profile.json()["description"] == "Changed after publishing"
+            updated_run = client.post(
+                f"{public_base}/runs",
+                headers=auth_headers(admin_token),
+                json={"goal": "Use the new published configuration"},
+            )
+            assert updated_run.status_code == 201, updated_run.text
+            stored_updated_run = asyncio.run(run_snapshot(updated_run.json()["id"]))
+            assert stored_updated_run is not None
+            assert stored_updated_run.instructions == "Use the updated draft instructions."
     finally:
         agent_access.enforce_external_agent_rate_limit = original_rate_limit
         agent_executor.run_agent = original_run_agent

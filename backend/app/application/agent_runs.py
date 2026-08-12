@@ -30,6 +30,7 @@ from app.schemas.agent import AgentRunResponse, AgentToolCallResponse
 from app.shareddomain.audit.services import record_audit_log
 from app.shareddomain.agents.services import (
     ACTIVE_STATUS,
+    AgentPublication,
     get_agent,
     get_agent_model,
 )
@@ -391,6 +392,7 @@ async def prepare_agent_run(
     conversation_id: str | None = None,
     access_source: str = "console",
     consumer_id: str | None = None,
+    publication: AgentPublication | None = None,
 ) -> tuple[AgentRun, Any]:
     if access_source not in {"console", "public", "api"}:
         raise ValueError("Invalid Agent run access source.")
@@ -404,10 +406,16 @@ async def prepare_agent_run(
         await require_agent_view(db, agent, actor, workspace_role)
     if agent.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent is disabled.")
-    model = await get_agent_model(db, workspace_id, agent.model_id)
-    knowledge_bindings = await agent_repository.list_binding_map(db, [agent.id])
-    mcp_bindings = await agent_repository.list_mcp_binding_map(db, [agent.id])
-    selected_mcp_tools = mcp_bindings[agent.id]
+    model_id = publication.model_id if publication else agent.model_id
+    model = await get_agent_model(db, workspace_id, model_id)
+    if publication:
+        knowledge_base_ids = publication.knowledge_base_ids
+        selected_mcp_tools = publication.mcp_tools
+    else:
+        knowledge_bindings = await agent_repository.list_binding_map(db, [agent.id])
+        mcp_bindings = await agent_repository.list_mcp_binding_map(db, [agent.id])
+        knowledge_base_ids = knowledge_bindings[agent.id]
+        selected_mcp_tools = mcp_bindings[agent.id]
     if conversation_id is None:
         if access_source != "console":
             conversation_id = new_id()
@@ -450,9 +458,11 @@ async def prepare_agent_run(
         consumer_id=consumer_id,
         conversation_id=conversation_id,
         goal=goal.strip(),
-        instructions=agent.instructions,
-        knowledge_base_ids=knowledge_bindings[agent.id],
-        knowledge_query_mode=agent.knowledge_query_mode,
+        instructions=publication.instructions if publication else agent.instructions,
+        knowledge_base_ids=knowledge_base_ids,
+        knowledge_query_mode=(
+            publication.knowledge_query_mode if publication else agent.knowledge_query_mode
+        ),
         mcp_tools=selected_mcp_tools,
         model_id=model.id,
         model_name=model.name,

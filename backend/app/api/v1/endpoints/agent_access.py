@@ -263,9 +263,10 @@ async def get_api_agent_documentation(
     ],
 ) -> AgentApiDocumentationResponse:
     context, _ = await _api_context(db, agent_id, credentials)
+    assert context.publication is not None
     return AgentApiDocumentationResponse(
         agent_id=context.agent.id,
-        agent_name=context.agent.name,
+        agent_name=context.publication.name,
         base_path=f"/api/v1/agent-api/{context.agent.id}",
     )
 

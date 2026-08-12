@@ -100,6 +100,13 @@ type AgentDetailWorkspaceProps = {
 
 const AUTO_FOLLOW_THRESHOLD_PX = 64
 
+export function agentPublicationAction(
+  agent: Pick<Agent, "published" | "has_unpublished_changes">
+) {
+  if (!agent.published) return "publish"
+  return agent.has_unpublished_changes ? "republish" : "unpublish"
+}
+
 export function isNearScrollBottom(
   element: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">
 ) {
@@ -731,6 +738,7 @@ export function AgentDetailWorkspace({
   const currentViewLabel =
     navigationItems.find((item) => item.view === visibleActiveView)?.label ??
     t("概览")
+  const publicationAction = agentPublicationAction(agent)
   const renderNavItems = (itemClassName: string) =>
     navigationItems.map(({ view, label, icon: Icon }) => (
       <Button
@@ -843,13 +851,19 @@ export function AgentDetailWorkspace({
             >
                 {isPublishing ? (
                   <LoaderCircleIcon className="animate-spin" />
-                ) : agent.published ? (
+                ) : publicationAction === "unpublish" ? (
                   <Undo2Icon />
                 ) : (
                   <RocketIcon />
                 )}
               <span className="hidden sm:inline">
-                {t(agent.published ? "取消发布" : "发布")}
+                {t(
+                  publicationAction === "unpublish"
+                    ? "取消发布"
+                    : publicationAction === "republish"
+                      ? "重新发布"
+                      : "发布"
+                )}
               </span>
             </Button>
             ) : null}

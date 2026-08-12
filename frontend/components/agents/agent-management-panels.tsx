@@ -379,37 +379,29 @@ export function AgentOverviewPanel({
               <ExternalLinkIcon className="size-4 text-primary" />
               {t("公开访问链接")}
             </div>
-            {agent.published ? (
-              <>
-                <p
-                  className="mt-3 truncate rounded-md bg-muted/50 px-3 py-2 font-mono text-xs text-foreground"
-                  title={publicUrl}
-                >
-                  {publicUrl}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleCopy(publicUrl)}
-                  >
-                    <CopyIcon data-icon="inline-start" />
-                    {t("复制链接")}
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" asChild>
-                    <a href={publicUrl} target="_blank" rel="noreferrer">
-                      <ExternalLinkIcon data-icon="inline-start" />
-                      {t("打开链接")}
-                    </a>
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <p className="mt-3 text-sm text-muted-foreground">
-                {t("发布后可访问公开聊天链接。")}
-              </p>
-            )}
+            <p
+              className="mt-3 truncate rounded-md bg-muted/50 px-3 py-2 font-mono text-xs text-foreground"
+              title={publicUrl}
+            >
+              {publicUrl}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleCopy(publicUrl)}
+              >
+                <CopyIcon data-icon="inline-start" />
+                {t("复制链接")}
+              </Button>
+              <Button type="button" variant="outline" size="sm" asChild>
+                <a href={publicUrl} target="_blank" rel="noreferrer">
+                  <ExternalLinkIcon data-icon="inline-start" />
+                  {t("打开链接")}
+                </a>
+              </Button>
+            </div>
           </div>
 
           <div className="min-w-0 p-4 sm:p-5">

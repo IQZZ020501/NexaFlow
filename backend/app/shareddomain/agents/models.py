@@ -77,6 +77,7 @@ class Agent(Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    published_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     published_by_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", name="fk_agents_published_by_user_id"),
         nullable=True,

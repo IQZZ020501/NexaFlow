@@ -19,6 +19,7 @@ export type Agent = {
   mcp_tools: AgentMcpToolRef[]
   status: "active" | "disabled"
   published: boolean
+  has_unpublished_changes: boolean
   published_by_user_id: string | null
   published_at: string | null
   created_by_user_id: string

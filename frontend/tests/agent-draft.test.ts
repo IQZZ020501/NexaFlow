@@ -12,6 +12,7 @@ import {
   type AgentFormState,
 } from "../components/agents/agents-page"
 import {
+  agentPublicationAction,
   collapsedProcessStatusKey,
   isNearScrollBottom,
   processTimeline,
@@ -76,6 +77,7 @@ const agent: Agent = {
   mcp_tools: [{ server_id: "server-1", tool_name: "search" }],
   status: "active",
   published: false,
+  has_unpublished_changes: false,
   published_by_user_id: null,
   published_at: null,
   created_by_user_id: "user-1",
@@ -98,6 +100,16 @@ const form: AgentFormState = {
 }
 
 describe("Agent form state", () => {
+  test("publishes drafts, republishes changed releases, and unpublishes current releases", () => {
+    expect(agentPublicationAction(agent)).toBe("publish")
+    expect(
+      agentPublicationAction({ published: true, has_unpublished_changes: true })
+    ).toBe("republish")
+    expect(
+      agentPublicationAction({ published: true, has_unpublished_changes: false })
+    ).toBe("unpublish")
+  })
+
   test("ignores binding ordering but detects actual edits", () => {
     expect(
       isAgentFormDirty(

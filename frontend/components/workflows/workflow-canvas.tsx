@@ -15,7 +15,7 @@ import {
   type EdgeChange,
   type NodeChange,
 } from "@xyflow/react"
-import { PlusIcon } from "lucide-react"
+import { ChevronDownIcon, ChevronUpIcon, FileTextIcon, PlusIcon } from "lucide-react"
 
 import {
   Dialog,
@@ -24,8 +24,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { IconButton } from "@/components/ui/icon-button"
+import { Input } from "@/components/ui/input"
 import type { TFunction } from "@/i18n"
 import type { Agent } from "@/lib/api/agents"
+import type { AgentFormState } from "@/components/agents/agents-page"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
@@ -70,6 +73,8 @@ type WorkflowCanvasProps = {
   readOnly: boolean
   paletteOpen: boolean
   onClosePalette: () => void
+  form: AgentFormState
+  setForm: React.Dispatch<React.SetStateAction<AgentFormState>>
   onChange: (graph: WorkflowGraph) => void
   t: TFunction
 }
@@ -81,6 +86,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
   const [edges, setEdges] = React.useState<WorkflowEdge[]>(props.graph.edges)
   const [viewport, setViewport] = React.useState(props.graph.viewport)
   const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(null)
+  const [infoOpen, setInfoOpen] = React.useState(true)
   const onChangeRef = React.useRef(props.onChange)
 
   React.useEffect(() => {
@@ -244,8 +250,72 @@ function CanvasInner(props: WorkflowCanvasProps) {
       <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
         <div
           ref={flowPaneRef}
-          className="h-[56vh] min-h-[440px] lg:h-full"
+          className="relative h-[56vh] min-h-[440px] lg:h-full"
         >
+          {!props.readOnly ? (
+            <div className="absolute left-4 top-4 z-10 w-80 rounded-xl border bg-card/95 p-3 shadow-md backdrop-blur">
+              <div className="flex items-center gap-2">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-orange-600 dark:text-orange-400">
+                  <FileTextIcon className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                  {t("基本信息")}
+                </span>
+                <IconButton
+                  label={infoOpen ? t("收起") : t("展开")}
+                  className="size-6"
+                  aria-expanded={infoOpen}
+                  onClick={() => setInfoOpen((current) => !current)}
+                >
+                  {infoOpen ? (
+                    <ChevronUpIcon className="size-3.5" />
+                  ) : (
+                    <ChevronDownIcon className="size-3.5" />
+                  )}
+                </IconButton>
+              </div>
+              {infoOpen ? (
+                <div className="mt-3 grid gap-3">
+                  <label className="grid gap-1.5 text-xs font-medium" htmlFor="basic-info-name">
+                    <span>{t("名称")}</span>
+                    <Input
+                      id="basic-info-name"
+                      value={props.form.name}
+                      maxLength={120}
+                      onChange={(event) =>
+                        props.setForm((current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                    />
+                    <span className="text-right text-[10px] text-muted-foreground">
+                      {props.form.name.length} / 120
+                    </span>
+                  </label>
+                  <label className="grid gap-1.5 text-xs font-medium" htmlFor="basic-info-description">
+                    <span>{t("描述")}</span>
+                    <textarea
+                      id="basic-info-description"
+                      rows={3}
+                      maxLength={500}
+                      value={props.form.description}
+                      onChange={(event) =>
+                        props.setForm((current) => ({
+                          ...current,
+                          description: event.target.value,
+                        }))
+                      }
+                      className="resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <span className="text-right text-[10px] text-muted-foreground">
+                      {props.form.description.length} / 500
+                    </span>
+                  </label>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <ReactFlow
             nodes={renderedNodes}
             edges={renderedEdges}

@@ -104,7 +104,7 @@ type WorkflowDetailWorkspaceProps = {
   onBack: () => void
   onDelete: () => void
   onManagePermissions: () => void
-  onSaveApp: React.FormEventHandler<HTMLFormElement>
+  onSaveApp: (event?: React.FormEvent<HTMLFormElement>) => void
   onViewChange: (view: AgentDetailView) => void
   notify: (kind: "success" | "error", message: string) => void
   t: TFunction
@@ -366,6 +366,18 @@ export function WorkflowDetailWorkspace({
     }
   }
 
+  async function handleSaveAll() {
+    if (!agent.can_edit) return
+    if (isDirty && !(await saveDraft())) return
+    if (isAppDirty) {
+      try {
+        await onSaveApp()
+      } catch (error) {
+        reportError(error)
+      }
+    }
+  }
+
   async function handlePublish() {
     if (!canManagePublishing || isPublishing) return
     setIsPublishing(true)
@@ -572,10 +584,10 @@ export function WorkflowDetailWorkspace({
           <Button
             type="button"
             variant="outline"
-            disabled={!isDirty || isSaving}
-            onClick={() => void saveDraft()}
+            disabled={(!isDirty && !isAppDirty) || isSaving || isSavingApp}
+            onClick={() => void handleSaveAll()}
           >
-            {isSaving ? (
+            {isSaving || isSavingApp ? (
               <LoaderCircleIcon className="animate-spin" />
             ) : (
               <SaveIcon />
@@ -717,6 +729,8 @@ export function WorkflowDetailWorkspace({
               readOnly={!agent.can_edit}
               paletteOpen={paletteOpen}
               onClosePalette={() => setPaletteOpen(false)}
+              form={form}
+              setForm={setForm}
               onChange={setGraph}
               t={t}
             />
