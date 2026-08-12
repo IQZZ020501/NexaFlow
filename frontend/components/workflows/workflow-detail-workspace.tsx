@@ -400,18 +400,19 @@ export function WorkflowDetailWorkspace({
             <IconButton label={t("删除工作流")} onClick={onDelete}>
               <Trash2Icon />
             </IconButton>
-            {view === "canvas" ? (
-              <Button type="button" variant="outline" disabled={!isDirty || isSaving} onClick={() => void saveDraft()}>
-                {isSaving ? <LoaderCircleIcon className="animate-spin" /> : <SaveIcon />}
-                {t("保存")}
-              </Button>
-            ) : (
-              <Button type="button" variant="outline" onClick={() => setView("canvas")}>
-                <PencilIcon />
-                {t("编辑画布")}
-              </Button>
-            )}
           </>
+        ) : null}
+        {view === "canvas" && agent.can_edit ? (
+          <Button type="button" variant="outline" disabled={!isDirty || isSaving} onClick={() => void saveDraft()}>
+            {isSaving ? <LoaderCircleIcon className="animate-spin" /> : <SaveIcon />}
+            {t("保存")}
+          </Button>
+        ) : null}
+        {view === "details" ? (
+          <Button type="button" variant="outline" onClick={() => setView("canvas")}>
+            <PencilIcon />
+            {agent.can_edit ? t("编辑画布") : t("查看画布")}
+          </Button>
         ) : null}
         {agent.can_edit ? (
           <Button
@@ -483,14 +484,12 @@ export function WorkflowDetailWorkspace({
                   edges: edgeCount,
                 })}
               </p>
-              {agent.can_edit ? (
-                <div>
-                  <Button type="button" onClick={() => setView("canvas")}>
-                    <PencilIcon />
-                    {t("编辑画布")}
-                  </Button>
-                </div>
-              ) : null}
+              <div>
+                <Button type="button" onClick={() => setView("canvas")}>
+                  <PencilIcon />
+                  {agent.can_edit ? t("编辑画布") : t("查看画布")}
+                </Button>
+              </div>
             </div>
             <div className="grid content-start gap-3 border-t pt-5 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
               <h2 className="text-sm font-semibold">{t("最近运行")}</h2>

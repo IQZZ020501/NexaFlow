@@ -901,6 +901,7 @@ export const en = {
     "Set the workflow default model and available resources, then build it on the canvas.",
   "返回应用列表": "Back to apps",
   "编辑画布": "Edit canvas",
+  "查看画布": "View canvas",
   "节点数量": "Nodes",
   "连线数量": "Edges",
   "草稿修订": "Draft revision",
