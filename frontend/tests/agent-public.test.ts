@@ -335,7 +335,7 @@ describe("public agent API", () => {
 
   test("opens workflow settings on the dedicated canvas route", () => {
     expect(appViewPath("workflow-1", "workflow", "settings")).toBe(
-      "/app/apps/workflow-1/workflow"
+      "/workflow/workflow-1"
     )
     expect(appViewPath("workflow-1", "workflow", "overview")).toBe(
       "/app/apps/workflow-1?view=overview"

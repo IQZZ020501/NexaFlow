@@ -9,6 +9,7 @@ import {
   LayoutDashboardIcon,
   LoaderCircleIcon,
   PlayIcon,
+  PlusIcon,
   SaveIcon,
   ScrollTextIcon,
   SettingsIcon,
@@ -99,6 +100,7 @@ type WorkflowDetailWorkspaceProps = {
   isAppDirty: boolean
   isSavingApp: boolean
   activeView: AgentDetailView
+  standalone?: boolean
   onBack: () => void
   onDelete: () => void
   onManagePermissions: () => void
@@ -147,6 +149,7 @@ export function WorkflowDetailWorkspace({
   isAppDirty,
   isSavingApp,
   activeView,
+  standalone,
   onBack,
   onDelete,
   onManagePermissions,
@@ -174,6 +177,7 @@ export function WorkflowDetailWorkspace({
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [runOpen, setRunOpen] = React.useState(false)
+  const [paletteOpen, setPaletteOpen] = React.useState(false)
   const [runDetailsOpen, setRunDetailsOpen] = React.useState(false)
   const [runInputs, setRunInputs] = React.useState("{}")
   const [runInputsInvalid, setRunInputsInvalid] = React.useState(false)
@@ -486,7 +490,13 @@ export function WorkflowDetailWorkspace({
   }
 
   return (
-    <div className="-mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
+    <div
+      className={
+        standalone
+          ? "flex h-svh flex-col overflow-hidden bg-background"
+          : "-mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0"
+      }
+    >
       <header className="z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
         <Button
           type="button"
@@ -573,6 +583,16 @@ export function WorkflowDetailWorkspace({
             <span className="hidden sm:inline">{t("保存")}</span>
           </Button>
         ) : null}
+        {visibleActiveView === "settings" && agent.can_edit ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setPaletteOpen(true)}
+          >
+            <PlusIcon />
+            <span className="hidden sm:inline">{t("添加节点")}</span>
+          </Button>
+        ) : null}
         {visibleActiveView === "settings" ? (
           <Button
             type="button"
@@ -639,18 +659,22 @@ export function WorkflowDetailWorkspace({
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-52 shrink-0 border-r bg-muted/20 p-3 lg:block">
-          <nav className="space-y-1" aria-label={t("工作流详情导航")}>
-            {renderNavItems("w-full justify-start")}
-          </nav>
-        </aside>
+        {standalone ? null : (
+          <aside className="hidden w-52 shrink-0 border-r bg-muted/20 p-3 lg:block">
+            <nav className="space-y-1" aria-label={t("工作流详情导航")}>
+              {renderNavItems("w-full justify-start")}
+            </nav>
+          </aside>
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
-          <nav
-            className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden"
-            aria-label={t("工作流详情导航")}
-          >
-            {renderNavItems("shrink-0")}
-          </nav>
+          {standalone ? null : (
+            <nav
+              className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden"
+              aria-label={t("工作流详情导航")}
+            >
+              {renderNavItems("shrink-0")}
+            </nav>
+          )}
           {visibleActiveView === "settings" && currentRun ? (
             <div className="flex flex-wrap items-center gap-3 border-b bg-muted/25 px-4 py-2 text-xs">
               <Badge
@@ -691,6 +715,8 @@ export function WorkflowDetailWorkspace({
               mcpServers={mcpServers}
               runtimeStatuses={runtimeStatuses}
               readOnly={!agent.can_edit}
+              paletteOpen={paletteOpen}
+              onClosePalette={() => setPaletteOpen(false)}
               onChange={setGraph}
               t={t}
             />

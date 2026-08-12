@@ -24,7 +24,7 @@ export function appViewPath(
   conversationId?: string | null
 ) {
   if (appType === "workflow" && view === "settings") {
-    return `/app/apps/${appId}/workflow`
+    return `/workflow/${appId}`
   }
   const query = new URLSearchParams({ view })
   if (conversationId) query.set("conversation_id", conversationId)

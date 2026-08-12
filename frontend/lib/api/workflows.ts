@@ -1,5 +1,9 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
+import type { Agent } from "@/lib/api/agents"
+import type { KnowledgeBase } from "@/lib/api/knowledge"
+import type { RegisteredModel } from "@/lib/api/llm"
+import type { McpServer } from "@/lib/api/mcp"
 
 export type WorkflowNodeType =
   | "start"
@@ -19,14 +23,14 @@ export type WorkflowNodeData = Record<string, unknown> & {
   config: Record<string, unknown>
   runtimeStatus?: WorkflowNodeExecution["status"]
   readOnly?: boolean
-  onAddConnectedNode?: (
-    sourceId: string,
-    sourceHandle: string | null | undefined,
-    type: WorkflowNodeType
-  ) => void
   onCopy?: (nodeId: string) => void
   onDelete?: (nodeId: string) => void
   onRename?: (nodeId: string, title: string) => void
+  onUpdate?: (data: WorkflowNodeData) => void
+  agent?: Agent
+  models?: RegisteredModel[]
+  knowledgeBases?: KnowledgeBase[]
+  mcpServers?: McpServer[]
 }
 
 export type WorkflowNode = {
