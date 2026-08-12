@@ -865,6 +865,7 @@ export const en = {
   "工具参数": "Tool arguments",
   "代码输入": "Code inputs",
   "删除节点": "Delete node",
+  "删除连线": "Delete edge",
   "节点库": "Node library",
   "等于": "Equals",
   "不等于": "Does not equal",

@@ -6,6 +6,7 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -495,6 +496,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
   const [edges, setEdges] = React.useState<WorkflowEdge[]>(props.graph.edges)
   const [viewport, setViewport] = React.useState(props.graph.viewport)
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(null)
   const onChangeRef = React.useRef(props.onChange)
 
   React.useEffect(() => {
@@ -524,6 +526,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
   )
 
   const selectedNode = nodes.find((node) => node.id === selectedId) ?? null
+  const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId) ?? null
   const renderedNodes = React.useMemo(
     () =>
       nodes.map((node) => ({
@@ -539,12 +542,14 @@ function CanvasInner(props: WorkflowCanvasProps) {
     () =>
       edges.map((edge) => ({
         ...edge,
+        selected: edge.id === selectedEdgeId,
+        interactionWidth: 28,
         ariaLabel: t("从 {source} 到 {target} 的连线", {
           source: edge.source,
           target: edge.target,
         }),
       })),
-    [edges, t]
+    [edges, selectedEdgeId, t]
   )
   const ariaLabelConfig = React.useMemo<Partial<AriaLabelConfig>>(() => {
     const directions: Record<string, string> = {
@@ -638,11 +643,19 @@ function CanvasInner(props: WorkflowCanvasProps) {
                 applyNodeChanges(changes, current) as WorkflowNode[]
               )
             }
-            onEdgesChange={(changes: EdgeChange[]) =>
+            onEdgesChange={(changes: EdgeChange[]) => {
+              const removedIds = new Set(
+                changes
+                  .filter((change) => change.type === "remove")
+                  .map((change) => change.id)
+              )
+              if (selectedEdgeId && removedIds.has(selectedEdgeId)) {
+                setSelectedEdgeId(null)
+              }
               setEdges((current) =>
                 applyEdgeChanges(changes, current) as WorkflowEdge[]
               )
-            }
+            }}
             onConnect={(connection: Connection) => {
               if (
                 props.readOnly ||
@@ -665,9 +678,27 @@ function CanvasInner(props: WorkflowCanvasProps) {
                 connection.targetHandle
               )
               setEdges((current) => addEdge(edge, current) as WorkflowEdge[])
+              setSelectedEdgeId(edge.id)
             }}
-            onNodeClick={(_event, node) => setSelectedId(node.id)}
-            onPaneClick={() => setSelectedId(null)}
+            onNodeClick={(_event, node) => {
+              setSelectedId(node.id)
+              setSelectedEdgeId(null)
+            }}
+            onEdgeClick={(event, edge) => {
+              event.stopPropagation()
+              setSelectedEdgeId(edge.id)
+              setSelectedId(null)
+            }}
+            onPaneClick={() => {
+              setSelectedId(null)
+              setSelectedEdgeId(null)
+            }}
+            onSelectionChange={({ edges: selectedEdges }) => {
+              if (selectedEdges.length > 0) {
+                setSelectedEdgeId(selectedEdges[0].id)
+              }
+            }}
+            deleteKeyCode={["Backspace", "Delete"]}
             onMoveEnd={(_event, nextViewport) => setViewport(nextViewport)}
             onDragOver={(event) => {
               event.preventDefault()
@@ -682,6 +713,26 @@ function CanvasInner(props: WorkflowCanvasProps) {
               addNode(type, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
             }}
           >
+            {selectedEdge && !props.readOnly ? (
+              <Panel position="top-right" className="!m-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  className="shadow-md"
+                  onClick={() => {
+                    setEdges((current) =>
+                      current.filter((edge) => edge.id !== selectedEdge.id)
+                    )
+                    setSelectedEdgeId(null)
+                  }}
+                  aria-label={t("删除连线")}
+                >
+                  <Trash2Icon data-icon="inline-start" />
+                  {t("删除连线")}
+                </Button>
+              </Panel>
+            ) : null}
             <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
             <Controls showInteractive={false} />
             <MiniMap
