@@ -17,6 +17,10 @@ import {
   CircleAlertIcon,
   CircleDotDashedIcon,
   LoaderCircleIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  CopyIcon,
+  PlusIcon,
 } from "lucide-react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 
@@ -27,6 +31,15 @@ import type {
   WorkflowNodeType,
 } from "@/lib/api/workflows"
 import { cn } from "@/lib/utils"
+import { CardMoreMenu } from "@/components/ui/card-more-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { IconButton } from "@/components/ui/icon-button"
 
 const NODE_LABELS: Record<WorkflowNodeType, TranslationKey> = {
   start: "开始节点",
@@ -94,6 +107,17 @@ const NODE_ACCENTS: Record<WorkflowNodeType, string> = {
   mcp: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
   code: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
 }
+
+const CONNECTABLE_NODE_TYPES: WorkflowNodeType[] = [
+  "llm",
+  "classifier",
+  "knowledge",
+  "condition",
+  "template",
+  "variable",
+  "mcp",
+  "code",
+]
 
 function previewValue(value: unknown) {
   if (typeof value !== "string") return ""
@@ -179,11 +203,37 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
           : [null]
   const StatusIcon = status ? STATUS_ICONS[status] : CircleDotDashedIcon
   const summary = configSummary(node, t)
+  const [expanded, setExpanded] = React.useState(node.type === "start" || node.type === "end")
+  const [renaming, setRenaming] = React.useState(false)
+  const [title, setTitle] = React.useState(node.title)
+  const outputFields = outputFieldNames(node)
+  const canOperate = !node.readOnly && !["start", "end"].includes(node.type)
+  const onRename = node.onRename as
+    | ((nodeId: string, title: string) => void)
+    | undefined
+  const onCopy = node.onCopy as ((nodeId: string) => void) | undefined
+  const onDelete = node.onDelete as ((nodeId: string) => void) | undefined
+  const onAddConnectedNode = node.onAddConnectedNode as
+    | ((sourceId: string, sourceHandle: string | null | undefined, type: WorkflowNodeType) => void)
+    | undefined
+  const nodeId = String(node.id)
+
+  const toggleExpanded = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    setExpanded((current) => !current)
+  }
+
+  const commitTitle = () => {
+    const nextTitle = title.trim()
+    if (nextTitle && nextTitle !== node.title) onRename?.(nodeId, nextTitle)
+    if (!nextTitle) setTitle(node.title)
+    setRenaming(false)
+  }
 
   return (
     <div
       className={cn(
-        "relative min-h-24 w-60 rounded-xl border bg-card px-3.5 py-3 shadow-md transition-[border-color,box-shadow,opacity]",
+        "group relative min-h-24 w-64 rounded-xl border bg-card px-3.5 py-3 shadow-md transition-[border-color,box-shadow,opacity] hover:shadow-lg",
         selected && "border-foreground shadow-lg ring-2 ring-foreground/10",
         status && STATUS_STYLES[status]
       )}
@@ -205,14 +255,36 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
           <Icon className="size-[18px]" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold leading-5">
-            {node.title}
-          </span>
+          {renaming ? (
+            <input
+              autoFocus
+              className="nodrag block h-6 w-full rounded border bg-background px-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-ring"
+              value={title}
+              maxLength={120}
+              aria-label={t("节点名称")}
+              onChange={(event) => setTitle(event.target.value)}
+              onBlur={commitTitle}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                event.stopPropagation()
+                if (event.key === "Enter") event.currentTarget.blur()
+                if (event.key === "Escape") {
+                  setTitle(node.title)
+                  setRenaming(false)
+                }
+              }}
+            />
+          ) : (
+            <span className="block truncate text-sm font-semibold leading-5">
+              {node.title}
+            </span>
+          )}
           <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
             {workflowNodeLabel(node.type, t)}
           </span>
         </span>
-        {status ? (
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          {status ? (
           <span
             className={cn(
               "mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
@@ -226,11 +298,70 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
             <StatusIcon className={cn("size-3", status === "running" && "animate-spin")} />
             <span className="sr-only">{t(STATUS_LABELS[status])}</span>
           </span>
-        ) : null}
+          ) : null}
+          <IconButton
+            label={expanded ? t("收起节点") : t("展开节点")}
+            className="nodrag"
+            aria-expanded={expanded}
+            onClick={toggleExpanded}
+          >
+            {expanded ? <ChevronUpIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
+          </IconButton>
+          {canOperate ? (
+            <span className="nodrag">
+              <CardMoreMenu label={t("更多")}>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setTitle(node.title)
+                    setRenaming(true)
+                  }}
+                >
+                  {t("重命名")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onCopy?.(nodeId)}>
+                  <CopyIcon />
+                  {t("复制节点")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={() => {
+                    if (window.confirm(t("确定删除节点“{name}”吗？", { name: node.title }))) {
+                      onDelete?.(nodeId)
+                    }
+                  }}
+                >
+                  {t("删除节点")}
+                </DropdownMenuItem>
+              </CardMoreMenu>
+            </span>
+          ) : null}
+        </div>
       </div>
       <div className="mt-3 border-t border-border/70 pt-2 text-[11px] text-muted-foreground">
         <span className="block truncate">{summary}</span>
       </div>
+      {expanded ? (
+        <div className="mt-2 space-y-1.5 border-t border-border/70 pt-2">
+          {outputFields.map((field) => (
+            <div key={field} className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5">
+              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
+                {`{{${node.id}.${field}}}`}
+              </span>
+              <IconButton
+                label={t("复制变量")}
+                className="size-6"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void navigator.clipboard?.writeText(`{{${node.id}.${field}}}`)
+                }}
+              >
+                <CopyIcon className="size-3" />
+              </IconButton>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {sourceHandles.map((handle, index) => (
         <React.Fragment key={handle ?? "default"}>
           {handle ? (
@@ -258,8 +389,84 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
                   : `${((index + 1) / (sourceHandles.length + 1)) * 100}%`,
             }}
           />
+          {!node.readOnly ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "nodrag nopan absolute z-30 flex size-6 -translate-y-1/2 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-sm transition-[opacity,color,background-color,transform] hover:scale-110 hover:bg-foreground hover:text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    selected ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  )}
+                  style={{
+                    right: -40,
+                    top:
+                      sourceHandles.length === 1
+                        ? "50%"
+                        : `${((index + 1) / (sourceHandles.length + 1)) * 100}%`,
+                  }}
+                  aria-label={t("添加下一个节点")}
+                  title={t("添加下一个节点")}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <PlusIcon className="size-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="right"
+                align="start"
+                className="max-h-72 min-w-48 overflow-y-auto"
+                onClick={(event) => event.stopPropagation()}
+              >
+                {CONNECTABLE_NODE_TYPES.map((type) => {
+                  const NextIcon = NODE_ICONS[type]
+                  return (
+                    <DropdownMenuItem
+                      key={type}
+                      onSelect={() => onAddConnectedNode?.(nodeId, handle, type)}
+                    >
+                      <NextIcon />
+                      {workflowNodeLabel(type, t)}
+                    </DropdownMenuItem>
+                  )
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </React.Fragment>
       ))}
     </div>
   )
+}
+
+function outputFieldNames(node: WorkflowNodeData) {
+  const config = node.config
+  if (node.type === "start" && Array.isArray(config.inputs)) {
+    return config.inputs.flatMap((item) =>
+      item && typeof item === "object" && typeof (item as Record<string, unknown>).name === "string"
+        ? [String((item as Record<string, unknown>).name)]
+        : []
+    )
+  }
+  if (node.type === "end" && config.outputs && typeof config.outputs === "object") {
+    return Object.keys(config.outputs)
+  }
+  if (node.type === "classifier" && Array.isArray(config.classes)) {
+    return config.classes.flatMap((item) =>
+      item && typeof item === "object" && typeof (item as Record<string, unknown>).handle === "string"
+        ? [String((item as Record<string, unknown>).handle)]
+        : []
+    )
+  }
+  const fields: Partial<Record<WorkflowNodeType, string[]>> = {
+    llm: ["text"],
+    classifier: ["class"],
+    knowledge: ["content"],
+    condition: ["matched"],
+    template: ["text"],
+    variable: ["value"],
+    mcp: ["result"],
+    code: ["result", "stdout", "stderr"],
+  }
+  return fields[node.type] ?? []
 }

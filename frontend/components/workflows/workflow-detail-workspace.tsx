@@ -7,6 +7,7 @@ import {
   Clock3Icon,
   HistoryIcon,
   LoaderCircleIcon,
+  PencilIcon,
   PlayIcon,
   SaveIcon,
   SettingsIcon,
@@ -150,6 +151,7 @@ export function WorkflowDetailWorkspace({
   const [runDetailsOpen, setRunDetailsOpen] = React.useState(false)
   const [runInputs, setRunInputs] = React.useState("{}")
   const [runInputsInvalid, setRunInputsInvalid] = React.useState(false)
+  const [view, setView] = React.useState<"details" | "canvas">("details")
   const runAbortRef = React.useRef<AbortController | null>(null)
 
   const isDirty = Boolean(
@@ -158,6 +160,12 @@ export function WorkflowDetailWorkspace({
       workflowGraphSignature(definition.graph) !== workflowGraphSignature(graph)
   )
   const hasUnsavedChanges = isDirty || isAppDirty
+  const nodeCount = graph?.nodes.length ?? 0
+  const edgeCount = graph?.edges.length ?? 0
+  const latestPublishedVersion = versions.reduce(
+    (latest, version) => Math.max(latest, version.version_number),
+    0
+  )
 
   const reportError = React.useCallback(
     (error: unknown) => notify("error", getErrorMessage(error, t)),
@@ -353,8 +361,12 @@ export function WorkflowDetailWorkspace({
     <div className="flex min-h-[calc(100dvh-6rem)] flex-col overflow-hidden rounded-md border bg-background">
       <header className="flex min-h-16 flex-wrap items-center gap-2 px-3 py-2 sm:px-4">
         <IconButton
-          label={t("返回应用列表")}
+          label={t("返回")}
           onClick={() => {
+            if (view === "canvas") {
+              setView("details")
+              return
+            }
             if (!hasUnsavedChanges || window.confirm(t("放弃未保存的更改？"))) onBack()
           }}
         >
@@ -388,10 +400,17 @@ export function WorkflowDetailWorkspace({
             <IconButton label={t("删除工作流")} onClick={onDelete}>
               <Trash2Icon />
             </IconButton>
-            <Button type="button" variant="outline" disabled={!isDirty || isSaving} onClick={() => void saveDraft()}>
-              {isSaving ? <LoaderCircleIcon className="animate-spin" /> : <SaveIcon />}
-              {t("保存")}
-            </Button>
+            {view === "canvas" ? (
+              <Button type="button" variant="outline" disabled={!isDirty || isSaving} onClick={() => void saveDraft()}>
+                {isSaving ? <LoaderCircleIcon className="animate-spin" /> : <SaveIcon />}
+                {t("保存")}
+              </Button>
+            ) : (
+              <Button type="button" variant="outline" onClick={() => setView("canvas")}>
+                <PencilIcon />
+                {t("编辑画布")}
+              </Button>
+            )}
           </>
         ) : null}
         {agent.can_edit ? (
@@ -428,7 +447,74 @@ export function WorkflowDetailWorkspace({
         ) : null}
       </header>
 
-      {currentRun ? (
+      {view === "details" ? (
+        <main className="flex-1 border-t">
+          <section className="grid grid-cols-2 divide-x border-b sm:grid-cols-4">
+            <div className="grid gap-1 px-4 py-4">
+              <span className="text-xs text-muted-foreground">{t("节点数量")}</span>
+              <strong className="text-xl font-semibold tabular-nums">{nodeCount}</strong>
+            </div>
+            <div className="grid gap-1 px-4 py-4 sm:border-r">
+              <span className="text-xs text-muted-foreground">{t("连线数量")}</span>
+              <strong className="text-xl font-semibold tabular-nums">{edgeCount}</strong>
+            </div>
+            <div className="grid gap-1 border-t px-4 py-4 sm:border-t-0 sm:border-r">
+              <span className="text-xs text-muted-foreground">{t("草稿修订")}</span>
+              <strong className="text-xl font-semibold tabular-nums">v{definition.revision}</strong>
+            </div>
+            <div className="grid gap-1 border-t px-4 py-4 sm:border-t-0">
+              <span className="text-xs text-muted-foreground">{t("已发布版本")}</span>
+              <strong className="text-xl font-semibold tabular-nums">
+                {latestPublishedVersion ? `v${latestPublishedVersion}` : "-"}
+              </strong>
+            </div>
+          </section>
+          <section className="grid gap-8 p-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(16rem,0.8fr)] lg:p-8">
+            <div className="grid content-start gap-4">
+              <div>
+                <h2 className="text-lg font-semibold">{t("工作流详情")}</h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                  {agent.description || t("暂无描述")}
+                </p>
+              </div>
+              <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+                {t("当前草稿包含 {nodes} 个节点和 {edges} 条连线。", {
+                  nodes: nodeCount,
+                  edges: edgeCount,
+                })}
+              </p>
+              {agent.can_edit ? (
+                <div>
+                  <Button type="button" onClick={() => setView("canvas")}>
+                    <PencilIcon />
+                    {t("编辑画布")}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+            <div className="grid content-start gap-3 border-t pt-5 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+              <h2 className="text-sm font-semibold">{t("最近运行")}</h2>
+              {currentRun ? (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant={currentRun.status === "failed" ? "destructive" : "outline"}>
+                    {runStatusLabel(currentRun, t)}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {t("已执行 {count} 个节点", { count: currentRun.step_count })}
+                  </span>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setRunDetailsOpen(true)}>
+                    {t("查看运行结果")}
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("尚未运行")}</p>
+              )}
+            </div>
+          </section>
+        </main>
+      ) : null}
+
+      {view === "canvas" && currentRun ? (
         <div className="flex flex-wrap items-center gap-3 border-t bg-muted/25 px-4 py-2 text-xs">
           <Badge
             variant={currentRun.status === "failed" ? "destructive" : "outline"}
@@ -448,18 +534,20 @@ export function WorkflowDetailWorkspace({
         </div>
       ) : null}
 
-      <WorkflowCanvas
-        key={`${definition.id}:${definition.revision}`}
-        agent={agent}
-        graph={graph}
-        models={models}
-        knowledgeBases={knowledgeBases}
-        mcpServers={mcpServers}
-        runtimeStatuses={runtimeStatuses}
-        readOnly={!agent.can_edit}
-        onChange={setGraph}
-        t={t}
-      />
+      {view === "canvas" ? (
+        <WorkflowCanvas
+          key={`${definition.id}:${definition.revision}`}
+          agent={agent}
+          graph={graph}
+          models={models}
+          knowledgeBases={knowledgeBases}
+          mcpServers={mcpServers}
+          runtimeStatuses={runtimeStatuses}
+          readOnly={!agent.can_edit}
+          onChange={setGraph}
+          t={t}
+        />
+      ) : null}
 
       <Dialog open={runOpen} onOpenChange={setRunOpen}>
         <DialogContent className="max-w-xl">

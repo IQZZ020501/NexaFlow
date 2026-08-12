@@ -18,6 +18,15 @@ export type WorkflowNodeData = Record<string, unknown> & {
   title: string
   config: Record<string, unknown>
   runtimeStatus?: WorkflowNodeExecution["status"]
+  readOnly?: boolean
+  onAddConnectedNode?: (
+    sourceId: string,
+    sourceHandle: string | null | undefined,
+    type: WorkflowNodeType
+  ) => void
+  onCopy?: (nodeId: string) => void
+  onDelete?: (nodeId: string) => void
+  onRename?: (nodeId: string, title: string) => void
 }
 
 export type WorkflowNode = {

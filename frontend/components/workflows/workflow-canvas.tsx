@@ -6,7 +6,6 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
-  Panel,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -47,8 +46,10 @@ import {
   WorkflowNodeCard,
   workflowNodeLabel,
 } from "./workflow-node"
+import { WorkflowEdgeCard } from "./workflow-edge"
 
 const nodeTypes = { workflow: WorkflowNodeCard }
+const edgeTypes = { workflow: WorkflowEdgeCard }
 const reactFlowProOptions = { hideAttribution: true }
 
 type WorkflowCanvasProps = {
@@ -525,23 +526,79 @@ function CanvasInner(props: WorkflowCanvasProps) {
     [nodes, props.readOnly, props.t]
   )
 
+  const deleteEdge = React.useCallback((edgeId: string) => {
+    setEdges((current) => current.filter((edge) => edge.id !== edgeId))
+    setSelectedEdgeId((current) => (current === edgeId ? null : current))
+  }, [])
+
+  const updateNode = React.useCallback((nodeId: string, update: (node: WorkflowNode) => WorkflowNode) => {
+    setNodes((current) => current.map((node) => (node.id === nodeId ? update(node) : node)))
+  }, [])
+
+  const copyNode = React.useCallback((nodeId: string) => {
+    if (props.readOnly) return
+    const source = nodes.find((node) => node.id === nodeId)
+    if (!source) return
+    const copy = createWorkflowNode(source.data.type, `${source.data.title} ${t("副本")}`, nodes.length)
+    copy.position = { x: source.position.x + 300, y: source.position.y + 80 }
+    copy.data.config = structuredClone(source.data.config)
+    setNodes((current) => [...current, copy])
+    setSelectedId(copy.id)
+  }, [nodes, props.readOnly, t])
+
+  const deleteNode = React.useCallback((nodeId: string) => {
+    if (props.readOnly || ["start", "end"].some((type) => nodes.find((node) => node.id === nodeId)?.data.type === type)) return
+    setNodes((current) => current.filter((node) => node.id !== nodeId))
+    setEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId))
+    setSelectedId((current) => (current === nodeId ? null : current))
+  }, [nodes, props.readOnly])
+
+  const renameNode = React.useCallback((nodeId: string, title: string) => {
+    if (props.readOnly) return
+    updateNode(nodeId, (node) => ({ ...node, data: { ...node.data, title } }))
+  }, [props.readOnly, updateNode])
+
+  const addConnectedNode = React.useCallback((sourceId: string, sourceHandle: string | null | undefined, type: WorkflowNodeType) => {
+    if (props.readOnly) return
+    const source = nodes.find((node) => node.id === sourceId)
+    if (!source) return
+    const nextNode = createWorkflowNode(type, workflowNodeLabel(type, t), nodes.length)
+    nextNode.position = { x: source.position.x + 330, y: source.position.y }
+    const edge = createWorkflowEdge(source.id, nextNode.id, sourceHandle)
+    setNodes((current) => [...current, nextNode])
+    setEdges((current) => addEdge(edge, current) as WorkflowEdge[])
+    setSelectedId(nextNode.id)
+    setSelectedEdgeId(edge.id)
+  }, [nodes, props.readOnly, t])
+
   const selectedNode = nodes.find((node) => node.id === selectedId) ?? null
-  const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId) ?? null
   const renderedNodes = React.useMemo(
     () =>
       nodes.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          runtimeStatus: props.runtimeStatuses[node.id],
-        },
+          ...node,
+          type: "workflow",
+          data: {
+            ...node.data,
+            runtimeStatus: props.runtimeStatuses[node.id],
+            readOnly: props.readOnly,
+            onAddConnectedNode: addConnectedNode,
+            onCopy: copyNode,
+            onDelete: deleteNode,
+            onRename: renameNode,
+          },
       })),
-    [nodes, props.runtimeStatuses]
+    [addConnectedNode, copyNode, deleteNode, nodes, props.readOnly, props.runtimeStatuses, renameNode]
   )
   const renderedEdges = React.useMemo(
     () =>
       edges.map((edge) => ({
         ...edge,
+        type: "workflow",
+        data: {
+          deleteLabel: t("删除连线"),
+          readOnly: props.readOnly,
+          onDelete: deleteEdge,
+        },
         selected: edge.id === selectedEdgeId,
         interactionWidth: 28,
         ariaLabel: t("从 {source} 到 {target} 的连线", {
@@ -549,7 +606,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
           target: edge.target,
         }),
       })),
-    [edges, selectedEdgeId, t]
+    [deleteEdge, edges, selectedEdgeId, t, props.readOnly]
   )
   const ariaLabelConfig = React.useMemo<Partial<AriaLabelConfig>>(() => {
     const directions: Record<string, string> = {
@@ -630,6 +687,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
             nodes={renderedNodes}
             edges={renderedEdges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             defaultViewport={props.graph.viewport}
             ariaLabelConfig={ariaLabelConfig}
             proOptions={reactFlowProOptions}
@@ -713,26 +771,6 @@ function CanvasInner(props: WorkflowCanvasProps) {
               addNode(type, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
             }}
           >
-            {selectedEdge && !props.readOnly ? (
-              <Panel position="top-right" className="!m-3">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive"
-                  className="shadow-md"
-                  onClick={() => {
-                    setEdges((current) =>
-                      current.filter((edge) => edge.id !== selectedEdge.id)
-                    )
-                    setSelectedEdgeId(null)
-                  }}
-                  aria-label={t("删除连线")}
-                >
-                  <Trash2Icon data-icon="inline-start" />
-                  {t("删除连线")}
-                </Button>
-              </Panel>
-            ) : null}
             <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
             <Controls showInteractive={false} />
             <MiniMap
