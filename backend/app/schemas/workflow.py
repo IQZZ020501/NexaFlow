@@ -348,7 +348,7 @@ class PublicWorkflowConversationListResponse(BaseModel):
 
 class ExternalWorkflowRunCreateRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict, max_length=100)
-    file_ids: list[str] = Field(default_factory=list, max_length=10)
+    file_ids: list[str] = Field(default_factory=list)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 

@@ -1967,10 +1967,8 @@ def assert_external_agent_access() -> None:
                     "interaction_config": {
                         "prologue": "How can I help?",
                         "tts_type": "BROWSER",
-                        "file_upload": True,
+                        "file_upload": False,
                         "file_upload_setting": {
-                            "max_files": 2,
-                            "file_limit": 1,
                             "file_upload_type": ["document", "image"],
                         },
                     },
@@ -2046,6 +2044,7 @@ def assert_external_agent_access() -> None:
                 "interaction_config",
             }
             assert profile.json()["interaction_config"]["prologue"] == "How can I help?"
+            assert profile.json()["interaction_config"]["file_upload"] is False
             upload_user_id, _upload_user_token = create_active_user(
                 client,
                 admin_token,
@@ -2076,9 +2075,24 @@ def assert_external_agent_access() -> None:
             uploaded = client.post(
                 f"{public_base}/uploads",
                 headers=auth_headers(admin_token),
-                files={"files": ("context.txt", b"release attachment", "text/plain")},
+                files=[
+                    ("files", ("context.txt", b"release attachment", "text/plain")),
+                    *[
+                        ("files", (f"extra-{index}.txt", b"text", "text/plain"))
+                        for index in range(9)
+                    ],
+                    (
+                        "files",
+                        (
+                            "large.txt",
+                            b"x" * (10 * 1024 * 1024 + 1),
+                            "text/plain",
+                        ),
+                    ),
+                ],
             )
             assert uploaded.status_code == 201, uploaded.text
+            assert len(uploaded.json()) == 11
             pending_upload_agent = client.post(
                 agents_url(workspace_id),
                 headers=auth_headers(admin_token),
@@ -2116,7 +2130,7 @@ def assert_external_agent_access() -> None:
                 headers=auth_headers(admin_token),
                 json={
                     "goal": "Read the attachment",
-                    "file_ids": [uploaded.json()[0]["id"]],
+                    "file_ids": [item["id"] for item in uploaded.json()],
                 },
             )
             assert attachment_run.status_code == 201, attachment_run.text

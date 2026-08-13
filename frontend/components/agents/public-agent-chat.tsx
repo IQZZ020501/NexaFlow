@@ -19,12 +19,14 @@ import {
   PaperclipIcon,
   SendIcon,
   ShieldAlertIcon,
+  SquareIcon,
   UserIcon,
   WrenchIcon,
 } from "lucide-react"
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { Button } from "@/components/ui/button"
+import { AgentAttachmentList } from "@/components/agents/agent-attachment-list"
 import {
   Dialog,
   DialogContent,
@@ -52,11 +54,10 @@ import {
   type PublicAgentProfile,
   type PublicAgentRunStreamEvent,
 } from "@/lib/api/public-agents"
-import { speakBrowserText } from "@/lib/browser-tts"
 import { getErrorMessage } from "@/lib/errors"
 import {
+  AGENT_FILE_UPLOAD_SETTING,
   acceptedUploadExtensions,
-  validateUploadSelection,
 } from "@/lib/interaction-config"
 
 type PublicAgentChatProps = {
@@ -661,7 +662,7 @@ export function PublicAgentChat({
   initialConversationId = null,
 }: PublicAgentChatProps) {
   const router = useRouter()
-  const { language, t } = useLanguage()
+  const { t } = useLanguage()
   const { token, isSessionRestored } = useSession()
   const [profile, setProfile] = React.useState<PublicAgentProfile | null>(null)
   const [conversations, setConversations] = React.useState<
@@ -687,6 +688,7 @@ export function PublicAgentChat({
   )
   const [sessionReady, setSessionReady] = React.useState(false)
   const streamControllerRef = React.useRef<AbortController | null>(null)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const initialConversationIdRef = React.useRef(initialConversationId)
   const routerRef = React.useRef(router)
@@ -896,13 +898,6 @@ export function PublicAgentChat({
             if (streamEvent.type === "error") {
               setSendError(streamEvent.run.error || t("回答失败，请稍后重试。"))
             }
-            if (
-              streamEvent.type === "complete" &&
-              streamEvent.run.status === "succeeded" &&
-              profile?.interaction_config.tts_type === "BROWSER"
-            ) {
-              speakBrowserText(streamEvent.run.result, language)
-            }
           },
           controller.signal
         )
@@ -932,7 +927,6 @@ export function PublicAgentChat({
     setQuestion("")
     setSendError(null)
     setIsSending(true)
-    const interactionConfig = currentProfile.interaction_config
     const controller = new AbortController()
     streamControllerRef.current = controller
     const placeholderId = `pending-${Date.now()}`
@@ -979,13 +973,6 @@ export function PublicAgentChat({
           if (streamEvent.type === "error") {
             setSendError(streamEvent.run.error || t("回答失败，请稍后重试。"))
           }
-          if (
-            streamEvent.type === "complete" &&
-            streamEvent.run.status === "succeeded" &&
-            interactionConfig.tts_type === "BROWSER"
-          ) {
-            speakBrowserText(streamEvent.run.result, language)
-          }
         },
         controller.signal,
         activeConversationId,
@@ -1011,6 +998,11 @@ export function PublicAgentChat({
         setIsSending(false)
       }
     }
+  }
+
+  function handleCancelAsk() {
+    cancelPublicAgentStream(streamControllerRef)
+    setIsSending(false)
   }
 
   if (isInitializing) {
@@ -1105,9 +1097,7 @@ export function PublicAgentChat({
                   {t("开始新对话")}
                 </h2>
                 <p className="mt-2 max-w-md text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
-                  {profile.interaction_config.prologue ||
-                    profile.description ||
-                    t("输入问题，Agent 会为你生成回答。")}
+                  {profile.description || t("输入问题，Agent 会为你生成回答。")}
                 </p>
               </div>
             ) : (
@@ -1187,72 +1177,81 @@ export function PublicAgentChat({
             </p>
           ) : null}
           <form
-            className="mx-auto grid max-w-3xl gap-2 rounded-xl border bg-background p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring/40"
+            className="relative mx-auto max-w-3xl rounded-xl border bg-background p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring/40"
             onSubmit={handleAsk}
           >
-            {profile.interaction_config.file_upload ? (
-              <label className="flex min-w-0 items-center gap-2 px-3 pt-1 text-xs text-muted-foreground">
-                <PaperclipIcon className="size-4 shrink-0" />
-                <input
-                  type="file"
-                  multiple
-                  accept={acceptedUploadExtensions(
-                    profile.interaction_config.file_upload_setting.file_upload_type
-                  )}
-                  disabled={isSending}
-                  onChange={(event) => {
-                    const selected = Array.from(event.target.files ?? [])
-                    const setting = profile.interaction_config.file_upload_setting
-                    if (!validateUploadSelection(selected, setting)) {
-                      event.target.value = ""
-                      setFiles([])
-                      setSendError(t("文件数量或大小超过限制。"))
-                      return
-                    }
-                    setSendError(null)
-                    setFiles(selected)
-                  }}
-                />
-                {files.length ? (
-                  <span className="truncate">
-                    {t("已选择 {count} 个文件", { count: files.length })}
-                  </span>
-                ) : null}
-              </label>
-            ) : null}
-            <div className="flex items-end gap-2">
-              <textarea
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter" &&
-                    !event.shiftKey &&
-                    !event.nativeEvent.isComposing
-                  ) {
-                    event.preventDefault()
-                    event.currentTarget.form?.requestSubmit()
-                  }
-                }}
-                className="max-h-40 min-h-12 min-w-0 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
-                placeholder={
-                  profile.interaction_config.user_input_title || t("请输入问题")
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="sr-only"
+              multiple
+              accept={acceptedUploadExtensions(
+                AGENT_FILE_UPLOAD_SETTING.file_upload_type
+              )}
+              disabled={isSending}
+              onChange={(event) => {
+                const selected = Array.from(event.target.files ?? [])
+                setSendError(null)
+                setFiles(selected)
+              }}
+            />
+            <textarea
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault()
+                  event.currentTarget.form?.requestSubmit()
                 }
-                aria-label={t("请输入问题")}
-                maxLength={4000}
-                rows={1}
-                disabled={isSending}
+              }}
+              className={`max-h-40 min-h-28 w-full resize-none bg-transparent px-3 pt-2 text-sm leading-6 outline-none placeholder:text-muted-foreground ${files.length ? "pb-2" : "pb-14"}`}
+              placeholder={t("请输入问题")}
+              aria-label={t("请输入问题")}
+              maxLength={4000}
+              rows={1}
+              disabled={isSending}
+            />
+            <AgentAttachmentList
+              files={files}
+                onRemove={(indexToRemove) =>
+                  setFiles((current) =>
+                    current.filter((_, index) => index !== indexToRemove)
+                  )
+                }
+                t={t}
               />
+            <div className="absolute right-2 bottom-2 flex items-center gap-2">
               <Button
-                type="submit"
+                type="button"
+                variant="ghost"
                 size="icon-lg"
                 className="rounded-lg"
-                aria-label={t("发送问题")}
-                title={t("发送问题")}
-                disabled={!question.trim() || isSending}
+                aria-label={t("添加附件")}
+                title={t("添加附件")}
+                disabled={isSending}
+                onClick={() => {
+                  if (!fileInputRef.current) return
+                  fileInputRef.current.value = ""
+                  fileInputRef.current.click()
+                }}
+              >
+                <PaperclipIcon />
+              </Button>
+              <Button
+                type={isSending ? "button" : "submit"}
+                size="icon-lg"
+                className="rounded-lg"
+                aria-label={t(isSending ? "停止生成" : "发送问题")}
+                title={t(isSending ? "停止生成" : "发送问题")}
+                onClick={isSending ? handleCancelAsk : undefined}
+                disabled={!isSending && !question.trim()}
               >
                 {isSending ? (
-                  <LoaderCircleIcon className="animate-spin" />
+                  <SquareIcon className="fill-current" />
                 ) : (
                   <SendIcon />
                 )}

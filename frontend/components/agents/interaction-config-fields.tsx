@@ -114,38 +114,6 @@ export function InteractionConfigFields({
         </label>
         {value.file_upload ? (
           <>
-            <label className="grid gap-1 text-xs font-medium">
-              {t("最多文件数")}
-              <Input
-                type="number"
-                min={1}
-                max={10}
-                value={value.file_upload_setting.max_files}
-                onChange={(event) => {
-                  const parsed = Number.parseInt(event.target.value, 10)
-                  if (!Number.isFinite(parsed)) return
-                  updateUploadSetting({
-                    max_files: Math.min(10, Math.max(1, parsed)),
-                  })
-                }}
-              />
-            </label>
-            <label className="grid gap-1 text-xs font-medium">
-              {t("单文件上限（MB）")}
-              <Input
-                type="number"
-                min={1}
-                max={100}
-                value={value.file_upload_setting.file_limit}
-                onChange={(event) => {
-                  const parsed = Number.parseInt(event.target.value, 10)
-                  if (!Number.isFinite(parsed)) return
-                  updateUploadSetting({
-                    file_limit: Math.min(100, Math.max(1, parsed)),
-                  })
-                }}
-              />
-            </label>
             <div className="flex flex-wrap gap-3 sm:col-span-2">
               {uploadTypes.map((type) => (
                 <label key={type} className="flex items-center gap-1.5 text-xs">

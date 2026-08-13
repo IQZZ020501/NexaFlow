@@ -14,7 +14,6 @@ from app.infrastructure.config import Settings
 from app.infrastructure.model_utils import new_id
 from app.infrastructure.object_storage import (
     EmptyObjectError,
-    ObjectTooLargeError,
     create_object_storage,
 )
 from app.infrastructure.repositories import workflow as workflow_repository
@@ -40,9 +39,9 @@ UPLOAD_EXTENSIONS = {
     "audio": {".m4a", ".mp3", ".ogg", ".wav", ".webm"},
 }
 AGENT_ATTACHMENT_TYPES = {"document", "image"}
+AGENT_ATTACHMENT_CONFIG = AgentInteractionConfig(file_upload=True)
 AGENT_FILE_TEXT_LIMIT = 20_000
 AGENT_ATTACHMENT_CONTEXT_LIMIT = 50_000
-MAX_PENDING_UPLOAD_BYTES_PER_USER = 1024 * 1024 * 1024
 
 
 def published_interaction_config(
@@ -163,37 +162,24 @@ async def _upload_files(
     config: AgentInteractionConfig,
     application_type: str,
 ) -> list[WorkflowUpload]:
-    upload_config = config.file_upload_setting
+    if application_type == "agent":
+        config = AGENT_ATTACHMENT_CONFIG
     if not config.file_upload:
         raise HTTPException(status.HTTP_409_CONFLICT, "File upload is disabled.")
-    if not uploads or len(uploads) > upload_config.max_files:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"Upload between 1 and {upload_config.max_files} files.",
-        )
+    if not uploads:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Upload files.")
+    upload_config = config.file_upload_setting
 
     if await workspace_repository.lock_workspace(db, agent.workspace_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Upload workspace not found.")
     if await user_repository.lock_user(db, user_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Upload user not found.")
-    pending_count = await workflow_repository.count_uploads(
+    if not await workflow_repository.lock_upload_application(
         db,
         agent.workspace_id,
         agent.id,
-        user_id,
-    )
-    if pending_count is None:
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Upload application not found.")
-    if pending_count + len(uploads) > upload_config.max_files:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "Use or wait for existing uploads before adding more files.",
-        )
-    pending_bytes = await workflow_repository.pending_upload_bytes(
-        db,
-        agent.workspace_id,
-        user_id,
-    )
 
     storage = create_object_storage(settings.knowledge_storage_dir)
     stored: list[WorkflowUpload] = []
@@ -224,19 +210,8 @@ async def _upload_files(
             size_bytes = await storage.put_chunks(
                 object_key,
                 chunks(),
-                upload_config.file_limit * 1024 * 1024,
+                None,
             )
-            if (
-                pending_bytes
-                + sum(item.size_bytes for item in stored)
-                + size_bytes
-                > MAX_PENDING_UPLOAD_BYTES_PER_USER
-            ):
-                stored_keys.append(object_key)
-                raise HTTPException(
-                    status.HTTP_413_CONTENT_TOO_LARGE,
-                    "Pending uploads exceed the 1 GiB workspace quota.",
-                )
             stored_keys.append(object_key)
             stored.append(
                 await workflow_repository.create_upload(
@@ -255,14 +230,6 @@ async def _upload_files(
                 )
             )
         await db.commit()
-    except ObjectTooLargeError as exc:
-        await db.rollback()
-        for object_key in stored_keys:
-            storage.delete(object_key)
-        raise HTTPException(
-            status.HTTP_413_CONTENT_TOO_LARGE,
-            f"{application_type.title()} upload is too large.",
-        ) from exc
     except EmptyObjectError as exc:
         await db.rollback()
         for object_key in stored_keys:
@@ -285,11 +252,12 @@ def _validate_upload_policy(
     config: AgentInteractionConfig,
     application_type: str,
 ) -> None:
+    if application_type == "agent":
+        config = AGENT_ATTACHMENT_CONFIG
     setting = config.file_upload_setting
     for upload in uploads:
         if (
             upload.category not in setting.file_upload_type
-            or upload.size_bytes > setting.file_limit * 1024 * 1024
             or (
                 application_type == "agent"
                 and upload.category not in AGENT_ATTACHMENT_TYPES
@@ -320,7 +288,7 @@ async def resolve_public_workflow_files(
     if not file_ids:
         return []
     config = published_interaction_config(context)
-    if not config.file_upload or len(file_ids) > config.file_upload_setting.max_files:
+    if not config.file_upload:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid workflow files.")
     if len(file_ids) != len(set(file_ids)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Duplicate workflow files.")
@@ -363,7 +331,6 @@ async def resolve_public_agent_files(
         user_id,
         file_ids,
         settings,
-        published_interaction_config(context),
     )
 
 
@@ -384,7 +351,6 @@ async def resolve_workspace_agent_files(
         actor.id,
         file_ids,
         settings,
-        AgentInteractionConfig.model_validate(agent.interaction_config),
     )
 
 
@@ -394,15 +360,11 @@ async def _resolve_agent_file_text(
     user_id: str,
     file_ids: list[str],
     settings: Settings,
-    config: AgentInteractionConfig,
 ) -> str:
     if not file_ids:
         return ""
-    if (
-        not config.file_upload
-        or len(file_ids) > config.file_upload_setting.max_files
-        or len(file_ids) != len(set(file_ids))
-    ):
+    config = AGENT_ATTACHMENT_CONFIG
+    if len(file_ids) != len(set(file_ids)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid agent files.")
     uploads = await workflow_repository.list_uploads(
         db,

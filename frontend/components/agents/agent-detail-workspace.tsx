@@ -28,6 +28,7 @@ import {
   SettingsIcon,
   ShieldCheckIcon,
   ShieldAlertIcon,
+  SquareIcon,
   Trash2Icon,
   Undo2Icon,
   UsersIcon,
@@ -50,11 +51,12 @@ import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
 import {
+  AGENT_FILE_UPLOAD_SETTING,
   acceptedUploadExtensions,
-  validateUploadSelection,
 } from "@/lib/interaction-config"
 
 import { AgentConfigFields } from "./agent-config-fields"
+import { AgentAttachmentList } from "./agent-attachment-list"
 import {
   AgentConversationUsersPanel,
   AgentLogsPanel,
@@ -683,6 +685,7 @@ export function AgentDetailWorkspace({
   )
   const [isConfigVisible, setIsConfigVisible] = React.useState(true)
   const previewScrollRef = React.useRef<HTMLDivElement>(null)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
   const shouldFollowPreviewRef = React.useRef(true)
 
   React.useEffect(() => {
@@ -1068,101 +1071,105 @@ export function AgentDetailWorkspace({
 
           <div className="shrink-0 border-t bg-background p-3 sm:p-4">
             <form
-              className="mx-auto max-w-3xl rounded-2xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-md"
+              className="relative mx-auto max-w-3xl rounded-2xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-md"
               onSubmit={(event) => {
                 shouldFollowPreviewRef.current = true
                 onAsk(event)
               }}
             >
-              {agent.interaction_config.file_upload ? (
-                <label className="flex min-w-0 items-center gap-2 px-3 pt-1 text-xs text-muted-foreground">
-                  <PaperclipIcon className="size-4 shrink-0" />
-                  <input
-                    type="file"
-                    multiple
-                    accept={acceptedUploadExtensions(
-                      agent.interaction_config.file_upload_setting.file_upload_type
-                    )}
-                    disabled={isDirty || isAsking || isRunsLoading}
-                    onChange={(event) => {
-                      const selected = Array.from(event.target.files ?? [])
-                      const setting = agent.interaction_config.file_upload_setting
-                      if (!validateUploadSelection(selected, setting)) {
-                        event.target.value = ""
-                        setFiles([])
-                        notify("error", t("文件数量或大小超过限制。"))
-                        return
-                      }
-                      setFiles(selected)
-                    }}
-                  />
-                  {files.length ? (
-                    <span className="truncate">
-                      {t("已选择 {count} 个文件", { count: files.length })}
-                    </span>
-                  ) : null}
-                </label>
-              ) : null}
-              <div className="flex items-end gap-2">
-                <textarea
-                  value={question}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === "Enter" &&
-                      !event.shiftKey &&
-                      !event.nativeEvent.isComposing
-                    ) {
-                      event.preventDefault()
-                      event.currentTarget.form?.requestSubmit()
-                    }
-                  }}
-                  className="max-h-40 min-h-14 min-w-0 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
-                  placeholder={
-                    isDirty
-                      ? t("请先保存配置后再调试")
-                      : agent.interaction_config.user_input_title ||
-                        t("向 Agent 提问...")
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="sr-only"
+                multiple
+                accept={acceptedUploadExtensions(
+                  AGENT_FILE_UPLOAD_SETTING.file_upload_type
+                )}
+                disabled={
+                  isDirty || isAsking || isRunsLoading || agent.status !== "active"
+                }
+                onChange={(event) => {
+                  const selected = Array.from(event.target.files ?? [])
+                  setFiles(selected)
+                }}
+              />
+              <textarea
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault()
+                    event.currentTarget.form?.requestSubmit()
                   }
-                  aria-label={t("向 Agent 提问")}
-                  disabled={
-                    isDirty ||
-                    isRunsLoading ||
-                    isAsking ||
-                    agent.status !== "active"
-                  }
-                  maxLength={4000}
-                  rows={2}
-                />
-                {isAsking ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-xl"
-                    aria-label={t("停止查看")}
-                    title={t("停止查看")}
-                    onClick={onCancelAsk}
-                  >
-                    <CircleXIcon />
-                    {t("停止查看")}
-                  </Button>
-                ) : null}
+                }}
+                className={`max-h-40 min-h-28 w-full resize-none bg-transparent px-3 pt-2 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed ${files.length ? "pb-2" : "pb-14"}`}
+                placeholder={
+                  isDirty
+                    ? t("请先保存配置后再调试")
+                    : t("向 Agent 提问...")
+                }
+                aria-label={t("向 Agent 提问")}
+                disabled={
+                  isDirty ||
+                  isRunsLoading ||
+                  isAsking ||
+                  agent.status !== "active"
+                }
+                maxLength={4000}
+                rows={2}
+              />
+              <AgentAttachmentList
+                files={files}
+                onRemove={(indexToRemove) =>
+                  setFiles((current) =>
+                    current.filter((_, index) => index !== indexToRemove)
+                  )
+                }
+                t={t}
+              />
+              <div className="absolute right-2 bottom-2 flex items-center gap-2">
                 <Button
-                  type="submit"
+                  type="button"
+                  variant="ghost"
                   size="icon-lg"
                   className="rounded-xl"
-                  aria-label={t("发送问题")}
-                  title={t("发送问题")}
+                  aria-label={t("添加附件")}
+                  title={t("添加附件")}
                   disabled={
-                    !question.trim() ||
                     isDirty ||
-                    isRunsLoading ||
                     isAsking ||
+                    isRunsLoading ||
                     agent.status !== "active"
+                  }
+                  onClick={() => {
+                    if (!fileInputRef.current) return
+                    fileInputRef.current.value = ""
+                    fileInputRef.current.click()
+                  }}
+                >
+                  <PaperclipIcon />
+                </Button>
+                <Button
+                  type={isAsking ? "button" : "submit"}
+                  size="icon-lg"
+                  className="rounded-xl"
+                  aria-label={t(isAsking ? "停止生成" : "发送问题")}
+                  title={t(isAsking ? "停止生成" : "发送问题")}
+                  onClick={isAsking ? onCancelAsk : undefined}
+                  disabled={
+                    !isAsking &&
+                    (!question.trim() ||
+                      isDirty ||
+                      isRunsLoading ||
+                      agent.status !== "active")
                   }
                 >
                   {isAsking ? (
-                    <LoaderCircleIcon className="animate-spin" />
+                    <SquareIcon className="fill-current" />
                   ) : (
                     <SendIcon />
                   )}

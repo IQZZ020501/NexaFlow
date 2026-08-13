@@ -19,8 +19,6 @@ FileUploadType = Literal["document", "image", "audio"]
 
 
 class AgentFileUploadSetting(BaseModel):
-    max_files: int = Field(default=3, ge=1, le=10)
-    file_limit: int = Field(default=10, ge=1, le=100)
     file_upload_type: list[FileUploadType] = Field(
         default_factory=lambda: ["document", "image"],
         min_length=1,
@@ -126,7 +124,7 @@ class AgentPermissionUpsertRequest(BaseModel):
 class AgentRunCreateRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
-    file_ids: list[str] = Field(default_factory=list, max_length=10)
+    file_ids: list[str] = Field(default_factory=list)
     preview: bool = Field(
         default=False,
         description="Deprecated compatibility field; runs are always durable.",
@@ -139,7 +137,7 @@ class ExternalAgentRunCreateRequest(BaseModel):
 
 
 class PublicAgentRunCreateRequest(ExternalAgentRunCreateRequest):
-    file_ids: list[str] = Field(default_factory=list, max_length=10)
+    file_ids: list[str] = Field(default_factory=list)
 
 
 class AgentApiDocumentationResponse(BaseModel):

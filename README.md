@@ -15,8 +15,6 @@
 
 NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队可以管理模型和知识库，创建可发布的 Agent，使用可视化画布编排工作流，并在服务端权限、审批、预算和运行恢复机制约束下调用 MCP 工具。
 
-![NexaFlow 应用工作台](docs/assets/apps-overview.png)
-
 ## 核心能力
 
 - **应用构建**：统一管理 Agent 与工作流，支持草稿、发布快照、公开访问和 API 调用。
@@ -27,7 +25,37 @@ NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队�
 - **MCP 工具**：支持 Streamable HTTP、SSE 和 stdio，提供加密凭据、工具审批和定义变更失效策略。
 - **团队治理**：工作空间与团队分级管理、资源级权限、审计日志和简体中文、繁体中文、英文界面。
 
-![NexaFlow 工作流画布](docs/assets/workflow-canvas.png)
+## 产品界面
+
+### Agent 构建与调试
+
+在同一工作区配置模型、知识库、MCP 工具和系统提示词，并在右侧调试区直接验证 Agent。发布后可继续维护草稿，再通过重新发布更新公开版本。
+
+![NexaFlow Agent 构建与调试界面](docs/assets/agent-builder.png)
+
+### 应用发布与 API
+
+Agent 和工作流都可以发布为公开访问页面，也可以通过独立 API Key、API 地址和接口文档接入其他系统。
+
+![NexaFlow 应用发布与 API 界面](docs/assets/application-publishing.png)
+
+### 知识库文档
+
+知识库集中管理文档上传、解析、向量化、启停、重建索引和命中测试，并记录文件状态、大小和分段数量。
+
+![NexaFlow 知识库文档界面](docs/assets/knowledge-base-documents.png)
+
+### 模型供应商
+
+模型注册按供应商引导填写连接信息和凭据，可接入云端模型、OpenAI-compatible 服务和本地模型。
+
+![NexaFlow 模型供应商选择界面](docs/assets/model-provider-selection.png)
+
+### 工作空间管理
+
+系统管理员可以创建和维护工作空间，并在工作空间内继续管理团队、用户和审计日志，实现组织与资源隔离。
+
+![NexaFlow 工作空间管理界面](docs/assets/workspace-management.png)
 
 ## 技术架构
 

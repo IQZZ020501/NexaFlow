@@ -67,7 +67,6 @@ import {
   type AgentRunStreamEvent,
   type AgentToolCall,
 } from "@/lib/api/agents"
-import { speakBrowserText } from "@/lib/browser-tts"
 import { listKnowledgeBases, type KnowledgeBase } from "@/lib/api/knowledge"
 import { listRegisteredModels, type RegisteredModel } from "@/lib/api/llm"
 import { listMcpServers, type McpServer } from "@/lib/api/mcp"
@@ -348,7 +347,7 @@ export function AgentsPage({
   const router = useRouter()
   const params = useParams<{ id?: string }>()
   const selectedAgentId = params.id ?? null
-  const { language, t } = useLanguage()
+  const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
   const [agents, setAgents] = React.useState<Agent[]>([])
   const [models, setModels] = React.useState<RegisteredModel[]>([])
@@ -1256,13 +1255,6 @@ export function AgentsPage({
           if (streamEvent.type === "error") {
             notify("error", t("Agent 回答失败"))
           }
-          if (
-            streamEvent.type === "complete" &&
-            streamEvent.run.status === "succeeded" &&
-            selectedAgent.interaction_config.tts_type === "BROWSER"
-          ) {
-            speakBrowserText(streamEvent.run.result, language)
-          }
         },
         askAbortController.signal,
         conversationId,
@@ -1347,12 +1339,6 @@ export function AgentsPage({
         return
       }
       setRuns((current) => mergeAgentRunSnapshot(current, run))
-      if (
-        run.status === "succeeded" &&
-        selectedAgent.interaction_config.tts_type === "BROWSER"
-      ) {
-        speakBrowserText(run.result, language)
-      }
       await loadRunToolCalls(selectedAgent.id, runId, conversationId)
       if (
         !isCurrentAgentConversation(
