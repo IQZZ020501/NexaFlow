@@ -386,6 +386,11 @@ export function AgentOverviewPanel({
               {publicUrl}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
+              {!agent.published ? (
+                <p className="w-full text-xs text-muted-foreground">
+                  {t("发布后此链接才可访问。")}
+                </p>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"

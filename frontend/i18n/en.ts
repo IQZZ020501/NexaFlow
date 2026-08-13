@@ -1039,6 +1039,10 @@ export const en = {
   "选项，用逗号分隔": "Options, comma separated",
   "请选择": "Select an option",
   "文件数量或大小超过限制。": "The file count or size exceeds the limit.",
+  "工作流已发布": "Workflow published",
+  "工作流已取消发布": "Workflow unpublished",
+  "发布后此链接才可访问。": "This link is available after publishing.",
+  "应用加载失败": "Failed to load application",
   "最多 {count} 个文件，每个不超过 {size} MB":
     "Up to {count} files, no more than {size} MB each",
 } satisfies Record<TranslationKey, string>

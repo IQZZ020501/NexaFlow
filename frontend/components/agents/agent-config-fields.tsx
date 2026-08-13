@@ -94,27 +94,45 @@ export function AgentConfigFields({
         .includes(query)
     )
   }, [activeKnowledgeBases, knowledgeSearch])
-  const activeMcpServers = mcpServers
-    .filter((server) => server.status === "active")
-    .map((server) => ({
-      ...server,
-      tools:
-        form.appType === "workflow"
-          ? server.tools.filter((tool) => tool.policy_mode === "read_only")
-          : server.tools,
-    }))
+  const activeMcpServers = React.useMemo(
+    () =>
+      mcpServers
+        .filter((server) => server.status === "active")
+        .map((server) => ({
+          ...server,
+          tools:
+            form.appType === "workflow"
+              ? server.tools.filter((tool) => tool.policy_mode === "read_only")
+              : server.tools,
+        })),
+    [form.appType, mcpServers]
+  )
+  const selectableMcpTools = React.useMemo(
+    () =>
+      new Set(
+        activeMcpServers.flatMap((server) =>
+          server.tools.map((tool) => `${server.id}:${tool.name}`)
+        )
+      ),
+    [activeMcpServers]
+  )
+  const selectedMcpTools = form.mcpTools.filter(
+    (reference) =>
+      form.appType !== "workflow" ||
+      selectableMcpTools.has(`${reference.server_id}:${reference.tool_name}`)
+  )
   const selectedModel = configurableModels.find(
     (model) => model.id === form.modelId
   )
   const selectedKnowledgeBaseNames = form.knowledgeBaseIds
     .map((id) => knowledgeBases.find((item) => item.id === id)?.name)
     .filter((name): name is string => Boolean(name))
-  const selectedMcpToolNames = form.mcpTools.map((reference) => {
+  const selectedMcpToolNames = selectedMcpTools.map((reference) => {
     const server = mcpServers.find((item) => item.id === reference.server_id)
     return server
       ? `${server.name} / ${reference.tool_name}`
       : reference.tool_name
-  })
+    })
 
   function toggleKnowledgeBase(id: string) {
     setForm((current) => {
@@ -444,7 +462,7 @@ export function AgentConfigFields({
                   {t("MCP 工具")}
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  {t("{value} 个 MCP 工具", { value: form.mcpTools.length })}
+                  {t("{value} 个 MCP 工具", { value: selectedMcpTools.length })}
                 </span>
               </span>
               <ChevronRightIcon
@@ -710,9 +728,9 @@ export function AgentConfigFields({
                             server_id: server.id,
                             tool_name: tool.name,
                           }
-                          const checked = hasMcpTool(form.mcpTools, reference)
+                          const checked = hasMcpTool(selectedMcpTools, reference)
                           const disabled =
-                            !checked && form.mcpTools.length >= 12
+                            !checked && selectedMcpTools.length >= 12
                           return (
                             <label
                               key={tool.name}
@@ -764,7 +782,7 @@ export function AgentConfigFields({
           </div>
           <DialogFooter className="flex-col border-t bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <p className="text-xs text-muted-foreground">
-              {t("{value} 个 MCP 工具", { value: form.mcpTools.length })}
+              {t("{value} 个 MCP 工具", { value: selectedMcpTools.length })}
             </p>
             <Button
               type="button"

@@ -526,7 +526,8 @@ async def get_public_agent_profile(
     user: User,
 ) -> PublicAgentProfileResponse:
     context = await get_workspace_published_agent_context(db, agent_id, user)
-    assert context.publication is not None
+    if context.publication is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
     return PublicAgentProfileResponse(
         id=context.agent.id,
         name=context.publication.name,
@@ -769,7 +770,8 @@ async def create_external_agent_run(
     file_ids: list[str] | None = None,
 ) -> ExternalAgentRunResponse:
     await _enforce_rate_limit(settings, context.agent.id, access_source, consumer_id)
-    assert context.publication is not None
+    if context.publication is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
     attachment_context = ""
     if file_ids:
         if access_source != "public":

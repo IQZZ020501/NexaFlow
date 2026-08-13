@@ -96,6 +96,8 @@ services:
     volumes:
       - ./data/uploads:/data
       - sandbox-socket:/run/sandbox
+    group_add:
+      - "65533"
     depends_on:
       db:
         condition: service_healthy

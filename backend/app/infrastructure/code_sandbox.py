@@ -48,7 +48,8 @@ async def execute_workflow_code(
 
     async def exchange() -> dict[str, Any]:
         reader, writer = await asyncio.open_unix_connection(
-            settings.workflow_sandbox_socket
+            settings.workflow_sandbox_socket,
+            limit=MAX_RESPONSE_BYTES,
         )
         try:
             writer.write(
@@ -71,7 +72,7 @@ async def execute_workflow_code(
             exchange(),
             timeout=settings.workflow_sandbox_timeout_seconds + 1,
         )
-    except (OSError, TimeoutError, json.JSONDecodeError) as exc:
+    except (OSError, TimeoutError, ValueError) as exc:
         raise WorkflowSandboxError("Code sandbox is unavailable.") from exc
 
     stdout = str(response.get("stdout") or "")

@@ -54,6 +54,10 @@ import {
 } from "@/lib/api/public-agents"
 import { speakBrowserText } from "@/lib/browser-tts"
 import { getErrorMessage } from "@/lib/errors"
+import {
+  acceptedUploadExtensions,
+  validateUploadSelection,
+} from "@/lib/interaction-config"
 
 type PublicAgentChatProps = {
   agentId: string
@@ -1192,22 +1196,14 @@ export function PublicAgentChat({
                 <input
                   type="file"
                   multiple
-                  accept={profile.interaction_config.file_upload_setting.file_upload_type
-                    .filter((type) => type !== "audio")
-                    .flatMap((type) =>
-                      type === "image"
-                        ? [".jpeg", ".jpg", ".png", ".webp"]
-                        : [".csv", ".docx", ".epub", ".html", ".ipynb", ".json", ".md", ".pdf", ".pptx", ".txt", ".xls", ".xlsx", ".xml", ".zip"]
-                    )
-                    .join(",")}
+                  accept={acceptedUploadExtensions(
+                    profile.interaction_config.file_upload_setting.file_upload_type
+                  )}
                   disabled={isSending}
                   onChange={(event) => {
                     const selected = Array.from(event.target.files ?? [])
                     const setting = profile.interaction_config.file_upload_setting
-                    if (
-                      selected.length > setting.max_files ||
-                      selected.some((file) => file.size > setting.file_limit * 1024 * 1024)
-                    ) {
+                    if (!validateUploadSelection(selected, setting)) {
                       event.target.value = ""
                       setFiles([])
                       setSendError(t("文件数量或大小超过限制。"))

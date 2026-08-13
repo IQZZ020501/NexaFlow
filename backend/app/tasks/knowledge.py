@@ -190,8 +190,14 @@ async def enqueue_upload_storage_cleanups(
     cleanup_ids: list[str],
     settings: Settings,
 ) -> None:
+    eager = settings.celery_task_always_eager
+    if not eager:
+        celery_app.conf.update(
+            broker_url=settings.celery_broker_url,
+            task_always_eager=False,
+        )
     for cleanup_id in cleanup_ids:
-        if settings.celery_task_always_eager:
+        if eager:
             try:
                 await run_upload_storage_cleanup(cleanup_id, settings)
             except Exception as exc:
@@ -202,10 +208,6 @@ async def enqueue_upload_storage_cleanups(
                     cleanup_id=cleanup_id,
                 )
             continue
-        celery_app.conf.update(
-            broker_url=settings.celery_broker_url,
-            task_always_eager=False,
-        )
         try:
             await asyncio.to_thread(
                 run_upload_storage_cleanup_job.apply_async,

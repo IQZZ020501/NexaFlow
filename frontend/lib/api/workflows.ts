@@ -222,14 +222,19 @@ export function restoreWorkflowVersion(
   token: string,
   workspaceId: string,
   workflowId: string,
-  versionNumber: number
+  versionNumber: number,
+  expectedRevision: number
 ) {
   return request<WorkflowDefinition>(
     workflowPath(
       workspaceId,
       `/${workflowId}/versions/${versionNumber}/restore`
     ),
-    { method: "POST", token }
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }
   )
 }
 

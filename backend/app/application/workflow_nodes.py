@@ -76,14 +76,19 @@ def resolve_value(value: Any, context: NodeExecutionContext) -> Any:
     if not isinstance(value, str):
         return value
 
+    def outputs(node_id: str) -> dict[str, Any]:
+        if node_id not in context.node_outputs:
+            raise ValueError(f"Workflow reference node did not run: {node_id}.")
+        return context.node_outputs[node_id]
+
     exact = REFERENCE_PATTERN.fullmatch(value)
     if exact:
         node_id, path = exact.group(1), exact.group(2) or ""
-        return _path_value(context.node_outputs[node_id], path)
+        return _path_value(outputs(node_id), path)
 
     def replace(match) -> str:
         item = _path_value(
-            context.node_outputs[match.group(1)],
+            outputs(match.group(1)),
             match.group(2) or "",
         )
         if isinstance(item, (dict, list)):
@@ -183,9 +188,33 @@ def _condition(left: Any, operator: str, right: Any) -> bool:
     if operator == "not_equals":
         return left != right
     if operator == "contains":
+        if not isinstance(left, (str, list, dict)):
+            raise ValueError(
+                "Workflow contains condition requires a string, array, or object."
+            )
         return right in left
     if operator == "not_contains":
+        if not isinstance(left, (str, list, dict)):
+            raise ValueError(
+                "Workflow contains condition requires a string, array, or object."
+            )
         return right not in left
+    if operator in {
+        "greater_than",
+        "greater_than_or_equal",
+        "less_than",
+        "less_than_or_equal",
+    } and not (
+        isinstance(left, str)
+        and isinstance(right, str)
+        or isinstance(left, (int, float))
+        and not isinstance(left, bool)
+        and isinstance(right, (int, float))
+        and not isinstance(right, bool)
+    ):
+        raise ValueError(
+            "Workflow ordering condition requires two strings or two numbers."
+        )
     if operator == "greater_than":
         return left > right
     if operator == "greater_than_or_equal":

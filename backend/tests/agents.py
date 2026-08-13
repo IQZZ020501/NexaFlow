@@ -84,6 +84,11 @@ async def create_pending_upload_for_user(
         await db.commit()
 
 
+async def assert_upload_cleanup_queued(object_key: str) -> None:
+    async with get_session_factory()() as db:
+        assert await workflow_repository.has_upload_cleanup_for_object(db, object_key)
+
+
 class AgentModelHandler(BaseHTTPRequestHandler):
     calls: list[dict] = []
 
@@ -799,6 +804,7 @@ def assert_tool_routing_context_is_explicit() -> None:
     run = SimpleNamespace(
         instructions="Use available sources.",
         goal="What is the release process?",
+        attachment_context="",
     )
     messages = agent_runs.execution_messages(
         run,  # type: ignore[arg-type]
@@ -1930,6 +1936,10 @@ def assert_external_agent_access() -> None:
     try:
         with test_client() as client, agent_model_server() as model_base_url:
             admin_token, workspace_id = activate_admin(client)
+            admin_user_id = client.get(
+                "/api/v1/auth/me",
+                headers=auth_headers(admin_token),
+            ).json()["user"]["id"]
             member_user_id, temporary_password = create_workspace_user(
                 client, admin_token, workspace_id
             )
@@ -2054,11 +2064,15 @@ def assert_external_agent_access() -> None:
                     upload_user_id,
                 )
             )
+            user_upload_object_key = (
+                f"workflow-uploads/{workspace_id}/{agent_id}/{upload_user_id}"
+            )
             upload_user_delete = client.delete(
                 f"/api/v1/admin/users/{upload_user_id}",
                 headers=auth_headers(admin_token),
             )
             assert upload_user_delete.status_code == 204, upload_user_delete.text
+            asyncio.run(assert_upload_cleanup_queued(user_upload_object_key))
             uploaded = client.post(
                 f"{public_base}/uploads",
                 headers=auth_headers(admin_token),
@@ -2087,11 +2101,16 @@ def assert_external_agent_access() -> None:
                 files={"files": ("pending.txt", b"pending", "text/plain")},
             )
             assert pending_upload.status_code == 201, pending_upload.text
+            pending_upload_object_key = (
+                f"workflow-uploads/{workspace_id}/{pending_agent_id}/"
+                f"{admin_user_id}/{pending_upload.json()[0]['id']}"
+            )
             pending_delete = client.delete(
                 agents_url(workspace_id, f"/{pending_agent_id}"),
                 headers=auth_headers(admin_token),
             )
             assert pending_delete.status_code == 204, pending_delete.text
+            asyncio.run(assert_upload_cleanup_queued(pending_upload_object_key))
             attachment_run = client.post(
                 f"{public_base}/runs",
                 headers=auth_headers(admin_token),
@@ -2158,11 +2177,6 @@ def assert_external_agent_access() -> None:
                 headers=auth_headers(member_token),
             )
             assert member_profile.status_code == 200, member_profile.text
-            admin_user_id = client.get(
-                "/api/v1/auth/me",
-                headers=auth_headers(admin_token),
-            ).json()["user"]["id"]
-
             new_chat_one = client.post(
                 f"{public_base}/runs",
                 headers=auth_headers(admin_token),

@@ -1,7 +1,7 @@
 # MaxKB 工作流节点（卡片）详解
 
 > 整理时间：2026-08-12。
-> 调研对象：MaxKB 本地克隆 `/Users/yang/fzy-project/shjd_pro/MaxKB` @ commit `0568ec05`（2026-01-21，`feat: add chat stats`）——比 `docs/WORKFLOW_ENGINES_RESEARCH.md` 固定的 `847755b1`（2025-08-19）更新，本清单以本地克隆为准。
+> 调研对象：[MaxKB](https://github.com/1Panel-dev/MaxKB) @ commit `0568ec05`（2026-01-21，`feat: add chat stats`）——比 `docs/WORKFLOW_ENGINES_RESEARCH.md` 固定的 `847755b1`（2025-08-19）更新，本清单以该提交为准。
 > 资料来源（一手代码，非文档转述）：
 > - 后端节点配置 Schema：`apps/application/flow/step_node/<节点>/i_<节点>.py`（序列化器即卡片表单字段）
 > - 后端节点执行与输出：`apps/application/flow/step_node/<节点>/impl/base_*.py`（`execute()` 返回的 `NodeResult` 键）
@@ -106,8 +106,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`ChatNodeSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | 模型 | `model_id` | 是 | 选择大语言模型 |
 | 角色设定 | `system` | 否 | 系统提示词 |
 | 提示词 | `prompt` | 是 | Jinja2 模板，可引用变量，默认"已知信息" |
@@ -126,8 +126,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`SearchDatasetStepNodeSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | 选择知识库 | `dataset_id_list` | 是 | 知识库 ID 列表（支持我的/共享/机构知识库） |
 | 检索问题 | `question_reference_address` | 是 | 变量引用（默认 `start-node.question`） |
 | 引用分段数 | `dataset_setting.top_n` | 是 | 检索返回的分段数 |
@@ -152,8 +152,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`QuestionNodeSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | 模型 | `model_id` | 是 | 大语言模型 |
 | 角色设定 | `system` | 否 | 默认"你是一个问题优化大师" |
 | 提示词 | `prompt` | 是 | 默认"根据上下文优化和完善用户问题：…请输出一个优化后的问题。" |
@@ -197,8 +197,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`ReplyNodeParamsSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | 回复类型 | `reply_type` | 是 | `custom`（自定义）\| `referencing`（引用变量） |
 | 内容 | `content` | 条件必填 | custom 时必填，Jinja2 模板，引用变量转字符串 |
 | 引用字段 | `fields` | 条件必填 | referencing 时必填且 ≥2 个（`[引用地址, 说明]`） |
@@ -212,8 +212,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`RerankerStepNodeSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | 重排内容 | `reranker_reference_list` | 是 | 多个变量引用（通常是多个检索节点的 `paragraph_list`） |
 | 检索问题 | `question_reference_address` | 是 | 变量引用 |
 | 重排模型 | `reranker_model_id` | 是 | 重排模型 |
@@ -229,8 +229,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`FormNodeParamsSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | 表单配置 | `form_field_list` | 是 | 表单字段定义列表（字段名/label/类型/必填等），前端渲染为表单 |
 | 表单输出内容 | `form_content_format` | 是 | Jinja2 模板，`{ form }` 为表单占位符；默认"你好，请先填写下面表单内容：`{{ form }}` 填写后请点击【提交】按钮进行提交。" |
 | 表单数据 | `form_data` | 否 | 提交后写入的数据（运行期由前端提交） |
@@ -254,8 +254,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`ImageUnderstandNodeSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | 视觉模型 | `model_id` | 是 | IMAGE 类型模型 |
 | 角色设定 | `system` | 否 | |
 | 提示词 | `prompt` | 是 | |
@@ -273,8 +273,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`ImageGenerateNodeSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | 图片生成模型 | `model_id` | 是 | TTI 类型模型 |
 | 提示词（正向） | `prompt` | 是 | 描述期望的元素和视觉特点 |
 | 提示词（负向） | `negative_prompt` | 否 | 描述不希望出现的内容（如颜色、血腥内容） |
@@ -309,8 +309,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`FunctionNodeParamsSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | 输入参数 | `input_field_list` | 是 | 每项：`name` 变量名、`is_required` 是否必填、`type`（`string\|int\|dict\|array\|float`）、`source`（`custom` 手填 \| `reference` 引用变量）、`value` 值 |
 | 函数 | `code` | 是 | Python 代码（`def handler(...)` 形式，通过受限执行器跑） |
 | 返回内容 | `is_result` | 否 | 开关 |
@@ -331,8 +331,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`ApplicationNodeSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | 应用 | `application_id` | 是 | 选择被调用的应用 |
 | 用户问题 | `question_reference_address` | 是 | 变量引用，作为传给子应用的问题 |
 | API 输入字段 | `api_input_field_list` | 否 | 子应用 API 输入变量映射 |
@@ -357,8 +357,8 @@ MaxKB 高级编排应用（工作流）共 **19 张卡片**（前端 `WorkflowTy
 
 卡片内配置（`McpNodeSerializer`）：
 
-| 字段 | 必填 | 说明 |
-|---|---|---|
+| 字段 | 键 | 必填 | 说明 |
+|---|---|---|---|
 | MCP Server 配置 | `mcp_servers` | 是 | 服务器配置列表（JSON，仅支持 SSE 调用方式；UI 提示"请输入 JSON 格式的 MCP 服务器配置"） |
 | MCP Server | `mcp_server` | 是 | 从配置中选择服务器 |
 | 工具 | `mcp_tool` | 是 | 从服务器拉取工具列表后选择 |

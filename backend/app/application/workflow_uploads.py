@@ -217,8 +217,8 @@ async def _upload_files(
                 f"{agent.id}/{user_id}/{upload_id}"
             )
 
-            async def chunks():
-                while chunk := await upload.read(UPLOAD_CHUNK_BYTES):
+            async def chunks(current_upload: UploadFile = upload):
+                while chunk := await current_upload.read(UPLOAD_CHUNK_BYTES):
                     yield chunk
 
             size_bytes = await storage.put_chunks(

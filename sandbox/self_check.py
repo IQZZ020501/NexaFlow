@@ -126,6 +126,11 @@ def main() -> None:
             if socket_path.exists():
                 break
             time.sleep(0.01)
+        if not socket_path.exists():
+            server.shutdown()
+            thread.join(timeout=1)
+            server.server_close()
+            raise AssertionError("sandbox socket was not created")
         response = request(socket_path, {"code": "print(input())", "stdin": "socket-ok"})
         server.shutdown()
         thread.join(timeout=1)

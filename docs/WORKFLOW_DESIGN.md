@@ -102,6 +102,8 @@ erDiagram
     WORKFLOW_DEFINITIONS ||--o{ WORKFLOW_RUN_DETAILS : traces
     WORKFLOW_VERSIONS o|--o{ WORKFLOW_RUN_DETAILS : "published source"
     AGENT_RUNS ||--o{ WORKFLOW_NODE_EXECUTIONS : audits
+    AGENTS ||--o{ WORKFLOW_UPLOADS : owns
+    WORKFLOW_UPLOADS ||--o| WORKFLOW_UPLOAD_STORAGE_CLEANUPS : queues
 
     WORKFLOW_DEFINITIONS {
       string id PK
@@ -146,6 +148,24 @@ erDiagram
       json model_usage
       string error
       int duration_ms
+    }
+    WORKFLOW_UPLOADS {
+      string id PK
+      string workspace_id FK
+      string agent_id FK
+      string uploaded_by_user_id FK
+      string object_key UK
+      int size_bytes
+      datetime expires_at
+    }
+    WORKFLOW_UPLOAD_STORAGE_CLEANUPS {
+      string id PK
+      string workspace_id
+      string uploaded_by_user_id
+      string object_key UK
+      int size_bytes
+      int attempts
+      datetime next_attempt_at
     }
 ```
 
@@ -219,7 +239,7 @@ Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全�
 
 草稿调试只允许应用所有者或工作空间管理员；有查看授权的成员只能运行已发布版本。控制台运行与 Agent 保持相同的调用者隔离：列表、详情、节点审计和事件流只返回当前用户自己发起的运行。
 
-控制台的 `/app/apps/{id}` 保留应用详情与运行管理；点击“设置”进入独立的 `/app/apps/{id}/workflow` 画布路由。画布返回与侧栏切换会回到对应详情视图，离开未保存草稿前必须确认；旧的 `?view=settings` 链接自动迁移到画布路由。
+控制台的 `/app/apps/{id}` 保留应用详情与运行管理；点击“设置”进入独立的 `/workflow/{id}` 画布路由。画布返回与侧栏切换会回到对应详情视图，离开未保存草稿前必须确认。
 
 ## 9. 运行事件时序
 
@@ -266,7 +286,7 @@ Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_runs`，统一任�
 | 2 画布与发布 | 10 节点编辑、草稿调试、状态回显、版本发布/恢复 | 三语 typecheck/test/build；发布快照与新草稿隔离；真实 API 冒烟 | React Flow 状态序列化、多人保存冲突 | 下线 workflow UI；API 与表保留只读，避免历史运行不可查 |
 | 3 高级能力 | HITL、Loop/Iteration、失败分支/兜底、子流 | 暂停跨进程恢复；迭代帧审计；恢复 CAS；独立限额与测试 | 状态空间和副作用重放显著增加 | 每项用独立 schema/feature gate 发布，不改变第一批 DAG 语义 |
 
-迁移回滚只能在确认没有需要保留的工作流定义、版本和运行审计后执行，因为 downgrade 会删除四张 workflow 表。生产已有数据时，正确回滚是退回 UI/运行入口并保留 additive schema 与类型隔离，而不是直接丢表。
+迁移回滚只能在确认没有需要保留的工作流定义、版本、运行审计和临时上传后执行，因为 downgrade 会删除六张 workflow 表。回滚前必须先处理上传表及仍待清理的存储对象。生产已有数据时，正确回滚是退回 UI/运行入口并保留 additive schema 与类型隔离，而不是直接丢表。
 
 ## 11. 安全与运维注意事项
 

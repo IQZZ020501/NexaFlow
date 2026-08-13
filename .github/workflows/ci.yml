@@ -75,6 +75,10 @@ jobs:
       - name: Run workflow tests
         run: uv run python -m tests.workflows
 
+      - name: Run sandbox self-check
+        working-directory: .
+        run: sudo -E python -m sandbox.self_check
+
       - name: Run main smoke tests
         run: uv run python -m tests.test_main
 

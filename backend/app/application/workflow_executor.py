@@ -363,7 +363,8 @@ async def _execute_claimed_workflow_run(
         if finalized and saved_detail:
             current_run = await agent_repository.get_agent_run_by_id(db, run.id)
             current_detail = await workflow_repository.get_run_detail(db, run.id)
-            assert current_run is not None and current_detail is not None
+            if current_run is None or current_detail is None:
+                raise WorkflowEngineError("Finalized workflow run state is missing.")
             await agent_repository.append_agent_run_event(
                 db,
                 run.workspace_id,
@@ -413,7 +414,8 @@ async def _fail_claimed_workflow_run(
         )
         if finalized:
             current = await agent_repository.get_agent_run_by_id(db, run_id)
-            assert current is not None
+            if current is None:
+                raise WorkflowEngineError("Finalized workflow run state is missing.")
             await agent_repository.append_agent_run_event(
                 db,
                 run.workspace_id,
@@ -457,6 +459,12 @@ async def run_durable_workflow_run(
             now + timedelta(seconds=settings.agent_executor_lease_seconds),
         )
         if claimed:
+            await workflow_repository.set_first_run_deadline(
+                db,
+                run_id,
+                worker_task_id,
+                now + timedelta(seconds=settings.agent_run_timeout_seconds),
+            )
             await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
         await db.commit()
     if not claimed:

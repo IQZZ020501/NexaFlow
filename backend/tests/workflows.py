@@ -248,6 +248,8 @@ def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
     assert _condition([1, 2, 3], "length_greater_than", 2)
     assert _condition(True, "is_true", None)
     assert not _condition(False, "is_true", None)
+    assert _condition(2, "greater_than", 1.5)
+    assert _condition(2.0, "greater_than", 1)
     try:
         _condition(3, "length_greater_than", 2)
     except ValueError as exc:
@@ -573,6 +575,50 @@ async def assert_exhausted_workflow_closes_running_node(run_id: str) -> None:
     assert "retry limit reached" in (start.error or "")
 
 
+async def assert_first_claim_sets_deadline_once(run_id: str) -> None:
+    from app.infrastructure.model_utils import utc_now
+    from app.infrastructure.repositories import agent as agent_repository
+    from app.infrastructure.repositories import workflow as workflow_repository
+    from app.infrastructure.session import get_session_factory
+
+    async with get_session_factory()() as db:
+        run = await agent_repository.get_agent_run_by_id(db, run_id)
+        detail = await workflow_repository.get_run_detail(db, run_id)
+        assert run is not None and detail is not None
+        original_deadline = detail.deadline_at
+        run.attempts = 1
+        run.worker_task_id = "deadline-worker-1"
+        await agent_repository.save_agent_run(db, run)
+        await workflow_repository.set_first_run_deadline(
+            db,
+            run_id,
+            "deadline-worker-1",
+            utc_now() + timedelta(seconds=60),
+        )
+        await db.commit()
+
+    async with get_session_factory()() as db:
+        run = await agent_repository.get_agent_run_by_id(db, run_id)
+        detail = await workflow_repository.get_run_detail(db, run_id)
+        assert run is not None and detail is not None
+        first_deadline = detail.deadline_at
+        assert first_deadline != original_deadline
+        run.attempts = 2
+        run.worker_task_id = "deadline-worker-2"
+        await agent_repository.save_agent_run(db, run)
+        await workflow_repository.set_first_run_deadline(
+            db,
+            run_id,
+            "deadline-worker-2",
+            utc_now() + timedelta(seconds=120),
+        )
+        await db.commit()
+
+    async with get_session_factory()() as db:
+        detail = await workflow_repository.get_run_detail(db, run_id)
+        assert detail is not None and detail.deadline_at == first_deadline
+
+
 def test_workflow_api_definition_publish_run_and_audit() -> None:
     from tests.agents import agent_model_server, create_workspace_user, model_payload
 
@@ -730,6 +776,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert event_types[0] == "run"
         assert "workflow_node" in event_types
         assert event_types[-1] == "complete"
+        asyncio.run(assert_first_claim_sets_deadline_once(run_id))
         asyncio.run(assert_exhausted_workflow_closes_running_node(run_id))
 
         published_run = client.post(
@@ -773,7 +820,17 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         versions = client.get(f"{base}/versions", headers=headers)
         assert versions.status_code == 200, versions.text
         assert [item["version_number"] for item in versions.json()["items"]] == [1]
-        restored = client.post(f"{base}/versions/1/restore", headers=headers)
+        stale_restore = client.post(
+            f"{base}/versions/1/restore",
+            headers=headers,
+            json={"expected_revision": 2},
+        )
+        assert stale_restore.status_code == 409, stale_restore.text
+        restored = client.post(
+            f"{base}/versions/1/restore",
+            headers=headers,
+            json={"expected_revision": 3},
+        )
         assert restored.status_code == 200, restored.text
         assert restored.json()["revision"] == 4
         assert restored.json()["graph"]["nodes"][2]["data"]["config"] == {
@@ -871,6 +928,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         restored_for_policy = client.post(
             f"{base}/versions/1/restore",
             headers=headers,
+            json={"expected_revision": 5},
         )
         assert restored_for_policy.status_code == 200, restored_for_policy.text
         image_only = client.patch(
@@ -1033,6 +1091,8 @@ def main() -> None:
     test_workflow_validation_rejects_cycles_and_downstream_references()
     test_workflow_engine_runs_branch_and_join_deterministically()
     test_workflow_engine_enforces_step_and_token_budgets()
+    test_workflow_model_output_limit_uses_provider_native_argument()
+    test_workflow_knowledge_node_limits_and_joins_results()
     test_workflow_engine_propagates_worker_cancellation()
     test_upload_cleanup_tasks_are_registered()
     test_interaction_config_migration_upgrades_prerequisites()

@@ -67,7 +67,7 @@ class WorkflowNodeExecution:
     run_id: str = ""
     node_id: str = ""
     node_type: str = ""
-    status: str = "pending"
+    status: str = "running"
     sequence: int = 0
     inputs: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)

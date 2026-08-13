@@ -236,6 +236,7 @@ async def publish_definition(
     if definition is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow definition not found.")
     graph = await validate_workflow_resources(db, agent, definition.graph)
+    serialized = graph.model_dump(by_alias=True, mode="json")
     version = WorkflowVersion(
         workspace_id=agent.workspace_id,
         agent_id=agent.id,
@@ -243,8 +244,8 @@ async def publish_definition(
         definition_revision=definition.revision,
         version_number=await workflow_repository.next_version_number(db, agent.id),
         default_model_id=agent.model_id,
-        graph=graph.model_dump(by_alias=True, mode="json"),
-        graph_hash=definition.graph_hash,
+        graph=serialized,
+        graph_hash=graph_hash(serialized),
         published_by_user_id=actor.id,
     )
     version = await workflow_repository.create_version(db, version)

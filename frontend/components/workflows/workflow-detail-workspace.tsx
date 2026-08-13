@@ -311,6 +311,15 @@ export function WorkflowDetailWorkspace({
     },
     [agent.id, applyRunEvent, reportError, token, workspaceId]
   )
+  const loadExecutionsRef = React.useRef(loadExecutions)
+  const observeRunRef = React.useRef(observeRun)
+  const reportErrorRef = React.useRef(reportError)
+
+  React.useEffect(() => {
+    loadExecutionsRef.current = loadExecutions
+    observeRunRef.current = observeRun
+    reportErrorRef.current = reportError
+  }, [loadExecutions, observeRun, reportError])
 
   React.useEffect(() => {
     let active = true
@@ -327,12 +336,16 @@ export function WorkflowDetailWorkspace({
         const latestRun = runs[0] ?? null
         setCurrentRun(latestRun)
         if (latestRun) {
-          void loadExecutions(latestRun.id).catch(reportError)
-          if (!TERMINAL_STATUSES.has(latestRun.status)) observeRun(latestRun)
+          void loadExecutionsRef.current(latestRun.id).catch(
+            reportErrorRef.current
+          )
+          if (!TERMINAL_STATUSES.has(latestRun.status)) {
+            observeRunRef.current(latestRun)
+          }
         }
       })
       .catch((error: unknown) => {
-        if (active) reportError(error)
+        if (active) reportErrorRef.current(error)
       })
       .finally(() => {
         if (active) setIsLoading(false)
@@ -341,7 +354,7 @@ export function WorkflowDetailWorkspace({
       active = false
       runAbortRef.current?.abort()
     }
-  }, [agent.id, loadExecutions, observeRun, reportError, token, workspaceId])
+  }, [agent.id, token, workspaceId])
 
   async function saveDraft() {
     if (!definition || !graph || !agent.can_edit) return definition
@@ -468,6 +481,7 @@ export function WorkflowDetailWorkspace({
   async function handleRestore(version: WorkflowVersion) {
     if (
       !agent.can_edit ||
+      !definition ||
       !window.confirm(
         t("将版本 v{version} 恢复为当前草稿？", {
           version: version.version_number,
@@ -481,7 +495,8 @@ export function WorkflowDetailWorkspace({
         token,
         workspaceId,
         agent.id,
-        version.version_number
+        version.version_number,
+        definition.revision
       )
       setDefinition(restored)
       setGraph(restored.graph)

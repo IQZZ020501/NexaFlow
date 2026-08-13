@@ -41,13 +41,13 @@ from app.application.workflow_access import (
 from app.application.workflow_uploads import upload_public_workflow_files
 
 __all__ = [
-    "create_workflow_run",
     "create_external_workflow_run",
+    "create_workflow_run",
     "get_external_workflow_run",
-    "get_workflow_definition",
-    "get_workflow_run",
     "get_public_workflow_profile",
     "get_workflow_api_documentation",
+    "get_workflow_definition",
+    "get_workflow_run",
     "list_external_workflow_runs",
     "list_public_workflow_conversations",
     "list_workflow_node_executions",
@@ -55,8 +55,8 @@ __all__ = [
     "list_workflow_versions",
     "publish_workflow_definition",
     "restore_workflow_version",
-    "stream_workflow_run",
     "stream_external_workflow_run",
+    "stream_workflow_run",
     "upload_public_workflow_files",
     "update_workflow_definition",
     "validate_workflow_definition",
@@ -149,6 +149,7 @@ async def restore_workflow_version(
     workspace_id: str,
     agent_id: str,
     version_number: int,
+    expected_revision: int,
     actor: User,
     workspace_role: str | None,
 ) -> WorkflowDefinitionResponse:
@@ -165,7 +166,7 @@ async def restore_workflow_version(
         db,
         definition,
         graph,
-        definition.revision,
+        expected_revision,
         actor,
     )
     return definition_to_response(updated)

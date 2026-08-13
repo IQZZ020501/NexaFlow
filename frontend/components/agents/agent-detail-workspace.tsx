@@ -49,6 +49,10 @@ import type { Agent, AgentRun, AgentToolCall } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
+import {
+  acceptedUploadExtensions,
+  validateUploadSelection,
+} from "@/lib/interaction-config"
 
 import { AgentConfigFields } from "./agent-config-fields"
 import {
@@ -1076,22 +1080,14 @@ export function AgentDetailWorkspace({
                   <input
                     type="file"
                     multiple
-                    accept={agent.interaction_config.file_upload_setting.file_upload_type
-                      .filter((type) => type !== "audio")
-                      .flatMap((type) =>
-                        type === "image"
-                          ? [".jpeg", ".jpg", ".png", ".webp"]
-                          : [".csv", ".docx", ".epub", ".html", ".ipynb", ".json", ".md", ".pdf", ".pptx", ".txt", ".xls", ".xlsx", ".xml", ".zip"]
-                      )
-                      .join(",")}
+                    accept={acceptedUploadExtensions(
+                      agent.interaction_config.file_upload_setting.file_upload_type
+                    )}
                     disabled={isDirty || isAsking || isRunsLoading}
                     onChange={(event) => {
                       const selected = Array.from(event.target.files ?? [])
                       const setting = agent.interaction_config.file_upload_setting
-                      if (
-                        selected.length > setting.max_files ||
-                        selected.some((file) => file.size > setting.file_limit * 1024 * 1024)
-                      ) {
+                      if (!validateUploadSelection(selected, setting)) {
                         event.target.value = ""
                         setFiles([])
                         notify("error", t("文件数量或大小超过限制。"))

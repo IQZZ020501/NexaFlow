@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -16,10 +16,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.infrastructure.base import Base
 from app.infrastructure.model_utils import new_id, utc_now
-
-
-def workflow_upload_expires_at() -> datetime:
-    return utc_now() + timedelta(days=1)
+from app.entities.workflows import workflow_upload_expires_at
 
 
 class WorkflowDefinition(Base):
@@ -218,7 +215,7 @@ class WorkflowUpload(Base):
     workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     uploaded_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(255), nullable=False)

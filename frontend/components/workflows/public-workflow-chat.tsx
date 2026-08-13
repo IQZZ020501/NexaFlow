@@ -41,8 +41,20 @@ import {
 } from "@/lib/api/public-workflows"
 import { getErrorMessage } from "@/lib/errors"
 import { speakBrowserText, workflowSpeechText } from "@/lib/browser-tts"
+import {
+  acceptedUploadExtensions,
+  validateUploadSelection,
+} from "@/lib/interaction-config"
 
 type InputValues = Record<string, string | boolean>
+
+function conversationLabel(inputs: Record<string, unknown>, fallback: string) {
+  return (
+    Object.values(inputs).find(
+      (value): value is string => typeof value === "string" && Boolean(value.trim())
+    )?.trim() || fallback
+  )
+}
 
 export function initialPublicWorkflowValues(
   fields: PublicWorkflowInput[]
@@ -165,7 +177,7 @@ function ConversationHistory({
             onClick={() => onSelect(item.conversation_id)}
           >
             <span className="block truncate text-sm font-medium">
-              {JSON.stringify(item.inputs)}
+              {conversationLabel(item.inputs, t("工作流运行"))}
             </span>
             <span className="mt-1 block truncate text-xs text-muted-foreground">
               {t("运行 {count} 次", { count: item.run_count })}
@@ -571,18 +583,13 @@ export function PublicWorkflowChat({
                     <Input
                       type="file"
                       multiple
-                      accept={profile.interaction_config.file_upload_setting.file_upload_type.flatMap((type) => ({
-                        document: [".csv", ".docx", ".epub", ".html", ".ipynb", ".json", ".md", ".pdf", ".pptx", ".txt", ".xls", ".xlsx", ".xml", ".zip"],
-                        image: [".jpeg", ".jpg", ".png", ".webp"],
-                        audio: [".m4a", ".mp3", ".ogg", ".wav", ".webm"],
-                      })[type]).join(",")}
+                      accept={acceptedUploadExtensions(
+                        profile.interaction_config.file_upload_setting.file_upload_type
+                      )}
                       onChange={(event) => {
                         const selected = Array.from(event.target.files ?? [])
                         const setting = profile.interaction_config.file_upload_setting
-                        if (
-                          selected.length > setting.max_files ||
-                          selected.some((file) => file.size > setting.file_limit * 1024 * 1024)
-                        ) {
+                        if (!validateUploadSelection(selected, setting)) {
                           event.target.value = ""
                           setFiles([])
                           setError(t("文件数量或大小超过限制。"))

@@ -182,7 +182,11 @@ def build_knowledge_search_tool(
                         knowledge_base,
                         KnowledgeQueryRequest(
                             query=payload.query,
-                            limit=payload.limit,
+                            limit=(
+                                MAX_RERANK_HITS_PER_BASE
+                                if knowledge_base.reranker_model_id is not None
+                                else payload.limit
+                            ),
                         ),
                         settings,
                     )
@@ -213,7 +217,9 @@ def build_knowledge_search_tool(
                             "RERANKER",
                         )
                     except HTTPException:
-                        reranked_groups.append((knowledge_base, hits))
+                        reranked_groups.append(
+                            (knowledge_base, hits[: payload.limit])
+                        )
                         continue
                     if reranker_model is not None:
                         docs = [hit.content for hit in hits[:MAX_RERANK_HITS_PER_BASE]]
@@ -226,7 +232,9 @@ def build_knowledge_search_tool(
                                 docs,
                             )
                         except ModelProviderError:
-                            reranked_groups.append((knowledge_base, hits))
+                            reranked_groups.append(
+                                (knowledge_base, hits[: payload.limit])
+                            )
                             continue
                         scored = sorted(
                             [
@@ -246,7 +254,7 @@ def build_knowledge_search_tool(
                         ]
                         reranked_groups.append((knowledge_base, reranked))
                         continue
-                reranked_groups.append((knowledge_base, hits))
+                reranked_groups.append((knowledge_base, hits[: payload.limit]))
 
             selected_hits: list[tuple[KnowledgeBase, Any]] = []
             for index in range(payload.limit):

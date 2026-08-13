@@ -35,6 +35,7 @@ from app.schemas.workflow import (
     WorkflowValidationRequest,
     WorkflowValidationResponse,
     WorkflowVersionListResponse,
+    WorkflowVersionRestoreRequest,
     WorkflowVersionResponse,
 )
 
@@ -137,6 +138,7 @@ async def get_versions(
 async def restore_version(
     agent_id: str,
     version_number: Annotated[int, Path(ge=1)],
+    payload: WorkflowVersionRestoreRequest,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkflowDefinitionResponse:
@@ -145,6 +147,7 @@ async def restore_version(
         context.workspace.id,
         agent_id,
         version_number,
+        payload.expected_revision,
         context.user,
         context.membership_role,
     )

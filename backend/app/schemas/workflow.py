@@ -229,6 +229,10 @@ class WorkflowDefinitionUpdateRequest(BaseModel):
     graph: WorkflowGraph
 
 
+class WorkflowVersionRestoreRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+
+
 class WorkflowValidationResponse(BaseModel):
     valid: Literal[True] = True
     graph_hash: str

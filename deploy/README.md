@@ -80,8 +80,9 @@ Workflow Python nodes run in the separate `sandbox` container. The container
 has no network namespace, a read-only root filesystem, a size-limited `/tmp`,
 drops all default capabilities and restores only `CHOWN`, `KILL`, `SETGID`, and
 `SETUID` for child isolation and cleanup. It also has explicit container CPU,
-memory, and PID limits. Only the Celery worker mounts the `sandbox-socket`
-volume at `/run/sandbox`.
+memory, and PID limits. Both the sandbox and Celery worker mount the
+`sandbox-socket` volume at `/run/sandbox`; the worker joins the dedicated socket
+group. These container limits are separate from the per-request limits below.
 
 The sandbox accepts one JSON object per Unix-socket line at
 `/run/sandbox/sandbox.sock`:

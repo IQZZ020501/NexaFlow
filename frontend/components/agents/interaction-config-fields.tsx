@@ -121,9 +121,13 @@ export function InteractionConfigFields({
                 min={1}
                 max={10}
                 value={value.file_upload_setting.max_files}
-                onChange={(event) =>
-                  updateUploadSetting({ max_files: Number(event.target.value) })
-                }
+                onChange={(event) => {
+                  const parsed = Number.parseInt(event.target.value, 10)
+                  if (!Number.isFinite(parsed)) return
+                  updateUploadSetting({
+                    max_files: Math.min(10, Math.max(1, parsed)),
+                  })
+                }}
               />
             </label>
             <label className="grid gap-1 text-xs font-medium">
@@ -133,9 +137,13 @@ export function InteractionConfigFields({
                 min={1}
                 max={100}
                 value={value.file_upload_setting.file_limit}
-                onChange={(event) =>
-                  updateUploadSetting({ file_limit: Number(event.target.value) })
-                }
+                onChange={(event) => {
+                  const parsed = Number.parseInt(event.target.value, 10)
+                  if (!Number.isFinite(parsed)) return
+                  updateUploadSetting({
+                    file_limit: Math.min(100, Math.max(1, parsed)),
+                  })
+                }}
               />
             </label>
             <div className="flex flex-wrap gap-3 sm:col-span-2">

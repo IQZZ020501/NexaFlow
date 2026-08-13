@@ -27,9 +27,11 @@ class AgentFileUploadSetting(BaseModel):
         max_length=3,
     )
 
-    def model_post_init(self, __context: Any) -> None:
+    @model_validator(mode="after")
+    def validate_unique_file_upload_types(self) -> "AgentFileUploadSetting":
         if len(self.file_upload_type) != len(set(self.file_upload_type)):
             raise ValueError("Upload file types must be unique.")
+        return self
 
 
 class AgentInteractionConfig(BaseModel):

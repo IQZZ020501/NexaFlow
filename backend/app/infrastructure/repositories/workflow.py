@@ -11,7 +11,7 @@ from app.entities.workflows import (
     WorkflowUpload as WorkflowUploadEntity,
     WorkflowUploadStorageCleanup as WorkflowUploadStorageCleanupEntity,
 )
-from app.infrastructure.repositories.mapping import refresh_entity, save, to_entity
+from app.infrastructure.repositories.mapping import refresh_entity, save, to_entity, to_orm
 from app.infrastructure.model_utils import utc_now
 from app.shareddomain.agents.models import Agent, AgentRun
 from app.shareddomain.workflows.models import (
@@ -136,25 +136,30 @@ async def queue_upload_cleanups(
             )
         ).all()
     )
-    cleanup_ids: list[str] = []
-    for upload in uploads:
-        cleanup = await create_upload_cleanup(
-            db,
-            WorkflowUploadStorageCleanupEntity(
-                workspace_id=upload.workspace_id,
-                uploaded_by_user_id=upload.uploaded_by_user_id,
-                object_key=upload.object_key,
-                size_bytes=upload.size_bytes,
-            ),
+    cleanups = [
+        WorkflowUploadStorageCleanupEntity(
+            workspace_id=upload.workspace_id,
+            uploaded_by_user_id=upload.uploaded_by_user_id,
+            object_key=upload.object_key,
+            size_bytes=upload.size_bytes,
         )
-        cleanup_ids.append(cleanup.id)
+        for upload in uploads
+    ]
+    if cleanups:
+        db.add_all(
+            [
+                to_orm(WorkflowUploadStorageCleanup, cleanup)
+                for cleanup in cleanups
+            ]
+        )
+        await db.flush()
     if uploads:
         await db.execute(
             delete(WorkflowUpload).where(
                 WorkflowUpload.id.in_([upload.id for upload in uploads])
             )
         )
-    return cleanup_ids
+    return [cleanup.id for cleanup in cleanups]
 
 
 async def create_upload_cleanup(
@@ -196,6 +201,17 @@ async def list_due_upload_cleanup_ids(
         .limit(limit)
     )
     return list(rows.all())
+
+
+async def has_upload_cleanup_for_object(db: AsyncSession, object_key: str) -> bool:
+    return (
+        await db.scalar(
+            select(WorkflowUploadStorageCleanup.id).where(
+                WorkflowUploadStorageCleanup.object_key == object_key
+            )
+        )
+        is not None
+    )
 
 
 async def save_upload_cleanup(
@@ -270,7 +286,7 @@ async def update_definition_graph(
             graph=graph,
             graph_hash=graph_hash,
             updated_by_user_id=updated_by_user_id,
-            updated_at=func.now(),
+            updated_at=utc_now(),
         )
         .returning(WorkflowDefinition)
     )
@@ -351,6 +367,28 @@ async def get_run_detail(
     return to_entity(WorkflowRunDetailEntity, row) if row is not None else None
 
 
+async def set_first_run_deadline(
+    db: AsyncSession,
+    run_id: str,
+    worker_task_id: str,
+    deadline_at: datetime,
+) -> None:
+    await db.execute(
+        update(WorkflowRunDetail)
+        .where(
+            WorkflowRunDetail.run_id == run_id,
+            select(AgentRun.attempts)
+            .where(
+                AgentRun.id == run_id,
+                AgentRun.worker_task_id == worker_task_id,
+            )
+            .scalar_subquery()
+            == 1,
+        )
+        .values(deadline_at=deadline_at, updated_at=utc_now())
+    )
+
+
 async def save_owned_run_detail(
     db: AsyncSession,
     entity: WorkflowRunDetailEntity,
@@ -372,7 +410,7 @@ async def save_owned_run_detail(
             outputs=entity.outputs,
             step_count=entity.step_count,
             token_usage=entity.token_usage,
-            updated_at=func.now(),
+            updated_at=utc_now(),
         )
     )
     return bool(result.rowcount)

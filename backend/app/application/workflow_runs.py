@@ -1,6 +1,5 @@
 import asyncio
 from collections.abc import AsyncIterator
-from datetime import timedelta
 import json
 from typing import Any
 
@@ -208,7 +207,8 @@ async def create_workflow_run(
         inputs=payload.inputs,
         max_steps=WORKFLOW_MAX_STEPS,
         max_model_tokens=WORKFLOW_MAX_MODEL_TOKENS,
-        deadline_at=now + timedelta(seconds=settings.agent_run_timeout_seconds),
+        # Reset from the worker's first claim so queue latency does not consume runtime.
+        deadline_at=now,
     )
     try:
         run = await agent_repository.create_agent_run(db, run)
@@ -272,9 +272,15 @@ async def list_workflow_runs(
         limit,
         offset,
     )
+    details = {
+        item.run_id: item
+        for item in await workflow_repository.list_run_details_for_external_conversations(
+            db, [run.id for run in runs]
+        )
+    }
     responses = []
     for run in runs:
-        detail = await workflow_repository.get_run_detail(db, run.id)
+        detail = details.get(run.id)
         if detail is not None:
             responses.append(workflow_run_to_response(run, detail))
     return responses

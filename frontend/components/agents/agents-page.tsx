@@ -76,7 +76,10 @@ import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { getErrorMessage } from "@/lib/errors"
 import { getMembershipRole } from "@/lib/display"
 import { appViewPath, type AgentDetailView } from "@/lib/agent-views"
-import { normalizeInteractionConfigForAppType } from "@/lib/interaction-config"
+import {
+  defaultInteractionConfig,
+  normalizeInteractionConfigForAppType,
+} from "@/lib/interaction-config"
 
 const WorkflowDetailWorkspace = dynamic(
   () =>
@@ -105,17 +108,7 @@ const EMPTY_FORM: AgentFormState = {
   appType: "agent",
   name: "",
   description: "",
-  interactionConfig: {
-    prologue: "",
-    tts_type: "BROWSER",
-    file_upload: false,
-    file_upload_setting: {
-      max_files: 3,
-      file_limit: 10,
-      file_upload_type: ["document", "image"],
-    },
-    user_input_title: "",
-  },
+  interactionConfig: defaultInteractionConfig(),
   modelId: "",
   instructions: "",
   knowledgeQueryMode: "required",
@@ -414,6 +407,7 @@ export function AgentsPage({
 
   const selectedAgent =
     agents.find((agent) => agent.id === selectedAgentId) ?? null
+  const selectedAppType = selectedAgent?.app_type ?? null
   const isDirty = selectedAgent ? isAgentFormDirty(form, selectedAgent) : false
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
   const canManagePublishing = workspaceRole === "admin"
@@ -672,14 +666,14 @@ export function AgentsPage({
   ])
 
   React.useEffect(() => {
-    if (!selectedAgent || !selectedAgentId) return
-    if (workflowCanvasMode && selectedAgent.app_type !== "workflow") {
+    if (!selectedAppType || !selectedAgentId) return
+    if (workflowCanvasMode && selectedAppType !== "workflow") {
       router.replace(appViewPath(selectedAgentId, "agent", "overview"))
       return
     }
     if (
       !workflowCanvasMode &&
-      selectedAgent.app_type === "workflow" &&
+      selectedAppType === "workflow" &&
       activeView === "settings"
     ) {
       router.replace(appViewPath(selectedAgentId, "workflow", "settings"))
@@ -687,7 +681,7 @@ export function AgentsPage({
   }, [
     activeView,
     router,
-    selectedAgent,
+    selectedAppType,
     selectedAgentId,
     workflowCanvasMode,
   ])
@@ -700,7 +694,7 @@ export function AgentsPage({
       hasLoadedWorkspaceData &&
       !isLoading &&
       !isMissingAgentLoading &&
-      !selectedAgent
+      !selectedAppType
     ) {
       router.replace("/app/apps")
     }
@@ -709,7 +703,7 @@ export function AgentsPage({
     isLoading,
     isMissingAgentLoading,
     router,
-    selectedAgent,
+    selectedAppType,
     selectedAgentId,
     selectedWorkspaceId,
     token,
@@ -720,8 +714,8 @@ export function AgentsPage({
       !token ||
       !selectedWorkspaceId ||
       !selectedAgentId ||
-      !selectedAgent ||
-      selectedAgent.app_type === "workflow"
+      !selectedAppType ||
+      selectedAppType === "workflow"
     ) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRuns([])
@@ -845,9 +839,8 @@ export function AgentsPage({
     reportError,
     router,
     initialConversationId,
-    selectedAgent,
     selectedAgentId,
-    selectedAgent,
+    selectedAppType,
     selectedWorkspaceId,
     token,
     activeView,
@@ -906,6 +899,21 @@ export function AgentsPage({
         form.interactionConfig,
         form.appType
       )
+      const mcpTools =
+        form.appType === "workflow"
+          ? form.mcpTools.filter((reference) =>
+              mcpServers.some(
+                (server) =>
+                  server.id === reference.server_id &&
+                  server.status === "active" &&
+                  server.tools.some(
+                    (tool) =>
+                      tool.name === reference.tool_name &&
+                      tool.policy_mode === "read_only"
+                  )
+              )
+            )
+          : form.mcpTools
       const payload = {
         name: form.name.trim(),
         app_type: form.appType,
@@ -915,7 +923,7 @@ export function AgentsPage({
         instructions: form.instructions,
         knowledge_query_mode: form.knowledgeQueryMode,
         knowledge_base_ids: form.knowledgeBaseIds,
-        mcp_tools: form.mcpTools,
+        mcp_tools: mcpTools,
         status: form.status,
       }
       if (form.id) {
@@ -978,7 +986,15 @@ export function AgentsPage({
       setForm(formFromAgent(updated))
       notify(
         "success",
-        t(updated.published ? "Agent 已发布" : "Agent 已取消发布")
+        t(
+          updated.app_type === "workflow"
+            ? updated.published
+              ? "工作流已发布"
+              : "工作流已取消发布"
+            : updated.published
+              ? "Agent 已发布"
+              : "Agent 已取消发布"
+        )
       )
     } catch (error) {
       reportError(error)

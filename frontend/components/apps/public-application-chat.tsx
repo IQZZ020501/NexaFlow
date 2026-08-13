@@ -2,10 +2,11 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { LoaderCircleIcon } from "lucide-react"
+import { LoaderCircleIcon, RotateCcwIcon } from "lucide-react"
 
 import { PublicAgentChat } from "@/components/agents/public-agent-chat"
 import { PublicWorkflowChat } from "@/components/workflows/public-workflow-chat"
+import { Button } from "@/components/ui/button"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import { ApiError } from "@/lib/api-client"
@@ -23,8 +24,9 @@ export function PublicApplicationChat({
   const { t } = useLanguage()
   const { token, isSessionRestored } = useSession()
   const [kind, setKind] = React.useState<
-    "agent" | "workflow" | "missing" | null
+    "agent" | "workflow" | "missing" | "error" | null
   >(null)
+  const [attempt, setAttempt] = React.useState(0)
 
   React.useEffect(() => {
     if (!isSessionRestored || token) return
@@ -45,11 +47,14 @@ export function PublicApplicationChat({
           () => active && setKind("workflow")
         )
       })
-      .catch(() => active && setKind("missing"))
+      .catch((error: unknown) => {
+        if (!active) return
+        setKind(error instanceof ApiError && error.status === 404 ? "missing" : "error")
+      })
     return () => {
       active = false
     }
-  }, [applicationId, token])
+  }, [applicationId, attempt, token])
 
   if (kind === "agent") {
     return (
@@ -71,6 +76,22 @@ export function PublicApplicationChat({
     <main className="flex min-h-svh items-center justify-center p-6 text-sm text-muted-foreground">
       {kind === "missing" ? (
         t("未发布")
+      ) : kind === "error" ? (
+        <span className="flex flex-col items-center gap-3">
+          {t("应用加载失败")}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setKind(null)
+              setAttempt((current) => current + 1)
+            }}
+          >
+            <RotateCcwIcon />
+            {t("重试")}
+          </Button>
+        </span>
       ) : (
         <>
           <LoaderCircleIcon className="mr-2 size-4 animate-spin" />

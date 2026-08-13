@@ -285,7 +285,8 @@ async def get_api_agent_documentation(
     ],
 ) -> AgentApiDocumentationResponse:
     context, _ = await _api_context(db, agent_id, credentials)
-    assert context.publication is not None
+    if context.publication is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
     return AgentApiDocumentationResponse(
         agent_id=context.agent.id,
         agent_name=context.publication.name,

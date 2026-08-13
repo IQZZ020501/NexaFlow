@@ -146,7 +146,7 @@ def execution_messages(
                 ),
             }
         )
-    attachment_context = getattr(run, "attachment_context", "")
+    attachment_context = run.attachment_context
     if attachment_context:
         messages.append(
             {
@@ -172,8 +172,8 @@ async def list_agent_runs(
     conversation_id: str | None = None,
 ) -> list[AgentRunResponse]:
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_agent_run_application(agent)
     await require_agent_view(db, agent, actor, workspace_role)
+    _require_agent_run_application(agent)
     return [
         run_to_response(run)
         for run in await agent_repository.list_agent_runs(
@@ -216,8 +216,8 @@ async def get_agent_run_entity(
     workspace_role: str | None,
 ) -> AgentRun:
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_agent_run_application(agent)
     await require_agent_view(db, agent, actor, workspace_role)
+    _require_agent_run_application(agent)
     run = await agent_repository.get_agent_run_by_id(db, run_id)
     if (
         run is None
@@ -413,9 +413,9 @@ async def prepare_agent_run(
     elif not consumer_id:
         raise ValueError("External Agent runs require a consumer id.")
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_agent_run_application(agent)
     if access_source == "console":
         await require_agent_view(db, agent, actor, workspace_role)
+    _require_agent_run_application(agent)
     if agent.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent is disabled.")
     model_id = publication.model_id if publication else agent.model_id

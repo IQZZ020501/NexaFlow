@@ -49,7 +49,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("size_bytes > 0", name="ck_workflow_uploads_size"),
         sa.ForeignKeyConstraint(
-            ["uploaded_by_user_id"], ["users.id"]
+            ["uploaded_by_user_id"], ["users.id"], ondelete="CASCADE"
         ),
         sa.ForeignKeyConstraint(
             ["workspace_id", "agent_id"],

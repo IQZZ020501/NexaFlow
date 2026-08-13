@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import Settings, User, get_db, get_settings, require_password_changed
 from app.application.agents import authenticate_agent_api_credential
 from app.application.agent_access import (
+    PublishedAgentContext,
     get_workspace_published_workflow_context,
 )
+from app.entities.agents import AgentApiCredential as WorkflowApiCredential
 from app.application.workflows import (
     create_external_workflow_run,
     get_external_workflow_run,
@@ -57,7 +59,7 @@ async def _api_context(
     db: AsyncSession,
     workflow_id: str,
     credentials: HTTPAuthorizationCredentials | None,
-) -> tuple:
+) -> tuple[PublishedAgentContext, WorkflowApiCredential]:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API credential required.")
     return await authenticate_agent_api_credential(

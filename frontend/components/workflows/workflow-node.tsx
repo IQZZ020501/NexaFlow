@@ -251,6 +251,7 @@ function TextEditor({
 }
 
 function NodeConfigFields({
+  nodeId,
   node,
   agent,
   models,
@@ -260,6 +261,7 @@ function NodeConfigFields({
   onUpdate,
   t,
 }: {
+  nodeId: string
   node: WorkflowNodeData
   agent: Agent
   models: RegisteredModel[]
@@ -299,7 +301,8 @@ function NodeConfigFields({
         },
       ],
     })
-  const updateOutputItem = (index: number, key: string, value: string) =>
+  const updateOutputItem = (index: number, key: string, value: string) => {
+    if (outputEntries.some(([itemKey], i) => i !== index && itemKey === key)) return
     updateConfig({
       outputs: Object.fromEntries(
         outputEntries.map(([itemKey, itemValue], i) =>
@@ -307,6 +310,7 @@ function NodeConfigFields({
         )
       ),
     })
+  }
   const removeOutputItem = (index: number) =>
     updateConfig({
       outputs: Object.fromEntries(
@@ -522,10 +526,10 @@ function NodeConfigFields({
       ) : null}
       {node.type === "llm" ? (
         <>
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor="llm-model">
+          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-llm-model`}>
             {t("节点模型")}
             <select
-              id="llm-model"
+              id={`${nodeId}-llm-model`}
               className="h-9 rounded-md border bg-background px-2 text-sm"
               value={String(config.model_id ?? "")}
               disabled={readOnly}
@@ -542,14 +546,14 @@ function NodeConfigFields({
             </select>
           </label>
           <TextEditor
-            id="llm-system"
+            id={`${nodeId}-llm-system`}
             label={t("系统提示词")}
             value={config.system_prompt ?? ""}
             readOnly={readOnly}
             onChange={(system_prompt) => updateConfig({ system_prompt })}
           />
           <TextEditor
-            id="llm-prompt"
+            id={`${nodeId}-llm-prompt`}
             label={t("用户提示词")}
             value={config.prompt ?? ""}
             readOnly={readOnly}
@@ -560,10 +564,10 @@ function NodeConfigFields({
       ) : null}
       {node.type === "classifier" ? (
         <>
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor="classifier-model">
+          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-classifier-model`}>
             {t("节点模型")}
             <select
-              id="classifier-model"
+              id={`${nodeId}-classifier-model`}
               className="h-9 rounded-md border bg-background px-2 text-sm"
               value={String(config.model_id ?? "")}
               disabled={readOnly}
@@ -580,24 +584,24 @@ function NodeConfigFields({
             </select>
           </label>
           <TextEditor
-            id="classifier-input"
+            id={`${nodeId}-classifier-input`}
             label={t("分类输入")}
             value={config.input ?? ""}
             readOnly={readOnly}
             onChange={(input) => updateConfig({ input })}
           />
           <JsonEditor
-            id="classifier-classes"
+            id={`${nodeId}-classifier-classes`}
             label={t("分类出口")}
             value={config.classes ?? []}
             readOnly={readOnly}
             onChange={(classes) => updateConfig({ classes })}
             t={t}
           />
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor="classifier-default">
+          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-classifier-default`}>
             {t("默认出口")}
             <Input
-              id="classifier-default"
+              id={`${nodeId}-classifier-default`}
               value={String(config.default_handle ?? "default")}
               readOnly={readOnly}
               onChange={(event) =>
@@ -645,10 +649,10 @@ function NodeConfigFields({
               )}
             </div>
           </fieldset>
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor="knowledge-limit">
+          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-knowledge-limit`}>
             {t("返回条数")}
             <Input
-              id="knowledge-limit"
+              id={`${nodeId}-knowledge-limit`}
               type="number"
               min={1}
               max={8}
@@ -658,7 +662,7 @@ function NodeConfigFields({
             />
           </label>
           <TextEditor
-            id="knowledge-query"
+            id={`${nodeId}-knowledge-query`}
             label={t("检索查询")}
             value={config.query ?? ""}
             readOnly={readOnly}
@@ -669,16 +673,16 @@ function NodeConfigFields({
       {node.type === "condition" ? (
         <>
           <TextEditor
-            id="condition-left"
+            id={`${nodeId}-condition-left`}
             label={t("左值")}
             value={config.left ?? ""}
             readOnly={readOnly}
             onChange={(left) => updateConfig({ left })}
           />
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor="condition-operator">
+          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-condition-operator`}>
             {t("运算符")}
             <select
-              id="condition-operator"
+              id={`${nodeId}-condition-operator`}
               className="h-9 rounded-md border bg-background px-2 text-sm"
               value={String(config.operator ?? "equals")}
               disabled={readOnly}
@@ -713,10 +717,10 @@ function NodeConfigFields({
           </label>
           {conditionHasRightValue ? (
             conditionUsesLength ? (
-              <label className="grid gap-1.5 text-xs font-medium" htmlFor="condition-right">
+              <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-condition-right`}>
                 {t("右值")}
                 <Input
-                  id="condition-right"
+                  id={`${nodeId}-condition-right`}
                   type="number"
                   min={0}
                   step={1}
@@ -731,7 +735,7 @@ function NodeConfigFields({
               </label>
             ) : (
               <JsonEditor
-                id="condition-right"
+                id={`${nodeId}-condition-right`}
                 label={t("右值")}
                 value={config.right ?? ""}
                 readOnly={readOnly}
@@ -744,7 +748,7 @@ function NodeConfigFields({
       ) : null}
       {node.type === "template" ? (
         <TextEditor
-          id="template-value"
+          id={`${nodeId}-template-value`}
           label={t("模板内容")}
           value={config.template ?? ""}
           readOnly={readOnly}
@@ -754,7 +758,7 @@ function NodeConfigFields({
       ) : null}
       {node.type === "variable" ? (
         <JsonEditor
-          id="variable-value"
+          id={`${nodeId}-variable-value`}
           label={t("变量值")}
           value={config.value ?? null}
           readOnly={readOnly}
@@ -764,10 +768,10 @@ function NodeConfigFields({
       ) : null}
       {node.type === "mcp" ? (
         <>
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor="mcp-tool">
+          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-mcp-tool`}>
             {t("MCP 工具")}
             <select
-              id="mcp-tool"
+              id={`${nodeId}-mcp-tool`}
               className="h-9 rounded-md border bg-background px-2 text-sm"
               value={`${String(config.server_id ?? "")}:${String(config.tool_name ?? "")}`}
               disabled={readOnly}
@@ -788,7 +792,7 @@ function NodeConfigFields({
             </select>
           </label>
           <JsonEditor
-            id="mcp-arguments"
+            id={`${nodeId}-mcp-arguments`}
             label={t("工具参数")}
             value={config.arguments ?? {}}
             readOnly={readOnly}
@@ -802,7 +806,7 @@ function NodeConfigFields({
       {node.type === "code" ? (
         <>
           <TextEditor
-            id="code-body"
+            id={`${nodeId}-code-body`}
             label={t("Python 代码")}
             value={config.code ?? ""}
             readOnly={readOnly}
@@ -810,7 +814,7 @@ function NodeConfigFields({
             onChange={(code) => updateConfig({ code })}
           />
           <JsonEditor
-            id="code-inputs"
+            id={`${nodeId}-code-inputs`}
             label={t("代码输入")}
             value={config.inputs ?? {}}
             readOnly={readOnly}
@@ -865,7 +869,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
   const onUpdate = node.onUpdate as
     | ((data: WorkflowNodeData) => void)
     | undefined
-  const nodeId = String(node.id)
+  const nodeId = id
 
   const toggleExpanded = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
@@ -1014,6 +1018,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
       {expanded && onUpdate && node.agent && node.models && node.knowledgeBases && node.mcpServers ? (
         <div className="nodrag mt-2 border-t border-border/70 pt-2">
           <NodeConfigFields
+            nodeId={nodeId}
             node={node}
             agent={node.agent}
             models={node.models}

@@ -10,9 +10,9 @@ from app.entities.agents import Agent
 from app.entities.workflows import WorkflowDefinition
 from app.entities.knowledge import KnowledgeBase
 from app.entities.user import User
+from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import workflow as workflow_repository
-from app.infrastructure.model_utils import utc_now
 from app.infrastructure.validation import normalize_name
 from app.schemas.agent import (
     AgentCreateRequest,
@@ -421,6 +421,8 @@ async def apply_agent_publication(
                 status.HTTP_409_CONFLICT,
                 "Publish workflows through the workflow version endpoint.",
             )
+        if agent.status == DISABLED_STATUS:
+            _reset_agent_publication(agent)
         return
     if agent.status == DISABLED_STATUS:
         _reset_agent_publication(agent)

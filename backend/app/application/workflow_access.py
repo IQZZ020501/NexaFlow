@@ -134,9 +134,16 @@ async def _published_start_inputs(
     )
     if version is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Published workflow not found.")
-    graph = WorkflowGraph.model_validate(version.graph)
-    start = next(node for node in graph.nodes if node.data.type == "start")
-    start_config = StartNodeConfig.model_validate(start.data.config)
+    try:
+        graph = WorkflowGraph.model_validate(version.graph)
+        start = next((node for node in graph.nodes if node.data.type == "start"), None)
+        if start is None:
+            raise ValueError("Published workflow has no start node.")
+        start_config = StartNodeConfig.model_validate(start.data.config)
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "Published workflow not found."
+        ) from exc
     return [
         PublicWorkflowInputFieldResponse.model_validate(item, from_attributes=True)
         for item in start_config.inputs
@@ -294,9 +301,15 @@ async def list_external_workflow_runs(
         consumer_id=consumer_id,
         conversation_id=conversation_id,
     )
+    details = {
+        item.run_id: item
+        for item in await workflow_repository.list_run_details_for_external_conversations(
+            db, [run.id for run in runs]
+        )
+    }
     items = []
     for run in runs:
-        detail = await workflow_repository.get_run_detail(db, run.id)
+        detail = details.get(run.id)
         if detail is not None:
             items.append(_external_run_response(run, detail))
     return ExternalWorkflowRunListResponse(

@@ -48,7 +48,9 @@ export function SessionGate({ children }: { children: React.ReactNode }) {
     return (
       <>
         <TopLoadingBar progress={loadingProgress} />
-        <main className="min-h-svh bg-background" aria-busy="true" />
+        <main className="min-h-svh bg-background" aria-busy="true">
+          <span className="sr-only" role="status">{t("正在加载")}</span>
+        </main>
       </>
     )
   }
