@@ -127,6 +127,10 @@ export function isCurrentAgentConversation(
   return currentConversationId === expectedConversationId
 }
 
+export function canOpenAgentDetails(agent: Pick<Agent, "app_type">) {
+  return agent.app_type === "agent"
+}
+
 export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
   const keepLiveAnswer = ["queued", "running", "awaiting_approval"].includes(
     liveRun.status
@@ -650,7 +654,19 @@ export function AgentsPage({
   ])
 
   React.useEffect(() => {
-    if (!token || !selectedWorkspaceId || !selectedAgentId) {
+    if (selectedAgent && !canOpenAgentDetails(selectedAgent)) {
+      router.replace("/app/apps")
+    }
+  }, [router, selectedAgent])
+
+  React.useEffect(() => {
+    if (
+      !token ||
+      !selectedWorkspaceId ||
+      !selectedAgentId ||
+      !selectedAgent ||
+      !canOpenAgentDetails(selectedAgent)
+    ) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRuns([])
       setToolCallsByRun({})
@@ -773,6 +789,7 @@ export function AgentsPage({
     reportError,
     router,
     initialConversationId,
+    selectedAgent,
     selectedAgentId,
     selectedWorkspaceId,
     token,
@@ -811,6 +828,7 @@ export function AgentsPage({
   }
 
   function openAgent(agent: Agent) {
+    if (!canOpenAgentDetails(agent)) return
     setForm(formFromAgent(agent))
     router.push(`/app/apps/${agent.id}`)
   }
@@ -1234,7 +1252,11 @@ export function AgentsPage({
     }
   }
 
-  if (selectedAgent && selectedWorkspaceId) {
+  if (
+    selectedAgent &&
+    selectedWorkspaceId &&
+    canOpenAgentDetails(selectedAgent)
+  ) {
     return (
       <>
         <AgentDetailWorkspace
@@ -1356,9 +1378,9 @@ export function AgentsPage({
             {filteredAgents.map((agent) => (
             <div
               key={agent.id}
-              role="button"
-              tabIndex={0}
-              className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+              role={canOpenAgentDetails(agent) ? "button" : undefined}
+              tabIndex={canOpenAgentDetails(agent) ? 0 : undefined}
+              className={`flex min-h-40 flex-col rounded-md border p-3 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring ${canOpenAgentDetails(agent) ? "cursor-pointer hover:bg-muted/40" : "cursor-default"}`}
               onClick={(event) => {
                 if (isEventFromDropdownMenu(event)) return
                 openAgent(agent)
@@ -1386,6 +1408,9 @@ export function AgentsPage({
                           ? t("工作流")
                           : t("Agent")}
                       </Badge>
+                      {agent.app_type === "workflow" ? (
+                        <Badge variant="secondary">{t("即将推出")}</Badge>
+                      ) : null}
                       <StatusBadge status={agent.status} />
                       <PermissionBadge
                         permission={agent.can_edit ? "edit" : "view"}
@@ -1396,7 +1421,7 @@ export function AgentsPage({
                     </p>
                   </div>
                 </div>
-                {agent.can_edit ? (
+                {agent.can_edit && canOpenAgentDetails(agent) ? (
                   <IconButton
                     label={t("编辑 Agent")}
                     onClick={(event) => {

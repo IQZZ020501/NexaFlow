@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  canOpenAgentDetails,
   isAgentFormDirty,
   isCurrentAgentConversation,
   mergeAgentRunSnapshot,
@@ -93,6 +94,13 @@ const form: AgentFormState = {
   mcpTools: [...agent.mcp_tools],
   status: agent.status,
 }
+
+describe("Agent detail availability", () => {
+  test("opens only Agent records in the Agent detail workspace", () => {
+    expect(canOpenAgentDetails(agent)).toBe(true)
+    expect(canOpenAgentDetails({ app_type: "workflow" })).toBe(false)
+  })
+})
 
 describe("Agent form state", () => {
   test("ignores binding ordering but detects actual edits", () => {
