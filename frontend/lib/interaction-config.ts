@@ -20,6 +20,10 @@ const FILE_UPLOAD_EXTENSIONS: Partial<Record<FileUploadType, readonly string[]>>
   audio: [".m4a", ".mp3", ".ogg", ".wav", ".webm"],
 }
 
+export const AGENT_FILE_UPLOAD_SETTING: AgentInteractionConfig["file_upload_setting"] = {
+  file_upload_type: ["document", "image"],
+}
+
 export function allowedFileUploadTypes(appType: AppType) {
   return FILE_UPLOAD_TYPES[appType]
 }
@@ -29,11 +33,7 @@ export function defaultInteractionConfig(): AgentInteractionConfig {
     prologue: "",
     tts_type: "BROWSER",
     file_upload: false,
-    file_upload_setting: {
-      max_files: 3,
-      file_limit: 10,
-      file_upload_type: ["document", "image"],
-    },
+    file_upload_setting: { ...AGENT_FILE_UPLOAD_SETTING },
     user_input_title: "",
   }
 }
@@ -42,6 +42,16 @@ export function normalizeInteractionConfigForAppType(
   config: AgentInteractionConfig,
   appType: AppType
 ): AgentInteractionConfig {
+  if (appType === "agent") {
+    return {
+      ...config,
+      prologue: "",
+      tts_type: "NONE",
+      file_upload: true,
+      file_upload_setting: { ...AGENT_FILE_UPLOAD_SETTING },
+      user_input_title: "",
+    }
+  }
   const allowed = allowedFileUploadTypes(appType)
   const selected = config.file_upload_setting.file_upload_type.filter((type) =>
     allowed.includes(type)
@@ -58,14 +68,4 @@ export function normalizeInteractionConfigForAppType(
 export function acceptedUploadExtensions(types: FileUploadType[]) {
   const extensions = types.flatMap((type) => FILE_UPLOAD_EXTENSIONS[type] ?? [])
   return extensions.length ? extensions.join(",") : undefined
-}
-
-export function validateUploadSelection(
-  files: File[],
-  setting: AgentInteractionConfig["file_upload_setting"]
-) {
-  return (
-    files.length <= setting.max_files &&
-    files.every((file) => file.size <= setting.file_limit * 1024 * 1024)
-  )
 }

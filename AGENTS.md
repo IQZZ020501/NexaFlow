@@ -83,10 +83,9 @@ Correctness, safety, evidence, and validation take priority over speed.
   use the same `QDRANT_URL`. Deletion cleanup intent is persisted in
   `knowledge_storage_cleanups`; Celery Beat redispatches due records, so do not
   replace it with best-effort post-commit cleanup.
-- Agent and workflow uploads are one-time, expire after 24 hours, and count
-  against their uploader's workspace quota until durable object cleanup succeeds.
-  Cleanup intent is persisted in `workflow_upload_storage_cleanups` and recovered
-  by Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
+- Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
+  intent is persisted in `workflow_upload_storage_cleanups` and recovered by
+  Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
 - Knowledge parsing uses MarkItDown for DOCX, PPTX, XLSX, and XLS; PDF Markdown
   conversion uses PyMuPDF4LLM/PyMuPDF with native text first and page-level OCR
   fallback. The upload UI and parser accept DOCX, PDF, Markdown, text, PPTX,

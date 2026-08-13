@@ -53,55 +53,17 @@ async def list_uploads(
     return [to_entity(WorkflowUploadEntity, row) for row in rows.all()]
 
 
-async def count_uploads(
+async def lock_upload_application(
     db: AsyncSession,
     workspace_id: str,
     agent_id: str,
-    uploaded_by_user_id: str,
-) -> int | None:
+) -> bool:
     locked_agent_id = await db.scalar(
         select(Agent.id)
         .where(Agent.workspace_id == workspace_id, Agent.id == agent_id)
         .with_for_update()
     )
-    if locked_agent_id is None:
-        return None
-    return int(
-        await db.scalar(
-            select(func.count(WorkflowUpload.id)).where(
-                WorkflowUpload.workspace_id == workspace_id,
-                WorkflowUpload.agent_id == agent_id,
-                WorkflowUpload.uploaded_by_user_id == uploaded_by_user_id,
-                WorkflowUpload.expires_at > utc_now(),
-            )
-        )
-        or 0
-    )
-
-
-async def pending_upload_bytes(
-    db: AsyncSession,
-    workspace_id: str,
-    uploaded_by_user_id: str,
-) -> int:
-    live_bytes = (
-        select(func.coalesce(func.sum(WorkflowUpload.size_bytes), 0))
-        .where(
-            WorkflowUpload.workspace_id == workspace_id,
-            WorkflowUpload.uploaded_by_user_id == uploaded_by_user_id,
-        )
-        .scalar_subquery()
-    )
-    cleanup_bytes = (
-        select(func.coalesce(func.sum(WorkflowUploadStorageCleanup.size_bytes), 0))
-        .where(
-            WorkflowUploadStorageCleanup.workspace_id == workspace_id,
-            WorkflowUploadStorageCleanup.uploaded_by_user_id
-            == uploaded_by_user_id,
-        )
-        .scalar_subquery()
-    )
-    return int(await db.scalar(select(live_bytes + cleanup_bytes)) or 0)
+    return locked_agent_id is not None
 
 
 async def queue_upload_cleanups(

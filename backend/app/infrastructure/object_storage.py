@@ -17,7 +17,7 @@ class ObjectStorage(Protocol):
         self,
         key: str,
         chunks: AsyncIterable[bytes],
-        max_bytes: int,
+        max_bytes: int | None,
     ) -> int: ...
 
     def put_bytes(self, key: str, content: bytes) -> int: ...
@@ -57,7 +57,7 @@ class LocalObjectStorage:
         self,
         key: str,
         chunks: AsyncIterable[bytes],
-        max_bytes: int,
+        max_bytes: int | None,
     ) -> int:
         target = self.path(key)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -66,7 +66,7 @@ class LocalObjectStorage:
             with target.open("wb") as output:
                 async for chunk in chunks:
                     size += len(chunk)
-                    if size > max_bytes:
+                    if max_bytes is not None and size > max_bytes:
                         raise ObjectTooLargeError("Object is too large.")
                     output.write(chunk)
         except Exception:

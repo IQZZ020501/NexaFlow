@@ -3,6 +3,8 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import { AgentConfigFields } from "../components/agents/agent-config-fields"
+import { AgentAttachmentList } from "../components/agents/agent-attachment-list"
+import { InteractionConfigFields } from "../components/agents/interaction-config-fields"
 import {
   isAgentFormDirty,
   isAgentListLoading,
@@ -86,8 +88,6 @@ const agent: Agent = {
     tts_type: "BROWSER",
     file_upload: false,
     file_upload_setting: {
-      max_files: 3,
-      file_limit: 10,
       file_upload_type: ["document", "image", "audio"],
     },
     user_input_title: "",
@@ -123,6 +123,26 @@ const form: AgentFormState = {
 }
 
 describe("Agent form state", () => {
+  test("shows selected attachment names in the composer", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AgentAttachmentList, {
+        files: [
+          {
+            name: "release-plan.pdf",
+            size: 42,
+            lastModified: 1,
+          } as File,
+        ],
+        onRemove: () => undefined,
+        t: (key, values) =>
+          key === "移除 {value}" ? `移除 ${values?.value}` : key,
+      })
+    )
+
+    expect(markup).toContain("release-plan.pdf")
+    expect(markup).toContain("移除 release-plan.pdf")
+  })
+
   test("normalizes attachment types at the shared app-type boundary", () => {
     expect(
       normalizeInteractionConfigForAppType(
@@ -135,7 +155,7 @@ describe("Agent form state", () => {
         },
         "agent"
       ).file_upload_setting.file_upload_type
-    ).toEqual(["document"])
+    ).toEqual(["document", "image"])
     expect(
       normalizeInteractionConfigForAppType(
         agent.interaction_config,
@@ -193,14 +213,33 @@ describe("Agent form state", () => {
       )
 
     const creationMarkup = renderForm({ ...form, id: null })
+    expect(creationMarkup).not.toContain("对话设置")
     expect(creationMarkup).not.toContain("系统提示词")
     expect(creationMarkup).not.toContain("关联知识库")
     expect(creationMarkup).not.toContain("MCP 工具")
 
     const editMarkup = renderForm(form)
+    expect(editMarkup).not.toContain("对话设置")
     expect(editMarkup).toContain("系统提示词")
     expect(editMarkup).toContain("关联知识库")
     expect(editMarkup).toContain("MCP 工具")
+  })
+
+  test("does not expose workflow upload quantity or size limits", () => {
+    const markup = renderToStaticMarkup(
+      createElement(InteractionConfigFields, {
+        appType: "workflow",
+        value: { ...agent.interaction_config, file_upload: true },
+        onChange: () => undefined,
+        t: (key) => key,
+        idPrefix: "workflow",
+      })
+    )
+
+    expect(markup).not.toContain("最多文件数")
+    expect(markup).not.toContain("单文件上限")
+    expect(markup).toContain("文档")
+    expect(markup).toContain("音频")
   })
 })
 

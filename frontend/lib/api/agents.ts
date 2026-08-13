@@ -11,8 +11,6 @@ export type AgentInteractionConfig = {
   tts_type: "NONE" | "BROWSER"
   file_upload: boolean
   file_upload_setting: {
-    max_files: number
-    file_limit: number
     file_upload_type: Array<"document" | "image" | "audio">
   }
   user_input_title: string

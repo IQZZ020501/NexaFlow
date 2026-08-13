@@ -43,7 +43,6 @@ import { getErrorMessage } from "@/lib/errors"
 import { speakBrowserText, workflowSpeechText } from "@/lib/browser-tts"
 import {
   acceptedUploadExtensions,
-  validateUploadSelection,
 } from "@/lib/interaction-config"
 
 type InputValues = Record<string, string | boolean>
@@ -588,23 +587,10 @@ export function PublicWorkflowChat({
                       )}
                       onChange={(event) => {
                         const selected = Array.from(event.target.files ?? [])
-                        const setting = profile.interaction_config.file_upload_setting
-                        if (!validateUploadSelection(selected, setting)) {
-                          event.target.value = ""
-                          setFiles([])
-                          setError(t("文件数量或大小超过限制。"))
-                          return
-                        }
                         setError(null)
                         setFiles(selected)
                       }}
                     />
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {t("最多 {count} 个文件，每个不超过 {size} MB", {
-                        count: profile.interaction_config.file_upload_setting.max_files,
-                        size: profile.interaction_config.file_upload_setting.file_limit,
-                      })}
-                    </span>
                   </label>
                 ) : null}
                 {!profile.inputs.length && !profile.interaction_config.file_upload ? (

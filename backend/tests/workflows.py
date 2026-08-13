@@ -523,14 +523,6 @@ def assert_upload_cleanup_removes_object(upload_id: str) -> None:
             for cleanup_id in cleanup_ids:
                 cleanup = await workflow_repository.lock_upload_cleanup(db, cleanup_id)
                 if cleanup is not None and cleanup.object_key.endswith(upload_id):
-                    assert (
-                        await workflow_repository.pending_upload_bytes(
-                            db,
-                            cleanup.workspace_id,
-                            cleanup.uploaded_by_user_id,
-                        )
-                        == cleanup.size_bytes
-                    )
                     object_path = create_object_storage(
                         runtime_settings.knowledge_storage_dir
                     ).path(cleanup.object_key)
@@ -653,8 +645,6 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
                     "tts_type": "BROWSER",
                     "file_upload": True,
                     "file_upload_setting": {
-                        "max_files": 2,
-                        "file_limit": 1,
                         "file_upload_type": ["document"],
                     },
                     "user_input_title": "Release options",
@@ -915,8 +905,6 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             "tts_type": "BROWSER",
             "file_upload": True,
             "file_upload_setting": {
-                "max_files": 2,
-                "file_limit": 1,
                 "file_upload_type": ["document"],
             },
             "user_input_title": "Release options",
@@ -950,8 +938,6 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
                     "tts_type": "BROWSER",
                     "file_upload": True,
                     "file_upload_setting": {
-                        "max_files": 2,
-                        "file_limit": 1,
                         "file_upload_type": ["image"],
                     },
                     "user_input_title": "Release options",
@@ -975,8 +961,6 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
                     "tts_type": "BROWSER",
                     "file_upload": True,
                     "file_upload_setting": {
-                        "max_files": 2,
-                        "file_limit": 1,
                         "file_upload_type": ["document"],
                     },
                     "user_input_title": "Release options",
@@ -985,37 +969,30 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         )
         assert document_only.status_code == 200, document_only.text
         assert client.post(f"{base}/publish", headers=headers).status_code == 201
-        from app.application import workflow_uploads
-
-        previous_pending_upload_limit = workflow_uploads.MAX_PENDING_UPLOAD_BYTES_PER_USER
-        workflow_uploads.MAX_PENDING_UPLOAD_BYTES_PER_USER = 13
-        try:
-            over_storage_quota = client.post(
-                f"/api/v1/public/workflows/{workflow_id}/uploads",
-                headers=member_headers,
-                files={"files": ("extra.txt", b"one", "text/plain")},
-            )
-        finally:
-            workflow_uploads.MAX_PENDING_UPLOAD_BYTES_PER_USER = (
-                previous_pending_upload_limit
-            )
-        assert over_storage_quota.status_code == 413, over_storage_quota.text
-        over_quota = client.post(
+        unlimited_upload = client.post(
             f"/api/v1/public/workflows/{workflow_id}/uploads",
             headers=member_headers,
             files=[
-                ("files", ("extra-1.txt", b"one", "text/plain")),
-                ("files", ("extra-2.txt", b"two", "text/plain")),
+                (
+                    "files",
+                    ("large.txt", b"x" * (1024 * 1024 + 1), "text/plain"),
+                ),
+                *[
+                    ("files", (f"extra-{index}.txt", b"text", "text/plain"))
+                    for index in range(10)
+                ],
             ],
         )
-        assert over_quota.status_code == 409, over_quota.text
+        assert unlimited_upload.status_code == 201, unlimited_upload.text
+        unlimited_upload_ids = [item["id"] for item in unlimited_upload.json()]
+        assert len(unlimited_upload_ids) == 11
 
         public_run = client.post(
             f"/api/v1/public/workflows/{workflow_id}/runs",
             headers=member_headers,
             json={
                 "inputs": {"input": "public-workflow"},
-                "file_ids": [upload_id],
+                "file_ids": [upload_id, *unlimited_upload_ids],
             },
         )
         assert public_run.status_code == 201, public_run.text
@@ -1029,6 +1006,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             "size_bytes": 13,
             "category": "document",
         }
+        assert len(public_payload["inputs"]["files"]) == 12
         reused_upload = client.post(
             f"/api/v1/public/workflows/{workflow_id}/runs",
             headers=member_headers,
