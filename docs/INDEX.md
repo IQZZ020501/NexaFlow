@@ -31,4 +31,3 @@ deploy/    Docker Compose 全栈编排、Dockerfile、Nginx 示例
 ## 相关文档
 
 - [MVP_TASK_PLAN.md](MVP_TASK_PLAN.md) — MVP 任务总表与逐条验收记录
-- [AGENTIC_RAG_RESEARCH.md](AGENTIC_RAG_RESEARCH.md) — RAG 架构调研
