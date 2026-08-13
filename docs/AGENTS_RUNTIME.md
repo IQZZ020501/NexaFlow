@@ -42,7 +42,6 @@ application/agent_memory.py（会话历史 → token 预算 → 摘要 + 最近�
 ## 相关测试
 
 - `backend/tests/agents.py` — Agent 端到端测试：检索策略、租约接管、断线、MCP 审批/只读策略/不确定结果、运行器预算与安全边界
-- `docs/AGENT_TOOL_ORCHESTRATION_RESEARCH.md` — Dify 经典 Agent 与 Agent v2 的工具层、knowledge layer、迭代收束和持久执行边界对照
 
 ## 运行策略与生产边界
 
