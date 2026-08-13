@@ -1,11 +1,21 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
 import type { AgentToolCall } from "@/lib/api/agents"
+import type { AgentInteractionConfig } from "@/lib/api/agents"
 
 export type PublicAgentProfile = {
   id: string
   name: string
   description: string
+  interaction_config: AgentInteractionConfig
+}
+
+export type AgentUpload = {
+  id: string
+  filename: string
+  content_type: string
+  size_bytes: number
+  category: "document" | "image" | "audio"
 }
 
 export type PublicAgentConversation = {
@@ -146,15 +156,31 @@ export function createPublicAgentRun(
   token: string,
   goal: string,
   conversationId?: string | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fileIds: string[] = []
 ) {
   return request<ExternalAgentRun>(publicAgentPath(agentId, "/runs"), {
     method: "POST",
     body: JSON.stringify({
       goal,
       ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(fileIds.length ? { file_ids: fileIds } : {}),
     }),
     signal,
+    token,
+  })
+}
+
+export function uploadPublicAgentFiles(
+  agentId: string,
+  token: string,
+  files: File[]
+) {
+  const body = new FormData()
+  files.forEach((file) => body.append("files", file))
+  return request<AgentUpload[]>(publicAgentPath(agentId, "/uploads"), {
+    method: "POST",
+    body,
     token,
   })
 }
@@ -229,16 +255,21 @@ export async function streamPublicAgentRun(
   goal: string,
   onEvent: (event: PublicAgentRunStreamEvent) => void,
   signal?: AbortSignal,
-  conversationId?: string | null
+  conversationId?: string | null,
+  fileIds: string[] = []
 ) {
   const run = await createPublicAgentRun(
     agentId,
     token,
     goal,
     conversationId,
-    signal
+    signal,
+    fileIds
   )
   onEvent({ type: "run", sequence: 0, run })
-  if (TERMINAL_STATUSES.has(run.status)) return
+  if (TERMINAL_STATUSES.has(run.status)) {
+    onEvent({ type: run.status === "succeeded" ? "complete" : "error", run })
+    return
+  }
   await observePublicAgentRun(agentId, token, run.id, onEvent, signal)
 }

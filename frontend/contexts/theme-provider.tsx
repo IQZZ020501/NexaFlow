@@ -19,8 +19,6 @@ type ThemeProviderState = {
 
 const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)"
 const THEME_VALUES: Theme[] = ["dark", "light", "system"]
-const LIGHT_BACKGROUND = "oklch(1 0 0)"
-const DARK_BACKGROUND = "oklch(0.145 0 0)"
 
 const ThemeProviderContext = React.createContext<
   ThemeProviderState | undefined
@@ -124,8 +122,7 @@ export function ThemeProvider({
       root.classList.remove("light", "dark")
       root.classList.add(resolvedTheme)
       root.style.colorScheme = resolvedTheme
-      root.style.backgroundColor =
-        resolvedTheme === "dark" ? DARK_BACKGROUND : LIGHT_BACKGROUND
+      root.style.backgroundColor = "var(--background)"
 
       if (restoreTransitions) {
         restoreTransitions()

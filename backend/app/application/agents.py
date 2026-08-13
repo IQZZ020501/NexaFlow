@@ -46,6 +46,11 @@ from app.application.agent_access import (
     resolve_external_agent_tool_approval,
     stream_external_agent_run,
 )
+from app.application.workflow_uploads import (
+    resolve_workspace_agent_files,
+    upload_public_agent_files,
+    upload_workspace_agent_files,
+)
 from app.shareddomain.agents.services import (
     ACTIVE_STATUS,
     accessible_agent_knowledge_bases,
@@ -105,6 +110,7 @@ __all__ = [
     "prepare_agent_run",
     "require_agent_edit",
     "resolve_agent_tool_approval",
+    "resolve_workspace_agent_files",
     "revoke_agent_api_credential",
     "revoke_agent_permission",
     "rotate_agent_api_credential",
@@ -113,6 +119,8 @@ __all__ = [
     "safe_agent_error",
     "stream_agent_run",
     "stream_external_agent_run",
+    "upload_public_agent_files",
+    "upload_workspace_agent_files",
     "update_agent",
     "upsert_agent_permission",
 ]

@@ -28,6 +28,14 @@ from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeTask,
 )
 from app.shareddomain.tools.models import McpServer, McpToolPolicy  # noqa: F401
+from app.shareddomain.workflows.models import (  # noqa: F401
+    WorkflowDefinition,
+    WorkflowNodeExecution,
+    WorkflowRunDetail,
+    WorkflowUpload,
+    WorkflowUploadStorageCleanup,
+    WorkflowVersion,
+)
 from app.capabilities.llm.models import RegisteredModel  # noqa: F401
 from app.domain.resource_permission import ResourcePermission  # noqa: F401
 from app.infrastructure.system_log import SystemLog  # noqa: F401

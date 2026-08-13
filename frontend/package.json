@@ -16,6 +16,7 @@
     "@ant-design/icons": "^6.3.2",
     "@fontsource-variable/geist": "^5.2.9",
     "@lobehub/icons": "^5.15.0",
+    "@xyflow/react": "^12.11.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.23.0",

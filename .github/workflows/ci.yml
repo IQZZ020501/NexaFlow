@@ -72,6 +72,15 @@ jobs:
       - name: Run agent tests
         run: uv run python -m tests.agents
 
+      - name: Run workflow tests
+        run: uv run python -m tests.workflows
+
+      - name: Run sandbox self-check
+        working-directory: .
+        run: |
+          docker build --file deploy/dockerfiles/sandbox.Dockerfile --tag nexaflow-sandbox-ci .
+          docker run --rm --network none --entrypoint python nexaflow-sandbox-ci -m sandbox.self_check
+
       - name: Run main smoke tests
         run: uv run python -m tests.test_main
 

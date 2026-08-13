@@ -1,0 +1,645 @@
+"use client"
+
+import * as React from "react"
+import { useRouter } from "next/navigation"
+import {
+  CircleAlertIcon,
+  CircleCheckIcon,
+  CircleDotDashedIcon,
+  HistoryIcon,
+  LoaderCircleIcon,
+  MenuIcon,
+  MessageSquarePlusIcon,
+  PaperclipIcon,
+  PlayIcon,
+  WorkflowIcon,
+} from "lucide-react"
+
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { useLanguage } from "@/contexts/language-provider"
+import { useSession } from "@/contexts/session-context"
+import {
+  createPublicWorkflowRun,
+  initializePublicWorkflow,
+  listPublicWorkflowRuns,
+  observePublicWorkflowRun,
+  uploadPublicWorkflowFiles,
+  type ExternalWorkflowRun,
+  type PublicWorkflowConversation,
+  type PublicWorkflowInput,
+  type PublicWorkflowProfile,
+  type PublicWorkflowRunStreamEvent,
+} from "@/lib/api/public-workflows"
+import { getErrorMessage } from "@/lib/errors"
+import { speakBrowserText, workflowSpeechText } from "@/lib/browser-tts"
+import {
+  acceptedUploadExtensions,
+  validateUploadSelection,
+} from "@/lib/interaction-config"
+
+type InputValues = Record<string, string | boolean>
+
+function conversationLabel(inputs: Record<string, unknown>, fallback: string) {
+  return (
+    Object.values(inputs).find(
+      (value): value is string => typeof value === "string" && Boolean(value.trim())
+    )?.trim() || fallback
+  )
+}
+
+export function initialPublicWorkflowValues(
+  fields: PublicWorkflowInput[]
+): InputValues {
+  return Object.fromEntries(
+    fields.map((field) => [
+      field.name,
+      field.type === "boolean"
+        ? Boolean(field.default)
+        : field.default == null
+          ? ""
+          : field.type === "object" || field.type === "array"
+            ? JSON.stringify(field.default, null, 2)
+            : String(field.default),
+    ])
+  )
+}
+
+export function parsePublicWorkflowValues(
+  fields: PublicWorkflowInput[],
+  values: InputValues
+) {
+  const inputs: Record<string, unknown> = {}
+  for (const field of fields) {
+    const value = values[field.name]
+    if (field.type === "boolean") {
+      inputs[field.name] = Boolean(value)
+      continue
+    }
+    const text = String(value ?? "").trim()
+    if (!text && field.required) throw new Error(field.name)
+    if (!text) continue
+    if (field.type === "number") {
+      const number = Number(text)
+      if (!Number.isFinite(number)) throw new Error(field.name)
+      inputs[field.name] = number
+    } else if (field.type === "object" || field.type === "array") {
+      const parsed: unknown = JSON.parse(text)
+      if (
+        field.type === "array"
+          ? !Array.isArray(parsed)
+          : !parsed || typeof parsed !== "object" || Array.isArray(parsed)
+      ) {
+        throw new Error(field.name)
+      }
+      inputs[field.name] = parsed
+    } else inputs[field.name] = text
+  }
+  return inputs
+}
+
+function updateRun(
+  runs: ExternalWorkflowRun[],
+  runId: string,
+  event: PublicWorkflowRunStreamEvent
+) {
+  return runs.map((run) => {
+    if (run.id !== runId) return run
+    if (event.type === "progress") {
+      const progress = [...run.progress]
+      const index = progress.findIndex((item) => item.id === event.event.id)
+      if (index === -1) progress.push(event.event)
+      else progress[index] = event.event
+      return { ...run, progress }
+    }
+    return {
+      ...event.run,
+      progress: event.run.progress.length ? event.run.progress : run.progress,
+    }
+  })
+}
+
+function JsonBlock({ value }: { value: unknown }) {
+  return (
+    <pre className="max-h-72 overflow-auto rounded-md bg-muted/50 p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  )
+}
+
+function ConversationHistory({
+  profile,
+  conversations,
+  conversationId,
+  onNew,
+  onSelect,
+}: {
+  profile: PublicWorkflowProfile
+  conversations: PublicWorkflowConversation[]
+  conversationId: string | null
+  onNew: () => void
+  onSelect: (conversationId: string) => void
+}) {
+  const { t } = useLanguage()
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <div className="flex min-h-16 items-center gap-3 border-b px-4">
+        <span className="flex size-9 items-center justify-center rounded-lg bg-foreground text-background">
+          <WorkflowIcon className="size-4" />
+        </span>
+        <p className="truncate text-sm font-semibold">{profile.name}</p>
+      </div>
+      <div className="p-3">
+        <Button type="button" variant="outline" className="w-full" onClick={onNew}>
+          <MessageSquarePlusIcon />
+          {t("新建对话")}
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+        <p className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground">
+          <HistoryIcon className="size-3.5" />
+          {t("历史记录")}
+        </p>
+        {conversations.map((item) => (
+          <button
+            key={item.conversation_id}
+            type="button"
+            className={`w-full rounded-md px-3 py-2 text-left hover:bg-muted ${conversationId === item.conversation_id ? "bg-muted" : ""}`}
+            aria-current={conversationId === item.conversation_id ? "page" : undefined}
+            onClick={() => onSelect(item.conversation_id)}
+          >
+            <span className="block truncate text-sm font-medium">
+              {conversationLabel(item.inputs, t("工作流运行"))}
+            </span>
+            <span className="mt-1 block truncate text-xs text-muted-foreground">
+              {t("运行 {count} 次", { count: item.run_count })}
+            </span>
+          </button>
+        ))}
+        {!conversations.length ? (
+          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+            {t("暂无历史记录")}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+export function PublicWorkflowChat({
+  workflowId,
+  initialConversationId = null,
+}: {
+  workflowId: string
+  initialConversationId?: string | null
+}) {
+  const router = useRouter()
+  const { language, t } = useLanguage()
+  const { token, isSessionRestored } = useSession()
+  const [profile, setProfile] = React.useState<PublicWorkflowProfile | null>(
+    null
+  )
+  const [conversations, setConversations] = React.useState<
+    PublicWorkflowConversation[]
+  >([])
+  const [conversationId, setConversationId] = React.useState<string | null>(
+    initialConversationId
+  )
+  const [runs, setRuns] = React.useState<ExternalWorkflowRun[]>([])
+  const [values, setValues] = React.useState<InputValues>({})
+  const [files, setFiles] = React.useState<File[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [runsLoading, setRunsLoading] = React.useState(false)
+  const [running, setRunning] = React.useState(false)
+  const [historyOpen, setHistoryOpen] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const streamRef = React.useRef<AbortController | null>(null)
+
+  React.useEffect(() => () => streamRef.current?.abort(), [])
+
+  React.useEffect(() => {
+    if (!isSessionRestored || !token) return
+    let active = true
+    initializePublicWorkflow(workflowId, token)
+      .then(({ profile: nextProfile, conversations: nextConversations }) => {
+        if (!active) return
+        setProfile(nextProfile)
+        setValues(initialPublicWorkflowValues(nextProfile.inputs))
+        setConversations(nextConversations.items)
+        const nextId =
+          initialConversationId ??
+          nextConversations.items[0]?.conversation_id ??
+          null
+        setRunsLoading(Boolean(nextId))
+        setConversationId(nextId)
+      })
+      .catch(() => active && setError(t("此工作流未发布或不可访问。")))
+      .finally(() => active && setLoading(false))
+    return () => {
+      active = false
+    }
+  }, [initialConversationId, isSessionRestored, t, token, workflowId])
+
+  React.useEffect(() => {
+    if (!token || !conversationId) return
+    let active = true
+    listPublicWorkflowRuns(workflowId, conversationId, token)
+      .then((response) => active && setRuns(response.items))
+      .catch((reason) => active && setError(getErrorMessage(reason, t)))
+      .finally(() => active && setRunsLoading(false))
+    return () => {
+      active = false
+    }
+  }, [conversationId, t, token, workflowId])
+
+  function selectConversation(nextId: string | null) {
+    streamRef.current?.abort()
+    setRuns([])
+    setFiles([])
+    setRunsLoading(Boolean(nextId))
+    setConversationId(nextId)
+    setError(null)
+    setHistoryOpen(false)
+    router.replace(
+      nextId
+        ? `/chat/${workflowId}?conversation_id=${encodeURIComponent(nextId)}`
+        : `/chat/${workflowId}`
+    )
+  }
+
+  async function handleRun(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!token || !profile || running) return
+    let inputs: Record<string, unknown>
+    try {
+      inputs = parsePublicWorkflowValues(profile.inputs, values)
+    } catch {
+      setError(t("请检查必填字段和 JSON 输入。"))
+      return
+    }
+    setRunning(true)
+    setError(null)
+    try {
+      const uploaded = files.length
+        ? await uploadPublicWorkflowFiles(workflowId, token, files)
+        : []
+      const run = await createPublicWorkflowRun(
+        workflowId,
+        token,
+        inputs,
+        conversationId,
+        uploaded.map((item) => item.id)
+      )
+      const nextConversationId = run.conversation_id
+      setConversationId(nextConversationId)
+      setRuns((current) => [run, ...current])
+      router.replace(
+        `/chat/${workflowId}?conversation_id=${encodeURIComponent(nextConversationId)}`
+      )
+      if (!["succeeded", "failed", "cancelled"].includes(run.status)) {
+        const controller = new AbortController()
+        streamRef.current = controller
+        await observePublicWorkflowRun(
+          workflowId,
+          token,
+          run.id,
+          (streamEvent) => {
+            setRuns((current) => updateRun(current, run.id, streamEvent))
+            if (
+              streamEvent.type === "complete" &&
+              streamEvent.run.status === "succeeded" &&
+              profile.interaction_config.tts_type === "BROWSER"
+            ) {
+              speakBrowserText(
+                workflowSpeechText(streamEvent.run.outputs),
+                language
+              )
+            }
+          },
+          controller.signal
+        )
+      } else if (
+        run.status === "succeeded" &&
+        profile.interaction_config.tts_type === "BROWSER"
+      ) {
+        speakBrowserText(workflowSpeechText(run.outputs), language)
+      }
+      setFiles([])
+      const refreshed = await initializePublicWorkflow(workflowId, token)
+      setConversations(refreshed.conversations.items)
+    } catch (reason) {
+      if (!(reason instanceof DOMException && reason.name === "AbortError")) {
+        setError(getErrorMessage(reason, t))
+      }
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  if (loading || !profile) {
+    return (
+      <main className="flex min-h-svh items-center justify-center p-6 text-sm text-muted-foreground">
+        {error ?? (
+          <>
+            <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
+            {t("正在加载")}
+          </>
+        )}
+      </main>
+    )
+  }
+
+  const history = (
+    <ConversationHistory
+      profile={profile}
+      conversations={conversations}
+      conversationId={conversationId}
+      onNew={() => selectConversation(null)}
+      onSelect={selectConversation}
+    />
+  )
+
+  return (
+    <main className="grid h-svh min-h-0 bg-muted/20 md:grid-cols-[16rem_minmax(0,1fr)]">
+      <aside className="hidden min-h-0 border-r md:block">{history}</aside>
+
+      <section className="flex min-h-0 min-w-0 flex-col">
+        <header className="flex min-h-16 items-center gap-3 border-b bg-background px-4 sm:px-6">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="md:hidden"
+            aria-label={t("打开历史记录")}
+            title={t("打开历史记录")}
+            onClick={() => setHistoryOpen(true)}
+          >
+            <MenuIcon />
+          </Button>
+          <span className="flex size-9 items-center justify-center rounded-lg bg-foreground text-background md:hidden">
+            <WorkflowIcon className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-sm font-semibold">{profile.name}</h1>
+            <p className="truncate text-xs text-muted-foreground">
+              {profile.description || t("工作流")}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="md:hidden"
+            onClick={() => selectConversation(null)}
+          >
+            <MessageSquarePlusIcon />
+            {t("新建对话")}
+          </Button>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8 sm:px-8">
+            {runsLoading ? (
+              <p className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+                <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
+                {t("正在加载")}
+              </p>
+            ) : (
+              runs.length ? runs.map((run) => (
+                <article
+                  key={run.id}
+                  className="space-y-3 rounded-lg border bg-background p-4 shadow-xs"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold">{t("工作流运行")}</p>
+                    <Badge
+                      variant={
+                        run.status === "failed" ? "destructive" : "outline"
+                      }
+                    >
+                      {t(
+                        run.status === "succeeded"
+                          ? "运行成功"
+                          : run.status === "failed"
+                            ? "运行失败"
+                            : "运行中"
+                      )}
+                    </Badge>
+                  </div>
+                  <section>
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">
+                      {t("运行输入")}
+                    </p>
+                    <JsonBlock value={run.inputs} />
+                  </section>
+                  {run.progress.length ? (
+                    <section>
+                      <p className="mb-2 text-xs font-medium text-muted-foreground">
+                        {t("节点执行记录")}
+                      </p>
+                      <div className="divide-y rounded-md border">
+                        {run.progress.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center gap-2 px-3 py-2 text-sm"
+                          >
+                            {item.status === "failed" ? (
+                              <CircleAlertIcon className="size-4 text-destructive" />
+                            ) : item.status === "succeeded" ? (
+                              <CircleCheckIcon className="size-4 text-emerald-600" />
+                            ) : item.status === "skipped" ? (
+                              <CircleDotDashedIcon className="size-4 text-muted-foreground" />
+                            ) : (
+                              <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
+                            )}
+                            <span className="min-w-0 flex-1 truncate">
+                              {item.node_id}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {item.node_type}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+                  {run.status === "succeeded" ? (
+                    <section>
+                      <p className="mb-2 text-xs font-medium text-muted-foreground">
+                        {t("运行结果")}
+                      </p>
+                      <JsonBlock value={run.outputs} />
+                    </section>
+                  ) : run.error ? (
+                    <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                      {run.error}
+                    </p>
+                  ) : null}
+                </article>
+              )) : profile.interaction_config.prologue ? (
+                <div className="rounded-lg border bg-background p-4 text-sm leading-6 shadow-xs whitespace-pre-wrap">
+                  {profile.interaction_config.prologue}
+                </div>
+              ) : null
+            )}
+
+            <form
+              className="rounded-lg border bg-background p-4 shadow-xs"
+              onSubmit={handleRun}
+            >
+              <div className="mb-4">
+                <h2 className="text-sm font-semibold">
+                  {profile.interaction_config.user_input_title || t("运行工作流")}
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("输入将从开始节点注入已发布版本。")}
+                </p>
+              </div>
+              <div className="grid gap-4">
+                {profile.inputs.map((field) => (
+                  <label
+                    key={field.name}
+                    className="grid gap-1.5 text-sm font-medium"
+                  >
+                    {field.label || field.name}
+                    {field.required ? (
+                      <span className="text-destructive">*</span>
+                    ) : null}
+                    {field.control === "select" ? (
+                      <select
+                        className="h-9 rounded-md border bg-background px-3 text-sm"
+                        required={field.required}
+                        value={String(values[field.name] ?? "")}
+                        onChange={(event) =>
+                          setValues((current) => ({
+                            ...current,
+                            [field.name]: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">{t("请选择")}</option>
+                        {field.options.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    ) : field.type === "boolean" ? (
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-primary"
+                        checked={Boolean(values[field.name])}
+                        onChange={(event) =>
+                          setValues((current) => ({
+                            ...current,
+                            [field.name]: event.target.checked,
+                          }))
+                        }
+                      />
+                    ) : field.type === "object" || field.type === "array" ? (
+                      <textarea
+                        className="min-h-28 rounded-md border bg-background p-3 font-mono text-xs"
+                        value={String(values[field.name] ?? "")}
+                        onChange={(event) =>
+                          setValues((current) => ({
+                            ...current,
+                            [field.name]: event.target.value,
+                          }))
+                        }
+                      />
+                    ) : (
+                      <Input
+                        type={
+                          field.control === "date"
+                            ? "date"
+                            : field.type === "number"
+                              ? "number"
+                              : "text"
+                        }
+                        required={field.required}
+                        value={String(values[field.name] ?? "")}
+                        onChange={(event) =>
+                          setValues((current) => ({
+                            ...current,
+                            [field.name]: event.target.value,
+                          }))
+                        }
+                      />
+                    )}
+                  </label>
+                ))}
+                {profile.interaction_config.file_upload ? (
+                  <label className="grid gap-1.5 text-sm font-medium">
+                    <span className="flex items-center gap-2">
+                      <PaperclipIcon className="size-4" />
+                      {t("文件上传")}
+                    </span>
+                    <Input
+                      type="file"
+                      multiple
+                      accept={acceptedUploadExtensions(
+                        profile.interaction_config.file_upload_setting.file_upload_type
+                      )}
+                      onChange={(event) => {
+                        const selected = Array.from(event.target.files ?? [])
+                        const setting = profile.interaction_config.file_upload_setting
+                        if (!validateUploadSelection(selected, setting)) {
+                          event.target.value = ""
+                          setFiles([])
+                          setError(t("文件数量或大小超过限制。"))
+                          return
+                        }
+                        setError(null)
+                        setFiles(selected)
+                      }}
+                    />
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {t("最多 {count} 个文件，每个不超过 {size} MB", {
+                        count: profile.interaction_config.file_upload_setting.max_files,
+                        size: profile.interaction_config.file_upload_setting.file_limit,
+                      })}
+                    </span>
+                  </label>
+                ) : null}
+                {!profile.inputs.length && !profile.interaction_config.file_upload ? (
+                  <p className="text-sm text-muted-foreground">
+                    {t("此工作流无需输入。")}
+                  </p>
+                ) : null}
+              </div>
+              {error ? (
+                <p role="alert" className="mt-4 text-sm text-destructive">
+                  {error}
+                </p>
+              ) : null}
+              <Button type="submit" className="mt-5" disabled={running}>
+                {running ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : (
+                  <PlayIcon />
+                )}
+                {t("开始运行")}
+              </Button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent side="right" className="p-0 md:hidden">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{t("历史记录")}</DialogTitle>
+            <DialogDescription>{t("选择或新建对话")}</DialogDescription>
+          </DialogHeader>
+          {history}
+        </DialogContent>
+      </Dialog>
+    </main>
+  )
+}

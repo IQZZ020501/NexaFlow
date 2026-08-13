@@ -27,9 +27,10 @@ from tests.support import (  # noqa: F401  (sets required env before app imports
     test_client,
 )
 
-from app.application import agent_access, agent_executor, agent_runs, agent_tools
+from app.application import agent_access, agent_executor, agent_memory, agent_runs, agent_tools
 from app.application import agents as agent_application
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.repositories import user as user_repository
 from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.capabilities.mcp import client as mcp_client_module
@@ -42,8 +43,9 @@ from app.capabilities.mcp.client import (
     normalize_mcp_url,
 )
 from app.schemas.knowledge import KnowledgeQueryHitResponse
-from app.entities.agents import AgentToolCall
+from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
+from app.entities.workflows import WorkflowUpload
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.system_log import SystemLog
@@ -60,6 +62,31 @@ from app.shareddomain.agents.runtime.graph import MAX_REASONING_CHARS
 from app.shareddomain.tools import services as mcp_services
 
 MEMBER_PASSWORD = "AgentMember@12345."
+
+
+async def create_pending_upload_for_user(
+    workspace_id: str,
+    agent_id: str,
+    user_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        await workflow_repository.create_upload(
+            db,
+            WorkflowUpload(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                uploaded_by_user_id=user_id,
+                filename="pending.txt",
+                size_bytes=1,
+                object_key=f"workflow-uploads/{workspace_id}/{agent_id}/{user_id}",
+            ),
+        )
+        await db.commit()
+
+
+async def assert_upload_cleanup_queued(object_key: str) -> None:
+    async with get_session_factory()() as db:
+        assert await workflow_repository.has_upload_cleanup_for_object(db, object_key)
 
 
 class AgentModelHandler(BaseHTTPRequestHandler):
@@ -777,6 +804,7 @@ def assert_tool_routing_context_is_explicit() -> None:
     run = SimpleNamespace(
         instructions="Use available sources.",
         goal="What is the release process?",
+        attachment_context="",
     )
     messages = agent_runs.execution_messages(
         run,  # type: ignore[arg-type]
@@ -799,6 +827,27 @@ def assert_tool_routing_context_is_explicit() -> None:
         "user",
     ]
 
+    run.attachment_context = "--- release.txt ---\nShip on Friday."
+    messages_with_attachment = agent_runs.execution_messages(
+        run,  # type: ignore[arg-type]
+        False,
+        False,
+    )
+    assert messages_with_attachment[-2]["role"] == "user"
+    assert "untrusted user-provided data" in messages_with_attachment[-2]["content"]
+    assert "Ship on Friday." in messages_with_attachment[-2]["content"]
+    assert messages_with_attachment[-1]["content"] == run.goal
+    historical_messages = agent_memory._run_messages(
+        AgentRun(
+            status="succeeded",
+            goal=run.goal,
+            result="Use the release attachment.",
+            attachment_context=run.attachment_context,
+        )
+    )
+    assert "historical turn" in historical_messages[0]["content"]
+    assert "Ship on Friday." in historical_messages[0]["content"]
+
     no_knowledge_system = agent_runs.execution_messages(
         run,  # type: ignore[arg-type]
         False,
@@ -819,6 +868,28 @@ def assert_tool_routing_context_is_explicit() -> None:
     assert (
         "Do not use for general knowledge or current external facts" in tool.description
     )
+
+    from pydantic import ValidationError
+
+    from app.schemas.agent import AgentCreateRequest
+
+    try:
+        AgentCreateRequest.model_validate(
+            {
+                "name": "Audio-only agent",
+                "model_id": "model-1",
+                "interaction_config": {
+                    "file_upload": True,
+                    "file_upload_setting": {
+                        "file_upload_type": ["audio"],
+                    },
+                },
+            }
+        )
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("Agent configuration accepted unsupported audio uploads")
 
 
 async def assert_final_turn_removes_tools() -> None:
@@ -1865,6 +1936,10 @@ def assert_external_agent_access() -> None:
     try:
         with test_client() as client, agent_model_server() as model_base_url:
             admin_token, workspace_id = activate_admin(client)
+            admin_user_id = client.get(
+                "/api/v1/auth/me",
+                headers=auth_headers(admin_token),
+            ).json()["user"]["id"]
             member_user_id, temporary_password = create_workspace_user(
                 client, admin_token, workspace_id
             )
@@ -1889,6 +1964,16 @@ def assert_external_agent_access() -> None:
                     "name": "Public Support",
                     "description": "Answers public questions",
                     "instructions": "Answer directly.",
+                    "interaction_config": {
+                        "prologue": "How can I help?",
+                        "tts_type": "BROWSER",
+                        "file_upload": True,
+                        "file_upload_setting": {
+                            "max_files": 2,
+                            "file_limit": 1,
+                            "file_upload_type": ["document", "image"],
+                        },
+                    },
                     "model_id": model_id,
                 },
             )
@@ -1946,6 +2031,7 @@ def assert_external_agent_access() -> None:
             )
             assert published.status_code == 200, published.text
             assert published.json()["published"] is True
+            assert published.json()["has_unpublished_changes"] is False
             assert published.json()["published_by_user_id"]
             assert published.json()["published_at"]
             profile = client.get(
@@ -1953,7 +2039,93 @@ def assert_external_agent_access() -> None:
                 headers=auth_headers(admin_token),
             )
             assert profile.status_code == 200, profile.text
-            assert set(profile.json()) == {"id", "name", "description"}
+            assert set(profile.json()) == {
+                "id",
+                "name",
+                "description",
+                "interaction_config",
+            }
+            assert profile.json()["interaction_config"]["prologue"] == "How can I help?"
+            upload_user_id, _upload_user_token = create_active_user(
+                client,
+                admin_token,
+                "upload-only",
+            )
+            upload_membership = client.post(
+                f"/api/v1/workspaces/{workspace_id}/members",
+                headers=auth_headers(admin_token),
+                json={"user_id": upload_user_id, "role": "member"},
+            )
+            assert upload_membership.status_code == 201, upload_membership.text
+            asyncio.run(
+                create_pending_upload_for_user(
+                    workspace_id,
+                    agent_id,
+                    upload_user_id,
+                )
+            )
+            user_upload_object_key = (
+                f"workflow-uploads/{workspace_id}/{agent_id}/{upload_user_id}"
+            )
+            upload_user_delete = client.delete(
+                f"/api/v1/admin/users/{upload_user_id}",
+                headers=auth_headers(admin_token),
+            )
+            assert upload_user_delete.status_code == 204, upload_user_delete.text
+            asyncio.run(assert_upload_cleanup_queued(user_upload_object_key))
+            uploaded = client.post(
+                f"{public_base}/uploads",
+                headers=auth_headers(admin_token),
+                files={"files": ("context.txt", b"release attachment", "text/plain")},
+            )
+            assert uploaded.status_code == 201, uploaded.text
+            pending_upload_agent = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Pending Upload Agent",
+                    "model_id": model_id,
+                    "interaction_config": {
+                        "file_upload": True,
+                        "file_upload_setting": {
+                            "file_upload_type": ["document"],
+                        },
+                    },
+                },
+            )
+            assert pending_upload_agent.status_code == 201, pending_upload_agent.text
+            pending_agent_id = pending_upload_agent.json()["id"]
+            pending_upload = client.post(
+                agents_url(workspace_id, f"/{pending_agent_id}/uploads"),
+                headers=auth_headers(admin_token),
+                files={"files": ("pending.txt", b"pending", "text/plain")},
+            )
+            assert pending_upload.status_code == 201, pending_upload.text
+            pending_upload_object_key = (
+                f"workflow-uploads/{workspace_id}/{pending_agent_id}/"
+                f"{admin_user_id}/{pending_upload.json()[0]['id']}"
+            )
+            pending_delete = client.delete(
+                agents_url(workspace_id, f"/{pending_agent_id}"),
+                headers=auth_headers(admin_token),
+            )
+            assert pending_delete.status_code == 204, pending_delete.text
+            asyncio.run(assert_upload_cleanup_queued(pending_upload_object_key))
+            attachment_run = client.post(
+                f"{public_base}/runs",
+                headers=auth_headers(admin_token),
+                json={
+                    "goal": "Read the attachment",
+                    "file_ids": [uploaded.json()[0]["id"]],
+                },
+            )
+            assert attachment_run.status_code == 201, attachment_run.text
+            stored_attachment_run = asyncio.run(
+                run_snapshot(attachment_run.json()["id"])
+            )
+            assert stored_attachment_run is not None
+            assert "release attachment" in stored_attachment_run.attachment_context
+            assert stored_attachment_run.goal == "Read the attachment"
             openapi = client.get("/openapi.json")
             assert openapi.status_code == 200, openapi.text
             docs = client.get("/docs")
@@ -1965,21 +2137,22 @@ def assert_external_agent_access() -> None:
                 "/api/v1/agent-api/{agent_id}/documentation",
                 "/api/v1/agent-api/{agent_id}/runs",
             }.issubset(openapi_payload["paths"])
-            external_create_schema = openapi_payload["components"]["schemas"][
-                "ExternalAgentRunCreateRequest"
+            public_create_schema = openapi_payload["components"]["schemas"][
+                "PublicAgentRunCreateRequest"
             ]
-            assert set(external_create_schema["properties"]) == {
+            assert set(public_create_schema["properties"]) == {
                 "goal",
                 "conversation_id",
+                "file_ids",
             }
-            for path in (
-                "/api/v1/public/agents/{agent_id}/runs",
-                "/api/v1/agent-api/{agent_id}/runs",
-            ):
-                schema_ref = openapi_payload["paths"][path]["post"]["requestBody"][
-                    "content"
-                ]["application/json"]["schema"]["$ref"]
-                assert schema_ref.endswith("/ExternalAgentRunCreateRequest")
+            public_schema_ref = openapi_payload["paths"][
+                "/api/v1/public/agents/{agent_id}/runs"
+            ]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+            assert public_schema_ref.endswith("/PublicAgentRunCreateRequest")
+            api_schema_ref = openapi_payload["paths"][
+                "/api/v1/agent-api/{agent_id}/runs"
+            ]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+            assert api_schema_ref.endswith("/ExternalAgentRunCreateRequest")
 
             second_agent = client.post(
                 agents_url(workspace_id),
@@ -2004,11 +2177,6 @@ def assert_external_agent_access() -> None:
                 headers=auth_headers(member_token),
             )
             assert member_profile.status_code == 200, member_profile.text
-            admin_user_id = client.get(
-                "/api/v1/auth/me",
-                headers=auth_headers(admin_token),
-            ).json()["user"]["id"]
-
             new_chat_one = client.post(
                 f"{public_base}/runs",
                 headers=auth_headers(admin_token),
@@ -2389,47 +2557,65 @@ def assert_external_agent_access() -> None:
             changed = client.patch(
                 management_base,
                 headers=auth_headers(admin_token),
-                json={"description": "Changed after publishing"},
+                json={
+                    "name": "Updated Public Support",
+                    "description": "Changed after publishing",
+                    "instructions": "Use the updated draft instructions.",
+                },
             )
             assert changed.status_code == 200, changed.text
-            assert changed.json()["published"] is False
-            assert changed.json()["published_by_user_id"] is None
-            assert changed.json()["published_at"] is None
-            assert (
-                client.get(
-                    f"{public_base}/profile",
-                    headers=auth_headers(admin_token),
-                ).status_code
-                == 404
+            assert changed.json()["published"] is True
+            assert changed.json()["has_unpublished_changes"] is True
+            assert changed.json()["published_by_user_id"]
+            assert changed.json()["published_at"]
+            unchanged_profile = client.get(
+                f"{public_base}/profile",
+                headers=auth_headers(admin_token),
             )
-            unpublished_documentation = client.get(
+            assert unchanged_profile.status_code == 200, unchanged_profile.text
+            assert unchanged_profile.json()["name"] == "Public Support"
+            assert unchanged_profile.json()["description"] == "Answers public questions"
+            unchanged_documentation = client.get(
                 documentation_url,
                 headers={"Authorization": f"Bearer {token_b}"},
             )
-            assert unpublished_documentation.status_code == 404
-            assert (
-                client.post(
-                    f"{public_base}/runs",
-                    headers=auth_headers(admin_token),
-                    json={"goal": "Unavailable after configuration change"},
-                ).status_code
-                == 404
+            assert unchanged_documentation.status_code == 200
+            assert unchanged_documentation.json()["agent_name"] == "Public Support"
+            unchanged_run = client.post(
+                f"{public_base}/runs",
+                headers=auth_headers(admin_token),
+                json={"goal": "Available after configuration change"},
             )
-            assert (
-                client.post(
-                    f"/api/v1/agent-api/{agent_id}/runs",
-                    headers={"Authorization": f"Bearer {token_b}"},
-                    json={"goal": "Unavailable after configuration change"},
-                ).status_code
-                == 404
+            assert unchanged_run.status_code == 201, unchanged_run.text
+            stored_unchanged_run = asyncio.run(
+                run_snapshot(unchanged_run.json()["id"])
             )
-            assert (
-                client.get(
-                    f"/api/v1/agent-api/{agent_id}/runs/{api_run_b.json()['id']}",
-                    headers={"Authorization": f"Bearer {token_b}"},
-                ).status_code
-                == 404
+            assert stored_unchanged_run is not None
+            assert stored_unchanged_run.instructions == "Answer directly."
+
+            published_update = client.patch(
+                management_base,
+                headers=auth_headers(admin_token),
+                json={"published": True},
             )
+            assert published_update.status_code == 200, published_update.text
+            assert published_update.json()["has_unpublished_changes"] is False
+            updated_profile = client.get(
+                f"{public_base}/profile",
+                headers=auth_headers(admin_token),
+            )
+            assert updated_profile.status_code == 200, updated_profile.text
+            assert updated_profile.json()["name"] == "Updated Public Support"
+            assert updated_profile.json()["description"] == "Changed after publishing"
+            updated_run = client.post(
+                f"{public_base}/runs",
+                headers=auth_headers(admin_token),
+                json={"goal": "Use the new published configuration"},
+            )
+            assert updated_run.status_code == 201, updated_run.text
+            stored_updated_run = asyncio.run(run_snapshot(updated_run.json()["id"]))
+            assert stored_updated_run is not None
+            assert stored_updated_run.instructions == "Use the updated draft instructions."
     finally:
         agent_access.enforce_external_agent_rate_limit = original_rate_limit
         agent_executor.run_agent = original_run_agent
@@ -2613,8 +2799,7 @@ def main() -> None:
                 headers=auth_headers(admin_token),
                 json={"app_type": "agent"},
             )
-            assert workflow_updated.status_code == 200, workflow_updated.text
-            assert workflow_updated.json()["app_type"] == "agent"
+            assert workflow_updated.status_code == 409, workflow_updated.text
 
             async def fail_agent_run(*_args, **_kwargs):
                 raise RuntimeError("synthetic runtime failure")

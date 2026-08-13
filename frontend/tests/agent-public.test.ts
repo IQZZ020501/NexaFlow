@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { parseAgentDetailView } from "../lib/agent-views"
+import { appViewPath, parseAgentDetailView } from "../lib/agent-views"
 import {
   cancelPublicAgentStream,
   mergePublicRunEvent,
@@ -333,6 +333,15 @@ describe("public agent API", () => {
     expect(parseAgentDetailView("unknown")).toBe("overview")
   })
 
+  test("opens workflow settings on the dedicated canvas route", () => {
+    expect(appViewPath("workflow-1", "workflow", "settings")).toBe(
+      "/workflow/workflow-1"
+    )
+    expect(appViewPath("workflow-1", "workflow", "overview")).toBe(
+      "/app/apps/workflow-1?view=overview"
+    )
+  })
+
   test("loads the profile and conversations with the session token", async () => {
     const requests: Array<{
       url: string
@@ -472,5 +481,36 @@ describe("public agent API", () => {
     )
     expect(events).toEqual(["answer_delta", "complete"])
     expect(urls[1]).toContain("after=9")
+  })
+
+  test("normalizes an immediately completed public run", async () => {
+    globalThis.fetch = (async () =>
+      Response.json(
+        {
+          id: "run-1",
+          conversation_id: "conversation-1",
+          question: "hello",
+          status: "succeeded",
+          result: "done",
+          error: null,
+          progress: [],
+          created_at: "2026-08-10T00:00:00Z",
+          started_at: null,
+          finished_at: "2026-08-10T00:00:01Z",
+          updated_at: "2026-08-10T00:00:01Z",
+        },
+        { status: 201 }
+      )) as unknown as typeof fetch
+    const events: string[] = []
+
+    const response = await import("../lib/api/public-agents")
+    await response.streamPublicAgentRun(
+      "agent-1",
+      "access-token",
+      "hello",
+      (event) => events.push(event.type)
+    )
+
+    expect(events).toEqual(["run", "complete"])
   })
 })

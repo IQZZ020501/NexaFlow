@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
+import dynamic from "next/dynamic"
 import { useParams, useRouter } from "next/navigation"
 import {
   BotIcon,
@@ -55,8 +56,10 @@ import {
   resolveAgentToolCall,
   revokeAgentPermission,
   streamAgentRun,
+  uploadAgentFiles,
   updateAgent,
   type Agent,
+  type AgentInteractionConfig,
   type AgentMcpToolRef,
   type AgentPermission,
   type AppType,
@@ -64,6 +67,7 @@ import {
   type AgentRunStreamEvent,
   type AgentToolCall,
 } from "@/lib/api/agents"
+import { speakBrowserText } from "@/lib/browser-tts"
 import { listKnowledgeBases, type KnowledgeBase } from "@/lib/api/knowledge"
 import { listRegisteredModels, type RegisteredModel } from "@/lib/api/llm"
 import { listMcpServers, type McpServer } from "@/lib/api/mcp"
@@ -71,13 +75,26 @@ import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/api/system"
 import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { getErrorMessage } from "@/lib/errors"
 import { getMembershipRole } from "@/lib/display"
-import type { AgentDetailView } from "@/lib/agent-views"
+import { appViewPath, type AgentDetailView } from "@/lib/agent-views"
+import {
+  defaultInteractionConfig,
+  normalizeInteractionConfigForAppType,
+} from "@/lib/interaction-config"
+
+const WorkflowDetailWorkspace = dynamic(
+  () =>
+    import("@/components/workflows/workflow-detail-workspace").then(
+      (module) => module.WorkflowDetailWorkspace
+    ),
+  { ssr: false }
+)
 
 export type AgentFormState = {
   id: string | null
   appType: AppType
   name: string
   description: string
+  interactionConfig: AgentInteractionConfig
   modelId: string
   instructions: string
   knowledgeQueryMode: Agent["knowledge_query_mode"]
@@ -91,6 +108,7 @@ const EMPTY_FORM: AgentFormState = {
   appType: "agent",
   name: "",
   description: "",
+  interactionConfig: defaultInteractionConfig(),
   modelId: "",
   instructions: "",
   knowledgeQueryMode: "required",
@@ -105,6 +123,7 @@ function formFromAgent(agent: Agent): AgentFormState {
     appType: agent.app_type,
     name: agent.name,
     description: agent.description,
+    interactionConfig: structuredClone(agent.interaction_config),
     modelId: agent.model_id,
     instructions: agent.instructions,
     knowledgeQueryMode: agent.knowledge_query_mode,
@@ -125,10 +144,6 @@ export function isCurrentAgentConversation(
   expectedConversationId: string | null
 ) {
   return currentConversationId === expectedConversationId
-}
-
-export function canOpenAgentDetails(agent: Pick<Agent, "app_type">) {
-  return agent.app_type === "agent"
 }
 
 export function isAgentListLoading(
@@ -308,6 +323,8 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
   return (
     form.name.trim() !== agent.name ||
     form.description.trim() !== agent.description ||
+    JSON.stringify(form.interactionConfig) !==
+      JSON.stringify(agent.interaction_config) ||
     form.modelId !== agent.model_id ||
     form.instructions.trim() !== agent.instructions ||
     form.knowledgeQueryMode !== agent.knowledge_query_mode ||
@@ -320,16 +337,18 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
 type AgentsPageProps = {
   initialConversationId?: string | null
   initialView?: AgentDetailView
+  workflowCanvasMode?: boolean
 }
 
 export function AgentsPage({
   initialConversationId = null,
   initialView = "overview",
+  workflowCanvasMode = false,
 }: AgentsPageProps) {
   const router = useRouter()
   const params = useParams<{ id?: string }>()
   const selectedAgentId = params.id ?? null
-  const { t } = useLanguage()
+  const { language, t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
   const [agents, setAgents] = React.useState<Agent[]>([])
   const [models, setModels] = React.useState<RegisteredModel[]>([])
@@ -345,6 +364,7 @@ export function AgentsPage({
     null
   )
   const [question, setQuestion] = React.useState("")
+  const [agentFiles, setAgentFiles] = React.useState<File[]>([])
   const [pendingQuestion, setPendingQuestion] = React.useState<string | null>(
     null
   )
@@ -387,6 +407,7 @@ export function AgentsPage({
 
   const selectedAgent =
     agents.find((agent) => agent.id === selectedAgentId) ?? null
+  const selectedAppType = selectedAgent?.app_type ?? null
   const isDirty = selectedAgent ? isAgentFormDirty(form, selectedAgent) : false
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
   const canManagePublishing = workspaceRole === "admin"
@@ -645,6 +666,27 @@ export function AgentsPage({
   ])
 
   React.useEffect(() => {
+    if (!selectedAppType || !selectedAgentId) return
+    if (workflowCanvasMode && selectedAppType !== "workflow") {
+      router.replace(appViewPath(selectedAgentId, "agent", "overview"))
+      return
+    }
+    if (
+      !workflowCanvasMode &&
+      selectedAppType === "workflow" &&
+      activeView === "settings"
+    ) {
+      router.replace(appViewPath(selectedAgentId, "workflow", "settings"))
+    }
+  }, [
+    activeView,
+    router,
+    selectedAppType,
+    selectedAgentId,
+    workflowCanvasMode,
+  ])
+
+  React.useEffect(() => {
     if (
       token &&
       selectedWorkspaceId &&
@@ -652,7 +694,7 @@ export function AgentsPage({
       hasLoadedWorkspaceData &&
       !isLoading &&
       !isMissingAgentLoading &&
-      !selectedAgent
+      !selectedAppType
     ) {
       router.replace("/app/apps")
     }
@@ -661,25 +703,19 @@ export function AgentsPage({
     isLoading,
     isMissingAgentLoading,
     router,
-    selectedAgent,
+    selectedAppType,
     selectedAgentId,
     selectedWorkspaceId,
     token,
   ])
 
   React.useEffect(() => {
-    if (selectedAgent && !canOpenAgentDetails(selectedAgent)) {
-      router.replace("/app/apps")
-    }
-  }, [router, selectedAgent])
-
-  React.useEffect(() => {
     if (
       !token ||
       !selectedWorkspaceId ||
       !selectedAgentId ||
-      !selectedAgent ||
-      !canOpenAgentDetails(selectedAgent)
+      !selectedAppType ||
+      selectedAppType === "workflow"
     ) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRuns([])
@@ -803,8 +839,8 @@ export function AgentsPage({
     reportError,
     router,
     initialConversationId,
-    selectedAgent,
     selectedAgentId,
+    selectedAppType,
     selectedWorkspaceId,
     token,
     activeView,
@@ -836,32 +872,58 @@ export function AgentsPage({
   }
 
   function chooseAppType(appType: AppType) {
-    setForm((current) => ({ ...current, appType }))
+    setForm((current) => ({
+      ...current,
+      appType,
+      interactionConfig: normalizeInteractionConfigForAppType(
+        current.interactionConfig,
+        appType
+      ),
+    }))
     setIsChooserOpen(false)
     setIsDialogOpen(true)
   }
 
   function openAgent(agent: Agent) {
-    if (!canOpenAgentDetails(agent)) return
     setForm(formFromAgent(agent))
-    router.push(`/app/apps/${agent.id}`)
+    router.push(appViewPath(agent.id, agent.app_type, "overview"))
   }
 
-  async function handleSaveAgent(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function handleSaveAgent(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
     if (!token || !selectedWorkspaceId || !form.name.trim() || !form.modelId)
       return
     setIsSaving(true)
     try {
+      const interactionConfig = normalizeInteractionConfigForAppType(
+        form.interactionConfig,
+        form.appType
+      )
+      const mcpTools =
+        form.appType === "workflow"
+          ? form.mcpTools.filter((reference) =>
+              mcpServers.some(
+                (server) =>
+                  server.id === reference.server_id &&
+                  server.status === "active" &&
+                  server.tools.some(
+                    (tool) =>
+                      tool.name === reference.tool_name &&
+                      tool.policy_mode === "read_only"
+                  )
+              )
+            )
+          : form.mcpTools
       const payload = {
         name: form.name.trim(),
         app_type: form.appType,
         description: form.description.trim(),
+        interaction_config: interactionConfig,
         model_id: form.modelId,
         instructions: form.instructions,
         knowledge_query_mode: form.knowledgeQueryMode,
         knowledge_base_ids: form.knowledgeBaseIds,
-        mcp_tools: form.mcpTools,
+        mcp_tools: mcpTools,
         status: form.status,
       }
       if (form.id) {
@@ -875,13 +937,19 @@ export function AgentsPage({
           current.map((agent) => (agent.id === updated.id ? updated : agent))
         )
         setForm(formFromAgent(updated))
-        notify("success", t("Agent 已更新"))
+        notify(
+          "success",
+          t(updated.app_type === "workflow" ? "工作流已更新" : "Agent 已更新")
+        )
       } else {
         const created = await createAgent(token, selectedWorkspaceId, payload)
         setAgents((current) => [created, ...current])
         setForm(formFromAgent(created))
         router.push(`/app/apps/${created.id}`)
-        notify("success", t("Agent 已创建"))
+        notify(
+          "success",
+          t(created.app_type === "workflow" ? "工作流已创建" : "Agent 已创建")
+        )
       }
       setIsDialogOpen(false)
     } catch (error) {
@@ -904,11 +972,13 @@ export function AgentsPage({
     }
     setIsPublishing(true)
     try {
+      const publishing =
+        !selectedAgent.published || selectedAgent.has_unpublished_changes
       const updated = await updateAgent(
         token,
         selectedWorkspaceId,
         selectedAgent.id,
-        { published: !selectedAgent.published }
+        { published: publishing }
       )
       setAgents((current) =>
         current.map((agent) => (agent.id === updated.id ? updated : agent))
@@ -916,7 +986,15 @@ export function AgentsPage({
       setForm(formFromAgent(updated))
       notify(
         "success",
-        t(updated.published ? "Agent 已发布" : "Agent 已取消发布")
+        t(
+          updated.app_type === "workflow"
+            ? updated.published
+              ? "工作流已发布"
+              : "工作流已取消发布"
+            : updated.published
+              ? "Agent 已发布"
+              : "Agent 已取消发布"
+        )
       )
     } catch (error) {
       reportError(error)
@@ -926,21 +1004,37 @@ export function AgentsPage({
   }
 
   function handleViewChange(view: AgentDetailView) {
-    if (!selectedAgentId) return
-    setActiveView(view)
-    const query = new URLSearchParams()
-    query.set("view", view)
-    if (activeConversationIdRef.current) {
-      query.set("conversation_id", activeConversationIdRef.current)
+    if (!selectedAgentId || !selectedAgent) return
+    const path = appViewPath(
+      selectedAgentId,
+      selectedAgent.app_type,
+      view,
+      activeConversationIdRef.current
+    )
+    if (
+      selectedAgent.app_type === "workflow" &&
+      view === "settings" &&
+      !workflowCanvasMode
+    ) {
+      router.push(path)
+      return
     }
-    router.replace(`/app/apps/${selectedAgentId}?${query.toString()}`)
+    setActiveView(view)
+    router.replace(path)
   }
 
   async function handleDeleteAgent(agent: Agent) {
     if (
       !token ||
       !selectedWorkspaceId ||
-      !window.confirm(t("确定删除 Agent“{name}”吗？", { name: agent.name }))
+      !window.confirm(
+        t(
+          agent.app_type === "workflow"
+            ? "确定删除工作流“{name}”吗？"
+            : "确定删除 Agent“{name}”吗？",
+          { name: agent.name }
+        )
+      )
     ) {
       return
     }
@@ -948,7 +1042,10 @@ export function AgentsPage({
       await deleteAgent(token, selectedWorkspaceId, agent.id)
       setAgents((current) => current.filter((item) => item.id !== agent.id))
       if (selectedAgentId === agent.id) router.push("/app/apps")
-      notify("success", t("Agent 已删除"))
+      notify(
+        "success",
+        t(agent.app_type === "workflow" ? "工作流已删除" : "Agent 已删除")
+      )
     } catch (error) {
       reportError(error)
     }
@@ -1116,6 +1213,14 @@ export function AgentsPage({
     setRuns((current) => [placeholderRun, ...current])
     let liveRunId: string | null = null
     try {
+      const uploaded = agentFiles.length
+        ? await uploadAgentFiles(
+            token,
+            selectedWorkspaceId,
+            selectedAgent.id,
+            agentFiles
+          )
+        : []
       await streamAgentRun(
         token,
         selectedWorkspaceId,
@@ -1151,10 +1256,19 @@ export function AgentsPage({
           if (streamEvent.type === "error") {
             notify("error", t("Agent 回答失败"))
           }
+          if (
+            streamEvent.type === "complete" &&
+            streamEvent.run.status === "succeeded" &&
+            selectedAgent.interaction_config.tts_type === "BROWSER"
+          ) {
+            speakBrowserText(streamEvent.run.result, language)
+          }
         },
         askAbortController.signal,
-        conversationId
+        conversationId,
+        uploaded.map((item) => item.id)
       )
+      setAgentFiles([])
     } catch (error) {
       const userCancelled = askAbortController.signal.aborted
       const isCurrentConversation = isCurrentAgentConversation(
@@ -1195,6 +1309,7 @@ export function AgentsPage({
     setRuns([])
     setToolCallsByRun({})
     setQuestion("")
+    setAgentFiles([])
     setPendingQuestion(null)
     setAskAbortController(null)
     setIsAsking(false)
@@ -1232,6 +1347,12 @@ export function AgentsPage({
         return
       }
       setRuns((current) => mergeAgentRunSnapshot(current, run))
+      if (
+        run.status === "succeeded" &&
+        selectedAgent.interaction_config.tts_type === "BROWSER"
+      ) {
+        speakBrowserText(run.result, language)
+      }
       await loadRunToolCalls(selectedAgent.id, runId, conversationId)
       if (
         !isCurrentAgentConversation(
@@ -1266,14 +1387,43 @@ export function AgentsPage({
     }
   }
 
-  if (
-    selectedAgent &&
-    selectedWorkspaceId &&
-    canOpenAgentDetails(selectedAgent)
-  ) {
+  if (selectedAgent && selectedWorkspaceId) {
     return (
       <>
-        <AgentDetailWorkspace
+        {selectedAgent.app_type === "workflow" ? (
+          <WorkflowDetailWorkspace
+            key={selectedAgent.id}
+            agent={selectedAgent}
+            form={form}
+            setForm={setForm}
+            models={models}
+            knowledgeBases={knowledgeBases}
+            mcpServers={mcpServers}
+            token={token}
+            workspaceId={selectedWorkspaceId}
+            canManagePublishing={canManagePublishing}
+            isAppDirty={isDirty}
+            isSavingApp={isSaving}
+            activeView={workflowCanvasMode ? "settings" : activeView}
+            standalone={workflowCanvasMode}
+            onBack={() =>
+              workflowCanvasMode
+                ? router.replace(
+                    appViewPath(selectedAgent.id, "workflow", "overview")
+                  )
+                : router.push("/app/apps")
+            }
+            onDelete={() => void handleDeleteAgent(selectedAgent)}
+            onManagePermissions={() =>
+              void handleOpenAgentPermissions(selectedAgent)
+            }
+            onSaveApp={handleSaveAgent}
+            onViewChange={handleViewChange}
+            notify={notify}
+            t={t}
+          />
+        ) : (
+          <AgentDetailWorkspace
           agent={selectedAgent}
           form={form}
           setForm={setForm}
@@ -1285,6 +1435,8 @@ export function AgentsPage({
           resolvingCallId={resolvingCallId}
           question={question}
           setQuestion={setQuestion}
+          files={agentFiles}
+          setFiles={setAgentFiles}
           pendingQuestion={pendingQuestion}
           isDirty={isDirty}
           isSaving={isSaving}
@@ -1315,7 +1467,8 @@ export function AgentsPage({
             void handleToolCallDecision(runId, callId, decision)
           }
           t={t}
-        />
+          />
+        )}
         <AgentPermissionsDialog
           agent={permissionAgent}
           members={permissionMembers}
@@ -1393,9 +1546,9 @@ export function AgentsPage({
             {filteredAgents.map((agent) => (
             <div
               key={agent.id}
-              role={canOpenAgentDetails(agent) ? "button" : undefined}
-              tabIndex={canOpenAgentDetails(agent) ? 0 : undefined}
-              className={`flex min-h-40 flex-col rounded-md border p-3 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring ${canOpenAgentDetails(agent) ? "cursor-pointer hover:bg-muted/40" : "cursor-default"}`}
+              role="button"
+              tabIndex={0}
+              className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
               onClick={(event) => {
                 if (isEventFromDropdownMenu(event)) return
                 openAgent(agent)
@@ -1411,7 +1564,11 @@ export function AgentsPage({
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 gap-3">
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-700 dark:text-violet-400">
-                    <SparklesIcon className="size-5" />
+                    {agent.app_type === "workflow" ? (
+                      <WorkflowIcon className="size-5" />
+                    ) : (
+                      <SparklesIcon className="size-5" />
+                    )}
                   </span>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -1436,9 +1593,9 @@ export function AgentsPage({
                     </p>
                   </div>
                 </div>
-                {agent.can_edit && canOpenAgentDetails(agent) ? (
+                {agent.can_edit ? (
                   <IconButton
-                    label={t("编辑 Agent")}
+                    label={t("编辑应用")}
                     onClick={(event) => {
                       event.stopPropagation()
                       openAgent(agent)
@@ -1519,7 +1676,7 @@ export function AgentsPage({
           <DialogHeader>
             <DialogTitle>{t("选择要创建的应用类型")}</DialogTitle>
             <DialogDescription>
-              {t("根据使用方式选择应用类型，创建后可在设置中调整。")}
+              {t("根据使用方式选择应用类型，创建后不可更改。")}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1538,17 +1695,13 @@ export function AgentsPage({
             </button>
             <button
               type="button"
-              disabled
-              className="group flex flex-col gap-2 rounded-md border p-4 text-left transition-colors outline-none enabled:hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+              className="group flex flex-col gap-2 rounded-md border p-4 text-left transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => chooseAppType("workflow")}
             >
               <span className="flex size-9 items-center justify-center rounded-md bg-violet-500/10 text-violet-700 dark:text-violet-400">
                 <WorkflowIcon className="size-5" />
               </span>
-              <span className="flex items-center gap-2 text-sm font-semibold">
-                {t("工作流")}
-                <Badge variant="secondary">{t("即将推出")}</Badge>
-              </span>
+              <span className="text-sm font-semibold">{t("工作流")}</span>
               <span className="text-sm leading-5 text-muted-foreground">
                 {t("按预设步骤编排固定流程，适合确定性的处理任务。")}
               </span>
@@ -1565,13 +1718,19 @@ export function AgentsPage({
         <DialogContent className="max-h-[calc(100svh-2rem)] max-w-xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {form.id ? t("编辑 Agent") : t("新建应用")}
+              {form.id ? t("编辑应用") : t("新建应用")}
               <Badge variant="secondary">
                 {form.appType === "workflow" ? t("工作流") : t("Agent")}
               </Badge>
             </DialogTitle>
             <DialogDescription>
-              {t("只需选择 Agent 可以使用的模型、知识和工具。")}
+              {t(
+                !form.id
+                  ? "填写应用名称、描述和模型。"
+                  : form.appType === "workflow"
+                  ? "设置工作流默认模型和可使用的资源，创建后进入画布编排。"
+                  : "只需选择 Agent 可以使用的模型、知识和工具。"
+              )}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSaveAgent}>

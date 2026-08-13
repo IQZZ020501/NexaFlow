@@ -253,12 +253,13 @@ export function AgentOverviewPanel({
   }, [agent.id, canViewCredentials, notify, t, token, workspaceId])
 
   const publicUrl = origin ? `${origin}/chat/${agent.id}` : `/chat/${agent.id}`
+  const apiKind = agent.app_type === "workflow" ? "workflow-api" : "agent-api"
   const apiBaseUrl = origin
-    ? `${origin}/api/v1/agent-api/${agent.id}/runs`
-    : `/api/v1/agent-api/${agent.id}/runs`
+    ? `${origin}/api/v1/${apiKind}/${agent.id}/runs`
+    : `/api/v1/${apiKind}/${agent.id}/runs`
   const docsUrl = origin
-    ? `${origin}/agent-api/${agent.id}/docs`
-    : `/agent-api/${agent.id}/docs`
+    ? `${origin}/${apiKind}/${agent.id}/docs`
+    : `/${apiKind}/${agent.id}/docs`
 
   async function handleCopy(value: string, successMessage = t("已复制")) {
     try {
@@ -378,37 +379,34 @@ export function AgentOverviewPanel({
               <ExternalLinkIcon className="size-4 text-primary" />
               {t("公开访问链接")}
             </div>
-            {agent.published ? (
-              <>
-                <p
-                  className="mt-3 truncate rounded-md bg-muted/50 px-3 py-2 font-mono text-xs text-foreground"
-                  title={publicUrl}
-                >
-                  {publicUrl}
+            <p
+              className="mt-3 truncate rounded-md bg-muted/50 px-3 py-2 font-mono text-xs text-foreground"
+              title={publicUrl}
+            >
+              {publicUrl}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {!agent.published ? (
+                <p className="w-full text-xs text-muted-foreground">
+                  {t("发布后此链接才可访问。")}
                 </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleCopy(publicUrl)}
-                  >
-                    <CopyIcon data-icon="inline-start" />
-                    {t("复制链接")}
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" asChild>
-                    <a href={publicUrl} target="_blank" rel="noreferrer">
-                      <ExternalLinkIcon data-icon="inline-start" />
-                      {t("打开链接")}
-                    </a>
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <p className="mt-3 text-sm text-muted-foreground">
-                {t("发布后可访问公开聊天链接。")}
-              </p>
-            )}
+              ) : null}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleCopy(publicUrl)}
+              >
+                <CopyIcon data-icon="inline-start" />
+                {t("复制链接")}
+              </Button>
+              <Button type="button" variant="outline" size="sm" asChild>
+                <a href={publicUrl} target="_blank" rel="noreferrer">
+                  <ExternalLinkIcon data-icon="inline-start" />
+                  {t("打开链接")}
+                </a>
+              </Button>
+            </div>
           </div>
 
           <div className="min-w-0 p-4 sm:p-5">
@@ -832,7 +830,11 @@ export function AgentLogsPanel({
                     />
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      {t("Agent 未返回结果")}
+                      {t(
+                        agent.app_type === "workflow"
+                          ? "工作流未返回结果"
+                          : "Agent 未返回结果"
+                      )}
                     </p>
                   )}
                 </div>
@@ -901,7 +903,11 @@ export function AgentMonitoringPanel({
         <div>
           <h2 className="text-lg font-semibold">{t("监控统计")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t("按时间范围查看 Agent 的使用与运行情况。")}
+            {t(
+              agent.app_type === "workflow"
+                ? "按时间范围查看工作流的使用与运行情况。"
+                : "按时间范围查看 Agent 的使用与运行情况。"
+            )}
           </p>
         </div>
         <div className="w-40 shrink-0">

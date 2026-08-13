@@ -45,9 +45,7 @@ from app.shareddomain.tools.services import (
     resolve_mcp_tools,
 )
 
-MAX_KNOWLEDGE_HITS_PER_BASE = 3
 MAX_RERANK_HITS_PER_BASE = 10
-MAX_RERANK_CONTEXT_HITS = 5
 MAX_KNOWLEDGE_HITS_PER_CALL = 8
 MAX_KNOWLEDGE_CONTENT_CHARS = 2000
 MAX_KNOWLEDGE_SOURCE_METADATA_CHARS = 240
@@ -64,6 +62,7 @@ def set_agent_tool_idempotency_key(value: str) -> None:
 
 class KnowledgeSearchInput(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
+    limit: int = Field(default=3, ge=1, le=MAX_KNOWLEDGE_HITS_PER_CALL)
 
 
 def describe_knowledge_sources(knowledge_bases: list[KnowledgeBase]) -> str:
@@ -183,7 +182,11 @@ def build_knowledge_search_tool(
                         knowledge_base,
                         KnowledgeQueryRequest(
                             query=payload.query,
-                            limit=MAX_KNOWLEDGE_HITS_PER_BASE,
+                            limit=(
+                                MAX_RERANK_HITS_PER_BASE
+                                if knowledge_base.reranker_model_id is not None
+                                else payload.limit
+                            ),
                         ),
                         settings,
                     )
@@ -214,7 +217,9 @@ def build_knowledge_search_tool(
                             "RERANKER",
                         )
                     except HTTPException:
-                        reranked_groups.append((knowledge_base, hits))
+                        reranked_groups.append(
+                            (knowledge_base, hits[: payload.limit])
+                        )
                         continue
                     if reranker_model is not None:
                         docs = [hit.content for hit in hits[:MAX_RERANK_HITS_PER_BASE]]
@@ -227,7 +232,9 @@ def build_knowledge_search_tool(
                                 docs,
                             )
                         except ModelProviderError:
-                            reranked_groups.append((knowledge_base, hits))
+                            reranked_groups.append(
+                                (knowledge_base, hits[: payload.limit])
+                            )
                             continue
                         scored = sorted(
                             [
@@ -242,21 +249,21 @@ def build_knowledge_search_tool(
                         )
                         reranked = [
                             hits[idx]
-                            for idx, _ in scored[:MAX_RERANK_CONTEXT_HITS]
+                            for idx, _ in scored[:payload.limit]
                             if idx < len(hits)
                         ]
                         reranked_groups.append((knowledge_base, reranked))
                         continue
-                reranked_groups.append((knowledge_base, hits))
+                reranked_groups.append((knowledge_base, hits[: payload.limit]))
 
             selected_hits: list[tuple[KnowledgeBase, Any]] = []
-            for index in range(MAX_KNOWLEDGE_HITS_PER_BASE):
+            for index in range(payload.limit):
                 for knowledge_base, hits in reranked_groups:
                     if index < len(hits):
                         selected_hits.append((knowledge_base, hits[index]))
-                        if len(selected_hits) == MAX_KNOWLEDGE_HITS_PER_CALL:
+                        if len(selected_hits) == payload.limit:
                             break
-                if len(selected_hits) == MAX_KNOWLEDGE_HITS_PER_CALL:
+                if len(selected_hits) == payload.limit:
                     break
 
             for knowledge_base, _ in selected_hits:

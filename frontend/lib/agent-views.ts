@@ -16,3 +16,17 @@ export function parseAgentDetailView(
     ? (candidate as AgentDetailView)
     : "overview"
 }
+
+export function appViewPath(
+  appId: string,
+  appType: "agent" | "workflow",
+  view: AgentDetailView,
+  conversationId?: string | null
+) {
+  if (appType === "workflow" && view === "settings") {
+    return `/workflow/${appId}`
+  }
+  const query = new URLSearchParams({ view })
+  if (conversationId) query.set("conversation_id", conversationId)
+  return `/app/apps/${appId}?${query.toString()}`
+}

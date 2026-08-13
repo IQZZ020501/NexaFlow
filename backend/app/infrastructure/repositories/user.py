@@ -35,6 +35,13 @@ async def get_user_by_id(db: AsyncSession, user_id: str) -> User | None:
     return mapping.to_entity(User, row) if row is not None else None
 
 
+async def lock_user(db: AsyncSession, user_id: str) -> User | None:
+    row = await db.scalar(
+        select(UserOrm).where(UserOrm.id == user_id).with_for_update()
+    )
+    return mapping.to_entity(User, row) if row is not None else None
+
+
 async def list_users_by_ids(db: AsyncSession, user_ids: list[str]) -> list[User]:
     if not user_ids:
         return []

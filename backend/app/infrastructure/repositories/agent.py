@@ -32,6 +32,7 @@ from app.shareddomain.agents.models import (
     AgentRunEvent,
     AgentToolCall,
 )
+from app.shareddomain.workflows.models import WorkflowNodeExecution
 
 _CONVERSATION_MEMORY_COLUMNS = (
     AgentRun.id,
@@ -44,6 +45,7 @@ _CONVERSATION_MEMORY_COLUMNS = (
     AgentRun.conversation_id,
     AgentRun.status,
     AgentRun.goal,
+    AgentRun.attachment_context,
     AgentRun.result,
     AgentRun.context_summary,
     AgentRun.created_at,
@@ -62,6 +64,7 @@ def _to_conversation_memory_entity(row: AgentRun) -> AgentRunEntity:
         conversation_id=row.conversation_id,
         status=row.status,
         goal=row.goal,
+        attachment_context=row.attachment_context,
         result=row.result,
         context_summary=row.context_summary,
         created_at=row.created_at,
@@ -109,6 +112,13 @@ async def list_agents(
 
 async def get_agent_by_id(db: AsyncSession, agent_id: str) -> AgentEntity | None:
     row = await db.get(Agent, agent_id)
+    return to_entity(AgentEntity, row) if row is not None else None
+
+
+async def lock_agent(db: AsyncSession, agent_id: str) -> AgentEntity | None:
+    row = await db.scalar(
+        select(Agent).where(Agent.id == agent_id).with_for_update()
+    )
     return to_entity(AgentEntity, row) if row is not None else None
 
 
@@ -467,6 +477,7 @@ async def list_consumer_conversations(
     )
     ranked = (
         select(
+            AgentRun.id.label("run_id"),
             AgentRun.conversation_id.label("conversation_id"),
             AgentRun.goal.label("goal"),
             AgentRun.status.label("status"),
@@ -483,6 +494,7 @@ async def list_consumer_conversations(
     )
     result = await db.execute(
         select(
+            ranked.c.run_id,
             aggregates.c.conversation_id,
             ranked.c.goal,
             ranked.c.status,
@@ -944,6 +956,22 @@ async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
             ),
             worker_task_id=None,
             lease_expires_at=None,
+            finished_at=now,
+            updated_at=now,
+        )
+    )
+    await db.execute(
+        update(WorkflowNodeExecution)
+        .where(
+            WorkflowNodeExecution.run_id.in_(exhausted_run_ids),
+            WorkflowNodeExecution.status == "running",
+        )
+        .values(
+            status="failed",
+            error=(
+                "Workflow run retry limit reached before the node result was "
+                "durably recorded."
+            ),
             finished_at=now,
             updated_at=now,
         )

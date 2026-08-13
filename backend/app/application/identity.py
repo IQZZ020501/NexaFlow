@@ -35,6 +35,7 @@ from app.infrastructure.security import (
     verify_password,
 )
 from app.infrastructure.system_log import record_system_log
+from app.shareddomain.workflows.uploads import queue_upload_cleanups
 from app.entities.team import Team, TeamMembership
 from app.entities.workspace import Workspace, WorkspaceMembership
 
@@ -343,6 +344,9 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
             "Current user cannot be deleted.",
         )
     await ensure_user_is_not_last_active_workspace_admin(db, user)
+    user = await user_repository.lock_user(db, user.id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
     record_audit_log(
         db,
         actor,
@@ -352,6 +356,7 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
         user.name,
         {"username": user.username, "email": user.email},
     )
+    await queue_upload_cleanups(db, uploaded_by_user_id=user.id)
     await user_repository.delete_user_graph(db, user.id)
     await db.commit()
 

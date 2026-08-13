@@ -2,11 +2,8 @@ import asyncio
 import logging
 import os
 
-from app.application.agent_executor import (
-    RUN_BUSY,
-    list_recoverable_agent_run_ids,
-    run_durable_agent_run,
-)
+from app.application.agent_executor import RUN_BUSY, list_recoverable_agent_run_ids
+from app.application.run_dispatch import run_durable_application_run
 from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
@@ -27,7 +24,7 @@ def run_agent_job(self, run_id: str) -> None:
     configure_task_worker(settings)
     try:
         outcome = asyncio.run(
-            run_durable_agent_run(run_id, settings, worker_task_id=self.request.id)
+            run_durable_application_run(run_id, settings, worker_task_id=self.request.id)
         )
     except Exception as exc:
         log_error(logger, "Agent worker job crashed.", exc, agent_run_id=run_id)
@@ -52,7 +49,7 @@ def recover_agent_runs_job() -> None:
 
 async def enqueue_agent_run(run_id: str, settings: Settings) -> None:
     if settings.celery_task_always_eager:
-        await run_durable_agent_run(run_id, settings)
+        await run_durable_application_run(run_id, settings)
         return
 
     celery_app.conf.update(

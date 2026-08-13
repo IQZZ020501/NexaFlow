@@ -282,4 +282,16 @@ describe("streamAgentRun", () => {
     controller.abort()
     expect(receivedSignal?.aborted).toBe(true)
   })
+
+  test("normalizes an immediately completed run into a complete event", async () => {
+    globalThis.fetch = (async () =>
+      Response.json(runSnapshot("succeeded"), { status: 201 })) as unknown as typeof fetch
+    const events: AgentRunStreamEvent[] = []
+
+    await streamAgentRun("token", "ws-1", "agent-1", "question", (event) =>
+      events.push(event)
+    )
+
+    expect(events.map((event) => event.type)).toEqual(["run", "complete"])
+  })
 })

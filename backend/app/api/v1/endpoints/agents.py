@@ -3,7 +3,7 @@ import json
 from collections.abc import AsyncIterator
 from enum import IntEnum
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,12 +27,14 @@ from app.application.agents import (
     list_agent_runs,
     list_agents,
     prepare_agent_run,
+    resolve_workspace_agent_files,
     require_agent_edit,
     resolve_agent_tool_approval,
     revoke_agent_api_credential,
     revoke_agent_permission,
     rotate_agent_api_credential,
     stream_agent_run,
+    upload_workspace_agent_files,
     update_agent,
     upsert_agent_permission,
 )
@@ -52,6 +54,7 @@ from app.schemas.agent import (
     AgentRunCreateRequest,
     AgentRunResponse,
     AgentToolCallResponse,
+    AgentUploadResponse,
     AgentUpdateRequest,
 )
 
@@ -357,6 +360,29 @@ async def list_workspace_agent_runs(
 
 
 @router.post(
+    "/{agent_id}/uploads",
+    response_model=list[AgentUploadResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_workspace_agent_attachments(
+    agent_id: str,
+    files: Annotated[list[UploadFile], File()],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[AgentUploadResponse]:
+    return await upload_workspace_agent_files(
+        db,
+        context.workspace.id,
+        agent_id,
+        context.user,
+        context.membership_role,
+        files,
+        settings,
+    )
+
+
+@router.post(
     "/{agent_id}/runs",
     response_model=AgentRunResponse,
     status_code=status.HTTP_201_CREATED,
@@ -377,6 +403,7 @@ async def create_workspace_agent_run(
         context.membership_role,
         settings,
         conversation_id=payload.conversation_id,
+        file_ids=payload.file_ids,
     )
 
 
@@ -425,6 +452,15 @@ async def stream_workspace_agent_run(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> StreamingResponse:
+    attachment_context = await resolve_workspace_agent_files(
+        db,
+        context.workspace.id,
+        agent_id,
+        context.user,
+        context.membership_role,
+        payload.file_ids,
+        settings,
+    )
     run, model = await prepare_agent_run(
         db,
         context.workspace.id,
@@ -434,6 +470,7 @@ async def stream_workspace_agent_run(
         context.membership_role,
         persist=True,
         conversation_id=payload.conversation_id,
+        attachment_context=attachment_context,
     )
     await enqueue_prepared_agent_run(run.id, settings)
     await db.rollback()
