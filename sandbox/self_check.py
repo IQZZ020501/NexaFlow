@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import signal
 import socket
 import sys
 import tempfile
 import threading
 import time
+from pathlib import Path
 
-from sandbox.healthcheck import probe
+from sandbox.healthcheck import PROBE_DEADLINE_SECONDS, probe
 from sandbox.runner import MAX_STDIN_BYTES, Limits, run_code
 from sandbox.server import SandboxServer
 
@@ -22,6 +22,22 @@ def request(socket_path: Path, payload: dict) -> dict:
         client.connect(str(socket_path))
         client.sendall((json.dumps(payload) + "\n").encode())
         return json.loads(client.makefile("rb").readline())
+
+
+def serve_probe_response(socket_path: Path, response: bytes, delay: float = 0) -> None:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+        server.bind(str(socket_path))
+        server.listen(1)
+        connection, _ = server.accept()
+        with connection:
+            connection.recv(1024)
+            for value in response:
+                if delay:
+                    time.sleep(delay)
+                try:
+                    connection.sendall(bytes((value,)))
+                except BrokenPipeError:
+                    break
 
 
 def main() -> None:
@@ -117,6 +133,39 @@ def main() -> None:
         assert "unknown limits" in str(exc)
     else:
         raise AssertionError("unknown limit was accepted")
+
+    with tempfile.TemporaryDirectory() as directory:
+        socket_path = Path(directory) / "slow.sock"
+        thread = threading.Thread(
+            target=serve_probe_response,
+            args=(socket_path, b'{"version":1,"ok":true,"status":"ready"}\n'),
+            kwargs={"delay": PROBE_DEADLINE_SECONDS * 0.75},
+            daemon=True,
+        )
+        thread.start()
+        for _ in range(100):
+            if socket_path.exists():
+                break
+            time.sleep(0.01)
+        started = time.monotonic()
+        assert not probe(socket_path)
+        assert time.monotonic() - started < PROBE_DEADLINE_SECONDS * 1.5
+        thread.join(timeout=PROBE_DEADLINE_SECONDS * 2)
+
+    with tempfile.TemporaryDirectory() as directory:
+        socket_path = Path(directory) / "invalid.sock"
+        thread = threading.Thread(
+            target=serve_probe_response,
+            args=(socket_path, b"\xff\n"),
+            daemon=True,
+        )
+        thread.start()
+        for _ in range(100):
+            if socket_path.exists():
+                break
+            time.sleep(0.01)
+        assert not probe(socket_path)
+        thread.join(timeout=1)
 
     with tempfile.TemporaryDirectory() as directory:
         socket_path = Path(directory) / "sandbox.sock"
