@@ -161,8 +161,8 @@ erDiagram
 | End | 把上游引用映射为运行最终输出 | 三家共同出口 |
 | LLM | prompt/system/model -> `text` + usage | 三家核心生成节点 |
 | Classifier | 输入/classes/default -> 选中 handle | Dify question classifier、Coze intent detector |
-| Knowledge | query + 已绑定知识库 -> 检索结果 | 复用 NexaFlow RAG |
-| Condition | 两值 + 确定性操作符 -> true/false | 三家分支基础 |
+| Knowledge | query + 1–10 个已绑定知识库 + 返回条数（1–8） -> `content/hits/retrieval_stats/evidence_status` | 复用 NexaFlow RAG；兼容旧单知识库草稿 |
+| Condition | 两值 + 等值/包含/顺序/空值/长度/布尔操作符 -> true/false | 三家分支基础；补齐 MaxKB 常用确定性判断 |
 | Template | 引用模板 -> `text` | Dify template、MaxKB 变量引用 |
 | Variable | 任意 JSON/引用 -> `value` | 三家变量能力 |
 | MCP | 参数 + 已绑定只读工具 -> 工具输出 | 复用 MCP 策略与 durable ledger |
@@ -170,7 +170,9 @@ erDiagram
 
 变量语法为 `{{node_id.path}}`。完整字符串引用保留原 JSON 类型，嵌入字符串时对象和数组序列化为紧凑 JSON。Start 会拒绝未知、缺失或类型错误的输入。
 
-第二批再增加 Loop、Iteration、HITL、HTTP、Subworkflow。它们需要执行帧/迭代路径、暂停原因、恢复 CAS 或额外网络策略，不能仅添加一个卡片即宣称完成。
+节点库另提供“问题优化”和“指定回复”两个预设，分别生成标准 LLM 与 Template 节点，不增加新的持久化节点类型或执行分支。
+
+第二批再增加 Loop、Iteration、HITL、HTTP、Subworkflow。表单收集、文档/图片/音频处理和子应用调用也要等暂停恢复、类型化上传、模型能力与子工作流边界落地后再增加；这些能力不能仅添加一个卡片即宣称完成。
 
 ## 7. Code 生产沙箱
 

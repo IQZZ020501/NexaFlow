@@ -27,9 +27,10 @@ from tests.support import (  # noqa: F401  (sets required env before app imports
     test_client,
 )
 
-from app.application import agent_access, agent_executor, agent_runs, agent_tools
+from app.application import agent_access, agent_executor, agent_memory, agent_runs, agent_tools
 from app.application import agents as agent_application
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.repositories import user as user_repository
 from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.capabilities.mcp import client as mcp_client_module
@@ -42,8 +43,9 @@ from app.capabilities.mcp.client import (
     normalize_mcp_url,
 )
 from app.schemas.knowledge import KnowledgeQueryHitResponse
-from app.entities.agents import AgentToolCall
+from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
+from app.entities.workflows import WorkflowUpload
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.system_log import SystemLog
@@ -60,6 +62,26 @@ from app.shareddomain.agents.runtime.graph import MAX_REASONING_CHARS
 from app.shareddomain.tools import services as mcp_services
 
 MEMBER_PASSWORD = "AgentMember@12345."
+
+
+async def create_pending_upload_for_user(
+    workspace_id: str,
+    agent_id: str,
+    user_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        await workflow_repository.create_upload(
+            db,
+            WorkflowUpload(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                uploaded_by_user_id=user_id,
+                filename="pending.txt",
+                size_bytes=1,
+                object_key=f"workflow-uploads/{workspace_id}/{agent_id}/{user_id}",
+            ),
+        )
+        await db.commit()
 
 
 class AgentModelHandler(BaseHTTPRequestHandler):
@@ -799,6 +821,27 @@ def assert_tool_routing_context_is_explicit() -> None:
         "user",
     ]
 
+    run.attachment_context = "--- release.txt ---\nShip on Friday."
+    messages_with_attachment = agent_runs.execution_messages(
+        run,  # type: ignore[arg-type]
+        False,
+        False,
+    )
+    assert messages_with_attachment[-2]["role"] == "user"
+    assert "untrusted user-provided data" in messages_with_attachment[-2]["content"]
+    assert "Ship on Friday." in messages_with_attachment[-2]["content"]
+    assert messages_with_attachment[-1]["content"] == run.goal
+    historical_messages = agent_memory._run_messages(
+        AgentRun(
+            status="succeeded",
+            goal=run.goal,
+            result="Use the release attachment.",
+            attachment_context=run.attachment_context,
+        )
+    )
+    assert "historical turn" in historical_messages[0]["content"]
+    assert "Ship on Friday." in historical_messages[0]["content"]
+
     no_knowledge_system = agent_runs.execution_messages(
         run,  # type: ignore[arg-type]
         False,
@@ -819,6 +862,28 @@ def assert_tool_routing_context_is_explicit() -> None:
     assert (
         "Do not use for general knowledge or current external facts" in tool.description
     )
+
+    from pydantic import ValidationError
+
+    from app.schemas.agent import AgentCreateRequest
+
+    try:
+        AgentCreateRequest.model_validate(
+            {
+                "name": "Audio-only agent",
+                "model_id": "model-1",
+                "interaction_config": {
+                    "file_upload": True,
+                    "file_upload_setting": {
+                        "file_upload_type": ["audio"],
+                    },
+                },
+            }
+        )
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("Agent configuration accepted unsupported audio uploads")
 
 
 async def assert_final_turn_removes_tools() -> None:
@@ -1889,6 +1954,16 @@ def assert_external_agent_access() -> None:
                     "name": "Public Support",
                     "description": "Answers public questions",
                     "instructions": "Answer directly.",
+                    "interaction_config": {
+                        "prologue": "How can I help?",
+                        "tts_type": "BROWSER",
+                        "file_upload": True,
+                        "file_upload_setting": {
+                            "max_files": 2,
+                            "file_limit": 1,
+                            "file_upload_type": ["document", "image"],
+                        },
+                    },
                     "model_id": model_id,
                 },
             )
@@ -1954,7 +2029,84 @@ def assert_external_agent_access() -> None:
                 headers=auth_headers(admin_token),
             )
             assert profile.status_code == 200, profile.text
-            assert set(profile.json()) == {"id", "name", "description"}
+            assert set(profile.json()) == {
+                "id",
+                "name",
+                "description",
+                "interaction_config",
+            }
+            assert profile.json()["interaction_config"]["prologue"] == "How can I help?"
+            upload_user_id, _upload_user_token = create_active_user(
+                client,
+                admin_token,
+                "upload-only",
+            )
+            upload_membership = client.post(
+                f"/api/v1/workspaces/{workspace_id}/members",
+                headers=auth_headers(admin_token),
+                json={"user_id": upload_user_id, "role": "member"},
+            )
+            assert upload_membership.status_code == 201, upload_membership.text
+            asyncio.run(
+                create_pending_upload_for_user(
+                    workspace_id,
+                    agent_id,
+                    upload_user_id,
+                )
+            )
+            upload_user_delete = client.delete(
+                f"/api/v1/admin/users/{upload_user_id}",
+                headers=auth_headers(admin_token),
+            )
+            assert upload_user_delete.status_code == 204, upload_user_delete.text
+            uploaded = client.post(
+                f"{public_base}/uploads",
+                headers=auth_headers(admin_token),
+                files={"files": ("context.txt", b"release attachment", "text/plain")},
+            )
+            assert uploaded.status_code == 201, uploaded.text
+            pending_upload_agent = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Pending Upload Agent",
+                    "model_id": model_id,
+                    "interaction_config": {
+                        "file_upload": True,
+                        "file_upload_setting": {
+                            "file_upload_type": ["document"],
+                        },
+                    },
+                },
+            )
+            assert pending_upload_agent.status_code == 201, pending_upload_agent.text
+            pending_agent_id = pending_upload_agent.json()["id"]
+            pending_upload = client.post(
+                agents_url(workspace_id, f"/{pending_agent_id}/uploads"),
+                headers=auth_headers(admin_token),
+                files={"files": ("pending.txt", b"pending", "text/plain")},
+            )
+            assert pending_upload.status_code == 201, pending_upload.text
+            pending_delete = client.delete(
+                agents_url(workspace_id, f"/{pending_agent_id}"),
+                headers=auth_headers(admin_token),
+            )
+            assert pending_delete.status_code == 204, pending_delete.text
+            attachment_run = client.post(
+                f"{public_base}/runs",
+                headers=auth_headers(admin_token),
+                json={
+                    "goal": "Read the attachment",
+                    "file_ids": [uploaded.json()[0]["id"]],
+                },
+            )
+            assert attachment_run.status_code == 201, attachment_run.text
+            stored_attachment_run = asyncio.run(
+                run_snapshot(attachment_run.json()["id"])
+            )
+            assert stored_attachment_run is not None
+            assert "release attachment" in stored_attachment_run.attachment_context
+            assert stored_attachment_run.goal == "Read the attachment"
             openapi = client.get("/openapi.json")
             assert openapi.status_code == 200, openapi.text
             docs = client.get("/docs")
@@ -1966,21 +2118,22 @@ def assert_external_agent_access() -> None:
                 "/api/v1/agent-api/{agent_id}/documentation",
                 "/api/v1/agent-api/{agent_id}/runs",
             }.issubset(openapi_payload["paths"])
-            external_create_schema = openapi_payload["components"]["schemas"][
-                "ExternalAgentRunCreateRequest"
+            public_create_schema = openapi_payload["components"]["schemas"][
+                "PublicAgentRunCreateRequest"
             ]
-            assert set(external_create_schema["properties"]) == {
+            assert set(public_create_schema["properties"]) == {
                 "goal",
                 "conversation_id",
+                "file_ids",
             }
-            for path in (
-                "/api/v1/public/agents/{agent_id}/runs",
-                "/api/v1/agent-api/{agent_id}/runs",
-            ):
-                schema_ref = openapi_payload["paths"][path]["post"]["requestBody"][
-                    "content"
-                ]["application/json"]["schema"]["$ref"]
-                assert schema_ref.endswith("/ExternalAgentRunCreateRequest")
+            public_schema_ref = openapi_payload["paths"][
+                "/api/v1/public/agents/{agent_id}/runs"
+            ]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+            assert public_schema_ref.endswith("/PublicAgentRunCreateRequest")
+            api_schema_ref = openapi_payload["paths"][
+                "/api/v1/agent-api/{agent_id}/runs"
+            ]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+            assert api_schema_ref.endswith("/ExternalAgentRunCreateRequest")
 
             second_agent = client.post(
                 agents_url(workspace_id),

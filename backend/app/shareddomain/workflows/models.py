@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -16,6 +16,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.infrastructure.base import Base
 from app.infrastructure.model_utils import new_id, utc_now
+
+
+def workflow_upload_expires_at() -> datetime:
+    return utc_now() + timedelta(days=1)
 
 
 class WorkflowDefinition(Base):
@@ -188,6 +192,70 @@ class WorkflowNodeExecution(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class WorkflowUpload(Base):
+    __tablename__ = "workflow_uploads"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "agent_id"],
+            ["agents.workspace_id", "agents.id"],
+            name="fk_workflow_uploads_agent_workspace",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "category IN ('document', 'image', 'audio')",
+            name="ck_workflow_uploads_category",
+        ),
+        CheckConstraint("size_bytes > 0", name="ck_workflow_uploads_size"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    uploaded_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str] = mapped_column(String(20), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=workflow_upload_expires_at,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class WorkflowUploadStorageCleanup(Base):
+    __tablename__ = "workflow_upload_storage_cleanups"
+    __table_args__ = (
+        CheckConstraint("size_bytes > 0", name="ck_workflow_upload_cleanups_size"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    # No foreign keys: the retry record must survive user, Agent, and workspace deletion.
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    uploaded_by_user_id: Mapped[str] = mapped_column(
+        String(36), nullable=False, index=True
+    )
+    object_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now

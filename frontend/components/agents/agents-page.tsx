@@ -56,8 +56,10 @@ import {
   resolveAgentToolCall,
   revokeAgentPermission,
   streamAgentRun,
+  uploadAgentFiles,
   updateAgent,
   type Agent,
+  type AgentInteractionConfig,
   type AgentMcpToolRef,
   type AgentPermission,
   type AppType,
@@ -65,6 +67,7 @@ import {
   type AgentRunStreamEvent,
   type AgentToolCall,
 } from "@/lib/api/agents"
+import { speakBrowserText } from "@/lib/browser-tts"
 import { listKnowledgeBases, type KnowledgeBase } from "@/lib/api/knowledge"
 import { listRegisteredModels, type RegisteredModel } from "@/lib/api/llm"
 import { listMcpServers, type McpServer } from "@/lib/api/mcp"
@@ -73,6 +76,7 @@ import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { getErrorMessage } from "@/lib/errors"
 import { getMembershipRole } from "@/lib/display"
 import { appViewPath, type AgentDetailView } from "@/lib/agent-views"
+import { normalizeInteractionConfigForAppType } from "@/lib/interaction-config"
 
 const WorkflowDetailWorkspace = dynamic(
   () =>
@@ -87,6 +91,7 @@ export type AgentFormState = {
   appType: AppType
   name: string
   description: string
+  interactionConfig: AgentInteractionConfig
   modelId: string
   instructions: string
   knowledgeQueryMode: Agent["knowledge_query_mode"]
@@ -100,6 +105,17 @@ const EMPTY_FORM: AgentFormState = {
   appType: "agent",
   name: "",
   description: "",
+  interactionConfig: {
+    prologue: "",
+    tts_type: "BROWSER",
+    file_upload: false,
+    file_upload_setting: {
+      max_files: 3,
+      file_limit: 10,
+      file_upload_type: ["document", "image"],
+    },
+    user_input_title: "",
+  },
   modelId: "",
   instructions: "",
   knowledgeQueryMode: "required",
@@ -114,6 +130,7 @@ function formFromAgent(agent: Agent): AgentFormState {
     appType: agent.app_type,
     name: agent.name,
     description: agent.description,
+    interactionConfig: structuredClone(agent.interaction_config),
     modelId: agent.model_id,
     instructions: agent.instructions,
     knowledgeQueryMode: agent.knowledge_query_mode,
@@ -305,6 +322,8 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
   return (
     form.name.trim() !== agent.name ||
     form.description.trim() !== agent.description ||
+    JSON.stringify(form.interactionConfig) !==
+      JSON.stringify(agent.interaction_config) ||
     form.modelId !== agent.model_id ||
     form.instructions.trim() !== agent.instructions ||
     form.knowledgeQueryMode !== agent.knowledge_query_mode ||
@@ -328,7 +347,7 @@ export function AgentsPage({
   const router = useRouter()
   const params = useParams<{ id?: string }>()
   const selectedAgentId = params.id ?? null
-  const { t } = useLanguage()
+  const { language, t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
   const [agents, setAgents] = React.useState<Agent[]>([])
   const [models, setModels] = React.useState<RegisteredModel[]>([])
@@ -344,6 +363,7 @@ export function AgentsPage({
     null
   )
   const [question, setQuestion] = React.useState("")
+  const [agentFiles, setAgentFiles] = React.useState<File[]>([])
   const [pendingQuestion, setPendingQuestion] = React.useState<string | null>(
     null
   )
@@ -844,7 +864,14 @@ export function AgentsPage({
   }
 
   function chooseAppType(appType: AppType) {
-    setForm((current) => ({ ...current, appType }))
+    setForm((current) => ({
+      ...current,
+      appType,
+      interactionConfig: normalizeInteractionConfigForAppType(
+        current.interactionConfig,
+        appType
+      ),
+    }))
     setIsChooserOpen(false)
     setIsDialogOpen(true)
   }
@@ -860,10 +887,15 @@ export function AgentsPage({
       return
     setIsSaving(true)
     try {
+      const interactionConfig = normalizeInteractionConfigForAppType(
+        form.interactionConfig,
+        form.appType
+      )
       const payload = {
         name: form.name.trim(),
         app_type: form.appType,
         description: form.description.trim(),
+        interaction_config: interactionConfig,
         model_id: form.modelId,
         instructions: form.instructions,
         knowledge_query_mode: form.knowledgeQueryMode,
@@ -1150,6 +1182,14 @@ export function AgentsPage({
     setRuns((current) => [placeholderRun, ...current])
     let liveRunId: string | null = null
     try {
+      const uploaded = agentFiles.length
+        ? await uploadAgentFiles(
+            token,
+            selectedWorkspaceId,
+            selectedAgent.id,
+            agentFiles
+          )
+        : []
       await streamAgentRun(
         token,
         selectedWorkspaceId,
@@ -1185,10 +1225,19 @@ export function AgentsPage({
           if (streamEvent.type === "error") {
             notify("error", t("Agent 回答失败"))
           }
+          if (
+            streamEvent.type === "complete" &&
+            streamEvent.run.status === "succeeded" &&
+            selectedAgent.interaction_config.tts_type === "BROWSER"
+          ) {
+            speakBrowserText(streamEvent.run.result, language)
+          }
         },
         askAbortController.signal,
-        conversationId
+        conversationId,
+        uploaded.map((item) => item.id)
       )
+      setAgentFiles([])
     } catch (error) {
       const userCancelled = askAbortController.signal.aborted
       const isCurrentConversation = isCurrentAgentConversation(
@@ -1229,6 +1278,7 @@ export function AgentsPage({
     setRuns([])
     setToolCallsByRun({})
     setQuestion("")
+    setAgentFiles([])
     setPendingQuestion(null)
     setAskAbortController(null)
     setIsAsking(false)
@@ -1266,6 +1316,12 @@ export function AgentsPage({
         return
       }
       setRuns((current) => mergeAgentRunSnapshot(current, run))
+      if (
+        run.status === "succeeded" &&
+        selectedAgent.interaction_config.tts_type === "BROWSER"
+      ) {
+        speakBrowserText(run.result, language)
+      }
       await loadRunToolCalls(selectedAgent.id, runId, conversationId)
       if (
         !isCurrentAgentConversation(
@@ -1348,6 +1404,8 @@ export function AgentsPage({
           resolvingCallId={resolvingCallId}
           question={question}
           setQuestion={setQuestion}
+          files={agentFiles}
+          setFiles={setAgentFiles}
           pendingQuestion={pendingQuestion}
           isDirty={isDirty}
           isSaving={isSaving}

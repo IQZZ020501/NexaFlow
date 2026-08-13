@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,7 @@ from app.application.workflows import (
     list_external_workflow_runs,
     list_public_workflow_conversations,
     stream_external_workflow_run,
+    upload_public_workflow_files,
 )
 from app.schemas.workflow import (
     ExternalWorkflowRunCreateRequest,
@@ -28,6 +29,7 @@ from app.schemas.workflow import (
     PublicWorkflowConversationListResponse,
     PublicWorkflowProfileResponse,
     WorkflowApiDocumentationResponse,
+    WorkflowUploadResponse,
 )
 
 _api_key_scheme = HTTPBearer(auto_error=False)
@@ -82,6 +84,22 @@ async def public_workflow_conversations(
 ) -> PublicWorkflowConversationListResponse:
     await get_workspace_published_workflow_context(db, workflow_id, user)
     return await list_public_workflow_conversations(db, workflow_id, user.id)
+
+
+@public_router.post(
+    "/uploads",
+    response_model=list[WorkflowUploadResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_public_workflow_attachments(
+    workflow_id: str,
+    files: Annotated[list[UploadFile], File()],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> list[WorkflowUploadResponse]:
+    context = await get_workspace_published_workflow_context(db, workflow_id, user)
+    return await upload_public_workflow_files(db, context, user.id, files, settings)
 
 
 @public_router.get("/runs", response_model=ExternalWorkflowRunListResponse)

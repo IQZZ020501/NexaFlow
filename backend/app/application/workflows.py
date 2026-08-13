@@ -38,6 +38,7 @@ from app.application.workflow_access import (
     list_public_workflow_conversations,
     stream_external_workflow_run,
 )
+from app.application.workflow_uploads import upload_public_workflow_files
 
 __all__ = [
     "create_workflow_run",
@@ -56,6 +57,7 @@ __all__ = [
     "restore_workflow_version",
     "stream_workflow_run",
     "stream_external_workflow_run",
+    "upload_public_workflow_files",
     "update_workflow_definition",
     "validate_workflow_definition",
 ]

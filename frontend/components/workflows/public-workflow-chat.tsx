@@ -10,6 +10,7 @@ import {
   LoaderCircleIcon,
   MenuIcon,
   MessageSquarePlusIcon,
+  PaperclipIcon,
   PlayIcon,
   WorkflowIcon,
 } from "lucide-react"
@@ -31,6 +32,7 @@ import {
   initializePublicWorkflow,
   listPublicWorkflowRuns,
   observePublicWorkflowRun,
+  uploadPublicWorkflowFiles,
   type ExternalWorkflowRun,
   type PublicWorkflowConversation,
   type PublicWorkflowInput,
@@ -38,6 +40,7 @@ import {
   type PublicWorkflowRunStreamEvent,
 } from "@/lib/api/public-workflows"
 import { getErrorMessage } from "@/lib/errors"
+import { speakBrowserText, workflowSpeechText } from "@/lib/browser-tts"
 
 type InputValues = Record<string, string | boolean>
 
@@ -187,7 +190,7 @@ export function PublicWorkflowChat({
   initialConversationId?: string | null
 }) {
   const router = useRouter()
-  const { t } = useLanguage()
+  const { language, t } = useLanguage()
   const { token, isSessionRestored } = useSession()
   const [profile, setProfile] = React.useState<PublicWorkflowProfile | null>(
     null
@@ -200,6 +203,7 @@ export function PublicWorkflowChat({
   )
   const [runs, setRuns] = React.useState<ExternalWorkflowRun[]>([])
   const [values, setValues] = React.useState<InputValues>({})
+  const [files, setFiles] = React.useState<File[]>([])
   const [loading, setLoading] = React.useState(true)
   const [runsLoading, setRunsLoading] = React.useState(false)
   const [running, setRunning] = React.useState(false)
@@ -247,6 +251,7 @@ export function PublicWorkflowChat({
   function selectConversation(nextId: string | null) {
     streamRef.current?.abort()
     setRuns([])
+    setFiles([])
     setRunsLoading(Boolean(nextId))
     setConversationId(nextId)
     setError(null)
@@ -271,11 +276,15 @@ export function PublicWorkflowChat({
     setRunning(true)
     setError(null)
     try {
+      const uploaded = files.length
+        ? await uploadPublicWorkflowFiles(workflowId, token, files)
+        : []
       const run = await createPublicWorkflowRun(
         workflowId,
         token,
         inputs,
-        conversationId
+        conversationId,
+        uploaded.map((item) => item.id)
       )
       const nextConversationId = run.conversation_id
       setConversationId(nextConversationId)
@@ -290,11 +299,28 @@ export function PublicWorkflowChat({
           workflowId,
           token,
           run.id,
-          (streamEvent) =>
-            setRuns((current) => updateRun(current, run.id, streamEvent)),
+          (streamEvent) => {
+            setRuns((current) => updateRun(current, run.id, streamEvent))
+            if (
+              streamEvent.type === "complete" &&
+              streamEvent.run.status === "succeeded" &&
+              profile.interaction_config.tts_type === "BROWSER"
+            ) {
+              speakBrowserText(
+                workflowSpeechText(streamEvent.run.outputs),
+                language
+              )
+            }
+          },
           controller.signal
         )
+      } else if (
+        run.status === "succeeded" &&
+        profile.interaction_config.tts_type === "BROWSER"
+      ) {
+        speakBrowserText(workflowSpeechText(run.outputs), language)
       }
+      setFiles([])
       const refreshed = await initializePublicWorkflow(workflowId, token)
       setConversations(refreshed.conversations.items)
     } catch (reason) {
@@ -375,7 +401,7 @@ export function PublicWorkflowChat({
                 {t("正在加载")}
               </p>
             ) : (
-              runs.map((run) => (
+              runs.length ? runs.map((run) => (
                 <article
                   key={run.id}
                   className="space-y-3 rounded-lg border bg-background p-4 shadow-xs"
@@ -446,7 +472,11 @@ export function PublicWorkflowChat({
                     </p>
                   ) : null}
                 </article>
-              ))
+              )) : profile.interaction_config.prologue ? (
+                <div className="rounded-lg border bg-background p-4 text-sm leading-6 shadow-xs whitespace-pre-wrap">
+                  {profile.interaction_config.prologue}
+                </div>
+              ) : null
             )}
 
             <form
@@ -454,7 +484,9 @@ export function PublicWorkflowChat({
               onSubmit={handleRun}
             >
               <div className="mb-4">
-                <h2 className="text-sm font-semibold">{t("运行工作流")}</h2>
+                <h2 className="text-sm font-semibold">
+                  {profile.interaction_config.user_input_title || t("运行工作流")}
+                </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {t("输入将从开始节点注入已发布版本。")}
                 </p>
@@ -465,11 +497,28 @@ export function PublicWorkflowChat({
                     key={field.name}
                     className="grid gap-1.5 text-sm font-medium"
                   >
-                    {field.name}
+                    {field.label || field.name}
                     {field.required ? (
                       <span className="text-destructive">*</span>
                     ) : null}
-                    {field.type === "boolean" ? (
+                    {field.control === "select" ? (
+                      <select
+                        className="h-9 rounded-md border bg-background px-3 text-sm"
+                        required={field.required}
+                        value={String(values[field.name] ?? "")}
+                        onChange={(event) =>
+                          setValues((current) => ({
+                            ...current,
+                            [field.name]: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">{t("请选择")}</option>
+                        {field.options.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    ) : field.type === "boolean" ? (
                       <input
                         type="checkbox"
                         className="size-4 accent-primary"
@@ -494,7 +543,13 @@ export function PublicWorkflowChat({
                       />
                     ) : (
                       <Input
-                        type={field.type === "number" ? "number" : "text"}
+                        type={
+                          field.control === "date"
+                            ? "date"
+                            : field.type === "number"
+                              ? "number"
+                              : "text"
+                        }
                         required={field.required}
                         value={String(values[field.name] ?? "")}
                         onChange={(event) =>
@@ -507,7 +562,45 @@ export function PublicWorkflowChat({
                     )}
                   </label>
                 ))}
-                {!profile.inputs.length ? (
+                {profile.interaction_config.file_upload ? (
+                  <label className="grid gap-1.5 text-sm font-medium">
+                    <span className="flex items-center gap-2">
+                      <PaperclipIcon className="size-4" />
+                      {t("文件上传")}
+                    </span>
+                    <Input
+                      type="file"
+                      multiple
+                      accept={profile.interaction_config.file_upload_setting.file_upload_type.flatMap((type) => ({
+                        document: [".csv", ".docx", ".epub", ".html", ".ipynb", ".json", ".md", ".pdf", ".pptx", ".txt", ".xls", ".xlsx", ".xml", ".zip"],
+                        image: [".jpeg", ".jpg", ".png", ".webp"],
+                        audio: [".m4a", ".mp3", ".ogg", ".wav", ".webm"],
+                      })[type]).join(",")}
+                      onChange={(event) => {
+                        const selected = Array.from(event.target.files ?? [])
+                        const setting = profile.interaction_config.file_upload_setting
+                        if (
+                          selected.length > setting.max_files ||
+                          selected.some((file) => file.size > setting.file_limit * 1024 * 1024)
+                        ) {
+                          event.target.value = ""
+                          setFiles([])
+                          setError(t("文件数量或大小超过限制。"))
+                          return
+                        }
+                        setError(null)
+                        setFiles(selected)
+                      }}
+                    />
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {t("最多 {count} 个文件，每个不超过 {size} MB", {
+                        count: profile.interaction_config.file_upload_setting.max_files,
+                        size: profile.interaction_config.file_upload_setting.file_limit,
+                      })}
+                    </span>
+                  </label>
+                ) : null}
+                {!profile.inputs.length && !profile.interaction_config.file_upload ? (
                   <p className="text-sm text-muted-foreground">
                     {t("此工作流无需输入。")}
                   </p>

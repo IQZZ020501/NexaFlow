@@ -25,7 +25,9 @@ from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.ports import model_registry
 from app.shareddomain.knowledge.services import delete_workspace_knowledge_bases
+from app.shareddomain.workflows.uploads import queue_upload_cleanups
 from app.tasks.knowledge import enqueue_knowledge_storage_cleanup
+from app.tasks.knowledge import enqueue_upload_storage_cleanups
 from app.schemas.workspace import (
     WorkspaceMemberResponse,
     WorkspaceUserCreateRequest,
@@ -448,6 +450,10 @@ async def delete_workspace_permanently(
         db,
         workspace.id,
     )
+    upload_cleanup_ids = await queue_upload_cleanups(
+        db,
+        workspace_id=workspace.id,
+    )
     record_audit_log(
         db,
         actor,
@@ -468,3 +474,4 @@ async def delete_workspace_permanently(
     await db.commit()
     for cleanup_id in cleanup_ids:
         await enqueue_knowledge_storage_cleanup(cleanup_id, settings)
+    await enqueue_upload_storage_cleanups(upload_cleanup_ids, settings)

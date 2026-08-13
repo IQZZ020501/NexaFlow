@@ -51,6 +51,7 @@ from app.schemas.agent import (
     PublicAgentConversationResponse,
     PublicAgentProfileResponse,
 )
+from app.application.workflow_uploads import resolve_public_agent_files
 from app.shareddomain.agents.services import (
     ACTIVE_STATUS,
     AgentPublication,
@@ -530,6 +531,7 @@ async def get_public_agent_profile(
         id=context.agent.id,
         name=context.publication.name,
         description=context.publication.description,
+        interaction_config=context.publication.interaction_config,
     )
 
 
@@ -764,9 +766,24 @@ async def create_external_agent_run(
     goal: str,
     settings: Settings,
     conversation_id: str | None = None,
+    file_ids: list[str] | None = None,
 ) -> ExternalAgentRunResponse:
     await _enforce_rate_limit(settings, context.agent.id, access_source, consumer_id)
     assert context.publication is not None
+    attachment_context = ""
+    if file_ids:
+        if access_source != "public":
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Agent API runs do not accept public upload ids.",
+            )
+        attachment_context = await resolve_public_agent_files(
+            db,
+            context,
+            consumer_id,
+            file_ids,
+            settings,
+        )
     run, _ = await prepare_agent_run(
         db,
         context.agent.workspace_id,
@@ -778,6 +795,7 @@ async def create_external_agent_run(
         access_source=access_source,
         consumer_id=consumer_id,
         publication=context.publication,
+        attachment_context=attachment_context,
     )
     await enqueue_prepared_agent_run(run.id, settings)
     current = await agent_repository.refresh_agent_run(db, run)

@@ -70,6 +70,9 @@ class Agent(Base):
         String(20), nullable=False, default="agent", server_default="agent"
     )
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    interaction_config: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     model_id: Mapped[str] = mapped_column(ForeignKey("model.id"), nullable=False, index=True)
     knowledge_query_mode: Mapped[str] = mapped_column(
@@ -265,6 +268,9 @@ class AgentRun(Base):
         String(36), nullable=False, default=new_id
     )
     goal: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment_context: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=""
+    )
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     knowledge_base_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     knowledge_query_mode: Mapped[str] = mapped_column(

@@ -106,19 +106,35 @@ describe("workflow API", () => {
 
   test("parses published Start node inputs by declared type", () => {
     const fields = [
-      { name: "query", type: "string" as const, required: true, default: "" },
-      { name: "count", type: "number" as const, required: true, default: 2 },
+      {
+        name: "query", label: "Query", type: "string" as const,
+        control: "input" as const, required: true, default: "", options: [],
+        assignment_method: "user_input" as const,
+      },
+      {
+        name: "count", label: "Count", type: "number" as const,
+        control: "input" as const, required: true, default: 2, options: [],
+        assignment_method: "user_input" as const,
+      },
       {
         name: "enabled",
+        label: "Enabled",
         type: "boolean" as const,
+        control: "input" as const,
         required: false,
         default: true,
+        options: [],
+        assignment_method: "user_input" as const,
       },
       {
         name: "filters",
+        label: "Filters",
         type: "object" as const,
+        control: "input" as const,
         required: false,
         default: {},
+        options: [],
+        assignment_method: "user_input" as const,
       },
     ]
     const values = initialPublicWorkflowValues(fields)

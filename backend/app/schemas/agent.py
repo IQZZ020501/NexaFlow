@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.user import UserResponse
 
@@ -15,6 +15,44 @@ KnowledgeQueryMode = Literal["required", "agentic"]
 
 AppType = Literal["agent", "workflow"]
 
+FileUploadType = Literal["document", "image", "audio"]
+
+
+class AgentFileUploadSetting(BaseModel):
+    max_files: int = Field(default=3, ge=1, le=10)
+    file_limit: int = Field(default=10, ge=1, le=100)
+    file_upload_type: list[FileUploadType] = Field(
+        default_factory=lambda: ["document", "image"],
+        min_length=1,
+        max_length=3,
+    )
+
+    def model_post_init(self, __context: Any) -> None:
+        if len(self.file_upload_type) != len(set(self.file_upload_type)):
+            raise ValueError("Upload file types must be unique.")
+
+
+class AgentInteractionConfig(BaseModel):
+    prologue: str = Field(default="", max_length=1000)
+    tts_type: Literal["NONE", "BROWSER"] = "BROWSER"
+    file_upload: bool = False
+    file_upload_setting: AgentFileUploadSetting = Field(
+        default_factory=AgentFileUploadSetting
+    )
+    user_input_title: str = Field(default="", max_length=120)
+
+
+def validate_agent_interaction_config(
+    value: AgentInteractionConfig,
+    app_type: AppType,
+) -> AgentInteractionConfig:
+    if app_type == "agent" and any(
+        item not in {"document", "image"}
+        for item in value.file_upload_setting.file_upload_type
+    ):
+        raise ValueError("Agent attachments support documents and images only.")
+    return value
+
 
 class AgentResponse(BaseModel):
     id: str
@@ -22,6 +60,9 @@ class AgentResponse(BaseModel):
     name: str
     app_type: AppType
     description: str
+    interaction_config: AgentInteractionConfig = Field(
+        default_factory=AgentInteractionConfig
+    )
     instructions: str
     model_id: str
     knowledge_query_mode: KnowledgeQueryMode
@@ -42,17 +83,26 @@ class AgentCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     app_type: AppType = "agent"
     description: str = Field(default="", max_length=500)
+    interaction_config: AgentInteractionConfig = Field(
+        default_factory=AgentInteractionConfig
+    )
     instructions: str = Field(default="", max_length=8000)
     model_id: str = Field(min_length=1, max_length=36)
     knowledge_query_mode: KnowledgeQueryMode = "required"
     knowledge_base_ids: list[str] = Field(default_factory=list, max_length=4)
     mcp_tools: list[AgentMcpToolRef] = Field(default_factory=list, max_length=12)
 
+    @model_validator(mode="after")
+    def validate_interaction_config(self) -> "AgentCreateRequest":
+        validate_agent_interaction_config(self.interaction_config, self.app_type)
+        return self
+
 
 class AgentUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     app_type: AppType | None = None
     description: str | None = Field(default=None, max_length=500)
+    interaction_config: AgentInteractionConfig | None = None
     instructions: str | None = Field(default=None, max_length=8000)
     model_id: str | None = Field(default=None, min_length=1, max_length=36)
     knowledge_query_mode: KnowledgeQueryMode | None = None
@@ -74,6 +124,7 @@ class AgentPermissionUpsertRequest(BaseModel):
 class AgentRunCreateRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
+    file_ids: list[str] = Field(default_factory=list, max_length=10)
     preview: bool = Field(
         default=False,
         description="Deprecated compatibility field; runs are always durable.",
@@ -83,6 +134,10 @@ class AgentRunCreateRequest(BaseModel):
 class ExternalAgentRunCreateRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+
+class PublicAgentRunCreateRequest(ExternalAgentRunCreateRequest):
+    file_ids: list[str] = Field(default_factory=list, max_length=10)
 
 
 class AgentApiDocumentationResponse(BaseModel):
@@ -191,6 +246,17 @@ class PublicAgentProfileResponse(BaseModel):
     id: str
     name: str
     description: str
+    interaction_config: AgentInteractionConfig = Field(
+        default_factory=AgentInteractionConfig
+    )
+
+
+class AgentUploadResponse(BaseModel):
+    id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    category: FileUploadType
 
 
 class ExternalAgentKnowledgeHitResponse(BaseModel):

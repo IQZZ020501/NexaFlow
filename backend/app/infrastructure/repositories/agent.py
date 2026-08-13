@@ -45,6 +45,7 @@ _CONVERSATION_MEMORY_COLUMNS = (
     AgentRun.conversation_id,
     AgentRun.status,
     AgentRun.goal,
+    AgentRun.attachment_context,
     AgentRun.result,
     AgentRun.context_summary,
     AgentRun.created_at,
@@ -63,6 +64,7 @@ def _to_conversation_memory_entity(row: AgentRun) -> AgentRunEntity:
         conversation_id=row.conversation_id,
         status=row.status,
         goal=row.goal,
+        attachment_context=row.attachment_context,
         result=row.result,
         context_summary=row.context_summary,
         created_at=row.created_at,
@@ -110,6 +112,13 @@ async def list_agents(
 
 async def get_agent_by_id(db: AsyncSession, agent_id: str) -> AgentEntity | None:
     row = await db.get(Agent, agent_id)
+    return to_entity(AgentEntity, row) if row is not None else None
+
+
+async def lock_agent(db: AsyncSession, agent_id: str) -> AgentEntity | None:
+    row = await db.scalar(
+        select(Agent).where(Agent.id == agent_id).with_for_update()
+    )
     return to_entity(AgentEntity, row) if row is not None else None
 
 

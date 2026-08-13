@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.workflows import (
@@ -8,15 +8,209 @@ from app.entities.workflows import (
     WorkflowNodeExecution as WorkflowNodeExecutionEntity,
     WorkflowRunDetail as WorkflowRunDetailEntity,
     WorkflowVersion as WorkflowVersionEntity,
+    WorkflowUpload as WorkflowUploadEntity,
+    WorkflowUploadStorageCleanup as WorkflowUploadStorageCleanupEntity,
 )
 from app.infrastructure.repositories.mapping import refresh_entity, save, to_entity
-from app.shareddomain.agents.models import AgentRun
+from app.infrastructure.model_utils import utc_now
+from app.shareddomain.agents.models import Agent, AgentRun
 from app.shareddomain.workflows.models import (
     WorkflowDefinition,
     WorkflowNodeExecution,
     WorkflowRunDetail,
     WorkflowVersion,
+    WorkflowUpload,
+    WorkflowUploadStorageCleanup,
 )
+
+
+async def create_upload(
+    db: AsyncSession,
+    entity: WorkflowUploadEntity,
+) -> WorkflowUploadEntity:
+    row = await save(db, WorkflowUpload, entity)
+    return to_entity(WorkflowUploadEntity, row)
+
+
+async def list_uploads(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    uploaded_by_user_id: str,
+    upload_ids: list[str],
+) -> list[WorkflowUploadEntity]:
+    if not upload_ids:
+        return []
+    rows = await db.scalars(
+        select(WorkflowUpload).where(
+            WorkflowUpload.workspace_id == workspace_id,
+            WorkflowUpload.agent_id == agent_id,
+            WorkflowUpload.uploaded_by_user_id == uploaded_by_user_id,
+            WorkflowUpload.id.in_(upload_ids),
+            WorkflowUpload.expires_at > utc_now(),
+        ).with_for_update()
+    )
+    return [to_entity(WorkflowUploadEntity, row) for row in rows.all()]
+
+
+async def count_uploads(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    uploaded_by_user_id: str,
+) -> int | None:
+    locked_agent_id = await db.scalar(
+        select(Agent.id)
+        .where(Agent.workspace_id == workspace_id, Agent.id == agent_id)
+        .with_for_update()
+    )
+    if locked_agent_id is None:
+        return None
+    return int(
+        await db.scalar(
+            select(func.count(WorkflowUpload.id)).where(
+                WorkflowUpload.workspace_id == workspace_id,
+                WorkflowUpload.agent_id == agent_id,
+                WorkflowUpload.uploaded_by_user_id == uploaded_by_user_id,
+                WorkflowUpload.expires_at > utc_now(),
+            )
+        )
+        or 0
+    )
+
+
+async def pending_upload_bytes(
+    db: AsyncSession,
+    workspace_id: str,
+    uploaded_by_user_id: str,
+) -> int:
+    live_bytes = (
+        select(func.coalesce(func.sum(WorkflowUpload.size_bytes), 0))
+        .where(
+            WorkflowUpload.workspace_id == workspace_id,
+            WorkflowUpload.uploaded_by_user_id == uploaded_by_user_id,
+        )
+        .scalar_subquery()
+    )
+    cleanup_bytes = (
+        select(func.coalesce(func.sum(WorkflowUploadStorageCleanup.size_bytes), 0))
+        .where(
+            WorkflowUploadStorageCleanup.workspace_id == workspace_id,
+            WorkflowUploadStorageCleanup.uploaded_by_user_id
+            == uploaded_by_user_id,
+        )
+        .scalar_subquery()
+    )
+    return int(await db.scalar(select(live_bytes + cleanup_bytes)) or 0)
+
+
+async def queue_upload_cleanups(
+    db: AsyncSession,
+    *,
+    upload_ids: list[str] | None = None,
+    agent_id: str | None = None,
+    workspace_id: str | None = None,
+    uploaded_by_user_id: str | None = None,
+    expired_at: datetime | None = None,
+) -> list[str]:
+    conditions = []
+    if upload_ids is not None:
+        if not upload_ids:
+            return []
+        conditions.append(WorkflowUpload.id.in_(upload_ids))
+    if agent_id is not None:
+        conditions.append(WorkflowUpload.agent_id == agent_id)
+    if workspace_id is not None:
+        conditions.append(WorkflowUpload.workspace_id == workspace_id)
+    if uploaded_by_user_id is not None:
+        conditions.append(WorkflowUpload.uploaded_by_user_id == uploaded_by_user_id)
+    if expired_at is not None:
+        conditions.append(WorkflowUpload.expires_at <= expired_at)
+    if not conditions:
+        raise ValueError("Workflow upload cleanup requires a target.")
+
+    uploads = list(
+        (
+            await db.scalars(
+                select(WorkflowUpload).where(*conditions).with_for_update()
+            )
+        ).all()
+    )
+    cleanup_ids: list[str] = []
+    for upload in uploads:
+        cleanup = await create_upload_cleanup(
+            db,
+            WorkflowUploadStorageCleanupEntity(
+                workspace_id=upload.workspace_id,
+                uploaded_by_user_id=upload.uploaded_by_user_id,
+                object_key=upload.object_key,
+                size_bytes=upload.size_bytes,
+            ),
+        )
+        cleanup_ids.append(cleanup.id)
+    if uploads:
+        await db.execute(
+            delete(WorkflowUpload).where(
+                WorkflowUpload.id.in_([upload.id for upload in uploads])
+            )
+        )
+    return cleanup_ids
+
+
+async def create_upload_cleanup(
+    db: AsyncSession,
+    entity: WorkflowUploadStorageCleanupEntity,
+) -> WorkflowUploadStorageCleanupEntity:
+    row = await save(db, WorkflowUploadStorageCleanup, entity)
+    return to_entity(WorkflowUploadStorageCleanupEntity, row)
+
+
+async def lock_upload_cleanup(
+    db: AsyncSession,
+    cleanup_id: str,
+) -> WorkflowUploadStorageCleanupEntity | None:
+    row = await db.scalar(
+        select(WorkflowUploadStorageCleanup)
+        .where(WorkflowUploadStorageCleanup.id == cleanup_id)
+        .with_for_update()
+    )
+    return (
+        to_entity(WorkflowUploadStorageCleanupEntity, row)
+        if row is not None
+        else None
+    )
+
+
+async def list_due_upload_cleanup_ids(
+    db: AsyncSession,
+    due_at: datetime,
+    limit: int,
+) -> list[str]:
+    rows = await db.scalars(
+        select(WorkflowUploadStorageCleanup.id)
+        .where(WorkflowUploadStorageCleanup.next_attempt_at <= due_at)
+        .order_by(
+            WorkflowUploadStorageCleanup.next_attempt_at,
+            WorkflowUploadStorageCleanup.id,
+        )
+        .limit(limit)
+    )
+    return list(rows.all())
+
+
+async def save_upload_cleanup(
+    db: AsyncSession,
+    entity: WorkflowUploadStorageCleanupEntity,
+) -> None:
+    await save(db, WorkflowUploadStorageCleanup, entity)
+
+
+async def delete_upload_cleanup(db: AsyncSession, cleanup_id: str) -> None:
+    await db.execute(
+        delete(WorkflowUploadStorageCleanup).where(
+            WorkflowUploadStorageCleanup.id == cleanup_id
+        )
+    )
 
 
 async def get_definition(

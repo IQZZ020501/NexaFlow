@@ -41,6 +41,7 @@ import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
 
 import type { AgentFormState } from "./agents-page"
+import { InteractionConfigFields } from "./interaction-config-fields"
 
 type AgentConfigFieldsProps = {
   form: AgentFormState
@@ -276,6 +277,29 @@ export function AgentConfigFields({
             </Field>
           </div>
         </section>
+
+        {form.appType === "agent" ? (
+          <section className="rounded-xl border bg-background p-4 shadow-xs">
+            <div className="mb-4 flex items-center gap-2">
+              <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
+              <h3 className="text-sm font-semibold">{t("对话设置")}</h3>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <InteractionConfigFields
+                  appType={form.appType}
+                  value={form.interactionConfig}
+                  onChange={(interactionConfig) =>
+                    setForm((current) => ({ ...current, interactionConfig }))
+                  }
+                  t={t}
+                  idPrefix="agent"
+                  readOnly={readOnly}
+                />
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         {form.id && form.appType === "agent" ? (
           <section className="rounded-xl border bg-background p-4 shadow-xs">

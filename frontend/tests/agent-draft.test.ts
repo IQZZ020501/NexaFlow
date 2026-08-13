@@ -19,6 +19,7 @@ import {
   unrenderedAgentToolCalls,
 } from "../components/agents/agent-detail-workspace"
 import type { Agent, AgentRun, AgentToolCall } from "../lib/api/agents"
+import { normalizeInteractionConfigForAppType } from "../lib/interaction-config"
 
 describe("Agent conversation async guards", () => {
   test("does not restore an aborted question after switching conversations", async () => {
@@ -70,6 +71,17 @@ const agent: Agent = {
   name: "Research assistant",
   app_type: "agent",
   description: "Answers from workspace knowledge",
+  interaction_config: {
+    prologue: "",
+    tts_type: "BROWSER",
+    file_upload: false,
+    file_upload_setting: {
+      max_files: 3,
+      file_limit: 10,
+      file_upload_type: ["document", "image", "audio"],
+    },
+    user_input_title: "",
+  },
   instructions: "Cite the sources you use.",
   model_id: "model-1",
   knowledge_query_mode: "required",
@@ -91,6 +103,7 @@ const form: AgentFormState = {
   appType: agent.app_type,
   name: agent.name,
   description: agent.description,
+  interactionConfig: structuredClone(agent.interaction_config),
   modelId: agent.model_id,
   instructions: agent.instructions,
   knowledgeQueryMode: agent.knowledge_query_mode,
@@ -100,6 +113,26 @@ const form: AgentFormState = {
 }
 
 describe("Agent form state", () => {
+  test("normalizes attachment types at the shared app-type boundary", () => {
+    expect(
+      normalizeInteractionConfigForAppType(
+        {
+          ...agent.interaction_config,
+          file_upload_setting: {
+            ...agent.interaction_config.file_upload_setting,
+            file_upload_type: ["audio"],
+          },
+        },
+        "agent"
+      ).file_upload_setting.file_upload_type
+    ).toEqual(["document"])
+    expect(
+      normalizeInteractionConfigForAppType(
+        agent.interaction_config,
+        "workflow"
+      ).file_upload_setting.file_upload_type
+    ).toEqual(["document", "image", "audio"])
+  })
   test("publishes drafts, republishes changed releases, and unpublishes current releases", () => {
     expect(agentPublicationAction(agent)).toBe("publish")
     expect(

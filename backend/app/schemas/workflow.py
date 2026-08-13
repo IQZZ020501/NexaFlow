@@ -1,7 +1,9 @@
-from datetime import datetime
-from typing import Any, Literal
+from datetime import date, datetime
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.schemas.agent import AgentInteractionConfig
 
 
 WorkflowNodeType = Literal[
@@ -70,9 +72,40 @@ class WorkflowGraph(BaseModel):
 
 class WorkflowInputField(BaseModel):
     name: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    label: str = Field(default="", max_length=120)
     type: Literal["string", "number", "boolean", "object", "array"] = "string"
+    control: Literal["input", "select", "date"] = "input"
     required: bool = True
     default: Any = None
+    options: list[str] = Field(default_factory=list, max_length=50)
+    assignment_method: Literal["user_input", "api_input"] = "user_input"
+
+    @model_validator(mode="after")
+    def validate_control(self) -> "WorkflowInputField":
+        if self.control == "select" and not self.options:
+            raise ValueError("Select inputs require at least one option.")
+        if self.control == "select" and self.type != "string":
+            raise ValueError("Select inputs must use the string value type.")
+        if any(not option.strip() or len(option) > 120 for option in self.options):
+            raise ValueError("Input options must contain 1 to 120 characters.")
+        if len(self.options) != len(set(self.options)):
+            raise ValueError("Input options must be unique.")
+        if self.control == "date" and self.type != "string":
+            raise ValueError("Date inputs must use the string value type.")
+        if self.default is not None:
+            self.validate_control_value(self.default)
+        return self
+
+    def validate_control_value(self, value: Any) -> None:
+        if self.control == "select" and value not in self.options:
+            raise ValueError(f"Workflow input {self.name} must use a configured option.")
+        if self.control == "date":
+            try:
+                date.fromisoformat(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Workflow input {self.name} must use an ISO date."
+                ) from exc
 
 
 class StartNodeConfig(BaseModel):
@@ -108,8 +141,32 @@ class ClassifierNodeConfig(BaseModel):
 
 
 class KnowledgeNodeConfig(BaseModel):
-    knowledge_base_id: str = Field(min_length=1, max_length=36)
+    knowledge_base_id: str | None = Field(default=None, min_length=1, max_length=36)
+    knowledge_base_ids: list[
+        Annotated[str, Field(min_length=1, max_length=36)]
+    ] = Field(default_factory=list, max_length=10)
     query: Any
+    limit: int = Field(default=3, ge=1, le=8)
+
+    @model_validator(mode="after")
+    def validate_knowledge_bases(self) -> "KnowledgeNodeConfig":
+        ids = self.resolved_knowledge_base_ids
+        if not ids:
+            raise ValueError("At least one knowledge base is required.")
+        if len(ids) > 10:
+            raise ValueError("At most 10 knowledge bases are allowed.")
+        return self
+
+    @property
+    def resolved_knowledge_base_ids(self) -> list[str]:
+        return list(
+            dict.fromkeys(
+                [
+                    *([self.knowledge_base_id] if self.knowledge_base_id else []),
+                    *self.knowledge_base_ids,
+                ]
+            )
+        )
 
 
 class ConditionNodeConfig(BaseModel):
@@ -125,6 +182,13 @@ class ConditionNodeConfig(BaseModel):
         "less_than_or_equal",
         "is_empty",
         "is_not_empty",
+        "length_equals",
+        "length_greater_than",
+        "length_greater_than_or_equal",
+        "length_less_than",
+        "length_less_than_or_equal",
+        "is_true",
+        "is_false",
     ]
     right: Any = None
 
@@ -245,15 +309,22 @@ class WorkflowNodeExecutionListResponse(BaseModel):
 
 class PublicWorkflowInputFieldResponse(BaseModel):
     name: str
+    label: str = ""
     type: Literal["string", "number", "boolean", "object", "array"]
+    control: Literal["input", "select", "date"] = "input"
     required: bool
     default: Any = None
+    options: list[str] = Field(default_factory=list)
+    assignment_method: Literal["user_input", "api_input"] = "user_input"
 
 
 class PublicWorkflowProfileResponse(BaseModel):
     id: str
     name: str
     description: str
+    interaction_config: AgentInteractionConfig = Field(
+        default_factory=AgentInteractionConfig
+    )
     inputs: list[PublicWorkflowInputFieldResponse] = Field(default_factory=list)
 
 
@@ -273,7 +344,16 @@ class PublicWorkflowConversationListResponse(BaseModel):
 
 class ExternalWorkflowRunCreateRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict, max_length=100)
+    file_ids: list[str] = Field(default_factory=list, max_length=10)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+
+class WorkflowUploadResponse(BaseModel):
+    id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    category: Literal["document", "image", "audio"]
 
 
 class ExternalWorkflowProgressEventResponse(BaseModel):
@@ -310,4 +390,7 @@ class WorkflowApiDocumentationResponse(BaseModel):
     workflow_id: str
     workflow_name: str
     base_path: str
+    interaction_config: AgentInteractionConfig = Field(
+        default_factory=AgentInteractionConfig
+    )
     inputs: list[PublicWorkflowInputFieldResponse] = Field(default_factory=list)

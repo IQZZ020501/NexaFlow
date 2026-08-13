@@ -482,4 +482,35 @@ describe("public agent API", () => {
     expect(events).toEqual(["answer_delta", "complete"])
     expect(urls[1]).toContain("after=9")
   })
+
+  test("normalizes an immediately completed public run", async () => {
+    globalThis.fetch = (async () =>
+      Response.json(
+        {
+          id: "run-1",
+          conversation_id: "conversation-1",
+          question: "hello",
+          status: "succeeded",
+          result: "done",
+          error: null,
+          progress: [],
+          created_at: "2026-08-10T00:00:00Z",
+          started_at: null,
+          finished_at: "2026-08-10T00:00:01Z",
+          updated_at: "2026-08-10T00:00:01Z",
+        },
+        { status: 201 }
+      )) as unknown as typeof fetch
+    const events: string[] = []
+
+    const response = await import("../lib/api/public-agents")
+    await response.streamPublicAgentRun(
+      "agent-1",
+      "access-token",
+      "hello",
+      (event) => events.push(event.type)
+    )
+
+    expect(events).toEqual(["run", "complete"])
+  })
 })

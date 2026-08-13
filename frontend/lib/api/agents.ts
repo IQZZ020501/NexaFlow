@@ -6,12 +6,25 @@ export type KnowledgeQueryMode = "required" | "agentic"
 
 export type AppType = "agent" | "workflow"
 
+export type AgentInteractionConfig = {
+  prologue: string
+  tts_type: "NONE" | "BROWSER"
+  file_upload: boolean
+  file_upload_setting: {
+    max_files: number
+    file_limit: number
+    file_upload_type: Array<"document" | "image" | "audio">
+  }
+  user_input_title: string
+}
+
 export type Agent = {
   id: string
   workspace_id: string
   name: string
   app_type: AppType
   description: string
+  interaction_config: AgentInteractionConfig
   instructions: string
   model_id: string
   knowledge_query_mode: KnowledgeQueryMode
@@ -46,9 +59,18 @@ export type AgentPayload = {
   knowledge_base_ids: string[]
   mcp_tools: AgentMcpToolRef[]
   description?: string
+  interaction_config?: AgentInteractionConfig
   instructions?: string
   status?: "active" | "disabled"
   published?: boolean
+}
+
+export type AgentUpload = {
+  id: string
+  filename: string
+  content_type: string
+  size_bytes: number
+  category: "document" | "image" | "audio"
 }
 
 export type AgentPlanStep = {
@@ -453,7 +475,8 @@ export function createAgentRun(
   agentId: string,
   goal: string,
   signal?: AbortSignal,
-  conversationId?: string | null
+  conversationId?: string | null,
+  fileIds: string[] = []
 ) {
   return request<AgentRun>(agentsPath(workspaceId, `/${agentId}/runs`), {
     method: "POST",
@@ -461,8 +484,24 @@ export function createAgentRun(
     body: JSON.stringify({
       goal,
       ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(fileIds.length ? { file_ids: fileIds } : {}),
     }),
     signal,
+  })
+}
+
+export function uploadAgentFiles(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  files: File[]
+) {
+  const body = new FormData()
+  files.forEach((file) => body.append("files", file))
+  return request<AgentUpload[]>(agentsPath(workspaceId, `/${agentId}/uploads`), {
+    method: "POST",
+    token,
+    body,
   })
 }
 
@@ -555,7 +594,8 @@ export async function streamAgentRun(
   goal: string,
   onEvent: (event: AgentRunStreamEvent) => void,
   signal?: AbortSignal,
-  conversationId?: string | null
+  conversationId?: string | null,
+  fileIds: string[] = []
 ) {
   const run = await createAgentRun(
     token,
@@ -563,9 +603,17 @@ export async function streamAgentRun(
     agentId,
     goal,
     signal,
-    conversationId
+    conversationId,
+    fileIds
   )
   onEvent({ type: "run", sequence: 0, run })
-  if (TERMINAL_RUN_STATUSES.has(run.status)) return
+  if (TERMINAL_RUN_STATUSES.has(run.status)) {
+    onEvent({
+      type: run.status === "succeeded" ? "complete" : "error",
+      sequence: 0,
+      run,
+    })
+    return
+  }
   await observeAgentRun(token, workspaceId, agentId, run.id, onEvent, signal)
 }

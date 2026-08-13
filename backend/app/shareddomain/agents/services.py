@@ -16,8 +16,10 @@ from app.infrastructure.model_utils import utc_now
 from app.infrastructure.validation import normalize_name
 from app.schemas.agent import (
     AgentCreateRequest,
+    AgentInteractionConfig,
     AgentResponse,
     AgentUpdateRequest,
+    validate_agent_interaction_config,
 )
 from app.shareddomain.agents.permissions import (
     AGENT_RESOURCE_TYPE,
@@ -33,6 +35,7 @@ from app.shareddomain.knowledge.services import (
 from app.shareddomain.tools.services import resolve_mcp_tools
 from app.shareddomain.workflows.defaults import default_workflow_graph
 from app.shareddomain.workflows.engine import graph_hash
+from app.shareddomain.workflows.uploads import queue_upload_cleanups
 
 ACTIVE_STATUS = "active"
 DISABLED_STATUS = "disabled"
@@ -52,6 +55,11 @@ class AgentPublication:
     knowledge_query_mode: str
     knowledge_base_ids: list[str]
     mcp_tools: list[dict[str, str]]
+    interaction_config: dict[str, object]
+
+
+def normalized_interaction_config(value: dict[str, object]) -> dict[str, object]:
+    return AgentInteractionConfig.model_validate(value).model_dump(mode="json")
 
 
 def validate_agent_status(value: str) -> str:
@@ -73,6 +81,7 @@ def agent_to_response(
         name=agent.name,
         app_type=agent.app_type,
         description=agent.description,
+        interaction_config=normalized_interaction_config(agent.interaction_config),
         instructions=agent.instructions,
         model_id=agent.model_id,
         knowledge_query_mode=agent.knowledge_query_mode,
@@ -82,7 +91,6 @@ def agent_to_response(
         published=agent.published,
         has_unpublished_changes=(
             agent.published
-            and agent.app_type == "agent"
             and agent.published_snapshot is not None
             and agent.published_snapshot
             != agent_publication_snapshot(agent, knowledge_base_ids, mcp_tools)
@@ -112,6 +120,7 @@ def agent_publication(
             mcp_tools,
             key=lambda item: (item["server_id"], item["tool_name"]),
         ),
+        interaction_config=normalized_interaction_config(agent.interaction_config),
     )
 
 
@@ -129,13 +138,21 @@ def agent_publication_snapshot(
         "knowledge_query_mode": publication.knowledge_query_mode,
         "knowledge_base_ids": publication.knowledge_base_ids,
         "mcp_tools": publication.mcp_tools,
+        "interaction_config": publication.interaction_config,
     }
 
 
 def agent_publication_from_snapshot(agent: Agent) -> AgentPublication | None:
     if agent.published_snapshot is None:
         return None
-    return AgentPublication(**agent.published_snapshot)
+    return AgentPublication(
+        **{
+            **agent.published_snapshot,
+            "interaction_config": normalized_interaction_config(
+                agent.published_snapshot.get("interaction_config", {})
+            ),
+        }
+    )
 
 
 async def accessible_agent_knowledge_bases(
@@ -326,6 +343,7 @@ async def create_agent(
         name=normalize_name(payload.name),
         app_type=payload.app_type,
         description=payload.description.strip(),
+        interaction_config=payload.interaction_config.model_dump(mode="json"),
         instructions=payload.instructions.strip() or DEFAULT_AGENT_INSTRUCTIONS,
         model_id=model.id,
         knowledge_query_mode=payload.knowledge_query_mode,
@@ -468,9 +486,7 @@ async def update_agent(
     )[agent.id]
     legacy_publication_snapshot = (
         agent_publication_snapshot(agent, current_bindings, current_mcp_bindings)
-        if agent.app_type == "agent"
-        and agent.published
-        and agent.published_snapshot is None
+        if agent.published and agent.published_snapshot is None
         else None
     )
     configuration_changed = False
@@ -489,6 +505,15 @@ async def update_agent(
         description = payload.description.strip()
         configuration_changed = configuration_changed or description != agent.description
         agent.description = description
+    if payload.interaction_config is not None:
+        validate_agent_interaction_config(payload.interaction_config, agent.app_type)
+        interaction_config = payload.interaction_config.model_dump(mode="json")
+        configuration_changed = (
+            configuration_changed
+            or interaction_config
+            != normalized_interaction_config(agent.interaction_config)
+        )
+        agent.interaction_config = interaction_config
     if payload.instructions is not None:
         instructions = payload.instructions.strip() or DEFAULT_AGENT_INSTRUCTIONS
         configuration_changed = configuration_changed or instructions != agent.instructions
@@ -574,6 +599,9 @@ async def delete_agent(
     workspace_role: str | None,
 ) -> None:
     require_agent_edit(agent, actor, workspace_role)
+    agent = await agent_repository.lock_agent(db, agent.id)
+    if agent is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent not found.")
     record_audit_log(
         db,
         actor,
@@ -583,6 +611,7 @@ async def delete_agent(
         agent.name,
         workspace_id=agent.workspace_id,
     )
+    await queue_upload_cleanups(db, agent_id=agent.id)
     await agent_repository.delete_agent_graph(
         db,
         agent.workspace_id,

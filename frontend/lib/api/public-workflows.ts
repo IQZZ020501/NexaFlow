@@ -1,18 +1,32 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
+import type { AgentInteractionConfig } from "@/lib/api/agents"
 
 export type PublicWorkflowInput = {
   name: string
+  label: string
   type: "string" | "number" | "boolean" | "object" | "array"
+  control: "input" | "select" | "date"
   required: boolean
   default: unknown
+  options: string[]
+  assignment_method: "user_input" | "api_input"
 }
 
 export type PublicWorkflowProfile = {
   id: string
   name: string
   description: string
+  interaction_config: AgentInteractionConfig
   inputs: PublicWorkflowInput[]
+}
+
+export type WorkflowUpload = {
+  id: string
+  filename: string
+  content_type: string
+  size_bytes: number
+  category: "document" | "image" | "audio"
 }
 
 export type PublicWorkflowConversation = {
@@ -60,6 +74,7 @@ export type WorkflowApiDocumentation = {
   workflow_id: string
   workflow_name: string
   base_path: string
+  interaction_config: AgentInteractionConfig
   inputs: PublicWorkflowInput[]
 }
 
@@ -101,15 +116,31 @@ export function createPublicWorkflowRun(
   workflowId: string,
   token: string,
   inputs: Record<string, unknown>,
-  conversationId?: string | null
+  conversationId?: string | null,
+  fileIds: string[] = []
 ) {
   return request<ExternalWorkflowRun>(path(workflowId, "/runs"), {
     method: "POST",
     token,
     body: JSON.stringify({
       inputs,
+      ...(fileIds.length ? { file_ids: fileIds } : {}),
       ...(conversationId ? { conversation_id: conversationId } : {}),
     }),
+  })
+}
+
+export function uploadPublicWorkflowFiles(
+  workflowId: string,
+  token: string,
+  files: File[]
+) {
+  const body = new FormData()
+  files.forEach((file) => body.append("files", file))
+  return request<WorkflowUpload[]>(path(workflowId, "/uploads"), {
+    method: "POST",
+    token,
+    body,
   })
 }
 

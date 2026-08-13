@@ -172,6 +172,10 @@ async def _execute_claimed_workflow_run(
         mcp_tools=scope.mcp_tools,
         ledger=ledger,
         node_order=node_order,
+        input_assignment_method={
+            "public": "user_input",
+            "api": "api_input",
+        }.get(scope.run.access_source),
     )
     engine = WorkflowEngine(
         graph,

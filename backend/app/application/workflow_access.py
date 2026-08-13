@@ -14,6 +14,10 @@ from app.application.workflow_runs import (
     create_workflow_run,
     stream_workflow_run,
 )
+from app.application.workflow_uploads import (
+    published_interaction_config,
+    resolve_public_workflow_files,
+)
 from app.entities.agents import AgentRun
 from app.entities.user import User
 from app.infrastructure.agent_rate_limit import (
@@ -111,11 +115,13 @@ async def get_public_workflow_profile(
 ) -> PublicWorkflowProfileResponse:
     context = await get_workspace_published_workflow_context(db, workflow_id, user)
     inputs = await _published_start_inputs(db, context)
+    publication = context.publication
     return PublicWorkflowProfileResponse(
         id=context.agent.id,
-        name=context.agent.name,
-        description=context.agent.description,
-        inputs=inputs,
+        name=publication.name if publication else context.agent.name,
+        description=publication.description if publication else context.agent.description,
+        interaction_config=published_interaction_config(context),
+        inputs=[item for item in inputs if item.assignment_method == "user_input"],
     )
 
 
@@ -143,9 +149,16 @@ async def get_workflow_api_documentation(
 ) -> WorkflowApiDocumentationResponse:
     return WorkflowApiDocumentationResponse(
         workflow_id=context.agent.id,
-        workflow_name=context.agent.name,
+        workflow_name=(
+            context.publication.name if context.publication else context.agent.name
+        ),
         base_path=f"/api/v1/workflow-api/{context.agent.id}",
-        inputs=await _published_start_inputs(db, context),
+        interaction_config=published_interaction_config(context),
+        inputs=[
+            item
+            for item in await _published_start_inputs(db, context)
+            if item.assignment_method == "api_input"
+        ],
     )
 
 
@@ -181,6 +194,18 @@ async def create_external_workflow_run(
     settings: Settings,
 ) -> ExternalWorkflowRunResponse:
     await _rate_limit(settings, context.agent.id, source, consumer_id)
+    inputs = dict(payload.inputs)
+    if source == "api" and payload.file_ids:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "API workflow runs cannot use public upload ids.",
+        )
+    inputs["files"] = await resolve_public_workflow_files(
+        db,
+        context,
+        consumer_id,
+        payload.file_ids,
+    ) if source == "public" else []
     version = await workflow_repository.get_version(
         db, context.agent.workspace_id, context.agent.id
     )
@@ -191,7 +216,7 @@ async def create_external_workflow_run(
         context.agent.workspace_id,
         context.agent.id,
         WorkflowRunCreateRequest(
-            inputs=payload.inputs,
+            inputs=inputs,
             source="published",
             version_number=version.version_number,
         ),

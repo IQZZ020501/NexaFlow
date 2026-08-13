@@ -11,12 +11,17 @@ from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.schemas.workflow import (
+    KnowledgeNodeConfig,
     WorkflowDefinitionResponse,
     WorkflowGraph,
     WorkflowVersionResponse,
 )
 from app.shareddomain.agents.permissions import require_agent_edit, require_agent_view
-from app.shareddomain.agents.services import get_agent, get_agent_model
+from app.shareddomain.agents.services import (
+    agent_publication_snapshot,
+    get_agent,
+    get_agent_model,
+)
 from app.shareddomain.tools.services import (
     effective_mcp_tool_policy_mode,
     get_mcp_tool_policy,
@@ -101,6 +106,11 @@ async def validate_workflow_resources(
                     status.HTTP_422_UNPROCESSABLE_CONTENT,
                     f"Start node {node.id} input names must be unique.",
                 )
+            if "files" in input_names:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    'Start input name "files" is reserved for uploads.',
+                )
         elif node.data.type == "end":
             if any(
                 OUTPUT_NAME_PATTERN.fullmatch(str(key)) is None
@@ -113,7 +123,10 @@ async def validate_workflow_resources(
         elif node.data.type in {"llm", "classifier"} and config.get("model_id"):
             model_ids.add(str(config["model_id"]))
         elif node.data.type == "knowledge":
-            if config["knowledge_base_id"] not in bindings:
+            knowledge_base_ids = KnowledgeNodeConfig.model_validate(
+                config
+            ).resolved_knowledge_base_ids
+            if any(item not in bindings for item in knowledge_base_ids):
                 raise HTTPException(
                     status.HTTP_422_UNPROCESSABLE_CONTENT,
                     f"Knowledge node {node.id} uses an unbound knowledge base.",
@@ -235,7 +248,14 @@ async def publish_definition(
         published_by_user_id=actor.id,
     )
     version = await workflow_repository.create_version(db, version)
+    bindings = (await agent_repository.list_binding_map(db, [agent.id]))[agent.id]
+    mcp_bindings = (await agent_repository.list_mcp_binding_map(db, [agent.id]))[
+        agent.id
+    ]
     agent.published = True
+    agent.published_snapshot = agent_publication_snapshot(
+        agent, bindings, mcp_bindings
+    )
     agent.published_by_user_id = actor.id
     agent.published_at = utc_now()
     await agent_repository.save_agent(db, agent)

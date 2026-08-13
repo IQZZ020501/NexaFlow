@@ -7,6 +7,17 @@ import {
 
 import type { WorkflowEdge, WorkflowGraph, WorkflowNode } from "@/lib/api/workflows"
 
+export function draggedCanvasPosition(
+  position: { x: number; y: number },
+  dragStart: { x: number; y: number },
+  pointer: { x: number; y: number }
+) {
+  return {
+    x: position.x + pointer.x - dragStart.x,
+    y: position.y + pointer.y - dragStart.y,
+  }
+}
+
 export function applyWorkflowNodeChanges(
   nodes: WorkflowNode[],
   changes: NodeChange[],

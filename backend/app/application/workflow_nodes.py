@@ -49,6 +49,7 @@ class WorkflowNodeScope:
     mcp_tools: dict[tuple[str, str], tuple[ResolvedMcpTool, McpToolPolicy]]
     ledger: DurableToolLedger
     node_order: dict[str, int]
+    input_assignment_method: str | None = None
 
 
 def _path_value(value: Any, path: str) -> Any:
@@ -102,23 +103,44 @@ def _matches_type(value: Any, expected: str) -> bool:
     }[expected]
 
 
-def _start_result(config: StartNodeConfig, inputs: dict[str, Any]) -> NodeResult:
+def _start_result(
+    config: StartNodeConfig,
+    inputs: dict[str, Any],
+    *,
+    assignment_method: str | None = None,
+) -> NodeResult:
     fields = {field.name: field for field in config.inputs}
-    unknown = set(inputs) - set(fields)
+    unknown = set(inputs) - set(fields) - {"files"}
     if unknown:
         raise ValueError(f"Unknown workflow inputs: {', '.join(sorted(unknown))}.")
+    if assignment_method is not None:
+        invalid = {
+            name
+            for name in inputs
+            if name in fields and fields[name].assignment_method != assignment_method
+        }
+        if invalid:
+            raise ValueError(
+                "Workflow inputs are not accepted from this workflow access source: "
+                f"{', '.join(sorted(invalid))}."
+            )
     output: dict[str, Any] = {}
+    output["files"] = inputs.get("files", [])
     for name, field in fields.items():
         if name in inputs:
             value = inputs[name]
         elif field.default is not None:
             value = field.default
-        elif field.required:
+        elif field.required and (
+            assignment_method is None or field.assignment_method == assignment_method
+        ):
             raise ValueError(f"Required workflow input is missing: {name}.")
         else:
             value = None
         if value is not None and not _matches_type(value, field.type):
             raise ValueError(f"Workflow input {name} must be {field.type}.")
+        if value is not None:
+            field.validate_control_value(value)
         output[name] = value
     return NodeResult(inputs=dict(inputs), outputs=output)
 
@@ -176,6 +198,29 @@ def _condition(left: Any, operator: str, right: Any) -> bool:
         return left is None or left == "" or left == [] or left == {}
     if operator == "is_not_empty":
         return not (left is None or left == "" or left == [] or left == {})
+    if operator.startswith("length_"):
+        if not isinstance(left, (str, list, dict)):
+            raise ValueError(
+                "Workflow length condition requires a string, array, or object."
+            )
+        if not isinstance(right, int) or isinstance(right, bool) or right < 0:
+            raise ValueError(
+                "Workflow length condition requires a non-negative integer."
+            )
+    if operator == "length_equals":
+        return len(left) == right
+    if operator == "length_greater_than":
+        return len(left) > right
+    if operator == "length_greater_than_or_equal":
+        return len(left) >= right
+    if operator == "length_less_than":
+        return len(left) < right
+    if operator == "length_less_than_or_equal":
+        return len(left) <= right
+    if operator == "is_true":
+        return left is True
+    if operator == "is_false":
+        return left is False
     raise ValueError("Unknown workflow condition operator.")
 
 
@@ -187,7 +232,11 @@ async def execute_workflow_node(
     config = node.data.config
     node_type = node.data.type
     if node_type == "start":
-        return _start_result(StartNodeConfig.model_validate(config), context.workflow_inputs)
+        return _start_result(
+            StartNodeConfig.model_validate(config),
+            context.workflow_inputs,
+            assignment_method=scope.input_assignment_method,
+        )
     if node_type == "end":
         outputs = resolve_value(EndNodeConfig.model_validate(config).outputs, context)
         return NodeResult(inputs=dict(outputs), outputs=dict(outputs))
@@ -248,21 +297,43 @@ async def execute_workflow_node(
     if node_type == "knowledge":
         parsed = KnowledgeNodeConfig.model_validate(config)
         query = str(resolve_value(parsed.query, context))
-        knowledge_base = scope.knowledge_bases.get(parsed.knowledge_base_id)
-        if knowledge_base is None:
+        knowledge_bases = [
+            scope.knowledge_bases[knowledge_base_id]
+            for knowledge_base_id in parsed.resolved_knowledge_base_ids
+            if knowledge_base_id in scope.knowledge_bases
+        ]
+        if len(knowledge_bases) != len(parsed.resolved_knowledge_base_ids):
             raise ValueError("Workflow knowledge base is unavailable.")
         tool = build_knowledge_search_tool(
-            [knowledge_base],
+            knowledge_bases,
             scope.run.workspace_id,
             scope.actor,
             scope.workspace_role,
             scope.settings,
         )
-        result = await tool.ainvoke({"query": query})
+        result = await tool.ainvoke({"query": query, "limit": parsed.limit})
         if result.is_error:
             raise RuntimeError(result.summary)
         output = result.output if isinstance(result.output, dict) else {"content": result.content}
-        return NodeResult(inputs={"query": query}, outputs=dict(output))
+        hits = output.get("hits")
+        selected_hits = hits[: parsed.limit] if isinstance(hits, list) else []
+        outputs = {
+            **output,
+            "hits": selected_hits,
+            "content": "\n\n".join(
+                str(item.get("content") or "")
+                for item in selected_hits
+                if isinstance(item, dict) and item.get("content")
+            ),
+        }
+        return NodeResult(
+            inputs={
+                "query": query,
+                "knowledge_base_ids": parsed.resolved_knowledge_base_ids,
+                "limit": parsed.limit,
+            },
+            outputs=outputs,
+        )
     if node_type == "mcp":
         parsed = McpNodeConfig.model_validate(config)
         arguments = resolve_value(parsed.arguments, context)

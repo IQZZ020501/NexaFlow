@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  WORKFLOW_NODE_PRESETS,
   createWorkflowEdge,
   defaultNodeConfig,
   initialWorkflowInputs,
@@ -12,10 +13,43 @@ import {
 import {
   applyWorkflowEdgeChanges,
   applyWorkflowNodeChanges,
+  draggedCanvasPosition,
   persistedWorkflowViewport,
 } from "../lib/workflows/canvas"
 
 describe("workflow graph", () => {
+  test("moves canvas components in flow coordinates", () => {
+    expect(
+      draggedCanvasPosition(
+        { x: 16, y: 16 },
+        { x: 100, y: 120 },
+        { x: 260, y: 310 }
+      )
+    ).toEqual({ x: 176, y: 206 })
+  })
+
+  test("builds reference-node presets from existing node types", () => {
+    const t = ((key: string) => key) as never
+    const optimizer = WORKFLOW_NODE_PRESETS.find(
+      (preset) => preset.id === "question-optimizer"
+    )
+    const reply = WORKFLOW_NODE_PRESETS.find((preset) => preset.id === "reply")
+
+    expect(optimizer?.type).toBe("llm")
+    expect(optimizer?.config(t)).toEqual({
+      system_prompt: "你是一个问题优化专家。",
+      prompt:
+        "请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.input}}",
+    })
+    expect(reply?.type).toBe("template")
+    expect(reply?.config(t)).toEqual({ template: "{{start.input}}" })
+    expect(defaultNodeConfig("knowledge")).toEqual({
+      knowledge_base_ids: [],
+      query: "{{start.input}}",
+      limit: 3,
+    })
+  })
+
   test("serializes only durable React Flow fields", () => {
     const graph = serializeWorkflowGraph(
       [

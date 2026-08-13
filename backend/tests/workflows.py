@@ -233,11 +233,179 @@ def test_workflow_engine_enforces_step_and_token_budgets() -> None:
 
 
 def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
-    from app.application.workflow_nodes import _model_output_limit
+    from pydantic import ValidationError
+
+    from app.application.workflow_nodes import (
+        _condition,
+        _model_output_limit,
+        _start_result,
+    )
+    from app.schemas.workflow import KnowledgeNodeConfig, StartNodeConfig
 
     assert _model_output_limit("openai_compatible", 12) == {"max_tokens": 12}
     assert _model_output_limit("google_genai", 12) == {"max_output_tokens": 12}
     assert _model_output_limit("ollama", 12) == {"num_predict": 12}
+    assert _condition([1, 2, 3], "length_greater_than", 2)
+    assert _condition(True, "is_true", None)
+    assert not _condition(False, "is_true", None)
+    try:
+        _condition(3, "length_greater_than", 2)
+    except ValueError as exc:
+        assert "requires a string, array, or object" in str(exc)
+    else:
+        raise AssertionError("length condition accepted an unsupported value")
+
+    start = StartNodeConfig.model_validate(
+        {
+            "inputs": [
+                {
+                    "name": "choice",
+                    "control": "select",
+                    "options": ["stable", "preview"],
+                },
+                {"name": "release_day", "control": "date"},
+            ]
+        }
+    )
+    for invalid_inputs in (
+        {"choice": "nightly", "release_day": "2026-08-13"},
+        {"choice": "stable", "release_day": "13/08/2026"},
+    ):
+        try:
+            _start_result(start, invalid_inputs)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid controlled workflow input was accepted")
+    for invalid_default in (
+        {
+            "name": "choice",
+            "control": "select",
+            "options": ["stable"],
+            "default": "nightly",
+        },
+        {"name": "release_day", "control": "date", "default": "13/08/2026"},
+    ):
+        try:
+            StartNodeConfig.model_validate({"inputs": [invalid_default]})
+        except ValidationError:
+            pass
+        else:
+            raise AssertionError("invalid controlled workflow default was accepted")
+
+    assigned = StartNodeConfig.model_validate(
+        {
+            "inputs": [
+                {"name": "question", "assignment_method": "user_input"},
+                {"name": "api_token", "assignment_method": "api_input"},
+            ]
+        }
+    )
+    public_start = _start_result(
+        assigned,
+        {"question": "hello"},
+        assignment_method="user_input",
+    )
+    assert public_start.outputs == {
+        "files": [],
+        "question": "hello",
+        "api_token": None,
+    }
+    try:
+        _start_result(
+            assigned,
+            {"question": "hello", "api_token": "forged"},
+            assignment_method="user_input",
+        )
+    except ValueError as exc:
+        assert "not accepted from this workflow access source" in str(exc)
+    else:
+        raise AssertionError("public input accepted an API-assigned field")
+    assert KnowledgeNodeConfig.model_validate(
+        {
+            "knowledge_base_id": "legacy-base",
+            "knowledge_base_ids": ["second-base", "legacy-base"],
+            "query": "question",
+        }
+    ).resolved_knowledge_base_ids == ["legacy-base", "second-base"]
+
+
+def test_workflow_knowledge_node_limits_and_joins_results() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from app.application.workflow_nodes import execute_workflow_node
+    from app.schemas.workflow import WorkflowNode
+    from app.shareddomain.workflows.engine import NodeExecutionContext
+
+    class FakeTool:
+        async def ainvoke(self, arguments):
+            assert arguments == {"query": "question", "limit": 2}
+            return SimpleNamespace(
+                is_error=False,
+                summary="ok",
+                content="",
+                output={
+                    "hits": [
+                        {"content": "first"},
+                        {"content": "second"},
+                        {"content": "third"},
+                    ],
+                    "evidence_status": "found",
+                },
+            )
+
+    async def run() -> None:
+        scope = SimpleNamespace(
+            knowledge_bases={
+                "base-1": SimpleNamespace(id="base-1"),
+                "base-2": SimpleNamespace(id="base-2"),
+            },
+            run=SimpleNamespace(workspace_id="workspace-1"),
+            actor=SimpleNamespace(),
+            workspace_role="member",
+            settings=SimpleNamespace(),
+        )
+        node = WorkflowNode.model_validate(
+            {
+                "id": "knowledge",
+                "position": {"x": 0, "y": 0},
+                "data": {
+                    "type": "knowledge",
+                    "title": "Knowledge",
+                    "config": {
+                        "knowledge_base_ids": ["base-1", "base-2"],
+                        "query": "question",
+                        "limit": 2,
+                    },
+                },
+            }
+        )
+        with patch(
+            "app.application.workflow_nodes.build_knowledge_search_tool",
+            return_value=FakeTool(),
+        ) as build_tool:
+            result = await execute_workflow_node(
+                scope,
+                node,
+                NodeExecutionContext(
+                    workflow_inputs={},
+                    node_outputs={},
+                    remaining_model_tokens=100,
+                ),
+            )
+
+        assert [item.id for item in build_tool.call_args.args[0]] == [
+            "base-1",
+            "base-2",
+        ]
+        assert result.outputs["hits"] == [
+            {"content": "first"},
+            {"content": "second"},
+        ]
+        assert result.outputs["content"] == "first\n\nsecond"
+
+    asyncio.run(run())
 
 
 def test_workflow_engine_propagates_worker_cancellation() -> None:
@@ -257,6 +425,108 @@ def test_workflow_engine_propagates_worker_cancellation() -> None:
             pass
         else:
             raise AssertionError("worker cancellation was swallowed")
+
+    asyncio.run(run())
+
+
+def test_upload_cleanup_tasks_are_registered() -> None:
+    from app.infrastructure.celery import celery_app
+
+    assert "app.uploads.cleanup_storage" in celery_app.tasks
+    assert "app.uploads.recover_storage_cleanups" in celery_app.tasks
+    assert (
+        celery_app.conf.beat_schedule["recover-upload-storage-cleanups"]["task"]
+        == "app.uploads.recover_storage_cleanups"
+    )
+
+
+def test_interaction_config_migration_upgrades_prerequisites() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine, inspect, text
+
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "202608120004_agent_interaction_config.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "agent_interaction_config_migration",
+        migration_path,
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=ON"))
+        connection.execute(text("CREATE TABLE users (id TEXT PRIMARY KEY)"))
+        connection.execute(
+            text(
+                "CREATE TABLE agents (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, "
+                "UNIQUE (workspace_id, id))"
+            )
+        )
+        connection.execute(text("CREATE TABLE agent_runs (id TEXT PRIMARY KEY)"))
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+
+        inspector = inspect(connection)
+        assert {
+            "workflow_uploads",
+            "workflow_upload_storage_cleanups",
+        }.issubset(inspector.get_table_names())
+        cleanup_columns = {
+            column["name"]
+            for column in inspector.get_columns("workflow_upload_storage_cleanups")
+        }
+        assert {
+            "workspace_id",
+            "uploaded_by_user_id",
+            "object_key",
+            "size_bytes",
+            "next_attempt_at",
+        }.issubset(cleanup_columns)
+
+
+def assert_upload_cleanup_removes_object(upload_id: str) -> None:
+    from app.infrastructure.object_storage import create_object_storage
+    from app.infrastructure.repositories import workflow as workflow_repository
+    from app.infrastructure.session import get_session_factory
+    from app.shareddomain.workflows.uploads import (
+        prepare_due_upload_cleanups,
+        run_upload_storage_cleanup,
+    )
+
+    async def run() -> None:
+        runtime_settings = tests.support.settings()
+        cleanup_ids = await prepare_due_upload_cleanups()
+        object_path = None
+        async with get_session_factory()() as db:
+            for cleanup_id in cleanup_ids:
+                cleanup = await workflow_repository.lock_upload_cleanup(db, cleanup_id)
+                if cleanup is not None and cleanup.object_key.endswith(upload_id):
+                    assert (
+                        await workflow_repository.pending_upload_bytes(
+                            db,
+                            cleanup.workspace_id,
+                            cleanup.uploaded_by_user_id,
+                        )
+                        == cleanup.size_bytes
+                    )
+                    object_path = create_object_storage(
+                        runtime_settings.knowledge_storage_dir
+                    ).path(cleanup.object_key)
+                    break
+        assert object_path is not None and object_path.exists()
+        for cleanup_id in cleanup_ids:
+            await run_upload_storage_cleanup(cleanup_id, runtime_settings)
+        assert not object_path.exists()
 
     asyncio.run(run())
 
@@ -322,6 +592,17 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
                 "name": "Release Workflow",
                 "app_type": "workflow",
                 "model_id": model.json()["id"],
+                "interaction_config": {
+                    "prologue": "Choose inputs to start.",
+                    "tts_type": "BROWSER",
+                    "file_upload": True,
+                    "file_upload_setting": {
+                        "max_files": 2,
+                        "file_limit": 1,
+                        "file_upload_type": ["document"],
+                    },
+                    "user_input_title": "Release options",
+                },
             },
         )
         assert workflow.status_code == 201, workflow.text
@@ -343,6 +624,15 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert definition.status_code == 200, definition.text
         assert definition.json()["revision"] == 1
         workflow_graph = definition.json()["graph"]
+        workflow_graph["nodes"][0]["data"]["config"]["inputs"].append(
+            {
+                "name": "api_input",
+                "type": "string",
+                "required": True,
+                "default": "default-api",
+                "assignment_method": "api_input",
+            }
+        )
         workflow_graph["nodes"].insert(
             1,
             {
@@ -544,26 +834,140 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert public_profile.json()["inputs"] == [
             {
                 "name": "input",
+                "label": "",
                 "type": "string",
+                "control": "input",
                 "required": True,
                 "default": None,
+                "options": [],
+                "assignment_method": "user_input",
             }
-        ]
+        ], public_profile.json()
+        assert public_profile.json()["interaction_config"] == {
+            "prologue": "Choose inputs to start.",
+            "tts_type": "BROWSER",
+            "file_upload": True,
+            "file_upload_setting": {
+                "max_files": 2,
+                "file_limit": 1,
+                "file_upload_type": ["document"],
+            },
+            "user_input_title": "Release options",
+        }
         wrong_public_runtime = client.get(
             f"/api/v1/public/agents/{workflow_id}/profile",
             headers=member_headers,
         )
         assert wrong_public_runtime.status_code == 404, wrong_public_runtime.text
 
+        uploaded = client.post(
+            f"/api/v1/public/workflows/{workflow_id}/uploads",
+            headers=member_headers,
+            files={"files": ("notes.txt", b"release notes", "text/plain")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        assert uploaded.json()[0]["filename"] == "notes.txt"
+        upload_id = uploaded.json()[0]["id"]
+        restored_for_policy = client.post(
+            f"{base}/versions/1/restore",
+            headers=headers,
+        )
+        assert restored_for_policy.status_code == 200, restored_for_policy.text
+        image_only = client.patch(
+            f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}",
+            headers=headers,
+            json={
+                "interaction_config": {
+                    "prologue": "Choose inputs to start.",
+                    "tts_type": "BROWSER",
+                    "file_upload": True,
+                    "file_upload_setting": {
+                        "max_files": 2,
+                        "file_limit": 1,
+                        "file_upload_type": ["image"],
+                    },
+                    "user_input_title": "Release options",
+                }
+            },
+        )
+        assert image_only.status_code == 200, image_only.text
+        assert client.post(f"{base}/publish", headers=headers).status_code == 201
+        stale_policy = client.post(
+            f"/api/v1/public/workflows/{workflow_id}/runs",
+            headers=member_headers,
+            json={"inputs": {"input": "stale"}, "file_ids": [upload_id]},
+        )
+        assert stale_policy.status_code == 422, stale_policy.text
+        document_only = client.patch(
+            f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}",
+            headers=headers,
+            json={
+                "interaction_config": {
+                    "prologue": "Choose inputs to start.",
+                    "tts_type": "BROWSER",
+                    "file_upload": True,
+                    "file_upload_setting": {
+                        "max_files": 2,
+                        "file_limit": 1,
+                        "file_upload_type": ["document"],
+                    },
+                    "user_input_title": "Release options",
+                }
+            },
+        )
+        assert document_only.status_code == 200, document_only.text
+        assert client.post(f"{base}/publish", headers=headers).status_code == 201
+        from app.application import workflow_uploads
+
+        previous_pending_upload_limit = workflow_uploads.MAX_PENDING_UPLOAD_BYTES_PER_USER
+        workflow_uploads.MAX_PENDING_UPLOAD_BYTES_PER_USER = 13
+        try:
+            over_storage_quota = client.post(
+                f"/api/v1/public/workflows/{workflow_id}/uploads",
+                headers=member_headers,
+                files={"files": ("extra.txt", b"one", "text/plain")},
+            )
+        finally:
+            workflow_uploads.MAX_PENDING_UPLOAD_BYTES_PER_USER = (
+                previous_pending_upload_limit
+            )
+        assert over_storage_quota.status_code == 413, over_storage_quota.text
+        over_quota = client.post(
+            f"/api/v1/public/workflows/{workflow_id}/uploads",
+            headers=member_headers,
+            files=[
+                ("files", ("extra-1.txt", b"one", "text/plain")),
+                ("files", ("extra-2.txt", b"two", "text/plain")),
+            ],
+        )
+        assert over_quota.status_code == 409, over_quota.text
+
         public_run = client.post(
             f"/api/v1/public/workflows/{workflow_id}/runs",
             headers=member_headers,
-            json={"inputs": {"input": "public-workflow"}},
+            json={
+                "inputs": {"input": "public-workflow"},
+                "file_ids": [upload_id],
+            },
         )
         assert public_run.status_code == 201, public_run.text
         public_payload = public_run.json()
         assert public_payload["status"] == "succeeded"
         assert public_payload["outputs"] == {"result": "public-workflow"}
+        assert public_payload["inputs"]["files"][0] == {
+            "id": upload_id,
+            "name": "notes.txt",
+            "content_type": "text/plain",
+            "size_bytes": 13,
+            "category": "document",
+        }
+        reused_upload = client.post(
+            f"/api/v1/public/workflows/{workflow_id}/runs",
+            headers=member_headers,
+            json={"inputs": {"input": "reuse"}, "file_ids": [upload_id]},
+        )
+        assert reused_upload.status_code == 404, reused_upload.text
+        assert_upload_cleanup_removes_object(upload_id)
         public_events = client.get(
             f"/api/v1/public/workflows/{workflow_id}/runs/{public_payload['id']}/stream",
             headers=member_headers,
@@ -597,14 +1001,26 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             headers=api_headers,
         )
         assert documentation.status_code == 200, documentation.text
-        assert documentation.json()["inputs"] == public_profile.json()["inputs"]
+        assert documentation.json()["inputs"] == [
+            {
+                "name": "api_input",
+                "label": "",
+                "type": "string",
+                "control": "input",
+                "required": True,
+                "default": "default-api",
+                "options": [],
+                "assignment_method": "api_input",
+            }
+        ], documentation.json()
         api_run = client.post(
             f"/api/v1/workflow-api/{workflow_id}/runs",
             headers=api_headers,
-            json={"inputs": {"input": "api-workflow"}},
+            json={"inputs": {"api_input": "api-workflow"}},
         )
         assert api_run.status_code == 201, api_run.text
-        assert api_run.json()["outputs"] == {"result": "api-workflow"}
+        assert api_run.json()["inputs"]["api_input"] == "api-workflow"
+        assert api_run.json()["outputs"] == {"result": None}
         wrong_api_runtime = client.post(
             f"/api/v1/agent-api/{workflow_id}/runs",
             headers=api_headers,
@@ -618,6 +1034,8 @@ def main() -> None:
     test_workflow_engine_runs_branch_and_join_deterministically()
     test_workflow_engine_enforces_step_and_token_budgets()
     test_workflow_engine_propagates_worker_cancellation()
+    test_upload_cleanup_tasks_are_registered()
+    test_interaction_config_migration_upgrades_prerequisites()
     test_workflow_api_definition_publish_run_and_audit()
     print("WORKFLOW_SUITE_OK")
 

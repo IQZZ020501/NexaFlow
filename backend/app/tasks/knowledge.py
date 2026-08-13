@@ -17,6 +17,10 @@ from app.shareddomain.knowledge.cleanup import (
     list_due_knowledge_storage_cleanup_ids,
     run_knowledge_storage_cleanup,
 )
+from app.shareddomain.workflows.uploads import (
+    prepare_due_upload_cleanups,
+    run_upload_storage_cleanup,
+)
 from app.tasks import configure_task_worker
 
 logger = get_logger(__name__)
@@ -85,6 +89,39 @@ def recover_knowledge_storage_cleanups_job() -> None:
         run_knowledge_storage_cleanup_job.apply_async(args=(cleanup_id,))
 
 
+@celery_app.task(
+    bind=True,
+    name="app.uploads.cleanup_storage",
+    ignore_result=True,
+    max_retries=None,
+)
+def run_upload_storage_cleanup_job(self, cleanup_id: str) -> None:
+    settings = Settings.from_env(require_bootstrap=False)
+    configure_task_worker(settings)
+    try:
+        asyncio.run(run_upload_storage_cleanup(cleanup_id, settings))
+    except Exception as exc:
+        log_error(
+            logger,
+            "Upload storage cleanup failed; retrying.",
+            exc,
+            cleanup_id=cleanup_id,
+        )
+        raise self.retry(exc=exc, countdown=60)
+
+
+@celery_app.task(
+    name="app.uploads.recover_storage_cleanups",
+    ignore_result=True,
+)
+def recover_upload_storage_cleanups_job() -> None:
+    settings = Settings.from_env(require_bootstrap=False)
+    configure_task_worker(settings)
+    cleanup_ids = asyncio.run(prepare_due_upload_cleanups())
+    for cleanup_id in cleanup_ids:
+        run_upload_storage_cleanup_job.apply_async(args=(cleanup_id,))
+
+
 async def mark_task_dispatch_failed(task_id: str) -> None:
     async with get_session_factory()() as db:
         await mark_knowledge_task_failed(
@@ -147,3 +184,37 @@ async def enqueue_knowledge_storage_cleanup(
             exc,
             cleanup_id=cleanup_id,
         )
+
+
+async def enqueue_upload_storage_cleanups(
+    cleanup_ids: list[str],
+    settings: Settings,
+) -> None:
+    for cleanup_id in cleanup_ids:
+        if settings.celery_task_always_eager:
+            try:
+                await run_upload_storage_cleanup(cleanup_id, settings)
+            except Exception as exc:
+                log_error(
+                    logger,
+                    "Upload storage cleanup deferred after eager failure.",
+                    exc,
+                    cleanup_id=cleanup_id,
+                )
+            continue
+        celery_app.conf.update(
+            broker_url=settings.celery_broker_url,
+            task_always_eager=False,
+        )
+        try:
+            await asyncio.to_thread(
+                run_upload_storage_cleanup_job.apply_async,
+                args=(cleanup_id,),
+            )
+        except Exception as exc:
+            log_error(
+                logger,
+                "Upload storage cleanup dispatch deferred.",
+                exc,
+                cleanup_id=cleanup_id,
+            )

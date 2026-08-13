@@ -32,6 +32,8 @@ from app.shareddomain.workflows.models import (  # noqa: F401
     WorkflowDefinition,
     WorkflowNodeExecution,
     WorkflowRunDetail,
+    WorkflowUpload,
+    WorkflowUploadStorageCleanup,
     WorkflowVersion,
 )
 from app.capabilities.llm.models import RegisteredModel  # noqa: F401

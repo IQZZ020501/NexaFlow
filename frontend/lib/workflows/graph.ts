@@ -5,6 +5,7 @@ import type {
   WorkflowNodeType,
   WorkflowVersion,
 } from "@/lib/api/workflows"
+import type { TFunction, TranslationKey } from "@/i18n"
 
 export const WORKFLOW_NODE_TYPES: WorkflowNodeType[] = [
   "start",
@@ -17,6 +18,31 @@ export const WORKFLOW_NODE_TYPES: WorkflowNodeType[] = [
   "variable",
   "mcp",
   "code",
+]
+
+export type WorkflowNodePreset = {
+  id: string
+  type: WorkflowNodeType
+  label: TranslationKey
+  config: (t: TFunction) => Record<string, unknown>
+}
+
+export const WORKFLOW_NODE_PRESETS: WorkflowNodePreset[] = [
+  {
+    id: "question-optimizer",
+    type: "llm",
+    label: "问题优化",
+    config: (t) => ({
+      system_prompt: t("你是一个问题优化专家。"),
+      prompt: t("请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.input}}"),
+    }),
+  },
+  {
+    id: "reply",
+    type: "template",
+    label: "指定回复",
+    config: () => ({ template: "{{start.input}}" }),
+  },
 ]
 
 export function defaultNodeConfig(
@@ -39,7 +65,7 @@ export function defaultNodeConfig(
         default_handle: "default",
       }
     case "knowledge":
-      return { knowledge_base_id: "", query: "{{start.input}}" }
+      return { knowledge_base_ids: [], query: "{{start.input}}", limit: 3 }
     case "condition":
       return {
         left: "{{start.input}}",
@@ -60,7 +86,8 @@ export function defaultNodeConfig(
 export function createWorkflowNode(
   type: WorkflowNodeType,
   title: string,
-  index: number
+  index: number,
+  config = defaultNodeConfig(type)
 ): WorkflowNode {
   return {
     id: `${type}-${crypto.randomUUID().slice(0, 8)}`,
@@ -69,7 +96,7 @@ export function createWorkflowNode(
       x: 240 + (index % 3) * 260,
       y: 80 + Math.floor(index / 3) * 180,
     },
-    data: { type, title, config: defaultNodeConfig(type) },
+    data: { type, title, config: structuredClone(config) },
   }
 }
 

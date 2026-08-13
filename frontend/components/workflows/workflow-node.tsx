@@ -145,11 +145,18 @@ function configSummary(node: WorkflowNodeData, t: TFunction) {
         contains: "包含",
         not_contains: "不包含",
         greater_than: "大于",
-        greater_or_equal: "大于等于",
+        greater_than_or_equal: "大于等于",
         less_than: "小于",
-        less_or_equal: "小于等于",
+        less_than_or_equal: "小于等于",
         is_empty: "为空",
-        not_empty: "不为空",
+        is_not_empty: "不为空",
+        length_equals: "长度等于",
+        length_greater_than: "长度大于",
+        length_greater_than_or_equal: "长度大于等于",
+        length_less_than: "长度小于",
+        length_less_than_or_equal: "长度小于等于",
+        is_true: "为真",
+        is_false: "为假",
       }
       return t(operators[String(config.operator)] ?? "运算符")
     }
@@ -284,7 +291,12 @@ function NodeConfigFields({
     updateConfig({
       inputs: [
         ...inputItems,
-        { name: `input_${inputItems.length + 1}`, required: false },
+        {
+          name: `input_${inputItems.length + 1}`,
+          type: "string",
+          required: false,
+          default: "",
+        },
       ],
     })
   const updateOutputItem = (index: number, key: string, value: string) =>
@@ -314,6 +326,11 @@ function NodeConfigFields({
   const boundKnowledge = knowledgeBases.filter((item) =>
     agent.knowledge_base_ids.includes(item.id)
   )
+  const selectedKnowledgeIds = Array.isArray(config.knowledge_base_ids)
+    ? config.knowledge_base_ids.map(String)
+    : config.knowledge_base_id
+      ? [String(config.knowledge_base_id)]
+      : []
   const boundMcp = agent.mcp_tools
     .map((reference) => {
       const server = mcpServers.find((item) => item.id === reference.server_id)
@@ -327,6 +344,14 @@ function NodeConfigFields({
       }
     })
     .filter((item) => item.policyMode === "read_only")
+  const conditionOperator = String(config.operator ?? "equals")
+  const conditionHasRightValue = ![
+    "is_empty",
+    "is_not_empty",
+    "is_true",
+    "is_false",
+  ].includes(conditionOperator)
+  const conditionUsesLength = conditionOperator.startsWith("length_")
 
   return (
     <div className="grid gap-3">
@@ -334,36 +359,113 @@ function NodeConfigFields({
         <fieldset className="grid gap-2">
           <legend className="text-xs font-medium">{t("输入字段")}</legend>
           {inputItems.map((item, index) => (
-            <div key={index} className="flex items-center gap-2">
-              <Input
-                className="min-w-0 flex-1"
-                value={String(item.name ?? "")}
-                readOnly={readOnly}
-                aria-label={t("输入名称")}
-                onChange={(event) =>
-                  updateInputItem(index, { name: event.target.value })
-                }
-              />
-              <label className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={Boolean(item.required)}
-                  disabled={readOnly}
+            <div key={index} className="grid gap-2 rounded-md border p-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  className="min-w-0 flex-1"
+                  value={String(item.name ?? "")}
+                  readOnly={readOnly}
+                  aria-label={t("输入名称")}
                   onChange={(event) =>
-                    updateInputItem(index, { required: event.target.checked })
+                    updateInputItem(index, { name: event.target.value })
                   }
                 />
-                {t("必填")}
-              </label>
-              {!readOnly ? (
-                <IconButton
-                  label={t("删除")}
-                  className="size-6 shrink-0"
-                  onClick={() => removeInputItem(index)}
-                >
-                  <XIcon className="size-3.5" />
-                </IconButton>
-              ) : null}
+                {!readOnly ? (
+                  <IconButton
+                    label={t("删除")}
+                    className="size-6 shrink-0"
+                    onClick={() => removeInputItem(index)}
+                  >
+                    <XIcon className="size-3.5" />
+                  </IconButton>
+                ) : null}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="grid gap-1 text-[11px] font-medium">
+                  {t("类型")}
+                  <select
+                    className="h-8 rounded-md border bg-background px-2 text-xs"
+                    value={String(item.type ?? "string")}
+                    disabled={readOnly}
+                    onChange={(event) => {
+                      const type = event.target.value
+                      updateInputItem(index, {
+                        type,
+                        default:
+                          type === "number"
+                            ? 0
+                            : type === "boolean"
+                              ? false
+                              : type === "object"
+                                ? {}
+                                : type === "array"
+                                  ? []
+                                  : "",
+                      })
+                    }}
+                  >
+                    {(["string", "number", "boolean", "object", "array"] as const).map(
+                      (type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </label>
+                <label className="flex items-end gap-1 pb-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(item.required)}
+                    disabled={readOnly}
+                    onChange={(event) =>
+                      updateInputItem(index, { required: event.target.checked })
+                    }
+                  />
+                  {t("必填")}
+                </label>
+              </div>
+              {item.type === "boolean" ? (
+                <label className="flex items-center gap-2 text-xs font-medium">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(item.default)}
+                    disabled={readOnly}
+                    onChange={(event) =>
+                      updateInputItem(index, { default: event.target.checked })
+                    }
+                  />
+                  {t("默认值")}
+                </label>
+              ) : item.type === "object" || item.type === "array" ? (
+                <JsonEditor
+                  id={`start-default-${index}`}
+                  label={t("默认值")}
+                  value={item.default ?? (item.type === "array" ? [] : {})}
+                  readOnly={readOnly}
+                  onChange={(value) => updateInputItem(index, { default: value })}
+                  t={t}
+                />
+              ) : (
+                <label className="grid gap-1 text-[11px] font-medium">
+                  {t("默认值")}
+                  <Input
+                    type={item.type === "number" ? "number" : "text"}
+                    value={String(item.default ?? "")}
+                    readOnly={readOnly}
+                    onChange={(event) =>
+                      updateInputItem(index, {
+                        default:
+                          item.type === "number"
+                            ? event.target.value === ""
+                              ? null
+                              : Number(event.target.value)
+                            : event.target.value,
+                      })
+                    }
+                  />
+                </label>
+              )}
             </div>
           ))}
           {!readOnly ? (
@@ -507,24 +609,53 @@ function NodeConfigFields({
       ) : null}
       {node.type === "knowledge" ? (
         <>
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor="knowledge-source">
-            {t("知识库")}
-            <select
-              id="knowledge-source"
-              className="h-9 rounded-md border bg-background px-2 text-sm"
-              value={String(config.knowledge_base_id ?? "")}
-              disabled={readOnly}
-              onChange={(event) =>
-                updateConfig({ knowledge_base_id: event.target.value })
-              }
-            >
-              <option value="">{t("选择已绑定知识库")}</option>
-              {boundKnowledge.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+          <fieldset className="grid gap-1.5 text-xs font-medium">
+            <legend>
+              {t("知识库（可多选）")}
+            </legend>
+            <div className="grid max-h-32 gap-2 overflow-y-auto rounded-md border bg-background p-2">
+              {boundKnowledge.length ? (
+                boundKnowledge.map((item) => (
+                  <label
+                    key={item.id}
+                    className="flex items-center gap-2 text-xs font-normal"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedKnowledgeIds.includes(item.id)}
+                      disabled={readOnly}
+                      onChange={(event) =>
+                        updateConfig({
+                          knowledge_base_id: null,
+                          knowledge_base_ids: event.target.checked
+                            ? [...selectedKnowledgeIds, item.id]
+                            : selectedKnowledgeIds.filter(
+                                (knowledgeBaseId) => knowledgeBaseId !== item.id
+                              ),
+                        })
+                      }
+                    />
+                    <span className="min-w-0 truncate">{item.name}</span>
+                  </label>
+                ))
+              ) : (
+                <span className="font-normal text-muted-foreground">
+                  {t("暂无可用知识库")}
+                </span>
+              )}
+            </div>
+          </fieldset>
+          <label className="grid gap-1.5 text-xs font-medium" htmlFor="knowledge-limit">
+            {t("返回条数")}
+            <Input
+              id="knowledge-limit"
+              type="number"
+              min={1}
+              max={8}
+              value={Number(config.limit ?? 3)}
+              readOnly={readOnly}
+              onChange={(event) => updateConfig({ limit: Number(event.target.value) })}
+            />
           </label>
           <TextEditor
             id="knowledge-query"
@@ -566,6 +697,13 @@ function NodeConfigFields({
                 ["less_than_or_equal", "小于等于"],
                 ["is_empty", "为空"],
                 ["is_not_empty", "不为空"],
+                ["length_equals", "长度等于"],
+                ["length_greater_than", "长度大于"],
+                ["length_greater_than_or_equal", "长度大于等于"],
+                ["length_less_than", "长度小于"],
+                ["length_less_than_or_equal", "长度小于等于"],
+                ["is_true", "为真"],
+                ["is_false", "为假"],
               ] as const).map(([operator, label]) => (
                 <option key={operator} value={operator}>
                   {t(label)}
@@ -573,14 +711,35 @@ function NodeConfigFields({
               ))}
             </select>
           </label>
-          <JsonEditor
-            id="condition-right"
-            label={t("右值")}
-            value={config.right ?? ""}
-            readOnly={readOnly}
-            onChange={(right) => updateConfig({ right })}
-            t={t}
-          />
+          {conditionHasRightValue ? (
+            conditionUsesLength ? (
+              <label className="grid gap-1.5 text-xs font-medium" htmlFor="condition-right">
+                {t("右值")}
+                <Input
+                  id="condition-right"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={
+                    typeof config.right === "number" ? config.right : 0
+                  }
+                  readOnly={readOnly}
+                  onChange={(event) =>
+                    updateConfig({ right: Number(event.target.value) })
+                  }
+                />
+              </label>
+            ) : (
+              <JsonEditor
+                id="condition-right"
+                label={t("右值")}
+                value={config.right ?? ""}
+                readOnly={readOnly}
+                onChange={(right) => updateConfig({ right })}
+                t={t}
+              />
+            )
+          ) : null}
         </>
       ) : null}
       {node.type === "template" ? (
@@ -902,11 +1061,11 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
 function outputFieldNames(node: WorkflowNodeData) {
   const config = node.config
   if (node.type === "start" && Array.isArray(config.inputs)) {
-    return config.inputs.flatMap((item) =>
+    return ["files", ...config.inputs.flatMap((item) =>
       item && typeof item === "object" && typeof (item as Record<string, unknown>).name === "string"
         ? [String((item as Record<string, unknown>).name)]
         : []
-    )
+    )]
   }
   if (node.type === "end" && config.outputs && typeof config.outputs === "object") {
     return Object.keys(config.outputs)
@@ -921,7 +1080,7 @@ function outputFieldNames(node: WorkflowNodeData) {
   const fields: Partial<Record<WorkflowNodeType, string[]>> = {
     llm: ["text"],
     classifier: ["class"],
-    knowledge: ["content"],
+    knowledge: ["content", "hits", "retrieval_stats", "evidence_status"],
     condition: ["matched"],
     template: ["text"],
     variable: ["value"],

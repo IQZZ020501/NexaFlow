@@ -59,6 +59,10 @@ def create_celery_app() -> Celery:
                 "task": "app.knowledge.recover_storage_cleanups",
                 "schedule": 60.0,
             },
+            "recover-upload-storage-cleanups": {
+                "task": "app.uploads.recover_storage_cleanups",
+                "schedule": 60.0,
+            },
             "recover-agent-runs": {
                 "task": "app.agents.recover",
                 "schedule": 30.0,

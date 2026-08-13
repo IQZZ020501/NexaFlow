@@ -12,6 +12,7 @@ class Agent:
     name: str = ""
     app_type: str = "agent"
     description: str = ""
+    interaction_config: dict[str, Any] = field(default_factory=dict)
     instructions: str = ""
     model_id: str = ""
     knowledge_query_mode: str = "required"
@@ -69,6 +70,7 @@ class AgentRun:
     consumer_id: str = ""
     conversation_id: str = field(default_factory=new_id)
     goal: str = ""
+    attachment_context: str = ""
     instructions: str = ""
     knowledge_base_ids: list[str] = field(default_factory=list)
     knowledge_query_mode: str = "required"

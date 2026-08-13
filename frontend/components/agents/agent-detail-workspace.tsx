@@ -16,6 +16,7 @@ import {
   MessageSquareIcon,
   MessageSquarePlusIcon,
   MoreHorizontalIcon,
+  PaperclipIcon,
   ChartNoAxesColumnIcon,
   LayoutDashboardIcon,
   PanelLeftCloseIcon,
@@ -70,6 +71,8 @@ type AgentDetailWorkspaceProps = {
   resolvingCallId: string | null
   question: string
   setQuestion: React.Dispatch<React.SetStateAction<string>>
+  files: File[]
+  setFiles: React.Dispatch<React.SetStateAction<File[]>>
   pendingQuestion: string | null
   isDirty: boolean
   isSaving: boolean
@@ -646,6 +649,8 @@ export function AgentDetailWorkspace({
   resolvingCallId,
   question,
   setQuestion,
+  files,
+  setFiles,
   pendingQuestion,
   isDirty,
   isSaving,
@@ -1065,6 +1070,43 @@ export function AgentDetailWorkspace({
                 onAsk(event)
               }}
             >
+              {agent.interaction_config.file_upload ? (
+                <label className="flex min-w-0 items-center gap-2 px-3 pt-1 text-xs text-muted-foreground">
+                  <PaperclipIcon className="size-4 shrink-0" />
+                  <input
+                    type="file"
+                    multiple
+                    accept={agent.interaction_config.file_upload_setting.file_upload_type
+                      .filter((type) => type !== "audio")
+                      .flatMap((type) =>
+                        type === "image"
+                          ? [".jpeg", ".jpg", ".png", ".webp"]
+                          : [".csv", ".docx", ".epub", ".html", ".ipynb", ".json", ".md", ".pdf", ".pptx", ".txt", ".xls", ".xlsx", ".xml", ".zip"]
+                      )
+                      .join(",")}
+                    disabled={isDirty || isAsking || isRunsLoading}
+                    onChange={(event) => {
+                      const selected = Array.from(event.target.files ?? [])
+                      const setting = agent.interaction_config.file_upload_setting
+                      if (
+                        selected.length > setting.max_files ||
+                        selected.some((file) => file.size > setting.file_limit * 1024 * 1024)
+                      ) {
+                        event.target.value = ""
+                        setFiles([])
+                        notify("error", t("文件数量或大小超过限制。"))
+                        return
+                      }
+                      setFiles(selected)
+                    }}
+                  />
+                  {files.length ? (
+                    <span className="truncate">
+                      {t("已选择 {count} 个文件", { count: files.length })}
+                    </span>
+                  ) : null}
+                </label>
+              ) : null}
               <div className="flex items-end gap-2">
                 <textarea
                   value={question}
@@ -1081,9 +1123,10 @@ export function AgentDetailWorkspace({
                   }}
                   className="max-h-40 min-h-14 min-w-0 flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
                   placeholder={
-                            isDirty
-                              ? t("请先保存配置后再调试")
-                              : t("向 Agent 提问...")
+                    isDirty
+                      ? t("请先保存配置后再调试")
+                      : agent.interaction_config.user_input_title ||
+                        t("向 Agent 提问...")
                   }
                   aria-label={t("向 Agent 提问")}
                   disabled={

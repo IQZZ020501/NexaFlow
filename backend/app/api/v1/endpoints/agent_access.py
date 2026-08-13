@@ -5,8 +5,10 @@ from typing import Annotated
 from fastapi import (
     APIRouter,
     Depends,
+    File,
     HTTPException,
     Query,
+    UploadFile,
     status,
 )
 from fastapi.responses import StreamingResponse
@@ -26,6 +28,7 @@ from app.application.agents import (
     list_public_agent_conversations,
     resolve_external_agent_tool_approval,
     stream_external_agent_run,
+    upload_public_agent_files,
 )
 from app.application.agent_access import PublishedAgentContext
 from app.entities.agents import AgentApiCredential
@@ -34,12 +37,14 @@ from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
 from app.schemas.agent import (
     AgentApiDocumentationResponse,
+    AgentUploadResponse,
     AgentToolCallResponse,
     ExternalAgentRunCreateRequest,
     ExternalAgentRunListResponse,
     ExternalAgentRunResponse,
     PublicAgentConversationListResponse,
     PublicAgentProfileResponse,
+    PublicAgentRunCreateRequest,
 )
 
 _api_key_scheme = HTTPBearer(auto_error=False)
@@ -82,6 +87,22 @@ async def public_agent_conversations(
     return await list_public_agent_conversations(db, agent_id, user.id)
 
 
+@public_router.post(
+    "/uploads",
+    response_model=list[AgentUploadResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_public_agent_attachments(
+    agent_id: str,
+    files: Annotated[list[UploadFile], File()],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> list[AgentUploadResponse]:
+    context = await get_workspace_published_agent_context(db, agent_id, user)
+    return await upload_public_agent_files(db, context, user.id, files, settings)
+
+
 @public_router.get("/runs", response_model=ExternalAgentRunListResponse)
 async def list_public_agent_runs(
     agent_id: str,
@@ -112,7 +133,7 @@ async def list_public_agent_runs(
 )
 async def create_public_agent_run(
     agent_id: str,
-    payload: ExternalAgentRunCreateRequest,
+    payload: PublicAgentRunCreateRequest,
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_password_changed)],
@@ -126,6 +147,7 @@ async def create_public_agent_run(
         payload.goal,
         settings,
         payload.conversation_id,
+        payload.file_ids,
     )
 
 
