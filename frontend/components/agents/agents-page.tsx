@@ -131,6 +131,14 @@ export function canOpenAgentDetails(agent: Pick<Agent, "app_type">) {
   return agent.app_type === "agent"
 }
 
+export function isAgentListLoading(
+  workspaceId: string | null,
+  isLoading: boolean,
+  isMissingAgentLoading: boolean
+) {
+  return Boolean(workspaceId && (isLoading || isMissingAgentLoading))
+}
+
 export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
   const keepLiveAnswer = ["queued", "running", "awaiting_approval"].includes(
     liveRun.status
@@ -488,6 +496,7 @@ export function AgentsPage({
       setMcpServers([])
       setListedAgentsCount(0)
       setHasLoadedWorkspaceData(false)
+      setIsLoading(false)
       return
     }
     setIsLoading(true)
@@ -560,6 +569,11 @@ export function AgentsPage({
   ])
 
   const agentsListEndRef = useInfiniteScroll(loadMoreAgents)
+  const isAgentListBusy = isAgentListLoading(
+    selectedWorkspaceId,
+    isLoading,
+    isMissingAgentLoading
+  )
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -1318,7 +1332,7 @@ export function AgentsPage({
 
   return (
     <>
-      {isLoading ? <TopLoadingBar progress={35} /> : null}
+      {isAgentListBusy ? <TopLoadingBar progress={35} /> : null}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{t("应用")}</h1>
@@ -1348,7 +1362,8 @@ export function AgentsPage({
         </div>
       </div>
 
-      {isLoading && agents.length === 0 ? null : agents.length === 0 ? (
+      <div aria-busy={isAgentListBusy} className="flex flex-col gap-4">
+        {isAgentListBusy && agents.length === 0 ? null : agents.length === 0 ? (
         <div className="mx-auto flex min-h-[320px] max-w-xl flex-col items-center justify-center gap-4 p-6 text-center">
           <span className="flex size-14 items-center justify-center rounded-lg bg-muted">
             <BotIcon className="size-5 text-muted-foreground" />
@@ -1480,6 +1495,7 @@ export function AgentsPage({
           </div>
         </>
       )}
+      </div>
 
       {renderTypeChooserDialog()}
       {renderAgentDialog()}
