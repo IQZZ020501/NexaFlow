@@ -187,30 +187,35 @@ def _condition(left: Any, operator: str, right: Any) -> bool:
         return left == right
     if operator == "not_equals":
         return left != right
-    if operator == "contains":
+    if operator in {"contains", "not_contains"}:
         if not isinstance(left, (str, list, dict)):
             raise ValueError(
                 "Workflow contains condition requires a string, array, or object."
             )
-        return right in left
-    if operator == "not_contains":
-        if not isinstance(left, (str, list, dict)):
-            raise ValueError(
-                "Workflow contains condition requires a string, array, or object."
-            )
-        return right not in left
+        if isinstance(left, str) and not isinstance(right, str):
+            raise ValueError("Workflow contains condition has incompatible operands.")
+        if isinstance(left, dict):
+            try:
+                hash(right)
+            except TypeError as exc:
+                raise ValueError(
+                    "Workflow contains condition has incompatible operands."
+                ) from exc
+        matched = right in left
+        return matched if operator == "contains" else not matched
     if operator in {
         "greater_than",
         "greater_than_or_equal",
         "less_than",
         "less_than_or_equal",
     } and not (
-        isinstance(left, str)
-        and isinstance(right, str)
-        or isinstance(left, (int, float))
-        and not isinstance(left, bool)
-        and isinstance(right, (int, float))
-        and not isinstance(right, bool)
+        (isinstance(left, str) and isinstance(right, str))
+        or (
+            isinstance(left, (int, float))
+            and not isinstance(left, bool)
+            and isinstance(right, (int, float))
+            and not isinstance(right, bool)
+        )
     ):
         raise ValueError(
             "Workflow ordering condition requires two strings or two numbers."

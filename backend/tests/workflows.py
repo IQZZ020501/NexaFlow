@@ -250,6 +250,16 @@ def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
     assert not _condition(False, "is_true", None)
     assert _condition(2, "greater_than", 1.5)
     assert _condition(2.0, "greater_than", 1)
+    for operator, left, right in (
+        ("contains", "text", 1),
+        ("not_contains", {"key": "value"}, ["key"]),
+    ):
+        try:
+            _condition(left, operator, right)
+        except ValueError as exc:
+            assert "incompatible operands" in str(exc)
+        else:
+            raise AssertionError(f"{operator} accepted incompatible operands")
     try:
         _condition(3, "length_greater_than", 2)
     except ValueError as exc:

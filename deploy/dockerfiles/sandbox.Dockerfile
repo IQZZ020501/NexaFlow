@@ -19,4 +19,4 @@ COPY --from=builder --chown=root:root /build/sandbox ./sandbox
 # Runs as root so the runner can drop each child to UID/GID 65532.
 ENTRYPOINT ["python", "-m", "sandbox.server"]
 HEALTHCHECK --interval=5s --timeout=2s --retries=10 \
-    CMD ["python", "-c", "import os, stat, sys; p='/run/sandbox/sandbox.sock'; sys.exit(0 if os.path.exists(p) and stat.S_ISSOCK(os.stat(p).st_mode) else 1)"]
+    CMD ["python", "-m", "sandbox.healthcheck"]

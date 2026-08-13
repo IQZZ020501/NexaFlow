@@ -6,15 +6,14 @@ import argparse
 import json
 import logging
 import os
-from pathlib import Path
 import signal
 import socketserver
 import stat
 import threading
+from pathlib import Path
 from typing import Any
 
 from .runner import encode_response, execute_request
-
 
 MAX_REQUEST_BYTES = 768 * 1024
 # NOTE: serialize same-UID jobs; move to one sandbox instance per job before
@@ -48,7 +47,9 @@ class SandboxRequestHandler(socketserver.StreamRequestHandler):
             request = json.loads(line)
             if not isinstance(request, dict):
                 raise ValueError("request must be an object")
-            if not self.server.run_slot.acquire(timeout=ACQUIRE_TIMEOUT_SECONDS):  # type: ignore[attr-defined]
+            if request == {"version": 1, "type": "healthcheck"}:
+                response = {"version": 1, "ok": True, "status": "ready"}
+            elif not self.server.run_slot.acquire(timeout=ACQUIRE_TIMEOUT_SECONDS):  # type: ignore[attr-defined]
                 response: dict[str, Any] = {
                     "version": 1,
                     "ok": False,

@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 
+from sandbox.healthcheck import probe
 from sandbox.runner import MAX_STDIN_BYTES, Limits, run_code
 from sandbox.server import SandboxServer
 
@@ -119,6 +120,7 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as directory:
         socket_path = Path(directory) / "sandbox.sock"
+        assert not probe(socket_path)
         server = SandboxServer(socket_path)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -131,6 +133,7 @@ def main() -> None:
             thread.join(timeout=1)
             server.server_close()
             raise AssertionError("sandbox socket was not created")
+        assert probe(socket_path)
         response = request(socket_path, {"code": "print(input())", "stdin": "socket-ok"})
         server.shutdown()
         thread.join(timeout=1)
