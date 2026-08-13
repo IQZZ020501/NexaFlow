@@ -18,6 +18,7 @@ import {
   PermissionBadge,
   StatusBadge,
 } from "@/components/knowledge/status-badges"
+import { TopLoadingBar } from "@/components/app/top-progress"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
@@ -118,6 +119,14 @@ export function isCurrentAgentConversation(
   expectedConversationId: string | null
 ) {
   return currentConversationId === expectedConversationId
+}
+
+export function isAgentListLoading(
+  workspaceId: string | null,
+  isLoading: boolean,
+  isMissingAgentLoading: boolean
+) {
+  return Boolean(workspaceId && (isLoading || isMissingAgentLoading))
 }
 
 export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
@@ -332,7 +341,7 @@ export function AgentsPage({
   const [askAbortController, setAskAbortController] =
     React.useState<AbortController | null>(null)
   const [form, setForm] = React.useState<AgentFormState>(EMPTY_FORM)
-  const [isLoading, setIsLoading] = React.useState(false)
+  const [isLoading, setIsLoading] = React.useState(true)
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
@@ -476,6 +485,7 @@ export function AgentsPage({
       setMcpServers([])
       setListedAgentsCount(0)
       setHasLoadedWorkspaceData(false)
+      setIsLoading(false)
       return
     }
     setIsLoading(true)
@@ -548,6 +558,11 @@ export function AgentsPage({
   ])
 
   const agentsListEndRef = useInfiniteScroll(loadMoreAgents)
+  const isAgentListBusy = isAgentListLoading(
+    selectedWorkspaceId,
+    isLoading,
+    isMissingAgentLoading
+  )
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -1281,6 +1296,7 @@ export function AgentsPage({
 
   return (
     <>
+      {isAgentListBusy ? <TopLoadingBar progress={35} /> : null}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{t("应用")}</h1>
@@ -1310,12 +1326,8 @@ export function AgentsPage({
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex min-h-[220px] items-center justify-center rounded-lg border bg-background shadow-sm">
-          <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
-          {t("正在加载")}
-        </div>
-      ) : agents.length === 0 ? (
+      <div aria-busy={isAgentListBusy} className="flex flex-col gap-4">
+        {isAgentListBusy && agents.length === 0 ? null : agents.length === 0 ? (
         <div className="mx-auto flex min-h-[320px] max-w-xl flex-col items-center justify-center gap-4 p-6 text-center">
           <span className="flex size-14 items-center justify-center rounded-lg bg-muted">
             <BotIcon className="size-5 text-muted-foreground" />
@@ -1439,6 +1451,7 @@ export function AgentsPage({
           </div>
         </>
       )}
+      </div>
 
       {renderAgentDialog()}
       <AgentPermissionsDialog

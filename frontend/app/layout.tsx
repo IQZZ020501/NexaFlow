@@ -13,6 +13,31 @@ export const viewport: Viewport = {
   initialScale: 1,
 }
 
+const themeScript = `
+(function () {
+  try {
+    var storedTheme = localStorage.getItem("theme");
+    var resolvedTheme =
+      storedTheme === "dark" || storedTheme === "light"
+        ? storedTheme
+        : window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+    var root = document.documentElement;
+    root.classList.remove("light", "dark");
+    root.classList.add(resolvedTheme);
+    root.style.colorScheme = resolvedTheme;
+    root.style.backgroundColor =
+      resolvedTheme === "dark" ? "oklch(0.145 0 0)" : "oklch(1 0 0)";
+  } catch {}
+})();
+`
+
+const criticalThemeStyles = `
+html, body { background-color: oklch(1 0 0); }
+html.dark, html.dark body { background-color: oklch(0.145 0 0); }
+`
+
 export default function RootLayout({
   children,
 }: {
@@ -20,6 +45,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-Hans" suppressHydrationWarning>
+      <head>
+        <style dangerouslySetInnerHTML={{ __html: criticalThemeStyles }} />
+        <script
+          id="theme-init"
+          dangerouslySetInnerHTML={{ __html: themeScript }}
+        />
+      </head>
       <body>
         <AppProviders>{children}</AppProviders>
       </body>

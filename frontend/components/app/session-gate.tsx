@@ -1,11 +1,11 @@
 "use client"
 
 import * as React from "react"
-import { LoaderCircleIcon } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 import { ChangePasswordDialog } from "@/components/auth/change-password-dialog"
 import { OperationNotification } from "@/components/app/operation-notification"
+import { TopLoadingBar } from "@/components/app/top-progress"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -42,16 +42,19 @@ export function SessionGate({ children }: { children: React.ReactNode }) {
     }
   }, [token, isSessionRestored, router])
 
-  if (!token) {
-    return null
+  const loadingProgress = isSessionRestored && token ? 65 : 20
+
+  if (!isSessionRestored || (isSessionLoading && !me)) {
+    return (
+      <>
+        <TopLoadingBar progress={loadingProgress} />
+        <main className="min-h-svh bg-background" aria-busy="true" />
+      </>
+    )
   }
 
-  if (isSessionLoading && !me) {
-    return (
-      <main className="flex min-h-svh items-center justify-center bg-background">
-        <LoaderCircleIcon className="animate-spin text-muted-foreground" />
-      </main>
-    )
+  if (!token) {
+    return null
   }
 
   if (!me) {

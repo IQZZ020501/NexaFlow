@@ -3,6 +3,32 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
+@keyframes session-loading-bar {
+    0% {
+        transform: translateX(-100%);
+    }
+    50%,
+    100% {
+        transform: translateX(300%);
+    }
+}
+
+.top-loading-bar-indicator {
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: 35%;
+    background: var(--primary-foreground);
+    opacity: 0.35;
+    animation: session-loading-bar 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .top-loading-bar-indicator {
+        animation: none;
+    }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
