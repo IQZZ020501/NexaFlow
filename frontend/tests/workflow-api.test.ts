@@ -8,10 +8,6 @@ import {
   createPublicWorkflowRun,
   getWorkflowApiDocumentation,
 } from "../lib/api/public-workflows"
-import {
-  initialPublicWorkflowValues,
-  parsePublicWorkflowValues,
-} from "../components/workflows/public-workflow-chat"
 
 const originalFetch = globalThis.fetch
 
@@ -56,13 +52,13 @@ describe("workflow API", () => {
       "token",
       "ws-1",
       "workflow-1",
-      { input: "release" },
+      "release",
       "published",
       3
     )
 
     expect(JSON.parse(body)).toEqual({
-      inputs: { input: "release" },
+      question: "release",
       source: "published",
       version_number: 3,
     })
@@ -83,71 +79,24 @@ describe("workflow API", () => {
         body: init?.body ? String(init.body) : undefined,
         authorization:
           new Headers(init?.headers).get("Authorization") ?? undefined,
-})
+      })
       return Response.json({})
     }) as typeof fetch
 
     await createPublicWorkflowRun(
       "workflow-1",
       "session-token",
-      { query: "release" },
+      "release",
       "conversation-1"
     )
     await getWorkflowApiDocumentation("workflow-1", "nxf_key")
 
     expect(requests[0]?.url).toContain("/public/workflows/workflow-1/runs")
     expect(JSON.parse(requests[0]?.body ?? "{}")).toEqual({
-      inputs: { query: "release" },
+      question: "release",
       conversation_id: "conversation-1",
     })
     expect(requests[1]?.url).toContain("/workflow-api/workflow-1/documentation")
     expect(requests[1]?.authorization).toBe("Bearer nxf_key")
-  })
-
-  test("parses published Start node inputs by declared type", () => {
-    const fields = [
-      {
-        name: "query", label: "Query", type: "string" as const,
-        control: "input" as const, required: true, default: "", options: [],
-        assignment_method: "user_input" as const,
-      },
-      {
-        name: "count", label: "Count", type: "number" as const,
-        control: "input" as const, required: true, default: 2, options: [],
-        assignment_method: "user_input" as const,
-      },
-      {
-        name: "enabled",
-        label: "Enabled",
-        type: "boolean" as const,
-        control: "input" as const,
-        required: false,
-        default: true,
-        options: [],
-        assignment_method: "user_input" as const,
-      },
-      {
-        name: "filters",
-        label: "Filters",
-        type: "object" as const,
-        control: "input" as const,
-        required: false,
-        default: {},
-        options: [],
-        assignment_method: "user_input" as const,
-      },
-    ]
-    const values = initialPublicWorkflowValues(fields)
-    values.query = "release"
-
-    expect(parsePublicWorkflowValues(fields, values)).toEqual({
-      query: "release",
-      count: 2,
-      enabled: true,
-      filters: {},
-    })
-    expect(() =>
-      parsePublicWorkflowValues(fields, { ...values, filters: "[]" })
-    ).toThrow()
   })
 })

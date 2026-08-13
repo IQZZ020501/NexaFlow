@@ -100,11 +100,10 @@ async def update_workflow_definition(
     agent = await get_workflow_agent(db, workspace_id, agent_id)
     require_agent_edit(agent, actor, workspace_role)
     definition = await get_or_create_definition(db, agent, actor, workspace_role)
-    graph = await validate_workflow_resources(db, agent, payload.graph)
     updated = await save_definition(
         db,
         definition,
-        graph,
+        payload.graph,
         payload.expected_revision,
         actor,
     )

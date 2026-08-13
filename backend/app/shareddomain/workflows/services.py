@@ -96,22 +96,9 @@ async def validate_workflow_resources(
     bound_mcp = {(item["server_id"], item["tool_name"]) for item in mcp_bindings}
     referenced_mcp: set[tuple[str, str]] = set()
     model_ids = {default_model_id or agent.model_id}
-    input_names: list[str] = []
     for node in parsed.nodes:
         config = node.data.config
-        if node.data.type == "start":
-            input_names = [str(item["name"]) for item in config.get("inputs", [])]
-            if len(input_names) != len(set(input_names)):
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    f"Start node {node.id} input names must be unique.",
-                )
-            if "files" in input_names:
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    'Start input name "files" is reserved for uploads.',
-                )
-        elif node.data.type == "end":
+        if node.data.type == "end":
             if any(
                 OUTPUT_NAME_PATTERN.fullmatch(str(key)) is None
                 for key in config.get("outputs", {})

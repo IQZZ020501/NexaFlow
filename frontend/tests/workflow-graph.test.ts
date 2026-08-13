@@ -4,7 +4,6 @@ import {
   WORKFLOW_NODE_PRESETS,
   createWorkflowEdge,
   defaultNodeConfig,
-  initialWorkflowInputs,
   removeWorkflowNode,
   selectWorkflowRunTarget,
   serializeWorkflowGraph,
@@ -13,8 +12,12 @@ import {
 import {
   applyWorkflowEdgeChanges,
   applyWorkflowNodeChanges,
+  canvasPositionLeftOf,
   draggedCanvasPosition,
+  nonOverlappingCanvasPosition,
   persistedWorkflowViewport,
+  viewportIncludingCanvasX,
+  workflowNodeRects,
 } from "../lib/workflows/canvas"
 
 describe("workflow graph", () => {
@@ -28,6 +31,48 @@ describe("workflow graph", () => {
     ).toEqual({ x: 176, y: 206 })
   })
 
+  test("keeps the basic info card clear of workflow nodes", () => {
+    const position = canvasPositionLeftOf(
+      { x: 80, y: 180, width: 256, height: 320 },
+      { width: 400, height: 620 }
+    )
+    expect(position).toEqual({ x: -344, y: 180 })
+    expect(
+      viewportIncludingCanvasX({ x: 0, y: 0, zoom: 1 }, position.x)
+    ).toEqual({ x: 360, y: 0, zoom: 1 })
+
+    expect(
+      nonOverlappingCanvasPosition(
+        { x: 16, y: 16 },
+        { width: 400, height: 620 },
+        [
+          { x: 80, y: 180, width: 256, height: 320 },
+          { x: 460, y: 180, width: 256, height: 320 },
+        ]
+      )
+    ).toEqual({ x: -344, y: 16 })
+
+    expect(
+      nonOverlappingCanvasPosition(
+        { x: 16, y: 16 },
+        { width: 400, height: 120 },
+        [{ x: 80, y: 180, width: 256, height: 320 }]
+      )
+    ).toEqual({ x: 16, y: 16 })
+
+    expect(
+      workflowNodeRects([
+        {
+          id: "start",
+          type: "workflow",
+          position: { x: 80, y: 180 },
+          measured: { width: 256, height: 320 },
+          data: { type: "start", title: "Start", config: {} },
+        } as never,
+      ])
+    ).toEqual([{ x: 80, y: 180, width: 256, height: 320 }])
+  })
+
   test("builds reference-node presets from existing node types", () => {
     const t = ((key: string) => key) as never
     const optimizer = WORKFLOW_NODE_PRESETS.find(
@@ -39,14 +84,18 @@ describe("workflow graph", () => {
     expect(optimizer?.config(t)).toEqual({
       system_prompt: "你是一个问题优化专家。",
       prompt:
-        "请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.input}}",
+        "请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.question}}",
     })
     expect(reply?.type).toBe("template")
-    expect(reply?.config(t)).toEqual({ template: "{{start.input}}" })
+    expect(reply?.config(t)).toEqual({ template: "{{start.question}}" })
     expect(defaultNodeConfig("knowledge")).toEqual({
       knowledge_base_ids: [],
-      query: "{{start.input}}",
+      query: "{{start.question}}",
       limit: 3,
+    })
+    expect(defaultNodeConfig("start")).toEqual({})
+    expect(defaultNodeConfig("end")).toEqual({
+      outputs: { result: "{{start.question}}" },
     })
   })
 
@@ -115,32 +164,6 @@ describe("workflow graph", () => {
     )
     expect(result.nodes).toHaveLength(1)
     expect(result.edges).toHaveLength(0)
-  })
-
-  test("builds debug inputs from the start node schema", () => {
-    expect(
-      initialWorkflowInputs({
-        nodes: [
-          {
-            id: "start",
-            type: "workflow",
-            position: { x: 0, y: 0 },
-            data: {
-              type: "start",
-              title: "Start",
-              config: {
-                inputs: [
-                  { name: "query", type: "string", required: true },
-                  { name: "limit", type: "number", default: 3 },
-                ],
-              },
-            },
-          },
-        ],
-        edges: [],
-        viewport: { x: 0, y: 0, zoom: 1 },
-      })
-    ).toEqual({ query: "", limit: 3 })
   })
 
   test("keeps read-only canvas graph mutations out of the draft", () => {

@@ -2,23 +2,11 @@ import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
 import type { AgentInteractionConfig } from "@/lib/api/agents"
 
-export type PublicWorkflowInput = {
-  name: string
-  label: string
-  type: "string" | "number" | "boolean" | "object" | "array"
-  control: "input" | "select" | "date"
-  required: boolean
-  default: unknown
-  options: string[]
-  assignment_method: "user_input" | "api_input"
-}
-
 export type PublicWorkflowProfile = {
   id: string
   name: string
   description: string
   interaction_config: AgentInteractionConfig
-  inputs: PublicWorkflowInput[]
 }
 
 export type WorkflowUpload = {
@@ -75,7 +63,6 @@ export type WorkflowApiDocumentation = {
   workflow_name: string
   base_path: string
   interaction_config: AgentInteractionConfig
-  inputs: PublicWorkflowInput[]
 }
 
 const path = (workflowId: string, suffix = "") =>
@@ -115,7 +102,7 @@ export function listPublicWorkflowRuns(
 export function createPublicWorkflowRun(
   workflowId: string,
   token: string,
-  inputs: Record<string, unknown>,
+  question: string,
   conversationId?: string | null,
   fileIds: string[] = []
 ) {
@@ -123,7 +110,7 @@ export function createPublicWorkflowRun(
     method: "POST",
     token,
     body: JSON.stringify({
-      inputs,
+      question,
       ...(fileIds.length ? { file_ids: fileIds } : {}),
       ...(conversationId ? { conversation_id: conversationId } : {}),
     }),

@@ -1,6 +1,5 @@
 import asyncio
 from collections.abc import AsyncIterator
-import json
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -32,7 +31,6 @@ from app.tasks.agents import enqueue_agent_run
 
 WORKFLOW_MAX_STEPS = 100
 WORKFLOW_MAX_MODEL_TOKENS = 100_000
-WORKFLOW_MAX_INPUT_BYTES = 128 * 1024
 WORKFLOW_EVENT_PAGE_SIZE = 200
 
 
@@ -120,6 +118,7 @@ async def create_workflow_run(
     access_source: str = "console",
     consumer_id: str | None = None,
     conversation_id: str | None = None,
+    files: list[dict[str, Any]] | None = None,
 ) -> WorkflowRunResponse:
     if access_source not in {"console", "public", "api"}:
         raise ValueError("Invalid workflow run access source.")
@@ -130,12 +129,6 @@ async def create_workflow_run(
         )
     if access_source != "console" and not consumer_id:
         raise ValueError("External workflow runs require a consumer id.")
-    encoded_inputs = json.dumps(payload.inputs, ensure_ascii=False, separators=(",", ":"))
-    if len(encoded_inputs.encode()) > WORKFLOW_MAX_INPUT_BYTES:
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            "Workflow inputs exceed 128 KiB.",
-        )
     agent = await get_workflow_agent(db, workspace_id, agent_id)
     if payload.source == "draft" and access_source == "console":
         require_agent_edit(agent, actor, workspace_role)
@@ -181,7 +174,7 @@ async def create_workflow_run(
         access_source=access_source,
         consumer_id=consumer_id or actor.id,
         conversation_id=run_conversation_id,
-        goal=encoded_inputs[:4000],
+        goal=payload.question,
         instructions=agent.instructions,
         knowledge_base_ids=knowledge_bindings,
         knowledge_query_mode=agent.knowledge_query_mode,
@@ -193,6 +186,9 @@ async def create_workflow_run(
         trace_id=new_id(),
         model_usage={},
     )
+    run_inputs: dict[str, Any] = {"question": payload.question}
+    if files:
+        run_inputs["files"] = files
     detail = WorkflowRunDetail(
         workspace_id=workspace_id,
         definition_id=definition.id,
@@ -204,7 +200,7 @@ async def create_workflow_run(
         source=payload.source,
         graph_hash=(version.graph_hash if version is not None else definition.graph_hash),
         graph_snapshot=parsed.model_dump(by_alias=True, mode="json"),
-        inputs=payload.inputs,
+        inputs=run_inputs,
         max_steps=WORKFLOW_MAX_STEPS,
         max_model_tokens=WORKFLOW_MAX_MODEL_TOKENS,
         # Reset from the worker's first claim so queue latency does not consume runtime.

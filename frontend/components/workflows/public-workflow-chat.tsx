@@ -35,7 +35,6 @@ import {
   uploadPublicWorkflowFiles,
   type ExternalWorkflowRun,
   type PublicWorkflowConversation,
-  type PublicWorkflowInput,
   type PublicWorkflowProfile,
   type PublicWorkflowRunStreamEvent,
 } from "@/lib/api/public-workflows"
@@ -45,64 +44,12 @@ import {
   acceptedUploadExtensions,
 } from "@/lib/interaction-config"
 
-type InputValues = Record<string, string | boolean>
-
 function conversationLabel(inputs: Record<string, unknown>, fallback: string) {
+  const question = inputs.question
   return (
-    Object.values(inputs).find(
-      (value): value is string => typeof value === "string" && Boolean(value.trim())
-    )?.trim() || fallback
+    (typeof question === "string" && question.trim() ? question.trim() : "") ||
+    fallback
   )
-}
-
-export function initialPublicWorkflowValues(
-  fields: PublicWorkflowInput[]
-): InputValues {
-  return Object.fromEntries(
-    fields.map((field) => [
-      field.name,
-      field.type === "boolean"
-        ? Boolean(field.default)
-        : field.default == null
-          ? ""
-          : field.type === "object" || field.type === "array"
-            ? JSON.stringify(field.default, null, 2)
-            : String(field.default),
-    ])
-  )
-}
-
-export function parsePublicWorkflowValues(
-  fields: PublicWorkflowInput[],
-  values: InputValues
-) {
-  const inputs: Record<string, unknown> = {}
-  for (const field of fields) {
-    const value = values[field.name]
-    if (field.type === "boolean") {
-      inputs[field.name] = Boolean(value)
-      continue
-    }
-    const text = String(value ?? "").trim()
-    if (!text && field.required) throw new Error(field.name)
-    if (!text) continue
-    if (field.type === "number") {
-      const number = Number(text)
-      if (!Number.isFinite(number)) throw new Error(field.name)
-      inputs[field.name] = number
-    } else if (field.type === "object" || field.type === "array") {
-      const parsed: unknown = JSON.parse(text)
-      if (
-        field.type === "array"
-          ? !Array.isArray(parsed)
-          : !parsed || typeof parsed !== "object" || Array.isArray(parsed)
-      ) {
-        throw new Error(field.name)
-      }
-      inputs[field.name] = parsed
-    } else inputs[field.name] = text
-  }
-  return inputs
 }
 
 function updateRun(
@@ -213,7 +160,7 @@ export function PublicWorkflowChat({
     initialConversationId
   )
   const [runs, setRuns] = React.useState<ExternalWorkflowRun[]>([])
-  const [values, setValues] = React.useState<InputValues>({})
+  const [question, setQuestion] = React.useState("")
   const [files, setFiles] = React.useState<File[]>([])
   const [loading, setLoading] = React.useState(true)
   const [runsLoading, setRunsLoading] = React.useState(false)
@@ -231,7 +178,6 @@ export function PublicWorkflowChat({
       .then(({ profile: nextProfile, conversations: nextConversations }) => {
         if (!active) return
         setProfile(nextProfile)
-        setValues(initialPublicWorkflowValues(nextProfile.inputs))
         setConversations(nextConversations.items)
         const nextId =
           initialConversationId ??
@@ -276,14 +222,8 @@ export function PublicWorkflowChat({
 
   async function handleRun(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!token || !profile || running) return
-    let inputs: Record<string, unknown>
-    try {
-      inputs = parsePublicWorkflowValues(profile.inputs, values)
-    } catch {
-      setError(t("请检查必填字段和 JSON 输入。"))
-      return
-    }
+    const nextQuestion = question.trim()
+    if (!token || !profile || running || !nextQuestion) return
     setRunning(true)
     setError(null)
     try {
@@ -293,10 +233,11 @@ export function PublicWorkflowChat({
       const run = await createPublicWorkflowRun(
         workflowId,
         token,
-        inputs,
+        nextQuestion,
         conversationId,
         uploaded.map((item) => item.id)
       )
+      setQuestion("")
       const nextConversationId = run.conversation_id
       setConversationId(nextConversationId)
       setRuns((current) => [run, ...current])
@@ -417,6 +358,14 @@ export function PublicWorkflowChat({
                   key={run.id}
                   className="space-y-3 rounded-lg border bg-background p-4 shadow-xs"
                 >
+                  <div className="flex justify-end">
+                    <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 break-words whitespace-pre-wrap text-primary-foreground [overflow-wrap:anywhere]">
+                      {typeof run.inputs.question === "string" &&
+                      run.inputs.question.trim()
+                        ? run.inputs.question
+                        : t("工作流运行")}
+                    </div>
+                  </div>
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold">{t("工作流运行")}</p>
                     <Badge
@@ -433,12 +382,6 @@ export function PublicWorkflowChat({
                       )}
                     </Badge>
                   </div>
-                  <section>
-                    <p className="mb-2 text-xs font-medium text-muted-foreground">
-                      {t("运行输入")}
-                    </p>
-                    <JsonBlock value={run.inputs} />
-                  </section>
                   {run.progress.length ? (
                     <section>
                       <p className="mb-2 text-xs font-medium text-muted-foreground">
@@ -499,80 +442,32 @@ export function PublicWorkflowChat({
                   {profile.interaction_config.user_input_title || t("运行工作流")}
                 </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {t("输入将从开始节点注入已发布版本。")}
+                  {t("问题将作为开始节点的 question 输出注入已发布版本。")}
                 </p>
               </div>
               <div className="grid gap-4">
-                {profile.inputs.map((field) => (
-                  <label
-                    key={field.name}
-                    className="grid gap-1.5 text-sm font-medium"
-                  >
-                    {field.label || field.name}
-                    {field.required ? (
-                      <span className="text-destructive">*</span>
-                    ) : null}
-                    {field.control === "select" ? (
-                      <select
-                        className="h-9 rounded-md border bg-background px-3 text-sm"
-                        required={field.required}
-                        value={String(values[field.name] ?? "")}
-                        onChange={(event) =>
-                          setValues((current) => ({
-                            ...current,
-                            [field.name]: event.target.value,
-                          }))
-                        }
-                      >
-                        <option value="">{t("请选择")}</option>
-                        {field.options.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </select>
-                    ) : field.type === "boolean" ? (
-                      <input
-                        type="checkbox"
-                        className="size-4 accent-primary"
-                        checked={Boolean(values[field.name])}
-                        onChange={(event) =>
-                          setValues((current) => ({
-                            ...current,
-                            [field.name]: event.target.checked,
-                          }))
-                        }
-                      />
-                    ) : field.type === "object" || field.type === "array" ? (
-                      <textarea
-                        className="min-h-28 rounded-md border bg-background p-3 font-mono text-xs"
-                        value={String(values[field.name] ?? "")}
-                        onChange={(event) =>
-                          setValues((current) => ({
-                            ...current,
-                            [field.name]: event.target.value,
-                          }))
-                        }
-                      />
-                    ) : (
-                      <Input
-                        type={
-                          field.control === "date"
-                            ? "date"
-                            : field.type === "number"
-                              ? "number"
-                              : "text"
-                        }
-                        required={field.required}
-                        value={String(values[field.name] ?? "")}
-                        onChange={(event) =>
-                          setValues((current) => ({
-                            ...current,
-                            [field.name]: event.target.value,
-                          }))
-                        }
-                      />
-                    )}
-                  </label>
-                ))}
+                <label
+                  className="grid gap-1.5 text-sm font-medium"
+                  htmlFor="workflow-chat-question"
+                >
+                  {t("用户问题")}
+                  <textarea
+                    id="workflow-chat-question"
+                    rows={4}
+                    className="resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value={question}
+                    onChange={(event) => setQuestion(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === "Enter" &&
+                        (event.metaKey || event.ctrlKey)
+                      ) {
+                        event.preventDefault()
+                        event.currentTarget.form?.requestSubmit()
+                      }
+                    }}
+                  />
+                </label>
                 {profile.interaction_config.file_upload ? (
                   <label className="grid gap-1.5 text-sm font-medium">
                     <span className="flex items-center gap-2">
@@ -593,18 +488,17 @@ export function PublicWorkflowChat({
                     />
                   </label>
                 ) : null}
-                {!profile.inputs.length && !profile.interaction_config.file_upload ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t("此工作流无需输入。")}
-                  </p>
-                ) : null}
               </div>
               {error ? (
                 <p role="alert" className="mt-4 text-sm text-destructive">
                   {error}
                 </p>
               ) : null}
-              <Button type="submit" className="mt-5" disabled={running}>
+              <Button
+                type="submit"
+                className="mt-5"
+                disabled={running || !question.trim()}
+              >
                 {running ? (
                   <LoaderCircleIcon className="animate-spin" />
                 ) : (

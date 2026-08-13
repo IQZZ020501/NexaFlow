@@ -36,12 +36,20 @@ import type {
   WorkflowNodeType,
 } from "@/lib/api/workflows"
 import { cn } from "@/lib/utils"
+import {
+  WORKFLOW_START_FIELDS,
+  WORKFLOW_START_GLOBALS,
+  upstreamWorkflowFields,
+} from "@/lib/workflows/graph"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { IconButton } from "@/components/ui/icon-button"
 
@@ -121,10 +129,8 @@ function previewValue(value: unknown) {
 function configSummary(node: WorkflowNodeData, t: TFunction) {
   const config = node.config
   switch (node.type) {
-    case "start": {
-      const count = Array.isArray(config.inputs) ? config.inputs.length : 0
-      return `${t("输入字段")} · ${count}`
-    }
+    case "start":
+      return null
     case "end": {
       const outputs = config.outputs
       const count = outputs && typeof outputs === "object" ? Object.keys(outputs).length : 0
@@ -220,6 +226,84 @@ function JsonEditor({
   )
 }
 
+function VariablePicker({
+  nodeId,
+  node,
+  t,
+  onInsert,
+}: {
+  nodeId: string
+  node: WorkflowNodeData
+  t: TFunction
+  onInsert: (reference: string) => void
+}) {
+  const [open, setOpen] = React.useState(false)
+  const upstream = React.useMemo(() => {
+    const nodes = node.nodes ?? []
+    const edges = node.edges ?? []
+    return upstreamWorkflowFields(nodes, edges, nodeId, outputFieldNames)
+  }, [node.edges, node.nodes, nodeId])
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-6 px-1.5 text-[11px] font-normal text-muted-foreground"
+        >
+          <BracesIcon className="size-3.5" />
+          {t("插入变量")}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-80 w-60 overflow-y-auto">
+        <p className="px-2 pt-1.5 pb-0.5 text-[10px] font-medium text-muted-foreground">
+          {t("全局变量")}
+        </p>
+        {WORKFLOW_START_GLOBALS.map((field) => (
+          <DropdownMenuItem
+            key={field.value}
+            onSelect={() => {
+              onInsert(`{{global.${field.value}}}`)
+              setOpen(false)
+            }}
+          >
+            <span className="min-w-0 flex-1 truncate font-mono text-xs">
+              {`{{global.${field.value}}}`}
+            </span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        {upstream.length ? (
+          upstream.map((group) => (
+            <React.Fragment key={group.id}>
+              <p className="px-2 pt-1.5 pb-0.5 text-[10px] font-medium text-muted-foreground">
+                {group.title}
+              </p>
+              {group.fields.map((field) => (
+                <DropdownMenuItem
+                  key={field}
+                  onSelect={() => {
+                    onInsert(`{{${group.id}.${field}}}`)
+                    setOpen(false)
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                    {`{{${group.id}.${field}}}`}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </React.Fragment>
+          ))
+        ) : (
+          <p className="px-2 py-2 text-xs text-muted-foreground">
+            {t("暂无可引用变量")}
+          </p>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function TextEditor({
   id,
   label,
@@ -227,6 +311,10 @@ function TextEditor({
   readOnly,
   rows = 3,
   onChange,
+  node,
+  nodeId,
+  t,
+  insertVariables = false,
 }: {
   id: string
   label: string
@@ -234,11 +322,38 @@ function TextEditor({
   readOnly: boolean
   rows?: number
   onChange: (value: string) => void
+  node: WorkflowNodeData
+  nodeId: string
+  t: TFunction
+  insertVariables?: boolean
 }) {
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const insertReference = React.useCallback(
+    (reference: string) => {
+      const textarea = textareaRef.current
+      const start = textarea?.selectionStart ?? (typeof value === "string" ? value.length : 0)
+      const end = textarea?.selectionEnd ?? start
+      onChange(
+        `${typeof value === "string" ? value : JSON.stringify(value)}`
+          .slice(0, start) + reference + `${typeof value === "string" ? value : JSON.stringify(value)}`.slice(end)
+      )
+      requestAnimationFrame(() => {
+        textarea?.focus()
+        textarea?.setSelectionRange(start + reference.length, start + reference.length)
+      })
+    },
+    [onChange, value]
+  )
   return (
     <label className="grid gap-1.5 text-xs font-medium" htmlFor={id}>
-      {label}
+      <span className="flex items-center justify-between gap-2">
+        {label}
+        {insertVariables && !readOnly ? (
+          <VariablePicker nodeId={nodeId} node={node} t={t} onInsert={insertReference} />
+        ) : null}
+      </span>
       <textarea
+        ref={textareaRef}
         id={id}
         rows={rows}
         className="resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -274,33 +389,10 @@ function NodeConfigFields({
   const config = node.config
   const updateConfig = (patch: Record<string, unknown>) =>
     onUpdate({ ...node, config: { ...config, ...patch } })
-  const inputItems = Array.isArray(config.inputs)
-    ? (config.inputs as Record<string, unknown>[])
-    : []
   const outputEntries =
     config.outputs && typeof config.outputs === "object"
       ? Object.entries(config.outputs as Record<string, unknown>)
       : []
-  const updateInputItem = (index: number, patch: Record<string, unknown>) =>
-    updateConfig({
-      inputs: inputItems.map((item, i) =>
-        i === index ? { ...item, ...patch } : item
-      ),
-    })
-  const removeInputItem = (index: number) =>
-    updateConfig({ inputs: inputItems.filter((_, i) => i !== index) })
-  const addInputItem = () =>
-    updateConfig({
-      inputs: [
-        ...inputItems,
-        {
-          name: `input_${inputItems.length + 1}`,
-          type: "string",
-          required: false,
-          default: "",
-        },
-      ],
-    })
   const updateOutputItem = (index: number, key: string, value: string) => {
     if (outputEntries.some(([itemKey], i) => i !== index && itemKey === key)) return
     updateConfig({
@@ -359,127 +451,6 @@ function NodeConfigFields({
 
   return (
     <div className="grid gap-3">
-      {node.type === "start" ? (
-        <fieldset className="grid gap-2">
-          <legend className="text-xs font-medium">{t("输入字段")}</legend>
-          {inputItems.map((item, index) => (
-            <div key={index} className="grid gap-2 rounded-md border p-2">
-              <div className="flex items-center gap-2">
-                <Input
-                  className="min-w-0 flex-1"
-                  value={String(item.name ?? "")}
-                  readOnly={readOnly}
-                  aria-label={t("输入名称")}
-                  onChange={(event) =>
-                    updateInputItem(index, { name: event.target.value })
-                  }
-                />
-                {!readOnly ? (
-                  <IconButton
-                    label={t("删除")}
-                    className="size-6 shrink-0"
-                    onClick={() => removeInputItem(index)}
-                  >
-                    <XIcon className="size-3.5" />
-                  </IconButton>
-                ) : null}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="grid gap-1 text-[11px] font-medium">
-                  {t("类型")}
-                  <select
-                    className="h-8 rounded-md border bg-background px-2 text-xs"
-                    value={String(item.type ?? "string")}
-                    disabled={readOnly}
-                    onChange={(event) => {
-                      const type = event.target.value
-                      updateInputItem(index, {
-                        type,
-                        default:
-                          type === "number"
-                            ? 0
-                            : type === "boolean"
-                              ? false
-                              : type === "object"
-                                ? {}
-                                : type === "array"
-                                  ? []
-                                  : "",
-                      })
-                    }}
-                  >
-                    {(["string", "number", "boolean", "object", "array"] as const).map(
-                      (type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </label>
-                <label className="flex items-end gap-1 pb-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(item.required)}
-                    disabled={readOnly}
-                    onChange={(event) =>
-                      updateInputItem(index, { required: event.target.checked })
-                    }
-                  />
-                  {t("必填")}
-                </label>
-              </div>
-              {item.type === "boolean" ? (
-                <label className="flex items-center gap-2 text-xs font-medium">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(item.default)}
-                    disabled={readOnly}
-                    onChange={(event) =>
-                      updateInputItem(index, { default: event.target.checked })
-                    }
-                  />
-                  {t("默认值")}
-                </label>
-              ) : item.type === "object" || item.type === "array" ? (
-                <JsonEditor
-                  id={`start-default-${index}`}
-                  label={t("默认值")}
-                  value={item.default ?? (item.type === "array" ? [] : {})}
-                  readOnly={readOnly}
-                  onChange={(value) => updateInputItem(index, { default: value })}
-                  t={t}
-                />
-              ) : (
-                <label className="grid gap-1 text-[11px] font-medium">
-                  {t("默认值")}
-                  <Input
-                    type={item.type === "number" ? "number" : "text"}
-                    value={String(item.default ?? "")}
-                    readOnly={readOnly}
-                    onChange={(event) =>
-                      updateInputItem(index, {
-                        default:
-                          item.type === "number"
-                            ? event.target.value === ""
-                              ? null
-                              : Number(event.target.value)
-                            : event.target.value,
-                      })
-                    }
-                  />
-                </label>
-              )}
-            </div>
-          ))}
-          {!readOnly ? (
-            <Button type="button" variant="outline" onClick={addInputItem}>
-              <PlusIcon />
-              {t("添加")}
-            </Button>
-          ) : null}
-        </fieldset>
-      ) : null}
       {node.type === "end" ? (
         <fieldset className="grid gap-2">
           <legend className="text-xs font-medium">{t("输出映射")}</legend>
@@ -551,6 +522,10 @@ function NodeConfigFields({
             value={config.system_prompt ?? ""}
             readOnly={readOnly}
             onChange={(system_prompt) => updateConfig({ system_prompt })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
+            insertVariables
           />
           <TextEditor
             id={`${nodeId}-llm-prompt`}
@@ -559,6 +534,10 @@ function NodeConfigFields({
             readOnly={readOnly}
             rows={6}
             onChange={(prompt) => updateConfig({ prompt })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
+            insertVariables
           />
         </>
       ) : null}
@@ -589,6 +568,10 @@ function NodeConfigFields({
             value={config.input ?? ""}
             readOnly={readOnly}
             onChange={(input) => updateConfig({ input })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
+            insertVariables
           />
           <JsonEditor
             id={`${nodeId}-classifier-classes`}
@@ -667,6 +650,10 @@ function NodeConfigFields({
             value={config.query ?? ""}
             readOnly={readOnly}
             onChange={(query) => updateConfig({ query })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
+            insertVariables
           />
         </>
       ) : null}
@@ -678,6 +665,10 @@ function NodeConfigFields({
             value={config.left ?? ""}
             readOnly={readOnly}
             onChange={(left) => updateConfig({ left })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
+            insertVariables
           />
           <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-condition-operator`}>
             {t("运算符")}
@@ -754,6 +745,10 @@ function NodeConfigFields({
           readOnly={readOnly}
           rows={8}
           onChange={(template) => updateConfig({ template })}
+          node={node}
+          nodeId={nodeId}
+          t={t}
+          insertVariables
         />
       ) : null}
       {node.type === "variable" ? (
@@ -812,6 +807,9 @@ function NodeConfigFields({
             readOnly={readOnly}
             rows={10}
             onChange={(code) => updateConfig({ code })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
           />
           <JsonEditor
             id={`${nodeId}-code-inputs`}
@@ -861,6 +859,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
   const [title, setTitle] = React.useState(node.title)
   const outputFields = outputFieldNames(node)
   const canOperate = !node.readOnly && !["start", "end"].includes(node.type)
+  const canRename = !node.readOnly && node.type === "start"
   const onRename = node.onRename as
     | ((nodeId: string, title: string) => void)
     | undefined
@@ -988,31 +987,63 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
                 </DropdownMenuItem>
               </CardMoreMenu>
             </span>
+          ) : canRename ? (
+            <span className="nodrag">
+              <CardMoreMenu label={t("更多")}>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setTitle(node.title)
+                    setRenaming(true)
+                  }}
+                >
+                  {t("重命名")}
+                </DropdownMenuItem>
+              </CardMoreMenu>
+            </span>
           ) : null}
         </div>
       </div>
-      <div className="mt-3 border-t border-border/70 pt-2 text-[11px] text-muted-foreground">
-        <span className="block truncate">{summary}</span>
-      </div>
+      {summary ? (
+        <div className="mt-3 border-t border-border/70 pt-2 text-[11px] text-muted-foreground">
+          <span className="block truncate">{summary}</span>
+        </div>
+      ) : null}
       {expanded ? (
         <div className="mt-2 space-y-1.5 border-t border-border/70 pt-2">
-          {outputFields.map((field) => (
-            <div key={field} className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5">
-              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
-                {`{{${id}.${field}}}`}
-              </span>
-              <IconButton
-                label={t("复制变量")}
-                className="size-6"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  void navigator.clipboard?.writeText(`{{${id}.${field}}}`)
-                }}
-              >
-                <CopyIcon className="size-3" />
-              </IconButton>
-            </div>
-          ))}
+          {node.type === "start" ? (
+            <>
+              <p className="px-1 text-[10px] font-medium text-muted-foreground">
+                {t("全局变量")}
+              </p>
+              {WORKFLOW_START_GLOBALS.map((field) => (
+                <OutputFieldRow
+                  key={field.value}
+                  label={t(field.label)}
+                  reference={`{{global.${field.value}}}`}
+                  t={t}
+                />
+              ))}
+              <p className="px-1 pt-1 text-[10px] font-medium text-muted-foreground">
+                {t("输入字段")}
+              </p>
+              {WORKFLOW_START_FIELDS.map((field) => (
+                <OutputFieldRow
+                  key={field.value}
+                  label={t(field.label)}
+                  reference={`{{${id}.${field.value}}}`}
+                  t={t}
+                />
+              ))}
+            </>
+          ) : (
+            outputFields.map((field) => (
+              <OutputFieldRow
+                key={field}
+                reference={`{{${id}.${field}}}`}
+                t={t}
+              />
+            ))
+          )}
         </div>
       ) : null}
       {expanded && onUpdate && node.agent && node.models && node.knowledgeBases && node.mcpServers ? (
@@ -1063,15 +1094,41 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
   )
 }
 
+function OutputFieldRow({
+  label,
+  reference,
+  t,
+}: {
+  label?: string
+  reference: string
+  t: TFunction
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5">
+      {label ? (
+        <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+          {label}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
+        {reference}
+      </span>
+      <IconButton
+        label={t("复制变量")}
+        className="size-6"
+        onClick={(event) => {
+          event.stopPropagation()
+          void navigator.clipboard?.writeText(reference)
+        }}
+      >
+        <CopyIcon className="size-3" />
+      </IconButton>
+    </div>
+  )
+}
+
 function outputFieldNames(node: WorkflowNodeData) {
   const config = node.config
-  if (node.type === "start" && Array.isArray(config.inputs)) {
-    return ["files", ...config.inputs.flatMap((item) =>
-      item && typeof item === "object" && typeof (item as Record<string, unknown>).name === "string"
-        ? [String((item as Record<string, unknown>).name)]
-        : []
-    )]
-  }
   if (node.type === "end" && config.outputs && typeof config.outputs === "object") {
     return Object.keys(config.outputs)
   }

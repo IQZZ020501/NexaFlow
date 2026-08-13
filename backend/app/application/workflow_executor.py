@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import json
 import time
 import traceback
+from typing import Any
 
 from app.application.agent_executor import (
     DurableToolLedger,
@@ -59,6 +60,41 @@ from app.shareddomain.workflows.engine import (
 )
 
 MAX_WORKFLOW_OUTPUT_BYTES = 256 * 1024
+WORKFLOW_HISTORY_LIMIT = 20
+
+
+def _history_answer(result: str) -> Any:
+    try:
+        return json.loads(result)
+    except (TypeError, ValueError):
+        return result
+
+
+async def _workflow_globals(
+    run: AgentRun,
+) -> dict[str, Any]:
+    history: list[dict[str, Any]] = []
+    if run.conversation_id:
+        async with get_session_factory()() as db:
+            prior = await agent_repository.list_agent_runs(
+                db,
+                run.agent_id,
+                run.access_source,
+                run.consumer_id,
+                limit=WORKFLOW_HISTORY_LIMIT,
+                status=AGENT_RUN_SUCCEEDED_STATUS,
+                conversation_id=run.conversation_id,
+            )
+        history = [
+            {"question": item.goal, "answer": _history_answer(item.result)}
+            for item in reversed(prior)
+        ]
+    return {
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "history_context": history,
+        "chat_id": run.conversation_id,
+        "start_time": time.time(),
+    }
 
 
 @dataclass(frozen=True)
@@ -172,10 +208,6 @@ async def _execute_claimed_workflow_run(
         mcp_tools=scope.mcp_tools,
         ledger=ledger,
         node_order=node_order,
-        input_assignment_method={
-            "public": "user_input",
-            "api": "api_input",
-        }.get(scope.run.access_source),
     )
     engine = WorkflowEngine(
         graph,
@@ -333,6 +365,7 @@ async def _execute_claimed_workflow_run(
         state=state,
         on_node_started=on_started,
         on_node_finished=on_finished,
+        globals=await _workflow_globals(run),
     )
     encoded_output = json.dumps(
         result.outputs,

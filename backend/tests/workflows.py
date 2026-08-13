@@ -10,6 +10,7 @@ import json
 import tests.support  # noqa: F401
 
 from app.shareddomain.workflows.engine import (
+    NodeExecutionContext,
     NodeResult,
     NodeState,
     WorkflowEngine,
@@ -17,7 +18,15 @@ from app.shareddomain.workflows.engine import (
     WorkflowValidationError,
     validate_graph,
 )
+from app.shareddomain.workflows.defaults import default_workflow_graph
 from tests.support import activate_admin, activate_user, auth_headers, test_client
+
+
+def test_default_workflow_only_contains_start() -> None:
+    graph = default_workflow_graph()
+
+    assert [node.data.type for node in graph.nodes] == ["start"]
+    assert graph.edges == []
 
 
 def graph(*, condition: bool = False) -> dict:
@@ -26,11 +35,7 @@ def graph(*, condition: bool = False) -> dict:
             "id": "start",
             "type": "workflow",
             "position": {"x": 0, "y": 0},
-            "data": {
-                "type": "start",
-                "title": "Start",
-                "config": {"inputs": [{"name": "input"}]},
-            },
+            "data": {"type": "start", "title": "Start", "config": {}},
         }
     ]
     edges = []
@@ -45,7 +50,7 @@ def graph(*, condition: bool = False) -> dict:
                         "type": "condition",
                         "title": "Condition",
                         "config": {
-                            "left": "{{start.input}}",
+                            "left": "{{start.question}}",
                             "operator": "equals",
                             "right": "yes",
                         },
@@ -99,7 +104,7 @@ def graph(*, condition: bool = False) -> dict:
                 "data": {
                     "type": "variable",
                     "title": "Value",
-                    "config": {"value": "{{start.input}}"},
+                    "config": {"value": "{{start.question}}"},
                 },
             }
         )
@@ -139,13 +144,20 @@ def test_workflow_validation_rejects_cycles_and_downstream_references() -> None:
         raise AssertionError("cyclic workflow was accepted")
 
     downstream = graph()
-    downstream["nodes"][0]["data"]["config"]["inputs"][0]["default"] = "{{value.value}}"
+    downstream["nodes"][1]["data"]["config"]["value"] = "{{end.result}}"
     try:
         validate_graph(downstream)
     except WorkflowValidationError:
         pass
     else:
         raise AssertionError("downstream workflow reference was accepted")
+
+    with_globals = graph()
+    with_globals["nodes"][1]["data"]["config"]["value"] = (
+        "{{time}}/{{history_context}}/{{chat_id}}/{{start_time}}"
+        "|{{global.time}}/{{global.history_context}}"
+    )
+    validate_graph(with_globals)
 
 
 def test_workflow_engine_runs_branch_and_join_deterministically() -> None:
@@ -233,14 +245,12 @@ def test_workflow_engine_enforces_step_and_token_budgets() -> None:
 
 
 def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
-    from pydantic import ValidationError
-
     from app.application.workflow_nodes import (
         _condition,
         _model_output_limit,
-        _start_result,
+        resolve_value,
     )
-    from app.schemas.workflow import KnowledgeNodeConfig, StartNodeConfig
+    from app.schemas.workflow import KnowledgeNodeConfig
 
     assert _model_output_limit("openai_compatible", 12) == {"max_tokens": 12}
     assert _model_output_limit("google_genai", 12) == {"max_output_tokens": 12}
@@ -267,72 +277,32 @@ def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
     else:
         raise AssertionError("length condition accepted an unsupported value")
 
-    start = StartNodeConfig.model_validate(
-        {
-            "inputs": [
-                {
-                    "name": "choice",
-                    "control": "select",
-                    "options": ["stable", "preview"],
-                },
-                {"name": "release_day", "control": "date"},
-            ]
-        }
-    )
-    for invalid_inputs in (
-        {"choice": "nightly", "release_day": "2026-08-13"},
-        {"choice": "stable", "release_day": "13/08/2026"},
-    ):
-        try:
-            _start_result(start, invalid_inputs)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("invalid controlled workflow input was accepted")
-    for invalid_default in (
-        {
-            "name": "choice",
-            "control": "select",
-            "options": ["stable"],
-            "default": "nightly",
+    context = NodeExecutionContext(
+        workflow_inputs={"files": [{"id": "upload-1"}]},
+        node_outputs={"start": {"question": "hi", "files": []}},
+        remaining_model_tokens=100,
+        globals={
+            "time": "2026-08-13 10:00:00",
+            "history_context": [{"question": "a", "answer": "b"}],
+            "chat_id": "conversation-1",
+            "start_time": "2026-08-13T10:00:00+00:00",
         },
-        {"name": "release_day", "control": "date", "default": "13/08/2026"},
-    ):
-        try:
-            StartNodeConfig.model_validate({"inputs": [invalid_default]})
-        except ValidationError:
-            pass
-        else:
-            raise AssertionError("invalid controlled workflow default was accepted")
-
-    assigned = StartNodeConfig.model_validate(
-        {
-            "inputs": [
-                {"name": "question", "assignment_method": "user_input"},
-                {"name": "api_token", "assignment_method": "api_input"},
-            ]
-        }
     )
-    public_start = _start_result(
-        assigned,
-        {"question": "hello"},
-        assignment_method="user_input",
-    )
-    assert public_start.outputs == {
-        "files": [],
-        "question": "hello",
-        "api_token": None,
-    }
-    try:
-        _start_result(
-            assigned,
-            {"question": "hello", "api_token": "forged"},
-            assignment_method="user_input",
-        )
-    except ValueError as exc:
-        assert "not accepted from this workflow access source" in str(exc)
-    else:
-        raise AssertionError("public input accepted an API-assigned field")
+    assert resolve_value("{{time}}", context) == "2026-08-13 10:00:00"
+    assert resolve_value("{{global.time}}", context) == "2026-08-13 10:00:00"
+    assert resolve_value("{{history_context}}", context) == [
+        {"question": "a", "answer": "b"}
+    ]
+    assert resolve_value("{{global.history_context}}", context) == [
+        {"question": "a", "answer": "b"}
+    ]
+    assert resolve_value("{{chat_id}}", context) == "conversation-1"
+    assert resolve_value("{{global.chat_id}}", context) == "conversation-1"
+    assert resolve_value("{{start.question}}", context) == "hi"
+    assert resolve_value("问：{{global.time}}", context) == "问：2026-08-13 10:00:00"
+    assert resolve_value(
+        "{{history_context}}", context
+    ) == [{"question": "a", "answer": "b"}]
     assert KnowledgeNodeConfig.model_validate(
         {
             "knowledge_base_id": "legacy-base",
@@ -340,6 +310,53 @@ def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
             "query": "question",
         }
     ).resolved_knowledge_base_ids == ["legacy-base", "second-base"]
+
+
+def test_workflow_start_node_outputs_question_files_and_globals() -> None:
+    from types import SimpleNamespace
+
+    from app.application.workflow_nodes import execute_workflow_node
+    from app.schemas.workflow import WorkflowNode
+
+    async def run() -> None:
+        scope = SimpleNamespace(
+            run=SimpleNamespace(goal="what is the weather?"),
+        )
+        node = WorkflowNode.model_validate(
+            {
+                "id": "start",
+                "position": {"x": 0, "y": 0},
+                "data": {"type": "start", "title": "Start", "config": {}},
+            }
+        )
+        result = await execute_workflow_node(
+            scope,
+            node,
+            NodeExecutionContext(
+                workflow_inputs={
+                    "question": "what is the weather?",
+                    "files": [{"id": "upload-1"}],
+                },
+                node_outputs={},
+                remaining_model_tokens=100,
+                globals={
+                    "time": "2026-08-13 10:00:00",
+                    "history_context": [],
+                    "chat_id": "conversation-1",
+                    "start_time": "2026-08-13T10:00:00+00:00",
+                },
+            ),
+        )
+        assert result.outputs == {
+            "files": [{"id": "upload-1"}],
+            "question": "what is the weather?",
+            "time": "2026-08-13 10:00:00",
+            "history_context": [],
+            "chat_id": "conversation-1",
+            "start_time": "2026-08-13T10:00:00+00:00",
+        }
+
+    asyncio.run(run())
 
 
 def test_workflow_knowledge_node_limits_and_joins_results() -> None:
@@ -670,31 +687,39 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert definition.status_code == 200, definition.text
         assert definition.json()["revision"] == 1
         workflow_graph = definition.json()["graph"]
-        workflow_graph["nodes"][0]["data"]["config"]["inputs"].append(
-            {
-                "name": "api_input",
-                "type": "string",
-                "required": True,
-                "default": "default-api",
-                "assignment_method": "api_input",
-            }
+        assert [node["data"]["type"] for node in workflow_graph["nodes"]] == ["start"]
+        assert workflow_graph["edges"] == []
+        incomplete = client.put(
+            f"{base}/definition",
+            headers=headers,
+            json={"expected_revision": 1, "graph": workflow_graph},
         )
-        workflow_graph["nodes"].insert(
-            1,
-            {
-                "id": "value",
-                "type": "workflow",
-                "position": {"x": 270, "y": 180},
-                "data": {
-                    "type": "variable",
-                    "title": "Value",
-                    "config": {"value": "{{start.input}}"},
+        assert incomplete.status_code == 200, incomplete.text
+        assert incomplete.json()["revision"] == 2
+        workflow_graph["nodes"].extend(
+            [
+                {
+                    "id": "value",
+                    "type": "workflow",
+                    "position": {"x": 270, "y": 180},
+                    "data": {
+                        "type": "variable",
+                        "title": "Value",
+                        "config": {"value": "{{start.question}}"},
+                    },
                 },
-            },
+                {
+                    "id": "end",
+                    "type": "workflow",
+                    "position": {"x": 460, "y": 180},
+                    "data": {
+                        "type": "end",
+                        "title": "End",
+                        "config": {"outputs": {"result": "{{value.value}}"}},
+                    },
+                },
+            ]
         )
-        workflow_graph["nodes"][2]["data"]["config"] = {
-            "outputs": {"result": "{{value.value}}"}
-        }
         workflow_graph["edges"] = [
             {"id": "start-value", "source": "start", "target": "value"},
             {"id": "value-end", "source": "value", "target": "end"},
@@ -702,21 +727,21 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         saved = client.put(
             f"{base}/definition",
             headers=headers,
-            json={"expected_revision": 1, "graph": workflow_graph},
+            json={"expected_revision": 2, "graph": workflow_graph},
         )
         assert saved.status_code == 200, saved.text
-        assert saved.json()["revision"] == 2
+        assert saved.json()["revision"] == 3
         conflict = client.put(
             f"{base}/definition",
             headers=headers,
-            json={"expected_revision": 1, "graph": workflow_graph},
+            json={"expected_revision": 2, "graph": workflow_graph},
         )
         assert conflict.status_code == 409, conflict.text
 
         published = client.post(f"{base}/publish", headers=headers)
         assert published.status_code == 201, published.text
         assert published.json()["version_number"] == 1
-        assert published.json()["definition_revision"] == 2
+        assert published.json()["definition_revision"] == 3
 
         member_id, temporary_password = create_workspace_user(
             client, token, workspace_id
@@ -737,7 +762,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         member_draft = client.post(
             f"{base}/runs",
             headers=member_headers,
-            json={"source": "draft", "inputs": {"input": "not-allowed"}},
+            json={"source": "draft", "question": "not-allowed"},
         )
         assert member_draft.status_code == 403, member_draft.text
 
@@ -747,19 +772,20 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         next_draft = client.put(
             f"{base}/definition",
             headers=headers,
-            json={"expected_revision": 2, "graph": workflow_graph},
+            json={"expected_revision": 3, "graph": workflow_graph},
         )
         assert next_draft.status_code == 200, next_draft.text
-        assert next_draft.json()["revision"] == 3
+        assert next_draft.json()["revision"] == 4
 
         draft_run = client.post(
             f"{base}/runs",
             headers=headers,
-            json={"source": "draft", "inputs": {"input": "release-ready"}},
+            json={"source": "draft", "question": "release-ready"},
         )
         assert draft_run.status_code == 201, draft_run.text
         assert draft_run.json()["status"] == "succeeded"
         assert draft_run.json()["outputs"] == {"result": "draft-two"}
+        assert draft_run.json()["inputs"] == {"question": "release-ready"}
         run_id = draft_run.json()["id"]
         nodes = client.get(f"{base}/runs/{run_id}/nodes", headers=headers)
         assert nodes.status_code == 200, nodes.text
@@ -768,6 +794,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             "succeeded",
             "succeeded",
         ]
+        assert nodes.json()["items"][0]["outputs"]["question"] == "release-ready"
         assert nodes.json()["items"][1]["outputs"] == {"value": "release-ready"}
 
         events = client.get(f"{base}/runs/{run_id}/stream", headers=headers)
@@ -785,7 +812,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             json={
                 "source": "published",
                 "version_number": 1,
-                "inputs": {"input": "version-one"},
+                "question": "version-one",
             },
         )
         assert published_run.status_code == 201, published_run.text
@@ -799,7 +826,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             json={
                 "source": "published",
                 "version_number": 1,
-                "inputs": {"input": "member-version"},
+                "question": "member-version",
             },
         )
         assert member_run.status_code == 201, member_run.text
@@ -823,16 +850,16 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         stale_restore = client.post(
             f"{base}/versions/1/restore",
             headers=headers,
-            json={"expected_revision": 2},
+            json={"expected_revision": 3},
         )
         assert stale_restore.status_code == 409, stale_restore.text
         restored = client.post(
             f"{base}/versions/1/restore",
             headers=headers,
-            json={"expected_revision": 3},
+            json={"expected_revision": 4},
         )
         assert restored.status_code == 200, restored.text
-        assert restored.json()["revision"] == 4
+        assert restored.json()["revision"] == 5
         assert restored.json()["graph"]["nodes"][2]["data"]["config"] == {
             "outputs": {"result": "{{value.value}}"}
         }
@@ -844,13 +871,13 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         failure_draft = client.put(
             f"{base}/definition",
             headers=headers,
-            json={"expected_revision": 4, "graph": failure_graph},
+            json={"expected_revision": 5, "graph": failure_graph},
         )
         assert failure_draft.status_code == 200, failure_draft.text
         failed_run = client.post(
             f"{base}/runs",
             headers=headers,
-            json={"source": "draft", "inputs": {"input": "runtime-error"}},
+            json={"source": "draft", "question": "runtime-error"},
         )
         assert failed_run.status_code == 201, failed_run.text
         assert failed_run.json()["status"] == "failed"
@@ -888,18 +915,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             headers=member_headers,
         )
         assert public_profile.status_code == 200, public_profile.text
-        assert public_profile.json()["inputs"] == [
-            {
-                "name": "input",
-                "label": "",
-                "type": "string",
-                "control": "input",
-                "required": True,
-                "default": None,
-                "options": [],
-                "assignment_method": "user_input",
-            }
-        ], public_profile.json()
+        assert "inputs" not in public_profile.json(), public_profile.json()
         assert public_profile.json()["interaction_config"] == {
             "prologue": "Choose inputs to start.",
             "tts_type": "BROWSER",
@@ -926,7 +942,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         restored_for_policy = client.post(
             f"{base}/versions/1/restore",
             headers=headers,
-            json={"expected_revision": 5},
+            json={"expected_revision": 6},
         )
         assert restored_for_policy.status_code == 200, restored_for_policy.text
         image_only = client.patch(
@@ -949,7 +965,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         stale_policy = client.post(
             f"/api/v1/public/workflows/{workflow_id}/runs",
             headers=member_headers,
-            json={"inputs": {"input": "stale"}, "file_ids": [upload_id]},
+            json={"question": "stale", "file_ids": [upload_id]},
         )
         assert stale_policy.status_code == 422, stale_policy.text
         document_only = client.patch(
@@ -991,7 +1007,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             f"/api/v1/public/workflows/{workflow_id}/runs",
             headers=member_headers,
             json={
-                "inputs": {"input": "public-workflow"},
+                "question": "public-workflow",
                 "file_ids": [upload_id, *unlimited_upload_ids],
             },
         )
@@ -999,6 +1015,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         public_payload = public_run.json()
         assert public_payload["status"] == "succeeded"
         assert public_payload["outputs"] == {"result": "public-workflow"}
+        assert public_payload["inputs"]["question"] == "public-workflow"
         assert public_payload["inputs"]["files"][0] == {
             "id": upload_id,
             "name": "notes.txt",
@@ -1010,7 +1027,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         reused_upload = client.post(
             f"/api/v1/public/workflows/{workflow_id}/runs",
             headers=member_headers,
-            json={"inputs": {"input": "reuse"}, "file_ids": [upload_id]},
+            json={"question": "reuse", "file_ids": [upload_id]},
         )
         assert reused_upload.status_code == 404, reused_upload.text
         assert_upload_cleanup_removes_object(upload_id)
@@ -1047,26 +1064,15 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             headers=api_headers,
         )
         assert documentation.status_code == 200, documentation.text
-        assert documentation.json()["inputs"] == [
-            {
-                "name": "api_input",
-                "label": "",
-                "type": "string",
-                "control": "input",
-                "required": True,
-                "default": "default-api",
-                "options": [],
-                "assignment_method": "api_input",
-            }
-        ], documentation.json()
+        assert "inputs" not in documentation.json(), documentation.json()
         api_run = client.post(
             f"/api/v1/workflow-api/{workflow_id}/runs",
             headers=api_headers,
-            json={"inputs": {"api_input": "api-workflow"}},
+            json={"question": "api-workflow"},
         )
         assert api_run.status_code == 201, api_run.text
-        assert api_run.json()["inputs"]["api_input"] == "api-workflow"
-        assert api_run.json()["outputs"] == {"result": None}
+        assert api_run.json()["inputs"] == {"question": "api-workflow"}
+        assert api_run.json()["outputs"] == {"result": "api-workflow"}
         wrong_api_runtime = client.post(
             f"/api/v1/agent-api/{workflow_id}/runs",
             headers=api_headers,
@@ -1076,10 +1082,12 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
 
 
 def main() -> None:
+    test_default_workflow_only_contains_start()
     test_workflow_validation_rejects_cycles_and_downstream_references()
     test_workflow_engine_runs_branch_and_join_deterministically()
     test_workflow_engine_enforces_step_and_token_budgets()
     test_workflow_model_output_limit_uses_provider_native_argument()
+    test_workflow_start_node_outputs_question_files_and_globals()
     test_workflow_knowledge_node_limits_and_joins_results()
     test_workflow_engine_propagates_worker_cancellation()
     test_upload_cleanup_tasks_are_registered()

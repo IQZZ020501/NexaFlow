@@ -72,7 +72,6 @@ import {
 } from "@/lib/api/workflows"
 import { getErrorMessage } from "@/lib/errors"
 import {
-  initialWorkflowInputs,
   selectWorkflowRunTarget,
   workflowGraphSignature,
 } from "@/lib/workflows/graph"
@@ -118,14 +117,6 @@ function runStatusLabel(run: WorkflowRun, t: TFunction) {
   if (run.status === "succeeded") return t("运行成功")
   if (run.status === "cancelled") return t("运行已取消")
   return t("运行失败")
-}
-
-function parseObject(text: string) {
-  const value: unknown = JSON.parse(text)
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("object required")
-  }
-  return value as Record<string, unknown>
 }
 
 function JsonBlock({ value }: { value: unknown }) {
@@ -179,8 +170,8 @@ export function WorkflowDetailWorkspace({
   const [runOpen, setRunOpen] = React.useState(false)
   const [paletteOpen, setPaletteOpen] = React.useState(false)
   const [runDetailsOpen, setRunDetailsOpen] = React.useState(false)
-  const [runInputs, setRunInputs] = React.useState("{}")
-  const [runInputsInvalid, setRunInputsInvalid] = React.useState(false)
+  const [runQuestion, setRunQuestion] = React.useState("")
+  const [runQuestionInvalid, setRunQuestionInvalid] = React.useState(false)
   const [runVersionNumber, setRunVersionNumber] = React.useState<number | null>(
     null
   )
@@ -416,14 +407,12 @@ export function WorkflowDetailWorkspace({
 
   async function handleRun(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    let inputs: Record<string, unknown>
-    try {
-      inputs = parseObject(runInputs)
-      setRunInputsInvalid(false)
-    } catch {
-      setRunInputsInvalid(true)
+    const question = runQuestion.trim()
+    if (!question) {
+      setRunQuestionInvalid(true)
       return
     }
+    setRunQuestionInvalid(false)
     if (!runTarget) return
     if (runTarget.source === "draft" && isAppDirty) return
     setIsRunning(true)
@@ -434,7 +423,7 @@ export function WorkflowDetailWorkspace({
         token,
         workspaceId,
         agent.id,
-        inputs,
+        question,
         runTarget.source,
         runTarget.versionNumber
       )
@@ -471,10 +460,8 @@ export function WorkflowDetailWorkspace({
     )
     if (!target) return
     setRunVersionNumber(versionNumber)
-    setRunInputs(
-      JSON.stringify(initialWorkflowInputs(target.graph ?? graph), null, 2)
-    )
-    setRunInputsInvalid(false)
+    setRunQuestion("")
+    setRunQuestionInvalid(false)
     setRunOpen(true)
   }
 
@@ -576,7 +563,7 @@ export function WorkflowDetailWorkspace({
             ) : null}
           </div>
           <p className="mt-0.5 hidden truncate text-xs text-muted-foreground sm:block">
-            {t("工作流")} · {currentViewLabel} · v{definition.revision}
+            {t("工作流")} · {currentViewLabel}
           </p>
         </div>
         {visibleActiveView === "settings" ? (
@@ -805,10 +792,10 @@ export function WorkflowDetailWorkspace({
               <DialogTitle>{t("运行工作流")}</DialogTitle>
               <DialogDescription>
                 {runTarget?.source === "published"
-                  ? t("输入将从开始节点注入已发布版本 v{version}。", {
+                  ? t("问题将作为开始节点的 question 输出注入已发布版本 v{version}。", {
                       version: runTarget.versionNumber ?? "",
                     })
-                  : t("输入将从开始节点注入当前草稿。")}
+                  : t("问题将作为开始节点的 question 输出注入当前草稿。")}
               </DialogDescription>
             </DialogHeader>
             <label
@@ -832,14 +819,8 @@ export function WorkflowDetailWorkspace({
                   )
                   if (!target) return
                   setRunVersionNumber(nextVersion)
-                  setRunInputs(
-                    JSON.stringify(
-                      initialWorkflowInputs(target.graph ?? graph),
-                      null,
-                      2
-                    )
-                  )
-                  setRunInputsInvalid(false)
+                  setRunQuestion("")
+                  setRunQuestionInvalid(false)
                 }}
               >
                 {agent.can_edit ? (
@@ -856,19 +837,24 @@ export function WorkflowDetailWorkspace({
             </label>
             <label
               className="grid gap-2 text-sm font-medium"
-              htmlFor="workflow-run-inputs"
+              htmlFor="workflow-run-question"
             >
-              {t("运行输入")}
+              {t("用户问题")}
               <textarea
-                id="workflow-run-inputs"
-                className="min-h-64 resize-y rounded-md border bg-background p-3 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring aria-invalid:border-destructive"
-                value={runInputs}
-                aria-invalid={runInputsInvalid}
-                onChange={(event) => setRunInputs(event.target.value)}
+                id="workflow-run-question"
+                className="min-h-24 resize-y rounded-md border bg-background p-3 text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring aria-invalid:border-destructive"
+                value={runQuestion}
+                aria-invalid={runQuestionInvalid}
+                onChange={(event) => {
+                  setRunQuestion(event.target.value)
+                  if (runQuestionInvalid && event.target.value.trim()) {
+                    setRunQuestionInvalid(false)
+                  }
+                }}
               />
-              {runInputsInvalid ? (
+              {runQuestionInvalid ? (
                 <span className="text-xs font-normal text-destructive">
-                  {t("请输入 JSON 对象")}
+                  {t("请输入问题")}
                 </span>
               ) : null}
             </label>
@@ -885,6 +871,7 @@ export function WorkflowDetailWorkspace({
                 disabled={
                   isRunning ||
                   !runTarget ||
+                  !runQuestion.trim() ||
                   (runTarget.source === "draft" && isAppDirty)
                 }
                 title={

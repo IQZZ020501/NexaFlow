@@ -31,6 +31,8 @@ export type WorkflowNodeData = Record<string, unknown> & {
   models?: RegisteredModel[]
   knowledgeBases?: KnowledgeBase[]
   mcpServers?: McpServer[]
+  nodes?: WorkflowNode[]
+  edges?: WorkflowEdge[]
 }
 
 export type WorkflowNode = {
@@ -242,7 +244,7 @@ export function createWorkflowRun(
   token: string,
   workspaceId: string,
   workflowId: string,
-  inputs: Record<string, unknown>,
+  question: string,
   source: "draft" | "published" = "draft",
   versionNumber?: number
 ) {
@@ -252,7 +254,7 @@ export function createWorkflowRun(
       method: "POST",
       token,
       body: JSON.stringify({
-        inputs,
+        question,
         source,
         ...(versionNumber ? { version_number: versionNumber } : {}),
       }),

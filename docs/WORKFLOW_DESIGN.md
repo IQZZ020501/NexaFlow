@@ -169,7 +169,7 @@ erDiagram
     }
 ```
 
-一次运行始终保存 `definition_revision/version_number/graph_hash/graph_snapshot/inputs`，所以草稿后来修改或发布新版本都不会改变历史运行。
+一次运行始终保存 `definition_revision/version_number/graph_hash/graph_snapshot/inputs`（`inputs` 固定为 `{"question": ...}`，公开运行另含 `files`），所以草稿后来修改或发布新版本都不会改变历史运行。
 
 ## 6. 节点目录
 
@@ -177,7 +177,7 @@ erDiagram
 
 | 节点 | 输入与输出 | 选择依据 |
 | --- | --- | --- |
-| Start | 校验运行输入并输出命名字段 | 三家共同入口 |
+| Start | 固定节点：`question/files` + 全局 `time/history_context/chat_id/start_time` | 三家共同入口 |
 | End | 把上游引用映射为运行最终输出 | 三家共同出口 |
 | LLM | prompt/system/model -> `text` + usage | 三家核心生成节点 |
 | Classifier | 输入/classes/default -> 选中 handle | Dify question classifier、Coze intent detector |
@@ -188,7 +188,7 @@ erDiagram
 | MCP | 参数 + 已绑定只读工具 -> 工具输出 | 复用 MCP 策略与 durable ledger |
 | Code | Python + JSON 输入 -> result/stdout/stderr | 三家均有代码/函数节点；使用独立沙箱 |
 
-变量语法为 `{{node_id.path}}`。完整字符串引用保留原 JSON 类型，嵌入字符串时对象和数组序列化为紧凑 JSON。Start 会拒绝未知、缺失或类型错误的输入。
+变量语法为 `{{node_id.path}}`。完整字符串引用保留原 JSON 类型，嵌入字符串时对象和数组序列化为紧凑 JSON。Start 固定输出本次运行的问题（`question`）、上传文件（`files`）以及全局变量：当前时间（`time`，`%Y-%m-%d %H:%M:%S`）、同会话历史（`history_context`，`[{question, answer}]`）、会话 ID（`chat_id`）与运行开始时间戳（`start_time`，epoch 秒）。全局变量可通过 `{{global.<field>}}` 命名空间在任何节点引用（兼容裸引用 `{{time}}` 等）。节点输入框提供「插入变量」选择器：全局变量组 + 沿入边可达的上游节点输出字段（对齐 MaxKB 的 NodeCascader），避免手写错误引用。
 
 节点库另提供“问题优化”和“指定回复”两个预设，分别生成标准 LLM 与 Template 节点，不增加新的持久化节点类型或执行分支。
 
@@ -229,9 +229,9 @@ Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全�
 
 现有 `/agents/{id}/runs`、公开 Agent 与 Agent API 运行路由显式拒绝 workflow，避免类型串线。工作流可复用应用发布、API Key、速率限制、会话归属、日志与 NDJSON 基础设施，但使用独立协议和执行入口：
 
-- `GET /public/workflows/{workflow_id}/profile`：返回已发布 Start 节点输入定义；
+- `GET /public/workflows/{workflow_id}/profile`：返回已发布工作流的名称、描述与交互配置；
 - `GET /public/workflows/{workflow_id}/conversations`：当前登录用户的工作流会话；
-- `POST /public/workflows/{workflow_id}/runs`：以结构化 `inputs` 运行最新发布版本；
+- `POST /public/workflows/{workflow_id}/runs`：以 `question`（作为 Start 节点输出）运行最新发布版本，可携带 `file_ids` 与 `conversation_id`；
 - `GET /public/workflows/{workflow_id}/runs/{run_id}/stream`：仅返回脱敏的节点状态、类型、耗时与终态输出；
 - `/workflow-api/{workflow_id}/documentation|runs|runs/{run_id}|runs/{run_id}/stream`：API Key 访问的同构接口。
 
@@ -254,7 +254,7 @@ sequenceDiagram
 
     UI->>API: "PUT definition(expected_revision, graph)"
     API->>DB: "校验后 revision + 1"
-    UI->>API: "POST runs(source=draft, inputs)"
+    UI->>API: "POST runs(source=draft, question)"
     API->>DB: "agent_run + workflow_run_detail + graph snapshot"
     API->>Q: "enqueue durable run"
     Q->>W: "dispatch by workflow_run_detail"

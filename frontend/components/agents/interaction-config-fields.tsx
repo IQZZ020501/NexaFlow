@@ -32,7 +32,7 @@ export function InteractionConfigFields({
     ? "grid gap-1.5 text-xs font-medium"
     : "grid gap-1.5 text-sm font-medium sm:col-span-2"
   const textareaClass = compact
-    ? "resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    ? "resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:border-ring"
     : "min-h-20 w-full resize-y rounded-lg border border-input bg-muted/20 px-3 py-2 text-sm leading-6 shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
 
   function update(next: Partial<AgentInteractionConfig>) {
@@ -69,6 +69,7 @@ export function InteractionConfigFields({
         <span>{t("用户输入标题")}</span>
         <Input
           id={`${idPrefix}-input-title`}
+          className={compact ? "focus-visible:border-ring focus-visible:ring-0" : undefined}
           maxLength={120}
           value={value.user_input_title}
           disabled={readOnly}
@@ -76,24 +77,29 @@ export function InteractionConfigFields({
         />
       </label>
 
-      <label
-        className={compact ? labelClass : "grid gap-1.5 text-sm font-medium"}
-        htmlFor={`${idPrefix}-tts`}
-      >
+      <div className="flex items-center justify-between gap-3 text-sm font-medium">
         <span>{t("文字转语音")}</span>
-        <select
+        <button
+          type="button"
+          role="switch"
           id={`${idPrefix}-tts`}
-          className="h-9 rounded-md border bg-background px-2.5 text-sm"
-          value={value.tts_type}
+          aria-checked={value.tts_type === "BROWSER"}
+          aria-label={t("文字转语音")}
           disabled={readOnly}
-          onChange={(event) =>
-            update({ tts_type: event.target.value as "NONE" | "BROWSER" })
+          onClick={() =>
+            update({ tts_type: value.tts_type === "BROWSER" ? "NONE" : "BROWSER" })
           }
+          className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+            value.tts_type === "BROWSER" ? "bg-primary" : "bg-muted-foreground/40"
+          }`}
         >
-          <option value="BROWSER">{t("浏览器语音")}</option>
-          <option value="NONE">{t("关闭")}</option>
-        </select>
-      </label>
+          <span
+            className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
+              value.tts_type === "BROWSER" ? "translate-x-[18px]" : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </div>
 
       <fieldset
         className={
@@ -103,15 +109,26 @@ export function InteractionConfigFields({
         }
         disabled={readOnly}
       >
-        <label className="flex items-center justify-between gap-3 text-sm font-medium sm:col-span-2">
+        <div className="flex items-center justify-between gap-3 text-sm font-medium sm:col-span-2">
           <span>{t("文件上传")}</span>
-          <input
-            type="checkbox"
-            className="size-4 accent-primary"
-            checked={value.file_upload}
-            onChange={(event) => update({ file_upload: event.target.checked })}
-          />
-        </label>
+          <button
+            type="button"
+            role="switch"
+            id={`${idPrefix}-file-upload`}
+            aria-checked={value.file_upload}
+            aria-label={t("文件上传")}
+            onClick={() => update({ file_upload: !value.file_upload })}
+            className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+              value.file_upload ? "bg-primary" : "bg-muted-foreground/40"
+            }`}
+          >
+            <span
+              className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
+                value.file_upload ? "translate-x-[18px]" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
         {value.file_upload ? (
           <>
             <div className="flex flex-wrap gap-3 sm:col-span-2">

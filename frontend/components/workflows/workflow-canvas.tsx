@@ -22,7 +22,6 @@ import {
   FileTextIcon,
   GripVerticalIcon,
   PlusIcon,
-  XIcon,
 } from "lucide-react"
 
 import {
@@ -59,8 +58,12 @@ import {
 import {
   applyWorkflowEdgeChanges,
   applyWorkflowNodeChanges,
+  canvasPositionLeftOf,
   draggedCanvasPosition,
+  nonOverlappingCanvasPosition,
   persistedWorkflowViewport,
+  viewportIncludingCanvasX,
+  workflowNodeRects,
 } from "@/lib/workflows/canvas"
 
 import {
@@ -73,17 +76,6 @@ import { WorkflowEdgeCard } from "./workflow-edge"
 const nodeTypes = { workflow: WorkflowNodeCard }
 const edgeTypes = { workflow: WorkflowEdgeCard }
 const reactFlowProOptions = { hideAttribution: true }
-
-type BasicInputField = {
-  name: string
-  label?: string
-  type: "string" | "number" | "boolean" | "object" | "array"
-  control?: "input" | "select" | "date"
-  required: boolean
-  default?: unknown
-  options?: string[]
-  assignment_method?: "user_input" | "api_input"
-}
 
 type WorkflowCanvasProps = {
   agent: Agent
@@ -102,7 +94,7 @@ type WorkflowCanvasProps = {
 }
 
 function CanvasInner(props: WorkflowCanvasProps) {
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, setViewport: setFlowViewport } = useReactFlow()
   const { t } = props
   const [nodes, setNodes] = React.useState<WorkflowNode[]>(props.graph.nodes)
   const [edges, setEdges] = React.useState<WorkflowEdge[]>(props.graph.edges)
@@ -110,6 +102,9 @@ function CanvasInner(props: WorkflowCanvasProps) {
   const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(null)
   const [infoOpen, setInfoOpen] = React.useState(true)
   const [infoPosition, setInfoPosition] = React.useState({ x: 16, y: 16 })
+  const infoCardRef = React.useRef<HTMLDivElement | null>(null)
+  const infoPositionInitializedRef = React.useRef(false)
+  const infoViewportAdjustedRef = React.useRef(false)
   const onChangeRef = React.useRef(props.onChange)
 
   React.useEffect(() => {
@@ -151,11 +146,65 @@ function CanvasInner(props: WorkflowCanvasProps) {
   } | null>(null)
   const { onClosePalette } = props
 
+  const clearInfoCardPosition = React.useCallback(
+    (position: { x: number; y: number }) => {
+      const card = infoCardRef.current
+      if (!card) return position
+      return nonOverlappingCanvasPosition(
+        position,
+        { width: card.offsetWidth, height: card.offsetHeight },
+        workflowNodeRects(nodes)
+      )
+    },
+    [nodes]
+  )
+
+  React.useLayoutEffect(() => {
+    const card = infoCardRef.current
+    if (!card) return
+    const placeLeftOfStart = () => {
+      const nodeRects = workflowNodeRects(nodes)
+      const startNode = nodeRects[nodes.findIndex((node) => node.data.type === "start")]
+      if (!startNode) return
+      const next = nonOverlappingCanvasPosition(
+        canvasPositionLeftOf(startNode, {
+          width: card.offsetWidth,
+          height: card.offsetHeight,
+        }),
+        { width: card.offsetWidth, height: card.offsetHeight },
+        nodeRects
+      )
+      infoPositionInitializedRef.current = true
+      setInfoPosition((current) =>
+        next.x === current.x && next.y === current.y ? current : next
+      )
+    }
+    placeLeftOfStart()
+    const observer = new ResizeObserver(placeLeftOfStart)
+    observer.observe(card)
+    return () => observer.disconnect()
+  }, [infoOpen, nodes])
+
+  React.useEffect(() => {
+    if (
+      !infoPositionInitializedRef.current ||
+      infoViewportAdjustedRef.current
+    ) {
+      return
+    }
+    infoViewportAdjustedRef.current = true
+    const next = viewportIncludingCanvasX(viewport, infoPosition.x)
+    if (next.x === viewport.x) return
+    void setFlowViewport(next)
+  }, [infoPosition.x, setFlowViewport, viewport])
+
   const moveInfoCardBy = React.useCallback(
     (x: number, y: number) => {
-      setInfoPosition((current) => ({ x: current.x + x, y: current.y + y }))
+      setInfoPosition((current) =>
+        clearInfoCardPosition({ x: current.x + x, y: current.y + y })
+      )
     },
-    []
+    [clearInfoCardPosition]
   )
 
   const handleInfoDragStart = React.useCallback(
@@ -178,28 +227,31 @@ function CanvasInner(props: WorkflowCanvasProps) {
       const drag = infoDragRef.current
       if (!drag || drag.pointerId !== event.pointerId) return
       setInfoPosition(
-        draggedCanvasPosition(
-          drag.position,
-          drag.pointer,
-          screenToFlowPosition({ x: event.clientX, y: event.clientY })
+        clearInfoCardPosition(
+          draggedCanvasPosition(
+            drag.position,
+            drag.pointer,
+            screenToFlowPosition({ x: event.clientX, y: event.clientY })
+          )
         )
       )
       event.preventDefault()
       event.stopPropagation()
     },
-    [screenToFlowPosition]
+    [clearInfoCardPosition, screenToFlowPosition]
   )
 
   const handleInfoDragEnd = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
       if (infoDragRef.current?.pointerId !== event.pointerId) return
       infoDragRef.current = null
+      setInfoPosition((current) => clearInfoCardPosition(current))
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId)
       }
       event.stopPropagation()
     },
-    []
+    [clearInfoCardPosition]
   )
 
   const handleInfoDragKeyDown = React.useCallback(
@@ -257,36 +309,6 @@ function CanvasInner(props: WorkflowCanvasProps) {
   const updateNode = React.useCallback((nodeId: string, update: (node: WorkflowNode) => WorkflowNode) => {
     setNodes((current) => current.map((node) => (node.id === nodeId ? update(node) : node)))
   }, [])
-  const startNode = nodes.find((node) => node.data.type === "start")
-  const inputFields = React.useMemo(
-    () =>
-      (Array.isArray(startNode?.data.config.inputs)
-        ? startNode.data.config.inputs
-        : []) as BasicInputField[],
-    [startNode]
-  )
-  const updateInputFields = React.useCallback(
-    (inputs: BasicInputField[]) => {
-      if (!startNode || props.readOnly) return
-      updateNode(startNode.id, (node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          config: { ...node.data.config, inputs },
-        },
-      }))
-    },
-    [props.readOnly, startNode, updateNode]
-  )
-  const updateInputField = React.useCallback(
-    (index: number, patch: Partial<BasicInputField>) =>
-      updateInputFields(
-        inputFields.map((field, fieldIndex) =>
-          fieldIndex === index ? { ...field, ...patch } : field
-        )
-      ),
-    [inputFields, updateInputFields]
-  )
 
   const copyNode = React.useCallback((nodeId: string) => {
     if (props.readOnly) return
@@ -331,9 +353,11 @@ function CanvasInner(props: WorkflowCanvasProps) {
             models: props.models,
             knowledgeBases: props.knowledgeBases,
             mcpServers: props.mcpServers,
+            nodes,
+            edges,
           },
       })),
-    [copyNode, deleteNode, nodes, props.agent, props.knowledgeBases, props.mcpServers, props.models, props.readOnly, props.runtimeStatuses, renameNode]
+    [copyNode, deleteNode, edges, nodes, props.agent, props.knowledgeBases, props.mcpServers, props.models, props.readOnly, props.runtimeStatuses, renameNode]
   )
   const renderedEdges = React.useMemo(
     () =>
@@ -486,6 +510,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
             {!props.readOnly ? (
               <ViewportPortal>
                 <div
+                  ref={infoCardRef}
                   style={{
                     transform: `translate(${infoPosition.x}px, ${infoPosition.y}px)`,
                   }}
@@ -532,6 +557,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
                         <span>{t("名称")}</span>
                         <Input
                           id="basic-info-name"
+                          className="focus-visible:border-ring focus-visible:ring-0"
                           value={props.form.name}
                           maxLength={120}
                           onChange={(event) =>
@@ -558,7 +584,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
                               description: event.target.value,
                             }))
                           }
-                          className="resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          className="resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:border-ring"
                         />
                         <span className="text-right text-[10px] text-muted-foreground">
                           {props.form.description.length} / 500
@@ -578,153 +604,6 @@ function CanvasInner(props: WorkflowCanvasProps) {
                         readOnly={props.readOnly}
                         compact
                       />
-
-                      <fieldset className="grid gap-3 border-t pt-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-medium">{t("输入字段")}</span>
-                          <IconButton
-                            label={t("添加输入字段")}
-                            className="size-7"
-                            onClick={() =>
-                              updateInputFields([
-                                ...inputFields,
-                                {
-                                  name: `input_${inputFields.length + 1}`,
-                                  label: "",
-                                  type: "string",
-                                  control: "input",
-                                  required: false,
-                                  default: "",
-                                  options: [],
-                                  assignment_method: "user_input",
-                                },
-                              ])
-                            }
-                          >
-                            <PlusIcon className="size-3.5" />
-                          </IconButton>
-                        </div>
-                        {inputFields.map((field, index) => (
-                          <div key={index} className="grid gap-2 rounded-md border p-2">
-                            <div className="flex gap-2">
-                              <Input
-                                aria-label={t("变量名")}
-                                placeholder={t("变量名")}
-                                value={field.name}
-                                onChange={(event) => updateInputField(index, { name: event.target.value })}
-                              />
-                              <Input
-                                aria-label={t("显示名")}
-                                placeholder={t("显示名")}
-                                value={field.label ?? ""}
-                                onChange={(event) => updateInputField(index, { label: event.target.value })}
-                              />
-                              <IconButton
-                                label={t("删除输入字段")}
-                                className="size-9 shrink-0"
-                                onClick={() => updateInputFields(inputFields.filter((_, itemIndex) => itemIndex !== index))}
-                              >
-                                <XIcon className="size-4" />
-                              </IconButton>
-                            </div>
-                            <div className="grid grid-cols-3 gap-2">
-                              <select
-                                aria-label={t("控件类型")}
-                                className="h-9 rounded-md border bg-background px-2 text-xs"
-                                value={field.control ?? "input"}
-                                onChange={(event) => {
-                                  const control = event.target.value as BasicInputField["control"]
-                                  updateInputField(index, {
-                                    control,
-                                    ...(control === "date" || control === "select" ? { type: "string" } : {}),
-                                  })
-                                }}
-                              >
-                                <option value="input">{t("输入框")}</option>
-                                <option value="select">{t("下拉选择")}</option>
-                                <option value="date">{t("日期")}</option>
-                              </select>
-                              <select
-                                aria-label={t("值类型")}
-                                className="h-9 rounded-md border bg-background px-2 text-xs"
-                                value={field.type}
-                                disabled={field.control === "date" || field.control === "select"}
-                                onChange={(event) => updateInputField(index, { type: event.target.value as BasicInputField["type"] })}
-                              >
-                                {(["string", "number", "boolean", "object", "array"] as const).map((type) => (
-                                  <option key={type} value={type}>{type}</option>
-                                ))}
-                              </select>
-                              <select
-                                aria-label={t("赋值方式")}
-                                className="h-9 rounded-md border bg-background px-2 text-xs"
-                                value={field.assignment_method ?? "user_input"}
-                                onChange={(event) => updateInputField(index, { assignment_method: event.target.value as BasicInputField["assignment_method"] })}
-                              >
-                                <option value="user_input">{t("用户输入")}</option>
-                                <option value="api_input">{t("API 输入")}</option>
-                              </select>
-                            </div>
-                            {field.control === "select" ? (
-                              <Input
-                                aria-label={t("选项")}
-                                placeholder={t("选项，用逗号分隔")}
-                                value={(field.options ?? []).join(", ")}
-                                onChange={(event) => updateInputField(index, {
-                                  options: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
-                                })}
-                              />
-                            ) : null}
-                            <div className="flex items-center gap-3">
-                              {field.type === "boolean" ? (
-                                <label className="flex min-h-9 flex-1 items-center gap-2 rounded-md border px-3 text-xs">
-                                  <input
-                                    type="checkbox"
-                                    className="size-4 accent-primary"
-                                    checked={Boolean(field.default)}
-                                    onChange={(event) => updateInputField(index, { default: event.target.checked })}
-                                  />
-                                  {t("默认值")}
-                                </label>
-                              ) : field.type === "object" || field.type === "array" ? (
-                                <textarea
-                                  aria-label={t("默认值")}
-                                  className="min-h-16 min-w-0 flex-1 rounded-md border bg-background p-2 font-mono text-xs"
-                                  value={field.default == null ? "" : typeof field.default === "string" ? field.default : JSON.stringify(field.default)}
-                                  onChange={(event) => {
-                                    try {
-                                      updateInputField(index, { default: JSON.parse(event.target.value) })
-                                    } catch {
-                                      updateInputField(index, { default: event.target.value })
-                                    }
-                                  }}
-                                />
-                              ) : (
-                                <Input
-                                  aria-label={t("默认值")}
-                                  placeholder={t("默认值")}
-                                  type={field.type === "number" ? "number" : field.control === "date" ? "date" : "text"}
-                                  value={field.default == null ? "" : String(field.default)}
-                                  onChange={(event) => updateInputField(index, {
-                                    default: field.type === "number"
-                                      ? event.target.value === "" ? null : Number(event.target.value)
-                                      : event.target.value,
-                                  })}
-                                />
-                              )}
-                              <label className="flex shrink-0 items-center gap-1.5 text-xs">
-                                <input
-                                  type="checkbox"
-                                  className="size-4 accent-primary"
-                                  checked={field.required}
-                                  onChange={(event) => updateInputField(index, { required: event.target.checked })}
-                                />
-                                {t("必填")}
-                              </label>
-                            </div>
-                          </div>
-                        ))}
-                      </fieldset>
                     </div>
                   ) : null}
                 </div>

@@ -67,12 +67,17 @@ REFERENCE_PATTERN = re.compile(
     r"{{\s*([A-Za-z0-9_-]+)(?:\.([A-Za-z0-9_.-]+))?\s*}}"
 )
 
+# Start node globals are available to every node as bare references like {{time}}
+# or through the {{global.<field>}} namespace (MaxKB-compatible).
+WORKFLOW_GLOBALS = frozenset({"time", "history_context", "chat_id", "start_time"})
+
 
 @dataclass(frozen=True)
 class NodeExecutionContext:
     workflow_inputs: dict[str, Any]
     node_outputs: dict[str, dict[str, Any]]
     remaining_model_tokens: int
+    globals: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -153,7 +158,11 @@ def graph_hash(graph: WorkflowGraph | Mapping[str, Any]) -> str:
 
 def _iter_references(value: Any):
     if isinstance(value, str):
-        yield from (match.group(1) for match in REFERENCE_PATTERN.finditer(value))
+        yield from (
+            match.group(1)
+            for match in REFERENCE_PATTERN.finditer(value)
+            if match.group(1) not in WORKFLOW_GLOBALS and match.group(1) != "global"
+        )
     elif isinstance(value, Mapping):
         for item in value.values():
             yield from _iter_references(item)
@@ -312,9 +321,11 @@ class WorkflowEngine:
         state: WorkflowEngineState | None = None,
         on_node_started: NodeStarted = _noop_started,
         on_node_finished: NodeFinished = _noop_finished,
+        globals: Mapping[str, Any] | None = None,
     ) -> WorkflowEngineResult:
         current = state or self.initial_state()
         node_order = {node.id: index for index, node in enumerate(self.graph.nodes)}
+        run_globals = dict(globals or {})
 
         while any(value == NodeState.PENDING for value in current.node_states.values()):
             if self._remaining_seconds() <= 0:
@@ -369,6 +380,7 @@ class WorkflowEngine:
                         key: dict(value) for key, value in current.node_outputs.items()
                     },
                     remaining_model_tokens=self.max_model_tokens - current.model_tokens,
+                    globals=run_globals,
                 )
                 try:
                     async with asyncio.timeout(self._remaining_seconds()):

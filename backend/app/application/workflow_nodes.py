@@ -49,7 +49,6 @@ class WorkflowNodeScope:
     mcp_tools: dict[tuple[str, str], tuple[ResolvedMcpTool, McpToolPolicy]]
     ledger: DurableToolLedger
     node_order: dict[str, int]
-    input_assignment_method: str | None = None
 
 
 def _path_value(value: Any, path: str) -> Any:
@@ -81,73 +80,24 @@ def resolve_value(value: Any, context: NodeExecutionContext) -> Any:
             raise ValueError(f"Workflow reference node did not run: {node_id}.")
         return context.node_outputs[node_id]
 
+    def reference_value(name: str, path: str) -> Any:
+        if name == "global":
+            return _path_value(context.globals, path)
+        if name in context.globals and not path:
+            return context.globals[name]
+        return _path_value(outputs(name), path)
+
     exact = REFERENCE_PATTERN.fullmatch(value)
     if exact:
-        node_id, path = exact.group(1), exact.group(2) or ""
-        return _path_value(outputs(node_id), path)
+        return reference_value(exact.group(1), exact.group(2) or "")
 
     def replace(match) -> str:
-        item = _path_value(
-            outputs(match.group(1)),
-            match.group(2) or "",
-        )
+        item = reference_value(match.group(1), match.group(2) or "")
         if isinstance(item, (dict, list)):
             return json.dumps(item, ensure_ascii=False, separators=(",", ":"))
         return str(item)
 
     return REFERENCE_PATTERN.sub(replace, value)
-
-
-def _matches_type(value: Any, expected: str) -> bool:
-    return {
-        "string": isinstance(value, str),
-        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
-        "boolean": isinstance(value, bool),
-        "object": isinstance(value, dict),
-        "array": isinstance(value, list),
-    }[expected]
-
-
-def _start_result(
-    config: StartNodeConfig,
-    inputs: dict[str, Any],
-    *,
-    assignment_method: str | None = None,
-) -> NodeResult:
-    fields = {field.name: field for field in config.inputs}
-    unknown = set(inputs) - set(fields) - {"files"}
-    if unknown:
-        raise ValueError(f"Unknown workflow inputs: {', '.join(sorted(unknown))}.")
-    if assignment_method is not None:
-        invalid = {
-            name
-            for name in inputs
-            if name in fields and fields[name].assignment_method != assignment_method
-        }
-        if invalid:
-            raise ValueError(
-                "Workflow inputs are not accepted from this workflow access source: "
-                f"{', '.join(sorted(invalid))}."
-            )
-    output: dict[str, Any] = {}
-    output["files"] = inputs.get("files", [])
-    for name, field in fields.items():
-        if name in inputs:
-            value = inputs[name]
-        elif field.default is not None:
-            value = field.default
-        elif field.required and (
-            assignment_method is None or field.assignment_method == assignment_method
-        ):
-            raise ValueError(f"Required workflow input is missing: {name}.")
-        else:
-            value = None
-        if value is not None and not _matches_type(value, field.type):
-            raise ValueError(f"Workflow input {name} must be {field.type}.")
-        if value is not None:
-            field.validate_control_value(value)
-        output[name] = value
-    return NodeResult(inputs=dict(inputs), outputs=output)
 
 
 def _model_output_limit(provider_type: str, remaining_model_tokens: int) -> dict[str, int]:
@@ -266,10 +216,16 @@ async def execute_workflow_node(
     config = node.data.config
     node_type = node.data.type
     if node_type == "start":
-        return _start_result(
-            StartNodeConfig.model_validate(config),
-            context.workflow_inputs,
-            assignment_method=scope.input_assignment_method,
+        StartNodeConfig.model_validate(config)
+        question = scope.run.goal or ""
+        files = context.workflow_inputs.get("files", []) or []
+        return NodeResult(
+            inputs={"question": question},
+            outputs={
+                "files": files,
+                "question": question,
+                **context.globals,
+            },
         )
     if node_type == "end":
         outputs = resolve_value(EndNodeConfig.model_validate(config).outputs, context)

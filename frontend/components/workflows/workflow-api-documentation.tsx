@@ -53,21 +53,7 @@ export function WorkflowApiDocumentation({
   const runExample = documentation
     ? JSON.stringify(
         {
-          inputs: Object.fromEntries(
-            documentation.inputs.map((field) => [
-              field.name,
-              field.default ??
-                (field.type === "number"
-                  ? 0
-                  : field.type === "boolean"
-                    ? false
-                    : field.type === "object"
-                      ? {}
-                      : field.type === "array"
-                        ? []
-                        : "string"),
-            ])
-          ),
+          question: "string",
           conversation_id: "uuid (optional)",
         },
         null,
@@ -80,7 +66,7 @@ export function WorkflowApiDocumentation({
           "POST",
           `${base}/runs`,
           t("创建运行"),
-          t("创建新的工作流运行；省略 conversation_id 时开始新对话。"),
+          t("创建新的工作流运行；question 会作为开始节点的 question 输出，省略 conversation_id 时开始新对话。"),
           runExample,
         ],
         [
@@ -88,7 +74,7 @@ export function WorkflowApiDocumentation({
           `${base}/runs/{run_id}`,
           t("查询运行"),
           t("按运行 ID 查询节点进度和最终输出。"),
-          `{"id":"uuid","status":"succeeded","inputs":{},"outputs":{},"progress":[]}`,
+          `{"id":"uuid","status":"succeeded","inputs":{"question":"string"},"outputs":{},"progress":[]}`,
         ],
         [
           "GET",
