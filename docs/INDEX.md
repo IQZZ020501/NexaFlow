@@ -28,6 +28,4 @@ deploy/    Docker Compose 全栈编排、Dockerfile、Nginx 示例
 | [FRONTEND.md](FRONTEND.md) | frontend/ 全部（路由/组件/上下文/i18n/lib/测试） |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | deploy/、scripts/、仓库根文件 |
 
-## 相关文档
 
-- [MVP_TASK_PLAN.md](MVP_TASK_PLAN.md) — MVP 任务总表与逐条验收记录
