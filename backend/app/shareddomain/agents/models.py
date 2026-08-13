@@ -51,6 +51,10 @@ class Agent(Base):
             name="ck_agents_knowledge_query_mode",
         ),
         CheckConstraint(
+            "app_type IN ('agent', 'workflow')",
+            name="ck_agents_app_type",
+        ),
+        CheckConstraint(
             "(published = false AND published_by_user_id IS NULL AND published_at IS NULL) "
             "OR (published = true AND published_by_user_id IS NOT NULL AND published_at IS NOT NULL)",
             name="ck_agents_publication",
@@ -62,6 +66,9 @@ class Agent(Base):
         ForeignKey("workspaces.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    app_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="agent", server_default="agent"
+    )
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     model_id: Mapped[str] = mapped_column(ForeignKey("model.id"), nullable=False, index=True)

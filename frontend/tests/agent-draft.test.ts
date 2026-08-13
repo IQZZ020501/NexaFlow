@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  canOpenAgentDetails,
   isAgentFormDirty,
   isAgentListLoading,
   isCurrentAgentConversation,
@@ -74,6 +75,7 @@ const agent: Agent = {
   id: "agent-1",
   workspace_id: "workspace-1",
   name: "Research assistant",
+  app_type: "agent",
   description: "Answers from workspace knowledge",
   instructions: "Cite the sources you use.",
   model_id: "model-1",
@@ -92,6 +94,7 @@ const agent: Agent = {
 
 const form: AgentFormState = {
   id: agent.id,
+  appType: agent.app_type,
   name: agent.name,
   description: agent.description,
   modelId: agent.model_id,
@@ -101,6 +104,13 @@ const form: AgentFormState = {
   mcpTools: [...agent.mcp_tools],
   status: agent.status,
 }
+
+describe("Agent detail availability", () => {
+  test("opens only Agent records in the Agent detail workspace", () => {
+    expect(canOpenAgentDetails(agent)).toBe(true)
+    expect(canOpenAgentDetails({ app_type: "workflow" })).toBe(false)
+  })
+})
 
 describe("Agent form state", () => {
   test("ignores binding ordering but detects actual edits", () => {

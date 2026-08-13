@@ -12,6 +12,7 @@ import {
   ShieldCheckIcon,
   SparklesIcon,
   Trash2Icon,
+  WorkflowIcon,
 } from "lucide-react"
 
 import {
@@ -22,6 +23,7 @@ import { TopLoadingBar } from "@/components/app/top-progress"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
+import { Badge } from "@/components/ui/badge"
 import { IconButton } from "@/components/ui/icon-button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
@@ -57,6 +59,7 @@ import {
   type Agent,
   type AgentMcpToolRef,
   type AgentPermission,
+  type AppType,
   type AgentRun,
   type AgentRunStreamEvent,
   type AgentToolCall,
@@ -72,6 +75,7 @@ import type { AgentDetailView } from "@/lib/agent-views"
 
 export type AgentFormState = {
   id: string | null
+  appType: AppType
   name: string
   description: string
   modelId: string
@@ -84,6 +88,7 @@ export type AgentFormState = {
 
 const EMPTY_FORM: AgentFormState = {
   id: null,
+  appType: "agent",
   name: "",
   description: "",
   modelId: "",
@@ -97,6 +102,7 @@ const EMPTY_FORM: AgentFormState = {
 function formFromAgent(agent: Agent): AgentFormState {
   return {
     id: agent.id,
+    appType: agent.app_type,
     name: agent.name,
     description: agent.description,
     modelId: agent.model_id,
@@ -119,6 +125,10 @@ export function isCurrentAgentConversation(
   expectedConversationId: string | null
 ) {
   return currentConversationId === expectedConversationId
+}
+
+export function canOpenAgentDetails(agent: Pick<Agent, "app_type">) {
+  return agent.app_type === "agent"
 }
 
 export function isAgentListLoading(
@@ -344,6 +354,7 @@ export function AgentsPage({
   const [isLoading, setIsLoading] = React.useState(true)
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
+  const [isChooserOpen, setIsChooserOpen] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
   const [isPublishing, setIsPublishing] = React.useState(false)
   const [isAsking, setIsAsking] = React.useState(false)
@@ -657,7 +668,19 @@ export function AgentsPage({
   ])
 
   React.useEffect(() => {
-    if (!token || !selectedWorkspaceId || !selectedAgentId) {
+    if (selectedAgent && !canOpenAgentDetails(selectedAgent)) {
+      router.replace("/app/apps")
+    }
+  }, [router, selectedAgent])
+
+  React.useEffect(() => {
+    if (
+      !token ||
+      !selectedWorkspaceId ||
+      !selectedAgentId ||
+      !selectedAgent ||
+      !canOpenAgentDetails(selectedAgent)
+    ) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRuns([])
       setToolCallsByRun({})
@@ -780,6 +803,7 @@ export function AgentsPage({
     reportError,
     router,
     initialConversationId,
+    selectedAgent,
     selectedAgentId,
     selectedWorkspaceId,
     token,
@@ -808,10 +832,17 @@ export function AgentsPage({
 
   function openCreateDialog() {
     setForm({ ...EMPTY_FORM, modelId: activeModels[0]?.id ?? "" })
+    setIsChooserOpen(true)
+  }
+
+  function chooseAppType(appType: AppType) {
+    setForm((current) => ({ ...current, appType }))
+    setIsChooserOpen(false)
     setIsDialogOpen(true)
   }
 
   function openAgent(agent: Agent) {
+    if (!canOpenAgentDetails(agent)) return
     setForm(formFromAgent(agent))
     router.push(`/app/apps/${agent.id}`)
   }
@@ -824,6 +855,7 @@ export function AgentsPage({
     try {
       const payload = {
         name: form.name.trim(),
+        app_type: form.appType,
         description: form.description.trim(),
         model_id: form.modelId,
         instructions: form.instructions,
@@ -1234,7 +1266,11 @@ export function AgentsPage({
     }
   }
 
-  if (selectedAgent && selectedWorkspaceId) {
+  if (
+    selectedAgent &&
+    selectedWorkspaceId &&
+    canOpenAgentDetails(selectedAgent)
+  ) {
     return (
       <>
         <AgentDetailWorkspace
@@ -1357,9 +1393,9 @@ export function AgentsPage({
             {filteredAgents.map((agent) => (
             <div
               key={agent.id}
-              role="button"
-              tabIndex={0}
-              className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+              role={canOpenAgentDetails(agent) ? "button" : undefined}
+              tabIndex={canOpenAgentDetails(agent) ? 0 : undefined}
+              className={`flex min-h-40 flex-col rounded-md border p-3 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring ${canOpenAgentDetails(agent) ? "cursor-pointer hover:bg-muted/40" : "cursor-default"}`}
               onClick={(event) => {
                 if (isEventFromDropdownMenu(event)) return
                 openAgent(agent)
@@ -1382,6 +1418,14 @@ export function AgentsPage({
                       <h2 className="truncate text-sm font-semibold">
                         {agent.name}
                       </h2>
+                      <Badge variant="secondary">
+                        {agent.app_type === "workflow"
+                          ? t("工作流")
+                          : t("Agent")}
+                      </Badge>
+                      {agent.app_type === "workflow" ? (
+                        <Badge variant="secondary">{t("即将推出")}</Badge>
+                      ) : null}
                       <StatusBadge status={agent.status} />
                       <PermissionBadge
                         permission={agent.can_edit ? "edit" : "view"}
@@ -1392,7 +1436,7 @@ export function AgentsPage({
                     </p>
                   </div>
                 </div>
-                {agent.can_edit ? (
+                {agent.can_edit && canOpenAgentDetails(agent) ? (
                   <IconButton
                     label={t("编辑 Agent")}
                     onClick={(event) => {
@@ -1453,6 +1497,7 @@ export function AgentsPage({
       )}
       </div>
 
+      {renderTypeChooserDialog()}
       {renderAgentDialog()}
       <AgentPermissionsDialog
         agent={permissionAgent}
@@ -1467,13 +1512,63 @@ export function AgentsPage({
     </>
   )
 
+  function renderTypeChooserDialog() {
+    return (
+      <Dialog open={isChooserOpen} onOpenChange={setIsChooserOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("选择要创建的应用类型")}</DialogTitle>
+            <DialogDescription>
+              {t("根据使用方式选择应用类型，创建后可在设置中调整。")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              className="group flex flex-col gap-2 rounded-md border p-4 text-left transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => chooseAppType("agent")}
+            >
+              <span className="flex size-9 items-center justify-center rounded-md bg-violet-500/10 text-violet-700 dark:text-violet-400">
+                <BotIcon className="size-5" />
+              </span>
+              <span className="text-sm font-semibold">{t("Agent")}</span>
+              <span className="text-sm leading-5 text-muted-foreground">
+                {t("智能对话助手，自动规划并使用模型、知识和工具。")}
+              </span>
+            </button>
+            <button
+              type="button"
+              disabled
+              className="group flex flex-col gap-2 rounded-md border p-4 text-left transition-colors outline-none enabled:hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => chooseAppType("workflow")}
+            >
+              <span className="flex size-9 items-center justify-center rounded-md bg-violet-500/10 text-violet-700 dark:text-violet-400">
+                <WorkflowIcon className="size-5" />
+              </span>
+              <span className="flex items-center gap-2 text-sm font-semibold">
+                {t("工作流")}
+                <Badge variant="secondary">{t("即将推出")}</Badge>
+              </span>
+              <span className="text-sm leading-5 text-muted-foreground">
+                {t("按预设步骤编排固定流程，适合确定性的处理任务。")}
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
   function renderAgentDialog() {
     return (
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-h-[calc(100svh-2rem)] max-w-xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
               {form.id ? t("编辑 Agent") : t("新建应用")}
+              <Badge variant="secondary">
+                {form.appType === "workflow" ? t("工作流") : t("Agent")}
+              </Badge>
             </DialogTitle>
             <DialogDescription>
               {t("只需选择 Agent 可以使用的模型、知识和工具。")}

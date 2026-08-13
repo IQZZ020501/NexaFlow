@@ -4,10 +4,13 @@ import type { User } from "@/lib/api/auth"
 
 export type KnowledgeQueryMode = "required" | "agentic"
 
+export type AppType = "agent" | "workflow"
+
 export type Agent = {
   id: string
   workspace_id: string
   name: string
+  app_type: AppType
   description: string
   instructions: string
   model_id: string
@@ -36,6 +39,7 @@ export type AgentPermission = {
 
 export type AgentPayload = {
   name: string
+  app_type?: AppType
   model_id: string
   knowledge_query_mode: KnowledgeQueryMode
   knowledge_base_ids: string[]

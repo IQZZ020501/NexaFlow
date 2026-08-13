@@ -13,11 +13,14 @@ class AgentMcpToolRef(BaseModel):
 
 KnowledgeQueryMode = Literal["required", "agentic"]
 
+AppType = Literal["agent", "workflow"]
+
 
 class AgentResponse(BaseModel):
     id: str
     workspace_id: str
     name: str
+    app_type: AppType
     description: str
     instructions: str
     model_id: str
@@ -36,6 +39,7 @@ class AgentResponse(BaseModel):
 
 class AgentCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    app_type: AppType = "agent"
     description: str = Field(default="", max_length=500)
     instructions: str = Field(default="", max_length=8000)
     model_id: str = Field(min_length=1, max_length=36)
@@ -46,6 +50,7 @@ class AgentCreateRequest(BaseModel):
 
 class AgentUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    app_type: AppType | None = None
     description: str | None = Field(default=None, max_length=500)
     instructions: str | None = Field(default=None, max_length=8000)
     model_id: str | None = Field(default=None, min_length=1, max_length=36)

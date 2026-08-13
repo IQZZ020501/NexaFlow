@@ -10,6 +10,7 @@ class Agent:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""
     name: str = ""
+    app_type: str = "agent"
     description: str = ""
     instructions: str = ""
     model_id: str = ""
