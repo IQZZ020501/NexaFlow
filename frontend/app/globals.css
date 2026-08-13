@@ -24,6 +24,12 @@
     animation: session-loading-bar 1.4s ease-in-out infinite;
 }
 
+@media (prefers-reduced-motion: reduce) {
+    .top-loading-bar-indicator {
+        animation: none;
+    }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
