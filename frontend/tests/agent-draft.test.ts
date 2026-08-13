@@ -63,6 +63,7 @@ describe("Agent conversation async guards", () => {
 
 describe("Agent list loading state", () => {
   test("stops loading without a workspace and includes deep-link fetches", () => {
+    expect(isAgentListLoading("workspace-1", true, false)).toBe(true)
     expect(isAgentListLoading(null, true, false)).toBe(false)
     expect(isAgentListLoading("workspace-1", false, true)).toBe(true)
     expect(isAgentListLoading("workspace-1", false, false)).toBe(false)
