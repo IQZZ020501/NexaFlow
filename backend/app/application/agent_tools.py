@@ -10,7 +10,7 @@ from contextvars import ContextVar
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from langchain_core.tools import StructuredTool
@@ -63,6 +63,8 @@ def set_agent_tool_idempotency_key(value: str) -> None:
 class KnowledgeSearchInput(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     limit: int = Field(default=3, ge=1, le=MAX_KNOWLEDGE_HITS_PER_CALL)
+    search_mode: Literal["embedding", "keywords", "blend"] = "blend"
+    similarity: float | None = Field(default=None, ge=0, le=2)
 
 
 def describe_knowledge_sources(knowledge_bases: list[KnowledgeBase]) -> str:
@@ -187,6 +189,8 @@ def build_knowledge_search_tool(
                                 if knowledge_base.reranker_model_id is not None
                                 else payload.limit
                             ),
+                            search_mode=payload.search_mode,
+                            similarity=payload.similarity,
                         ),
                         settings,
                     )
@@ -280,7 +284,10 @@ def build_knowledge_search_tool(
                     {
                         "knowledge_base": knowledge_base.name,
                         "document": hit.document_filename,
+                        "chunk_id": hit.chunk_id,
+                        "document_id": hit.document_id,
                         "content": hit.content[:MAX_KNOWLEDGE_CONTENT_CHARS],
+                        "distance": hit.distance,
                     }
                 )
 

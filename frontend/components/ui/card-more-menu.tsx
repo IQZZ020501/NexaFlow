@@ -28,7 +28,9 @@ export function CardMoreMenu({
         </IconButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        align="end"
+        side="bottom"
+        align="start"
+        className="min-w-40"
         onClick={(event) => event.stopPropagation()}
       >
         {children}

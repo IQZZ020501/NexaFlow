@@ -20,7 +20,6 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   FileTextIcon,
-  GripVerticalIcon,
   PlusIcon,
 } from "lucide-react"
 
@@ -53,6 +52,7 @@ import {
   WORKFLOW_NODE_TYPES,
   createWorkflowEdge,
   createWorkflowNode,
+  ensureConditionElseIfBranches,
   serializeWorkflowGraph,
 } from "@/lib/workflows/graph"
 import {
@@ -63,6 +63,7 @@ import {
   nonOverlappingCanvasPosition,
   persistedWorkflowViewport,
   viewportIncludingCanvasX,
+  viewportIncludingCanvasY,
   workflowNodeRects,
 } from "@/lib/workflows/canvas"
 
@@ -96,7 +97,11 @@ type WorkflowCanvasProps = {
 function CanvasInner(props: WorkflowCanvasProps) {
   const { screenToFlowPosition, setViewport: setFlowViewport } = useReactFlow()
   const { t } = props
-  const [nodes, setNodes] = React.useState<WorkflowNode[]>(props.graph.nodes)
+  const [nodes, setNodes] = React.useState<WorkflowNode[]>(() =>
+    props.readOnly
+      ? props.graph.nodes
+      : ensureConditionElseIfBranches(props.graph.nodes)
+  )
   const [edges, setEdges] = React.useState<WorkflowEdge[]>(props.graph.edges)
   const [viewport, setViewport] = React.useState(props.graph.viewport)
   const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(null)
@@ -105,6 +110,9 @@ function CanvasInner(props: WorkflowCanvasProps) {
   const infoCardRef = React.useRef<HTMLDivElement | null>(null)
   const infoPositionInitializedRef = React.useRef(false)
   const infoViewportAdjustedRef = React.useRef(false)
+  const transientViewportRef = React.useRef<WorkflowGraph["viewport"] | null>(
+    null
+  )
   const onChangeRef = React.useRef(props.onChange)
 
   React.useEffect(() => {
@@ -160,30 +168,23 @@ function CanvasInner(props: WorkflowCanvasProps) {
   )
 
   React.useLayoutEffect(() => {
+    if (infoPositionInitializedRef.current) return
     const card = infoCardRef.current
     if (!card) return
-    const placeLeftOfStart = () => {
-      const nodeRects = workflowNodeRects(nodes)
-      const startNode = nodeRects[nodes.findIndex((node) => node.data.type === "start")]
-      if (!startNode) return
-      const next = nonOverlappingCanvasPosition(
-        canvasPositionLeftOf(startNode, {
-          width: card.offsetWidth,
-          height: card.offsetHeight,
-        }),
-        { width: card.offsetWidth, height: card.offsetHeight },
-        nodeRects
-      )
-      infoPositionInitializedRef.current = true
-      setInfoPosition((current) =>
-        next.x === current.x && next.y === current.y ? current : next
-      )
-    }
-    placeLeftOfStart()
-    const observer = new ResizeObserver(placeLeftOfStart)
-    observer.observe(card)
-    return () => observer.disconnect()
-  }, [infoOpen, nodes])
+    const nodeRects = workflowNodeRects(nodes)
+    const startNode = nodeRects[nodes.findIndex((node) => node.data.type === "start")]
+    if (!startNode) return
+    const next = nonOverlappingCanvasPosition(
+      canvasPositionLeftOf(startNode, {
+        width: card.offsetWidth,
+        height: card.offsetHeight,
+      }),
+      { width: card.offsetWidth, height: card.offsetHeight },
+      nodeRects
+    )
+    infoPositionInitializedRef.current = true
+    setInfoPosition(next)
+  }, [nodes])
 
   React.useEffect(() => {
     if (
@@ -193,10 +194,15 @@ function CanvasInner(props: WorkflowCanvasProps) {
       return
     }
     infoViewportAdjustedRef.current = true
-    const next = viewportIncludingCanvasX(viewport, infoPosition.x)
-    if (next.x === viewport.x) return
+    const top = Math.min(infoPosition.y, ...nodes.map((node) => node.position.y))
+    const next = viewportIncludingCanvasY(
+      viewportIncludingCanvasX(viewport, infoPosition.x),
+      top
+    )
+    if (next.x === viewport.x && next.y === viewport.y) return
+    transientViewportRef.current = next
     void setFlowViewport(next)
-  }, [infoPosition.x, setFlowViewport, viewport])
+  }, [infoPosition.x, infoPosition.y, nodes, setFlowViewport, viewport])
 
   const moveInfoCardBy = React.useCallback(
     (x: number, y: number) => {
@@ -343,12 +349,33 @@ function CanvasInner(props: WorkflowCanvasProps) {
             onCopy: copyNode,
             onDelete: deleteNode,
             onRename: renameNode,
-            onUpdate: (nextData: WorkflowNodeData) =>
+            onUpdate: (nextData: WorkflowNodeData) => {
+              if (node.data.type === "condition") {
+                const nextHandles = new Set(
+                  Array.isArray(nextData.config.branch)
+                    ? nextData.config.branch.flatMap((branch) =>
+                        branch &&
+                        typeof branch === "object" &&
+                        typeof (branch as Record<string, unknown>).id === "string"
+                          ? [String((branch as Record<string, unknown>).id)]
+                          : []
+                      )
+                    : []
+                )
+                setEdges((current) =>
+                  current.filter(
+                    (edge) =>
+                      edge.source !== node.id ||
+                      nextHandles.has(String(edge.sourceHandle ?? ""))
+                  )
+                )
+              }
               setNodes((current) =>
                 current.map((item) =>
                   item.id === node.id ? { ...item, data: nextData } : item
                 )
-              ),
+              )
+            },
             agent: props.agent,
             models: props.models,
             knowledgeBases: props.knowledgeBases,
@@ -489,11 +516,21 @@ function CanvasInner(props: WorkflowCanvasProps) {
               }
             }}
             deleteKeyCode={props.readOnly ? null : ["Backspace", "Delete"]}
-            onMoveEnd={(_event, nextViewport) =>
+            onMoveEnd={(_event, nextViewport) => {
+              const transient = transientViewportRef.current
+              transientViewportRef.current = null
+              if (
+                transient &&
+                Math.abs(transient.x - nextViewport.x) < 0.01 &&
+                Math.abs(transient.y - nextViewport.y) < 0.01 &&
+                Math.abs(transient.zoom - nextViewport.zoom) < 0.001
+              ) {
+                return
+              }
               setViewport((current) =>
                 persistedWorkflowViewport(current, nextViewport, props.readOnly)
               )
-            }
+            }}
             onDragOver={(event) => {
               event.preventDefault()
               event.dataTransfer.dropEffect = "move"
@@ -530,7 +567,6 @@ function CanvasInner(props: WorkflowCanvasProps) {
                       }}
                       onKeyDown={handleInfoDragKeyDown}
                     >
-                      <GripVerticalIcon className="size-4 shrink-0 text-muted-foreground" />
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-orange-600 dark:text-orange-400">
                         <FileTextIcon className="size-4" />
                       </span>

@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 import json
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,7 @@ from app.application.workflows import (
     update_workflow_definition,
     validate_workflow_definition,
     stream_workflow_run,
+    upload_workspace_workflow_files,
 )
 from app.schemas.workflow import (
     WorkflowDefinitionResponse,
@@ -37,6 +38,7 @@ from app.schemas.workflow import (
     WorkflowVersionListResponse,
     WorkflowVersionRestoreRequest,
     WorkflowVersionResponse,
+    WorkflowUploadResponse,
 )
 
 router = APIRouter(
@@ -169,6 +171,29 @@ async def get_runs(
         context.membership_role,
         limit,
         offset,
+    )
+
+
+@router.post(
+    "/{agent_id}/uploads",
+    response_model=list[WorkflowUploadResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_workspace_workflow_attachments(
+    agent_id: str,
+    files: Annotated[list[UploadFile], File()],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[WorkflowUploadResponse]:
+    return await upload_workspace_workflow_files(
+        db,
+        context.workspace.id,
+        agent_id,
+        context.user,
+        context.membership_role,
+        files,
+        settings,
     )
 
 

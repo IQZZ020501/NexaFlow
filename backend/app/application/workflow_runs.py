@@ -14,6 +14,7 @@ from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.session import get_session_factory
+from app.application.workflow_uploads import resolve_workspace_workflow_files
 from app.schemas.workflow import (
     WorkflowNodeExecutionListResponse,
     WorkflowNodeExecutionResponse,
@@ -26,6 +27,7 @@ from app.shareddomain.workflows.services import (
     get_or_create_definition,
     get_workflow_agent,
     validate_workflow_resources,
+    workflow_resource_references,
 )
 from app.tasks.agents import enqueue_agent_run
 
@@ -144,15 +146,26 @@ async def create_workflow_run(
         db,
         agent,
         graph,
+        actor,
+        workspace_role,
         default_model_id=default_model_id,
     )
+    if access_source == "console":
+        files = await resolve_workspace_workflow_files(
+            db,
+            workspace_id,
+            agent_id,
+            actor,
+            workspace_role,
+            payload.file_ids,
+        )
+    elif payload.file_ids:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "External workflow runs cannot use console upload ids.",
+        )
     model = await get_agent_model(db, workspace_id, default_model_id)
-    knowledge_bindings = (await agent_repository.list_binding_map(db, [agent.id]))[
-        agent.id
-    ]
-    mcp_bindings = (await agent_repository.list_mcp_binding_map(db, [agent.id]))[
-        agent.id
-    ]
+    knowledge_base_ids, mcp_tools = workflow_resource_references(parsed)
     now = utc_now()
     run_conversation_id = conversation_id or new_id()
     if conversation_id and await agent_repository.get_active_agent_run(
@@ -176,9 +189,9 @@ async def create_workflow_run(
         conversation_id=run_conversation_id,
         goal=payload.question,
         instructions=agent.instructions,
-        knowledge_base_ids=knowledge_bindings,
+        knowledge_base_ids=knowledge_base_ids,
         knowledge_query_mode=agent.knowledge_query_mode,
-        mcp_tools=mcp_bindings,
+        mcp_tools=mcp_tools,
         model_id=model.id,
         model_name=model.name,
         status="queued",

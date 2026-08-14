@@ -9,6 +9,7 @@ import json
 import re
 from typing import Any
 
+from jinja2 import Environment, meta
 from pydantic import BaseModel, ValidationError
 
 from app.schemas.workflow import (
@@ -19,6 +20,7 @@ from app.schemas.workflow import (
     KnowledgeNodeConfig,
     LlmNodeConfig,
     McpNodeConfig,
+    ReplyNodeConfig,
     StartNodeConfig,
     TemplateNodeConfig,
     VariableNodeConfig,
@@ -57,6 +59,7 @@ NODE_CONFIG_MODELS: dict[str, type[BaseModel]] = {
     "classifier": ClassifierNodeConfig,
     "knowledge": KnowledgeNodeConfig,
     "condition": ConditionNodeConfig,
+    "reply-node": ReplyNodeConfig,
     "template": TemplateNodeConfig,
     "variable": VariableNodeConfig,
     "mcp": McpNodeConfig,
@@ -66,6 +69,7 @@ NODE_CONFIG_MODELS: dict[str, type[BaseModel]] = {
 REFERENCE_PATTERN = re.compile(
     r"{{\s*([A-Za-z0-9_-]+)(?:\.([A-Za-z0-9_.-]+))?\s*}}"
 )
+JINJA_ENV = Environment()
 
 # Start node globals are available to every node as bare references like {{time}}
 # or through the {{global.<field>}} namespace (MaxKB-compatible).
@@ -248,10 +252,13 @@ def validate_graph(graph: WorkflowGraph | Mapping[str, Any]) -> WorkflowGraph:
             ) from exc
         edges = outgoing_edges[node.id]
         handles = [edge.source_handle for edge in edges]
-        if node.data.type == "condition" and sorted(handles) != ["false", "true"]:
-            raise WorkflowValidationError(
-                f"Condition node {node.id} requires true and false output edges."
-            )
+        if node.data.type == "condition":
+            condition = ConditionNodeConfig.model_validate(config)
+            expected = {branch.id for branch in condition.branch}
+            if set(handles) != expected or len(handles) != len(expected):
+                raise WorkflowValidationError(
+                    f"Condition node {node.id} requires one edge for every branch."
+                )
         if node.data.type == "classifier":
             classifier = ClassifierNodeConfig.model_validate(config)
             expected = {item.handle for item in classifier.classes} | {
@@ -271,7 +278,33 @@ def validate_graph(graph: WorkflowGraph | Mapping[str, Any]) -> WorkflowGraph:
         for parent in incoming[node_id]:
             ancestors[node_id].add(parent)
             ancestors[node_id].update(ancestors[parent])
-        for reference in _iter_references(nodes[node_id].data.config):
+        node = nodes[node_id]
+        references = list(_iter_references(node.data.config))
+        if node.data.type == "reply-node":
+            reply = ReplyNodeConfig.model_validate(node.data.config)
+            if reply.reply_type == "referencing" and reply.fields:
+                references.append(reply.fields[0][0])
+            elif reply.reply_type == "custom":
+                normalized = REFERENCE_PATTERN.sub(
+                    "{{ workflow_refs.value }}", reply.content
+                )
+                references.extend(
+                    name
+                    for name in meta.find_undeclared_variables(
+                        JINJA_ENV.parse(normalized)
+                    )
+                    if name != "workflow_refs"
+                )
+        if node.data.type == "condition":
+            condition = ConditionNodeConfig.model_validate(node.data.config)
+            references.extend(
+                rule.field[0]
+                for branch in condition.branch
+                for rule in branch.conditions
+            )
+        for reference in references:
+            if reference in WORKFLOW_GLOBALS or reference == "global":
+                continue
             if reference not in ancestors[node_id]:
                 raise WorkflowValidationError(
                     f"Node {node_id} references non-upstream node {reference}."
@@ -478,4 +511,21 @@ class WorkflowEngine:
         end = next(node for node in self.graph.nodes if node.data.type == "end")
         if current.node_states[end.id] != NodeState.SUCCEEDED:
             raise WorkflowEngineError("Workflow ended without producing an output.")
-        return WorkflowEngineResult(outputs=current.node_outputs[end.id], state=current)
+        outputs = dict(current.node_outputs[end.id])
+        answers: list[str] = []
+        for node in self.graph.nodes:
+            if current.node_states[node.id] != NodeState.SUCCEEDED:
+                continue
+            if node.data.type == "llm":
+                config = LlmNodeConfig.model_validate(node.data.config)
+                value = current.node_outputs[node.id].get("text")
+            elif node.data.type == "reply-node":
+                config = ReplyNodeConfig.model_validate(node.data.config)
+                value = current.node_outputs[node.id].get("answer")
+            else:
+                continue
+            if config.is_result and value is not None:
+                answers.append(str(value))
+        if answers:
+            outputs["result"] = "\n\n".join(answers)
+        return WorkflowEngineResult(outputs=outputs, state=current)

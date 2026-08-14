@@ -39,6 +39,7 @@ class VectorStore(Protocol):
         embedding_model: object,
         query: str,
         limit: int,
+        score_threshold: float | None = None,
     ) -> list[VectorHit]: ...
 
 
@@ -79,12 +80,14 @@ def query_vectors(
     embedding_model: object,
     query: str,
     limit: int,
+    score_threshold: float | None = None,
 ) -> list[VectorHit]:
     return build_vector_store(settings).query_vectors(
         knowledge_base_id,
         embedding_model,
         query,
         limit,
+        score_threshold,
     )
 
 

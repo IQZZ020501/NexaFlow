@@ -75,6 +75,16 @@ export function viewportIncludingCanvasX(
   return { ...viewport, x: viewport.x + padding - screenX }
 }
 
+export function viewportIncludingCanvasY(
+  viewport: WorkflowGraph["viewport"],
+  y: number,
+  padding = 16
+) {
+  const screenY = y * viewport.zoom + viewport.y
+  if (screenY >= padding) return viewport
+  return { ...viewport, y: viewport.y + padding - screenY }
+}
+
 export function workflowNodeRects(nodes: WorkflowNode[]): CanvasRect[] {
   return nodes.map((node) => {
     const runtimeNode = node as WorkflowNode & {

@@ -7,7 +7,7 @@
 - React Flow 画布编辑、后端强校验、乐观并发草稿保存；
 - 草稿调试、节点状态回显、运行与节点审计；
 - 不可变发布版本、版本列表、恢复为新草稿、指定版本运行；
-- Start、End、LLM、Classifier、Knowledge、Condition、Template、Variable、MCP、Code 十类节点；
+- Start、End、LLM、Reply、Classifier、Knowledge、Condition、Variable、MCP、Code 十类可新增节点；
 - Code 节点的独立、无网络、受资源限制的 Python 生产沙箱；
 - Celery 持久执行、租约接管、deadline、步数与模型 token 预算、NDJSON 事件重放。
 
@@ -62,9 +62,9 @@ flowchart LR
 
 - 节点、边 ID 唯一；恰好一个 Start 和一个 End；Start 无入边，End 无出边；
 - 所有节点从 Start 可达且都可到达 End；禁止环；最多 200 节点、500 边；
-- Condition 必须各有一条 `true`、`false` 出边；Classifier 每个 class 和 default 各一条出边；
+- Condition 每个分支 ID 必须各有一条出边；Classifier 每个 class 和 default 各一条出边；
 - 每个节点配置用对应 Pydantic schema 强校验；变量引用只能指向拓扑上游；
-- Knowledge 和 MCP 必须是应用已绑定资源，MCP 必须有当前 `read_only` 策略；节点指定模型必须存在且启用。
+- Knowledge 直接引用当前用户可访问的工作区知识库；MCP 直接引用工作区工具且必须有当前 `read_only` 策略；节点指定模型必须存在且启用。
 
 调度器维护节点状态 `PENDING/SUCCEEDED/SKIPPED/FAILED` 和边状态 `UNKNOWN/TAKEN/SKIPPED`：
 
@@ -87,7 +87,7 @@ flowchart LR
 | `agent_runs` | 运行主记录、状态、执行用户、租约、attempt、worker、checkpoint、trace、模型 usage、时间戳 |
 | `agent_run_events` | 有序持久事件与断线重放游标 |
 | `agent_tool_calls` | MCP 节点的参数/定义 hash、幂等键、租约与结果账本；不替代节点审计 |
-| Agent 资源绑定表 | 工作流可用知识库和 MCP 工具白名单 |
+| 工作流图节点配置 | 工作流直接引用的知识库和 MCP 工具；发布和运行时重新校验权限、状态与只读策略 |
 
 工作流不复用 Agent 的 LangGraph `agent -> tool -> agent` 业务图，只复用它的持久执行外壳。
 
@@ -179,18 +179,20 @@ erDiagram
 | --- | --- | --- |
 | Start | 固定节点：`question/files` + 全局 `time/history_context/chat_id/start_time` | 三家共同入口 |
 | End | 把上游引用映射为运行最终输出 | 三家共同出口 |
-| LLM | prompt/system/model -> `text` + usage | 三家核心生成节点 |
+| LLM | prompt/system/model -> text + usage；多轮对话（`dialogue_number` 最近 N 轮，`dialogue_type` NODE 仅本节点历史 / WORKFLOW 整条流程历史）、模型参数（temperature/top_p/max_tokens）、可选 MCP 工具循环、`reasoning_content_enable` 思考过程输出；开启 `is_result` 的节点文本按画布顺序汇总为运行结果，同时保留 `text` 供下游引用 | 三家核心生成节点；字段与 MaxKB ai-chat-node 对齐 |
+| Reply | `custom` 使用沙箱化 Jinja2 模板生成回复，`referencing` 将单个上游字段转为字符串；输出 `answer`，开启 `is_result` 时按画布顺序汇总到运行结果 | 节点库置顶的指定回复节点；字段与 MaxKB reply-node 对齐 |
 | Classifier | 输入/classes/default -> 选中 handle | Dify question classifier、Coze intent detector |
-| Knowledge | query + 1–10 个已绑定知识库 + 返回条数（1–8） -> `content/hits/retrieval_stats/evidence_status` | 复用 NexaFlow RAG；兼容旧单知识库草稿 |
-| Condition | 两值 + 等值/包含/顺序/空值/长度/布尔操作符 -> true/false | 三家分支基础；补齐 MaxKB 常用确定性判断 |
-| Template | 引用模板 -> `text` | Dify template、MaxKB 变量引用 |
+| Knowledge | query + 至少 1 个可访问知识库（暂不限制数量）+ 引用分段数（1–8）+ 相似度（0–1，默认 0.6）+ 检索模式（embedding/keywords/blend）+ 最大引用字符数（默认 5000） -> `content/hits/paragraph_list/is_hit_handling_method_list/data/directly_return/retrieval_stats/evidence_status` | 复用 NexaFlow RAG；字段与 MaxKB search-dataset-node 对齐（`directly_return` 以节点相似度阈值为直接回答门槛，MaxKB 的分段级 hit_handling_method 元数据在 NexaFlow 中不存在）；兼容旧单知识库草稿 |
+| Condition | 有序 `IF / ELSE IF N / ELSE` 分支 + `and/or` 条件组 + 上游字段引用 + 16 种比较符 -> 首个命中分支 handle + `branch_name` | 三家分支基础；对齐 MaxKB 常用确定性判断与分支结构 |
 | Variable | 任意 JSON/引用 -> `value` | 三家变量能力 |
-| MCP | 参数 + 已绑定只读工具 -> 工具输出 | 复用 MCP 策略与 durable ledger |
+| MCP | 参数 + 工作区只读工具 -> 工具输出 | 复用 MCP 策略与 durable ledger |
 | Code | Python + JSON 输入 -> result/stdout/stderr | 三家均有代码/函数节点；使用独立沙箱 |
 
 变量语法为 `{{node_id.path}}`。完整字符串引用保留原 JSON 类型，嵌入字符串时对象和数组序列化为紧凑 JSON。Start 固定输出本次运行的问题（`question`）、上传文件（`files`）以及全局变量：当前时间（`time`，`%Y-%m-%d %H:%M:%S`）、同会话历史（`history_context`，`[{question, answer}]`）、会话 ID（`chat_id`）与运行开始时间戳（`start_time`，epoch 秒）。全局变量可通过 `{{global.<field>}}` 命名空间在任何节点引用（兼容裸引用 `{{time}}` 等）。节点输入框提供「插入变量」选择器：全局变量组 + 沿入边可达的上游节点输出字段（对齐 MaxKB 的 NodeCascader），避免手写错误引用。
 
-节点库另提供“问题优化”和“指定回复”两个预设，分别生成标准 LLM 与 Template 节点，不增加新的持久化节点类型或执行分支。
+节点库另提供“问题优化”预设以生成标准 LLM 节点；“指定回复”是置顶的 `reply-node` 持久化节点类型。
+
+旧版 Template 节点不再允许新增；后端与前端仍保留读取、编辑和执行兼容，避免已有草稿及发布版本失效。
 
 第二批再增加 Loop、Iteration、HITL、HTTP、Subworkflow。表单收集、文档/图片/音频处理和子应用调用也要等暂停恢复、类型化上传、模型能力与子工作流边界落地后再增加；这些能力不能仅添加一个卡片即宣称完成。
 

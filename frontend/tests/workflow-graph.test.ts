@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test"
 
 import {
   WORKFLOW_NODE_PRESETS,
+  WORKFLOW_NODE_TYPES,
   createWorkflowEdge,
   defaultNodeConfig,
+  ensureConditionElseIfBranches,
   removeWorkflowNode,
   selectWorkflowRunTarget,
   serializeWorkflowGraph,
@@ -78,7 +80,6 @@ describe("workflow graph", () => {
     const optimizer = WORKFLOW_NODE_PRESETS.find(
       (preset) => preset.id === "question-optimizer"
     )
-    const reply = WORKFLOW_NODE_PRESETS.find((preset) => preset.id === "reply")
 
     expect(optimizer?.type).toBe("llm")
     expect(optimizer?.config(t)).toEqual({
@@ -86,17 +87,87 @@ describe("workflow graph", () => {
       prompt:
         "请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.question}}",
     })
-    expect(reply?.type).toBe("template")
-    expect(reply?.config(t)).toEqual({ template: "{{start.question}}" })
+    expect(WORKFLOW_NODE_TYPES[0]).toBe("reply-node")
+    expect(WORKFLOW_NODE_TYPES).not.toContain("template")
+    expect(defaultNodeConfig("template")).toEqual({
+      template: "{{start.question}}",
+    })
+    expect(defaultNodeConfig("reply-node")).toEqual({
+      reply_type: "custom",
+      content: "",
+      fields: null,
+      is_result: true,
+    })
     expect(defaultNodeConfig("knowledge")).toEqual({
       knowledge_base_ids: [],
       query: "{{start.question}}",
       limit: 3,
+      similarity: 0.6,
+      search_mode: "embedding",
+      max_paragraph_char_number: 5000,
     })
     expect(defaultNodeConfig("start")).toEqual({})
     expect(defaultNodeConfig("end")).toEqual({
       outputs: { result: "{{start.question}}" },
     })
+    const condition = defaultNodeConfig("condition") as {
+      branch: Array<Record<string, unknown>>
+    }
+    expect(condition.branch).toHaveLength(3)
+    expect(condition.branch.map((branch) => branch.type)).toEqual([
+      "IF",
+      "ELSE IF 1",
+      "ELSE",
+    ])
+    expect(condition.branch[0].conditions).toEqual([
+      { field: ["start", "question"], compare: "eq", value: "" },
+    ])
+    expect(condition.branch[1].conditions).toEqual([
+      { field: ["start", "question"], compare: "eq", value: "" },
+    ])
+  })
+
+  test("adds the missing ELSE IF branch to editable legacy condition nodes", () => {
+    const ifBranch = {
+      id: "if-branch",
+      type: "IF",
+      condition: "and",
+      conditions: [
+        { field: ["start", "question"], compare: "eq", value: "yes" },
+      ],
+    }
+    const elseBranch = {
+      id: "else-branch",
+      type: "ELSE",
+      condition: "and",
+      conditions: [],
+    }
+    const [condition] = ensureConditionElseIfBranches([
+      {
+        id: "condition",
+        type: "workflow",
+        position: { x: 0, y: 0 },
+        data: {
+          type: "condition",
+          title: "Condition",
+          config: { branch: [ifBranch, elseBranch] },
+        },
+      },
+    ] as never)
+    const branches = condition.data.config.branch as Array<
+      Record<string, unknown>
+    >
+
+    expect(branches.map((branch) => branch.type)).toEqual([
+      "IF",
+      "ELSE IF 1",
+      "ELSE",
+    ])
+    expect(branches[0]).toBe(ifBranch)
+    expect(branches[2]).toBe(elseBranch)
+    expect(branches[1].conditions).toEqual([
+      { field: ["start", "question"], compare: "eq", value: "" },
+    ])
   })
 
   test("serializes only durable React Flow fields", () => {

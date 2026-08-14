@@ -257,6 +257,7 @@ def query_vectors(
     embedding_model: RegisteredModel,
     query: str,
     limit: int,
+    score_threshold: float | None = None,
 ) -> list[VectorHit]:
     if limit <= 0:
         return []
@@ -279,6 +280,7 @@ def query_vectors(
             ),
             limit=limit,
             with_payload=["chunk_id"],
+            **({"score_threshold": score_threshold} if score_threshold is not None else {}),
         ).points
     except Exception as exc:
         log_error(
@@ -292,7 +294,9 @@ def query_vectors(
         )
         raise
     return [
-        VectorHit(chunk_id=chunk_id, distance=None)
+        # Qdrant COSINE reports cosine similarity (1 = identical); expose
+        # cosine distance (1 - score, [0, 2]) so lower is more similar.
+        VectorHit(chunk_id=chunk_id, distance=1.0 - point.score)
         for point in results
         if isinstance(point.payload, dict)
         and isinstance(chunk_id := point.payload.get("chunk_id"), str)
@@ -336,6 +340,7 @@ class QdrantVectorStore:
         embedding_model: RegisteredModel,
         query: str,
         limit: int,
+        score_threshold: float | None = None,
     ) -> list[VectorHit]:
         return query_vectors(
             self._settings,
@@ -343,4 +348,5 @@ class QdrantVectorStore:
             embedding_model,
             query,
             limit,
+            score_threshold,
         )

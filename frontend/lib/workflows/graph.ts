@@ -9,13 +9,13 @@ import type {
 import type { TFunction, TranslationKey } from "@/i18n"
 
 export const WORKFLOW_NODE_TYPES: WorkflowNodeType[] = [
+  "reply-node",
   "start",
   "end",
   "llm",
   "classifier",
   "knowledge",
   "condition",
-  "template",
   "variable",
   "mcp",
   "code",
@@ -52,12 +52,6 @@ export const WORKFLOW_NODE_PRESETS: WorkflowNodePreset[] = [
       prompt: t("请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.question}}"),
     }),
   },
-  {
-    id: "reply",
-    type: "template",
-    label: "指定回复",
-    config: () => ({ template: "{{start.question}}" }),
-  },
 ]
 
 export function defaultNodeConfig(
@@ -69,7 +63,17 @@ export function defaultNodeConfig(
     case "end":
       return { outputs: { result: "{{start.question}}" } }
     case "llm":
-      return { prompt: "{{start.question}}", system_prompt: "" }
+      return {
+        prompt: "{{start.question}}",
+        system_prompt: "",
+        dialogue_number: 1,
+        dialogue_type: "NODE",
+        model_params_setting: {},
+        model_setting: {},
+        mcp_enable: false,
+        mcp_servers: [],
+        is_result: true,
+      }
     case "classifier":
       return {
         input: "{{start.question}}",
@@ -80,12 +84,47 @@ export function defaultNodeConfig(
         default_handle: "default",
       }
     case "knowledge":
-      return { knowledge_base_ids: [], query: "{{start.question}}", limit: 3 }
+      return {
+        knowledge_base_ids: [],
+        query: "{{start.question}}",
+        limit: 3,
+        similarity: 0.6,
+        search_mode: "embedding",
+        max_paragraph_char_number: 5000,
+      }
     case "condition":
       return {
-        left: "{{start.question}}",
-        operator: "equals",
-        right: "",
+        branch: [
+          {
+            id: crypto.randomUUID().replaceAll("-", "").slice(0, 12),
+            type: "IF",
+            condition: "and",
+            conditions: [
+              { field: ["start", "question"], compare: "eq", value: "" },
+            ],
+          },
+          {
+            id: crypto.randomUUID().replaceAll("-", "").slice(0, 12),
+            type: "ELSE IF 1",
+            condition: "and",
+            conditions: [
+              { field: ["start", "question"], compare: "eq", value: "" },
+            ],
+          },
+          {
+            id: crypto.randomUUID().replaceAll("-", "").slice(0, 12),
+            type: "ELSE",
+            condition: "and",
+            conditions: [],
+          },
+        ],
+      }
+    case "reply-node":
+      return {
+        reply_type: "custom",
+        content: "",
+        fields: null,
+        is_result: true,
       }
     case "template":
       return { template: "{{start.question}}" }
@@ -116,6 +155,48 @@ export function createWorkflowNode(
     },
     data: { type, title, config: structuredClone(config) },
   }
+}
+
+export function ensureConditionElseIfBranches(
+  nodes: WorkflowNode[]
+): WorkflowNode[] {
+  return nodes.map((node) => {
+    const branches = node.data.config.branch
+    if (
+      node.data.type !== "condition" ||
+      !Array.isArray(branches) ||
+      branches.length !== 2 ||
+      !branches[0] ||
+      typeof branches[0] !== "object" ||
+      !branches[1] ||
+      typeof branches[1] !== "object" ||
+      (branches[0] as Record<string, unknown>).type !== "IF" ||
+      (branches[1] as Record<string, unknown>).type !== "ELSE"
+    ) {
+      return node
+    }
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        config: {
+          ...node.data.config,
+          branch: [
+            branches[0],
+            {
+              id: crypto.randomUUID().replaceAll("-", "").slice(0, 12),
+              type: "ELSE IF 1",
+              condition: "and",
+              conditions: [
+                { field: ["start", "question"], compare: "eq", value: "" },
+              ],
+            },
+            branches[1],
+          ],
+        },
+      },
+    }
+  })
 }
 
 export function createWorkflowEdge(

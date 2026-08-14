@@ -30,7 +30,7 @@ from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.system_log import record_system_log
 from app.ports.llm import ModelProviderError, RegisteredModel
-from app.schemas.workflow import WorkflowGraph
+from app.schemas.workflow import LlmNodeConfig, WorkflowGraph
 from app.shareddomain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
@@ -95,6 +95,57 @@ async def _workflow_globals(
         "chat_id": run.conversation_id,
         "start_time": time.time(),
     }
+
+
+async def _workflow_node_histories(
+    run: AgentRun,
+    graph: WorkflowGraph,
+) -> dict[str, list[dict[str, Any]]]:
+    """Per-node conversation history for LLM nodes using ``NODE`` context.
+
+    For every prior succeeded run in this conversation, records the run
+    question paired with the answer this node produced, oldest first.
+    """
+    if not run.conversation_id:
+        return {}
+    node_ids = [
+        node.id
+        for node in graph.nodes
+        if node.data.type == "llm"
+        and LlmNodeConfig.model_validate(node.data.config).dialogue_type == "NODE"
+    ]
+    if not node_ids:
+        return {}
+    histories: dict[str, list[dict[str, Any]]] = {
+        node_id: [] for node_id in node_ids
+    }
+    node_id_set = set(node_ids)
+    async with get_session_factory()() as db:
+        prior = await agent_repository.list_agent_runs(
+            db,
+            run.agent_id,
+            run.access_source,
+            run.consumer_id,
+            limit=WORKFLOW_HISTORY_LIMIT,
+            status=AGENT_RUN_SUCCEEDED_STATUS,
+            conversation_id=run.conversation_id,
+        )
+        for item in reversed(prior):
+            executions = await workflow_repository.list_node_executions(
+                db, item.id
+            )
+            for execution in executions:
+                if execution.node_id not in node_id_set:
+                    continue
+                if execution.status != "succeeded":
+                    continue
+                answer = (execution.outputs or {}).get("text")
+                if answer is None:
+                    continue
+                histories[execution.node_id].append(
+                    {"question": item.goal, "answer": answer}
+                )
+    return histories
 
 
 @dataclass(frozen=True)
@@ -208,6 +259,7 @@ async def _execute_claimed_workflow_run(
         mcp_tools=scope.mcp_tools,
         ledger=ledger,
         node_order=node_order,
+        node_histories=await _workflow_node_histories(run, graph),
     )
     engine = WorkflowEngine(
         graph,

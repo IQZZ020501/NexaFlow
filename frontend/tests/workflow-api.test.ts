@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import {
   createWorkflowRun,
+  uploadWorkflowFiles,
   updateWorkflowDefinition,
 } from "../lib/api/workflows"
 import {
@@ -61,6 +62,43 @@ describe("workflow API", () => {
       question: "release",
       source: "published",
       version_number: 3,
+    })
+  })
+
+  test("uploads debug attachments and passes their ids to the run", async () => {
+    const requests: Array<{ url: string; body: BodyInit | null | undefined }> = []
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      requests.push({ url: String(input), body: init?.body })
+      return Response.json([{ id: "upload-1" }])
+    }) as typeof fetch
+
+    const files = [new File(["debug"], "debug.txt", { type: "text/plain" })]
+    const uploaded = await uploadWorkflowFiles(
+      "token",
+      "ws-1",
+      "workflow-1",
+      files
+    )
+    await createWorkflowRun(
+      "token",
+      "ws-1",
+      "workflow-1",
+      "inspect attachment",
+      "draft",
+      undefined,
+      uploaded.map((item) => item.id)
+    )
+
+    expect(requests[0]?.url).toContain("/workflows/workflow-1/uploads")
+    expect(requests[0]?.body).toBeInstanceOf(FormData)
+    expect((requests[0]?.body as FormData).getAll("files")).toEqual(files)
+    expect(JSON.parse(String(requests[1]?.body))).toEqual({
+      question: "inspect attachment",
+      source: "draft",
+      file_ids: ["upload-1"],
     })
   })
 

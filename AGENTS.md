@@ -10,8 +10,7 @@ Correctness, safety, evidence, and validation take priority over speed.
 ## 1. Required Skills
 
 - Backend work must read and follow `fastapi` before implementation.
-- Frontend work must read and follow `react-templates`,
-  `vercel-react-best-practices` before implementation.
+- Frontend work must read and follow `react-templates`before implementation.
 - If a required skill is unavailable, surface that before coding instead of
   silently proceeding.
 
@@ -91,6 +90,9 @@ Correctness, safety, evidence, and validation take priority over speed.
   fallback. The upload UI and parser accept DOCX, PDF, Markdown, text, PPTX,
   XLSX, XLS, HTML, CSV, JSON, XML, IPYNB, EPUB, ZIP, PNG, JPG, JPEG, and WEBP.
   The backend image must include Tesseract Chinese/English data for OCR fallback.
+- Workflow custom reply nodes render Jinja2 templates in a sandboxed environment;
+  undefined variables fail the node, and reference-only replies stringify one
+  selected upstream field.
 - MCP tools use workspace-scoped Streamable HTTP, legacy SSE, or stdio Server
   registrations. Remote Bearer tokens and full stdio configurations are
   encrypted; remote endpoints may use HTTP or HTTPS, while private and loopback

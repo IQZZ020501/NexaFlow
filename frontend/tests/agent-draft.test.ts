@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
@@ -23,6 +25,11 @@ import {
 } from "../components/agents/agent-detail-workspace"
 import type { Agent, AgentRun, AgentToolCall } from "../lib/api/agents"
 import { normalizeInteractionConfigForAppType } from "../lib/interaction-config"
+
+const agentsPageSource = readFileSync(
+  join(import.meta.dir, "../components/agents/agents-page.tsx"),
+  "utf8"
+)
 
 describe("Agent conversation async guards", () => {
   test("does not restore an aborted question after switching conversations", async () => {
@@ -74,6 +81,35 @@ describe("Agent list loading state", () => {
     expect(isAgentListLoading(null, true, false)).toBe(false)
     expect(isAgentListLoading("workspace-1", false, true)).toBe(true)
     expect(isAgentListLoading("workspace-1", false, false)).toBe(false)
+  })
+})
+
+describe("Application cards", () => {
+  test("show the actual workflow publication state", () => {
+    expect(agentsPageSource).toContain(
+      't(agent.published ? "已发布" : "未发布")'
+    )
+    expect(agentsPageSource).not.toContain('t("即将推出")')
+  })
+})
+
+describe("Agent deletion", () => {
+  test("uses an in-app confirmation dialog before issuing the delete", () => {
+    const deleteHandler = agentsPageSource.slice(
+      agentsPageSource.indexOf("async function handleDeleteAgent"),
+      agentsPageSource.indexOf("function closeAgentPermissions")
+    )
+    const deleteDialog = agentsPageSource.slice(
+      agentsPageSource.indexOf("function renderDeleteAgentDialog"),
+      agentsPageSource.indexOf("function renderTypeChooserDialog")
+    )
+
+    expect(deleteHandler).not.toContain("window.confirm")
+    expect(deleteDialog).toContain("<Dialog")
+    expect(deleteDialog).toContain("onClick={() => void handleDeleteAgent()}")
+    expect(agentsPageSource).toContain(
+      "onSelect={() => setDeleteAgentTarget(agent)}"
+    )
   })
 })
 
@@ -161,7 +197,7 @@ describe("Agent form state", () => {
         agent.interaction_config,
         "workflow"
       ).file_upload_setting.file_upload_type
-    ).toEqual(["document", "image", "audio"])
+    ).toEqual(["document", "image"])
   })
   test("publishes drafts, republishes changed releases, and unpublishes current releases", () => {
     expect(agentPublicationAction(agent)).toBe("publish")
@@ -225,7 +261,7 @@ describe("Agent form state", () => {
     expect(editMarkup).toContain("MCP 工具")
   })
 
-  test("does not expose workflow upload quantity or size limits", () => {
+  test("moves workflow upload types behind settings without limits or audio", () => {
     const markup = renderToStaticMarkup(
       createElement(InteractionConfigFields, {
         appType: "workflow",
@@ -238,8 +274,9 @@ describe("Agent form state", () => {
 
     expect(markup).not.toContain("最多文件数")
     expect(markup).not.toContain("单文件上限")
-    expect(markup).toContain("文档")
-    expect(markup).toContain("音频")
+    expect(markup).toContain('title="文件上传设置"')
+    expect(markup).not.toContain('type="checkbox"')
+    expect(markup).not.toContain("音频")
   })
 })
 

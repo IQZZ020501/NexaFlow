@@ -328,8 +328,9 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
     form.instructions.trim() !== agent.instructions ||
     form.knowledgeQueryMode !== agent.knowledge_query_mode ||
     form.status !== agent.status ||
-    !sameValues(form.knowledgeBaseIds, agent.knowledge_base_ids) ||
-    !sameValues(formTools, agentTools)
+    (form.appType === "agent" &&
+      (!sameValues(form.knowledgeBaseIds, agent.knowledge_base_ids) ||
+        !sameValues(formTools, agentTools)))
   )
 }
 
@@ -376,6 +377,10 @@ export function AgentsPage({
   const [isChooserOpen, setIsChooserOpen] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
   const [isPublishing, setIsPublishing] = React.useState(false)
+  const [deleteAgentTarget, setDeleteAgentTarget] = React.useState<Agent | null>(
+    null
+  )
+  const [isDeletingAgent, setIsDeletingAgent] = React.useState(false)
   const [isAsking, setIsAsking] = React.useState(false)
   const [agentSearch, setAgentSearch] = React.useState("")
   const [agentsHasMore, setAgentsHasMore] = React.useState(true)
@@ -898,21 +903,7 @@ export function AgentsPage({
         form.interactionConfig,
         form.appType
       )
-      const mcpTools =
-        form.appType === "workflow"
-          ? form.mcpTools.filter((reference) =>
-              mcpServers.some(
-                (server) =>
-                  server.id === reference.server_id &&
-                  server.status === "active" &&
-                  server.tools.some(
-                    (tool) =>
-                      tool.name === reference.tool_name &&
-                      tool.policy_mode === "read_only"
-                  )
-              )
-            )
-          : form.mcpTools
+      const mcpTools = form.appType === "workflow" ? [] : form.mcpTools
       const payload = {
         name: form.name.trim(),
         app_type: form.appType,
@@ -921,7 +912,8 @@ export function AgentsPage({
         model_id: form.modelId,
         instructions: form.instructions,
         knowledge_query_mode: form.knowledgeQueryMode,
-        knowledge_base_ids: form.knowledgeBaseIds,
+        knowledge_base_ids:
+          form.appType === "workflow" ? [] : form.knowledgeBaseIds,
         mcp_tools: mcpTools,
         status: form.status,
       }
@@ -1022,24 +1014,15 @@ export function AgentsPage({
     router.replace(path)
   }
 
-  async function handleDeleteAgent(agent: Agent) {
-    if (
-      !token ||
-      !selectedWorkspaceId ||
-      !window.confirm(
-        t(
-          agent.app_type === "workflow"
-            ? "确定删除工作流“{name}”吗？"
-            : "确定删除 Agent“{name}”吗？",
-          { name: agent.name }
-        )
-      )
-    ) {
-      return
-    }
+  async function handleDeleteAgent() {
+    if (!token || !selectedWorkspaceId || !deleteAgentTarget) return
+
+    const agent = deleteAgentTarget
+    setIsDeletingAgent(true)
     try {
       await deleteAgent(token, selectedWorkspaceId, agent.id)
       setAgents((current) => current.filter((item) => item.id !== agent.id))
+      setDeleteAgentTarget(null)
       if (selectedAgentId === agent.id) router.push("/app/apps")
       notify(
         "success",
@@ -1047,6 +1030,8 @@ export function AgentsPage({
       )
     } catch (error) {
       reportError(error)
+    } finally {
+      setIsDeletingAgent(false)
     }
   }
 
@@ -1399,7 +1384,7 @@ export function AgentsPage({
                   )
                 : router.push("/app/apps")
             }
-            onDelete={() => void handleDeleteAgent(selectedAgent)}
+            onDelete={() => setDeleteAgentTarget(selectedAgent)}
             onManagePermissions={() =>
               void handleOpenAgentPermissions(selectedAgent)
             }
@@ -1433,7 +1418,7 @@ export function AgentsPage({
               router.push("/app/apps")
             }
           }}
-          onDelete={() => void handleDeleteAgent(selectedAgent)}
+          onDelete={() => setDeleteAgentTarget(selectedAgent)}
           onManagePermissions={() =>
             void handleOpenAgentPermissions(selectedAgent)
           }
@@ -1465,6 +1450,7 @@ export function AgentsPage({
           onGrant={handleGrantAgentPermission}
           onRevoke={handleRevokeAgentPermission}
         />
+        {renderDeleteAgentDialog()}
       </>
     )
   }
@@ -1567,7 +1553,9 @@ export function AgentsPage({
                           : t("Agent")}
                       </Badge>
                       {agent.app_type === "workflow" ? (
-                        <Badge variant="secondary">{t("即将推出")}</Badge>
+                        <Badge variant="secondary">
+                          {t(agent.published ? "已发布" : "未发布")}
+                        </Badge>
                       ) : null}
                       <StatusBadge status={agent.status} />
                       <PermissionBadge
@@ -1612,7 +1600,7 @@ export function AgentsPage({
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       variant="destructive"
-                      onSelect={() => void handleDeleteAgent(agent)}
+                      onSelect={() => setDeleteAgentTarget(agent)}
                     >
                       <Trash2Icon />
                       {t("删除")}
@@ -1652,8 +1640,62 @@ export function AgentsPage({
         onGrant={handleGrantAgentPermission}
         onRevoke={handleRevokeAgentPermission}
       />
+      {renderDeleteAgentDialog()}
     </>
   )
+
+  function renderDeleteAgentDialog() {
+    if (!deleteAgentTarget) return null
+
+    const isWorkflow = deleteAgentTarget.app_type === "workflow"
+    return (
+      <Dialog
+        open
+        onOpenChange={(open) => {
+          if (!open && !isDeletingAgent) setDeleteAgentTarget(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {t(isWorkflow ? "删除工作流" : "删除 Agent")}
+            </DialogTitle>
+            <DialogDescription>
+              {t(
+                isWorkflow
+                  ? "确定删除工作流“{name}”吗？"
+                  : "确定删除 Agent“{name}”吗？",
+                { name: deleteAgentTarget.name }
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isDeletingAgent}
+              onClick={() => setDeleteAgentTarget(null)}
+            >
+              {t("取消")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isDeletingAgent}
+              onClick={() => void handleDeleteAgent()}
+            >
+              {isDeletingAgent ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <Trash2Icon />
+              )}
+              {t("删除")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
 
   function renderTypeChooserDialog() {
     return (

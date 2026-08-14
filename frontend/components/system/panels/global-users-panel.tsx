@@ -314,7 +314,11 @@ export function GlobalUsersPanel({
                                 <MoreHorizontalIcon />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
+                            <DropdownMenuContent
+                              side="bottom"
+                              align="start"
+                              className="min-w-40"
+                            >
                               <DropdownMenuItem
                                 disabled={user.id === me.user.id}
                                 onSelect={() => void handleToggleUser(user)}

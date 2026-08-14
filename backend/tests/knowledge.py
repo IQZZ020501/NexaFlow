@@ -413,7 +413,8 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
     original_query_vectors = knowledge_application.query_vectors
 
     def fake_query_vectors(*_args) -> list[VectorHit]:
-        assert _args[-1] == 5
+        assert _args[-2] == 5
+        assert _args[-1] is None
         return [
             VectorHit(chunk_id="stale-chunk", distance=0.0),
             VectorHit(chunk_id=indexed_chunk_id, distance=0.1),
@@ -519,7 +520,7 @@ def assert_vector_store_mmr_and_metadata() -> None:
             object(),
             "exact term",
             3,
-        ) == [VectorHit(chunk_id=chunk_id, distance=None)]
+        ) == [VectorHit(chunk_id=chunk_id, distance=0.0)]
 
         try:
             knowledge_vector_store._ensure_collection(client, collection_name, 3)
@@ -603,7 +604,8 @@ async def assert_query_aggregates_hybrid_hits(
     }
 
     def fake_query_vectors(*args) -> list[VectorHit]:
-        assert args[-2:] == ("exact term", 10)
+        assert args[-3:-1] == ("exact term", 10)
+        assert args[-1] is None
         return [
             VectorHit(chunk_id=product_chunk_id, distance=0.05),
             VectorHit(chunk_id="stale-chunk", distance=0.1),
@@ -809,7 +811,8 @@ async def assert_hierarchical_retrieval(
         candidates = [first_children[0], first_children[1], second_children[0]]
 
         def fake_query_vectors(*args) -> list[VectorHit]:
-            assert args[-2:] == ("hierarchical query", 10)
+            assert args[-3:-1] == ("hierarchical query", 10)
+            assert args[-1] is None
             return [
                 VectorHit(chunk_id=chunk.id, distance=index / 10)
                 for index, chunk in enumerate(candidates, start=1)
