@@ -82,6 +82,9 @@ Correctness, safety, evidence, and validation take priority over speed.
   use the same `QDRANT_URL`. Deletion cleanup intent is persisted in
   `knowledge_storage_cleanups`; Celery Beat redispatches due records, so do not
   replace it with best-effort post-commit cleanup.
+- `backend/make dev` automatically follows logs from a running Compose worker
+  into the API terminal and stops that follower when Uvicorn exits; it does not
+  start or replace the worker.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
   intent is persisted in `workflow_upload_storage_cleanups` and recovered by
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.

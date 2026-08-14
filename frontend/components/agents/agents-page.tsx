@@ -1470,7 +1470,6 @@ export function AgentsPage({
 
   return (
     <>
-      {isAgentListBusy ? <TopLoadingBar progress={35} /> : null}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{t("应用")}</h1>
@@ -1487,6 +1486,7 @@ export function AgentsPage({
           {t("新建应用")}
         </Button>
       </div>
+      {isAgentListBusy ? <TopLoadingBar progress={35} /> : null}
 
       <div className="rounded-lg border bg-background p-3 shadow-sm">
         <div className="relative min-w-0 sm:w-[320px]">

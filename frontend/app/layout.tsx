@@ -6,6 +6,10 @@ import "./globals.css"
 export const metadata: Metadata = {
   title: "NexaFlow",
   description: "编排业务流程、知识库和模型能力，构建可运行的 AI 应用。",
+  icons: {
+    icon: "/NexaFlow-logo.png",
+    apple: "/NexaFlow-logo.png",
+  },
 }
 
 export const viewport: Viewport = {
