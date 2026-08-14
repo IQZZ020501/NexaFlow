@@ -2114,6 +2114,7 @@ def _llm_scope(**overrides) -> SimpleNamespace:
         node_order={"llm-1": 0},
         node_histories={},
         ledger=_FakeLlmLedger(),
+        output_delta=None,
     )
     for key, value in overrides.items():
         setattr(scope, key, value)
@@ -2384,6 +2385,55 @@ def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
     asyncio.run(run())
 
 
+def test_workflow_llm_result_streams_markdown_deltas() -> None:
+    from unittest.mock import patch
+
+    from app.application.workflow_nodes import execute_workflow_node
+    from langchain_core.messages import AIMessageChunk
+
+    class StreamingModel(_FakeLlmModel):
+        async def astream(self, messages, **kwargs):
+            self.calls.append((list(messages), dict(kwargs)))
+            yield AIMessageChunk(content="# 标题")
+            yield AIMessageChunk(content="\n\n正文")
+
+    async def run() -> None:
+        deltas: list[tuple[str, str]] = []
+
+        async def emit(node_id: str, delta: str) -> None:
+            deltas.append((node_id, delta))
+
+        model = StreamingModel([_FakeLlmMessage("fallback")])
+        with patch(
+            "app.application.workflow_nodes.build_chat_model",
+            return_value=model,
+        ):
+            result = await execute_workflow_node(
+                _llm_scope(output_delta=emit),
+                _llm_node({"prompt": "用 Markdown 回答"}),
+                _llm_context(),
+            )
+
+        assert deltas == [("llm-1", "# 标题"), ("llm-1", "\n\n正文")]
+        assert result.outputs == {"text": "# 标题\n\n正文"}
+
+        hidden = StreamingModel([_FakeLlmMessage("内部结果")])
+        with patch(
+            "app.application.workflow_nodes.build_chat_model",
+            return_value=hidden,
+        ):
+            await execute_workflow_node(
+                _llm_scope(output_delta=emit),
+                _llm_node(
+                    {"prompt": "优化问题", "is_result": False}
+                ),
+                _llm_context(),
+            )
+        assert deltas == [("llm-1", "# 标题"), ("llm-1", "\n\n正文")]
+
+    asyncio.run(run())
+
+
 def main() -> None:
     test_default_workflow_only_contains_start()
     test_workflow_interaction_config_rejects_audio_uploads()
@@ -2403,6 +2453,7 @@ def main() -> None:
     test_workflow_reranker_form_and_document_nodes()
     test_workflow_llm_node_dialogue_history_and_params()
     test_workflow_llm_node_reasoning_and_mcp_tool_loop()
+    test_workflow_llm_result_streams_markdown_deltas()
     test_workflow_engine_propagates_worker_cancellation()
     test_upload_cleanup_tasks_are_registered()
     test_interaction_config_migration_upgrades_prerequisites()

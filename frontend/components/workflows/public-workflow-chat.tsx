@@ -15,6 +15,7 @@ import {
   WorkflowIcon,
 } from "lucide-react"
 
+import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -40,11 +41,10 @@ import {
   type PublicWorkflowProfile,
   type PublicWorkflowRunStreamEvent,
 } from "@/lib/api/public-workflows"
-import { getErrorMessage } from "@/lib/errors"
+import { compareLiveStreamIds } from "@/lib/api/agents"
 import { speakBrowserText, workflowSpeechText } from "@/lib/browser-tts"
-import {
-  acceptedUploadExtensions,
-} from "@/lib/interaction-config"
+import { getErrorMessage } from "@/lib/errors"
+import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import {
   workflowErrorMessage,
   workflowNodeLabel,
@@ -65,6 +65,28 @@ function updateRun(
 ) {
   return runs.map((run) => {
     if (run.id !== runId) return run
+    if (event.type === "answer_delta") {
+      const sameStream =
+        !event.stream_epoch || event.stream_epoch === run.live_stream_epoch
+      if (
+        sameStream &&
+        event.live_sequence &&
+        run.live_stream_cursor &&
+        compareLiveStreamIds(event.live_sequence, run.live_stream_cursor) <= 0
+      ) {
+        return run
+      }
+      const previous =
+        sameStream && typeof run.outputs.result === "string"
+          ? run.outputs.result
+          : ""
+      return {
+        ...run,
+        outputs: { ...run.outputs, result: previous + event.delta },
+        live_stream_epoch: event.stream_epoch ?? run.live_stream_epoch,
+        live_stream_cursor: event.live_sequence ?? run.live_stream_cursor,
+      }
+    }
     if (event.type === "progress") {
       const progress = [...run.progress]
       const index = progress.findIndex((item) => item.id === event.event.id)
@@ -77,14 +99,6 @@ function updateRun(
       progress: event.run.progress.length ? event.run.progress : run.progress,
     }
   })
-}
-
-function JsonBlock({ value }: { value: unknown }) {
-  return (
-    <pre className="max-h-72 overflow-auto rounded-md bg-muted/50 p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  )
 }
 
 function ConversationHistory({
@@ -175,6 +189,7 @@ export function PublicWorkflowChat({
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const streamRef = React.useRef<AbortController | null>(null)
+  const conversationScrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => () => streamRef.current?.abort(), [])
 
@@ -211,6 +226,13 @@ export function PublicWorkflowChat({
       active = false
     }
   }, [conversationId, t, token, workflowId])
+
+  React.useLayoutEffect(() => {
+    if (conversationScrollRef.current) {
+      conversationScrollRef.current.scrollTop =
+        conversationScrollRef.current.scrollHeight
+    }
+  }, [runs, runsLoading])
 
   function selectConversation(nextId: string | null) {
     streamRef.current?.abort()
@@ -404,7 +426,10 @@ export function PublicWorkflowChat({
           </Button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          ref={conversationScrollRef}
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
           <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8 sm:px-8">
             {runsLoading ? (
               <p className="flex items-center justify-center py-12 text-sm text-muted-foreground">
@@ -481,14 +506,20 @@ export function PublicWorkflowChat({
                       submitting={submittingFormRunId === run.id}
                       onSubmit={(data) => handleFormSubmit(run, data)}
                     />
-                  ) : run.status === "succeeded" ? (
+                  ) : null}
+                  {typeof run.outputs.result === "string" ||
+                  run.status === "succeeded" ? (
                     <section>
                       <p className="mb-2 text-xs font-medium text-muted-foreground">
                         {t("运行结果")}
                       </p>
-                      <JsonBlock value={run.outputs} />
+                      <MarkdownContent
+                        content={workflowSpeechText(run.outputs)}
+                        className="text-sm leading-6"
+                      />
                     </section>
-                  ) : run.error ? (
+                  ) : null}
+                  {run.error ? (
                     <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
                       {workflowErrorMessage(run.error, t)}
                     </p>

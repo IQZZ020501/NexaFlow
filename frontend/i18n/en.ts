@@ -992,6 +992,7 @@ export const en = {
   "草稿修订 {revision}": "Draft revision {revision}",
   "暂无已发布版本": "No published versions",
   "运行结果": "Run results",
+  "执行详情": "Execution details",
   "节点执行记录": "Node execution log",
   "暂无节点执行记录": "No node execution records",
   "输出内容": "Output",

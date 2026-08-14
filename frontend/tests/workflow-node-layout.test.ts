@@ -18,6 +18,10 @@ const detailSource = readFileSync(
   join(import.meta.dir, "../components/workflows/workflow-detail-workspace.tsx"),
   "utf8"
 )
+const publicChatSource = readFileSync(
+  join(import.meta.dir, "../components/workflows/public-workflow-chat.tsx"),
+  "utf8"
+)
 const appConfigSource = readFileSync(
   join(import.meta.dir, "../components/agents/agent-config-fields.tsx"),
   "utf8"
@@ -39,6 +43,17 @@ test("workflow nodes default to expanded when the canvas mounts", () => {
   )
   expect(canvasSource).toContain("ensureConditionElseIfBranches(props.graph)")
   expect(canvasSource).toContain("skipInitialChangeRef.current = false")
+})
+
+test("workflow chats keep streamed output visible", () => {
+  expect(detailSource).toContain("ref={runScrollRef}")
+  expect(detailSource).toContain(
+    "runScrollRef.current.scrollTop = runScrollRef.current.scrollHeight"
+  )
+  expect(publicChatSource).toContain("ref={conversationScrollRef}")
+  expect(publicChatSource).toMatch(
+    /conversationScrollRef\.current\.scrollTop\s*=\s*conversationScrollRef\.current\.scrollHeight/
+  )
 })
 
 test("reply node is pinned and exposes both reply modes", () => {
@@ -228,12 +243,17 @@ test("workflow debugging uses an anchored canvas window", () => {
   expect(debugPanel).toMatch(/<aside\s+role="dialog"/)
   expect(debugPanel).toContain('"absolute z-40')
   expect(debugPanel).toContain('sm:w-96')
+  expect(debugPanel).toContain('sm:w-2/3 lg:w-1/3')
+  expect(debugPanel).not.toContain('? "inset-3"')
   expect(debugPanel).toContain("runExpanded")
   expect(debugPanel).toContain("<Maximize2Icon")
   expect(debugPanel).toContain("<Minimize2Icon")
   expect(debugPanel).toContain("<SendIcon")
   expect(debugPanel).toContain("form.interactionConfig.prologue")
-  expect(debugPanel).toContain("currentRun.outputs")
+  expect(debugPanel).toContain("currentRunOutput")
+  expect(debugPanel).toContain("handleCopyText(currentRunOutput)")
+  expect(debugPanel).toContain("handleCopyText(currentRunQuestion)")
+  expect(debugPanel).toContain("<CopyIcon")
   expect(debugPanel).toContain("bg-background/98")
   expect(debugPanel).toContain("focus-within:shadow-md")
   expect(debugPanel).toContain("form.interactionConfig.file_upload")
@@ -249,23 +269,26 @@ test("workflow debugging uses an anchored canvas window", () => {
   expect(debugPanel).not.toContain("bg-gradient-to-r")
   expect(debugPanel).not.toContain("border-dashed")
   expect(detailSource).not.toContain("<Dialog open={runOpen}")
-  expect(detailSource).not.toContain("runDetailsOpen")
+  expect(debugPanel).toContain("setRunDetailsOpen(true)")
+  expect(debugPanel).toContain('t("执行详情")')
 })
 
-test("workflow debug node rows expand to execution details", () => {
-  const executionLog = detailSource.slice(
-    detailSource.indexOf('{executions.map((execution) => ('),
-    detailSource.indexOf('{currentRun.status === "awaiting_input"')
+test("workflow reply opens node execution details in a floating dialog", () => {
+  const executionDialog = detailSource.slice(
+    detailSource.indexOf('<Dialog open={runDetailsOpen}'),
+    detailSource.indexOf('<Dialog open={historyOpen}')
   )
 
-  expect(executionLog).toContain("<details")
-  expect(executionLog).toContain("<summary")
-  expect(executionLog).toContain("group-open:rotate-180")
-  expect(executionLog).toContain("execution.outputs")
-  expect(executionLog).toContain("execution.inputs")
-  expect(executionLog).toContain("execution.model_usage")
-  expect(executionLog).toContain("execution.error")
-  expect(executionLog).toContain('t("暂无输出内容")')
+  expect(executionDialog).toContain("<DialogContent")
+  expect(executionDialog).toContain('t("执行详情")')
+  expect(executionDialog).toContain("<details")
+  expect(executionDialog).toContain("<summary")
+  expect(executionDialog).toContain("group-open:rotate-180")
+  expect(executionDialog).toContain("execution.outputs")
+  expect(executionDialog).toContain("execution.inputs")
+  expect(executionDialog).toContain("execution.model_usage")
+  expect(executionDialog).toContain("execution.error")
+  expect(executionDialog).toContain('t("暂无输出内容")')
 })
 
 test("LLM advanced parameters live behind the card settings button", () => {

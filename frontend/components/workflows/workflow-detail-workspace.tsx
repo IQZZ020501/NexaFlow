@@ -5,6 +5,7 @@ import dynamic from "next/dynamic"
 import {
   ArrowLeftIcon,
   ChevronDownIcon,
+  CopyIcon,
   HistoryIcon,
   LayoutDashboardIcon,
   LoaderCircleIcon,
@@ -29,6 +30,7 @@ import {
 
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentAttachmentList } from "@/components/agents/agent-attachment-list"
+import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import {
   AgentConversationUsersPanel,
   AgentLogsPanel,
@@ -56,7 +58,7 @@ import { IconButton } from "@/components/ui/icon-button"
 import { WorkflowRuntimeForm } from "@/components/workflows/workflow-runtime-form"
 import type { TFunction } from "@/i18n"
 import type { AgentDetailView } from "@/lib/agent-views"
-import type { Agent } from "@/lib/api/agents"
+import { compareLiveStreamIds, type Agent } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
@@ -79,6 +81,8 @@ import {
   type WorkflowRunStreamEvent,
   type WorkflowVersion,
 } from "@/lib/api/workflows"
+import { workflowSpeechText } from "@/lib/browser-tts"
+import { copyText } from "@/lib/clipboard"
 import { getErrorMessage } from "@/lib/errors"
 import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import {
@@ -182,6 +186,7 @@ export function WorkflowDetailWorkspace({
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [runOpen, setRunOpen] = React.useState(false)
+  const [runDetailsOpen, setRunDetailsOpen] = React.useState(false)
   const [runExpanded, setRunExpanded] = React.useState(false)
   const [paletteOpen, setPaletteOpen] = React.useState(false)
   const [canvasGeneration, setCanvasGeneration] = React.useState(0)
@@ -193,6 +198,7 @@ export function WorkflowDetailWorkspace({
   )
   const runAbortRef = React.useRef<AbortController | null>(null)
   const runFileInputRef = React.useRef<HTMLInputElement>(null)
+  const runScrollRef = React.useRef<HTMLDivElement>(null)
 
   const isDirty = Boolean(
     definition &&
@@ -213,6 +219,19 @@ export function WorkflowDetailWorkspace({
     typeof currentRun?.inputs.question === "string"
       ? currentRun.inputs.question
       : ""
+  const currentRunOutput =
+    typeof currentRun?.outputs.result === "string"
+      ? currentRun.outputs.result
+      : currentRun?.status === "succeeded"
+        ? workflowSpeechText(currentRun.outputs)
+        : ""
+
+  React.useLayoutEffect(() => {
+    if (runScrollRef.current) {
+      runScrollRef.current.scrollTop = runScrollRef.current.scrollHeight
+    }
+  }, [currentRunOutput, currentRun?.status, runOpen])
+
   const isRunActive = Boolean(
     currentRun && !TERMINAL_STATUSES.has(currentRun.status)
   )
@@ -300,6 +319,38 @@ export function WorkflowDetailWorkspace({
 
   const applyRunEvent = React.useCallback(
     (event: WorkflowRunStreamEvent) => {
+      if (event.type === "answer_delta") {
+        setCurrentRun((current) => {
+          if (!current) return current
+          const sameStream =
+            !event.stream_epoch ||
+            event.stream_epoch === current.live_stream_epoch
+          if (
+            sameStream &&
+            event.live_sequence &&
+            current.live_stream_cursor &&
+            compareLiveStreamIds(
+              event.live_sequence,
+              current.live_stream_cursor
+            ) <= 0
+          ) {
+            return current
+          }
+          const previous =
+            sameStream && typeof current.outputs.result === "string"
+              ? current.outputs.result
+              : ""
+          return {
+            ...current,
+            outputs: { ...current.outputs, result: previous + event.delta },
+            live_stream_epoch:
+              event.stream_epoch ?? current.live_stream_epoch,
+            live_stream_cursor:
+              event.live_sequence ?? current.live_stream_cursor,
+          }
+        })
+        return
+      }
       if ("run" in event) {
         setCurrentRun(event.run)
         if (event.type !== "run")
@@ -476,6 +527,7 @@ export function WorkflowDetailWorkspace({
       )
       setCurrentRun(run)
       setExecutions([])
+      setRunDetailsOpen(false)
       setRuntimeStatuses({})
       setRunQuestion("")
       setRunFiles([])
@@ -516,6 +568,15 @@ export function WorkflowDetailWorkspace({
     }
   }
 
+  async function handleCopyText(value: string) {
+    try {
+      await copyText(value)
+      notify("success", t("已复制"))
+    } catch {
+      notify("error", t("复制失败"))
+    }
+  }
+
   function openRunDialog(
     versionNumber: number | null = agent.can_edit
       ? null
@@ -532,6 +593,7 @@ export function WorkflowDetailWorkspace({
     setRunQuestion("")
     setRunFiles([])
     setRunQuestionInvalid(false)
+    setRunDetailsOpen(false)
     setRunExpanded(false)
     setRunOpen(true)
   }
@@ -821,7 +883,7 @@ export function WorkflowDetailWorkspace({
                   className={cn(
                     "absolute z-40 flex min-h-0 overflow-hidden rounded-2xl border border-border/80 bg-background/98 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.55)] backdrop-blur-xl transition-[inset,width] duration-200",
                     runExpanded
-                      ? "inset-3"
+                      ? "inset-2 sm:inset-y-3 sm:right-3 sm:left-auto sm:w-2/3 lg:w-1/3 lg:min-w-96"
                       : "inset-2 sm:inset-y-4 sm:right-4 sm:left-auto sm:w-96"
                   )}
                 >
@@ -861,7 +923,10 @@ export function WorkflowDetailWorkspace({
                       </IconButton>
                     </header>
 
-                    <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-muted/10 px-4 py-5">
+                    <div
+                      ref={runScrollRef}
+                      className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-muted/10 px-4 py-5"
+                    >
                       {form.interactionConfig.prologue ? (
                         <div className="flex items-start gap-2.5">
                           <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background shadow-xs">
@@ -889,9 +954,24 @@ export function WorkflowDetailWorkspace({
                       {currentRun ? (
                         <div className="grid gap-4">
                           {currentRunQuestion ? (
-                            <p className="ml-auto max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-3.5 py-2.5 text-sm leading-6 text-background shadow-sm">
-                              {currentRunQuestion}
-                            </p>
+                            <div className="ml-auto grid max-w-[85%] justify-items-end gap-1">
+                              <p className="rounded-2xl rounded-tr-md bg-foreground px-3.5 py-2.5 text-sm leading-6 text-background shadow-sm">
+                                {currentRunQuestion}
+                              </p>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                className="text-muted-foreground"
+                                aria-label={t("复制")}
+                                title={t("复制")}
+                                onClick={() =>
+                                  void handleCopyText(currentRunQuestion)
+                                }
+                              >
+                                <CopyIcon />
+                              </Button>
+                            </div>
                           ) : null}
                           <div className="flex items-start gap-2.5">
                             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background shadow-xs">
@@ -915,102 +995,6 @@ export function WorkflowDetailWorkspace({
                                 </span>
                               </div>
 
-                              {executions.length ? (
-                                <section className="grid gap-2">
-                                  <h3 className="text-xs font-medium text-muted-foreground">
-                                    {t("节点执行记录")}
-                                  </h3>
-                                  <div className="overflow-hidden rounded-lg border bg-muted/10">
-                                    {executions.map((execution) => (
-                                      <details
-                                        key={execution.id}
-                                        className="group border-b last:border-b-0"
-                                      >
-                                        <summary
-                                          className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
-                                        >
-                                          <span
-                                            className={cn(
-                                              "size-2 shrink-0 rounded-full",
-                                              execution.status === "succeeded"
-                                                ? "bg-emerald-500"
-                                                : execution.status === "failed"
-                                                  ? "bg-destructive"
-                                                  : execution.status === "running"
-                                                    ? "animate-pulse bg-sky-500"
-                                                    : "bg-muted-foreground/40"
-                                            )}
-                                          />
-                                          <span
-                                            className="min-w-0 flex-1 truncate text-xs"
-                                            title={execution.node_id}
-                                          >
-                                            {workflowExecutionNodeLabel(
-                                              execution.node_id,
-                                              execution.node_type,
-                                              executionGraph,
-                                              t
-                                            )}
-                                          </span>
-                                          {execution.duration_ms !== null ? (
-                                            <span className="shrink-0 text-[11px] text-muted-foreground">
-                                              {t("{duration} 毫秒", {
-                                                duration: execution.duration_ms,
-                                              })}
-                                            </span>
-                                          ) : null}
-                                          <ChevronDownIcon
-                                            aria-hidden="true"
-                                            className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
-                                          />
-                                        </summary>
-                                        <div className="grid gap-3 border-t bg-muted/20 px-3 py-3">
-                                          {execution.error ? (
-                                            <section className="grid gap-1.5">
-                                              <h4 className="text-[11px] font-medium text-destructive">
-                                                {t("错误")}
-                                              </h4>
-                                              <p className="break-words rounded-md bg-destructive/10 px-2.5 py-2 text-xs leading-5 text-destructive whitespace-pre-wrap [overflow-wrap:anywhere]">
-                                                {workflowErrorMessage(
-                                                  execution.error,
-                                                  t
-                                                )}
-                                              </p>
-                                            </section>
-                                          ) : null}
-                                          <section className="grid gap-1.5">
-                                            <h4 className="text-[11px] font-medium text-muted-foreground">
-                                              {t("输出内容")}
-                                            </h4>
-                                            {Object.keys(execution.outputs).length ? (
-                                              <JsonBlock value={execution.outputs} />
-                                            ) : (
-                                              <p className="rounded-md border bg-background px-2.5 py-2 text-xs text-muted-foreground">
-                                                {t("暂无输出内容")}
-                                              </p>
-                                            )}
-                                          </section>
-                                          <section className="grid gap-1.5">
-                                            <h4 className="text-[11px] font-medium text-muted-foreground">
-                                              {t("输入内容")}
-                                            </h4>
-                                            <JsonBlock value={execution.inputs} />
-                                          </section>
-                                          {Object.keys(execution.model_usage).length ? (
-                                            <section className="grid gap-1.5">
-                                              <h4 className="text-[11px] font-medium text-muted-foreground">
-                                                {t("模型用量")}
-                                              </h4>
-                                              <JsonBlock value={execution.model_usage} />
-                                            </section>
-                                          ) : null}
-                                        </div>
-                                      </details>
-                                    ))}
-                                  </div>
-                                </section>
-                              ) : null}
-
                               {currentRun.status === "awaiting_input" &&
                               currentRun.pending_form ? (
                                 <WorkflowRuntimeForm
@@ -1019,23 +1003,61 @@ export function WorkflowDetailWorkspace({
                                   submitting={isSubmittingForm}
                                   onSubmit={handleFormSubmit}
                                 />
-                              ) : currentRun.last_error ? (
-                                <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-                                  {workflowErrorMessage(currentRun.last_error, t)}
-                                </p>
-                              ) : currentRun.status === "succeeded" ? (
+                              ) : null}
+
+                              {currentRunOutput ? (
                                 <section className="grid gap-2">
                                   <h3 className="text-xs font-medium text-muted-foreground">
                                     {t("运行结果")}
                                   </h3>
-                                  <JsonBlock value={currentRun.outputs} />
+                                  <MarkdownContent
+                                    content={currentRunOutput}
+                                    className="text-sm leading-6"
+                                  />
                                 </section>
-                              ) : (
+                              ) : null}
+
+                              {currentRun.last_error ? (
+                                <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                                  {workflowErrorMessage(currentRun.last_error, t)}
+                                </p>
+                              ) : currentRun.status !== "succeeded" &&
+                                currentRun.status !== "awaiting_input" ? (
                                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                                   <LoaderCircleIcon className="size-4 animate-spin" />
                                   {runStatusLabel(currentRun, t)}
                                 </p>
-                              )}
+                              ) : null}
+
+                              {currentRunOutput || executions.length ? (
+                                <div className="flex items-center justify-end gap-1 border-t pt-2">
+                                  {currentRunOutput ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon-xs"
+                                      className="text-muted-foreground"
+                                      aria-label={t("复制")}
+                                      title={t("复制")}
+                                      onClick={() =>
+                                        void handleCopyText(currentRunOutput)
+                                      }
+                                    >
+                                      <CopyIcon />
+                                    </Button>
+                                  ) : null}
+                                  {executions.length ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setRunDetailsOpen(true)}
+                                    >
+                                      {t("执行详情")}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              ) : null}
                             </article>
                           </div>
                         </div>
@@ -1204,6 +1226,100 @@ export function WorkflowDetailWorkspace({
           )}
         </div>
       </div>
+
+      <Dialog open={runDetailsOpen} onOpenChange={setRunDetailsOpen}>
+        <DialogContent className="max-h-[calc(100svh-2rem)] max-w-2xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0">
+          <DialogHeader className="border-b px-5 py-4">
+            <DialogTitle>{t("执行详情")}</DialogTitle>
+            <DialogDescription>{t("节点执行记录")}</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto p-5">
+            <div className="overflow-hidden rounded-lg border bg-muted/10">
+              {executions.map((execution) => (
+                <details
+                  key={execution.id}
+                  className="group border-b last:border-b-0"
+                >
+                  <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                    <span
+                      className={cn(
+                        "size-2 shrink-0 rounded-full",
+                        execution.status === "succeeded"
+                          ? "bg-emerald-500"
+                          : execution.status === "failed"
+                            ? "bg-destructive"
+                            : execution.status === "running"
+                              ? "animate-pulse bg-sky-500"
+                              : "bg-muted-foreground/40"
+                      )}
+                    />
+                    <span
+                      className="min-w-0 flex-1 truncate text-sm"
+                      title={execution.node_id}
+                    >
+                      {workflowExecutionNodeLabel(
+                        execution.node_id,
+                        execution.node_type,
+                        executionGraph,
+                        t
+                      )}
+                    </span>
+                    {execution.duration_ms !== null ? (
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {t("{duration} 毫秒", {
+                          duration: execution.duration_ms,
+                        })}
+                      </span>
+                    ) : null}
+                    <ChevronDownIcon
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                    />
+                  </summary>
+                  <div className="grid gap-3 border-t bg-muted/20 px-3 py-3">
+                    {execution.error ? (
+                      <section className="grid gap-1.5">
+                        <h4 className="text-xs font-medium text-destructive">
+                          {t("错误")}
+                        </h4>
+                        <p className="break-words rounded-md bg-destructive/10 px-2.5 py-2 text-xs leading-5 text-destructive whitespace-pre-wrap [overflow-wrap:anywhere]">
+                          {workflowErrorMessage(execution.error, t)}
+                        </p>
+                      </section>
+                    ) : null}
+                    <section className="grid gap-1.5">
+                      <h4 className="text-xs font-medium text-muted-foreground">
+                        {t("输出内容")}
+                      </h4>
+                      {Object.keys(execution.outputs).length ? (
+                        <JsonBlock value={execution.outputs} />
+                      ) : (
+                        <p className="rounded-md border bg-background px-2.5 py-2 text-xs text-muted-foreground">
+                          {t("暂无输出内容")}
+                        </p>
+                      )}
+                    </section>
+                    <section className="grid gap-1.5">
+                      <h4 className="text-xs font-medium text-muted-foreground">
+                        {t("输入内容")}
+                      </h4>
+                      <JsonBlock value={execution.inputs} />
+                    </section>
+                    {Object.keys(execution.model_usage).length ? (
+                      <section className="grid gap-1.5">
+                        <h4 className="text-xs font-medium text-muted-foreground">
+                          {t("模型用量")}
+                        </h4>
+                        <JsonBlock value={execution.model_usage} />
+                      </section>
+                    ) : null}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
         <DialogContent className="max-h-[calc(100svh-2rem)] max-w-2xl overflow-y-auto">

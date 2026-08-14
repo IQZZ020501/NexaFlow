@@ -350,10 +350,27 @@ async def stream_external_workflow_run(
     settings: Settings,
     *,
     after: int = 0,
+    live_after: str = "0-0",
 ) -> AsyncIterator[dict[str, Any]]:
-    async for event in stream_workflow_run(run_id, settings, after=after):
+    async for event in stream_workflow_run(
+        run_id,
+        settings,
+        after=after,
+        live_after=live_after,
+    ):
         event_type = event.get("type")
-        if event_type in {
+        if event_type == "answer_delta":
+            yield {
+                **{
+                    key: event[key]
+                    for key in ("live_sequence", "stream_epoch")
+                    if key in event
+                },
+                "type": "answer_delta",
+                "node_id": str(event.get("node_id") or ""),
+                "delta": str(event.get("delta") or ""),
+            }
+        elif event_type in {
             "run",
             "complete",
             "error",

@@ -183,11 +183,19 @@ async def stream_public_workflow_run(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_password_changed)],
     after: Annotated[int, Query(ge=0)] = 0,
+    live_after: Annotated[str, Query(pattern=r"^[0-9]+-[0-9]+$")] = "0-0",
 ) -> StreamingResponse:
     await get_workspace_published_workflow_context(db, workflow_id, user)
     await get_external_workflow_run(db, workflow_id, run_id, "public", user.id)
     await db.rollback()
-    return _stream_response(stream_external_workflow_run(run_id, settings, after=after))
+    return _stream_response(
+        stream_external_workflow_run(
+            run_id,
+            settings,
+            after=after,
+            live_after=live_after,
+        )
+    )
 
 
 @api_router.get("/documentation", response_model=WorkflowApiDocumentationResponse)
@@ -270,8 +278,16 @@ async def stream_api_workflow_run(
         HTTPAuthorizationCredentials | None, Depends(_api_key_scheme)
     ],
     after: Annotated[int, Query(ge=0)] = 0,
+    live_after: Annotated[str, Query(pattern=r"^[0-9]+-[0-9]+$")] = "0-0",
 ) -> StreamingResponse:
     _, credential = await _api_context(db, workflow_id, credentials)
     await get_external_workflow_run(db, workflow_id, run_id, "api", credential.id)
     await db.rollback()
-    return _stream_response(stream_external_workflow_run(run_id, settings, after=after))
+    return _stream_response(
+        stream_external_workflow_run(
+            run_id,
+            settings,
+            after=after,
+            live_after=live_after,
+        )
+    )

@@ -142,6 +142,8 @@ export type WorkflowRun = {
   created_at: string
   updated_at: string
   pending_form: WorkflowPendingForm | null
+  live_stream_epoch?: string
+  live_stream_cursor?: string
 }
 
 export type WorkflowNodeExecution = {
@@ -162,6 +164,13 @@ export type WorkflowNodeExecution = {
 
 export type WorkflowRunStreamEvent =
   | { type: "run"; sequence: number; run: WorkflowRun }
+  | {
+      type: "answer_delta"
+      live_sequence?: string
+      stream_epoch?: string
+      node_id: string
+      delta: string
+    }
   | {
       type: "workflow_node_started"
       sequence: number
@@ -374,12 +383,12 @@ export function observeWorkflowRun(
   after = 0
 ) {
   return observeNdjsonStream<WorkflowRunStreamEvent>(
-    (cursor, _liveCursor, streamSignal) =>
+    (cursor, liveCursor, streamSignal) =>
       fetch(
         apiUrl(
           workflowPath(
             workspaceId,
-            `/${workflowId}/runs/${runId}/stream?after=${cursor}`
+            `/${workflowId}/runs/${runId}/stream?after=${cursor}&live_after=${encodeURIComponent(liveCursor)}`
           )
         ),
         {

@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import json
 import math
@@ -7,7 +8,14 @@ from typing import Any
 
 from jinja2 import StrictUndefined, TemplateError
 from jinja2.sandbox import SandboxedEnvironment
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    message_chunk_to_message,
+)
 from langchain_core.tools import StructuredTool
 
 from app.application.agent_executor import DurableToolLedger
@@ -77,6 +85,7 @@ class WorkflowNodeScope:
         default_factory=dict
     )
     form_submissions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    output_delta: Callable[[str, str], Awaitable[None]] | None = None
 
 
 def _path_value(value: Any, path: str) -> Any:
@@ -256,17 +265,38 @@ def _message_reasoning(message: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+async def _invoke_model(
+    chat_model: Any,
+    messages: list[Any],
+    call_params: dict[str, Any],
+    on_delta: Callable[[str], Awaitable[None]] | None,
+) -> Any:
+    if on_delta is None:
+        return await chat_model.ainvoke(messages, **call_params)
+    aggregate: AIMessageChunk | None = None
+    async for chunk in chat_model.astream(messages, **call_params):
+        if not isinstance(chunk, AIMessageChunk):
+            raise ValueError("Workflow model returned an invalid stream message.")
+        if chunk.text:
+            await on_delta(chunk.text)
+        aggregate = chunk if aggregate is None else aggregate + chunk
+    return message_chunk_to_message(aggregate or AIMessageChunk(content=""))
+
+
 async def _invoke_chat(
     scope: WorkflowNodeScope,
     model: RegisteredModel,
     messages: list[Any],
     remaining_model_tokens: int,
     call_params: dict[str, Any] | None = None,
+    on_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str, dict[str, Any], str]:
     """One chat-model call returning content, usage, and reasoning content."""
     output_limit = _model_output_limit(model.provider_type, remaining_model_tokens)
     merged = {**output_limit, **(call_params or {})}
-    message = await build_chat_model(scope.settings, model).ainvoke(messages, **merged)
+    message = await _invoke_model(
+        build_chat_model(scope.settings, model), messages, merged, on_delta
+    )
     usage = usage_from_message(message)
     return model_completion(message).content, usage, _message_reasoning(message)
 
@@ -317,6 +347,7 @@ async def _model_tool_loop(
     remaining_model_tokens: int,
     call_params: dict[str, Any],
     tools: list[StructuredTool],
+    on_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str, dict[str, Any], str]:
     """Run the LLM with bound MCP tools until it answers or the call cap hits.
 
@@ -328,7 +359,7 @@ async def _model_tool_loop(
     tool_call_count = 0
     reasoning = ""
     for _ in range(MAX_WORKFLOW_LLM_TOOL_CALLS):
-        message = await bound.ainvoke(messages, **call_params)
+        message = await _invoke_model(bound, messages, call_params, on_delta)
         reasoning = _message_reasoning(message)
         total_usage = merge_usage(total_usage, usage_from_message(message))
         if int(total_usage.get("total_tokens") or 0) > remaining_model_tokens:
@@ -556,6 +587,11 @@ async def execute_workflow_node(
                 tools.append(
                     build_mcp_agent_tool(resolved[0], scope.settings, "read_only")
                 )
+        async def emit_output_delta(delta: str) -> None:
+            assert scope.output_delta is not None
+            await scope.output_delta(node.id, delta)
+
+        on_delta = emit_output_delta if parsed.is_result and scope.output_delta else None
         if tools:
             content, usage, reasoning = await _model_tool_loop(
                 scope,
@@ -565,6 +601,7 @@ async def execute_workflow_node(
                 context.remaining_model_tokens,
                 call_params,
                 tools,
+                on_delta,
             )
         else:
             content, usage, reasoning = await _invoke_chat(
@@ -573,6 +610,7 @@ async def execute_workflow_node(
                 messages,
                 context.remaining_model_tokens,
                 call_params,
+                on_delta,
             )
         outputs: dict[str, Any] = {"text": content}
         if parsed.model_setting.reasoning_content_enable and reasoning:

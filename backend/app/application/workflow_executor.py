@@ -19,6 +19,7 @@ from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import McpToolPolicy
 from app.entities.user import User
 from app.entities.workflows import WorkflowNodeExecution, WorkflowRunDetail
+from app.infrastructure.agent_live_stream import AgentLiveStreamPublisher
 from app.infrastructure.code_sandbox import WorkflowSandboxError
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import classify_error
@@ -256,6 +257,18 @@ async def _execute_claimed_workflow_run(
     workflow_globals, node_histories = await _workflow_context(run, graph)
     node_order = {node.id: index for index, node in enumerate(graph.nodes)}
     ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
+    live_stream = AgentLiveStreamPublisher(settings, run.id)
+
+    async def output_delta(node_id: str, delta: str) -> None:
+        await live_stream.publish(
+            {
+                "type": "answer_delta",
+                "node_id": node_id,
+                "delta": delta,
+                "stream_epoch": worker_task_id,
+            }
+        )
+
     node_scope = WorkflowNodeScope(
         run=run,
         actor=scope.actor,
@@ -267,6 +280,7 @@ async def _execute_claimed_workflow_run(
         ledger=ledger,
         node_order=node_order,
         node_histories=node_histories,
+        output_delta=output_delta,
     )
     engine = WorkflowEngine(
         graph,
@@ -475,6 +489,8 @@ async def _execute_claimed_workflow_run(
         if original is not None:
             raise exc from original
         raise
+    finally:
+        await live_stream.close()
     encoded_output = json.dumps(
         result.outputs,
         ensure_ascii=False,

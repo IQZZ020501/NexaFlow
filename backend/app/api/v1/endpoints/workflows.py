@@ -294,6 +294,7 @@ async def reconnect_run(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
     after: Annotated[int, Query(ge=0)] = 0,
+    live_after: Annotated[str, Query(pattern=r"^[0-9]+-[0-9]+$")] = "0-0",
 ) -> StreamingResponse:
     await get_workflow_run(
         db,
@@ -306,7 +307,12 @@ async def reconnect_run(
     await db.rollback()
 
     async def encode_events() -> AsyncIterator[bytes]:
-        async for event in stream_workflow_run(run_id, settings, after=after):
+        async for event in stream_workflow_run(
+            run_id,
+            settings,
+            after=after,
+            live_after=live_after,
+        ):
             yield (json.dumps(event, ensure_ascii=False) + "\n").encode()
 
     return StreamingResponse(

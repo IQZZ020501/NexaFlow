@@ -50,9 +50,18 @@ export type ExternalWorkflowRun = {
   finished_at: string | null
   updated_at: string
   pending_form: WorkflowPendingForm | null
+  live_stream_epoch?: string
+  live_stream_cursor?: string
 }
 
 export type PublicWorkflowRunStreamEvent =
+  | {
+      type: "answer_delta"
+      live_sequence?: string
+      stream_epoch?: string
+      node_id: string
+      delta: string
+    }
   | {
       type: "run" | "complete" | "error" | "workflow_input_required"
       sequence: number
@@ -158,12 +167,20 @@ export function observePublicWorkflowRun(
   signal?: AbortSignal
 ) {
   return observeNdjsonStream<PublicWorkflowRunStreamEvent>(
-    (cursor, _liveCursor, streamSignal) =>
-      fetch(apiUrl(path(workflowId, `/runs/${runId}/stream?after=${cursor}`)), {
-        credentials: "include",
-        headers: { Authorization: `Bearer ${token}` },
-        signal: streamSignal,
-      }),
+    (cursor, liveCursor, streamSignal) =>
+      fetch(
+        apiUrl(
+          path(
+            workflowId,
+            `/runs/${runId}/stream?after=${cursor}&live_after=${encodeURIComponent(liveCursor)}`
+          )
+        ),
+        {
+          credentials: "include",
+          headers: { Authorization: `Bearer ${token}` },
+          signal: streamSignal,
+        }
+      ),
     onEvent,
     { signal, errorLabel: "Public Workflow stream" }
   )

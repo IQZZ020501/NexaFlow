@@ -11,6 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.entities.agents import AgentRun
 from app.entities.user import User
 from app.entities.workflows import WorkflowRunDetail, WorkflowVersion
+from app.infrastructure.agent_live_stream import (
+    LIVE_EVENT_TYPES,
+    AgentLiveStreamReader,
+)
 from app.infrastructure.config import Settings
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import agent as agent_repository
@@ -478,50 +482,92 @@ async def stream_workflow_run(
     settings: Settings,
     *,
     after: int = 0,
+    live_after: str = "0-0",
 ) -> AsyncIterator[dict[str, Any]]:
     cursor = after
+    live_cursor = live_after
+    stopping_statuses = {"succeeded", "failed", "cancelled", "awaiting_input"}
+    reader = AgentLiveStreamReader(settings, run_id)
+    loop = asyncio.get_running_loop()
+    next_database_poll = 0.0
     snapshot_sent = False
-    terminal = {"succeeded", "failed", "cancelled"}
-    suspended = {"awaiting_input"}
-    while True:
-        async with get_session_factory()() as db:
-            run = await agent_repository.get_agent_run_by_id(db, run_id)
-            detail = await workflow_repository.get_run_detail(db, run_id)
-            rows = await agent_repository.list_agent_run_events(
-                db, run_id, after=cursor, limit=WORKFLOW_EVENT_PAGE_SIZE
+    try:
+        while True:
+            terminal_event: dict[str, Any] | None = None
+            rows: list[Any] = []
+            if loop.time() >= next_database_poll:
+                async with get_session_factory()() as db:
+                    run = await agent_repository.get_agent_run_by_id(db, run_id)
+                    detail = await workflow_repository.get_run_detail(db, run_id)
+                    rows = await agent_repository.list_agent_run_events(
+                        db,
+                        run_id,
+                        after=cursor,
+                        limit=WORKFLOW_EVENT_PAGE_SIZE,
+                    )
+                if run is None or detail is None:
+                    return
+                if not snapshot_sent:
+                    yield {
+                        "type": "run",
+                        "sequence": cursor,
+                        "run": workflow_run_to_response(run, detail).model_dump(
+                            mode="json"
+                        ),
+                    }
+                    snapshot_sent = True
+                next_database_poll = loop.time() + settings.agent_event_poll_seconds
+                for row in rows:
+                    assert row.id is not None
+                    cursor = row.id
+                    event = {**row.event, "sequence": cursor}
+                    if event.get("type") in {
+                        "complete",
+                        "error",
+                        "workflow_input_required",
+                    }:
+                        terminal_event = event
+                    else:
+                        yield event
+                if (
+                    run.status in stopping_statuses
+                    and len(rows) == WORKFLOW_EVENT_PAGE_SIZE
+                    and terminal_event is None
+                ):
+                    next_database_poll = 0.0
+                    continue
+                if run.status in stopping_statuses:
+                    while reader.available:
+                        live_events = await reader.read(live_cursor, 1)
+                        if not live_events:
+                            break
+                        for live_sequence, event in live_events:
+                            live_cursor = live_sequence
+                            if event.get("type") in LIVE_EVENT_TYPES:
+                                yield {**event, "live_sequence": live_cursor}
+                    yield terminal_event or {
+                        "type": (
+                            "workflow_input_required"
+                            if run.status == "awaiting_input"
+                            else "complete" if run.status == "succeeded" else "error"
+                        ),
+                        "sequence": cursor,
+                        "run": workflow_run_to_response(run, detail).model_dump(
+                            mode="json"
+                        ),
+                    }
+                    return
+
+            wait_seconds = max(0.001, next_database_poll - loop.time())
+            live_events = await reader.read(
+                live_cursor,
+                max(1, min(500, round(wait_seconds * 1000))),
             )
-        if run is None or detail is None:
-            return
-        if not snapshot_sent:
-            yield {
-                "type": "run",
-                "sequence": cursor,
-                "run": workflow_run_to_response(run, detail).model_dump(mode="json"),
-            }
-            snapshot_sent = True
-        terminal_event = None
-        for row in rows:
-            assert row.id is not None
-            cursor = row.id
-            event = {**row.event, "sequence": cursor}
-            if event.get("type") in {"complete", "error", "workflow_input_required"}:
-                terminal_event = event
-            else:
-                yield event
-        if run.status in terminal and len(rows) == WORKFLOW_EVENT_PAGE_SIZE:
-            continue
-        if run.status in terminal:
-            yield terminal_event or {
-                "type": "complete" if run.status == "succeeded" else "error",
-                "sequence": cursor,
-                "run": workflow_run_to_response(run, detail).model_dump(mode="json"),
-            }
-            return
-        if run.status in suspended:
-            yield terminal_event or {
-                "type": "workflow_input_required",
-                "sequence": cursor,
-                "run": workflow_run_to_response(run, detail).model_dump(mode="json"),
-            }
-            return
-        await asyncio.sleep(settings.agent_event_poll_seconds)
+            for live_sequence, event in live_events:
+                live_cursor = live_sequence
+                if event.get("type") in LIVE_EVENT_TYPES:
+                    yield {**event, "live_sequence": live_cursor}
+            if not reader.available and not live_events:
+                await asyncio.sleep(wait_seconds)
+    finally:
+        await reader.close()
