@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="frontend/public/NexaFlow-log.png" width="480" alt="NexaFlow logo" />
+  <img src="frontend/public/NexaFlow-logo.png" width="96" alt="NexaFlow logo" />
   <h1>NexaFlow</h1>
   <p>面向团队的 AI 应用编排平台，将知识库、模型、Agent、工作流与 MCP 工具统一在工作空间中。</p>
 
