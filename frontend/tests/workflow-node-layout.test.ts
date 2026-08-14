@@ -234,6 +234,21 @@ test("React Flow selection changes use a stable state callback", () => {
   )
 })
 
+test("node form updates reach React Flow before controlled input restoration", () => {
+  const updateNode = canvasSource.slice(
+    canvasSource.indexOf("const updateNode = React.useCallback"),
+    canvasSource.indexOf("const copyNode = React.useCallback")
+  )
+
+  expect(updateNode).toContain("flowState.setNodes")
+  expect(updateNode.indexOf("flowState.setNodes")).toBeLessThan(
+    updateNode.indexOf("setNodes((current)")
+  )
+  expect(canvasSource).toContain(
+    "updateNode(node.id, (item) => ({ ...item, data: nextData }))"
+  )
+})
+
 test("workflow debugging uses an anchored canvas window", () => {
   const debugPanel = detailSource.slice(
     detailSource.indexOf("{runOpen ? ("),
