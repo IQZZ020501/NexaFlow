@@ -1,10 +1,21 @@
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import json
+import math
+import re
 from typing import Any
 
 from jinja2 import StrictUndefined, TemplateError
 from jinja2.sandbox import SandboxedEnvironment
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    message_chunk_to_message,
+)
 from langchain_core.tools import StructuredTool
 
 from app.application.agent_executor import DurableToolLedger
@@ -18,16 +29,24 @@ from app.entities.tools import McpToolPolicy
 from app.entities.user import User
 from app.infrastructure.code_sandbox import execute_workflow_code
 from app.infrastructure.config import Settings
-from app.ports.llm import ModelToolCall, RegisteredModel, build_chat_model
+from app.ports.llm import (
+    ModelToolCall,
+    RegisteredModel,
+    build_chat_model,
+    build_reranker,
+)
 from app.schemas.workflow import (
     ClassifierNodeConfig,
     CodeNodeConfig,
     ConditionNodeConfig,
+    DocumentExtractNodeConfig,
     EndNodeConfig,
+    FormNodeConfig,
     KnowledgeNodeConfig,
     LlmNodeConfig,
     McpNodeConfig,
     ReplyNodeConfig,
+    RerankerNodeConfig,
     StartNodeConfig,
     TemplateNodeConfig,
     VariableNodeConfig,
@@ -45,8 +64,10 @@ from app.shareddomain.tools.services import ResolvedMcpTool
 from app.shareddomain.workflows.engine import NodeExecutionContext, NodeResult
 
 MAX_WORKFLOW_LLM_TOOL_CALLS = 8
+DEFAULT_WORKFLOW_LLM_MAX_TOKENS = 4096
 REPLY_TEMPLATE_ENV = SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
 REPLY_TEMPLATE_ENV.globals.clear()
+FORM_PLACEHOLDER_PATTERN = re.compile(r"{{\s*form\s*}}")
 
 
 @dataclass(frozen=True)
@@ -63,6 +84,8 @@ class WorkflowNodeScope:
     node_histories: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
+    form_submissions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    output_delta: Callable[[str, str], Awaitable[None]] | None = None
 
 
 def _path_value(value: Any, path: str) -> Any:
@@ -145,12 +168,35 @@ def render_reply_template(template: str, context: NodeExecutionContext) -> str:
         raise ValueError(f"Invalid workflow reply template: {exc}") from exc
 
 
+def render_form_template(template: str, context: NodeExecutionContext) -> str:
+    placeholder = "\ue000workflow_form\ue001"
+    normalized = FORM_PLACEHOLDER_PATTERN.sub(placeholder, template)
+    return render_reply_template(normalized, context).replace(
+        placeholder,
+        "{{ form }}",
+    )
+
+
+def _reranker_candidates(values: list[Any]) -> tuple[list[Any], list[str]]:
+    candidates: list[Any] = []
+    for value in values:
+        candidates.extend(value if isinstance(value, list) else [value])
+    texts = [
+        str(item.get("content") or "") if isinstance(item, dict) else str(item)
+        for item in candidates
+    ]
+    if not candidates or any(not text for text in texts):
+        raise ValueError("Workflow reranker content must contain non-empty text.")
+    return candidates, texts
+
+
 def _model_output_limit(provider_type: str, remaining_model_tokens: int) -> dict[str, int]:
+    output_tokens = min(remaining_model_tokens, DEFAULT_WORKFLOW_LLM_MAX_TOKENS)
     if provider_type == "google_genai":
-        return {"max_output_tokens": remaining_model_tokens}
+        return {"max_output_tokens": output_tokens}
     if provider_type == "ollama":
-        return {"num_predict": remaining_model_tokens}
-    return {"max_tokens": remaining_model_tokens}
+        return {"num_predict": output_tokens}
+    return {"max_tokens": output_tokens}
 
 
 def _model_call_params(
@@ -178,7 +224,7 @@ def _model_call_params(
         and not isinstance(max_tokens, bool)
         and max_tokens > 0
     ):
-        params[native_max_key] = min(max_tokens, output_limit[native_max_key])
+        params[native_max_key] = min(max_tokens, remaining_model_tokens)
     return {**output_limit, **params}
 
 
@@ -219,17 +265,38 @@ def _message_reasoning(message: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+async def _invoke_model(
+    chat_model: Any,
+    messages: list[Any],
+    call_params: dict[str, Any],
+    on_delta: Callable[[str], Awaitable[None]] | None,
+) -> Any:
+    if on_delta is None:
+        return await chat_model.ainvoke(messages, **call_params)
+    aggregate: AIMessageChunk | None = None
+    async for chunk in chat_model.astream(messages, **call_params):
+        if not isinstance(chunk, AIMessageChunk):
+            raise ValueError("Workflow model returned an invalid stream message.")
+        if chunk.text:
+            await on_delta(chunk.text)
+        aggregate = chunk if aggregate is None else aggregate + chunk
+    return message_chunk_to_message(aggregate or AIMessageChunk(content=""))
+
+
 async def _invoke_chat(
     scope: WorkflowNodeScope,
     model: RegisteredModel,
     messages: list[Any],
     remaining_model_tokens: int,
     call_params: dict[str, Any] | None = None,
+    on_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str, dict[str, Any], str]:
     """One chat-model call returning content, usage, and reasoning content."""
     output_limit = _model_output_limit(model.provider_type, remaining_model_tokens)
     merged = {**output_limit, **(call_params or {})}
-    message = await build_chat_model(scope.settings, model).ainvoke(messages, **merged)
+    message = await _invoke_model(
+        build_chat_model(scope.settings, model), messages, merged, on_delta
+    )
     usage = usage_from_message(message)
     return model_completion(message).content, usage, _message_reasoning(message)
 
@@ -280,6 +347,7 @@ async def _model_tool_loop(
     remaining_model_tokens: int,
     call_params: dict[str, Any],
     tools: list[StructuredTool],
+    on_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str, dict[str, Any], str]:
     """Run the LLM with bound MCP tools until it answers or the call cap hits.
 
@@ -291,7 +359,7 @@ async def _model_tool_loop(
     tool_call_count = 0
     reasoning = ""
     for _ in range(MAX_WORKFLOW_LLM_TOOL_CALLS):
-        message = await bound.ainvoke(messages, **call_params)
+        message = await _invoke_model(bound, messages, call_params, on_delta)
         reasoning = _message_reasoning(message)
         total_usage = merge_usage(total_usage, usage_from_message(message))
         if int(total_usage.get("total_tokens") or 0) > remaining_model_tokens:
@@ -519,6 +587,11 @@ async def execute_workflow_node(
                 tools.append(
                     build_mcp_agent_tool(resolved[0], scope.settings, "read_only")
                 )
+        async def emit_output_delta(delta: str) -> None:
+            assert scope.output_delta is not None
+            await scope.output_delta(node.id, delta)
+
+        on_delta = emit_output_delta if parsed.is_result and scope.output_delta else None
         if tools:
             content, usage, reasoning = await _model_tool_loop(
                 scope,
@@ -528,6 +601,7 @@ async def execute_workflow_node(
                 context.remaining_model_tokens,
                 call_params,
                 tools,
+                on_delta,
             )
         else:
             content, usage, reasoning = await _invoke_chat(
@@ -536,6 +610,7 @@ async def execute_workflow_node(
                 messages,
                 context.remaining_model_tokens,
                 call_params,
+                on_delta,
             )
         outputs: dict[str, Any] = {"text": content}
         if parsed.model_setting.reasoning_content_enable and reasoning:
@@ -575,6 +650,102 @@ async def execute_workflow_node(
             selected_handles=frozenset({selected}),
             model_tokens=int(usage.get("total_tokens") or 0),
             model_usage=usage,
+        )
+    if node_type == "reranker-node":
+        parsed = RerankerNodeConfig.model_validate(config)
+        query = str(resolve_value(parsed.question_reference_address, context))
+        candidates, texts = _reranker_candidates(
+            resolve_value(parsed.reranker_reference_list, context)
+        )
+        model = scope.models.get(parsed.reranker_model_id)
+        if model is None or model.model_type != "RERANKER":
+            raise ValueError("Workflow reranker model is unavailable.")
+        results = await asyncio.to_thread(
+            build_reranker(scope.settings, model).rerank,
+            query,
+            texts,
+        )
+        ranked: list[tuple[int, float]] = []
+        for fallback_index, item in enumerate(results):
+            if not isinstance(item, dict):
+                continue
+            index = item.get("index", fallback_index)
+            score = item.get("relevance_score", 0)
+            if (
+                isinstance(index, int)
+                and 0 <= index < len(candidates)
+                and isinstance(score, (int, float))
+                and not isinstance(score, bool)
+                and math.isfinite(float(score))
+                and float(score) >= parsed.reranker_setting.similarity
+            ):
+                ranked.append((index, float(score)))
+        ranked.sort(key=lambda item: item[1], reverse=True)
+        selected: list[dict[str, Any]] = []
+        selected_indexes: set[int] = set()
+        total_chars = 0
+        for index, score in ranked:
+            if index in selected_indexes:
+                continue
+            text = texts[index]
+            remaining = parsed.reranker_setting.max_paragraph_char_number - total_chars
+            if remaining <= 0 or len(selected) >= parsed.reranker_setting.top_n:
+                break
+            content = text[:remaining]
+            source = candidates[index]
+            selected.append(
+                {
+                    **(source if isinstance(source, dict) else {}),
+                    "content": content,
+                    "similarity": score,
+                }
+            )
+            selected_indexes.add(index)
+            total_chars += len(content)
+        return NodeResult(
+            inputs={
+                "question": query,
+                "candidate_count": len(candidates),
+                "reranker_model_id": parsed.reranker_model_id,
+            },
+            outputs={
+                "result_list": selected,
+                "result": "\n\n".join(item["content"] for item in selected),
+            },
+        )
+    if node_type == "form-node":
+        parsed = FormNodeConfig.model_validate(config)
+        submitted = scope.form_submissions.get(node.id)
+        if submitted is None:
+            pending = {
+                "runtime_node_id": node.id,
+                "content": render_form_template(parsed.form_content_format, context),
+                "fields": [
+                    field.model_dump(mode="json") for field in parsed.form_field_list
+                ],
+            }
+            return NodeResult(inputs=pending, interrupt=pending)
+        result = json.dumps(submitted, ensure_ascii=False, separators=(",", ":"))
+        return NodeResult(
+            inputs={"form_data": submitted},
+            outputs={**submitted, "form_data": submitted, "result": result},
+        )
+    if node_type == "document-extract-node":
+        parsed = DocumentExtractNodeConfig.model_validate(config)
+        resolved = resolve_value(parsed.document_list, context)
+        documents = resolved if isinstance(resolved, list) else [resolved]
+        sections: list[str] = []
+        for item in documents:
+            if not isinstance(item, dict) or not (item.get("file_id") or item.get("id")):
+                raise ValueError("Workflow document references must contain a file id.")
+            content = item.get("content")
+            if not isinstance(content, str):
+                raise ValueError("Workflow document content is unavailable.")
+            name = str(item.get("name") or item.get("filename") or "document")
+            sections.append(f"--- {name} ---\n{content}")
+        return NodeResult(
+            inputs={"document_count": len(documents)},
+            outputs={"content": "\n\n".join(sections)},
         )
     if node_type == "knowledge":
         parsed = KnowledgeNodeConfig.model_validate(config)

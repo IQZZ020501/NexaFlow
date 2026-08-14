@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import {
   createWorkflowRun,
+  observeWorkflowRun,
   uploadWorkflowFiles,
   updateWorkflowDefinition,
 } from "../lib/api/workflows"
@@ -11,10 +12,26 @@ import {
 } from "../lib/api/public-workflows"
 
 const originalFetch = globalThis.fetch
+const originalSetTimeout = globalThis.setTimeout
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+  globalThis.setTimeout = originalSetTimeout
 })
+
+function ndjsonResponse(events: object[]) {
+  const encoder = new TextEncoder()
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
+        }
+        controller.close()
+      },
+    })
+  )
+}
 
 describe("workflow API", () => {
   test("saves drafts with an optimistic revision", async () => {
@@ -136,5 +153,42 @@ describe("workflow API", () => {
     })
     expect(requests[1]?.url).toContain("/workflow-api/workflow-1/documentation")
     expect(requests[1]?.authorization).toBe("Bearer nxf_key")
+  })
+
+  test("reconnects workflow output streams from the last live delta", async () => {
+    const urls: string[] = []
+    const eventTypes: string[] = []
+    globalThis.setTimeout = ((callback: () => void) => {
+      queueMicrotask(callback)
+      return 1
+    }) as typeof setTimeout
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      urls.push(String(input))
+      return urls.length === 1
+        ? ndjsonResponse([
+            {
+              type: "answer_delta",
+              live_sequence: "1700000000000-0",
+              stream_epoch: "worker-1",
+              node_id: "llm-1",
+              delta: "# 标题",
+            },
+          ])
+        : ndjsonResponse([
+            { type: "complete", sequence: 3, run: {} },
+          ])
+    }) as typeof fetch
+
+    await observeWorkflowRun(
+      "token",
+      "ws-1",
+      "workflow-1",
+      "run-1",
+      (event) => eventTypes.push(event.type)
+    )
+
+    expect(eventTypes).toEqual(["answer_delta", "complete"])
+    expect(urls[1]).toContain("after=0")
+    expect(urls[1]).toContain("live_after=1700000000000-0")
   })
 })

@@ -18,6 +18,8 @@ from app.shareddomain.workflows.engine import (
     NodeState,
     WorkflowEngine,
     WorkflowEngineError,
+    WorkflowEngineState,
+    WorkflowInputRequired,
     WorkflowValidationError,
     validate_graph,
 )
@@ -596,6 +598,9 @@ def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
     assert _model_output_limit("openai_compatible", 12) == {"max_tokens": 12}
     assert _model_output_limit("google_genai", 12) == {"max_output_tokens": 12}
     assert _model_output_limit("ollama", 12) == {"num_predict": 12}
+    assert _model_output_limit("openai_compatible", 100_000) == {
+        "max_tokens": 4096
+    }
     assert _condition([1, 2, 3], "len_gt", "2")
     assert _condition(True, "is_true", None)
     assert not _condition(False, "is_true", None)
@@ -662,6 +667,16 @@ def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
         pass
     else:
         raise AssertionError("Knowledge node accepted more than 50 knowledge bases")
+
+
+def test_workflow_model_timeout_uses_specific_safe_error() -> None:
+    from app.application.workflow_executor import _safe_node_error
+    from app.ports.llm import ModelProviderTimeoutError
+
+    assert (
+        _safe_node_error(ModelProviderTimeoutError("Model request timed out."))
+        == "Workflow model request timed out."
+    )
 
 
 def test_workflow_resources_come_from_nodes_without_knowledge_limit() -> None:
@@ -1151,6 +1166,207 @@ def test_workflow_knowledge_node_maxkb_settings_and_truncation() -> None:
         assert result.outputs["content"] == "alpha beta"
         assert result.inputs["search_mode"] == "keywords"
         assert result.inputs["similarity"] == 0.8
+
+    asyncio.run(run())
+
+
+def test_workflow_reranker_form_and_document_nodes() -> None:
+    from unittest.mock import patch
+
+    from app.application.workflow_nodes import execute_workflow_node
+
+    class FakeReranker:
+        def rerank(self, query, documents):
+            assert query == "question"
+            assert documents == ["first", "second"]
+            return [
+                {"index": 1, "relevance_score": 0.9},
+                {"index": 1, "relevance_score": 0.8},
+                {"index": 0, "relevance_score": float("nan")},
+                {"index": 0, "relevance_score": 0.4},
+            ]
+
+    async def run() -> None:
+        context = NodeExecutionContext(
+            workflow_inputs={},
+            node_outputs={
+                "knowledge": {
+                    "paragraph_list": [
+                        {"content": "first", "document_id": "one"},
+                        {"content": "second", "document_id": "two"},
+                    ]
+                }
+            },
+            remaining_model_tokens=100,
+        )
+        reranker = WorkflowNode.model_validate(
+            {
+                "id": "reranker",
+                "position": {"x": 0, "y": 0},
+                "data": {
+                    "type": "reranker-node",
+                    "title": "Reranker",
+                    "config": {
+                        "reranker_model_id": "reranker-1",
+                        "question_reference_address": "question",
+                        "reranker_reference_list": [
+                            "{{knowledge.paragraph_list}}"
+                        ],
+                        "reranker_setting": {
+                            "top_n": 2,
+                            "similarity": 0.5,
+                            "max_paragraph_char_number": 100,
+                        },
+                    },
+                },
+            }
+        )
+        scope = SimpleNamespace(
+            models={
+                "reranker-1": SimpleNamespace(model_type="RERANKER")
+            },
+            settings=SimpleNamespace(),
+            form_submissions={},
+        )
+        with patch(
+            "app.application.workflow_nodes.build_reranker",
+            return_value=FakeReranker(),
+        ):
+            reranked = await execute_workflow_node(scope, reranker, context)
+        assert reranked.outputs == {
+            "result_list": [
+                {
+                    "content": "second",
+                    "document_id": "two",
+                    "similarity": 0.9,
+                }
+            ],
+            "result": "second",
+        }
+
+        form = WorkflowNode.model_validate(
+            {
+                "id": "form",
+                "position": {"x": 0, "y": 0},
+                "data": {
+                    "type": "form-node",
+                    "title": "Form",
+                    "config": {
+                        "form_field_list": [
+                            {
+                                "variable": "email",
+                                "name": "Email",
+                                "type": "input",
+                                "is_required": True,
+                            }
+                        ],
+                        "form_content_format": (
+                            "Before {{ knowledge.paragraph_list.0.content }} "
+                            "{{ form }} After"
+                        ),
+                    },
+                },
+            }
+        )
+        waiting = await execute_workflow_node(scope, form, context)
+        assert waiting.interrupt == {
+            "runtime_node_id": "form",
+            "content": "Before first {{ form }} After",
+            "fields": [
+                {
+                    "variable": "email",
+                    "name": "Email",
+                    "type": "input",
+                    "is_required": True,
+                    "default_value": None,
+                    "show_default_value": False,
+                    "optionList": [],
+                }
+            ],
+        }
+        scope.form_submissions["form"] = {"email": "user@example.com"}
+        submitted = await execute_workflow_node(scope, form, context)
+        assert submitted.outputs["email"] == "user@example.com"
+        assert submitted.outputs["form_data"] == {"email": "user@example.com"}
+
+        document = WorkflowNode.model_validate(
+            {
+                "id": "document",
+                "position": {"x": 0, "y": 0},
+                "data": {
+                    "type": "document-extract-node",
+                    "title": "Document",
+                    "config": {
+                        "document_list": [
+                            {"file_id": "file-1", "name": "a.txt", "content": "hello"}
+                        ]
+                    },
+                },
+            }
+        )
+        extracted = await execute_workflow_node(scope, document, context)
+        assert extracted.outputs == {"content": "--- a.txt ---\nhello"}
+
+        graph_form = form.model_dump(mode="json")
+        graph_form["data"]["config"]["form_content_format"] = "Before {{ form }} After"
+        graph_value = {
+            "nodes": [
+                {
+                    "id": "start",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"type": "start", "title": "Start", "config": {}},
+                },
+                graph_form,
+                {
+                    "id": "end",
+                    "position": {"x": 2, "y": 0},
+                    "data": {
+                        "type": "end",
+                        "title": "End",
+                        "config": {"outputs": {"result": "{{form.email}}"}},
+                    },
+                },
+            ],
+            "edges": [
+                {"id": "one", "source": "start", "target": "form"},
+                {"id": "two", "source": "form", "target": "end"},
+            ],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+        }
+        engine = WorkflowEngine(
+            graph_value,
+            max_steps=10,
+            max_model_tokens=100,
+            deadline_at=datetime.now(UTC) + timedelta(seconds=5),
+        )
+
+        paused_state: WorkflowEngineState | None = None
+
+        async def execute(node, _context):
+            if node.data.type == "start":
+                return NodeResult(outputs={})
+            return NodeResult(interrupt={"runtime_node_id": "form"})
+
+        async def capture_state(_transition, state):
+            nonlocal paused_state
+            paused_state = WorkflowEngineState.from_dict(state.to_dict())
+
+        try:
+            await engine.run({}, execute, on_node_finished=capture_state)
+        except WorkflowInputRequired as exc:
+            assert exc.form == {"runtime_node_id": "form"}
+        else:
+            raise AssertionError("Form node did not interrupt the workflow")
+        assert paused_state is not None
+
+        async def resume(node, context):
+            if node.data.type == "form-node":
+                return NodeResult(outputs={"email": "user@example.com"})
+            assert node.data.type == "end"
+            return NodeResult(outputs={"result": context.node_outputs["form"]["email"]})
+
+        completed = await engine.run({}, resume, state=paused_state)
+        assert completed.outputs == {"result": "user@example.com"}
 
     asyncio.run(run())
 
@@ -1898,6 +2114,7 @@ def _llm_scope(**overrides) -> SimpleNamespace:
         node_order={"llm-1": 0},
         node_histories={},
         ledger=_FakeLlmLedger(),
+        output_delta=None,
     )
     for key, value in overrides.items():
         setattr(scope, key, value)
@@ -2045,6 +2262,23 @@ def test_workflow_llm_node_dialogue_history_and_params() -> None:
             )
         messages3, _ = fake3.calls[0]
         assert len(messages3) == 1
+        assert fake3.calls[0][1] == {"max_tokens": 100}
+
+        fake4 = _FakeLlmModel([_FakeLlmMessage("answer-4")])
+        with patch(
+            "app.application.workflow_nodes.build_chat_model",
+            return_value=fake4,
+        ):
+            await execute_workflow_node(
+                _llm_scope(),
+                _llm_node({"prompt": "now", "dialogue_number": 0}),
+                NodeExecutionContext(
+                    workflow_inputs={},
+                    node_outputs={"start": {"question": "hi"}},
+                    remaining_model_tokens=100_000,
+                ),
+            )
+        assert fake4.calls[0][1] == {"max_tokens": 4096}
 
     asyncio.run(run())
 
@@ -2151,6 +2385,55 @@ def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
     asyncio.run(run())
 
 
+def test_workflow_llm_result_streams_markdown_deltas() -> None:
+    from unittest.mock import patch
+
+    from app.application.workflow_nodes import execute_workflow_node
+    from langchain_core.messages import AIMessageChunk
+
+    class StreamingModel(_FakeLlmModel):
+        async def astream(self, messages, **kwargs):
+            self.calls.append((list(messages), dict(kwargs)))
+            yield AIMessageChunk(content="# 标题")
+            yield AIMessageChunk(content="\n\n正文")
+
+    async def run() -> None:
+        deltas: list[tuple[str, str]] = []
+
+        async def emit(node_id: str, delta: str) -> None:
+            deltas.append((node_id, delta))
+
+        model = StreamingModel([_FakeLlmMessage("fallback")])
+        with patch(
+            "app.application.workflow_nodes.build_chat_model",
+            return_value=model,
+        ):
+            result = await execute_workflow_node(
+                _llm_scope(output_delta=emit),
+                _llm_node({"prompt": "用 Markdown 回答"}),
+                _llm_context(),
+            )
+
+        assert deltas == [("llm-1", "# 标题"), ("llm-1", "\n\n正文")]
+        assert result.outputs == {"text": "# 标题\n\n正文"}
+
+        hidden = StreamingModel([_FakeLlmMessage("内部结果")])
+        with patch(
+            "app.application.workflow_nodes.build_chat_model",
+            return_value=hidden,
+        ):
+            await execute_workflow_node(
+                _llm_scope(output_delta=emit),
+                _llm_node(
+                    {"prompt": "优化问题", "is_result": False}
+                ),
+                _llm_context(),
+            )
+        assert deltas == [("llm-1", "# 标题"), ("llm-1", "\n\n正文")]
+
+    asyncio.run(run())
+
+
 def main() -> None:
     test_default_workflow_only_contains_start()
     test_workflow_interaction_config_rejects_audio_uploads()
@@ -2167,8 +2450,10 @@ def main() -> None:
     test_workflow_start_node_outputs_question_files_and_globals()
     test_workflow_knowledge_node_limits_and_joins_results()
     test_workflow_knowledge_node_maxkb_settings_and_truncation()
+    test_workflow_reranker_form_and_document_nodes()
     test_workflow_llm_node_dialogue_history_and_params()
     test_workflow_llm_node_reasoning_and_mcp_tool_loop()
+    test_workflow_llm_result_streams_markdown_deltas()
     test_workflow_engine_propagates_worker_cancellation()
     test_upload_cleanup_tasks_are_registered()
     test_interaction_config_migration_upgrades_prerequisites()

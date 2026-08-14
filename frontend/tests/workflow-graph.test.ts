@@ -10,7 +10,10 @@ import {
   removeWorkflowNode,
   selectWorkflowRunTarget,
   serializeWorkflowGraph,
+  workflowErrorMessage,
+  workflowExecutionNodeLabel,
   workflowGraphSignature,
+  workflowNodeLabel,
 } from "../lib/workflows/graph"
 import {
   applyWorkflowEdgeChanges,
@@ -24,6 +27,39 @@ import {
 } from "../lib/workflows/canvas"
 
 describe("workflow graph", () => {
+  test("presents workflow execution details in the active language", () => {
+    const t = ((key: string) => key) as never
+    const graph = {
+      nodes: [
+        {
+          id: "reranker-1",
+          type: "workflow",
+          position: { x: 0, y: 0 },
+          data: { type: "reranker-node", title: "个人知识重排", config: {} },
+        },
+      ],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    } as never
+
+    expect(
+      workflowExecutionNodeLabel("reranker-1", "reranker-node", graph, t)
+    ).toBe("个人知识重排")
+    expect(
+      workflowExecutionNodeLabel("missing", "reranker-node", graph, t)
+    ).toBe("多路召回")
+    expect(workflowNodeLabel("document-extract-node", t)).toBe(
+      "文档内容提取"
+    )
+    expect(
+      workflowErrorMessage(
+        "Workflow reranker content must contain non-empty text.",
+        t
+      )
+    ).toBe("重排内容必须包含非空文本。")
+    expect(workflowErrorMessage("Provider detail", t)).toBe("Provider detail")
+  })
+
   test("moves canvas components in flow coordinates", () => {
     expect(
       draggedCanvasPosition(

@@ -15,11 +15,66 @@ export const WORKFLOW_NODE_TYPES: WorkflowNodeType[] = [
   "llm",
   "classifier",
   "knowledge",
+  "reranker-node",
+  "form-node",
+  "document-extract-node",
   "condition",
   "variable",
   "mcp",
   "code",
 ]
+
+const WORKFLOW_NODE_LABELS: Record<WorkflowNodeType, TranslationKey> = {
+  start: "开始节点",
+  end: "结束节点",
+  llm: "大语言模型",
+  classifier: "问题分类器",
+  knowledge: "知识检索节点",
+  "reranker-node": "多路召回",
+  "form-node": "表单收集",
+  "document-extract-node": "文档内容提取",
+  condition: "条件分支",
+  "reply-node": "指定回复",
+  template: "模板转换",
+  variable: "变量赋值",
+  mcp: "MCP 工具节点",
+  code: "Python 代码",
+}
+
+const WORKFLOW_ERROR_LABELS: Partial<Record<string, TranslationKey>> = {
+  "Workflow reranker content must contain non-empty text.":
+    "重排内容必须包含非空文本。",
+  "Workflow model request failed.": "工作流模型请求失败。",
+  "Workflow model request timed out.": "工作流模型请求超时。",
+  "Workflow node execution failed.": "工作流节点执行失败。",
+  "Workflow node failed.": "工作流节点执行失败。",
+  "Workflow execution failed.": "工作流执行失败。",
+  "Workflow run failed.": "工作流运行失败。",
+  "Workflow run was cancelled.": "工作流运行已取消。",
+  "Workflow document references must contain a file id.":
+    "文档引用必须包含文件 ID。",
+}
+
+export function workflowNodeLabel(type: WorkflowNodeType, t: TFunction) {
+  return t(WORKFLOW_NODE_LABELS[type])
+}
+
+export function workflowExecutionNodeLabel(
+  nodeId: string,
+  type: WorkflowNodeType,
+  graph: WorkflowGraph | null,
+  t: TFunction
+) {
+  const title = graph?.nodes
+    .find((node) => node.id === nodeId)
+    ?.data.title.trim()
+  return title || workflowNodeLabel(type, t)
+}
+
+export function workflowErrorMessage(message: string, t: TFunction) {
+  const label = WORKFLOW_ERROR_LABELS[message]
+  return label ? t(label) : message
+}
 
 /** Start node globals, referenced as {{global.<value>}} (MaxKB-compatible). */
 export const WORKFLOW_START_GLOBALS: Array<{ label: TranslationKey; value: string }> = [
@@ -33,6 +88,7 @@ export const WORKFLOW_START_GLOBALS: Array<{ label: TranslationKey; value: strin
 export const WORKFLOW_START_FIELDS: Array<{ label: TranslationKey; value: string }> = [
   { label: "用户问题", value: "question" },
   { label: "上传文件", value: "files" },
+  { label: "文档", value: "document" },
 ]
 
 export type WorkflowNodePreset = {
@@ -97,6 +153,25 @@ export function defaultNodeConfig(
         search_mode: "embedding",
         max_paragraph_char_number: 5000,
       }
+    case "reranker-node":
+      return {
+        reranker_model_id: "",
+        question_reference_address: questionReference,
+        reranker_reference_list: [],
+        reranker_setting: {
+          top_n: 3,
+          similarity: 0,
+          max_paragraph_char_number: 5000,
+        },
+      }
+    case "form-node":
+      return {
+        form_field_list: [],
+        form_content_format: "{{ form }}",
+        is_result: true,
+      }
+    case "document-extract-node":
+      return { document_list: `{{${startNodeId}.document}}` }
     case "condition":
       return {
         branch: [

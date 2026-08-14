@@ -27,6 +27,7 @@ from app.application.workflow_runs import (
     get_workflow_run,
     list_workflow_node_executions,
     list_workflow_runs,
+    submit_workflow_form,
     stream_workflow_run,
 )
 from app.application.workflow_access import (
@@ -37,6 +38,7 @@ from app.application.workflow_access import (
     list_external_workflow_runs,
     list_public_workflow_conversations,
     stream_external_workflow_run,
+    submit_external_workflow_form,
 )
 from app.application.workflow_uploads import (
     upload_public_workflow_files,
@@ -60,6 +62,8 @@ __all__ = [
     "restore_workflow_version",
     "stream_external_workflow_run",
     "stream_workflow_run",
+    "submit_external_workflow_form",
+    "submit_workflow_form",
     "upload_public_workflow_files",
     "upload_workspace_workflow_files",
     "update_workflow_definition",

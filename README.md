@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="imgs/nexaflow.svg" width="96" alt="NexaFlow logo" />
+  <img src="frontend/public/NexaFlow-log.png" width="480" alt="NexaFlow logo" />
   <h1>NexaFlow</h1>
   <p>面向团队的 AI 应用编排平台，将知识库、模型、Agent、工作流与 MCP 工具统一在工作空间中。</p>
 
@@ -167,6 +167,8 @@ uv run celery -A app.infrastructure.celery:celery_app beat --loglevel=INFO
 ```
 
 API 默认运行在 <http://127.0.0.1:8000>。Python Code 工作流节点依赖 Unix socket 沙箱，开发这部分功能时优先使用完整 Docker Compose 栈。
+当 Compose Worker 已运行时，`make dev` 会自动把带 `worker-1 |` 前缀的
+Worker 日志同步到同一个终端；退出 API 时日志跟随进程也会一起结束。
 
 ### 前端
 

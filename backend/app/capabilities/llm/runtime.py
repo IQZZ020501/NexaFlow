@@ -44,7 +44,7 @@ from app.infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
 
-MODEL_REQUEST_TIMEOUT_SECONDS = 20
+MODEL_REQUEST_TIMEOUT_SECONDS = 60
 STREAM_USAGE_SUPPORTED_META_KEY = "stream_usage_supported"
 SUPPORTED_PROVIDER_TYPES = {
     "openai_compatible",
@@ -80,6 +80,10 @@ class ModelProviderStatusError(ModelProviderError):
         super().__init__(detail)
 
 
+class ModelProviderTimeoutError(ModelProviderError):
+    pass
+
+
 class Reranker(Protocol):
     def rerank(self, query: str, documents: list[str]) -> list[dict[str, Any]]: ...
 
@@ -101,6 +105,18 @@ def _provider_status_code(exc: Exception) -> int | None:
 
 def _model_provider_error(exc: Exception) -> ModelProviderError:
     log_error(logger, "LLM provider request failed.", exc)
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TimeoutError) or type(current).__name__ in {
+            "APITimeoutError",
+            "ConnectTimeout",
+            "ReadTimeout",
+            "TimeoutException",
+        }:
+            return ModelProviderTimeoutError("Model request timed out.")
+        current = current.__cause__ or current.__context__
     if isinstance(exc, APIStatusError):
         return ModelProviderStatusError(exc.status_code, _api_error_detail(exc))
     status_code = _provider_status_code(exc)
@@ -299,7 +315,7 @@ class OpenAICompatibleEmbeddings(CheckedEmbeddings):
         api_base: str,
         api_key: str,
         model_name: str,
-        timeout: int = MODEL_REQUEST_TIMEOUT_SECONDS,
+        timeout: float = MODEL_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
         super().__init__(
             OpenAIEmbeddings(
@@ -319,7 +335,7 @@ class OpenAICompatibleReranker:
         api_base: str,
         api_key: str,
         model_name: str,
-        timeout: int = MODEL_REQUEST_TIMEOUT_SECONDS,
+        timeout: float = MODEL_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
         self.api_base = openai_compatible_base(api_base)
         self.api_key = api_key
@@ -345,7 +361,7 @@ class OpenAICompatibleReranker:
         except HTTPError as exc:
             raise ModelProviderStatusError(exc.code) from exc
         except (OSError, TimeoutError, URLError) as exc:
-            raise ModelProviderError("Model request failed.") from exc
+            raise _model_provider_error(exc) from exc
         try:
             data = json.loads(body)
         except ValueError as exc:
@@ -388,15 +404,18 @@ def _openai_api_key(credentials: dict[str, str]) -> str:
     return _optional(credentials, "api_key") or "not-required"
 
 
-def _bedrock_config() -> BotocoreConfig:
+def _bedrock_config(timeout: float) -> BotocoreConfig:
     return BotocoreConfig(
-        connect_timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
-        read_timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
+        connect_timeout=timeout,
+        read_timeout=timeout,
         retries={"max_attempts": 0},
     )
 
 
-def _bedrock_credentials(credentials: dict[str, str]) -> dict[str, Any]:
+def _bedrock_credentials(
+    credentials: dict[str, str],
+    timeout: float = MODEL_REQUEST_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
     access_key = _optional(credentials, "aws_access_key_id")
     secret_key = _optional(credentials, "aws_secret_access_key")
     if bool(access_key) != bool(secret_key):
@@ -410,7 +429,7 @@ def _bedrock_credentials(credentials: dict[str, str]) -> dict[str, Any]:
         "aws_session_token": _secret(
             _optional(credentials, "aws_session_token")
         ),
-        "config": _bedrock_config(),
+        "config": _bedrock_config(timeout),
     }
 
 
@@ -433,6 +452,7 @@ def build_chat_model(
     model_name: str,
     *,
     stream_usage: bool = False,
+    timeout: float = MODEL_REQUEST_TIMEOUT_SECONDS,
 ) -> BaseChatModel:
     if provider_type == "openai_compatible":
         return OpenAICompatibleChatModel(
@@ -440,7 +460,7 @@ def build_chat_model(
             api_key=_openai_api_key(credentials),
             base_url=openai_compatible_base(_required(credentials, "api_base")),
             stream_usage=stream_usage,
-            timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
+            timeout=timeout,
             max_retries=0,
         )
     if provider_type == "anthropic":
@@ -448,16 +468,16 @@ def build_chat_model(
             model_name=model_name,
             api_key=_required(credentials, "api_key"),
             base_url=_optional(credentials, "api_base"),
-            timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
+            timeout=timeout,
             max_retries=0,
         )
     if provider_type == "bedrock":
         return BedrockChatModel(
             model=model_name,
             base_url=_optional(credentials, "endpoint_url"),
-            timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
+            timeout=timeout,
             max_retries=0,
-            **_bedrock_credentials(credentials),
+            **_bedrock_credentials(credentials, timeout),
         )
     if provider_type == "azure_openai":
         return AzureChatModel(
@@ -466,7 +486,7 @@ def build_chat_model(
             azure_endpoint=_required(credentials, "azure_endpoint"),
             api_version=_required(credentials, "api_version"),
             api_key=_required(credentials, "api_key"),
-            timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
+            timeout=timeout,
             max_retries=0,
         )
     if provider_type == "deepseek":
@@ -474,7 +494,7 @@ def build_chat_model(
             model=model_name,
             api_key=_required(credentials, "api_key"),
             base_url=openai_compatible_base(_required(credentials, "api_base")),
-            timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
+            timeout=timeout,
             max_retries=0,
         )
     if provider_type == "google_genai":
@@ -483,14 +503,14 @@ def build_chat_model(
             api_key=_required(credentials, "api_key"),
             base_url=_optional(credentials, "api_base"),
             api_version=_optional(credentials, "api_version"),
-            request_timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
+            request_timeout=timeout,
             retries=0,
         )
     if provider_type == "ollama":
         return OllamaChatModel(
             model=model_name,
             base_url=_required(credentials, "api_base"),
-            client_kwargs={"timeout": MODEL_REQUEST_TIMEOUT_SECONDS},
+            client_kwargs={"timeout": timeout},
         )
     raise ModelProviderError("Model provider type is not supported.")
 
@@ -499,19 +519,22 @@ def build_embeddings(
     provider_type: str,
     credentials: dict[str, str],
     model_name: str,
+    *,
+    timeout: float = MODEL_REQUEST_TIMEOUT_SECONDS,
 ) -> Embeddings:
     if provider_type == "openai_compatible":
         return OpenAICompatibleEmbeddings(
             _required(credentials, "api_base"),
             _openai_api_key(credentials),
             model_name,
+            timeout,
         )
     if provider_type == "bedrock":
         return CheckedEmbeddings(
             BedrockEmbeddings(
                 model_id=model_name,
                 endpoint_url=_optional(credentials, "endpoint_url"),
-                **_bedrock_credentials(credentials),
+                **_bedrock_credentials(credentials, timeout),
             )
         )
     if provider_type == "azure_openai":
@@ -522,7 +545,7 @@ def build_embeddings(
                 azure_endpoint=_required(credentials, "azure_endpoint"),
                 api_version=_required(credentials, "api_version"),
                 api_key=_required(credentials, "api_key"),
-                timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
+                timeout=timeout,
                 max_retries=0,
                 check_embedding_ctx_length=False,
             )
@@ -534,7 +557,7 @@ def build_embeddings(
                 api_key=_required(credentials, "api_key"),
                 base_url=_optional(credentials, "api_base"),
                 api_version=_optional(credentials, "api_version"),
-                request_options={"timeout": MODEL_REQUEST_TIMEOUT_SECONDS},
+                request_options={"timeout": timeout},
             )
         )
     if provider_type == "ollama":
@@ -542,7 +565,7 @@ def build_embeddings(
             OllamaEmbeddings(
                 model=model_name,
                 base_url=_required(credentials, "api_base"),
-                client_kwargs={"timeout": MODEL_REQUEST_TIMEOUT_SECONDS},
+                client_kwargs={"timeout": timeout},
             )
         )
     raise ModelProviderError("Embedding provider type is not supported.")
@@ -552,15 +575,18 @@ def build_reranker(
     provider_type: str,
     credentials: dict[str, str],
     model_name: str,
+    *,
+    timeout: float = MODEL_REQUEST_TIMEOUT_SECONDS,
 ) -> Reranker:
     if provider_type == "openai_compatible":
         return OpenAICompatibleReranker(
             _required(credentials, "api_base"),
             _openai_api_key(credentials),
             model_name,
+            timeout,
         )
     if provider_type == "bedrock":
-        bedrock_credentials = _bedrock_credentials(credentials)
+        bedrock_credentials = _bedrock_credentials(credentials, timeout)
         region_name = bedrock_credentials["region_name"]
         return BedrockModelReranker(
             BedrockRerank(
@@ -609,6 +635,7 @@ def build_registered_chat_model(
         _registered_model_credentials(model, settings, "LLM"),
         model.model_name,
         stream_usage=(model.meta or {}).get(STREAM_USAGE_SUPPORTED_META_KEY) is True,
+        timeout=settings.model_request_timeout_seconds,
     )
 
 
@@ -620,6 +647,7 @@ def build_registered_embeddings(
         model.provider_type,
         _registered_model_credentials(model, settings, "EMBEDDING"),
         model.model_name,
+        timeout=settings.model_request_timeout_seconds,
     )
 
 
@@ -631,6 +659,7 @@ def build_registered_reranker(
         model.provider_type,
         _registered_model_credentials(model, settings, "RERANKER"),
         model.model_name,
+        timeout=settings.model_request_timeout_seconds,
     )
 
 

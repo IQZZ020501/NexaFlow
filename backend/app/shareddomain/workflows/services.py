@@ -11,10 +11,12 @@ from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.infrastructure.repositories import workflow as workflow_repository
+from app.ports.model_registry import get_registered_model_by_id
 from app.schemas.workflow import (
     KnowledgeNodeConfig,
     LlmNodeConfig,
     McpNodeConfig,
+    RerankerNodeConfig,
     WorkflowDefinitionResponse,
     WorkflowGraph,
     WorkflowVersionResponse,
@@ -101,6 +103,7 @@ async def validate_workflow_resources(
 
     knowledge_base_ids, mcp_tools = workflow_resource_references(parsed)
     model_ids = {default_model_id or agent.model_id}
+    reranker_model_ids: set[str] = set()
     for node in parsed.nodes:
         config = node.data.config
         if node.data.type == "end":
@@ -114,9 +117,25 @@ async def validate_workflow_resources(
                 )
         elif node.data.type in {"llm", "classifier"} and config.get("model_id"):
             model_ids.add(str(config["model_id"]))
+        elif node.data.type == "reranker-node":
+            reranker_model_ids.add(
+                RerankerNodeConfig.model_validate(config).reranker_model_id
+            )
 
     for model_id in model_ids:
         await get_agent_model(db, agent.workspace_id, model_id)
+    for model_id in reranker_model_ids:
+        model = await get_registered_model_by_id(db, model_id)
+        if (
+            model is None
+            or model.workspace_id != agent.workspace_id
+            or model.model_type != "RERANKER"
+            or model.status != "active"
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Workflow reranker model is unavailable.",
+            )
     knowledge_rows = await knowledge_base_repository.list_knowledge_bases_with_user_grants(
         db,
         agent.workspace_id,

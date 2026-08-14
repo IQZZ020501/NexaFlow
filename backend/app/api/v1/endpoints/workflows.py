@@ -25,6 +25,7 @@ from app.application.workflows import (
     update_workflow_definition,
     validate_workflow_definition,
     stream_workflow_run,
+    submit_workflow_form,
     upload_workspace_workflow_files,
 )
 from app.schemas.workflow import (
@@ -32,6 +33,7 @@ from app.schemas.workflow import (
     WorkflowDefinitionUpdateRequest,
     WorkflowNodeExecutionListResponse,
     WorkflowRunCreateRequest,
+    WorkflowFormSubmitRequest,
     WorkflowRunResponse,
     WorkflowValidationRequest,
     WorkflowValidationResponse,
@@ -237,6 +239,30 @@ async def get_run(
     )
 
 
+@router.post(
+    "/{agent_id}/runs/{run_id}/form",
+    response_model=WorkflowRunResponse,
+)
+async def post_run_form(
+    agent_id: str,
+    run_id: str,
+    payload: WorkflowFormSubmitRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkflowRunResponse:
+    return await submit_workflow_form(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        payload,
+        context.user,
+        context.membership_role,
+        settings,
+    )
+
+
 @router.get(
     "/{agent_id}/runs/{run_id}/nodes",
     response_model=WorkflowNodeExecutionListResponse,
@@ -268,6 +294,7 @@ async def reconnect_run(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
     after: Annotated[int, Query(ge=0)] = 0,
+    live_after: Annotated[str, Query(pattern=r"^[0-9]+-[0-9]+$")] = "0-0",
 ) -> StreamingResponse:
     await get_workflow_run(
         db,
@@ -280,7 +307,12 @@ async def reconnect_run(
     await db.rollback()
 
     async def encode_events() -> AsyncIterator[bytes]:
-        async for event in stream_workflow_run(run_id, settings, after=after):
+        async for event in stream_workflow_run(
+            run_id,
+            settings,
+            after=after,
+            live_after=live_after,
+        ):
             yield (json.dumps(event, ensure_ascii=False) + "\n").encode()
 
     return StreamingResponse(

@@ -378,6 +378,27 @@ async def save_owned_run_detail(
     return bool(result.rowcount)
 
 
+async def reset_waiting_run_deadline(
+    db: AsyncSession,
+    run_id: str,
+    deadline_at: datetime,
+) -> bool:
+    waiting = await db.scalar(
+        select(AgentRun.id).where(
+            AgentRun.id == run_id,
+            AgentRun.status == "awaiting_input",
+        )
+    )
+    if waiting is None:
+        return False
+    result = await db.execute(
+        update(WorkflowRunDetail)
+        .where(WorkflowRunDetail.run_id == run_id)
+        .values(deadline_at=deadline_at, updated_at=utc_now())
+    )
+    return bool(result.rowcount)
+
+
 async def start_node_execution(
     db: AsyncSession,
     *,

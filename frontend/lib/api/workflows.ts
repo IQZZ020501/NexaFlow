@@ -11,6 +11,9 @@ export type WorkflowNodeType =
   | "llm"
   | "classifier"
   | "knowledge"
+  | "reranker-node"
+  | "form-node"
+  | "document-extract-node"
   | "condition"
   | "reply-node"
   | "template"
@@ -86,6 +89,7 @@ export type WorkflowVersion = {
 export type WorkflowRunStatus =
   | "queued"
   | "running"
+  | "awaiting_input"
   | "succeeded"
   | "failed"
   | "cancelled"
@@ -96,6 +100,22 @@ export type WorkflowUpload = {
   content_type: string
   size_bytes: number
   category: "document" | "image" | "audio"
+}
+
+export type WorkflowFormField = {
+  variable: string
+  name: string
+  type: "input" | "textarea" | "select" | "date" | "number"
+  is_required: boolean
+  default_value: unknown
+  show_default_value: boolean
+  optionList: string[]
+}
+
+export type WorkflowPendingForm = {
+  runtime_node_id: string
+  content: string
+  fields: WorkflowFormField[]
 }
 
 export type WorkflowRun = {
@@ -121,6 +141,9 @@ export type WorkflowRun = {
   finished_at: string | null
   created_at: string
   updated_at: string
+  pending_form: WorkflowPendingForm | null
+  live_stream_epoch?: string
+  live_stream_cursor?: string
 }
 
 export type WorkflowNodeExecution = {
@@ -128,7 +151,7 @@ export type WorkflowNodeExecution = {
   run_id: string
   node_id: string
   node_type: WorkflowNodeType
-  status: "running" | "succeeded" | "failed" | "skipped"
+  status: "running" | "awaiting_input" | "succeeded" | "failed" | "skipped"
   sequence: number
   inputs: Record<string, unknown>
   outputs: Record<string, unknown>
@@ -141,6 +164,13 @@ export type WorkflowNodeExecution = {
 
 export type WorkflowRunStreamEvent =
   | { type: "run"; sequence: number; run: WorkflowRun }
+  | {
+      type: "answer_delta"
+      live_sequence?: string
+      stream_epoch?: string
+      node_id: string
+      delta: string
+    }
   | {
       type: "workflow_node_started"
       sequence: number
@@ -161,7 +191,11 @@ export type WorkflowRunStreamEvent =
       error: string | null
       duration_ms: number
     }
-  | { type: "complete" | "error"; sequence: number; run: WorkflowRun }
+  | {
+      type: "complete" | "error" | "workflow_input_required"
+      sequence: number
+      run: WorkflowRun
+    }
 
 function workflowPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/workflows${suffix}`
@@ -291,6 +325,27 @@ export function uploadWorkflowFiles(
   )
 }
 
+export function submitWorkflowForm(
+  token: string,
+  workspaceId: string,
+  workflowId: string,
+  runId: string,
+  runtimeNodeId: string,
+  formData: Record<string, unknown>
+) {
+  return request<WorkflowRun>(
+    workflowPath(workspaceId, `/${workflowId}/runs/${runId}/form`),
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify({
+        runtime_node_id: runtimeNodeId,
+        form_data: formData,
+      }),
+    }
+  )
+}
+
 export function listWorkflowRuns(
   token: string,
   workspaceId: string,
@@ -328,12 +383,12 @@ export function observeWorkflowRun(
   after = 0
 ) {
   return observeNdjsonStream<WorkflowRunStreamEvent>(
-    (cursor, _liveCursor, streamSignal) =>
+    (cursor, liveCursor, streamSignal) =>
       fetch(
         apiUrl(
           workflowPath(
             workspaceId,
-            `/${workflowId}/runs/${runId}/stream?after=${cursor}`
+            `/${workflowId}/runs/${runId}/stream?after=${cursor}&live_after=${encodeURIComponent(liveCursor)}`
           )
         ),
         {

@@ -1,6 +1,7 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
 import type { AgentInteractionConfig } from "@/lib/api/agents"
+import type { WorkflowNodeType, WorkflowPendingForm } from "@/lib/api/workflows"
 
 export type PublicWorkflowProfile = {
   id: string
@@ -30,8 +31,8 @@ export type PublicWorkflowConversation = {
 export type ExternalWorkflowProgress = {
   id: string
   node_id: string
-  node_type: string
-  status: "running" | "succeeded" | "failed" | "skipped"
+  node_type: WorkflowNodeType
+  status: "running" | "awaiting_input" | "succeeded" | "failed" | "skipped"
   error: string | null
   duration_ms: number | null
 }
@@ -48,11 +49,21 @@ export type ExternalWorkflowRun = {
   started_at: string | null
   finished_at: string | null
   updated_at: string
+  pending_form: WorkflowPendingForm | null
+  live_stream_epoch?: string
+  live_stream_cursor?: string
 }
 
 export type PublicWorkflowRunStreamEvent =
   | {
-      type: "run" | "complete" | "error"
+      type: "answer_delta"
+      live_sequence?: string
+      stream_epoch?: string
+      node_id: string
+      delta: string
+    }
+  | {
+      type: "run" | "complete" | "error" | "workflow_input_required"
       sequence: number
       run: ExternalWorkflowRun
     }
@@ -131,6 +142,23 @@ export function uploadPublicWorkflowFiles(
   })
 }
 
+export function submitPublicWorkflowForm(
+  workflowId: string,
+  token: string,
+  runId: string,
+  runtimeNodeId: string,
+  formData: Record<string, unknown>
+) {
+  return request<ExternalWorkflowRun>(path(workflowId, `/runs/${runId}/form`), {
+    method: "POST",
+    token,
+    body: JSON.stringify({
+      runtime_node_id: runtimeNodeId,
+      form_data: formData,
+    }),
+  })
+}
+
 export function observePublicWorkflowRun(
   workflowId: string,
   token: string,
@@ -139,12 +167,20 @@ export function observePublicWorkflowRun(
   signal?: AbortSignal
 ) {
   return observeNdjsonStream<PublicWorkflowRunStreamEvent>(
-    (cursor, _liveCursor, streamSignal) =>
-      fetch(apiUrl(path(workflowId, `/runs/${runId}/stream?after=${cursor}`)), {
-        credentials: "include",
-        headers: { Authorization: `Bearer ${token}` },
-        signal: streamSignal,
-      }),
+    (cursor, liveCursor, streamSignal) =>
+      fetch(
+        apiUrl(
+          path(
+            workflowId,
+            `/runs/${runId}/stream?after=${cursor}&live_after=${encodeURIComponent(liveCursor)}`
+          )
+        ),
+        {
+          credentials: "include",
+          headers: { Authorization: `Bearer ${token}` },
+          signal: streamSignal,
+        }
+      ),
     onEvent,
     { signal, errorLabel: "Public Workflow stream" }
   )

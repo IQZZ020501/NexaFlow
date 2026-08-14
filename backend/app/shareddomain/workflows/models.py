@@ -170,7 +170,7 @@ class WorkflowNodeExecution(Base):
             "run_id", "node_id", name="uq_workflow_node_executions_run_node"
         ),
         CheckConstraint(
-            "status IN ('running', 'succeeded', 'failed', 'skipped')",
+            "status IN ('running', 'awaiting_input', 'succeeded', 'failed', 'skipped')",
             name="ck_workflow_node_executions_status",
         ),
     )

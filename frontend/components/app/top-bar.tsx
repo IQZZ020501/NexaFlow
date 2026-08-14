@@ -9,6 +9,7 @@ import {
   LogOutIcon,
   SettingsIcon,
 } from "lucide-react"
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -85,9 +86,16 @@ export function TopBar() {
         <div className="flex min-w-0 shrink-0 items-center gap-2">
           <Link
             href="/app/apps"
-            className="shrink-0 rounded-sm text-left text-base font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
-            NexaFlow
+            <Image
+              src="/NexaFlow-logo.png"
+              alt="NexaFlow"
+              width={32}
+              height={32}
+              priority
+              className="size-8 rounded-full dark:invert"
+            />
           </Link>
           <span className="text-sm text-muted-foreground" aria-hidden="true">
             ｜

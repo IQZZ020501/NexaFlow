@@ -12,8 +12,8 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <LanguageProvider>
       <ThemeProvider>
         <SessionProvider>
-          <TopProgress />
           {children}
+          <TopProgress />
         </SessionProvider>
       </ThemeProvider>
     </LanguageProvider>

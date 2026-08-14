@@ -1,5 +1,6 @@
 import * as React from "react"
 import { LoaderCircleIcon } from "lucide-react"
+import Image from "next/image"
 import { useLanguage } from "@/contexts/language-provider"
 import { Button } from "@/components/ui/button"
 import {
@@ -60,7 +61,17 @@ export function LoginScreen({
       <main className="flex min-h-svh items-center justify-center bg-muted/30 p-6">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle>NexaFlow</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Image
+                src="/NexaFlow-logo.png"
+                alt=""
+                width={36}
+                height={36}
+                priority
+                className="size-9 rounded-full dark:invert"
+              />
+              <span>NexaFlow</span>
+            </CardTitle>
             <CardDescription>{t("登录到你的工作空间")}</CardDescription>
           </CardHeader>
           <form onSubmit={handleSubmit}>

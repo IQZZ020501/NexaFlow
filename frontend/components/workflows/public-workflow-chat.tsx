@@ -15,6 +15,7 @@ import {
   WorkflowIcon,
 } from "lucide-react"
 
+import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { WorkflowRuntimeForm } from "@/components/workflows/workflow-runtime-form"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import {
@@ -32,17 +34,21 @@ import {
   initializePublicWorkflow,
   listPublicWorkflowRuns,
   observePublicWorkflowRun,
+  submitPublicWorkflowForm,
   uploadPublicWorkflowFiles,
   type ExternalWorkflowRun,
   type PublicWorkflowConversation,
   type PublicWorkflowProfile,
   type PublicWorkflowRunStreamEvent,
 } from "@/lib/api/public-workflows"
-import { getErrorMessage } from "@/lib/errors"
+import { compareLiveStreamIds } from "@/lib/api/agents"
 import { speakBrowserText, workflowSpeechText } from "@/lib/browser-tts"
+import { getErrorMessage } from "@/lib/errors"
+import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import {
-  acceptedUploadExtensions,
-} from "@/lib/interaction-config"
+  workflowErrorMessage,
+  workflowNodeLabel,
+} from "@/lib/workflows/graph"
 
 function conversationLabel(inputs: Record<string, unknown>, fallback: string) {
   const question = inputs.question
@@ -59,6 +65,28 @@ function updateRun(
 ) {
   return runs.map((run) => {
     if (run.id !== runId) return run
+    if (event.type === "answer_delta") {
+      const sameStream =
+        !event.stream_epoch || event.stream_epoch === run.live_stream_epoch
+      if (
+        sameStream &&
+        event.live_sequence &&
+        run.live_stream_cursor &&
+        compareLiveStreamIds(event.live_sequence, run.live_stream_cursor) <= 0
+      ) {
+        return run
+      }
+      const previous =
+        sameStream && typeof run.outputs.result === "string"
+          ? run.outputs.result
+          : ""
+      return {
+        ...run,
+        outputs: { ...run.outputs, result: previous + event.delta },
+        live_stream_epoch: event.stream_epoch ?? run.live_stream_epoch,
+        live_stream_cursor: event.live_sequence ?? run.live_stream_cursor,
+      }
+    }
     if (event.type === "progress") {
       const progress = [...run.progress]
       const index = progress.findIndex((item) => item.id === event.event.id)
@@ -71,14 +99,6 @@ function updateRun(
       progress: event.run.progress.length ? event.run.progress : run.progress,
     }
   })
-}
-
-function JsonBlock({ value }: { value: unknown }) {
-  return (
-    <pre className="max-h-72 overflow-auto rounded-md bg-muted/50 p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  )
 }
 
 function ConversationHistory({
@@ -165,9 +185,11 @@ export function PublicWorkflowChat({
   const [loading, setLoading] = React.useState(true)
   const [runsLoading, setRunsLoading] = React.useState(false)
   const [running, setRunning] = React.useState(false)
+  const [submittingFormRunId, setSubmittingFormRunId] = React.useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const streamRef = React.useRef<AbortController | null>(null)
+  const conversationScrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => () => streamRef.current?.abort(), [])
 
@@ -204,6 +226,13 @@ export function PublicWorkflowChat({
       active = false
     }
   }, [conversationId, t, token, workflowId])
+
+  React.useLayoutEffect(() => {
+    if (conversationScrollRef.current) {
+      conversationScrollRef.current.scrollTop =
+        conversationScrollRef.current.scrollHeight
+    }
+  }, [runs, runsLoading])
 
   function selectConversation(nextId: string | null) {
     streamRef.current?.abort()
@@ -284,6 +313,58 @@ export function PublicWorkflowChat({
     }
   }
 
+  async function handleFormSubmit(
+    run: ExternalWorkflowRun,
+    data: Record<string, unknown>
+  ) {
+    if (!token || !run.pending_form || submittingFormRunId) return
+    setSubmittingFormRunId(run.id)
+    setError(null)
+    try {
+      const resumed = await submitPublicWorkflowForm(
+        workflowId,
+        token,
+        run.id,
+        run.pending_form.runtime_node_id,
+        data
+      )
+      setRuns((current) =>
+        current.map((item) =>
+          item.id === run.id ? { ...resumed, progress: item.progress } : item
+        )
+      )
+      const controller = new AbortController()
+      streamRef.current = controller
+      await observePublicWorkflowRun(
+        workflowId,
+        token,
+        run.id,
+        (streamEvent) => {
+          setRuns((current) => updateRun(current, run.id, streamEvent))
+          if (
+            streamEvent.type === "complete" &&
+            streamEvent.run.status === "succeeded" &&
+            profile?.interaction_config.tts_type === "BROWSER"
+          ) {
+            speakBrowserText(
+              workflowSpeechText(streamEvent.run.outputs),
+              language
+            )
+          }
+        },
+        controller.signal
+      )
+      const refreshed = await initializePublicWorkflow(workflowId, token)
+      setConversations(refreshed.conversations.items)
+    } catch (reason) {
+      if (!(reason instanceof DOMException && reason.name === "AbortError")) {
+        setError(getErrorMessage(reason, t))
+      }
+    } finally {
+      setSubmittingFormRunId(null)
+    }
+  }
+
   if (loading || !profile) {
     return (
       <main className="flex min-h-svh items-center justify-center p-6 text-sm text-muted-foreground">
@@ -345,7 +426,10 @@ export function PublicWorkflowChat({
           </Button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          ref={conversationScrollRef}
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
           <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8 sm:px-8">
             {runsLoading ? (
               <p className="flex items-center justify-center py-12 text-sm text-muted-foreground">
@@ -378,7 +462,9 @@ export function PublicWorkflowChat({
                           ? "运行成功"
                           : run.status === "failed"
                             ? "运行失败"
-                            : "运行中"
+                            : run.status === "awaiting_input"
+                              ? "等待填写表单"
+                              : "运行中"
                       )}
                     </Badge>
                   </div>
@@ -397,32 +483,45 @@ export function PublicWorkflowChat({
                               <CircleAlertIcon className="size-4 text-destructive" />
                             ) : item.status === "succeeded" ? (
                               <CircleCheckIcon className="size-4 text-emerald-600" />
-                            ) : item.status === "skipped" ? (
+                            ) : ["skipped", "awaiting_input"].includes(item.status) ? (
                               <CircleDotDashedIcon className="size-4 text-muted-foreground" />
                             ) : (
                               <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
                             )}
-                            <span className="min-w-0 flex-1 truncate">
-                              {item.node_id}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              {item.node_type}
+                            <span
+                              className="min-w-0 flex-1 truncate"
+                              title={item.node_id}
+                            >
+                              {workflowNodeLabel(item.node_type, t)}
                             </span>
                           </div>
                         ))}
                       </div>
                     </section>
                   ) : null}
-                  {run.status === "succeeded" ? (
+                  {run.status === "awaiting_input" && run.pending_form ? (
+                    <WorkflowRuntimeForm
+                      key={run.pending_form.runtime_node_id}
+                      form={run.pending_form}
+                      submitting={submittingFormRunId === run.id}
+                      onSubmit={(data) => handleFormSubmit(run, data)}
+                    />
+                  ) : null}
+                  {typeof run.outputs.result === "string" ||
+                  run.status === "succeeded" ? (
                     <section>
                       <p className="mb-2 text-xs font-medium text-muted-foreground">
                         {t("运行结果")}
                       </p>
-                      <JsonBlock value={run.outputs} />
+                      <MarkdownContent
+                        content={workflowSpeechText(run.outputs)}
+                        className="text-sm leading-6"
+                      />
                     </section>
-                  ) : run.error ? (
+                  ) : null}
+                  {run.error ? (
                     <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                      {run.error}
+                      {workflowErrorMessage(run.error, t)}
                     </p>
                   ) : null}
                 </article>
@@ -497,7 +596,11 @@ export function PublicWorkflowChat({
               <Button
                 type="submit"
                 className="mt-5"
-                disabled={running || !question.trim()}
+                    disabled={
+                      running ||
+                      runs.some((run) => run.status === "awaiting_input") ||
+                      !question.trim()
+                    }
               >
                 {running ? (
                   <LoaderCircleIcon className="animate-spin" />
