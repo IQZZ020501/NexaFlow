@@ -2,16 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import {
   createWorkflowRun,
+  uploadWorkflowFiles,
   updateWorkflowDefinition,
 } from "../lib/api/workflows"
 import {
   createPublicWorkflowRun,
   getWorkflowApiDocumentation,
 } from "../lib/api/public-workflows"
-import {
-  initialPublicWorkflowValues,
-  parsePublicWorkflowValues,
-} from "../components/workflows/public-workflow-chat"
 
 const originalFetch = globalThis.fetch
 
@@ -56,15 +53,52 @@ describe("workflow API", () => {
       "token",
       "ws-1",
       "workflow-1",
-      { input: "release" },
+      "release",
       "published",
       3
     )
 
     expect(JSON.parse(body)).toEqual({
-      inputs: { input: "release" },
+      question: "release",
       source: "published",
       version_number: 3,
+    })
+  })
+
+  test("uploads debug attachments and passes their ids to the run", async () => {
+    const requests: Array<{ url: string; body: BodyInit | null | undefined }> = []
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      requests.push({ url: String(input), body: init?.body })
+      return Response.json([{ id: "upload-1" }])
+    }) as typeof fetch
+
+    const files = [new File(["debug"], "debug.txt", { type: "text/plain" })]
+    const uploaded = await uploadWorkflowFiles(
+      "token",
+      "ws-1",
+      "workflow-1",
+      files
+    )
+    await createWorkflowRun(
+      "token",
+      "ws-1",
+      "workflow-1",
+      "inspect attachment",
+      "draft",
+      undefined,
+      uploaded.map((item) => item.id)
+    )
+
+    expect(requests[0]?.url).toContain("/workflows/workflow-1/uploads")
+    expect(requests[0]?.body).toBeInstanceOf(FormData)
+    expect((requests[0]?.body as FormData).getAll("files")).toEqual(files)
+    expect(JSON.parse(String(requests[1]?.body))).toEqual({
+      question: "inspect attachment",
+      source: "draft",
+      file_ids: ["upload-1"],
     })
   })
 
@@ -83,71 +117,24 @@ describe("workflow API", () => {
         body: init?.body ? String(init.body) : undefined,
         authorization:
           new Headers(init?.headers).get("Authorization") ?? undefined,
-})
+      })
       return Response.json({})
     }) as typeof fetch
 
     await createPublicWorkflowRun(
       "workflow-1",
       "session-token",
-      { query: "release" },
+      "release",
       "conversation-1"
     )
     await getWorkflowApiDocumentation("workflow-1", "nxf_key")
 
     expect(requests[0]?.url).toContain("/public/workflows/workflow-1/runs")
     expect(JSON.parse(requests[0]?.body ?? "{}")).toEqual({
-      inputs: { query: "release" },
+      question: "release",
       conversation_id: "conversation-1",
     })
     expect(requests[1]?.url).toContain("/workflow-api/workflow-1/documentation")
     expect(requests[1]?.authorization).toBe("Bearer nxf_key")
-  })
-
-  test("parses published Start node inputs by declared type", () => {
-    const fields = [
-      {
-        name: "query", label: "Query", type: "string" as const,
-        control: "input" as const, required: true, default: "", options: [],
-        assignment_method: "user_input" as const,
-      },
-      {
-        name: "count", label: "Count", type: "number" as const,
-        control: "input" as const, required: true, default: 2, options: [],
-        assignment_method: "user_input" as const,
-      },
-      {
-        name: "enabled",
-        label: "Enabled",
-        type: "boolean" as const,
-        control: "input" as const,
-        required: false,
-        default: true,
-        options: [],
-        assignment_method: "user_input" as const,
-      },
-      {
-        name: "filters",
-        label: "Filters",
-        type: "object" as const,
-        control: "input" as const,
-        required: false,
-        default: {},
-        options: [],
-        assignment_method: "user_input" as const,
-      },
-    ]
-    const values = initialPublicWorkflowValues(fields)
-    values.query = "release"
-
-    expect(parsePublicWorkflowValues(fields, values)).toEqual({
-      query: "release",
-      count: 2,
-      enabled: true,
-      filters: {},
-    })
-    expect(() =>
-      parsePublicWorkflowValues(fields, { ...values, filters: "[]" })
-    ).toThrow()
   })
 })

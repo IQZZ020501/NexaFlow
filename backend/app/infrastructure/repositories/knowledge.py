@@ -139,6 +139,41 @@ async def list_knowledge_base_rows(
     ]
 
 
+async def list_knowledge_bases_with_user_grants(
+    db: AsyncSession,
+    workspace_id: str,
+    knowledge_base_ids: list[str],
+    user_id: str,
+    resource_type: str,
+) -> list[tuple[KnowledgeBase, ResourcePermission | None]]:
+    if not knowledge_base_ids:
+        return []
+    grant = ResourcePermissionORM
+    rows = await db.execute(
+        select(KnowledgeBaseORM, grant)
+        .outerjoin(
+            grant,
+            (
+                (grant.workspace_id == KnowledgeBaseORM.workspace_id)
+                & (grant.resource_type == resource_type)
+                & (grant.resource_id == KnowledgeBaseORM.id)
+                & (grant.user_id == user_id)
+            ),
+        )
+        .where(
+            KnowledgeBaseORM.workspace_id == workspace_id,
+            KnowledgeBaseORM.id.in_(knowledge_base_ids),
+        )
+    )
+    return [
+        (
+            to_entity(KnowledgeBase, knowledge_base),
+            to_entity(ResourcePermission, permission) if permission else None,
+        )
+        for knowledge_base, permission in rows.all()
+    ]
+
+
 async def list_and_lock_knowledge_bases_in_workspace(
     db: AsyncSession,
     workspace_id: str,

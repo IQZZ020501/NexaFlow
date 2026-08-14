@@ -35,11 +35,8 @@ from app.schemas.workflow import (
     ExternalWorkflowRunResponse,
     PublicWorkflowConversationListResponse,
     PublicWorkflowConversationResponse,
-    PublicWorkflowInputFieldResponse,
     PublicWorkflowProfileResponse,
-    StartNodeConfig,
     WorkflowApiDocumentationResponse,
-    WorkflowGraph,
     WorkflowRunCreateRequest,
 )
 
@@ -114,40 +111,13 @@ async def get_public_workflow_profile(
     user: User,
 ) -> PublicWorkflowProfileResponse:
     context = await get_workspace_published_workflow_context(db, workflow_id, user)
-    inputs = await _published_start_inputs(db, context)
     publication = context.publication
     return PublicWorkflowProfileResponse(
         id=context.agent.id,
         name=publication.name if publication else context.agent.name,
         description=publication.description if publication else context.agent.description,
         interaction_config=published_interaction_config(context),
-        inputs=[item for item in inputs if item.assignment_method == "user_input"],
     )
-
-
-async def _published_start_inputs(
-    db: AsyncSession,
-    context: PublishedAgentContext,
-) -> list[PublicWorkflowInputFieldResponse]:
-    version = await workflow_repository.get_version(
-        db, context.agent.workspace_id, context.agent.id
-    )
-    if version is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published workflow not found.")
-    try:
-        graph = WorkflowGraph.model_validate(version.graph)
-        start = next((node for node in graph.nodes if node.data.type == "start"), None)
-        if start is None:
-            raise ValueError("Published workflow has no start node.")
-        start_config = StartNodeConfig.model_validate(start.data.config)
-    except ValueError as exc:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, "Published workflow not found."
-        ) from exc
-    return [
-        PublicWorkflowInputFieldResponse.model_validate(item, from_attributes=True)
-        for item in start_config.inputs
-    ]
 
 
 async def get_workflow_api_documentation(
@@ -161,11 +131,6 @@ async def get_workflow_api_documentation(
         ),
         base_path=f"/api/v1/workflow-api/{context.agent.id}",
         interaction_config=published_interaction_config(context),
-        inputs=[
-            item
-            for item in await _published_start_inputs(db, context)
-            if item.assignment_method == "api_input"
-        ],
     )
 
 
@@ -201,18 +166,21 @@ async def create_external_workflow_run(
     settings: Settings,
 ) -> ExternalWorkflowRunResponse:
     await _rate_limit(settings, context.agent.id, source, consumer_id)
-    inputs = dict(payload.inputs)
     if source == "api" and payload.file_ids:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "API workflow runs cannot use public upload ids.",
         )
-    inputs["files"] = await resolve_public_workflow_files(
-        db,
-        context,
-        consumer_id,
-        payload.file_ids,
-    ) if source == "public" else []
+    files = (
+        await resolve_public_workflow_files(
+            db,
+            context,
+            consumer_id,
+            payload.file_ids,
+        )
+        if source == "public"
+        else []
+    )
     version = await workflow_repository.get_version(
         db, context.agent.workspace_id, context.agent.id
     )
@@ -223,7 +191,7 @@ async def create_external_workflow_run(
         context.agent.workspace_id,
         context.agent.id,
         WorkflowRunCreateRequest(
-            inputs=inputs,
+            question=payload.question,
             source="published",
             version_number=version.version_number,
         ),
@@ -233,6 +201,7 @@ async def create_external_workflow_run(
         access_source=source,
         consumer_id=consumer_id,
         conversation_id=payload.conversation_id,
+        files=files,
     )
     return ExternalWorkflowRunResponse(
         id=run.id,

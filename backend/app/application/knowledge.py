@@ -177,15 +177,24 @@ async def query_knowledge_base(
     settings: Settings,
 ) -> list[KnowledgeQueryHitResponse]:
     started_at = time.perf_counter()
-    embedding_model = await resolve_embedding_model(db, knowledge_base)
-    if embedding_model is None:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Embedding model is required.",
-        )
-
     candidate_limit = payload.limit * QUERY_OVERFETCH_FACTOR
-    vector_hits, keyword_chunk_ids = await asyncio.gather(
+    use_vector = payload.search_mode in {"embedding", "blend"}
+    use_keywords = payload.search_mode in {"keywords", "blend"}
+    embedding_model = None
+    if use_vector:
+        embedding_model = await resolve_embedding_model(db, knowledge_base)
+        if embedding_model is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Embedding model is required.",
+            )
+
+    # Qdrant uses cosine similarity (keep scores >= threshold); the API uses
+    # cosine distance (keep distances <= threshold).
+    qdrant_score_threshold = (
+        1.0 - payload.similarity if payload.similarity is not None else None
+    )
+    vector_task = (
         asyncio.to_thread(
             query_vectors,
             settings,
@@ -193,14 +202,31 @@ async def query_knowledge_base(
             embedding_model,
             payload.query,
             candidate_limit,
-        ),
+            qdrant_score_threshold,
+        )
+        if use_vector
+        else None
+    )
+    keyword_task = (
         knowledge_base_repository.query_keyword_chunk_ids(
             db,
             knowledge_base,
             payload.query,
             candidate_limit,
-        ),
+        )
+        if use_keywords
+        else None
     )
+    if vector_task is not None and keyword_task is not None:
+        vector_hits, keyword_chunk_ids = await asyncio.gather(
+            vector_task, keyword_task
+        )
+    elif vector_task is not None:
+        vector_hits = await vector_task
+        keyword_chunk_ids = []
+    else:
+        vector_hits = []
+        keyword_chunk_ids = await keyword_task
     ranked_hits = reciprocal_rank_fusion(vector_hits, keyword_chunk_ids)
     chunks = await knowledge_base_repository.list_chunks_by_ids(
         db,

@@ -1,9 +1,13 @@
-from datetime import date, datetime
+from datetime import datetime
+import re
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from jinja2 import Environment, TemplateSyntaxError
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.agent import AgentInteractionConfig
+
+JINJA_ENV = Environment()
 
 
 WorkflowNodeType = Literal[
@@ -13,6 +17,7 @@ WorkflowNodeType = Literal[
     "classifier",
     "knowledge",
     "condition",
+    "reply-node",
     "template",
     "variable",
     "mcp",
@@ -65,61 +70,43 @@ class WorkflowViewport(BaseModel):
 
 
 class WorkflowGraph(BaseModel):
-    nodes: list[WorkflowNode] = Field(min_length=2, max_length=200)
-    edges: list[WorkflowEdge] = Field(min_length=1, max_length=500)
+    nodes: list[WorkflowNode] = Field(min_length=1, max_length=200)
+    edges: list[WorkflowEdge] = Field(max_length=500)
     viewport: WorkflowViewport = Field(default_factory=WorkflowViewport)
 
 
-class WorkflowInputField(BaseModel):
-    name: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
-    label: str = Field(default="", max_length=120)
-    type: Literal["string", "number", "boolean", "object", "array"] = "string"
-    control: Literal["input", "select", "date"] = "input"
-    required: bool = True
-    default: Any = None
-    options: list[str] = Field(default_factory=list, max_length=50)
-    assignment_method: Literal["user_input", "api_input"] = "user_input"
-
-    @model_validator(mode="after")
-    def validate_control(self) -> "WorkflowInputField":
-        if self.control == "select" and not self.options:
-            raise ValueError("Select inputs require at least one option.")
-        if self.control == "select" and self.type != "string":
-            raise ValueError("Select inputs must use the string value type.")
-        if any(not option.strip() or len(option) > 120 for option in self.options):
-            raise ValueError("Input options must contain 1 to 120 characters.")
-        if len(self.options) != len(set(self.options)):
-            raise ValueError("Input options must be unique.")
-        if self.control == "date" and self.type != "string":
-            raise ValueError("Date inputs must use the string value type.")
-        if self.default is not None:
-            self.validate_control_value(self.default)
-        return self
-
-    def validate_control_value(self, value: Any) -> None:
-        if self.control == "select" and value not in self.options:
-            raise ValueError(f"Workflow input {self.name} must use a configured option.")
-        if self.control == "date":
-            try:
-                date.fromisoformat(value)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"Workflow input {self.name} must use an ISO date."
-                ) from exc
-
-
 class StartNodeConfig(BaseModel):
-    inputs: list[WorkflowInputField] = Field(default_factory=list, max_length=50)
+    """Fixed start node: no configuration; exposes the run question and globals."""
 
 
 class EndNodeConfig(BaseModel):
     outputs: dict[str, Any] = Field(default_factory=dict, max_length=50)
 
 
+class LlmMcpServer(BaseModel):
+    """MCP tool reference for the LLM node; must use a read-only policy."""
+
+    server_id: str = Field(min_length=1, max_length=36)
+    tool_name: str = Field(min_length=1, max_length=255)
+
+
+class LlmModelSetting(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reasoning_content_enable: bool = False
+
+
 class LlmNodeConfig(BaseModel):
     prompt: str = Field(min_length=1, max_length=20000)
     system_prompt: str = Field(default="", max_length=20000)
     model_id: str | None = Field(default=None, min_length=1, max_length=36)
+    dialogue_number: int = Field(default=1, ge=0, le=20)
+    dialogue_type: Literal["NODE", "WORKFLOW"] = "NODE"
+    model_params_setting: dict[str, Any] = Field(default_factory=dict, max_length=20)
+    model_setting: LlmModelSetting = Field(default_factory=LlmModelSetting)
+    mcp_enable: bool = False
+    mcp_servers: list[LlmMcpServer] = Field(default_factory=list, max_length=20)
+    is_result: bool = True
 
 
 class ClassifierClass(BaseModel):
@@ -144,17 +131,24 @@ class KnowledgeNodeConfig(BaseModel):
     knowledge_base_id: str | None = Field(default=None, min_length=1, max_length=36)
     knowledge_base_ids: list[
         Annotated[str, Field(min_length=1, max_length=36)]
-    ] = Field(default_factory=list, max_length=10)
+    ] = Field(default_factory=list, max_length=50)
     query: Any
     limit: int = Field(default=3, ge=1, le=8)
+    similarity: float = Field(default=0.6, ge=0, le=1)
+    search_mode: Literal["embedding", "keywords", "blend"] = "embedding"
+    max_paragraph_char_number: int = Field(default=5000, ge=1, le=20000)
+    # 内部维护，发布时由资源校验反向解析；前端不手填
+    source_dataset_id_list: list[
+        Annotated[str, Field(min_length=1, max_length=36)]
+    ] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="after")
     def validate_knowledge_bases(self) -> "KnowledgeNodeConfig":
         ids = self.resolved_knowledge_base_ids
         if not ids:
             raise ValueError("At least one knowledge base is required.")
-        if len(ids) > 10:
-            raise ValueError("At most 10 knowledge bases are allowed.")
+        if len(ids) > 50:
+            raise ValueError("At most 50 knowledge bases are allowed.")
         return self
 
     @property
@@ -169,32 +163,164 @@ class KnowledgeNodeConfig(BaseModel):
         )
 
 
-class ConditionNodeConfig(BaseModel):
-    left: Any
-    operator: Literal[
-        "equals",
-        "not_equals",
-        "contains",
-        "not_contains",
-        "greater_than",
-        "greater_than_or_equal",
-        "less_than",
-        "less_than_or_equal",
-        "is_empty",
-        "is_not_empty",
-        "length_equals",
-        "length_greater_than",
-        "length_greater_than_or_equal",
-        "length_less_than",
-        "length_less_than_or_equal",
-        "is_true",
-        "is_false",
+ConditionCompare = Literal[
+    "is_null",
+    "is_not_null",
+    "contain",
+    "not_contain",
+    "eq",
+    "ge",
+    "gt",
+    "le",
+    "lt",
+    "len_eq",
+    "len_ge",
+    "len_gt",
+    "len_le",
+    "len_lt",
+    "is_true",
+    "is_not_true",
+    "not_eq",
+]
+
+
+class ConditionRule(BaseModel):
+    field: tuple[
+        Annotated[str, Field(min_length=1, max_length=80)],
+        Annotated[str, Field(min_length=1, max_length=255)],
     ]
-    right: Any = None
+    compare: ConditionCompare
+    value: str = Field(max_length=4000)
+
+
+class ConditionBranch(BaseModel):
+    id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    type: Literal["IF", "ELSE IF", "ELSE"]
+    condition: Literal["and", "or"]
+    conditions: list[ConditionRule] = Field(max_length=20)
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_legacy_type(cls, value: Any) -> Any:
+        if isinstance(value, str) and re.fullmatch(r"ELSE IF [1-9][0-9]*", value):
+            return "ELSE IF"
+        return value
+
+
+class ConditionNodeConfig(BaseModel):
+    branch: list[ConditionBranch] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_condition(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or "branch" in value:
+            return value
+        field = value.get("left")
+        match = (
+            re.fullmatch(
+                r"{{\s*([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)\s*}}", field
+            )
+            if isinstance(field, str)
+            else None
+        )
+        compares = {
+            "equals": "eq",
+            "not_equals": "not_eq",
+            "contains": "contain",
+            "not_contains": "not_contain",
+            "greater_than": "gt",
+            "greater_than_or_equal": "ge",
+            "less_than": "lt",
+            "less_than_or_equal": "le",
+            "is_empty": "is_null",
+            "is_not_empty": "is_not_null",
+            "length_equals": "len_eq",
+            "length_greater_than": "len_gt",
+            "length_greater_than_or_equal": "len_ge",
+            "length_less_than": "len_lt",
+            "length_less_than_or_equal": "len_le",
+            "is_true": "is_true",
+            "is_false": "is_not_true",
+        }
+        compare = compares.get(str(value.get("operator")))
+        if match is None or compare is None:
+            return value
+        return {
+            "branch": [
+                {
+                    "id": "true",
+                    "type": "IF",
+                    "condition": "and",
+                    "conditions": [
+                        {
+                            "field": [match.group(1), match.group(2)],
+                            "compare": compare,
+                            "value": str(
+                                value.get("right")
+                                if value.get("right") is not None
+                                else ""
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "id": "false",
+                    "type": "ELSE",
+                    "condition": "and",
+                    "conditions": [],
+                },
+            ]
+        }
+
+    @model_validator(mode="after")
+    def validate_branches(self) -> "ConditionNodeConfig":
+        if len({item.id for item in self.branch}) != len(self.branch):
+            raise ValueError("Condition branch ids must be unique.")
+        for index, item in enumerate(self.branch):
+            expected_type = "IF" if index == 0 else "ELSE IF"
+            if item.type == "ELSE":
+                if index != len(self.branch) - 1 or item.conditions:
+                    raise ValueError("ELSE must be the final branch and have no conditions.")
+                continue
+            if item.type != expected_type or not item.conditions:
+                raise ValueError(
+                    "Condition branches must be ordered as IF followed by ELSE IF branches."
+                )
+        return self
 
 
 class TemplateNodeConfig(BaseModel):
     template: str = Field(max_length=20000)
+
+
+class ReplyNodeConfig(BaseModel):
+    reply_type: Literal["custom", "referencing"]
+    content: str = Field(default="", max_length=20000)
+    fields: tuple[
+        list[
+            Annotated[
+                str,
+                Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_-]+$"),
+            ]
+        ],
+        Annotated[str, Field(max_length=500)],
+    ] | None = None
+    is_result: bool = True
+
+    @model_validator(mode="after")
+    def validate_reply_source(self) -> "ReplyNodeConfig":
+        if self.reply_type == "custom" and not self.content.strip():
+            raise ValueError("Reply content is required for custom replies.")
+        if self.reply_type == "custom":
+            try:
+                JINJA_ENV.parse(self.content)
+            except TemplateSyntaxError as exc:
+                raise ValueError(f"Invalid reply template: {exc}") from exc
+        if self.reply_type == "referencing" and (
+            self.fields is None or len(self.fields[0]) < 2
+        ):
+            raise ValueError("Reply fields must contain a reference path and description.")
+        return self
 
 
 class VariableNodeConfig(BaseModel):
@@ -261,9 +387,10 @@ class WorkflowValidationRequest(BaseModel):
 
 
 class WorkflowRunCreateRequest(BaseModel):
-    inputs: dict[str, Any] = Field(default_factory=dict, max_length=100)
+    question: str = Field(min_length=1, max_length=4000)
     source: Literal["draft", "published"] = "draft"
     version_number: int | None = Field(default=None, ge=1)
+    file_ids: list[str] = Field(default_factory=list)
 
 
 class WorkflowNodeExecutionResponse(BaseModel):
@@ -311,17 +438,6 @@ class WorkflowNodeExecutionListResponse(BaseModel):
     items: list[WorkflowNodeExecutionResponse]
 
 
-class PublicWorkflowInputFieldResponse(BaseModel):
-    name: str
-    label: str = ""
-    type: Literal["string", "number", "boolean", "object", "array"]
-    control: Literal["input", "select", "date"] = "input"
-    required: bool
-    default: Any = None
-    options: list[str] = Field(default_factory=list)
-    assignment_method: Literal["user_input", "api_input"] = "user_input"
-
-
 class PublicWorkflowProfileResponse(BaseModel):
     id: str
     name: str
@@ -329,7 +445,6 @@ class PublicWorkflowProfileResponse(BaseModel):
     interaction_config: AgentInteractionConfig = Field(
         default_factory=AgentInteractionConfig
     )
-    inputs: list[PublicWorkflowInputFieldResponse] = Field(default_factory=list)
 
 
 class PublicWorkflowConversationResponse(BaseModel):
@@ -347,7 +462,7 @@ class PublicWorkflowConversationListResponse(BaseModel):
 
 
 class ExternalWorkflowRunCreateRequest(BaseModel):
-    inputs: dict[str, Any] = Field(default_factory=dict, max_length=100)
+    question: str = Field(min_length=1, max_length=4000)
     file_ids: list[str] = Field(default_factory=list)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
 
@@ -397,4 +512,3 @@ class WorkflowApiDocumentationResponse(BaseModel):
     interaction_config: AgentInteractionConfig = Field(
         default_factory=AgentInteractionConfig
     )
-    inputs: list[PublicWorkflowInputFieldResponse] = Field(default_factory=list)

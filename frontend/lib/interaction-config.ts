@@ -8,7 +8,7 @@ export type FileUploadType =
 
 const FILE_UPLOAD_TYPES: Record<AppType, readonly FileUploadType[]> = {
   agent: ["document", "image"],
-  workflow: ["document", "image", "audio"],
+  workflow: ["document", "image"],
 }
 
 const FILE_UPLOAD_EXTENSIONS: Partial<Record<FileUploadType, readonly string[]>> = {
@@ -17,7 +17,6 @@ const FILE_UPLOAD_EXTENSIONS: Partial<Record<FileUploadType, readonly string[]>>
     ".pptx", ".txt", ".xls", ".xlsx", ".xml", ".zip",
   ],
   image: [".jpeg", ".jpg", ".png", ".webp"],
-  audio: [".m4a", ".mp3", ".ogg", ".wav", ".webm"],
 }
 
 export const AGENT_FILE_UPLOAD_SETTING: AgentInteractionConfig["file_upload_setting"] = {

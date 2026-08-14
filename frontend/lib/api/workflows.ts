@@ -12,6 +12,7 @@ export type WorkflowNodeType =
   | "classifier"
   | "knowledge"
   | "condition"
+  | "reply-node"
   | "template"
   | "variable"
   | "mcp"
@@ -31,6 +32,8 @@ export type WorkflowNodeData = Record<string, unknown> & {
   models?: RegisteredModel[]
   knowledgeBases?: KnowledgeBase[]
   mcpServers?: McpServer[]
+  nodes?: WorkflowNode[]
+  edges?: WorkflowEdge[]
 }
 
 export type WorkflowNode = {
@@ -86,6 +89,14 @@ export type WorkflowRunStatus =
   | "succeeded"
   | "failed"
   | "cancelled"
+
+export type WorkflowUpload = {
+  id: string
+  filename: string
+  content_type: string
+  size_bytes: number
+  category: "document" | "image" | "audio"
+}
 
 export type WorkflowRun = {
   id: string
@@ -242,9 +253,10 @@ export function createWorkflowRun(
   token: string,
   workspaceId: string,
   workflowId: string,
-  inputs: Record<string, unknown>,
+  question: string,
   source: "draft" | "published" = "draft",
-  versionNumber?: number
+  versionNumber?: number,
+  fileIds: string[] = []
 ) {
   return request<WorkflowRun>(
     workflowPath(workspaceId, `/${workflowId}/runs`),
@@ -252,10 +264,29 @@ export function createWorkflowRun(
       method: "POST",
       token,
       body: JSON.stringify({
-        inputs,
+        question,
         source,
         ...(versionNumber ? { version_number: versionNumber } : {}),
+        ...(fileIds.length ? { file_ids: fileIds } : {}),
       }),
+    }
+  )
+}
+
+export function uploadWorkflowFiles(
+  token: string,
+  workspaceId: string,
+  workflowId: string,
+  files: File[]
+) {
+  const body = new FormData()
+  files.forEach((file) => body.append("files", file))
+  return request<WorkflowUpload[]>(
+    workflowPath(workspaceId, `/${workflowId}/uploads`),
+    {
+      method: "POST",
+      token,
+      body,
     }
   )
 }

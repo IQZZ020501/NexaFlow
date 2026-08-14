@@ -1,8 +1,11 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from jinja2 import StrictUndefined, TemplateError
+from jinja2.sandbox import SandboxedEnvironment
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import StructuredTool
 
 from app.application.agent_executor import DurableToolLedger
 from app.application.agent_tools import (
@@ -15,7 +18,7 @@ from app.entities.tools import McpToolPolicy
 from app.entities.user import User
 from app.infrastructure.code_sandbox import execute_workflow_code
 from app.infrastructure.config import Settings
-from app.ports.llm import RegisteredModel, build_chat_model
+from app.ports.llm import ModelToolCall, RegisteredModel, build_chat_model
 from app.schemas.workflow import (
     ClassifierNodeConfig,
     CodeNodeConfig,
@@ -24,6 +27,7 @@ from app.schemas.workflow import (
     KnowledgeNodeConfig,
     LlmNodeConfig,
     McpNodeConfig,
+    ReplyNodeConfig,
     StartNodeConfig,
     TemplateNodeConfig,
     VariableNodeConfig,
@@ -32,10 +36,17 @@ from app.schemas.workflow import (
 from app.shareddomain.agents.runtime import AgentExecutionPaused
 from app.shareddomain.agents.runtime.graph import model_completion
 from app.shareddomain.agents.runtime.state import PendingToolCall
-from app.shareddomain.agents.runtime.tools import agent_tool_metadata
-from app.shareddomain.agents.runtime.usage import usage_from_message
+from app.shareddomain.agents.runtime.tools import (
+    AgentToolResult,
+    agent_tool_metadata,
+)
+from app.shareddomain.agents.runtime.usage import merge_usage, usage_from_message
 from app.shareddomain.tools.services import ResolvedMcpTool
 from app.shareddomain.workflows.engine import NodeExecutionContext, NodeResult
+
+MAX_WORKFLOW_LLM_TOOL_CALLS = 8
+REPLY_TEMPLATE_ENV = SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
+REPLY_TEMPLATE_ENV.globals.clear()
 
 
 @dataclass(frozen=True)
@@ -49,7 +60,9 @@ class WorkflowNodeScope:
     mcp_tools: dict[tuple[str, str], tuple[ResolvedMcpTool, McpToolPolicy]]
     ledger: DurableToolLedger
     node_order: dict[str, int]
-    input_assignment_method: str | None = None
+    node_histories: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
 
 
 def _path_value(value: Any, path: str) -> Any:
@@ -81,16 +94,21 @@ def resolve_value(value: Any, context: NodeExecutionContext) -> Any:
             raise ValueError(f"Workflow reference node did not run: {node_id}.")
         return context.node_outputs[node_id]
 
+    def reference_value(name: str, path: str) -> Any:
+        if name == "global":
+            return _path_value(context.globals, path)
+        if name in context.node_outputs:
+            return _path_value(outputs(name), path)
+        if name in context.globals and not path:
+            return context.globals[name]
+        return _path_value(outputs(name), path)
+
     exact = REFERENCE_PATTERN.fullmatch(value)
     if exact:
-        node_id, path = exact.group(1), exact.group(2) or ""
-        return _path_value(outputs(node_id), path)
+        return reference_value(exact.group(1), exact.group(2) or "")
 
     def replace(match) -> str:
-        item = _path_value(
-            outputs(match.group(1)),
-            match.group(2) or "",
-        )
+        item = reference_value(match.group(1), match.group(2) or "")
         if isinstance(item, (dict, list)):
             return json.dumps(item, ensure_ascii=False, separators=(",", ":"))
         return str(item)
@@ -98,56 +116,33 @@ def resolve_value(value: Any, context: NodeExecutionContext) -> Any:
     return REFERENCE_PATTERN.sub(replace, value)
 
 
-def _matches_type(value: Any, expected: str) -> bool:
-    return {
-        "string": isinstance(value, str),
-        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
-        "boolean": isinstance(value, bool),
-        "object": isinstance(value, dict),
-        "array": isinstance(value, list),
-    }[expected]
+def render_reply_template(template: str, context: NodeExecutionContext) -> str:
+    from app.shareddomain.workflows.engine import REFERENCE_PATTERN
 
+    references: dict[str, Any] = {}
 
-def _start_result(
-    config: StartNodeConfig,
-    inputs: dict[str, Any],
-    *,
-    assignment_method: str | None = None,
-) -> NodeResult:
-    fields = {field.name: field for field in config.inputs}
-    unknown = set(inputs) - set(fields) - {"files"}
-    if unknown:
-        raise ValueError(f"Unknown workflow inputs: {', '.join(sorted(unknown))}.")
-    if assignment_method is not None:
-        invalid = {
-            name
-            for name in inputs
-            if name in fields and fields[name].assignment_method != assignment_method
+    def replace(match) -> str:
+        key = f"value_{len(references)}"
+        references[key] = resolve_value(match.group(0), context)
+        return "{{ workflow_refs." + key + " }}"
+
+    normalized = REFERENCE_PATTERN.sub(replace, template)
+    variables: dict[str, Any] = {
+        **context.globals,
+        "global": context.globals,
+        "workflow_refs": references,
+    }
+    variables.update(
+        {
+            node_id: outputs
+            for node_id, outputs in context.node_outputs.items()
+            if node_id.isidentifier()
         }
-        if invalid:
-            raise ValueError(
-                "Workflow inputs are not accepted from this workflow access source: "
-                f"{', '.join(sorted(invalid))}."
-            )
-    output: dict[str, Any] = {}
-    output["files"] = inputs.get("files", [])
-    for name, field in fields.items():
-        if name in inputs:
-            value = inputs[name]
-        elif field.default is not None:
-            value = field.default
-        elif field.required and (
-            assignment_method is None or field.assignment_method == assignment_method
-        ):
-            raise ValueError(f"Required workflow input is missing: {name}.")
-        else:
-            value = None
-        if value is not None and not _matches_type(value, field.type):
-            raise ValueError(f"Workflow input {name} must be {field.type}.")
-        if value is not None:
-            field.validate_control_value(value)
-        output[name] = value
-    return NodeResult(inputs=dict(inputs), outputs=output)
+    )
+    try:
+        return REPLY_TEMPLATE_ENV.from_string(normalized).render(variables)
+    except TemplateError as exc:
+        raise ValueError(f"Invalid workflow reply template: {exc}") from exc
 
 
 def _model_output_limit(provider_type: str, remaining_model_tokens: int) -> dict[str, int]:
@@ -156,6 +151,180 @@ def _model_output_limit(provider_type: str, remaining_model_tokens: int) -> dict
     if provider_type == "ollama":
         return {"num_predict": remaining_model_tokens}
     return {"max_tokens": remaining_model_tokens}
+
+
+def _model_call_params(
+    provider_type: str,
+    setting: dict[str, Any],
+    remaining_model_tokens: int,
+) -> dict[str, Any]:
+    """Merge user model parameters with the remaining token output limit.
+
+    Only parameters every supported provider accepts are honored; a user
+    ``max_tokens`` is capped by the run's remaining model token budget.
+    """
+    output_limit = _model_output_limit(provider_type, remaining_model_tokens)
+    native_max_key = next(iter(output_limit))
+    params: dict[str, Any] = {}
+    temperature = setting.get("temperature")
+    if isinstance(temperature, (int, float)) and not isinstance(temperature, bool):
+        params["temperature"] = float(temperature)
+    top_p = setting.get("top_p")
+    if isinstance(top_p, (int, float)) and not isinstance(top_p, bool):
+        params["top_p"] = float(top_p)
+    max_tokens = setting.get("max_tokens")
+    if (
+        isinstance(max_tokens, int)
+        and not isinstance(max_tokens, bool)
+        and max_tokens > 0
+    ):
+        params[native_max_key] = min(max_tokens, output_limit[native_max_key])
+    return {**output_limit, **params}
+
+
+def _history_messages(
+    parsed: LlmNodeConfig,
+    scope: WorkflowNodeScope,
+    node: WorkflowNode,
+    context: NodeExecutionContext,
+) -> list[Any]:
+    """Build the multi-turn history messages for an LLM node.
+
+    ``NODE`` keeps only prior turns whose answer was produced by this node;
+    ``WORKFLOW`` keeps the whole conversation history. Both take the last
+    ``dialogue_number`` rounds, mirroring MaxKB semantics.
+    """
+    rounds = parsed.dialogue_number
+    if rounds <= 0:
+        return []
+    history: Any = context.globals.get("history_context") or []
+    if parsed.dialogue_type == "NODE":
+        history = scope.node_histories.get(node.id) or []
+    messages: list[Any] = []
+    for item in history[-rounds:]:
+        if not isinstance(item, dict):
+            continue
+        question = item.get("question")
+        answer = item.get("answer")
+        if question is None or answer is None:
+            continue
+        messages.append(HumanMessage(content=str(question)))
+        messages.append(AIMessage(content=str(answer)))
+    return messages
+
+
+def _message_reasoning(message: Any) -> str:
+    reasoning = getattr(message, "additional_kwargs", None)
+    value = reasoning.get("reasoning_content") if isinstance(reasoning, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+async def _invoke_chat(
+    scope: WorkflowNodeScope,
+    model: RegisteredModel,
+    messages: list[Any],
+    remaining_model_tokens: int,
+    call_params: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any], str]:
+    """One chat-model call returning content, usage, and reasoning content."""
+    output_limit = _model_output_limit(model.provider_type, remaining_model_tokens)
+    merged = {**output_limit, **(call_params or {})}
+    message = await build_chat_model(scope.settings, model).ainvoke(messages, **merged)
+    usage = usage_from_message(message)
+    return model_completion(message).content, usage, _message_reasoning(message)
+
+
+async def _llm_tool_call(
+    scope: WorkflowNodeScope,
+    node: WorkflowNode,
+    tool: StructuredTool,
+    call: ModelToolCall,
+    tool_call_count: int,
+) -> AgentToolResult:
+    arguments: Any = {}
+    if call.arguments:
+        try:
+            arguments = json.loads(call.arguments)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "Workflow model returned invalid tool arguments."
+            ) from exc
+    if not isinstance(arguments, dict):
+        raise ValueError("Workflow model returned invalid tool arguments.")
+    pending: PendingToolCall = {
+        "id": f"workflow-{node.id}-tool-{tool_call_count}",
+        "name": tool.name,
+        "arguments": call.arguments or "{}",
+    }
+    metadata = agent_tool_metadata(tool)
+    turn = scope.node_order.get(node.id, 0) + 1 + tool_call_count
+    try:
+        stored = await scope.ledger.before(turn, pending, metadata, arguments)
+        if stored is None:
+            result = await tool.ainvoke(arguments)
+            await scope.ledger.after(turn, pending, metadata, arguments, result)
+        else:
+            result = stored
+    except AgentExecutionPaused as exc:
+        raise RuntimeError(
+            "Workflow LLM MCP tool call is not permitted."
+        ) from exc
+    return result
+
+
+async def _model_tool_loop(
+    scope: WorkflowNodeScope,
+    node: WorkflowNode,
+    model: RegisteredModel,
+    messages: list[Any],
+    remaining_model_tokens: int,
+    call_params: dict[str, Any],
+    tools: list[StructuredTool],
+) -> tuple[str, dict[str, Any], str]:
+    """Run the LLM with bound MCP tools until it answers or the call cap hits.
+
+    Tool executions are durably recorded through the run's tool ledger, and
+    every model invocation counts against the run's model token budget.
+    """
+    bound = build_chat_model(scope.settings, model).bind_tools(tools)
+    total_usage: dict[str, Any] = {}
+    tool_call_count = 0
+    reasoning = ""
+    for _ in range(MAX_WORKFLOW_LLM_TOOL_CALLS):
+        message = await bound.ainvoke(messages, **call_params)
+        reasoning = _message_reasoning(message)
+        total_usage = merge_usage(total_usage, usage_from_message(message))
+        if int(total_usage.get("total_tokens") or 0) > remaining_model_tokens:
+            raise ValueError("Workflow model token budget exceeded.")
+        completion = model_completion(message)
+        if completion.tool_calls:
+            messages.append(message)
+            for call in completion.tool_calls:
+                if not call.id or not call.name:
+                    raise ValueError("Workflow model returned an invalid tool call.")
+                tool = next(
+                    (item for item in tools if item.name == call.name), None
+                )
+                if tool is None:
+                    raise ValueError("Workflow model requested an unavailable tool.")
+                result = await _llm_tool_call(
+                    scope,
+                    node,
+                    tool,
+                    call,
+                    tool_call_count,
+                )
+                tool_call_count += 1
+                messages.append(
+                    ToolMessage(
+                        content=result.content,
+                        tool_call_id=call.id,
+                        name=tool.name,
+                    )
+                )
+            continue
+        return completion.content, total_usage, reasoning
+    raise ValueError("Workflow model tool call limit reached.")
 
 
 async def _model_result(
@@ -174,86 +343,69 @@ async def _model_result(
     if system_prompt:
         messages.append(SystemMessage(content=system_prompt))
     messages.append(HumanMessage(content=prompt))
-    output_limit = _model_output_limit(model.provider_type, remaining_model_tokens)
-    message = await build_chat_model(scope.settings, model).ainvoke(
-        messages, **output_limit
+    content, usage, _reasoning = await _invoke_chat(
+        scope, model, messages, remaining_model_tokens
     )
-    usage = usage_from_message(message)
-    return model_completion(message).content, usage
+    return content, usage
 
 
 def _condition(left: Any, operator: str, right: Any) -> bool:
-    if operator == "equals":
-        return left == right
-    if operator == "not_equals":
-        return left != right
-    if operator in {"contains", "not_contains"}:
-        if not isinstance(left, (str, list, dict)):
-            raise ValueError(
-                "Workflow contains condition requires a string, array, or object."
-            )
-        if isinstance(left, str) and not isinstance(right, str):
-            raise ValueError("Workflow contains condition has incompatible operands.")
-        if isinstance(left, dict):
-            try:
-                hash(right)
-            except TypeError as exc:
-                raise ValueError(
-                    "Workflow contains condition has incompatible operands."
-                ) from exc
-        matched = right in left
-        return matched if operator == "contains" else not matched
-    if operator in {
-        "greater_than",
-        "greater_than_or_equal",
-        "less_than",
-        "less_than_or_equal",
-    } and not (
-        (isinstance(left, str) and isinstance(right, str))
-        or (
-            isinstance(left, (int, float))
-            and not isinstance(left, bool)
-            and isinstance(right, (int, float))
-            and not isinstance(right, bool)
-        )
-    ):
-        raise ValueError(
-            "Workflow ordering condition requires two strings or two numbers."
-        )
-    if operator == "greater_than":
-        return left > right
-    if operator == "greater_than_or_equal":
-        return left >= right
-    if operator == "less_than":
-        return left < right
-    if operator == "less_than_or_equal":
-        return left <= right
-    if operator == "is_empty":
+    if operator == "is_null":
         return left is None or left == "" or left == [] or left == {}
-    if operator == "is_not_empty":
+    if operator == "is_not_null":
         return not (left is None or left == "" or left == [] or left == {})
-    if operator.startswith("length_"):
+    if operator in {"contain", "not_contain"}:
+        target = str(right)
+        if isinstance(left, list):
+            matched = any(str(item) == target for item in left)
+        else:
+            matched = target in str(left)
+        return matched if operator == "contain" else not matched
+    if operator == "eq":
+        return str(left) == str(right)
+    if operator == "not_eq":
+        return str(left) != str(right)
+    if operator in {"ge", "gt", "le", "lt"}:
+        try:
+            ordered_left: Any = float(left)
+            ordered_right: Any = float(right)
+        except (TypeError, ValueError):
+            ordered_left, ordered_right = str(left), str(right)
+        if operator == "ge":
+            return ordered_left >= ordered_right
+        if operator == "gt":
+            return ordered_left > ordered_right
+        if operator == "le":
+            return ordered_left <= ordered_right
+        return ordered_left < ordered_right
+    if operator.startswith("len_"):
         if not isinstance(left, (str, list, dict)):
             raise ValueError(
                 "Workflow length condition requires a string, array, or object."
             )
-        if not isinstance(right, int) or isinstance(right, bool) or right < 0:
+        try:
+            length = int(right)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Workflow length condition requires a non-negative integer."
+            ) from exc
+        if length < 0:
             raise ValueError(
                 "Workflow length condition requires a non-negative integer."
             )
-    if operator == "length_equals":
-        return len(left) == right
-    if operator == "length_greater_than":
-        return len(left) > right
-    if operator == "length_greater_than_or_equal":
-        return len(left) >= right
-    if operator == "length_less_than":
-        return len(left) < right
-    if operator == "length_less_than_or_equal":
-        return len(left) <= right
+        if operator == "len_eq":
+            return len(left) == length
+        if operator == "len_ge":
+            return len(left) >= length
+        if operator == "len_gt":
+            return len(left) > length
+        if operator == "len_le":
+            return len(left) <= length
+        if operator == "len_lt":
+            return len(left) < length
     if operator == "is_true":
         return left is True
-    if operator == "is_false":
+    if operator == "is_not_true":
         return left is False
     raise ValueError("Unknown workflow condition operator.")
 
@@ -266,10 +418,16 @@ async def execute_workflow_node(
     config = node.data.config
     node_type = node.data.type
     if node_type == "start":
-        return _start_result(
-            StartNodeConfig.model_validate(config),
-            context.workflow_inputs,
-            assignment_method=scope.input_assignment_method,
+        StartNodeConfig.model_validate(config)
+        question = scope.run.goal or ""
+        files = context.workflow_inputs.get("files", []) or []
+        return NodeResult(
+            inputs={"question": question},
+            outputs={
+                "files": files,
+                "question": question,
+                **context.globals,
+            },
         )
     if node_type == "end":
         outputs = resolve_value(EndNodeConfig.model_validate(config).outputs, context)
@@ -281,27 +439,117 @@ async def execute_workflow_node(
         template = TemplateNodeConfig.model_validate(config).template
         text = resolve_value(template, context)
         return NodeResult(inputs={"template": template}, outputs={"text": text})
+    if node_type == "reply-node":
+        parsed = ReplyNodeConfig.model_validate(config)
+        if parsed.reply_type == "referencing":
+            path, description = parsed.fields or ([], "")
+            answer = str(resolve_value("{{" + ".".join(path) + "}}", context))
+            inputs = {"fields": [path, description]}
+        else:
+            answer = render_reply_template(parsed.content, context)
+            inputs = {"content": parsed.content}
+        return NodeResult(inputs=inputs, outputs={"answer": answer})
     if node_type == "condition":
         parsed = ConditionNodeConfig.model_validate(config)
-        left = resolve_value(parsed.left, context)
-        right = resolve_value(parsed.right, context)
-        matched = _condition(left, parsed.operator, right)
+        selected = None
+        resolved_conditions = []
+        for branch in parsed.branch:
+            if branch.type == "ELSE":
+                selected = branch
+                break
+            matches = []
+            for rule in branch.conditions:
+                left = resolve_value(
+                    f"{{{{{rule.field[0]}.{rule.field[1]}}}}}", context
+                )
+                right = resolve_value(rule.value, context)
+                matched = _condition(left, rule.compare, right)
+                matches.append(matched)
+                resolved_conditions.append(
+                    {
+                        "branch_id": branch.id,
+                        "field": list(rule.field),
+                        "compare": rule.compare,
+                        "value": right,
+                        "matched": matched,
+                    }
+                )
+            if (branch.condition == "and" and all(matches)) or (
+                branch.condition == "or" and any(matches)
+            ):
+                selected = branch
+                break
+        if selected is None:
+            raise ValueError("Workflow condition did not match a branch.")
         return NodeResult(
-            inputs={"left": left, "operator": parsed.operator, "right": right},
-            outputs={"matched": matched},
-            selected_handles=frozenset({"true" if matched else "false"}),
+            inputs={"conditions": resolved_conditions},
+            outputs={"branch_name": selected.type},
+            selected_handles=frozenset({selected.id}),
         )
     if node_type == "llm":
         parsed = LlmNodeConfig.model_validate(config)
         prompt = str(resolve_value(parsed.prompt, context))
         system_prompt = str(resolve_value(parsed.system_prompt, context))
         model_id = parsed.model_id or scope.run.model_id
-        content, usage = await _model_result(
-            scope, model_id, system_prompt, prompt, context.remaining_model_tokens
+        model = scope.models.get(model_id)
+        if model is None:
+            raise ValueError("Workflow model is unavailable.")
+        if context.remaining_model_tokens <= 0:
+            raise ValueError("Workflow model token budget exceeded.")
+        messages: list[Any] = []
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        messages.extend(_history_messages(parsed, scope, node, context))
+        messages.append(HumanMessage(content=prompt))
+        call_params = _model_call_params(
+            model.provider_type,
+            parsed.model_params_setting,
+            context.remaining_model_tokens,
         )
+        tools: list[StructuredTool] = []
+        if parsed.mcp_enable:
+            for reference in parsed.mcp_servers:
+                resolved = scope.mcp_tools.get(
+                    (reference.server_id, reference.tool_name)
+                )
+                if resolved is None:
+                    raise ValueError(
+                        "Workflow MCP tool is unavailable or not read-only."
+                    )
+                tools.append(
+                    build_mcp_agent_tool(resolved[0], scope.settings, "read_only")
+                )
+        if tools:
+            content, usage, reasoning = await _model_tool_loop(
+                scope,
+                node,
+                model,
+                messages,
+                context.remaining_model_tokens,
+                call_params,
+                tools,
+            )
+        else:
+            content, usage, reasoning = await _invoke_chat(
+                scope,
+                model,
+                messages,
+                context.remaining_model_tokens,
+                call_params,
+            )
+        outputs: dict[str, Any] = {"text": content}
+        if parsed.model_setting.reasoning_content_enable and reasoning:
+            outputs["reasoning_content"] = reasoning
         return NodeResult(
-            inputs={"prompt": prompt, "system_prompt": system_prompt, "model_id": model_id},
-            outputs={"text": content},
+            inputs={
+                "prompt": prompt,
+                "system_prompt": system_prompt,
+                "model_id": model_id,
+                "dialogue_type": parsed.dialogue_type,
+                "dialogue_number": parsed.dialogue_number,
+                "mcp_enable": parsed.mcp_enable,
+            },
+            outputs=outputs,
             model_tokens=int(usage.get("total_tokens") or 0),
             model_usage=usage,
         )
@@ -345,26 +593,64 @@ async def execute_workflow_node(
             scope.workspace_role,
             scope.settings,
         )
-        result = await tool.ainvoke({"query": query, "limit": parsed.limit})
+        result = await tool.ainvoke(
+            {
+                "query": query,
+                "limit": parsed.limit,
+                "search_mode": parsed.search_mode,
+                "similarity": parsed.similarity,
+            }
+        )
         if result.is_error:
             raise RuntimeError(result.summary)
         output = result.output if isinstance(result.output, dict) else {"content": result.content}
         hits = output.get("hits")
         selected_hits = hits[: parsed.limit] if isinstance(hits, list) else []
+        paragraph_list = [
+            {
+                "knowledge_base": str(item.get("knowledge_base") or ""),
+                "document": str(item.get("document") or ""),
+                "chunk_id": str(item.get("chunk_id") or ""),
+                "document_id": str(item.get("document_id") or ""),
+                "content": str(item.get("content") or ""),
+                "distance": item.get("distance"),
+            }
+            for item in selected_hits
+            if isinstance(item, dict)
+        ]
+        # 达到检索相似度阈值的向量命中视为可直接回答（MaxKB 的分段级
+        # hit_handling_method 元数据在 NexaFlow 中不存在，故以节点阈值为准）
+        is_hit_handling_method_list = [
+            item
+            for item in paragraph_list
+            if isinstance(item["distance"], (int, float))
+            and not isinstance(item["distance"], bool)
+            and item["distance"] <= parsed.similarity
+        ]
+        joined = "\n\n".join(
+            item["content"] for item in paragraph_list if item["content"]
+        )
+        direct_joined = "\n\n".join(
+            item["content"]
+            for item in is_hit_handling_method_list
+            if item["content"]
+        )
         outputs = {
             **output,
             "hits": selected_hits,
-            "content": "\n\n".join(
-                str(item.get("content") or "")
-                for item in selected_hits
-                if isinstance(item, dict) and item.get("content")
-            ),
+            "paragraph_list": paragraph_list,
+            "is_hit_handling_method_list": is_hit_handling_method_list,
+            "data": joined[: parsed.max_paragraph_char_number],
+            "directly_return": direct_joined,
+            "content": joined,
         }
         return NodeResult(
             inputs={
                 "query": query,
                 "knowledge_base_ids": parsed.resolved_knowledge_base_ids,
                 "limit": parsed.limit,
+                "search_mode": parsed.search_mode,
+                "similarity": parsed.similarity,
             },
             outputs=outputs,
         )

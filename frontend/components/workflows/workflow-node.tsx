@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import type { ComponentType } from "react"
+import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   BracesIcon,
   BrainCircuitIcon,
@@ -14,18 +15,25 @@ import {
   TextCursorInputIcon,
   WrenchIcon,
   CheckCircle2Icon,
+  CheckIcon,
   CircleAlertIcon,
   CircleDotDashedIcon,
   LoaderCircleIcon,
+  MessageSquareMoreIcon,
+  MinusIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   CopyIcon,
+  PencilIcon,
   PlusIcon,
+  SettingsIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 
 import { useLanguage } from "@/contexts/language-provider"
+import { useSession } from "@/contexts/session-context"
 import type { TFunction, TranslationKey } from "@/i18n"
 import type { Agent } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
@@ -35,15 +43,47 @@ import type {
   WorkflowNodeData,
   WorkflowNodeType,
 } from "@/lib/api/workflows"
+import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
+import {
+  WORKFLOW_START_FIELDS,
+  WORKFLOW_START_GLOBALS,
+  upstreamWorkflowFields,
+} from "@/lib/workflows/graph"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import {
+  DropdownMenu,
+  DropdownMenuContent as BaseDropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { IconButton } from "@/components/ui/icon-button"
+
+function DropdownMenuContent({
+  className,
+  ...props
+}: React.ComponentProps<typeof BaseDropdownMenuContent>) {
+  return (
+    <BaseDropdownMenuContent
+      className={cn(
+        "min-w-0 rounded-md p-0.5 [&_[data-slot=dropdown-menu-item]]:gap-1.5 [&_[data-slot=dropdown-menu-item]]:rounded-sm [&_[data-slot=dropdown-menu-item]]:px-1.5 [&_[data-slot=dropdown-menu-item]]:py-1 [&_[data-slot=dropdown-menu-item]]:text-[11px] [&_[data-slot=dropdown-menu-item]]:leading-4 [&_[data-slot=dropdown-menu-item]]:whitespace-nowrap",
+        className
+      )}
+      {...props}
+    />
+  )
+}
 
 const NODE_LABELS: Record<WorkflowNodeType, TranslationKey> = {
   start: "开始节点",
@@ -52,6 +92,7 @@ const NODE_LABELS: Record<WorkflowNodeType, TranslationKey> = {
   classifier: "问题分类器",
   knowledge: "知识检索节点",
   condition: "条件分支",
+  "reply-node": "指定回复",
   template: "模板转换",
   variable: "变量赋值",
   mcp: "MCP 工具节点",
@@ -68,6 +109,7 @@ export const NODE_ICONS: Record<
   classifier: RouteIcon,
   knowledge: DatabaseIcon,
   condition: GitBranchIcon,
+  "reply-node": MessageSquareMoreIcon,
   template: TextCursorInputIcon,
   variable: BracesIcon,
   mcp: WrenchIcon,
@@ -106,10 +148,167 @@ const NODE_ACCENTS: Record<WorkflowNodeType, string> = {
   classifier: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
   knowledge: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   condition: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  "reply-node": "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   template: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   variable: "bg-pink-500/10 text-pink-600 dark:text-pink-400",
   mcp: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
   code: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+}
+
+const KNOWLEDGE_OUTPUT_FIELDS: Array<{
+  field: string
+  label: TranslationKey
+}> = [
+  { field: "paragraph_list", label: "检索结果的分段列表" },
+  {
+    field: "is_hit_handling_method_list",
+    label: "满足直接回答的分段列表",
+  },
+  { field: "data", label: "检索结果" },
+  { field: "directly_return", label: "满足直接回答的分段内容" },
+]
+
+const LLM_OUTPUT_FIELDS: Array<{
+  field: string
+  label: TranslationKey
+}> = [
+  { field: "text", label: "模型回复" },
+  { field: "reasoning_content", label: "思考过程" },
+]
+
+const OUTPUT_FIELD_LABELS: Partial<
+  Record<WorkflowNodeType, Record<string, TranslationKey>>
+> = {
+  classifier: { class: "分类结果" },
+  template: { text: "模板内容" },
+  variable: { value: "变量值" },
+  mcp: { result: "工具结果" },
+  code: { result: "执行结果", stdout: "标准输出", stderr: "错误输出" },
+}
+
+function outputFieldLabel(type: WorkflowNodeType, field: string, t: TFunction) {
+  const label = OUTPUT_FIELD_LABELS[type]?.[field]
+  return label ? t(label) : field
+}
+
+const KNOWLEDGE_SEARCH_MODES: Array<{
+  value: string
+  label: TranslationKey
+}> = [
+  { value: "embedding", label: "向量检索" },
+  { value: "keywords", label: "关键词检索" },
+  { value: "blend", label: "混合检索" },
+]
+
+const CONDITION_COMPARE_OPTIONS: Array<{
+  value: string
+  label: TranslationKey
+}> = [
+  { value: "is_null", label: "为空" },
+  { value: "is_not_null", label: "不为空" },
+  { value: "contain", label: "包含" },
+  { value: "not_contain", label: "不包含" },
+  { value: "eq", label: "等于" },
+  { value: "ge", label: "大于等于" },
+  { value: "gt", label: "大于" },
+  { value: "le", label: "小于等于" },
+  { value: "lt", label: "小于" },
+  { value: "len_eq", label: "长度等于" },
+  { value: "len_ge", label: "长度大于等于" },
+  { value: "len_gt", label: "长度大于" },
+  { value: "len_le", label: "长度小于等于" },
+  { value: "len_lt", label: "长度小于" },
+  { value: "is_true", label: "为真" },
+  { value: "is_not_true", label: "不为真" },
+]
+
+const CONDITION_VALUELESS_COMPARE = new Set([
+  "is_null",
+  "is_not_null",
+  "is_true",
+  "is_not_true",
+])
+
+type ConditionRule = {
+  field: [string, string]
+  compare: string
+  value: string
+}
+
+type ConditionBranch = {
+  id: string
+  type: string
+  condition: "and" | "or"
+  conditions: ConditionRule[]
+}
+
+function conditionBranches(
+  config: Record<string, unknown>,
+  startNodeId = "start"
+): ConditionBranch[] {
+  if (Array.isArray(config.branch)) {
+    return (config.branch as ConditionBranch[]).map((branch) => ({
+      ...branch,
+      type: /^ELSE IF(?: [1-9][0-9]*)?$/.test(branch.type)
+        ? "ELSE IF"
+        : branch.type,
+    }))
+  }
+  const fieldMatch = String(config.left ?? "").match(
+    /^{{\s*([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)\s*}}$/
+  )
+  const legacyCompare: Record<string, string> = {
+    equals: "eq",
+    not_equals: "not_eq",
+    contains: "contain",
+    not_contains: "not_contain",
+    greater_than: "gt",
+    greater_than_or_equal: "ge",
+    less_than: "lt",
+    less_than_or_equal: "le",
+    is_empty: "is_null",
+    is_not_empty: "is_not_null",
+    length_equals: "len_eq",
+    length_greater_than: "len_gt",
+    length_greater_than_or_equal: "len_ge",
+    length_less_than: "len_lt",
+    length_less_than_or_equal: "len_le",
+    is_true: "is_true",
+    is_false: "is_not_true",
+  }
+  return [
+    {
+      id: "true",
+      type: "IF",
+      condition: "and",
+      conditions: [
+        {
+          field: fieldMatch
+            ? [fieldMatch[1], fieldMatch[2]]
+            : [startNodeId, "question"],
+          compare: legacyCompare[String(config.operator)] ?? "eq",
+          value: String(config.right ?? ""),
+        },
+      ],
+    },
+    { id: "false", type: "ELSE", condition: "and", conditions: [] },
+  ]
+}
+
+function createConditionId() {
+  return crypto.randomUUID().replaceAll("-", "").slice(0, 12)
+}
+
+function normalizeConditionBranches(branches: ConditionBranch[]) {
+  return branches.map((branch, index) => ({
+    ...branch,
+    type:
+      index === 0
+        ? "IF"
+        : index === branches.length - 1 && branch.type === "ELSE"
+          ? "ELSE"
+          : "ELSE IF",
+  }))
 }
 
 function previewValue(value: unknown) {
@@ -121,10 +320,8 @@ function previewValue(value: unknown) {
 function configSummary(node: WorkflowNodeData, t: TFunction) {
   const config = node.config
   switch (node.type) {
-    case "start": {
-      const count = Array.isArray(config.inputs) ? config.inputs.length : 0
-      return `${t("输入字段")} · ${count}`
-    }
+    case "start":
+      return null
     case "end": {
       const outputs = config.outputs
       const count = outputs && typeof outputs === "object" ? Object.keys(outputs).length : 0
@@ -139,27 +336,10 @@ function configSummary(node: WorkflowNodeData, t: TFunction) {
     case "knowledge":
       return `${t("检索查询")} · ${previewValue(config.query) || t("未配置")}`
     case "condition": {
-      const operators: Record<string, TranslationKey> = {
-        equals: "等于",
-        not_equals: "不等于",
-        contains: "包含",
-        not_contains: "不包含",
-        greater_than: "大于",
-        greater_than_or_equal: "大于等于",
-        less_than: "小于",
-        less_than_or_equal: "小于等于",
-        is_empty: "为空",
-        is_not_empty: "不为空",
-        length_equals: "长度等于",
-        length_greater_than: "长度大于",
-        length_greater_than_or_equal: "长度大于等于",
-        length_less_than: "长度小于",
-        length_less_than_or_equal: "长度小于等于",
-        is_true: "为真",
-        is_false: "为假",
-      }
-      return t(operators[String(config.operator)] ?? "运算符")
+      return `${t("分支")} · ${conditionBranches(config).length}`
     }
+    case "reply-node":
+      return t(config.reply_type === "referencing" ? "引用变量" : "自定义")
     case "template":
       return `${t("模板内容")} · ${previewValue(config.template) || t("未配置")}`
     case "variable":
@@ -193,7 +373,7 @@ function JsonEditor({
   const [invalid, setInvalid] = React.useState(false)
 
   return (
-    <label className="grid gap-1.5 text-xs font-medium" htmlFor={id}>
+    <label className="grid min-w-0 gap-1.5 text-xs font-medium" htmlFor={id}>
       {label}
       <textarea
         id={id}
@@ -220,6 +400,135 @@ function JsonEditor({
   )
 }
 
+function VariablePicker({
+  nodeId,
+  node,
+  t,
+  label,
+  className,
+  onInsert,
+}: {
+  nodeId: string
+  node: WorkflowNodeData
+  t: TFunction
+  label?: string
+  className?: string
+  onInsert: (reference: string, path: string[], description: string) => void
+}) {
+  const [open, setOpen] = React.useState(false)
+  const startNodeId =
+    (node.nodes ?? []).find((item) => item.data.type === "start")?.id ??
+    "start"
+  const upstream = React.useMemo(() => {
+    const nodes = node.nodes ?? []
+    const edges = node.edges ?? []
+    return upstreamWorkflowFields(nodes, edges, nodeId, outputFieldNames)
+  }, [node.edges, node.nodes, nodeId])
+  const upstreamFieldLabel = (sourceId: string, field: string) => {
+    const source = (node.nodes ?? []).find((item) => item.id === sourceId)
+    const definition =
+      source?.data.type === "knowledge"
+        ? KNOWLEDGE_OUTPUT_FIELDS.find((item) => item.field === field)
+        : source?.data.type === "llm"
+          ? LLM_OUTPUT_FIELDS.find((item) => item.field === field)
+          : undefined
+    return definition ? t(definition.label) : field
+  }
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          className={cn(
+            "h-6 px-1.5 text-[11px] font-normal text-muted-foreground",
+            className
+          )}
+        >
+          <span className="min-w-0 truncate">{label ?? t("插入变量")}</span>
+          {label ? <ChevronDownIcon className="ml-auto size-3.5" /> : null}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-80 w-60 overflow-y-auto">
+        <p className="px-2 pt-1.5 pb-0.5 text-[10px] font-medium text-muted-foreground">
+          {t("全局变量")}
+        </p>
+        {WORKFLOW_START_GLOBALS.map((field) => (
+          <DropdownMenuItem
+            key={field.value}
+            onSelect={() => {
+              onInsert(
+                `{{global.${field.value}}}`,
+                ["global", field.value],
+                t(field.label)
+              )
+              setOpen(false)
+            }}
+          >
+            <span className="min-w-0 flex-1 truncate text-xs">
+              {t(field.label)}
+            </span>
+          </DropdownMenuItem>
+        ))}
+        <p className="px-2 pt-1.5 pb-0.5 text-[10px] font-medium text-muted-foreground">
+          {t("开始节点")}
+        </p>
+        {WORKFLOW_START_FIELDS.map((field) => (
+          <DropdownMenuItem
+            key={field.value}
+            onSelect={() => {
+              onInsert(
+                `{{${startNodeId}.${field.value}}}`,
+                [startNodeId, field.value],
+                t(field.label)
+              )
+              setOpen(false)
+            }}
+          >
+            <span className="min-w-0 flex-1 truncate text-xs">
+              {t(field.label)}
+            </span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        {upstream.length ? (
+          upstream.map((group) => (
+            <React.Fragment key={group.id}>
+              <p className="px-2 pt-1.5 pb-0.5 text-[10px] font-medium text-muted-foreground">
+                {group.title}
+              </p>
+              {group.fields.map((field) => {
+                const displayLabel = upstreamFieldLabel(group.id, field)
+                return (
+                  <DropdownMenuItem
+                    key={field}
+                    onSelect={() => {
+                      onInsert(
+                        `{{${group.id}.${field}}}`,
+                        [group.id, field],
+                        `${group.title} > ${displayLabel}`
+                      )
+                      setOpen(false)
+                    }}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-xs">
+                      {displayLabel}
+                    </span>
+                  </DropdownMenuItem>
+                )
+              })}
+            </React.Fragment>
+          ))
+        ) : (
+          <p className="px-2 py-2 text-xs text-muted-foreground">
+            {t("暂无可引用变量")}
+          </p>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function TextEditor({
   id,
   label,
@@ -227,6 +536,10 @@ function TextEditor({
   readOnly,
   rows = 3,
   onChange,
+  node,
+  nodeId,
+  t,
+  insertVariables = false,
 }: {
   id: string
   label: string
@@ -234,19 +547,569 @@ function TextEditor({
   readOnly: boolean
   rows?: number
   onChange: (value: string) => void
+  node: WorkflowNodeData
+  nodeId: string
+  t: TFunction
+  insertVariables?: boolean
 }) {
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const insertReference = React.useCallback(
+    (reference: string) => {
+      const textarea = textareaRef.current
+      const start = textarea?.selectionStart ?? (typeof value === "string" ? value.length : 0)
+      const end = textarea?.selectionEnd ?? start
+      onChange(
+        `${typeof value === "string" ? value : JSON.stringify(value)}`
+          .slice(0, start) + reference + `${typeof value === "string" ? value : JSON.stringify(value)}`.slice(end)
+      )
+      requestAnimationFrame(() => {
+        textarea?.focus()
+        textarea?.setSelectionRange(start + reference.length, start + reference.length)
+      })
+    },
+    [onChange, value]
+  )
   return (
     <label className="grid gap-1.5 text-xs font-medium" htmlFor={id}>
-      {label}
+      <span className="flex items-center justify-between gap-2">
+        {label}
+        {insertVariables && !readOnly ? (
+          <VariablePicker nodeId={nodeId} node={node} t={t} onInsert={insertReference} />
+        ) : null}
+      </span>
       <textarea
+        ref={textareaRef}
         id={id}
         rows={rows}
-        className="resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="w-full min-w-0 resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
         value={typeof value === "string" ? value : JSON.stringify(value)}
         readOnly={readOnly}
         onChange={(event) => onChange(event.target.value)}
       />
     </label>
+  )
+}
+
+function NumberStepper({
+  id,
+  value,
+  min,
+  max,
+  step = 1,
+  readOnly,
+  onChange,
+  t,
+}: {
+  id: string
+  value: number
+  min: number
+  max: number
+  step?: number
+  readOnly: boolean
+  onChange: (value: number) => void
+  t: TFunction
+}) {
+  const updateValue = (next: number) =>
+    onChange(Math.min(max, Math.max(min, Number(next.toFixed(10)))))
+
+  return (
+    <div className="grid h-8 w-20 grid-cols-[minmax(0,1fr)_1.25rem] overflow-hidden rounded-lg border border-input bg-transparent shadow-xs dark:bg-input/30">
+      <input
+        id={id}
+        className="min-w-0 appearance-none bg-transparent px-1 text-center text-xs outline-none focus-visible:bg-accent/50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        readOnly={readOnly}
+        onChange={(event) => updateValue(Number(event.target.value))}
+      />
+      <div className="grid grid-rows-2 border-l border-input">
+        <button
+          type="button"
+          className="grid place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+          aria-label={t("增加数值")}
+          disabled={readOnly || value >= max}
+          onClick={() => updateValue(value + step)}
+        >
+          <PlusIcon className="size-2.5" />
+        </button>
+        <button
+          type="button"
+          className="grid place-items-center border-t border-input text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+          aria-label={t("减少数值")}
+          disabled={readOnly || value <= min}
+          onClick={() => updateValue(value - step)}
+        >
+          <MinusIcon className="size-2.5" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function LlmSettingsDialog({
+  open,
+  onOpenChange,
+  nodeId,
+  node,
+  readOnly,
+  onUpdate,
+  t,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  nodeId: string
+  node: WorkflowNodeData
+  readOnly: boolean
+  onUpdate: (data: WorkflowNodeData) => void
+  t: TFunction
+}) {
+  const config = node.config
+  const modelParams = (config.model_params_setting ?? {}) as Record<
+    string,
+    unknown
+  >
+  const modelSetting = (config.model_setting ?? {}) as Record<string, unknown>
+  const reasoningContentEnabled =
+    modelSetting.reasoning_content_enable === true
+  const paramValue = (key: string) => {
+    const value = modelParams[key]
+    return typeof value === "number" ? String(value) : ""
+  }
+  const updateParam = (key: string, next: string) => {
+    const updated = { ...modelParams }
+    const parsed = Number(next)
+    if (next.trim() === "" || Number.isNaN(parsed)) {
+      delete updated[key]
+    } else {
+      updated[key] = parsed
+    }
+    onUpdate({
+      ...node,
+      config: { ...config, model_params_setting: updated },
+    })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="nodrag nowheel max-h-[calc(100svh-2rem)] max-w-lg overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{t("高级模型设置")}</DialogTitle>
+          <DialogDescription>
+            {t("配置此节点的模型参数和扩展设置。")}
+          </DialogDescription>
+        </DialogHeader>
+        <fieldset className="grid gap-3 text-sm font-medium">
+          <legend>{t("模型参数")}</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-1.5 font-normal" htmlFor={`${nodeId}-llm-temperature`}>
+              {t("温度")}
+              <Input
+                id={`${nodeId}-llm-temperature`}
+                type="number"
+                min={0}
+                max={2}
+                step={0.1}
+                placeholder={t("跟随模型默认")}
+                value={paramValue("temperature")}
+                readOnly={readOnly}
+                onChange={(event) =>
+                  updateParam("temperature", event.target.value)
+                }
+              />
+            </label>
+            <label className="grid gap-1.5 font-normal" htmlFor={`${nodeId}-llm-top-p`}>
+              {t("Top P")}
+              <Input
+                id={`${nodeId}-llm-top-p`}
+                type="number"
+                min={0}
+                max={1}
+                step={0.1}
+                placeholder={t("跟随模型默认")}
+                value={paramValue("top_p")}
+                readOnly={readOnly}
+                onChange={(event) => updateParam("top_p", event.target.value)}
+              />
+            </label>
+            <label className="grid gap-1.5 font-normal sm:col-span-2" htmlFor={`${nodeId}-llm-max-tokens`}>
+              {t("最大输出 Token")}
+              <Input
+                id={`${nodeId}-llm-max-tokens`}
+                type="number"
+                min={1}
+                step={1}
+                placeholder={t("跟随模型默认")}
+                value={paramValue("max_tokens")}
+                readOnly={readOnly}
+                onChange={(event) =>
+                  updateParam("max_tokens", event.target.value)
+                }
+              />
+            </label>
+          </div>
+        </fieldset>
+        <div className="flex items-center justify-between gap-3 text-sm font-medium">
+          <span>{t("思考过程")}</span>
+          <button
+            type="button"
+            role="switch"
+            id={`${nodeId}-llm-reasoning-content`}
+            aria-checked={reasoningContentEnabled}
+            aria-label={t("思考过程")}
+            disabled={readOnly}
+            onClick={() =>
+              onUpdate({
+                ...node,
+                config: {
+                  ...config,
+                  model_setting: {
+                    ...modelSetting,
+                    reasoning_content_enable: !reasoningContentEnabled,
+                  },
+                },
+              })
+            }
+            className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+              reasoningContentEnabled
+                ? "bg-primary"
+                : "bg-muted-foreground/40"
+            }`}
+          >
+            <span
+              className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
+                reasoningContentEnabled
+                  ? "translate-x-[18px]"
+                  : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            {t("关闭")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ConditionEditor({
+  nodeId,
+  node,
+  readOnly,
+  onUpdate,
+  t,
+}: {
+  nodeId: string
+  node: WorkflowNodeData
+  readOnly: boolean
+  onUpdate: (data: WorkflowNodeData) => void
+  t: TFunction
+}) {
+  const startNodeId =
+    (node.nodes ?? []).find((item) => item.data.type === "start")?.id ??
+    "start"
+  const branches = conditionBranches(node.config, startNodeId)
+  const updateBranches = (next: ConditionBranch[]) =>
+    onUpdate({
+      ...node,
+      config: {
+        ...node.config,
+        branch: normalizeConditionBranches(next),
+      },
+    })
+  const fieldLabel = ([sourceId, field]: [string, string]) => {
+    if (sourceId === "global") {
+      const global = WORKFLOW_START_GLOBALS.find((item) => item.value === field)
+      return `${t("全局变量")} > ${global ? t(global.label) : field}`
+    }
+    const source = (node.nodes ?? []).find((item) => item.id === sourceId)
+    const startField =
+      source?.data.type === "start"
+        ? WORKFLOW_START_FIELDS.find((item) => item.value === field)
+        : undefined
+    const knowledgeField =
+      source?.data.type === "knowledge"
+        ? KNOWLEDGE_OUTPUT_FIELDS.find((item) => item.field === field)
+        : undefined
+    const llmField =
+      source?.data.type === "llm"
+        ? LLM_OUTPUT_FIELDS.find((item) => item.field === field)
+        : undefined
+    const sourceTitle =
+      source?.data.type === "start" ? t("开始节点") : (source?.data.title ?? sourceId)
+    return `${sourceTitle} > ${
+      startField
+        ? t(startField.label)
+        : knowledgeField
+          ? t(knowledgeField.label)
+          : llmField
+            ? t(llmField.label)
+            : field
+    }`
+  }
+  const updateBranch = (
+    branchIndex: number,
+    patch: Partial<ConditionBranch>
+  ) =>
+    updateBranches(
+      branches.map((branch, index) =>
+        index === branchIndex ? { ...branch, ...patch } : branch
+      )
+    )
+  const updateRule = (
+    branchIndex: number,
+    ruleIndex: number,
+    patch: Partial<ConditionRule>
+  ) =>
+    updateBranch(branchIndex, {
+      conditions: branches[branchIndex].conditions.map((rule, index) =>
+        index === ruleIndex ? { ...rule, ...patch } : rule
+      ),
+    })
+  const removeBranch = (branchIndex: number) =>
+    updateBranches(branches.filter((_, index) => index !== branchIndex))
+
+  return (
+    <div className="grid gap-3">
+      {branches.map((branch, branchIndex) => {
+        const isElse = branch.type === "ELSE"
+        const displayType =
+          branch.type === "ELSE IF" && branchIndex > 1
+            ? `ELSE IF ${branchIndex}`
+            : branch.type
+        return (
+          <section
+            key={branch.id}
+            className="grid gap-2.5 border-t border-border/70 pt-3 first:border-t-0 first:pt-0"
+          >
+            <div className="relative flex min-h-7 items-center justify-between gap-2 pr-1">
+              <span
+                className={cn(
+                  "inline-flex h-6 items-center rounded-md px-2 text-[11px] font-semibold",
+                  isElse
+                    ? "bg-muted text-muted-foreground"
+                    : "bg-orange-500/10 text-orange-700 dark:text-orange-300"
+                )}
+              >
+                {displayType}
+              </span>
+              <span className="flex items-center gap-1">
+                {!isElse && branch.conditions.length > 1 ? (
+                  <span className="inline-flex rounded-md border bg-muted/40 p-0.5">
+                    {(["and", "or"] as const).map((condition) => (
+                      <button
+                        key={condition}
+                        type="button"
+                        className={cn(
+                          "h-6 rounded px-2 text-[11px] font-medium",
+                          branch.condition === condition &&
+                            "bg-background text-foreground shadow-xs"
+                        )}
+                        disabled={readOnly}
+                        onClick={() => updateBranch(branchIndex, { condition })}
+                      >
+                        {t(condition === "and" ? "全部满足" : "任一满足")}
+                      </button>
+                    ))}
+                  </span>
+                ) : null}
+                {!isElse && branches.length > 2 ? (
+                  <IconButton
+                    label={t("删除分支")}
+                    className="size-7"
+                    disabled={readOnly}
+                    onClick={() => removeBranch(branchIndex)}
+                  >
+                    <Trash2Icon className="size-3.5" />
+                  </IconButton>
+                ) : null}
+              </span>
+              <Handle
+                id={branch.id}
+                type="source"
+                position={Position.Right}
+                title={displayType}
+                className="!pointer-events-auto !absolute !right-[-1.375rem] !top-1/2 !z-20 !size-4 !border-[3px] !border-card !bg-foreground"
+              />
+            </div>
+            {isElse ? (
+              <p className="px-2 text-[11px] leading-4 text-muted-foreground">
+                {t("未命中以上条件时执行")}
+              </p>
+            ) : null}
+            {!isElse
+              ? branch.conditions.map((rule, ruleIndex) => (
+                  <div
+                    key={`${branch.id}-${ruleIndex}`}
+                    className="grid gap-2 rounded-lg border border-border/70 bg-muted/20 p-2"
+                  >
+                    <VariablePicker
+                      nodeId={nodeId}
+                      node={node}
+                      t={t}
+                      label={fieldLabel(rule.field)}
+                      className="h-8 w-full justify-between rounded-md border border-input bg-background px-2 text-xs text-foreground hover:bg-background"
+                      onInsert={(_reference, path) =>
+                        updateRule(branchIndex, ruleIndex, {
+                          field: [path[0], path.slice(1).join(".")],
+                        })
+                      }
+                    />
+                    <div
+                      className={cn(
+                        "grid min-w-0 items-center gap-2",
+                        CONDITION_VALUELESS_COMPARE.has(rule.compare)
+                          ? "grid-cols-[minmax(0,1fr)_1.75rem]"
+                          : "grid-cols-[7rem_minmax(0,1fr)_1.75rem]"
+                      )}
+                    >
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 w-full min-w-0 justify-between px-2 text-xs font-normal"
+                            disabled={readOnly}
+                          >
+                            <span className="truncate">
+                              {rule.compare === "not_eq"
+                                ? t("不等于")
+                                : t(
+                                    CONDITION_COMPARE_OPTIONS.find(
+                                      (item) => item.value === rule.compare
+                                    )?.label ?? "运算符"
+                                  )}
+                            </span>
+                            <ChevronDownIcon className="size-3.5 shrink-0" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="start"
+                          className="max-h-80 w-(--radix-dropdown-menu-trigger-width) min-w-32 overflow-y-auto"
+                        >
+                          {CONDITION_COMPARE_OPTIONS.map((item) => (
+                            <DropdownMenuItem
+                              key={item.value}
+                              className="justify-between"
+                              onSelect={() =>
+                                updateRule(branchIndex, ruleIndex, {
+                                  compare: item.value,
+                                })
+                              }
+                            >
+                              {t(item.label)}
+                              {rule.compare === item.value ? (
+                                <CheckIcon className="text-primary" />
+                              ) : null}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      {!CONDITION_VALUELESS_COMPARE.has(rule.compare) ? (
+                        <Input
+                          className="h-8 min-w-0 text-xs"
+                          value={rule.value}
+                          readOnly={readOnly}
+                          aria-label={t("比较值")}
+                          placeholder={t("比较值")}
+                          onChange={(event) =>
+                            updateRule(branchIndex, ruleIndex, {
+                              value: event.target.value,
+                            })
+                          }
+                        />
+                      ) : null}
+                      <IconButton
+                        label={t("删除条件")}
+                        className="size-7"
+                        disabled={
+                          readOnly ||
+                          (branches.length === 2 && branch.conditions.length === 1)
+                        }
+                        onClick={() => {
+                          if (branch.conditions.length === 1) {
+                            removeBranch(branchIndex)
+                            return
+                          }
+                          updateBranch(branchIndex, {
+                            conditions: branch.conditions.filter(
+                              (_, index) => index !== ruleIndex
+                            ),
+                          })
+                        }}
+                      >
+                        <Trash2Icon className="size-3.5" />
+                      </IconButton>
+                    </div>
+                  </div>
+                ))
+              : null}
+            {!isElse ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-fit px-1 text-xs text-primary hover:bg-transparent hover:text-primary/80"
+                disabled={readOnly}
+                onClick={() =>
+                  updateBranch(branchIndex, {
+                    conditions: [
+                      ...branch.conditions,
+                      {
+                        field: [startNodeId, "question"],
+                        compare: "eq",
+                        value: "",
+                      },
+                    ],
+                  })
+                }
+              >
+                <PlusIcon />
+                {t("添加条件")}
+              </Button>
+            ) : null}
+          </section>
+        )
+      })}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-8 w-full border-dashed bg-transparent text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+        disabled={readOnly || branches.length >= 20}
+        onClick={() => {
+          const elseIndex = branches.findIndex((branch) => branch.type === "ELSE")
+          const next = [...branches]
+          next.splice(elseIndex < 0 ? next.length : elseIndex, 0, {
+            id: createConditionId(),
+            type: "ELSE IF",
+            condition: "and",
+            conditions: [
+              { field: [startNodeId, "question"], compare: "eq", value: "" },
+            ],
+          })
+          updateBranches(next)
+        }}
+      >
+        <PlusIcon />
+        {t("添加分支")}
+      </Button>
+      <section className="grid gap-2 border-t border-border/70 pt-3">
+        <h3 className="px-1 text-[10px] font-medium text-muted-foreground">
+          {t("输出参数")}
+        </h3>
+        <OutputFieldRow
+          displayValue={t("分支名称")}
+          reference={`{{${nodeId}.branch_name}}`}
+          t={t}
+        />
+      </section>
+    </div>
   )
 }
 
@@ -274,33 +1137,10 @@ function NodeConfigFields({
   const config = node.config
   const updateConfig = (patch: Record<string, unknown>) =>
     onUpdate({ ...node, config: { ...config, ...patch } })
-  const inputItems = Array.isArray(config.inputs)
-    ? (config.inputs as Record<string, unknown>[])
-    : []
   const outputEntries =
     config.outputs && typeof config.outputs === "object"
       ? Object.entries(config.outputs as Record<string, unknown>)
       : []
-  const updateInputItem = (index: number, patch: Record<string, unknown>) =>
-    updateConfig({
-      inputs: inputItems.map((item, i) =>
-        i === index ? { ...item, ...patch } : item
-      ),
-    })
-  const removeInputItem = (index: number) =>
-    updateConfig({ inputs: inputItems.filter((_, i) => i !== index) })
-  const addInputItem = () =>
-    updateConfig({
-      inputs: [
-        ...inputItems,
-        {
-          name: `input_${inputItems.length + 1}`,
-          type: "string",
-          required: false,
-          default: "",
-        },
-      ],
-    })
   const updateOutputItem = (index: number, key: string, value: string) => {
     if (outputEntries.some(([itemKey], i) => i !== index && itemKey === key)) return
     updateConfig({
@@ -327,159 +1167,74 @@ function NodeConfigFields({
   const activeModels = models.filter(
     (model) => model.model_type === "LLM" && model.status === "active"
   )
-  const boundKnowledge = knowledgeBases.filter((item) =>
-    agent.knowledge_base_ids.includes(item.id)
+  const availableKnowledge = knowledgeBases.filter(
+    (item) => item.status === "active" && item.permission !== "none"
   )
   const selectedKnowledgeIds = Array.isArray(config.knowledge_base_ids)
     ? config.knowledge_base_ids.map(String)
     : config.knowledge_base_id
       ? [String(config.knowledge_base_id)]
       : []
-  const boundMcp = agent.mcp_tools
-    .map((reference) => {
-      const server = mcpServers.find((item) => item.id === reference.server_id)
-      const tool = server?.tools.find(
-        (item) => item.name === reference.tool_name
-      )
-      return {
-        ...reference,
-        policyMode: tool?.policy_mode,
-        label: `${server?.name ?? reference.server_id} / ${reference.tool_name}`,
-      }
+  const selectedKnowledgeNames = availableKnowledge
+    .filter((item) => selectedKnowledgeIds.includes(item.id))
+    .map((item) => item.name)
+  const searchMode = String(config.search_mode ?? "embedding")
+  const searchModeLabel =
+    KNOWLEDGE_SEARCH_MODES.find((item) => item.value === searchMode)?.label ??
+    "向量检索"
+  const toggleKnowledgeBase = (knowledgeBaseId: string) =>
+    updateConfig({
+      knowledge_base_id: null,
+      knowledge_base_ids: selectedKnowledgeIds.includes(knowledgeBaseId)
+        ? selectedKnowledgeIds.filter((item) => item !== knowledgeBaseId)
+        : [...selectedKnowledgeIds, knowledgeBaseId],
     })
-    .filter((item) => item.policyMode === "read_only")
-  const conditionOperator = String(config.operator ?? "equals")
-  const conditionHasRightValue = ![
-    "is_empty",
-    "is_not_empty",
-    "is_true",
-    "is_false",
-  ].includes(conditionOperator)
-  const conditionUsesLength = conditionOperator.startsWith("length_")
-
+  const availableMcp = mcpServers
+    .filter((server) => server.status === "active")
+    .flatMap((server) =>
+      server.tools
+        .filter((tool) => tool.policy_mode === "read_only")
+        .map((tool) => ({
+          server_id: server.id,
+          tool_name: tool.name,
+          label: `${server.name} / ${tool.name}`,
+        }))
+    )
+  const selectedMcpRefs = Array.isArray(config.mcp_servers)
+    ? (config.mcp_servers as Array<{ server_id: string; tool_name: string }>)
+    : []
+  const mcpSelected = (reference: { server_id: string; tool_name: string }) =>
+    selectedMcpRefs.some(
+      (item) =>
+        item.server_id === reference.server_id &&
+        item.tool_name === reference.tool_name
+    )
+  const toggleMcpReference = (
+    reference: { server_id: string; tool_name: string },
+    checked: boolean
+    ) =>
+    updateConfig({
+      mcp_servers: checked
+        ? [...selectedMcpRefs, reference]
+        : selectedMcpRefs.filter(
+            (item) =>
+              item.server_id !== reference.server_id ||
+              item.tool_name !== reference.tool_name
+          ),
+    })
+  const isResult = config.is_result !== false
+  const dialogueType = String(config.dialogue_type ?? "NODE")
+  const selectedModelId = String(config.model_id ?? agent.model_id ?? "")
+  const selectedModel = activeModels.find((model) => model.id === selectedModelId)
+  const replyType = String(config.reply_type ?? "custom")
+  const replyFields = Array.isArray(config.fields) ? config.fields : null
+  const replyFieldPath = Array.isArray(replyFields?.[0])
+    ? replyFields[0].map(String)
+    : []
+  const replyFieldDescription =
+    typeof replyFields?.[1] === "string" ? replyFields[1] : ""
   return (
     <div className="grid gap-3">
-      {node.type === "start" ? (
-        <fieldset className="grid gap-2">
-          <legend className="text-xs font-medium">{t("输入字段")}</legend>
-          {inputItems.map((item, index) => (
-            <div key={index} className="grid gap-2 rounded-md border p-2">
-              <div className="flex items-center gap-2">
-                <Input
-                  className="min-w-0 flex-1"
-                  value={String(item.name ?? "")}
-                  readOnly={readOnly}
-                  aria-label={t("输入名称")}
-                  onChange={(event) =>
-                    updateInputItem(index, { name: event.target.value })
-                  }
-                />
-                {!readOnly ? (
-                  <IconButton
-                    label={t("删除")}
-                    className="size-6 shrink-0"
-                    onClick={() => removeInputItem(index)}
-                  >
-                    <XIcon className="size-3.5" />
-                  </IconButton>
-                ) : null}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="grid gap-1 text-[11px] font-medium">
-                  {t("类型")}
-                  <select
-                    className="h-8 rounded-md border bg-background px-2 text-xs"
-                    value={String(item.type ?? "string")}
-                    disabled={readOnly}
-                    onChange={(event) => {
-                      const type = event.target.value
-                      updateInputItem(index, {
-                        type,
-                        default:
-                          type === "number"
-                            ? 0
-                            : type === "boolean"
-                              ? false
-                              : type === "object"
-                                ? {}
-                                : type === "array"
-                                  ? []
-                                  : "",
-                      })
-                    }}
-                  >
-                    {(["string", "number", "boolean", "object", "array"] as const).map(
-                      (type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </label>
-                <label className="flex items-end gap-1 pb-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(item.required)}
-                    disabled={readOnly}
-                    onChange={(event) =>
-                      updateInputItem(index, { required: event.target.checked })
-                    }
-                  />
-                  {t("必填")}
-                </label>
-              </div>
-              {item.type === "boolean" ? (
-                <label className="flex items-center gap-2 text-xs font-medium">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(item.default)}
-                    disabled={readOnly}
-                    onChange={(event) =>
-                      updateInputItem(index, { default: event.target.checked })
-                    }
-                  />
-                  {t("默认值")}
-                </label>
-              ) : item.type === "object" || item.type === "array" ? (
-                <JsonEditor
-                  id={`start-default-${index}`}
-                  label={t("默认值")}
-                  value={item.default ?? (item.type === "array" ? [] : {})}
-                  readOnly={readOnly}
-                  onChange={(value) => updateInputItem(index, { default: value })}
-                  t={t}
-                />
-              ) : (
-                <label className="grid gap-1 text-[11px] font-medium">
-                  {t("默认值")}
-                  <Input
-                    type={item.type === "number" ? "number" : "text"}
-                    value={String(item.default ?? "")}
-                    readOnly={readOnly}
-                    onChange={(event) =>
-                      updateInputItem(index, {
-                        default:
-                          item.type === "number"
-                            ? event.target.value === ""
-                              ? null
-                              : Number(event.target.value)
-                            : event.target.value,
-                      })
-                    }
-                  />
-                </label>
-              )}
-            </div>
-          ))}
-          {!readOnly ? (
-            <Button type="button" variant="outline" onClick={addInputItem}>
-              <PlusIcon />
-              {t("添加")}
-            </Button>
-          ) : null}
-        </fieldset>
-      ) : null}
       {node.type === "end" ? (
         <fieldset className="grid gap-2">
           <legend className="text-xs font-medium">{t("输出映射")}</legend>
@@ -528,38 +1283,338 @@ function NodeConfigFields({
         <>
           <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-llm-model`}>
             {t("节点模型")}
-            <select
-              id={`${nodeId}-llm-model`}
-              className="h-9 rounded-md border bg-background px-2 text-sm"
-              value={String(config.model_id ?? "")}
-              disabled={readOnly}
-              onChange={(event) =>
-                updateConfig({ model_id: event.target.value || null })
-              }
-            >
-              <option value="">{t("使用工作流默认模型")}</option>
-              {activeModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name}
-                </option>
-              ))}
-            </select>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  id={`${nodeId}-llm-model`}
+                  type="button"
+                  variant="outline"
+                  className="h-8 w-full justify-between px-2 text-xs font-normal"
+                  disabled={readOnly}
+                >
+                  <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-left">
+                    {selectedModel ? (
+                      <ModelIcon
+                        model={selectedModel.model_name}
+                        size={16}
+                        type="color"
+                        className="shrink-0"
+                      />
+                    ) : null}
+                    <span className="min-w-0 truncate">
+                      {selectedModel?.name ?? t("使用工作流默认模型")}
+                    </span>
+                  </span>
+                  <ChevronDownIcon data-icon="inline-end" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="max-h-72 w-(--radix-dropdown-menu-trigger-width) min-w-0 overflow-y-auto"
+              >
+                <DropdownMenuItem
+                  className="justify-between"
+                  onSelect={() => updateConfig({ model_id: null })}
+                >
+                  {t("使用工作流默认模型")}
+                  {!config.model_id ? <span className="text-primary">✓</span> : null}
+                </DropdownMenuItem>
+                {activeModels.map((model) => (
+                  <DropdownMenuItem
+                    key={model.id}
+                    className="justify-between"
+                    onSelect={() => updateConfig({ model_id: model.id })}
+                  >
+                    <span className="flex min-w-0 items-center gap-2 truncate">
+                      <ModelIcon
+                        model={model.model_name}
+                        size={16}
+                        type="color"
+                        className="shrink-0"
+                      />
+                      <span className="min-w-0 truncate">{model.name}</span>
+                    </span>
+                    {model.id === config.model_id ? (
+                      <span className="text-primary">✓</span>
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </label>
           <TextEditor
             id={`${nodeId}-llm-system`}
-            label={t("系统提示词")}
+            label={t("角色设定")}
             value={config.system_prompt ?? ""}
             readOnly={readOnly}
             onChange={(system_prompt) => updateConfig({ system_prompt })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
+            insertVariables
           />
           <TextEditor
             id={`${nodeId}-llm-prompt`}
-            label={t("用户提示词")}
+            label={t("提示词")}
             value={config.prompt ?? ""}
             readOnly={readOnly}
             rows={6}
             onChange={(prompt) => updateConfig({ prompt })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
+            insertVariables
           />
+          <div className="grid gap-1.5 text-xs font-medium">
+            <span className="flex items-center justify-between gap-2">
+              <label
+                id={`${nodeId}-llm-dialogue-label`}
+                htmlFor={`${nodeId}-llm-dialogue`}
+              >
+                {t("多轮对话数")}
+              </label>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    id={`${nodeId}-llm-dialogue-type`}
+                    type="button"
+                    variant="outline"
+                    className="h-7 w-40 justify-between px-2 text-[11px] font-normal"
+                    aria-label={t("多轮对话数")}
+                    disabled={readOnly}
+                  >
+                    <span className="truncate">
+                      {dialogueType === "WORKFLOW"
+                        ? t("整条流程历史")
+                        : t("仅取本节点历史")}
+                    </span>
+                    <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  side="bottom"
+                  sideOffset={4}
+                  className="w-(--radix-dropdown-menu-trigger-width) min-w-40"
+                >
+                  {([
+                    ["NODE", "仅取本节点历史"],
+                    ["WORKFLOW", "整条流程历史"],
+                  ] as const).map(([value, label]) => (
+                    <DropdownMenuItem
+                      key={value}
+                      className="justify-between whitespace-nowrap"
+                      onSelect={() => updateConfig({ dialogue_type: value })}
+                    >
+                      {t(label)}
+                      {dialogueType === value ? (
+                        <CheckIcon className="size-4 text-primary" />
+                      ) : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
+            <Input
+              id={`${nodeId}-llm-dialogue`}
+              type="number"
+              min={0}
+              max={20}
+              step={1}
+              value={Number(config.dialogue_number ?? 1)}
+              readOnly={readOnly}
+              onChange={(event) =>
+                updateConfig({ dialogue_number: Number(event.target.value) })
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2 text-xs font-medium">
+            <span>{t("启用 MCP")}</span>
+            <button
+              type="button"
+              role="switch"
+              id={`${nodeId}-llm-mcp`}
+              aria-checked={Boolean(config.mcp_enable)}
+              aria-label={t("启用 MCP")}
+              disabled={readOnly}
+              onClick={() =>
+                updateConfig({
+                  mcp_enable: !config.mcp_enable,
+                  mcp_servers: config.mcp_enable ? [] : selectedMcpRefs,
+                })
+              }
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+                config.mcp_enable ? "bg-primary" : "bg-muted-foreground/40"
+              }`}
+            >
+              <span
+                className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
+                  config.mcp_enable ? "translate-x-[18px]" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </div>
+          {config.mcp_enable ? (
+            <fieldset className="grid gap-1.5 text-xs font-medium">
+              <legend>{t("MCP 工具（可多选）")}</legend>
+              <div className="grid max-h-32 gap-2 overflow-y-auto rounded-md border bg-background p-2">
+                {availableMcp.length ? (
+                  availableMcp.map((item) => (
+                    <label
+                      key={`${item.server_id}:${item.tool_name}`}
+                      className="flex items-center gap-2 text-xs font-normal"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={mcpSelected(item)}
+                        disabled={readOnly}
+                        onChange={(event) =>
+                          toggleMcpReference(item, event.target.checked)
+                        }
+                      />
+                      <span className="min-w-0 truncate">{item.label}</span>
+                    </label>
+                  ))
+                ) : (
+                  <span className="font-normal text-muted-foreground">
+                    {t("暂无可用 MCP 工具")}
+                  </span>
+                )}
+              </div>
+            </fieldset>
+          ) : null}
+          <div className="flex items-center justify-between gap-2 text-xs font-medium">
+            <span>{t("返回内容")}</span>
+            <button
+              type="button"
+              role="switch"
+              id={`${nodeId}-llm-result`}
+              aria-checked={isResult}
+              aria-label={t("返回内容")}
+              disabled={readOnly}
+              onClick={() => updateConfig({ is_result: !isResult })}
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+                isResult ? "bg-primary" : "bg-muted-foreground/40"
+              }`}
+            >
+              <span
+                className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
+                  isResult ? "translate-x-[18px]" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </div>
+          <section className="grid min-w-0 gap-2 border-t border-border/70 pt-3">
+            <h3 className="px-1 text-[10px] font-medium text-muted-foreground">
+              {t("输出参数")}
+            </h3>
+            {LLM_OUTPUT_FIELDS.map((item) => (
+              <OutputFieldRow
+                key={item.field}
+                displayValue={t(item.label)}
+                reference={`{{${nodeId}.${item.field}}}`}
+                t={t}
+              />
+            ))}
+          </section>
+        </>
+      ) : null}
+      {node.type === "reply-node" ? (
+        <>
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 text-xs font-medium">
+            <span>{t("回复内容")}</span>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  id={`${nodeId}-reply-type`}
+                  type="button"
+                  variant="outline"
+                  className="h-8 justify-between px-2 text-xs font-normal"
+                  disabled={readOnly}
+                >
+                  {t(replyType === "referencing" ? "引用变量" : "自定义")}
+                  <ChevronDownIcon className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-(--radix-dropdown-menu-trigger-width) min-w-0"
+              >
+                {(["referencing", "custom"] as const).map((type) => (
+                  <DropdownMenuItem
+                    key={type}
+                    className="justify-between"
+                    onSelect={() => updateConfig({ reply_type: type })}
+                  >
+                    {t(type === "referencing" ? "引用变量" : "自定义")}
+                    {replyType === type ? <CheckIcon className="text-primary" /> : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          {replyType === "referencing" ? (
+            <div className="grid gap-1.5 text-xs font-medium">
+              <span>{t("引用字段")}</span>
+              <VariablePicker
+                nodeId={nodeId}
+                node={node}
+                t={t}
+                label={
+                  replyFieldDescription ||
+                  (replyFieldPath.length ? replyFieldPath.join(" > ") : t("选择引用变量"))
+                }
+                className="h-9 w-full justify-start border bg-background px-2 text-xs text-foreground shadow-xs hover:bg-muted"
+                onInsert={(_reference, path, description) =>
+                  updateConfig({ fields: [path, description] })
+                }
+              />
+            </div>
+          ) : (
+            <TextEditor
+              id={`${nodeId}-reply-content`}
+              label={t("内容")}
+              value={config.content ?? ""}
+              readOnly={readOnly}
+              rows={6}
+              onChange={(content) => updateConfig({ content })}
+              node={node}
+              nodeId={nodeId}
+              t={t}
+              insertVariables
+            />
+          )}
+          <div className="flex items-center justify-between gap-2 text-xs font-medium">
+            <span>{t("返回内容")}</span>
+            <button
+              type="button"
+              role="switch"
+              id={`${nodeId}-reply-result`}
+              aria-checked={isResult}
+              aria-label={t("返回内容")}
+              disabled={readOnly}
+              onClick={() => updateConfig({ is_result: !isResult })}
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+                isResult ? "bg-primary" : "bg-muted-foreground/40"
+              }`}
+            >
+              <span
+                className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
+                  isResult ? "translate-x-[18px]" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </div>
+          <section className="grid min-w-0 gap-2 border-t border-border/70 pt-3">
+            <h3 className="px-1 text-[10px] font-medium text-muted-foreground">
+              {t("输出参数")}
+            </h3>
+            <OutputFieldRow
+              displayValue={t("内容 {answer}")}
+              reference={`{{${nodeId}.answer}}`}
+              t={t}
+            />
+          </section>
         </>
       ) : null}
       {node.type === "classifier" ? (
@@ -589,6 +1644,10 @@ function NodeConfigFields({
             value={config.input ?? ""}
             readOnly={readOnly}
             onChange={(input) => updateConfig({ input })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
+            insertVariables
           />
           <JsonEditor
             id={`${nodeId}-classifier-classes`}
@@ -612,139 +1671,215 @@ function NodeConfigFields({
         </>
       ) : null}
       {node.type === "knowledge" ? (
-        <>
-          <fieldset className="grid gap-1.5 text-xs font-medium">
-            <legend>
-              {t("知识库（可多选）")}
-            </legend>
-            <div className="grid max-h-32 gap-2 overflow-y-auto rounded-md border bg-background p-2">
-              {boundKnowledge.length ? (
-                boundKnowledge.map((item) => (
-                  <label
-                    key={item.id}
-                    className="flex items-center gap-2 text-xs font-normal"
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
+          <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
+            <h3 className="px-1 text-[10px] font-medium text-muted-foreground">
+              {t("节点设置")}
+            </h3>
+
+            <fieldset className="grid gap-3">
+              <legend className="mb-1 text-xs font-medium">
+                {t("检索范围")}
+              </legend>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 w-full justify-between px-2.5 text-xs font-normal"
+                    disabled={readOnly || !availableKnowledge.length}
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedKnowledgeIds.includes(item.id)}
-                      disabled={readOnly}
-                      onChange={(event) =>
-                        updateConfig({
-                          knowledge_base_id: null,
-                          knowledge_base_ids: event.target.checked
-                            ? [...selectedKnowledgeIds, item.id]
-                            : selectedKnowledgeIds.filter(
-                                (knowledgeBaseId) => knowledgeBaseId !== item.id
-                              ),
-                        })
-                      }
-                    />
-                    <span className="min-w-0 truncate">{item.name}</span>
-                  </label>
-                ))
-              ) : (
-                <span className="font-normal text-muted-foreground">
-                  {t("暂无可用知识库")}
+                    <span className="min-w-0 truncate text-left">
+                      {selectedKnowledgeNames.length === 1
+                        ? selectedKnowledgeNames[0]
+                        : selectedKnowledgeNames.length > 1
+                          ? t("已选择 {value} 个知识库", {
+                              value: selectedKnowledgeNames.length,
+                            })
+                          : t("选择知识库")}
+                    </span>
+                    <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="max-h-72 w-(--radix-dropdown-menu-trigger-width) min-w-0 overflow-y-auto"
+                >
+                  {availableKnowledge.map((item) => {
+                    const selected = selectedKnowledgeIds.includes(item.id)
+                    return (
+                      <DropdownMenuItem
+                        key={item.id}
+                        className="min-h-8 justify-between px-2.5 py-1.5 text-xs"
+                        onSelect={(event) => {
+                          event.preventDefault()
+                          toggleKnowledgeBase(item.id)
+                        }}
+                      >
+                        <span className="min-w-0 truncate">{item.name}</span>
+                        {selected ? <CheckIcon className="text-primary" /> : null}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <p className="px-1 text-xs leading-5 text-muted-foreground">
+                {availableKnowledge.length
+                  ? t("工作区可用的知识库展示在这里")
+                  : t("暂无可用知识库")}
+              </p>
+            </fieldset>
+
+            <fieldset className="grid gap-1.5">
+              <legend className="text-xs font-medium">{t("检索参数")}</legend>
+              <div
+                className="grid grid-cols-[minmax(0,1fr)_7.5rem] items-center gap-3 text-xs"
+              >
+                <span
+                  id={`${nodeId}-knowledge-mode-label`}
+                  className="text-muted-foreground"
+                >
+                  {t("检索模式")}
                 </span>
-              )}
-            </div>
-          </fieldset>
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-knowledge-limit`}>
-            {t("返回条数")}
-            <Input
-              id={`${nodeId}-knowledge-limit`}
-              type="number"
-              min={1}
-              max={8}
-              value={Number(config.limit ?? 3)}
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      id={`${nodeId}-knowledge-mode`}
+                      type="button"
+                      variant="outline"
+                      className="h-7 w-full justify-between px-2 text-[11px] font-normal"
+                      aria-labelledby={`${nodeId}-knowledge-mode-label`}
+                      disabled={readOnly}
+                    >
+                      <span className="truncate">{t(searchModeLabel)}</span>
+                      <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    side="bottom"
+                    sideOffset={4}
+                    className="w-(--radix-dropdown-menu-trigger-width) min-w-24"
+                  >
+                    {KNOWLEDGE_SEARCH_MODES.map((item) => (
+                      <DropdownMenuItem
+                        key={item.value}
+                        className="justify-between"
+                        onSelect={() => updateConfig({ search_mode: item.value })}
+                      >
+                        {t(item.label)}
+                        {searchMode === item.value ? (
+                          <CheckIcon className="size-4 text-primary" />
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              <div
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs"
+              >
+                <label
+                  className="text-muted-foreground"
+                  htmlFor={`${nodeId}-knowledge-similarity`}
+                >
+                  {t("相似度")}
+                </label>
+                <NumberStepper
+                  id={`${nodeId}-knowledge-similarity`}
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  value={Number(config.similarity ?? 0.6)}
+                  readOnly={readOnly}
+                  onChange={(similarity) => updateConfig({ similarity })}
+                  t={t}
+                />
+              </div>
+              <div
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs"
+              >
+                <label
+                  className="text-muted-foreground"
+                  htmlFor={`${nodeId}-knowledge-limit`}
+                >
+                  {t("引用分段数")}
+                </label>
+                <NumberStepper
+                  id={`${nodeId}-knowledge-limit`}
+                  min={1}
+                  max={8}
+                  value={Number(config.limit ?? 3)}
+                  readOnly={readOnly}
+                  onChange={(limit) => updateConfig({ limit })}
+                  t={t}
+                />
+              </div>
+              <div
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs"
+              >
+                <label
+                  className="text-muted-foreground"
+                  htmlFor={`${nodeId}-knowledge-max-chars`}
+                >
+                  {t("最大引用字符数")}
+                </label>
+                <NumberStepper
+                  id={`${nodeId}-knowledge-max-chars`}
+                  min={1}
+                  max={20000}
+                  step={100}
+                  value={Number(config.max_paragraph_char_number ?? 5000)}
+                  readOnly={readOnly}
+                  onChange={(maxParagraphCharNumber) =>
+                    updateConfig({
+                      max_paragraph_char_number: maxParagraphCharNumber,
+                    })
+                  }
+                  t={t}
+                />
+              </div>
+            </fieldset>
+
+            <TextEditor
+              id={`${nodeId}-knowledge-query`}
+              label={t("检索问题")}
+              value={config.query ?? ""}
               readOnly={readOnly}
-              onChange={(event) => updateConfig({ limit: Number(event.target.value) })}
+              rows={2}
+              onChange={(query) => updateConfig({ query })}
+              node={node}
+              nodeId={nodeId}
+              t={t}
+              insertVariables
             />
-          </label>
-          <TextEditor
-            id={`${nodeId}-knowledge-query`}
-            label={t("检索查询")}
-            value={config.query ?? ""}
-            readOnly={readOnly}
-            onChange={(query) => updateConfig({ query })}
-          />
-        </>
+          </section>
+
+          <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 border-t border-border/70 pt-3">
+            <h3 className="px-1 text-[10px] font-medium text-muted-foreground">
+              {t("输出参数")}
+            </h3>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
+              {KNOWLEDGE_OUTPUT_FIELDS.map((item) => (
+                <OutputFieldRow
+                  key={item.field}
+                  displayValue={t(item.label)}
+                  reference={`{{${nodeId}.${item.field}}}`}
+                  t={t}
+                />
+              ))}
+            </div>
+          </section>
+        </div>
       ) : null}
       {node.type === "condition" ? (
-        <>
-          <TextEditor
-            id={`${nodeId}-condition-left`}
-            label={t("左值")}
-            value={config.left ?? ""}
-            readOnly={readOnly}
-            onChange={(left) => updateConfig({ left })}
-          />
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-condition-operator`}>
-            {t("运算符")}
-            <select
-              id={`${nodeId}-condition-operator`}
-              className="h-9 rounded-md border bg-background px-2 text-sm"
-              value={String(config.operator ?? "equals")}
-              disabled={readOnly}
-              onChange={(event) =>
-                updateConfig({ operator: event.target.value })
-              }
-            >
-              {([
-                ["equals", "等于"],
-                ["not_equals", "不等于"],
-                ["contains", "包含"],
-                ["not_contains", "不包含"],
-                ["greater_than", "大于"],
-                ["greater_than_or_equal", "大于等于"],
-                ["less_than", "小于"],
-                ["less_than_or_equal", "小于等于"],
-                ["is_empty", "为空"],
-                ["is_not_empty", "不为空"],
-                ["length_equals", "长度等于"],
-                ["length_greater_than", "长度大于"],
-                ["length_greater_than_or_equal", "长度大于等于"],
-                ["length_less_than", "长度小于"],
-                ["length_less_than_or_equal", "长度小于等于"],
-                ["is_true", "为真"],
-                ["is_false", "为假"],
-              ] as const).map(([operator, label]) => (
-                <option key={operator} value={operator}>
-                  {t(label)}
-                </option>
-              ))}
-            </select>
-          </label>
-          {conditionHasRightValue ? (
-            conditionUsesLength ? (
-              <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-condition-right`}>
-                {t("右值")}
-                <Input
-                  id={`${nodeId}-condition-right`}
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={
-                    typeof config.right === "number" ? config.right : 0
-                  }
-                  readOnly={readOnly}
-                  onChange={(event) =>
-                    updateConfig({ right: Number(event.target.value) })
-                  }
-                />
-              </label>
-            ) : (
-              <JsonEditor
-                id={`${nodeId}-condition-right`}
-                label={t("右值")}
-                value={config.right ?? ""}
-                readOnly={readOnly}
-                onChange={(right) => updateConfig({ right })}
-                t={t}
-              />
-            )
-          ) : null}
-        </>
+        <ConditionEditor
+          nodeId={nodeId}
+          node={node}
+          readOnly={readOnly}
+          onUpdate={onUpdate}
+          t={t}
+        />
       ) : null}
       {node.type === "template" ? (
         <TextEditor
@@ -754,6 +1889,10 @@ function NodeConfigFields({
           readOnly={readOnly}
           rows={8}
           onChange={(template) => updateConfig({ template })}
+          node={node}
+          nodeId={nodeId}
+          t={t}
+          insertVariables
         />
       ) : null}
       {node.type === "variable" ? (
@@ -768,29 +1907,54 @@ function NodeConfigFields({
       ) : null}
       {node.type === "mcp" ? (
         <>
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-mcp-tool`}>
-            {t("MCP 工具")}
-            <select
-              id={`${nodeId}-mcp-tool`}
-              className="h-9 rounded-md border bg-background px-2 text-sm"
-              value={`${String(config.server_id ?? "")}:${String(config.tool_name ?? "")}`}
-              disabled={readOnly}
-              onChange={(event) => {
-                const [server_id, ...name] = event.target.value.split(":")
-                updateConfig({ server_id, tool_name: name.join(":") })
-              }}
-            >
-              <option value=":">{t("选择只读 MCP 工具")}</option>
-              {boundMcp.map((item) => (
-                <option
-                  key={`${item.server_id}:${item.tool_name}`}
-                  value={`${item.server_id}:${item.tool_name}`}
+          <fieldset className="grid gap-1.5 text-xs font-medium">
+            <legend>{t("MCP 工具")}</legend>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  id={`${nodeId}-mcp-tool`}
+                  type="button"
+                  variant="outline"
+                  className="h-8 w-full justify-between px-2 text-xs font-normal"
+                  disabled={readOnly || !availableMcp.length}
                 >
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
+                  <span className="min-w-0 truncate text-left">
+                    {availableMcp.find(
+                      (item) =>
+                        item.server_id === String(config.server_id ?? "") &&
+                        item.tool_name === String(config.tool_name ?? "")
+                    )?.label ?? t("选择只读 MCP 工具")}
+                  </span>
+                  <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="max-h-72 w-(--radix-dropdown-menu-trigger-width) overflow-y-auto"
+              >
+                {availableMcp.map((item) => {
+                  const selected =
+                    item.server_id === String(config.server_id ?? "") &&
+                    item.tool_name === String(config.tool_name ?? "")
+                  return (
+                    <DropdownMenuItem
+                      key={`${item.server_id}:${item.tool_name}`}
+                      className="justify-between"
+                      onSelect={() =>
+                        updateConfig({
+                          server_id: item.server_id,
+                          tool_name: item.tool_name,
+                        })
+                      }
+                    >
+                      <span className="min-w-0 truncate">{item.label}</span>
+                      {selected ? <CheckIcon className="text-primary" /> : null}
+                    </DropdownMenuItem>
+                  )
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </fieldset>
           <JsonEditor
             id={`${nodeId}-mcp-arguments`}
             label={t("工具参数")}
@@ -805,6 +1969,14 @@ function NodeConfigFields({
       ) : null}
       {node.type === "code" ? (
         <>
+          <JsonEditor
+            id={`${nodeId}-code-inputs`}
+            label={t("代码输入")}
+            value={config.inputs ?? {}}
+            readOnly={readOnly}
+            onChange={(inputs) => updateConfig({ inputs })}
+            t={t}
+          />
           <TextEditor
             id={`${nodeId}-code-body`}
             label={t("Python 代码")}
@@ -812,13 +1984,8 @@ function NodeConfigFields({
             readOnly={readOnly}
             rows={10}
             onChange={(code) => updateConfig({ code })}
-          />
-          <JsonEditor
-            id={`${nodeId}-code-inputs`}
-            label={t("代码输入")}
-            value={config.inputs ?? {}}
-            readOnly={readOnly}
-            onChange={(inputs) => updateConfig({ inputs })}
+            node={node}
+            nodeId={nodeId}
             t={t}
           />
         </>
@@ -833,6 +2000,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
   const Icon = NODE_ICONS[node.type]
   const status = node.runtimeStatus
   const config = node.config
+  const branches = node.type === "condition" ? conditionBranches(config) : []
   const classifierHandles =
     node.type === "classifier" && Array.isArray(config.classes)
       ? [
@@ -846,21 +2014,25 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
           String(config.default_handle ?? "default"),
         ]
       : []
-  const sourceHandles =
-    node.type === "condition"
-      ? ["true", "false"]
-      : node.type === "classifier"
-        ? classifierHandles
-        : node.type === "end"
-          ? []
-          : [null]
   const StatusIcon = status ? STATUS_ICONS[status] : CircleDotDashedIcon
   const summary = configSummary(node, t)
-  const [expanded, setExpanded] = React.useState(node.type === "start" || node.type === "end")
+  const [expanded, setExpanded] = React.useState(true)
+  const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [renaming, setRenaming] = React.useState(false)
   const [title, setTitle] = React.useState(node.title)
+  const sourceHandles =
+    node.type === "condition" && expanded
+      ? []
+      : node.type === "condition"
+        ? branches.map((branch) => branch.id)
+        : node.type === "classifier"
+          ? classifierHandles
+          : node.type === "end"
+            ? []
+            : [null]
   const outputFields = outputFieldNames(node)
   const canOperate = !node.readOnly && !["start", "end"].includes(node.type)
+  const canRename = !node.readOnly && node.type === "start"
   const onRename = node.onRename as
     | ((nodeId: string, title: string) => void)
     | undefined
@@ -886,7 +2058,12 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
   return (
     <div
       className={cn(
-        "group relative min-h-24 w-64 rounded-xl border bg-card px-3.5 py-3 shadow-md transition-[border-color,box-shadow,opacity] hover:shadow-lg",
+        "group relative min-h-24 rounded-xl border bg-card px-3.5 py-3 shadow-md transition-[border-color,box-shadow,opacity] hover:shadow-lg",
+        node.type === "condition"
+          ? "w-80"
+          : ["llm", "knowledge", "reply-node"].includes(node.type)
+            ? "w-80"
+            : "w-64",
         selected && "border-foreground shadow-lg ring-2 ring-foreground/10",
         status && STATUS_STYLES[status]
       )}
@@ -952,6 +2129,18 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
             <span className="sr-only">{t(STATUS_LABELS[status])}</span>
           </span>
           ) : null}
+          {node.type === "llm" && onUpdate ? (
+            <IconButton
+              label={t("高级模型设置")}
+              className="nodrag"
+              onClick={(event) => {
+                event.stopPropagation()
+                setSettingsOpen(true)
+              }}
+            >
+              <SettingsIcon className="size-3.5" />
+            </IconButton>
+          ) : null}
           <IconButton
             label={expanded ? t("收起节点") : t("展开节点")}
             className="nodrag"
@@ -969,6 +2158,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
                     setRenaming(true)
                   }}
                 >
+                  <PencilIcon />
                   {t("重命名")}
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onCopy?.(nodeId)}>
@@ -984,35 +2174,70 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
                     }
                   }}
                 >
+                  <Trash2Icon />
                   {t("删除节点")}
+                </DropdownMenuItem>
+              </CardMoreMenu>
+            </span>
+          ) : canRename ? (
+            <span className="nodrag">
+              <CardMoreMenu label={t("更多")}>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setTitle(node.title)
+                    setRenaming(true)
+                  }}
+                >
+                  <PencilIcon />
+                  {t("重命名")}
                 </DropdownMenuItem>
               </CardMoreMenu>
             </span>
           ) : null}
         </div>
       </div>
-      <div className="mt-3 border-t border-border/70 pt-2 text-[11px] text-muted-foreground">
-        <span className="block truncate">{summary}</span>
-      </div>
-      {expanded ? (
+      {summary ? (
+        <div className="mt-3 border-t border-border/70 pt-2 text-[11px] text-muted-foreground">
+          <span className="block truncate">{summary}</span>
+        </div>
+      ) : null}
+      {expanded && !["knowledge", "llm", "condition", "reply-node", "code"].includes(node.type) ? (
         <div className="mt-2 space-y-1.5 border-t border-border/70 pt-2">
-          {outputFields.map((field) => (
-            <div key={field} className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5">
-              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
-                {`{{${id}.${field}}}`}
-              </span>
-              <IconButton
-                label={t("复制变量")}
-                className="size-6"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  void navigator.clipboard?.writeText(`{{${id}.${field}}}`)
-                }}
-              >
-                <CopyIcon className="size-3" />
-              </IconButton>
-            </div>
-          ))}
+          {node.type === "start" ? (
+            <>
+              <p className="px-1 text-[10px] font-medium text-muted-foreground">
+                {t("全局变量")}
+              </p>
+              {WORKFLOW_START_GLOBALS.map((field) => (
+                <OutputFieldRow
+                  key={field.value}
+                  label={t(field.label)}
+                  reference={`{{global.${field.value}}}`}
+                  t={t}
+                />
+              ))}
+              <p className="px-1 pt-1 text-[10px] font-medium text-muted-foreground">
+                {t("输入字段")}
+              </p>
+              {WORKFLOW_START_FIELDS.map((field) => (
+                <OutputFieldRow
+                  key={field.value}
+                  label={t(field.label)}
+                  reference={`{{${id}.${field.value}}}`}
+                  t={t}
+                />
+              ))}
+            </>
+          ) : (
+            outputFields.map((field) => (
+              <OutputFieldRow
+                key={field}
+                displayValue={outputFieldLabel(node.type, field, t)}
+                reference={`{{${id}.${field}}}`}
+                t={t}
+              />
+            ))
+          )}
         </div>
       ) : null}
       {expanded && onUpdate && node.agent && node.models && node.knowledgeBases && node.mcpServers ? (
@@ -1030,9 +2255,32 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
           />
         </div>
       ) : null}
+      {expanded && node.type === "code" ? (
+        <div className="mt-2 space-y-1.5 border-t border-border/70 pt-2">
+          {outputFields.map((field) => (
+            <OutputFieldRow
+              key={field}
+              displayValue={outputFieldLabel(node.type, field, t)}
+              reference={`{{${id}.${field}}}`}
+              t={t}
+            />
+          ))}
+        </div>
+      ) : null}
+      {node.type === "llm" && onUpdate ? (
+        <LlmSettingsDialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          nodeId={nodeId}
+          node={node}
+          readOnly={Boolean(node.readOnly)}
+          onUpdate={onUpdate}
+          t={t}
+        />
+      ) : null}
       {sourceHandles.map((handle, index) => (
         <React.Fragment key={handle ?? "default"}>
-          {handle ? (
+          {handle && node.type !== "condition" ? (
             <span
               className="pointer-events-none absolute right-3 z-10 -translate-y-1/2 rounded bg-card px-1 text-[10px] text-muted-foreground"
               style={{
@@ -1063,15 +2311,47 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
   )
 }
 
+function OutputFieldRow({
+  label,
+  displayValue,
+  reference,
+  t,
+}: {
+  label?: string
+  displayValue?: string
+  reference: string
+  t: TFunction
+}) {
+  const { notify } = useSession()
+
+  return (
+    <div className="flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md bg-muted/50 px-2 py-1.5">
+      {label ? (
+        <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+          {label}
+        </span>
+      ) : null}
+      <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">
+        {displayValue ?? reference}
+      </span>
+      <IconButton
+        label={t("复制变量")}
+        className="size-6"
+        onClick={(event) => {
+          event.stopPropagation()
+          void copyText(reference)
+            .then(() => notify("success", t("已复制")))
+            .catch(() => notify("error", t("复制失败")))
+        }}
+      >
+        <CopyIcon className="size-3" />
+      </IconButton>
+    </div>
+  )
+}
+
 function outputFieldNames(node: WorkflowNodeData) {
   const config = node.config
-  if (node.type === "start" && Array.isArray(config.inputs)) {
-    return ["files", ...config.inputs.flatMap((item) =>
-      item && typeof item === "object" && typeof (item as Record<string, unknown>).name === "string"
-        ? [String((item as Record<string, unknown>).name)]
-        : []
-    )]
-  }
   if (node.type === "end" && config.outputs && typeof config.outputs === "object") {
     return Object.keys(config.outputs)
   }
@@ -1083,10 +2363,10 @@ function outputFieldNames(node: WorkflowNodeData) {
     )
   }
   const fields: Partial<Record<WorkflowNodeType, string[]>> = {
-    llm: ["text"],
     classifier: ["class"],
-    knowledge: ["content", "hits", "retrieval_stats", "evidence_status"],
-    condition: ["matched"],
+    knowledge: KNOWLEDGE_OUTPUT_FIELDS.map((item) => item.field),
+    condition: ["branch_name"],
+    "reply-node": ["answer"],
     template: ["text"],
     variable: ["value"],
     mcp: ["result"],

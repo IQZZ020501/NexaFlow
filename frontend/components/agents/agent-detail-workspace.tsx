@@ -907,7 +907,11 @@ export function AgentDetailWorkspace({
                   <MoreHorizontalIcon />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent
+                side="bottom"
+                align="start"
+                className="min-w-40"
+              >
                 <DropdownMenuItem onSelect={onManagePermissions}>
                   <ShieldCheckIcon />
                   {t("资源授权")}

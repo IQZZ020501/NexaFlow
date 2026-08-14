@@ -9,9 +9,12 @@ from app.entities.user import User
 from app.entities.workflows import WorkflowDefinition, WorkflowVersion
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.schemas.workflow import (
     KnowledgeNodeConfig,
+    LlmNodeConfig,
+    McpNodeConfig,
     WorkflowDefinitionResponse,
     WorkflowGraph,
     WorkflowVersionResponse,
@@ -21,6 +24,11 @@ from app.shareddomain.agents.services import (
     agent_publication_snapshot,
     get_agent,
     get_agent_model,
+)
+from app.shareddomain.knowledge.services import (
+    ACTIVE_STATUS as KNOWLEDGE_ACTIVE_STATUS,
+    RESOURCE_TYPE as KNOWLEDGE_RESOURCE_TYPE,
+    effective_permission,
 )
 from app.shareddomain.tools.services import (
     effective_mcp_tool_policy_mode,
@@ -82,6 +90,8 @@ async def validate_workflow_resources(
     db: AsyncSession,
     agent: Agent,
     graph: WorkflowGraph | dict[str, Any],
+    actor: User,
+    workspace_role: str | None,
     default_model_id: str | None = None,
 ) -> WorkflowGraph:
     try:
@@ -89,29 +99,11 @@ async def validate_workflow_resources(
     except WorkflowValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
-    bindings = (await agent_repository.list_binding_map(db, [agent.id]))[agent.id]
-    mcp_bindings = (await agent_repository.list_mcp_binding_map(db, [agent.id]))[
-        agent.id
-    ]
-    bound_mcp = {(item["server_id"], item["tool_name"]) for item in mcp_bindings}
-    referenced_mcp: set[tuple[str, str]] = set()
+    knowledge_base_ids, mcp_tools = workflow_resource_references(parsed)
     model_ids = {default_model_id or agent.model_id}
-    input_names: list[str] = []
     for node in parsed.nodes:
         config = node.data.config
-        if node.data.type == "start":
-            input_names = [str(item["name"]) for item in config.get("inputs", [])]
-            if len(input_names) != len(set(input_names)):
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    f"Start node {node.id} input names must be unique.",
-                )
-            if "files" in input_names:
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    'Start input name "files" is reserved for uploads.',
-                )
-        elif node.data.type == "end":
+        if node.data.type == "end":
             if any(
                 OUTPUT_NAME_PATTERN.fullmatch(str(key)) is None
                 for key in config.get("outputs", {})
@@ -122,36 +114,48 @@ async def validate_workflow_resources(
                 )
         elif node.data.type in {"llm", "classifier"} and config.get("model_id"):
             model_ids.add(str(config["model_id"]))
-        elif node.data.type == "knowledge":
-            knowledge_base_ids = KnowledgeNodeConfig.model_validate(
-                config
-            ).resolved_knowledge_base_ids
-            if any(item not in bindings for item in knowledge_base_ids):
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    f"Knowledge node {node.id} uses an unbound knowledge base.",
-                )
-        elif node.data.type == "mcp":
-            reference = (config["server_id"], config["tool_name"])
-            if reference not in bound_mcp:
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    f"MCP node {node.id} uses an unbound tool.",
-                )
-            referenced_mcp.add(reference)
 
     for model_id in model_ids:
         await get_agent_model(db, agent.workspace_id, model_id)
-    if referenced_mcp:
-        references = [
-            item
-            for item in mcp_bindings
-            if (item["server_id"], item["tool_name"]) in referenced_mcp
-        ]
+    knowledge_rows = await knowledge_base_repository.list_knowledge_bases_with_user_grants(
+        db,
+        agent.workspace_id,
+        knowledge_base_ids,
+        actor.id,
+        KNOWLEDGE_RESOURCE_TYPE,
+    )
+    knowledge_by_id = {
+        knowledge_base.id: (knowledge_base, grant)
+        for knowledge_base, grant in knowledge_rows
+    }
+    for knowledge_base_id in knowledge_base_ids:
+        row = knowledge_by_id.get(knowledge_base_id)
+        if row is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "Knowledge base not found.",
+            )
+        knowledge_base, grant = row
+        if effective_permission(
+            knowledge_base,
+            actor,
+            workspace_role,
+            grant,
+        ) not in {"view", "edit"}:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Knowledge base access denied.",
+            )
+        if knowledge_base.status != KNOWLEDGE_ACTIVE_STATUS:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Workflow knowledge bases must be active.",
+            )
+    if mcp_tools:
         resolved = await resolve_mcp_tools(
             db,
             agent.workspace_id,
-            references,
+            mcp_tools,
             strict=True,
         )
         for tool in resolved:
@@ -171,6 +175,35 @@ async def validate_workflow_resources(
                     "Workflow MCP nodes require a current read-only policy.",
                 )
     return parsed
+
+
+def workflow_resource_references(
+    graph: WorkflowGraph,
+) -> tuple[list[str], list[dict[str, str]]]:
+    knowledge_base_ids: list[str] = []
+    mcp_references: list[tuple[str, str]] = []
+    for node in graph.nodes:
+        config = node.data.config
+        if node.data.type == "knowledge":
+            knowledge_base_ids.extend(
+                KnowledgeNodeConfig.model_validate(config).resolved_knowledge_base_ids
+            )
+        elif node.data.type == "mcp":
+            mcp = McpNodeConfig.model_validate(config)
+            mcp_references.append((mcp.server_id, mcp.tool_name))
+        elif node.data.type == "llm":
+            llm = LlmNodeConfig.model_validate(config)
+            if llm.mcp_enable:
+                mcp_references.extend(
+                    (item.server_id, item.tool_name) for item in llm.mcp_servers
+                )
+    return (
+        list(dict.fromkeys(knowledge_base_ids)),
+        [
+            {"server_id": server_id, "tool_name": tool_name}
+            for server_id, tool_name in dict.fromkeys(mcp_references)
+        ],
+    )
 
 
 async def get_or_create_definition(
@@ -229,13 +262,16 @@ async def publish_definition(
     db: AsyncSession,
     agent: Agent,
     actor: User,
+    workspace_role: str | None,
 ) -> WorkflowVersion:
     definition = await workflow_repository.lock_definition(
         db, agent.workspace_id, agent.id
     )
     if definition is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow definition not found.")
-    graph = await validate_workflow_resources(db, agent, definition.graph)
+    graph = await validate_workflow_resources(
+        db, agent, definition.graph, actor, workspace_role
+    )
     serialized = graph.model_dump(by_alias=True, mode="json")
     version = WorkflowVersion(
         workspace_id=agent.workspace_id,

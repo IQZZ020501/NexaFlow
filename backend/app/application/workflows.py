@@ -38,7 +38,10 @@ from app.application.workflow_access import (
     list_public_workflow_conversations,
     stream_external_workflow_run,
 )
-from app.application.workflow_uploads import upload_public_workflow_files
+from app.application.workflow_uploads import (
+    upload_public_workflow_files,
+    upload_workspace_workflow_files,
+)
 
 __all__ = [
     "create_external_workflow_run",
@@ -58,6 +61,7 @@ __all__ = [
     "stream_external_workflow_run",
     "stream_workflow_run",
     "upload_public_workflow_files",
+    "upload_workspace_workflow_files",
     "update_workflow_definition",
     "validate_workflow_definition",
 ]
@@ -85,7 +89,9 @@ async def validate_workflow_definition(
 ) -> WorkflowValidationResponse:
     agent = await get_workflow_agent(db, workspace_id, agent_id)
     require_agent_edit(agent, actor, workspace_role)
-    parsed = await validate_workflow_resources(db, agent, graph)
+    parsed = await validate_workflow_resources(
+        db, agent, graph, actor, workspace_role
+    )
     return WorkflowValidationResponse(graph_hash=graph_hash(parsed))
 
 
@@ -100,11 +106,10 @@ async def update_workflow_definition(
     agent = await get_workflow_agent(db, workspace_id, agent_id)
     require_agent_edit(agent, actor, workspace_role)
     definition = await get_or_create_definition(db, agent, actor, workspace_role)
-    graph = await validate_workflow_resources(db, agent, payload.graph)
     updated = await save_definition(
         db,
         definition,
-        graph,
+        payload.graph,
         payload.expected_revision,
         actor,
     )
@@ -126,7 +131,9 @@ async def publish_workflow_definition(
             "Workspace admin required to publish workflows.",
         )
     await get_or_create_definition(db, agent, actor, workspace_role)
-    return version_to_response(await publish_definition(db, agent, actor))
+    return version_to_response(
+        await publish_definition(db, agent, actor, workspace_role)
+    )
 
 
 async def list_workflow_versions(
@@ -161,7 +168,9 @@ async def restore_workflow_version(
     )
     if version is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow version not found.")
-    graph = await validate_workflow_resources(db, agent, version.graph)
+    graph = await validate_workflow_resources(
+        db, agent, version.graph, actor, workspace_role
+    )
     updated = await save_definition(
         db,
         definition,

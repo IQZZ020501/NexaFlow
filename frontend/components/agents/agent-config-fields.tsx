@@ -182,7 +182,7 @@ export function AgentConfigFields({
                   !form.id
                     ? "填写应用名称、描述和模型。"
                     : form.appType === "workflow"
-                    ? "配置工作流使用的默认模型、知识库和只读 MCP 工具。"
+                    ? "配置工作流的默认模型。"
                     : "配置 Agent 使用的模型、知识库和 MCP 工具。"
                 )}
               </p>
@@ -321,7 +321,7 @@ export function AgentConfigFields({
           </section>
         ) : null}
 
-        {form.id ? (
+        {form.id && form.appType === "agent" ? (
           <section className="rounded-xl border bg-background shadow-xs">
           <div className="flex items-center gap-2 px-4 py-3">
             <button
@@ -421,7 +421,7 @@ export function AgentConfigFields({
           </section>
         ) : null}
 
-        {form.id ? (
+        {form.id && form.appType === "agent" ? (
           <section className="rounded-xl border bg-background shadow-xs">
           <div className="flex items-center gap-2 px-4 py-3">
             <button
@@ -535,7 +535,7 @@ export function AgentConfigFields({
       </FieldGroup>
 
       <Dialog
-        open={resourcePicker === "knowledge"}
+        open={form.appType === "agent" && resourcePicker === "knowledge"}
         onOpenChange={(open) => {
           setResourcePicker(open ? "knowledge" : null)
           if (!open) setKnowledgeSearch("")
@@ -653,7 +653,7 @@ export function AgentConfigFields({
       </Dialog>
 
       <Dialog
-        open={resourcePicker === "mcp"}
+        open={form.appType === "agent" && resourcePicker === "mcp"}
         onOpenChange={(open) => setResourcePicker(open ? "mcp" : null)}
       >
         <DialogContent className="max-h-[calc(100svh-2rem)] max-w-xl gap-0 overflow-hidden p-0">

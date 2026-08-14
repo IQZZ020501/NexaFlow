@@ -178,6 +178,9 @@ class KnowledgeTaskResponse(BaseModel):
 class KnowledgeQueryRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     limit: int = Field(default=5, ge=1, le=20)
+    search_mode: Literal["embedding", "keywords", "blend"] = "blend"
+    # 相似度阈值（余弦距离，0–2，保留距离不超过该值的命中）
+    similarity: float | None = Field(default=None, ge=0, le=2)
 
 
 class KnowledgeQueryHitResponse(BaseModel):

@@ -1640,7 +1640,11 @@ function KnowledgeBasePageContent({
                                     <MoreHorizontalIcon />
                                   </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
+                                <DropdownMenuContent
+                                  side="bottom"
+                                  align="start"
+                                  className="min-w-40"
+                                >
                                   <DropdownMenuItem
                                     onSelect={() =>
                                       void handleDownloadDocument(document)

@@ -12,21 +12,11 @@ def default_workflow_graph() -> WorkflowGraph:
                     "data": {
                         "type": "start",
                         "title": "Start",
-                        "config": {"inputs": [{"name": "input", "required": True}]},
-                    },
-                },
-                {
-                    "id": "end",
-                    "type": "workflow",
-                    "position": {"x": 460, "y": 180},
-                    "data": {
-                        "type": "end",
-                        "title": "End",
-                        "config": {"outputs": {"result": "{{start.input}}"}},
+                        "config": {},
                     },
                 },
             ],
-            "edges": [{"id": "start-end", "source": "start", "target": "end"}],
+            "edges": [],
             "viewport": {"x": 0, "y": 0, "zoom": 1},
         }
     )

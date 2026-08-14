@@ -3,8 +3,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
-import time
 import traceback
+from typing import Any
 
 from app.application.agent_executor import (
     DurableToolLedger,
@@ -29,7 +29,7 @@ from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.system_log import record_system_log
 from app.ports.llm import ModelProviderError, RegisteredModel
-from app.schemas.workflow import WorkflowGraph
+from app.schemas.workflow import LlmNodeConfig, WorkflowGraph
 from app.shareddomain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
@@ -51,7 +51,6 @@ from app.shareddomain.tools.services import (
     resolve_mcp_tools,
 )
 from app.shareddomain.workflows.engine import (
-    NodeState,
     NodeTransition,
     WorkflowEngine,
     WorkflowEngineError,
@@ -59,6 +58,77 @@ from app.shareddomain.workflows.engine import (
 )
 
 MAX_WORKFLOW_OUTPUT_BYTES = 256 * 1024
+WORKFLOW_HISTORY_LIMIT = 20
+
+
+def _history_answer(result: str) -> Any:
+    try:
+        return json.loads(result)
+    except (TypeError, ValueError):
+        return result
+
+
+async def _workflow_context(
+    run: AgentRun,
+    graph: WorkflowGraph,
+) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
+    node_ids = [
+        node.id
+        for node in graph.nodes
+        if node.data.type == "llm"
+        and LlmNodeConfig.model_validate(node.data.config).dialogue_type == "NODE"
+    ]
+    histories: dict[str, list[dict[str, Any]]] = {
+        node_id: [] for node_id in node_ids
+    }
+    prior: list[AgentRun] = []
+    executions_by_run: dict[str, list[WorkflowNodeExecution]] = {}
+    if run.conversation_id:
+        async with get_session_factory()() as db:
+            prior = await agent_repository.list_agent_runs(
+                db,
+                run.agent_id,
+                run.access_source,
+                run.consumer_id,
+                limit=WORKFLOW_HISTORY_LIMIT,
+                status=AGENT_RUN_SUCCEEDED_STATUS,
+                conversation_id=run.conversation_id,
+            )
+            executions = await workflow_repository.list_node_executions_for_runs(
+                db,
+                [item.id for item in prior] if node_ids else [],
+            )
+        for execution in executions:
+            executions_by_run.setdefault(execution.run_id, []).append(execution)
+
+    history = [
+        {"question": item.goal, "answer": _history_answer(item.result)}
+        for item in reversed(prior)
+    ]
+    if node_ids:
+        node_id_set = set(node_ids)
+        for item in reversed(prior):
+            for execution in executions_by_run.get(item.id, []):
+                if execution.node_id not in node_id_set:
+                    continue
+                if execution.status != "succeeded":
+                    continue
+                answer = (execution.outputs or {}).get("text")
+                if answer is None:
+                    continue
+                histories[execution.node_id].append(
+                    {"question": item.goal, "answer": answer}
+                )
+    now = utc_now()
+    return (
+        {
+            "time": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "history_context": history,
+            "chat_id": run.conversation_id,
+            "start_time": now.isoformat(),
+        },
+        histories,
+    )
 
 
 @dataclass(frozen=True)
@@ -160,6 +230,7 @@ async def _execute_claimed_workflow_run(
     scope = await _load_scope(run_id)
     run, detail = scope.run, scope.detail
     graph = WorkflowGraph.model_validate(detail.graph_snapshot)
+    workflow_globals, node_histories = await _workflow_context(run, graph)
     node_order = {node.id: index for index, node in enumerate(graph.nodes)}
     ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
     node_scope = WorkflowNodeScope(
@@ -172,10 +243,7 @@ async def _execute_claimed_workflow_run(
         mcp_tools=scope.mcp_tools,
         ledger=ledger,
         node_order=node_order,
-        input_assignment_method={
-            "public": "user_input",
-            "api": "api_input",
-        }.get(scope.run.access_source),
+        node_histories=node_histories,
     )
     engine = WorkflowEngine(
         graph,
@@ -333,6 +401,7 @@ async def _execute_claimed_workflow_run(
         state=state,
         on_node_started=on_started,
         on_node_finished=on_finished,
+        workflow_globals=workflow_globals,
     )
     encoded_output = json.dumps(
         result.outputs,

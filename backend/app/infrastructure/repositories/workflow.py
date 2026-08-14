@@ -479,6 +479,24 @@ async def list_node_executions(
     return [to_entity(WorkflowNodeExecutionEntity, row) for row in rows.all()]
 
 
+async def list_node_executions_for_runs(
+    db: AsyncSession,
+    run_ids: list[str],
+) -> list[WorkflowNodeExecutionEntity]:
+    if not run_ids:
+        return []
+    rows = await db.scalars(
+        select(WorkflowNodeExecution)
+        .where(WorkflowNodeExecution.run_id.in_(run_ids))
+        .order_by(
+            WorkflowNodeExecution.run_id,
+            WorkflowNodeExecution.sequence,
+            WorkflowNodeExecution.node_id,
+        )
+    )
+    return [to_entity(WorkflowNodeExecutionEntity, row) for row in rows.all()]
+
+
 async def list_run_details_for_external_conversations(
     db: AsyncSession,
     run_ids: list[str],

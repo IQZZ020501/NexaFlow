@@ -413,7 +413,8 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
     original_query_vectors = knowledge_application.query_vectors
 
     def fake_query_vectors(*_args) -> list[VectorHit]:
-        assert _args[-1] == 5
+        assert _args[-2] == 5
+        assert _args[-1] is None
         return [
             VectorHit(chunk_id="stale-chunk", distance=0.0),
             VectorHit(chunk_id=indexed_chunk_id, distance=0.1),
@@ -433,6 +434,52 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
             assert [hit.chunk_id for hit in hits] == [indexed_chunk_id]
     finally:
         knowledge_application.query_vectors = original_query_vectors
+
+
+def test_keyword_query_does_not_require_embedding_model() -> None:
+    from unittest.mock import AsyncMock, Mock, patch
+
+    async def run() -> None:
+        keyword_query = AsyncMock(return_value=[])
+        with patch.object(
+            knowledge_application,
+            "resolve_embedding_model",
+            new=AsyncMock(side_effect=AssertionError("embedding model was resolved")),
+        ) as resolve_model, patch.object(
+            knowledge_application,
+            "query_vectors",
+            new=Mock(side_effect=AssertionError("vector search was called")),
+        ) as vector_query, patch.object(
+            knowledge_repository,
+            "query_keyword_chunk_ids",
+            new=keyword_query,
+        ), patch.object(
+            knowledge_repository,
+            "list_chunks_by_ids",
+            new=AsyncMock(return_value=[]),
+        ), patch.object(
+            knowledge_repository,
+            "list_active_documents_by_ids",
+            new=AsyncMock(return_value=[]),
+        ):
+            hits = await knowledge_application.query_knowledge_base(
+                object(),  # type: ignore[arg-type]
+                SimpleNamespace(id="base-1"),  # type: ignore[arg-type]
+                KnowledgeQueryRequest(
+                    query="keyword only",
+                    limit=1,
+                    search_mode="keywords",
+                ),
+                SimpleNamespace(),  # type: ignore[arg-type]
+            )
+
+        assert hits == []
+        resolve_model.assert_not_awaited()
+        vector_query.assert_not_called()
+        keyword_query.assert_awaited_once()
+        assert keyword_query.await_args.args[2:] == ("keyword only", 5)
+
+    asyncio.run(run())
 
 
 def assert_vector_store_mmr_and_metadata() -> None:
@@ -519,7 +566,7 @@ def assert_vector_store_mmr_and_metadata() -> None:
             object(),
             "exact term",
             3,
-        ) == [VectorHit(chunk_id=chunk_id, distance=None)]
+        ) == [VectorHit(chunk_id=chunk_id, distance=0.0)]
 
         try:
             knowledge_vector_store._ensure_collection(client, collection_name, 3)
@@ -603,7 +650,8 @@ async def assert_query_aggregates_hybrid_hits(
     }
 
     def fake_query_vectors(*args) -> list[VectorHit]:
-        assert args[-2:] == ("exact term", 10)
+        assert args[-3:-1] == ("exact term", 10)
+        assert args[-1] is None
         return [
             VectorHit(chunk_id=product_chunk_id, distance=0.05),
             VectorHit(chunk_id="stale-chunk", distance=0.1),
@@ -809,7 +857,8 @@ async def assert_hierarchical_retrieval(
         candidates = [first_children[0], first_children[1], second_children[0]]
 
         def fake_query_vectors(*args) -> list[VectorHit]:
-            assert args[-2:] == ("hierarchical query", 10)
+            assert args[-3:-1] == ("hierarchical query", 10)
+            assert args[-1] is None
             return [
                 VectorHit(chunk_id=chunk.id, distance=index / 10)
                 for index, chunk in enumerate(candidates, start=1)
@@ -881,6 +930,7 @@ async def assert_document_open_tasks_failed(
 
 
 def main() -> None:
+    test_keyword_query_does_not_require_embedding_model()
     assert_vector_store_mmr_and_metadata()
     hierarchical_drafts = build_hierarchical_chunks(
         "# One\n\n```text\n# not a heading\n```\n\nBody\n\n# Two\n\nMore",

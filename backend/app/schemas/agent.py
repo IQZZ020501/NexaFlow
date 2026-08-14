@@ -46,11 +46,11 @@ def validate_agent_interaction_config(
     value: AgentInteractionConfig,
     app_type: AppType,
 ) -> AgentInteractionConfig:
-    if app_type == "agent" and any(
+    if any(
         item not in {"document", "image"}
         for item in value.file_upload_setting.file_upload_type
     ):
-        raise ValueError("Agent attachments support documents and images only.")
+        raise ValueError(f"{app_type.title()} attachments support documents and images only.")
     return value
 
 

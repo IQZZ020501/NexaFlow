@@ -56,6 +56,7 @@ import {
   type AgentMonitoring,
   type PaginatedResponse,
 } from "@/lib/api/agents"
+import { copyText } from "@/lib/clipboard"
 import { formatDateTime } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import type { TFunction } from "@/i18n"
@@ -162,24 +163,6 @@ function statusLabel(status: string, t: TFunction) {
   return labels[status] ?? status
 }
 
-async function copyText(value: string) {
-  if (typeof navigator !== "undefined" && navigator.clipboard) {
-    await navigator.clipboard.writeText(value)
-    return
-  }
-  const input = document.createElement("textarea")
-  input.value = value
-  input.style.position = "fixed"
-  input.style.opacity = "0"
-  document.body.appendChild(input)
-  input.select()
-  const copied = document.execCommand("copy")
-  input.remove()
-  if (!copied) {
-    throw new Error("Copy failed; please copy the text manually.")
-  }
-}
-
 function MetricCard({
   icon: Icon,
   label,
@@ -265,8 +248,8 @@ export function AgentOverviewPanel({
     try {
       await copyText(value)
       notify("success", successMessage)
-    } catch (error) {
-      notify("error", getErrorMessage(error, t))
+    } catch {
+      notify("error", t("复制失败"))
     }
   }
 

@@ -4,14 +4,17 @@ import * as React from "react"
 import dynamic from "next/dynamic"
 import {
   ArrowLeftIcon,
-  Clock3Icon,
   HistoryIcon,
   LayoutDashboardIcon,
   LoaderCircleIcon,
+  Maximize2Icon,
+  Minimize2Icon,
+  PaperclipIcon,
   PlayIcon,
   PlusIcon,
   SaveIcon,
   ScrollTextIcon,
+  SendIcon,
   SettingsIcon,
   ShieldCheckIcon,
   MoreHorizontalIcon,
@@ -20,9 +23,11 @@ import {
   UsersIcon,
   ChartNoAxesColumnIcon,
   WorkflowIcon,
+  XIcon,
 } from "lucide-react"
 
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
+import { AgentAttachmentList } from "@/components/agents/agent-attachment-list"
 import {
   AgentConversationUsersPanel,
   AgentLogsPanel,
@@ -63,6 +68,7 @@ import {
   publishWorkflow,
   restoreWorkflowVersion,
   updateWorkflowDefinition,
+  uploadWorkflowFiles,
   type WorkflowDefinition,
   type WorkflowGraph,
   type WorkflowNodeExecution,
@@ -71,8 +77,8 @@ import {
   type WorkflowVersion,
 } from "@/lib/api/workflows"
 import { getErrorMessage } from "@/lib/errors"
+import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import {
-  initialWorkflowInputs,
   selectWorkflowRunTarget,
   workflowGraphSignature,
 } from "@/lib/workflows/graph"
@@ -118,14 +124,6 @@ function runStatusLabel(run: WorkflowRun, t: TFunction) {
   if (run.status === "succeeded") return t("运行成功")
   if (run.status === "cancelled") return t("运行已取消")
   return t("运行失败")
-}
-
-function parseObject(text: string) {
-  const value: unknown = JSON.parse(text)
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("object required")
-  }
-  return value as Record<string, unknown>
 }
 
 function JsonBlock({ value }: { value: unknown }) {
@@ -177,14 +175,17 @@ export function WorkflowDetailWorkspace({
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [runOpen, setRunOpen] = React.useState(false)
+  const [runExpanded, setRunExpanded] = React.useState(false)
   const [paletteOpen, setPaletteOpen] = React.useState(false)
-  const [runDetailsOpen, setRunDetailsOpen] = React.useState(false)
-  const [runInputs, setRunInputs] = React.useState("{}")
-  const [runInputsInvalid, setRunInputsInvalid] = React.useState(false)
+  const [canvasGeneration, setCanvasGeneration] = React.useState(0)
+  const [runQuestion, setRunQuestion] = React.useState("")
+  const [runFiles, setRunFiles] = React.useState<File[]>([])
+  const [runQuestionInvalid, setRunQuestionInvalid] = React.useState(false)
   const [runVersionNumber, setRunVersionNumber] = React.useState<number | null>(
     null
   )
   const runAbortRef = React.useRef<AbortController | null>(null)
+  const runFileInputRef = React.useRef<HTMLInputElement>(null)
 
   const isDirty = Boolean(
     definition &&
@@ -201,6 +202,18 @@ export function WorkflowDetailWorkspace({
     versions,
     runVersionNumber
   )
+  const currentRunQuestion =
+    typeof currentRun?.inputs.question === "string"
+      ? currentRun.inputs.question
+      : ""
+  const isRunActive = Boolean(
+    currentRun && !TERMINAL_STATUSES.has(currentRun.status)
+  )
+  const runInputDisabled =
+    isRunning ||
+    isRunActive ||
+    (runTarget?.source === "draft" && isAppDirty)
+  const visibleRunFiles = form.interactionConfig.file_upload ? runFiles : []
   const navigationItems = [
     { view: "overview" as const, label: t("概览"), icon: LayoutDashboardIcon },
     { view: "settings" as const, label: t("设置"), icon: SettingsIcon },
@@ -416,32 +429,41 @@ export function WorkflowDetailWorkspace({
 
   async function handleRun(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    let inputs: Record<string, unknown>
-    try {
-      inputs = parseObject(runInputs)
-      setRunInputsInvalid(false)
-    } catch {
-      setRunInputsInvalid(true)
+    const question = runQuestion.trim()
+    if (!question) {
+      setRunQuestionInvalid(true)
       return
     }
+    setRunQuestionInvalid(false)
     if (!runTarget) return
     if (runTarget.source === "draft" && isAppDirty) return
     setIsRunning(true)
     try {
       if (runTarget.source === "draft" && isDirty && !(await saveDraft()))
         return
+      const uploaded =
+        form.interactionConfig.file_upload && runFiles.length
+          ? await uploadWorkflowFiles(
+              token,
+              workspaceId,
+              agent.id,
+              runFiles
+            )
+          : []
       const run = await createWorkflowRun(
         token,
         workspaceId,
         agent.id,
-        inputs,
+        question,
         runTarget.source,
-        runTarget.versionNumber
+        runTarget.versionNumber,
+        uploaded.map((item) => item.id)
       )
       setCurrentRun(run)
       setExecutions([])
       setRuntimeStatuses({})
-      setRunOpen(false)
+      setRunQuestion("")
+      setRunFiles([])
       observeRun(run)
       notify(
         "success",
@@ -471,10 +493,10 @@ export function WorkflowDetailWorkspace({
     )
     if (!target) return
     setRunVersionNumber(versionNumber)
-    setRunInputs(
-      JSON.stringify(initialWorkflowInputs(target.graph ?? graph), null, 2)
-    )
-    setRunInputsInvalid(false)
+    setRunQuestion("")
+    setRunFiles([])
+    setRunQuestionInvalid(false)
+    setRunExpanded(false)
     setRunOpen(true)
   }
 
@@ -500,6 +522,7 @@ export function WorkflowDetailWorkspace({
       )
       setDefinition(restored)
       setGraph(restored.graph)
+      setCanvasGeneration((current) => current + 1)
       setHistoryOpen(false)
       notify("success", t("工作流版本已恢复"))
     } catch (error) {
@@ -576,7 +599,7 @@ export function WorkflowDetailWorkspace({
             ) : null}
           </div>
           <p className="mt-0.5 hidden truncate text-xs text-muted-foreground sm:block">
-            {t("工作流")} · {currentViewLabel} · v{definition.revision}
+            {t("工作流")} · {currentViewLabel}
           </p>
         </div>
         {visibleActiveView === "settings" ? (
@@ -628,7 +651,7 @@ export function WorkflowDetailWorkspace({
               agent.status !== "active" ||
               isRunning ||
               (!agent.can_edit && !latestPublishedVersion) ||
-              Boolean(currentRun && !TERMINAL_STATUSES.has(currentRun.status))
+              isRunActive
             }
             title={
               !agent.can_edit && !latestPublishedVersion
@@ -671,7 +694,11 @@ export function WorkflowDetailWorkspace({
                 <MoreHorizontalIcon />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent
+              side="bottom"
+              align="start"
+              className="min-w-40"
+            >
               <DropdownMenuItem onSelect={onManagePermissions}>
                 <ShieldCheckIcon />
                 {t("资源授权")}
@@ -693,7 +720,7 @@ export function WorkflowDetailWorkspace({
             </nav>
           </aside>
         )}
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="relative flex min-w-0 flex-1 flex-col">
           {standalone ? null : (
             <nav
               className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden"
@@ -726,29 +753,311 @@ export function WorkflowDetailWorkspace({
                 variant="ghost"
                 size="sm"
                 className="ml-auto"
-                onClick={() => setRunDetailsOpen(true)}
+                onClick={() => setRunOpen(true)}
               >
                 {t("查看运行结果")}
               </Button>
             </div>
           ) : null}
           {visibleActiveView === "settings" ? (
-            <WorkflowCanvas
-              key={`${definition.id}:${definition.revision}`}
-              agent={agent}
-              graph={graph}
-              models={models}
-              knowledgeBases={knowledgeBases}
-              mcpServers={mcpServers}
-              runtimeStatuses={runtimeStatuses}
-              readOnly={!agent.can_edit}
-              paletteOpen={paletteOpen}
-              onClosePalette={() => setPaletteOpen(false)}
-              form={form}
-              setForm={setForm}
-              onChange={setGraph}
-              t={t}
-            />
+            <>
+              <WorkflowCanvas
+                key={`${definition.id}:${canvasGeneration}`}
+                agent={agent}
+                graph={graph}
+                models={models}
+                knowledgeBases={knowledgeBases}
+                mcpServers={mcpServers}
+                runtimeStatuses={runtimeStatuses}
+                readOnly={!agent.can_edit}
+                paletteOpen={paletteOpen}
+                onClosePalette={() => setPaletteOpen(false)}
+                form={form}
+                setForm={setForm}
+                onChange={setGraph}
+                t={t}
+              />
+              {runOpen ? (
+                <aside
+                  role="dialog"
+                  aria-modal="false"
+                  aria-label={t("运行工作流")}
+                  className={cn(
+                    "absolute z-40 flex min-h-0 overflow-hidden rounded-2xl border border-border/80 bg-background/98 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.55)] backdrop-blur-xl transition-[inset,width] duration-200",
+                    runExpanded
+                      ? "inset-3"
+                      : "inset-2 sm:inset-y-4 sm:right-4 sm:left-auto sm:w-96"
+                  )}
+                >
+                  <form
+                    className="flex min-h-0 flex-1 flex-col"
+                    onSubmit={(event) => void handleRun(event)}
+                  >
+                    <header className="flex shrink-0 items-center gap-3 border-b bg-background/95 px-4 py-3">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50 shadow-xs">
+                        <WorkflowIcon className="size-[18px] text-foreground" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <strong className="block truncate text-sm font-semibold">
+                          {form.name || agent.name}
+                        </strong>
+                        <span className="block text-[11px] text-muted-foreground">
+                          {agent.can_edit ? t("调试运行") : t("运行已发布版本")}
+                        </span>
+                      </span>
+                      <IconButton
+                        label={t(runExpanded ? "收起" : "展开")}
+                        className="size-8 text-muted-foreground hover:text-foreground"
+                        onClick={() => setRunExpanded((current) => !current)}
+                      >
+                        {runExpanded ? (
+                          <Minimize2Icon className="size-4" />
+                        ) : (
+                          <Maximize2Icon className="size-4" />
+                        )}
+                      </IconButton>
+                      <IconButton
+                        label={t("关闭")}
+                        className="size-8 text-muted-foreground hover:text-foreground"
+                        onClick={() => setRunOpen(false)}
+                      >
+                        <XIcon className="size-4" />
+                      </IconButton>
+                    </header>
+
+                    <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-muted/10 px-4 py-5">
+                      {form.interactionConfig.prologue ? (
+                        <div className="flex items-start gap-2.5">
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background shadow-xs">
+                            <WorkflowIcon className="size-4" />
+                          </span>
+                          <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-tl-md border bg-background px-3.5 py-3 text-sm leading-6 shadow-xs">
+                            {form.interactionConfig.prologue}
+                          </div>
+                        </div>
+                      ) : !currentRun ? (
+                        <div className="flex min-h-full flex-col items-center justify-center px-6 text-center">
+                          <span className="flex size-12 items-center justify-center rounded-2xl border bg-background shadow-sm">
+                            <WorkflowIcon className="size-5 text-muted-foreground" />
+                          </span>
+                          <p className="mt-4 max-w-xs text-sm leading-6 text-muted-foreground">
+                          {runTarget?.source === "published"
+                            ? t("问题将作为开始节点的 question 输出注入已发布版本 v{version}。", {
+                                version: runTarget.versionNumber ?? "",
+                              })
+                            : t("问题将作为开始节点的 question 输出注入当前草稿。")}
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {currentRun ? (
+                        <div className="grid gap-4">
+                          {currentRunQuestion ? (
+                            <p className="ml-auto max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-3.5 py-2.5 text-sm leading-6 text-background shadow-sm">
+                              {currentRunQuestion}
+                            </p>
+                          ) : null}
+                          <div className="flex items-start gap-2.5">
+                            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background shadow-xs">
+                              <WorkflowIcon className="size-4" />
+                            </span>
+                            <article className="grid min-w-0 flex-1 gap-4 rounded-2xl rounded-tl-md border bg-background p-3.5 shadow-xs">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge
+                                  variant={
+                                    currentRun.status === "failed"
+                                      ? "destructive"
+                                      : "outline"
+                                  }
+                                >
+                                  {runStatusLabel(currentRun, t)}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {t("已执行 {count} 个节点", {
+                                    count: currentRun.step_count,
+                                  })}
+                                </span>
+                              </div>
+
+                              {executions.length ? (
+                                <section className="grid gap-2">
+                                  <h3 className="text-xs font-medium text-muted-foreground">
+                                    {t("节点执行记录")}
+                                  </h3>
+                                  <div className="divide-y overflow-hidden rounded-lg border bg-muted/10">
+                                    {executions.map((execution) => (
+                                      <div
+                                        key={execution.id}
+                                        className="flex items-center gap-2 px-3 py-2"
+                                      >
+                                        <span
+                                          className={cn(
+                                            "size-2 shrink-0 rounded-full",
+                                            execution.status === "succeeded"
+                                              ? "bg-emerald-500"
+                                              : execution.status === "failed"
+                                                ? "bg-destructive"
+                                                : execution.status === "running"
+                                                  ? "animate-pulse bg-sky-500"
+                                                  : "bg-muted-foreground/40"
+                                          )}
+                                        />
+                                        <span className="min-w-0 flex-1 truncate text-xs">
+                                          {execution.node_id}
+                                        </span>
+                                        {execution.duration_ms !== null ? (
+                                          <span className="text-[11px] text-muted-foreground">
+                                            {t("{duration} 毫秒", {
+                                              duration: execution.duration_ms,
+                                            })}
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </section>
+                              ) : null}
+
+                              {currentRun.last_error ? (
+                                <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                                  {currentRun.last_error}
+                                </p>
+                              ) : currentRun.status === "succeeded" ? (
+                                <section className="grid gap-2">
+                                  <h3 className="text-xs font-medium text-muted-foreground">
+                                    {t("运行结果")}
+                                  </h3>
+                                  <JsonBlock value={currentRun.outputs} />
+                                </section>
+                              ) : (
+                                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                                  <LoaderCircleIcon className="size-4 animate-spin" />
+                                  {runStatusLabel(currentRun, t)}
+                                </p>
+                              )}
+                            </article>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <footer className="shrink-0 border-t bg-background/95 p-3.5">
+                      {runQuestionInvalid ? (
+                        <p className="mb-2 text-xs text-destructive">
+                          {t("请输入问题")}
+                        </p>
+                      ) : null}
+                      <div className="relative rounded-2xl border bg-muted/20 p-1.5 shadow-sm transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:shadow-md">
+                        {form.interactionConfig.file_upload ? (
+                          <input
+                            ref={runFileInputRef}
+                            type="file"
+                            className="sr-only"
+                            multiple
+                            accept={acceptedUploadExtensions(
+                              form.interactionConfig.file_upload_setting
+                                .file_upload_type
+                            )}
+                            disabled={runInputDisabled}
+                            onChange={(event) => {
+                              setRunFiles(Array.from(event.target.files ?? []))
+                            }}
+                          />
+                        ) : null}
+                        <textarea
+                          id="workflow-run-question"
+                          rows={3}
+                          aria-label={
+                            form.interactionConfig.user_input_title ||
+                            t("请输入问题")
+                          }
+                          className={cn(
+                            "block min-h-20 w-full resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none disabled:cursor-not-allowed",
+                            visibleRunFiles.length ? "pb-2" : "pb-12"
+                          )}
+                          placeholder={
+                            form.interactionConfig.user_input_title || t("请输入问题")
+                          }
+                          value={runQuestion}
+                          disabled={runInputDisabled}
+                          aria-invalid={runQuestionInvalid}
+                          onChange={(event) => {
+                            setRunQuestion(event.target.value)
+                            if (runQuestionInvalid && event.target.value.trim()) {
+                              setRunQuestionInvalid(false)
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              event.key === "Enter" &&
+                              (event.metaKey || event.ctrlKey)
+                            ) {
+                              event.preventDefault()
+                              event.currentTarget.form?.requestSubmit()
+                            }
+                          }}
+                        />
+                        <AgentAttachmentList
+                          files={visibleRunFiles}
+                          onRemove={(indexToRemove) =>
+                            setRunFiles((current) =>
+                              current.filter((_, index) => index !== indexToRemove)
+                            )
+                          }
+                          t={t}
+                        />
+                        <div className="absolute right-2 bottom-2 flex items-center gap-1.5">
+                          {form.interactionConfig.file_upload ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="size-9 rounded-xl"
+                              aria-label={t("添加附件")}
+                              title={
+                                runTarget?.source === "draft" && isAppDirty
+                                  ? t("请先保存配置后再调试")
+                                  : t("添加附件")
+                              }
+                              disabled={runInputDisabled}
+                              onClick={() => {
+                                if (!runFileInputRef.current) return
+                                runFileInputRef.current.value = ""
+                                runFileInputRef.current.click()
+                              }}
+                            >
+                              <PaperclipIcon />
+                            </Button>
+                          ) : null}
+                          <Button
+                            type="submit"
+                            size="icon"
+                            className="size-9 rounded-xl"
+                            aria-label={t("发送问题")}
+                            title={
+                              runTarget?.source === "draft" && isAppDirty
+                                ? t("请先保存配置后再调试")
+                                : t("发送问题")
+                            }
+                            disabled={
+                              runInputDisabled ||
+                              !runTarget ||
+                              !runQuestion.trim()
+                            }
+                          >
+                            {isRunning ? (
+                              <LoaderCircleIcon className="animate-spin" />
+                            ) : (
+                              <SendIcon />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </footer>
+                  </form>
+                </aside>
+              ) : null}
+            </>
           ) : (
             <main className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
               {visibleActiveView === "overview" ? (
@@ -795,118 +1104,6 @@ export function WorkflowDetailWorkspace({
         </div>
       </div>
 
-      <Dialog open={runOpen} onOpenChange={setRunOpen}>
-        <DialogContent className="max-w-xl">
-          <form
-            className="grid gap-4"
-            onSubmit={(event) => void handleRun(event)}
-          >
-            <DialogHeader>
-              <DialogTitle>{t("运行工作流")}</DialogTitle>
-              <DialogDescription>
-                {runTarget?.source === "published"
-                  ? t("输入将从开始节点注入已发布版本 v{version}。", {
-                      version: runTarget.versionNumber ?? "",
-                    })
-                  : t("输入将从开始节点注入当前草稿。")}
-              </DialogDescription>
-            </DialogHeader>
-            <label
-              className="grid gap-2 text-sm font-medium"
-              htmlFor="workflow-run-version"
-            >
-              {t("运行版本")}
-              <select
-                id="workflow-run-version"
-                className="h-9 rounded-md border bg-background px-2 text-sm"
-                value={runVersionNumber ?? "draft"}
-                onChange={(event) => {
-                  const nextVersion =
-                    event.target.value === "draft"
-                      ? null
-                      : Number(event.target.value)
-                  const target = selectWorkflowRunTarget(
-                    agent.can_edit,
-                    versions,
-                    nextVersion
-                  )
-                  if (!target) return
-                  setRunVersionNumber(nextVersion)
-                  setRunInputs(
-                    JSON.stringify(
-                      initialWorkflowInputs(target.graph ?? graph),
-                      null,
-                      2
-                    )
-                  )
-                  setRunInputsInvalid(false)
-                }}
-              >
-                {agent.can_edit ? (
-                  <option value="draft">{t("当前草稿")}</option>
-                ) : null}
-                {versions.map((version) => (
-                  <option key={version.id} value={version.version_number}>
-                    {t("已发布版本 v{version}", {
-                      version: version.version_number,
-                    })}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label
-              className="grid gap-2 text-sm font-medium"
-              htmlFor="workflow-run-inputs"
-            >
-              {t("运行输入")}
-              <textarea
-                id="workflow-run-inputs"
-                className="min-h-64 resize-y rounded-md border bg-background p-3 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring aria-invalid:border-destructive"
-                value={runInputs}
-                aria-invalid={runInputsInvalid}
-                onChange={(event) => setRunInputs(event.target.value)}
-              />
-              {runInputsInvalid ? (
-                <span className="text-xs font-normal text-destructive">
-                  {t("请输入 JSON 对象")}
-                </span>
-              ) : null}
-            </label>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setRunOpen(false)}
-              >
-                {t("取消")}
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  isRunning ||
-                  !runTarget ||
-                  (runTarget.source === "draft" && isAppDirty)
-                }
-                title={
-                  runTarget?.source === "draft" && isAppDirty
-                    ? t("请先保存配置后再调试")
-                    : undefined
-                }
-              >
-                {isRunning ? (
-                  <LoaderCircleIcon className="animate-spin" />
-                ) : (
-                  <PlayIcon />
-                )}
-                {runTarget?.source === "published"
-                  ? t("开始运行")
-                  : t("开始调试")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
         <DialogContent className="max-h-[calc(100svh-2rem)] max-w-2xl overflow-y-auto">
           <DialogHeader>
@@ -938,9 +1135,7 @@ export function WorkflowDetailWorkspace({
                   disabled={
                     agent.status !== "active" ||
                     isRunning ||
-                      Boolean(
-                        currentRun && !TERMINAL_STATUSES.has(currentRun.status)
-                      )
+                      isRunActive
                   }
                   onClick={() => {
                     setHistoryOpen(false)
@@ -971,82 +1166,6 @@ export function WorkflowDetailWorkspace({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={runDetailsOpen} onOpenChange={setRunDetailsOpen}>
-        <DialogContent className="max-h-[calc(100svh-2rem)] max-w-3xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{t("运行结果")}</DialogTitle>
-            <DialogDescription>
-              {currentRun
-                ? `${runStatusLabel(currentRun, t)} · ${currentRun.trace_id}`
-                : ""}
-            </DialogDescription>
-          </DialogHeader>
-          {currentRun ? (
-            <div className="grid gap-5">
-              <section className="grid gap-2">
-                <h3 className="text-sm font-semibold">
-                  {currentRun.last_error ? t("错误") : t("结果")}
-                </h3>
-                {currentRun.last_error ? (
-                  <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                    {currentRun.last_error}
-                  </p>
-                ) : (
-                  <JsonBlock value={currentRun.outputs} />
-                )}
-              </section>
-              <section className="grid gap-2">
-                <h3 className="text-sm font-semibold">{t("节点执行记录")}</h3>
-                <div className="divide-y rounded-md border">
-                  {executions.map((execution) => (
-                    <div key={execution.id} className="grid gap-2 p-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium">
-                          {execution.node_id}
-                        </span>
-                        <Badge
-                          variant={
-                            execution.status === "failed"
-                              ? "destructive"
-                              : "outline"
-                          }
-                        >
-                          {execution.status === "succeeded"
-                            ? t("运行成功")
-                            : execution.status === "failed"
-                              ? t("运行失败")
-                              : execution.status === "running"
-                                ? t("运行中")
-                                : t("已跳过")}
-                        </Badge>
-                        {execution.duration_ms !== null ? (
-                          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
-                            <Clock3Icon className="size-3.5" />
-                            {t("{duration} 毫秒", {
-                              duration: execution.duration_ms,
-                            })}
-                          </span>
-                        ) : null}
-                      </div>
-                      {execution.error ? (
-                        <p className="text-xs text-destructive">
-                          {execution.error}
-                        </p>
-                      ) : null}
-                    </div>
-                  ))}
-                  {!executions.length ? (
-                    <p className="p-4 text-sm text-muted-foreground">
-                      {t("暂无节点执行记录")}
-                    </p>
-                  ) : null}
-                </div>
-              </section>
-            </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-
       <Dialog
         open={settingsOpen}
         onOpenChange={(open) => {
@@ -1059,7 +1178,7 @@ export function WorkflowDetailWorkspace({
           <DialogHeader>
             <DialogTitle>{t("工作流设置")}</DialogTitle>
             <DialogDescription>
-              {t("配置默认模型以及节点可使用的知识库和只读 MCP 工具。")}
+              {t("配置工作流的默认模型；知识库和只读 MCP 工具由节点选择。")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={onSaveApp}>
