@@ -720,6 +720,7 @@ export function WorkflowDetailWorkspace({
           <Button
             type="button"
             variant="outline"
+            aria-label={t("保存")}
             disabled={(!isDirty && !isAppDirty) || isSaving || isSavingApp}
             onClick={() => void handleSaveAll()}
           >
@@ -735,6 +736,7 @@ export function WorkflowDetailWorkspace({
           <Button
             type="button"
             variant="outline"
+            aria-label={t("添加节点")}
             onClick={() => setPaletteOpen(true)}
           >
             <PlusIcon />
@@ -745,6 +747,7 @@ export function WorkflowDetailWorkspace({
           <Button
             type="button"
             variant="outline"
+            aria-label={agent.can_edit ? t("调试运行") : t("运行已发布版本")}
             disabled={
               agent.status !== "active" ||
               isRunning ||
@@ -767,6 +770,7 @@ export function WorkflowDetailWorkspace({
         {canManagePublishing ? (
           <Button
             type="button"
+            aria-label={t("发布版本")}
             disabled={isPublishing || agent.status !== "active" || isAppDirty}
             title={isAppDirty ? t("请先保存更改后再发布。") : undefined}
             onClick={() => void handlePublish()}

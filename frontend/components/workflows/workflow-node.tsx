@@ -479,6 +479,46 @@ function JsonEditor({
   )
 }
 
+function FormOptionsInput({
+  value,
+  readOnly,
+  onChange,
+  t,
+}: {
+  value: string[]
+  readOnly: boolean
+  onChange: (value: string[]) => void
+  t: TFunction
+}) {
+  const [draft, setDraft] = React.useState("")
+  const [editing, setEditing] = React.useState(false)
+  const displayValue = editing ? draft : value.join(", ")
+
+  return (
+    <Input
+      value={displayValue}
+      readOnly={readOnly}
+      aria-label={t("选项")}
+      placeholder={t("用逗号分隔选项")}
+      onFocus={(event) => {
+        setDraft(event.currentTarget.value)
+        setEditing(true)
+      }}
+      onBlur={() => setEditing(false)}
+      onChange={(event) => {
+        const next = event.target.value
+        setDraft(next)
+        onChange(
+          next
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean)
+        )
+      }}
+    />
+  )
+}
+
 function VariablePicker({
   nodeId,
   node,
@@ -2198,19 +2238,13 @@ function NodeConfigFields({
                   </DropdownMenuContent>
                 </DropdownMenu>
                 {field.type === "select" ? (
-                  <Input
-                    value={field.optionList.join(", ")}
+                  <FormOptionsInput
+                    value={field.optionList}
                     readOnly={readOnly}
-                    aria-label={t("选项")}
-                    placeholder={t("用逗号分隔选项")}
-                    onChange={(event) =>
-                      updateFormField(index, {
-                        optionList: event.target.value
-                          .split(",")
-                          .map((item) => item.trim())
-                          .filter(Boolean),
-                      })
+                    onChange={(optionList) =>
+                      updateFormField(index, { optionList })
                     }
+                    t={t}
                   />
                 ) : null}
                 <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
