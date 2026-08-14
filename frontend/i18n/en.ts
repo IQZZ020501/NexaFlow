@@ -930,8 +930,6 @@ export const en = {
   "请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.question}}":
     "Improve the question below without changing its meaning. Return only the improved question:\n\n{{start.question}}",
   "工作流名称": "Workflow name",
-  "配置工作流使用的默认模型、知识库和只读 MCP 工具。":
-    "Configure the default model, knowledge bases, and read-only MCP tools used by the workflow.",
   "配置工作流的默认模型。": "Configure the workflow's default model.",
   "工作区可用的知识库展示在这里":
     "Knowledge bases available in this workspace appear here.",
@@ -989,8 +987,8 @@ export const en = {
   "节点执行记录": "Node execution log",
   "暂无节点执行记录": "No node execution records",
   "工作流设置": "Workflow settings",
-  "配置默认模型以及节点可使用的知识库和只读 MCP 工具。":
-    "Configure the default model, knowledge bases, and read-only MCP tools available to nodes.",
+  "配置工作流的默认模型；知识库和只读 MCP 工具由节点选择。":
+    "Configure the workflow's default model; select knowledge bases and read-only MCP tools in nodes.",
   "工作流版本 v{version} 已发布": "Workflow version v{version} published",
   "工作流调试已开始": "Workflow debug run started",
   "工作流运行已开始": "Workflow run started",

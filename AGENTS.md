@@ -10,7 +10,7 @@ Correctness, safety, evidence, and validation take priority over speed.
 ## 1. Required Skills
 
 - Backend work must read and follow `fastapi` before implementation.
-- Frontend work must read and follow `react-templates`before implementation.
+- Frontend work must read and follow `react-templates` before implementation.
 - If a required skill is unavailable, surface that before coding instead of
   silently proceeding.
 

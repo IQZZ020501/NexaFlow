@@ -196,6 +196,11 @@ def validate_graph(graph: WorkflowGraph | Mapping[str, Any]) -> WorkflowGraph:
     node_ids = [node.id for node in parsed.nodes]
     if len(node_ids) != len(set(node_ids)):
         raise WorkflowValidationError("Workflow node ids must be unique.")
+    reserved_node_ids = set(node_ids) & (WORKFLOW_GLOBALS | {"global"})
+    if reserved_node_ids:
+        raise WorkflowValidationError(
+            "Workflow node ids must not use reserved global names."
+        )
     edge_ids = [edge.id for edge in parsed.edges]
     if len(edge_ids) != len(set(edge_ids)):
         raise WorkflowValidationError("Workflow edge ids must be unique.")
@@ -354,11 +359,11 @@ class WorkflowEngine:
         state: WorkflowEngineState | None = None,
         on_node_started: NodeStarted = _noop_started,
         on_node_finished: NodeFinished = _noop_finished,
-        globals: Mapping[str, Any] | None = None,
+        workflow_globals: Mapping[str, Any] | None = None,
     ) -> WorkflowEngineResult:
         current = state or self.initial_state()
         node_order = {node.id: index for index, node in enumerate(self.graph.nodes)}
-        run_globals = dict(globals or {})
+        run_globals = dict(workflow_globals or {})
 
         while any(value == NodeState.PENDING for value in current.node_states.values()):
             if self._remaining_seconds() <= 0:
@@ -527,5 +532,5 @@ class WorkflowEngine:
             if config.is_result and value is not None:
                 answers.append(str(value))
         if answers:
-            outputs["result"] = "\n\n".join(answers)
+            outputs.setdefault("result", "\n\n".join(answers))
         return WorkflowEngineResult(outputs=outputs, state=current)

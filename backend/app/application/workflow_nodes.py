@@ -97,6 +97,8 @@ def resolve_value(value: Any, context: NodeExecutionContext) -> Any:
     def reference_value(name: str, path: str) -> Any:
         if name == "global":
             return _path_value(context.globals, path)
+        if name in context.node_outputs:
+            return _path_value(outputs(name), path)
         if name in context.globals and not path:
             return context.globals[name]
         return _path_value(outputs(name), path)
@@ -243,8 +245,10 @@ async def _llm_tool_call(
     if call.arguments:
         try:
             arguments = json.loads(call.arguments)
-        except json.JSONDecodeError:
-            raise ValueError("Workflow model returned invalid tool arguments.")
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "Workflow model returned invalid tool arguments."
+            ) from exc
     if not isinstance(arguments, dict):
         raise ValueError("Workflow model returned invalid tool arguments.")
     pending: PendingToolCall = {
@@ -463,6 +467,7 @@ async def execute_workflow_node(
                 matches.append(matched)
                 resolved_conditions.append(
                     {
+                        "branch_id": branch.id,
                         "field": list(rule.field),
                         "compare": rule.compare,
                         "value": right,
@@ -501,7 +506,6 @@ async def execute_workflow_node(
             parsed.model_params_setting,
             context.remaining_model_tokens,
         )
-        tool_outputs: list[dict[str, Any]] = []
         tools: list[StructuredTool] = []
         if parsed.mcp_enable:
             for reference in parsed.mcp_servers:

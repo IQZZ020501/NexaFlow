@@ -9,10 +9,12 @@ from app.entities.user import User
 from app.entities.workflows import WorkflowDefinition, WorkflowVersion
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.schemas.workflow import (
     KnowledgeNodeConfig,
     LlmNodeConfig,
+    McpNodeConfig,
     WorkflowDefinitionResponse,
     WorkflowGraph,
     WorkflowVersionResponse,
@@ -25,8 +27,8 @@ from app.shareddomain.agents.services import (
 )
 from app.shareddomain.knowledge.services import (
     ACTIVE_STATUS as KNOWLEDGE_ACTIVE_STATUS,
-    get_knowledge_base,
-    require_knowledge_base_permission,
+    RESOURCE_TYPE as KNOWLEDGE_RESOURCE_TYPE,
+    effective_permission,
 )
 from app.shareddomain.tools.services import (
     effective_mcp_tool_policy_mode,
@@ -115,13 +117,35 @@ async def validate_workflow_resources(
 
     for model_id in model_ids:
         await get_agent_model(db, agent.workspace_id, model_id)
+    knowledge_rows = await knowledge_base_repository.list_knowledge_bases_with_user_grants(
+        db,
+        agent.workspace_id,
+        knowledge_base_ids,
+        actor.id,
+        KNOWLEDGE_RESOURCE_TYPE,
+    )
+    knowledge_by_id = {
+        knowledge_base.id: (knowledge_base, grant)
+        for knowledge_base, grant in knowledge_rows
+    }
     for knowledge_base_id in knowledge_base_ids:
-        knowledge_base = await get_knowledge_base(
-            db, agent.workspace_id, knowledge_base_id
-        )
-        await require_knowledge_base_permission(
-            db, knowledge_base, actor, workspace_role, {"view", "edit"}
-        )
+        row = knowledge_by_id.get(knowledge_base_id)
+        if row is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "Knowledge base not found.",
+            )
+        knowledge_base, grant = row
+        if effective_permission(
+            knowledge_base,
+            actor,
+            workspace_role,
+            grant,
+        ) not in {"view", "edit"}:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Knowledge base access denied.",
+            )
         if knowledge_base.status != KNOWLEDGE_ACTIVE_STATUS:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -165,7 +189,8 @@ def workflow_resource_references(
                 KnowledgeNodeConfig.model_validate(config).resolved_knowledge_base_ids
             )
         elif node.data.type == "mcp":
-            mcp_references.append((config["server_id"], config["tool_name"]))
+            mcp = McpNodeConfig.model_validate(config)
+            mcp_references.append((mcp.server_id, mcp.tool_name))
         elif node.data.type == "llm":
             llm = LlmNodeConfig.model_validate(config)
             if llm.mcp_enable:

@@ -4,6 +4,7 @@ import {
   WORKFLOW_NODE_PRESETS,
   WORKFLOW_NODE_TYPES,
   createWorkflowEdge,
+  createWorkflowNode,
   defaultNodeConfig,
   ensureConditionElseIfBranches,
   removeWorkflowNode,
@@ -87,6 +88,11 @@ describe("workflow graph", () => {
       prompt:
         "请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.question}}",
     })
+    expect(optimizer?.config(t, "start-custom")).toEqual({
+      system_prompt: "你是一个问题优化专家。",
+      prompt:
+        "请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start-custom.question}}",
+    })
     expect(WORKFLOW_NODE_TYPES[0]).toBe("reply-node")
     expect(WORKFLOW_NODE_TYPES).not.toContain("template")
     expect(defaultNodeConfig("template")).toEqual({
@@ -116,7 +122,7 @@ describe("workflow graph", () => {
     expect(condition.branch).toHaveLength(3)
     expect(condition.branch.map((branch) => branch.type)).toEqual([
       "IF",
-      "ELSE IF 1",
+      "ELSE IF",
       "ELSE",
     ])
     expect(condition.branch[0].conditions).toEqual([
@@ -125,49 +131,94 @@ describe("workflow graph", () => {
     expect(condition.branch[1].conditions).toEqual([
       { field: ["start", "question"], compare: "eq", value: "" },
     ])
+    const customStartCondition = defaultNodeConfig(
+      "condition",
+      "start-custom"
+    ) as { branch: Array<{ conditions: Array<{ field: string[] }> }> }
+    expect(customStartCondition.branch[0].conditions[0].field).toEqual([
+      "start-custom",
+      "question",
+    ])
+    expect(
+      createWorkflowNode("llm", "LLM", 1, undefined, "start-custom").data
+        .config.prompt
+    ).toBe("{{start-custom.question}}")
   })
 
-  test("adds the missing ELSE IF branch to editable legacy condition nodes", () => {
-    const ifBranch = {
-      id: "if-branch",
-      type: "IF",
-      condition: "and",
-      conditions: [
-        { field: ["start", "question"], compare: "eq", value: "yes" },
-      ],
-    }
-    const elseBranch = {
-      id: "else-branch",
-      type: "ELSE",
-      condition: "and",
-      conditions: [],
-    }
-    const [condition] = ensureConditionElseIfBranches([
-      {
-        id: "condition",
-        type: "workflow",
-        position: { x: 0, y: 0 },
-        data: {
-          type: "condition",
-          title: "Condition",
-          config: { branch: [ifBranch, elseBranch] },
+  test("migrates editable two-branch conditions without a dead branch", () => {
+    const graph = ensureConditionElseIfBranches({
+      nodes: [
+        {
+          id: "start-custom",
+          type: "workflow",
+          position: { x: 0, y: 0 },
+          data: { type: "start", title: "Start", config: {} },
         },
-      },
-    ] as never)
-    const branches = condition.data.config.branch as Array<
-      Record<string, unknown>
-    >
+        {
+          id: "condition-1",
+          type: "workflow",
+          position: { x: 200, y: 0 },
+          data: {
+            type: "condition",
+            title: "Condition",
+            config: {
+              branch: [
+                {
+                  id: "yes",
+                  type: "IF",
+                  condition: "and",
+                  conditions: [
+                    {
+                      field: ["start-custom", "question"],
+                      compare: "eq",
+                      value: "yes",
+                    },
+                  ],
+                },
+                { id: "no", type: "ELSE", condition: "and", conditions: [] },
+              ],
+            },
+          },
+        },
+        {
+          id: "end-1",
+          type: "workflow",
+          position: { x: 400, y: 0 },
+          data: { type: "end", title: "End", config: { outputs: {} } },
+        },
+      ],
+      edges: [
+        {
+          id: "edge-no",
+          source: "condition-1",
+          target: "end-1",
+          sourceHandle: "no",
+        },
+      ],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    } as never)
+    const branches = graph.nodes[1].data.config.branch as Array<{
+      id: string
+      type: string
+      conditions: Array<{ field: string[] }>
+    }>
 
     expect(branches.map((branch) => branch.type)).toEqual([
       "IF",
-      "ELSE IF 1",
+      "ELSE IF",
       "ELSE",
     ])
-    expect(branches[0]).toBe(ifBranch)
-    expect(branches[2]).toBe(elseBranch)
-    expect(branches[1].conditions).toEqual([
-      { field: ["start", "question"], compare: "eq", value: "" },
+    expect(branches[1].conditions[0].field).toEqual([
+      "start-custom",
+      "question",
     ])
+    expect(graph.edges).toContainEqual(
+      expect.objectContaining({
+        source: "condition-1",
+        target: "end-1",
+        sourceHandle: branches[1].id,
+      })
+    )
   })
 
   test("serializes only durable React Flow fields", () => {

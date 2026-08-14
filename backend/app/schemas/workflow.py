@@ -3,7 +3,7 @@ import re
 from typing import Annotated, Any, Literal
 
 from jinja2 import Environment, TemplateSyntaxError
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.agent import AgentInteractionConfig
 
@@ -131,7 +131,7 @@ class KnowledgeNodeConfig(BaseModel):
     knowledge_base_id: str | None = Field(default=None, min_length=1, max_length=36)
     knowledge_base_ids: list[
         Annotated[str, Field(min_length=1, max_length=36)]
-    ] = Field(default_factory=list)
+    ] = Field(default_factory=list, max_length=50)
     query: Any
     limit: int = Field(default=3, ge=1, le=8)
     similarity: float = Field(default=0.6, ge=0, le=1)
@@ -147,6 +147,8 @@ class KnowledgeNodeConfig(BaseModel):
         ids = self.resolved_knowledge_base_ids
         if not ids:
             raise ValueError("At least one knowledge base is required.")
+        if len(ids) > 50:
+            raise ValueError("At most 50 knowledge bases are allowed.")
         return self
 
     @property
@@ -193,9 +195,16 @@ class ConditionRule(BaseModel):
 
 class ConditionBranch(BaseModel):
     id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
-    type: str = Field(pattern=r"^(IF|ELSE IF [1-9][0-9]*|ELSE)$")
+    type: Literal["IF", "ELSE IF", "ELSE"]
     condition: Literal["and", "or"]
     conditions: list[ConditionRule] = Field(max_length=20)
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_legacy_type(cls, value: Any) -> Any:
+        if isinstance(value, str) and re.fullmatch(r"ELSE IF [1-9][0-9]*", value):
+            return "ELSE IF"
+        return value
 
 
 class ConditionNodeConfig(BaseModel):
@@ -268,7 +277,7 @@ class ConditionNodeConfig(BaseModel):
         if len({item.id for item in self.branch}) != len(self.branch):
             raise ValueError("Condition branch ids must be unique.")
         for index, item in enumerate(self.branch):
-            expected_type = "IF" if index == 0 else f"ELSE IF {index}"
+            expected_type = "IF" if index == 0 else "ELSE IF"
             if item.type == "ELSE":
                 if index != len(self.branch) - 1 or item.conditions:
                     raise ValueError("ELSE must be the final branch and have no conditions.")
@@ -288,7 +297,12 @@ class ReplyNodeConfig(BaseModel):
     reply_type: Literal["custom", "referencing"]
     content: str = Field(default="", max_length=20000)
     fields: tuple[
-        list[Annotated[str, Field(min_length=1, max_length=120)]],
+        list[
+            Annotated[
+                str,
+                Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_-]+$"),
+            ]
+        ],
         Annotated[str, Field(max_length=500)],
     ] | None = None
     is_result: bool = True

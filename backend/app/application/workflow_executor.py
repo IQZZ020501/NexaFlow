@@ -3,7 +3,6 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
-import time
 import traceback
 from typing import Any
 
@@ -52,7 +51,6 @@ from app.shareddomain.tools.services import (
     resolve_mcp_tools,
 )
 from app.shareddomain.workflows.engine import (
-    NodeState,
     NodeTransition,
     WorkflowEngine,
     WorkflowEngineError,
@@ -70,10 +68,21 @@ def _history_answer(result: str) -> Any:
         return result
 
 
-async def _workflow_globals(
+async def _workflow_context(
     run: AgentRun,
-) -> dict[str, Any]:
-    history: list[dict[str, Any]] = []
+    graph: WorkflowGraph,
+) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
+    node_ids = [
+        node.id
+        for node in graph.nodes
+        if node.data.type == "llm"
+        and LlmNodeConfig.model_validate(node.data.config).dialogue_type == "NODE"
+    ]
+    histories: dict[str, list[dict[str, Any]]] = {
+        node_id: [] for node_id in node_ids
+    }
+    prior: list[AgentRun] = []
+    executions_by_run: dict[str, list[WorkflowNodeExecution]] = {}
     if run.conversation_id:
         async with get_session_factory()() as db:
             prior = await agent_repository.list_agent_runs(
@@ -85,56 +94,21 @@ async def _workflow_globals(
                 status=AGENT_RUN_SUCCEEDED_STATUS,
                 conversation_id=run.conversation_id,
             )
-        history = [
-            {"question": item.goal, "answer": _history_answer(item.result)}
-            for item in reversed(prior)
-        ]
-    return {
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "history_context": history,
-        "chat_id": run.conversation_id,
-        "start_time": time.time(),
-    }
-
-
-async def _workflow_node_histories(
-    run: AgentRun,
-    graph: WorkflowGraph,
-) -> dict[str, list[dict[str, Any]]]:
-    """Per-node conversation history for LLM nodes using ``NODE`` context.
-
-    For every prior succeeded run in this conversation, records the run
-    question paired with the answer this node produced, oldest first.
-    """
-    if not run.conversation_id:
-        return {}
-    node_ids = [
-        node.id
-        for node in graph.nodes
-        if node.data.type == "llm"
-        and LlmNodeConfig.model_validate(node.data.config).dialogue_type == "NODE"
-    ]
-    if not node_ids:
-        return {}
-    histories: dict[str, list[dict[str, Any]]] = {
-        node_id: [] for node_id in node_ids
-    }
-    node_id_set = set(node_ids)
-    async with get_session_factory()() as db:
-        prior = await agent_repository.list_agent_runs(
-            db,
-            run.agent_id,
-            run.access_source,
-            run.consumer_id,
-            limit=WORKFLOW_HISTORY_LIMIT,
-            status=AGENT_RUN_SUCCEEDED_STATUS,
-            conversation_id=run.conversation_id,
-        )
-        for item in reversed(prior):
-            executions = await workflow_repository.list_node_executions(
-                db, item.id
+            executions = await workflow_repository.list_node_executions_for_runs(
+                db,
+                [item.id for item in prior] if node_ids else [],
             )
-            for execution in executions:
+        for execution in executions:
+            executions_by_run.setdefault(execution.run_id, []).append(execution)
+
+    history = [
+        {"question": item.goal, "answer": _history_answer(item.result)}
+        for item in reversed(prior)
+    ]
+    if node_ids:
+        node_id_set = set(node_ids)
+        for item in reversed(prior):
+            for execution in executions_by_run.get(item.id, []):
                 if execution.node_id not in node_id_set:
                     continue
                 if execution.status != "succeeded":
@@ -145,7 +119,16 @@ async def _workflow_node_histories(
                 histories[execution.node_id].append(
                     {"question": item.goal, "answer": answer}
                 )
-    return histories
+    now = utc_now()
+    return (
+        {
+            "time": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "history_context": history,
+            "chat_id": run.conversation_id,
+            "start_time": now.isoformat(),
+        },
+        histories,
+    )
 
 
 @dataclass(frozen=True)
@@ -247,6 +230,7 @@ async def _execute_claimed_workflow_run(
     scope = await _load_scope(run_id)
     run, detail = scope.run, scope.detail
     graph = WorkflowGraph.model_validate(detail.graph_snapshot)
+    workflow_globals, node_histories = await _workflow_context(run, graph)
     node_order = {node.id: index for index, node in enumerate(graph.nodes)}
     ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
     node_scope = WorkflowNodeScope(
@@ -259,7 +243,7 @@ async def _execute_claimed_workflow_run(
         mcp_tools=scope.mcp_tools,
         ledger=ledger,
         node_order=node_order,
-        node_histories=await _workflow_node_histories(run, graph),
+        node_histories=node_histories,
     )
     engine = WorkflowEngine(
         graph,
@@ -417,7 +401,7 @@ async def _execute_claimed_workflow_run(
         state=state,
         on_node_started=on_started,
         on_node_finished=on_finished,
-        globals=await _workflow_globals(run),
+        workflow_globals=workflow_globals,
     )
     encoded_output = json.dumps(
         result.outputs,

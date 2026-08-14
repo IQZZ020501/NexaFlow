@@ -55,6 +55,7 @@ export function WorkflowApiDocumentation({
         {
           question: "string",
           conversation_id: "uuid (optional)",
+          file_ids: ["uuid (optional)"],
         },
         null,
         2

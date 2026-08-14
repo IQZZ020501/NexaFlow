@@ -33,9 +33,8 @@ test("workflow nodes default to expanded when the canvas mounts", () => {
   expect(source).not.toContain(
     'React.useState(node.type === "start" || node.type === "end")'
   )
-  expect(canvasSource).toContain(
-    "ensureConditionElseIfBranches(props.graph.nodes)"
-  )
+  expect(canvasSource).toContain("ensureConditionElseIfBranches(props.graph)")
+  expect(canvasSource).toContain("skipInitialChangeRef.current = false")
 })
 
 test("reply node is pinned and exposes both reply modes", () => {
@@ -55,7 +54,8 @@ test("variable picker shows translated names without changing references", () =>
 
   expect(variablePicker.match(/\{t\(field\.label\)\}/g)).toHaveLength(2)
   expect(variablePicker).toContain('`{{global.${field.value}}}`')
-  expect(variablePicker).toContain('`{{start.${field.value}}}`')
+  expect(variablePicker).toContain('`{{${startNodeId}.${field.value}}}`')
+  expect(variablePicker).toContain("[startNodeId, field.value]")
   expect(variablePicker).toContain('source?.data.type === "knowledge"')
   expect(variablePicker).toContain("KNOWLEDGE_OUTPUT_FIELDS.find")
   expect(variablePicker).toContain("{displayLabel}")
@@ -118,7 +118,7 @@ test("condition node uses ordered branches and stable branch handles", () => {
   expect(source).toContain('node.type === "condition" && expanded')
   expect(source).toContain('handle && node.type !== "condition"')
   expect(canvasSource).toContain("nextHandles.has(String(edge.sourceHandle ?? \"\"))")
-  expect(source).toContain('node.type === "condition"\n          ? "w-80"')
+  expect(source).toMatch(/node\.type === "condition"\s*\?\s*"w-80"/)
   expect(conditionEditor).toContain(
     'rounded-lg border border-border/70 bg-muted/20 p-2'
   )
@@ -130,11 +130,14 @@ test("condition node uses ordered branches and stable branch handles", () => {
   )
   expect(conditionEditor).toContain('placeholder={t("比较值")}')
   expect(conditionEditor).toContain('t("未命中以上条件时执行")')
-  expect(conditionEditor).toContain(
-    'branch.type === "ELSE IF 1" ? "ELSE IF" : branch.type'
+  expect(conditionEditor).toMatch(
+    /branch\.type === "ELSE IF"[\s\S]*?`ELSE IF \$\{branchIndex\}`/
   )
   expect(conditionEditor).toContain(
     'source?.data.type === "start" ? t("开始节点")'
+  )
+  expect(conditionEditor).toMatch(
+    /config:\s*\{\s*\.\.\.node\.config,\s*branch: normalizeConditionBranches\(next\)/
   )
 })
 
@@ -166,7 +169,7 @@ test("workflow debugging uses an anchored canvas window", () => {
     detailSource.indexOf('<Dialog open={historyOpen}')
   )
 
-  expect(debugPanel).toContain('<aside\n                  role="dialog"')
+  expect(debugPanel).toMatch(/<aside\s+role="dialog"/)
   expect(debugPanel).toContain('"absolute z-40')
   expect(debugPanel).toContain('sm:w-96')
   expect(debugPanel).toContain("runExpanded")
@@ -181,6 +184,9 @@ test("workflow debugging uses an anchored canvas window", () => {
   expect(debugPanel).toContain("acceptedUploadExtensions(")
   expect(debugPanel).toContain("<AgentAttachmentList")
   expect(debugPanel).toContain("<PaperclipIcon")
+  expect(debugPanel).toMatch(
+    /<textarea\s+id="workflow-run-question"[\s\S]*?aria-label=\{[\s\S]*?t\("请输入问题"\)[\s\S]*?disabled=\{runInputDisabled\}/
+  )
   expect(detailSource).toContain("uploadWorkflowFiles(")
   expect(debugPanel).not.toContain('id="workflow-run-version"')
   expect(debugPanel).not.toContain('{t("运行版本")}')
@@ -208,6 +214,9 @@ test("LLM advanced parameters live behind the card settings button", () => {
   expect(advancedDialog).toContain("${nodeId}-llm-temperature")
   expect(advancedDialog).toContain("${nodeId}-llm-reasoning-content")
   expect(advancedDialog).toContain('role="switch"')
+  expect(advancedDialog).toMatch(
+    /model_setting:\s*\{\s*\.\.\.modelSetting,\s*reasoning_content_enable:/
+  )
   expect(advancedDialog).not.toContain("<JsonEditor")
   expect(nodeConfigFields).not.toContain("${nodeId}-llm-temperature")
   expect(nodeConfigFields).not.toContain("${nodeId}-llm-reasoning-content")
@@ -219,7 +228,9 @@ test("LLM model selector shows the effective model and icon", () => {
   expect(source).toContain("selectedModel?.name")
   expect(source).toContain("<ModelIcon")
   expect(source).toContain('<DropdownMenu modal={false}>')
-  expect(source).not.toContain('id={`${nodeId}-llm-model`}\n              className="h-9 rounded-md border bg-background px-2 text-sm"')
+  expect(source).not.toMatch(
+    /<select\s+id=\{`\$\{nodeId\}-llm-model`\}\s+className="h-9 rounded-md border bg-background px-2 text-sm"/
+  )
 })
 
 test("LLM dialogue history uses the anchored app dropdown", () => {
@@ -269,7 +280,9 @@ test("knowledge search mode uses the anchored app dropdown", () => {
   expect(source).toContain(
     'className="w-(--radix-dropdown-menu-trigger-width) min-w-24"'
   )
-  expect(source).not.toContain('<select\n                  id={`${nodeId}-knowledge-mode`}')
+  expect(source).not.toMatch(
+    /<select\s+id=\{`\$\{nodeId\}-knowledge-mode`\}/
+  )
 })
 
 test("knowledge node presents grouped settings and four documented outputs", () => {
@@ -330,7 +343,9 @@ test("workflow app settings no longer expose resource bindings", () => {
   expect(appConfigSource).toContain(
     'open={form.appType === "agent" && resourcePicker === "mcp"}'
   )
-  expect(detailSource).toContain('t("配置工作流的默认模型。")')
+  expect(detailSource).toContain(
+    't("配置工作流的默认模型；知识库和只读 MCP 工具由节点选择。")'
+  )
   expect(agentsPageSource).toContain(
     'form.appType === "workflow" ? [] : form.mcpTools'
   )

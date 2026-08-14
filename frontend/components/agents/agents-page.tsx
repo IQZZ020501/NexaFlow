@@ -1028,6 +1028,19 @@ export function AgentsPage({
         "success",
         t(agent.app_type === "workflow" ? "工作流已删除" : "Agent 已删除")
       )
+      try {
+        const listedAgents = await listAgents(token, selectedWorkspaceId, {
+          limit: CARD_BATCH_SIZE,
+          offset: 0,
+        })
+        setAgents(listedAgents)
+        setListedAgentsCount(listedAgents.length)
+        setAgentsHasMore(listedAgents.length === CARD_BATCH_SIZE)
+      } catch (error) {
+        setListedAgentsCount(0)
+        setAgentsHasMore(true)
+        reportError(error)
+      }
     } catch (error) {
       reportError(error)
     } finally {

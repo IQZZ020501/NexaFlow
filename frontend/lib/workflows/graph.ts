@@ -39,7 +39,7 @@ export type WorkflowNodePreset = {
   id: string
   type: WorkflowNodeType
   label: TranslationKey
-  config: (t: TFunction) => Record<string, unknown>
+  config: (t: TFunction, startNodeId?: string) => Record<string, unknown>
 }
 
 export const WORKFLOW_NODE_PRESETS: WorkflowNodePreset[] = [
@@ -47,24 +47,29 @@ export const WORKFLOW_NODE_PRESETS: WorkflowNodePreset[] = [
     id: "question-optimizer",
     type: "llm",
     label: "问题优化",
-    config: (t) => ({
+    config: (t, startNodeId = "start") => ({
       system_prompt: t("你是一个问题优化专家。"),
-      prompt: t("请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.question}}"),
+      prompt: t("请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.question}}").replace(
+        "{{start.question}}",
+        `{{${startNodeId}.question}}`
+      ),
     }),
   },
 ]
 
 export function defaultNodeConfig(
-  type: WorkflowNodeType
+  type: WorkflowNodeType,
+  startNodeId = "start"
 ): Record<string, unknown> {
+  const questionReference = `{{${startNodeId}.question}}`
   switch (type) {
     case "start":
       return {}
     case "end":
-      return { outputs: { result: "{{start.question}}" } }
+      return { outputs: { result: questionReference } }
     case "llm":
       return {
-        prompt: "{{start.question}}",
+        prompt: questionReference,
         system_prompt: "",
         dialogue_number: 1,
         dialogue_type: "NODE",
@@ -76,7 +81,7 @@ export function defaultNodeConfig(
       }
     case "classifier":
       return {
-        input: "{{start.question}}",
+        input: questionReference,
         classes: [
           { handle: "match", label: "Match", description: "" },
           { handle: "other", label: "Other", description: "" },
@@ -86,7 +91,7 @@ export function defaultNodeConfig(
     case "knowledge":
       return {
         knowledge_base_ids: [],
-        query: "{{start.question}}",
+        query: questionReference,
         limit: 3,
         similarity: 0.6,
         search_mode: "embedding",
@@ -100,15 +105,15 @@ export function defaultNodeConfig(
             type: "IF",
             condition: "and",
             conditions: [
-              { field: ["start", "question"], compare: "eq", value: "" },
+              { field: [startNodeId, "question"], compare: "eq", value: "" },
             ],
           },
           {
             id: crypto.randomUUID().replaceAll("-", "").slice(0, 12),
-            type: "ELSE IF 1",
+            type: "ELSE IF",
             condition: "and",
             conditions: [
-              { field: ["start", "question"], compare: "eq", value: "" },
+              { field: [startNodeId, "question"], compare: "eq", value: "" },
             ],
           },
           {
@@ -127,15 +132,15 @@ export function defaultNodeConfig(
         is_result: true,
       }
     case "template":
-      return { template: "{{start.question}}" }
+      return { template: questionReference }
     case "variable":
-      return { value: "{{start.question}}" }
+      return { value: questionReference }
     case "mcp":
       return { server_id: "", tool_name: "", arguments: {} }
     case "code":
       return {
         code: "result = inputs",
-        inputs: { input: "{{start.question}}" },
+        inputs: { input: questionReference },
       }
   }
 }
@@ -144,7 +149,8 @@ export function createWorkflowNode(
   type: WorkflowNodeType,
   title: string,
   index: number,
-  config = defaultNodeConfig(type)
+  config?: Record<string, unknown>,
+  startNodeId = "start"
 ): WorkflowNode {
   return {
     id: `${type}-${crypto.randomUUID().slice(0, 8)}`,
@@ -153,14 +159,22 @@ export function createWorkflowNode(
       x: 240 + (index % 3) * 260,
       y: 80 + Math.floor(index / 3) * 180,
     },
-    data: { type, title, config: structuredClone(config) },
+    data: {
+      type,
+      title,
+      config: structuredClone(config ?? defaultNodeConfig(type, startNodeId)),
+    },
   }
 }
 
 export function ensureConditionElseIfBranches(
-  nodes: WorkflowNode[]
-): WorkflowNode[] {
-  return nodes.map((node) => {
+  graph: WorkflowGraph
+): WorkflowGraph {
+  const startNodeId =
+    graph.nodes.find((node) => node.data.type === "start")?.id ?? "start"
+  const edges = [...graph.edges]
+  let changed = false
+  const nodes = graph.nodes.map((node) => {
     const branches = node.data.config.branch
     if (
       node.data.type !== "condition" ||
@@ -175,6 +189,21 @@ export function ensureConditionElseIfBranches(
     ) {
       return node
     }
+    changed = true
+    const branchId = crypto.randomUUID().replaceAll("-", "").slice(0, 12)
+    const elseBranchId = String((branches[1] as Record<string, unknown>).id)
+    edges.push(
+      ...graph.edges
+        .filter(
+          (edge) =>
+            edge.source === node.id && edge.sourceHandle === elseBranchId
+        )
+        .map((edge) => ({
+          ...edge,
+          id: `edge-${crypto.randomUUID().slice(0, 12)}`,
+          sourceHandle: branchId,
+        }))
+    )
     return {
       ...node,
       data: {
@@ -184,11 +213,15 @@ export function ensureConditionElseIfBranches(
           branch: [
             branches[0],
             {
-              id: crypto.randomUUID().replaceAll("-", "").slice(0, 12),
-              type: "ELSE IF 1",
+              id: branchId,
+              type: "ELSE IF",
               condition: "and",
               conditions: [
-                { field: ["start", "question"], compare: "eq", value: "" },
+                {
+                  field: [startNodeId, "question"],
+                  compare: "eq",
+                  value: "",
+                },
               ],
             },
             branches[1],
@@ -197,6 +230,7 @@ export function ensureConditionElseIfBranches(
       },
     }
   })
+  return changed ? { ...graph, nodes, edges } : graph
 }
 
 export function createWorkflowEdge(

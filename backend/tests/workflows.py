@@ -202,6 +202,17 @@ def test_workflow_validation_rejects_cycles_and_downstream_references() -> None:
     )
     validate_graph(with_globals)
 
+    reserved_global = graph()
+    reserved_global["nodes"][1]["id"] = "time"
+    reserved_global["edges"][0]["target"] = "time"
+    reserved_global["edges"][1]["source"] = "time"
+    try:
+        validate_graph(reserved_global)
+    except WorkflowValidationError as exc:
+        assert "reserved global names" in str(exc)
+    else:
+        raise AssertionError("workflow node used a reserved global name")
+
 
 def test_workflow_engine_runs_branch_and_join_deterministically() -> None:
     async def run() -> None:
@@ -261,7 +272,7 @@ def test_condition_node_selects_the_first_matching_branch_or_else() -> None:
             1,
             {
                 "id": "other_branch",
-                "type": "ELSE IF 1",
+                "type": "ELSE IF",
                 "condition": "or",
                 "conditions": [
                     {
@@ -272,6 +283,31 @@ def test_condition_node_selects_the_first_matching_branch_or_else() -> None:
                 ],
             },
         )
+        stable_types = ConditionNodeConfig.model_validate(node.data.config).model_dump(
+            mode="json"
+        )
+        stable_types["branch"].insert(
+            2,
+            {
+                "id": "third_branch",
+                "type": "ELSE IF 2",
+                "condition": "and",
+                "conditions": [
+                    {
+                        "field": ["start", "question"],
+                        "compare": "eq",
+                        "value": "third",
+                    }
+                ],
+            },
+        )
+        assert [
+            item.type for item in ConditionNodeConfig.model_validate(stable_types).branch
+        ] == ["IF", "ELSE IF", "ELSE IF", "ELSE"]
+        del stable_types["branch"][1]
+        assert [
+            item.type for item in ConditionNodeConfig.model_validate(stable_types).branch
+        ] == ["IF", "ELSE IF", "ELSE"]
         context = NodeExecutionContext(
             workflow_inputs={},
             node_outputs={"start": {"question": "yes"}},
@@ -280,6 +316,15 @@ def test_condition_node_selects_the_first_matching_branch_or_else() -> None:
         result = await execute_workflow_node(None, node, context)  # type: ignore[arg-type]
         assert result.selected_handles == frozenset({"yes_branch"})
         assert result.outputs == {"branch_name": "IF"}
+        assert result.inputs["conditions"] == [
+            {
+                "branch_id": "yes_branch",
+                "field": ["start", "question"],
+                "compare": "eq",
+                "value": "yes",
+                "matched": True,
+            }
+        ]
 
         context = NodeExecutionContext(
             workflow_inputs={},
@@ -289,6 +334,10 @@ def test_condition_node_selects_the_first_matching_branch_or_else() -> None:
         result = await execute_workflow_node(None, node, context)  # type: ignore[arg-type]
         assert result.selected_handles == frozenset({"no_branch"})
         assert result.outputs == {"branch_name": "ELSE"}
+        assert [item["branch_id"] for item in result.inputs["conditions"]] == [
+            "yes_branch",
+            "other_branch",
+        ]
 
     asyncio.run(run())
 
@@ -308,12 +357,13 @@ def test_workflow_engine_returns_enabled_llm_content() -> None:
         }
         workflow["edges"][0]["target"] = "llm"
         workflow["edges"][1]["source"] = "llm"
+        end_outputs = {"result": "end"}
 
         async def execute(node, context):
             if node.data.type == "llm":
                 return NodeResult(outputs={"text": "answer"})
             if node.data.type == "end":
-                return NodeResult(outputs={"result": "end"})
+                return NodeResult(outputs=dict(end_outputs))
             return NodeResult(outputs=context.workflow_inputs)
 
         engine = WorkflowEngine(
@@ -323,9 +373,20 @@ def test_workflow_engine_returns_enabled_llm_content() -> None:
             deadline_at=datetime.now(UTC) + timedelta(seconds=5),
         )
         result = await engine.run({"question": "hello"}, execute)
-        assert result.outputs == {"result": "answer"}
+        assert result.outputs == {"result": "end"}
         assert result.state.node_outputs["llm"] == {"text": "answer"}
 
+        end_outputs.clear()
+        engine = WorkflowEngine(
+            workflow,
+            max_steps=3,
+            max_model_tokens=100,
+            deadline_at=datetime.now(UTC) + timedelta(seconds=5),
+        )
+        result = await engine.run({"question": "hello"}, execute)
+        assert result.outputs == {"result": "answer"}
+
+        end_outputs["result"] = "end"
         workflow["nodes"][1]["data"]["config"]["is_result"] = False
         engine = WorkflowEngine(
             workflow,
@@ -399,6 +460,17 @@ def test_workflow_reply_node_modes_and_result_output() -> None:
             raise AssertionError("Invalid reply fields were accepted")
         try:
             ReplyNodeConfig.model_validate(
+                {
+                    "reply_type": "referencing",
+                    "fields": [["value", "some field"], "Value"],
+                }
+            )
+        except ValidationError:
+            pass
+        else:
+            raise AssertionError("Unsupported reply reference characters were accepted")
+        try:
+            ReplyNodeConfig.model_validate(
                 {"reply_type": "custom", "content": "{% if %}"}
             )
         except ValidationError:
@@ -451,7 +523,7 @@ def test_workflow_reply_node_modes_and_result_output() -> None:
             deadline_at=datetime.now(UTC) + timedelta(seconds=5),
         )
         engine_result = await engine.run({"question": "hello"}, execute)
-        assert engine_result.outputs == {"result": "reply answer"}
+        assert engine_result.outputs == {"result": "end answer"}
 
         workflow["nodes"][1]["data"]["config"]["is_result"] = False
         engine = WorkflowEngine(
@@ -512,6 +584,8 @@ def test_workflow_engine_enforces_step_and_token_budgets() -> None:
 
 
 def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
+    from pydantic import ValidationError
+
     from app.application.workflow_nodes import (
         _condition,
         _model_output_limit,
@@ -559,6 +633,13 @@ def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
     assert resolve_value("{{chat_id}}", context) == "conversation-1"
     assert resolve_value("{{global.chat_id}}", context) == "conversation-1"
     assert resolve_value("{{start.question}}", context) == "hi"
+    colliding_context = NodeExecutionContext(
+        workflow_inputs={},
+        node_outputs={"time": {"value": "node time"}},
+        remaining_model_tokens=100,
+        globals={"time": "global time"},
+    )
+    assert resolve_value("{{time}}", colliding_context) == {"value": "node time"}
     assert resolve_value("问：{{global.time}}", context) == "问：2026-08-13 10:00:00"
     assert resolve_value(
         "{{history_context}}", context
@@ -570,9 +651,22 @@ def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
             "query": "question",
         }
     ).resolved_knowledge_base_ids == ["legacy-base", "second-base"]
+    try:
+        KnowledgeNodeConfig.model_validate(
+            {
+                "query": "question",
+                "knowledge_base_ids": [f"base-{index}" for index in range(51)],
+            }
+        )
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("Knowledge node accepted more than 50 knowledge bases")
 
 
 def test_workflow_resources_come_from_nodes_without_knowledge_limit() -> None:
+    from pydantic import ValidationError
+
     from app.schemas.workflow import KnowledgeNodeConfig, WorkflowGraph
     from app.shareddomain.workflows.services import workflow_resource_references
 
@@ -619,6 +713,176 @@ def test_workflow_resources_come_from_nodes_without_knowledge_limit() -> None:
         knowledge_ids,
         [{"server_id": "server-1", "tool_name": "search"}],
     )
+    malformed = parsed.model_dump(mode="json")
+    del malformed["nodes"][1]["data"]["config"]["server_id"]
+    try:
+        workflow_resource_references(WorkflowGraph.model_validate(malformed))
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("Malformed MCP node config bypassed validation")
+
+
+def test_workflow_resource_validation_batches_knowledge_bases() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi import HTTPException
+
+    from app.shareddomain.workflows.services import validate_workflow_resources
+
+    knowledge_ids = [f"base-{index}" for index in range(25)]
+    workflow = graph()
+    workflow["nodes"][1]["data"] = {
+        "type": "knowledge",
+        "title": "Knowledge",
+        "config": {
+            "query": "{{start.question}}",
+            "knowledge_base_ids": knowledge_ids,
+        },
+    }
+    agent = SimpleNamespace(workspace_id="workspace-1", model_id="model-1")
+    actor = SimpleNamespace(id="user-1")
+
+    def rows(*, owner: str = "user-1", status: str = "active") -> list[tuple]:
+        return [
+            (
+                SimpleNamespace(
+                    id=knowledge_base_id,
+                    workspace_id="workspace-1",
+                    created_by_user_id=owner,
+                    status=status,
+                ),
+                None,
+            )
+            for knowledge_base_id in knowledge_ids
+        ]
+
+    async def validate(knowledge_rows: list[tuple]) -> int | None:
+        batch = AsyncMock(return_value=knowledge_rows)
+        with patch(
+            "app.shareddomain.workflows.services.get_agent_model",
+            new=AsyncMock(return_value=object()),
+        ), patch(
+            "app.shareddomain.workflows.services.knowledge_base_repository."
+            "list_knowledge_bases_with_user_grants",
+            new=batch,
+        ):
+            try:
+                await validate_workflow_resources(
+                    object(),  # type: ignore[arg-type]
+                    agent,  # type: ignore[arg-type]
+                    workflow,
+                    actor,  # type: ignore[arg-type]
+                    "member",
+                )
+            except HTTPException as exc:
+                status_code = exc.status_code
+            else:
+                status_code = None
+        batch.assert_awaited_once()
+        assert batch.await_args.args[2] == knowledge_ids
+        return status_code
+
+    async def run() -> None:
+        assert await validate(rows()) is None
+        assert await validate(rows()[:-1]) == 404
+        assert await validate(rows(owner="another-user")) == 403
+        assert await validate(rows(status="archived")) == 422
+
+    asyncio.run(run())
+
+
+def test_workflow_context_batches_prior_node_executions() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.application.workflow_executor import _workflow_context
+    from app.schemas.workflow import WorkflowGraph
+
+    class SessionContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    prior = [
+        SimpleNamespace(id="run-new", goal="new", result='{"value":"new"}'),
+        SimpleNamespace(id="run-old", goal="old", result="old answer"),
+    ]
+    executions = [
+        SimpleNamespace(
+            run_id="run-new",
+            node_id="llm-1",
+            status="succeeded",
+            outputs={"text": "new node answer"},
+        ),
+        SimpleNamespace(
+            run_id="run-old",
+            node_id="llm-1",
+            status="succeeded",
+            outputs={"text": "old node answer"},
+        ),
+    ]
+    run = SimpleNamespace(
+        agent_id="agent-1",
+        access_source="console",
+        consumer_id="user-1",
+        conversation_id="conversation-1",
+    )
+    workflow = WorkflowGraph.model_validate(
+        {
+            "nodes": [
+                {
+                    "id": "llm-1",
+                    "position": {"x": 0, "y": 0},
+                    "data": {
+                        "type": "llm",
+                        "title": "LLM",
+                        "config": {"prompt": "question", "dialogue_type": "NODE"},
+                    },
+                }
+            ],
+            "edges": [],
+        }
+    )
+
+    async def check() -> None:
+        list_runs = AsyncMock(return_value=prior)
+        list_executions = AsyncMock(return_value=executions)
+        with patch(
+            "app.application.workflow_executor.get_session_factory",
+            return_value=lambda: SessionContext(),
+        ), patch(
+            "app.application.workflow_executor.agent_repository.list_agent_runs",
+            new=list_runs,
+        ), patch(
+            "app.application.workflow_executor.workflow_repository."
+            "list_node_executions_for_runs",
+            new=list_executions,
+        ):
+            workflow_globals, histories = await _workflow_context(
+                run,  # type: ignore[arg-type]
+                workflow,
+            )
+
+        list_runs.assert_awaited_once()
+        list_executions.assert_awaited_once()
+        assert list_executions.await_args.args[1] == ["run-new", "run-old"]
+        assert workflow_globals["history_context"] == [
+            {"question": "old", "answer": "old answer"},
+            {"question": "new", "answer": {"value": "new"}},
+        ]
+        assert histories == {
+            "llm-1": [
+                {"question": "old", "answer": "old node answer"},
+                {"question": "new", "answer": "new node answer"},
+            ]
+        }
+        start_time = datetime.fromisoformat(workflow_globals["start_time"])
+        assert start_time.utcoffset() == timedelta(0)
+        assert workflow_globals["time"] == start_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    asyncio.run(check())
 
 
 def test_workflow_start_node_outputs_question_files_and_globals() -> None:
@@ -1889,12 +2153,17 @@ def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
 
 def main() -> None:
     test_default_workflow_only_contains_start()
+    test_workflow_interaction_config_rejects_audio_uploads()
     test_workflow_validation_rejects_cycles_and_downstream_references()
     test_workflow_engine_runs_branch_and_join_deterministically()
+    test_condition_node_selects_the_first_matching_branch_or_else()
+    test_workflow_engine_returns_enabled_llm_content()
     test_workflow_reply_node_modes_and_result_output()
     test_workflow_engine_enforces_step_and_token_budgets()
     test_workflow_model_output_limit_uses_provider_native_argument()
     test_workflow_resources_come_from_nodes_without_knowledge_limit()
+    test_workflow_resource_validation_batches_knowledge_bases()
+    test_workflow_context_batches_prior_node_executions()
     test_workflow_start_node_outputs_question_files_and_globals()
     test_workflow_knowledge_node_limits_and_joins_results()
     test_workflow_knowledge_node_maxkb_settings_and_truncation()

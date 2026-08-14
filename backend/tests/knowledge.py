@@ -436,6 +436,52 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
         knowledge_application.query_vectors = original_query_vectors
 
 
+def test_keyword_query_does_not_require_embedding_model() -> None:
+    from unittest.mock import AsyncMock, Mock, patch
+
+    async def run() -> None:
+        keyword_query = AsyncMock(return_value=[])
+        with patch.object(
+            knowledge_application,
+            "resolve_embedding_model",
+            new=AsyncMock(side_effect=AssertionError("embedding model was resolved")),
+        ) as resolve_model, patch.object(
+            knowledge_application,
+            "query_vectors",
+            new=Mock(side_effect=AssertionError("vector search was called")),
+        ) as vector_query, patch.object(
+            knowledge_repository,
+            "query_keyword_chunk_ids",
+            new=keyword_query,
+        ), patch.object(
+            knowledge_repository,
+            "list_chunks_by_ids",
+            new=AsyncMock(return_value=[]),
+        ), patch.object(
+            knowledge_repository,
+            "list_active_documents_by_ids",
+            new=AsyncMock(return_value=[]),
+        ):
+            hits = await knowledge_application.query_knowledge_base(
+                object(),  # type: ignore[arg-type]
+                SimpleNamespace(id="base-1"),  # type: ignore[arg-type]
+                KnowledgeQueryRequest(
+                    query="keyword only",
+                    limit=1,
+                    search_mode="keywords",
+                ),
+                SimpleNamespace(),  # type: ignore[arg-type]
+            )
+
+        assert hits == []
+        resolve_model.assert_not_awaited()
+        vector_query.assert_not_called()
+        keyword_query.assert_awaited_once()
+        assert keyword_query.await_args.args[2:] == ("keyword only", 5)
+
+    asyncio.run(run())
+
+
 def assert_vector_store_mmr_and_metadata() -> None:
     chunk_id = "00000000-0000-0000-0000-000000000001"
 
@@ -884,6 +930,7 @@ async def assert_document_open_tasks_failed(
 
 
 def main() -> None:
+    test_keyword_query_does_not_require_embedding_model()
     assert_vector_store_mmr_and_metadata()
     hierarchical_drafts = build_hierarchical_chunks(
         "# One\n\n```text\n# not a heading\n```\n\nBody\n\n# Two\n\nMore",

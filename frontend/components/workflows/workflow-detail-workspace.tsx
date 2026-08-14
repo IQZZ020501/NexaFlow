@@ -209,6 +209,10 @@ export function WorkflowDetailWorkspace({
   const isRunActive = Boolean(
     currentRun && !TERMINAL_STATUSES.has(currentRun.status)
   )
+  const runInputDisabled =
+    isRunning ||
+    isRunActive ||
+    (runTarget?.source === "draft" && isAppDirty)
   const visibleRunFiles = form.interactionConfig.file_upload ? runFiles : []
   const navigationItems = [
     { view: "overview" as const, label: t("概览"), icon: LayoutDashboardIcon },
@@ -954,11 +958,7 @@ export function WorkflowDetailWorkspace({
                               form.interactionConfig.file_upload_setting
                                 .file_upload_type
                             )}
-                            disabled={
-                              isRunning ||
-                              isRunActive ||
-                              (runTarget?.source === "draft" && isAppDirty)
-                            }
+                            disabled={runInputDisabled}
                             onChange={(event) => {
                               setRunFiles(Array.from(event.target.files ?? []))
                             }}
@@ -967,6 +967,10 @@ export function WorkflowDetailWorkspace({
                         <textarea
                           id="workflow-run-question"
                           rows={3}
+                          aria-label={
+                            form.interactionConfig.user_input_title ||
+                            t("请输入问题")
+                          }
                           className={cn(
                             "block min-h-20 w-full resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none disabled:cursor-not-allowed",
                             visibleRunFiles.length ? "pb-2" : "pb-12"
@@ -975,7 +979,7 @@ export function WorkflowDetailWorkspace({
                             form.interactionConfig.user_input_title || t("请输入问题")
                           }
                           value={runQuestion}
-                          disabled={isRunActive}
+                          disabled={runInputDisabled}
                           aria-invalid={runQuestionInvalid}
                           onChange={(event) => {
                             setRunQuestion(event.target.value)
@@ -1015,11 +1019,7 @@ export function WorkflowDetailWorkspace({
                                   ? t("请先保存配置后再调试")
                                   : t("添加附件")
                               }
-                              disabled={
-                                isRunning ||
-                                isRunActive ||
-                                (runTarget?.source === "draft" && isAppDirty)
-                              }
+                              disabled={runInputDisabled}
                               onClick={() => {
                                 if (!runFileInputRef.current) return
                                 runFileInputRef.current.value = ""
@@ -1040,11 +1040,9 @@ export function WorkflowDetailWorkspace({
                                 : t("发送问题")
                             }
                             disabled={
-                              isRunning ||
-                              isRunActive ||
+                              runInputDisabled ||
                               !runTarget ||
-                              !runQuestion.trim() ||
-                              (runTarget.source === "draft" && isAppDirty)
+                              !runQuestion.trim()
                             }
                           >
                             {isRunning ? (
@@ -1180,7 +1178,7 @@ export function WorkflowDetailWorkspace({
           <DialogHeader>
             <DialogTitle>{t("工作流设置")}</DialogTitle>
             <DialogDescription>
-              {t("配置工作流的默认模型。")}
+              {t("配置工作流的默认模型；知识库和只读 MCP 工具由节点选择。")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={onSaveApp}>

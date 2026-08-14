@@ -97,12 +97,13 @@ type WorkflowCanvasProps = {
 function CanvasInner(props: WorkflowCanvasProps) {
   const { screenToFlowPosition, setViewport: setFlowViewport } = useReactFlow()
   const { t } = props
-  const [nodes, setNodes] = React.useState<WorkflowNode[]>(() =>
-    props.readOnly
-      ? props.graph.nodes
-      : ensureConditionElseIfBranches(props.graph.nodes)
+  const [initialGraph] = React.useState(() =>
+    props.readOnly ? props.graph : ensureConditionElseIfBranches(props.graph)
   )
-  const [edges, setEdges] = React.useState<WorkflowEdge[]>(props.graph.edges)
+  const [nodes, setNodes] = React.useState<WorkflowNode[]>(initialGraph.nodes)
+  const [edges, setEdges] = React.useState<WorkflowEdge[]>(initialGraph.edges)
+  const startNodeId =
+    nodes.find((node) => node.data.type === "start")?.id ?? "start"
   const [viewport, setViewport] = React.useState(props.graph.viewport)
   const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(null)
   const [infoOpen, setInfoOpen] = React.useState(true)
@@ -113,6 +114,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
   const transientViewportRef = React.useRef<WorkflowGraph["viewport"] | null>(
     null
   )
+  const skipInitialChangeRef = React.useRef(true)
   const onChangeRef = React.useRef(props.onChange)
 
   React.useEffect(() => {
@@ -120,6 +122,10 @@ function CanvasInner(props: WorkflowCanvasProps) {
   }, [props.onChange])
 
   React.useEffect(() => {
+    if (skipInitialChangeRef.current) {
+      skipInitialChangeRef.current = false
+      return
+    }
     onChangeRef.current(serializeWorkflowGraph(nodes, edges, viewport))
   }, [edges, nodes, viewport])
 
@@ -138,12 +144,13 @@ function CanvasInner(props: WorkflowCanvasProps) {
         type,
         title,
         nodes.length,
-        config
+        config,
+        startNodeId
       )
       if (position) node.position = position
       setNodes((current) => [...current, node])
     },
-    [nodes, props.readOnly, props.t]
+    [nodes, props.readOnly, props.t, startNodeId]
   )
 
   const flowPaneRef = React.useRef<HTMLDivElement | null>(null)
@@ -708,7 +715,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
                     addNodeAtCenter(
                       preset.type,
                       props.t(preset.label),
-                      preset.config(props.t)
+                      preset.config(props.t, startNodeId)
                     )
                   }
                 >

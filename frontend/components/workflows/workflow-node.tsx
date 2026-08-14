@@ -242,8 +242,18 @@ type ConditionBranch = {
   conditions: ConditionRule[]
 }
 
-function conditionBranches(config: Record<string, unknown>): ConditionBranch[] {
-  if (Array.isArray(config.branch)) return config.branch as ConditionBranch[]
+function conditionBranches(
+  config: Record<string, unknown>,
+  startNodeId = "start"
+): ConditionBranch[] {
+  if (Array.isArray(config.branch)) {
+    return (config.branch as ConditionBranch[]).map((branch) => ({
+      ...branch,
+      type: /^ELSE IF(?: [1-9][0-9]*)?$/.test(branch.type)
+        ? "ELSE IF"
+        : branch.type,
+    }))
+  }
   const fieldMatch = String(config.left ?? "").match(
     /^{{\s*([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)\s*}}$/
   )
@@ -275,7 +285,7 @@ function conditionBranches(config: Record<string, unknown>): ConditionBranch[] {
         {
           field: fieldMatch
             ? [fieldMatch[1], fieldMatch[2]]
-            : ["start", "question"],
+            : [startNodeId, "question"],
           compare: legacyCompare[String(config.operator)] ?? "eq",
           value: String(config.right ?? ""),
         },
@@ -297,7 +307,7 @@ function normalizeConditionBranches(branches: ConditionBranch[]) {
         ? "IF"
         : index === branches.length - 1 && branch.type === "ELSE"
           ? "ELSE"
-          : `ELSE IF ${index}`,
+          : "ELSE IF",
   }))
 }
 
@@ -406,6 +416,9 @@ function VariablePicker({
   onInsert: (reference: string, path: string[], description: string) => void
 }) {
   const [open, setOpen] = React.useState(false)
+  const startNodeId =
+    (node.nodes ?? []).find((item) => item.data.type === "start")?.id ??
+    "start"
   const upstream = React.useMemo(() => {
     const nodes = node.nodes ?? []
     const edges = node.edges ?? []
@@ -465,8 +478,8 @@ function VariablePicker({
             key={field.value}
             onSelect={() => {
               onInsert(
-                `{{start.${field.value}}}`,
-                ["start", field.value],
+                `{{${startNodeId}.${field.value}}}`,
+                [startNodeId, field.value],
                 t(field.label)
               )
               setOpen(false)
@@ -658,9 +671,9 @@ function LlmSettingsDialog({
     string,
     unknown
   >
+  const modelSetting = (config.model_setting ?? {}) as Record<string, unknown>
   const reasoningContentEnabled =
-    (config.model_setting as Record<string, unknown> | undefined)
-      ?.reasoning_content_enable === true
+    modelSetting.reasoning_content_enable === true
   const paramValue = (key: string) => {
     const value = modelParams[key]
     return typeof value === "number" ? String(value) : ""
@@ -753,6 +766,7 @@ function LlmSettingsDialog({
                 config: {
                   ...config,
                   model_setting: {
+                    ...modelSetting,
                     reasoning_content_enable: !reasoningContentEnabled,
                   },
                 },
@@ -796,11 +810,17 @@ function ConditionEditor({
   onUpdate: (data: WorkflowNodeData) => void
   t: TFunction
 }) {
-  const branches = conditionBranches(node.config)
+  const startNodeId =
+    (node.nodes ?? []).find((item) => item.data.type === "start")?.id ??
+    "start"
+  const branches = conditionBranches(node.config, startNodeId)
   const updateBranches = (next: ConditionBranch[]) =>
     onUpdate({
       ...node,
-      config: { branch: normalizeConditionBranches(next) },
+      config: {
+        ...node.config,
+        branch: normalizeConditionBranches(next),
+      },
     })
   const fieldLabel = ([sourceId, field]: [string, string]) => {
     if (sourceId === "global") {
@@ -858,7 +878,10 @@ function ConditionEditor({
     <div className="grid gap-3">
       {branches.map((branch, branchIndex) => {
         const isElse = branch.type === "ELSE"
-        const displayType = branch.type === "ELSE IF 1" ? "ELSE IF" : branch.type
+        const displayType =
+          branch.type === "ELSE IF" && branchIndex > 1
+            ? `ELSE IF ${branchIndex}`
+            : branch.type
         return (
           <section
             key={branch.id}
@@ -1038,7 +1061,7 @@ function ConditionEditor({
                     conditions: [
                       ...branch.conditions,
                       {
-                        field: ["start", "question"],
+                        field: [startNodeId, "question"],
                         compare: "eq",
                         value: "",
                       },
@@ -1064,10 +1087,10 @@ function ConditionEditor({
           const next = [...branches]
           next.splice(elseIndex < 0 ? next.length : elseIndex, 0, {
             id: createConditionId(),
-            type: "ELSE IF 1",
+            type: "ELSE IF",
             condition: "and",
             conditions: [
-              { field: ["start", "question"], compare: "eq", value: "" },
+              { field: [startNodeId, "question"], compare: "eq", value: "" },
             ],
           })
           updateBranches(next)
