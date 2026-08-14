@@ -2,6 +2,7 @@ import asyncio
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 
@@ -9,7 +10,10 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import text
 
-from app.capabilities.llm.credentials import decrypt_credential_secrets
+from app.capabilities.llm.credentials import (
+    decrypt_credential_secrets,
+    encrypt_credential_secrets,
+)
 from app.capabilities.llm.models import RegisteredModel
 from app.capabilities.llm.runtime import (
     build_chat_model,
@@ -29,6 +33,31 @@ from tests.support import (
 )
 
 MEMBER_PASSWORD = "Member@12345."
+
+
+def test_registered_chat_model_uses_configured_timeout() -> None:
+    runtime_settings = replace(settings(), model_request_timeout_seconds=77)
+    model = RegisteredModel(
+        workspace_id="workspace-1",
+        name="DeepSeek",
+        provider="model_deepseek_provider",
+        provider_type="deepseek",
+        api_base="https://api.deepseek.com",
+        api_key_ciphertext=encrypt_credential_secrets(
+            {"api_key": "test"}, runtime_settings.model_secret_key
+        ),
+        credential_config={"api_base": "https://api.deepseek.com"},
+        credential_secret_hints={},
+        model_type="LLM",
+        model_name="deepseek-chat",
+        status="active",
+        meta={},
+        created_by_user_id="user-1",
+    )
+
+    chat_model = build_registered_chat_model(model, runtime_settings)
+
+    assert chat_model.request_timeout == 77
 
 
 class ModelTestHandler(BaseHTTPRequestHandler):

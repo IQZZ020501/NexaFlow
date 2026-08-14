@@ -25,6 +25,7 @@ from app.application.workflows import (
     update_workflow_definition,
     validate_workflow_definition,
     stream_workflow_run,
+    submit_workflow_form,
     upload_workspace_workflow_files,
 )
 from app.schemas.workflow import (
@@ -32,6 +33,7 @@ from app.schemas.workflow import (
     WorkflowDefinitionUpdateRequest,
     WorkflowNodeExecutionListResponse,
     WorkflowRunCreateRequest,
+    WorkflowFormSubmitRequest,
     WorkflowRunResponse,
     WorkflowValidationRequest,
     WorkflowValidationResponse,
@@ -234,6 +236,30 @@ async def get_run(
         run_id,
         context.user,
         context.membership_role,
+    )
+
+
+@router.post(
+    "/{agent_id}/runs/{run_id}/form",
+    response_model=WorkflowRunResponse,
+)
+async def post_run_form(
+    agent_id: str,
+    run_id: str,
+    payload: WorkflowFormSubmitRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkflowRunResponse:
+    return await submit_workflow_form(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        payload,
+        context.user,
+        context.membership_role,
+        settings,
     )
 
 

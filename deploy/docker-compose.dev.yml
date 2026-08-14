@@ -22,3 +22,7 @@ services:
     container_name: nexaflow-qdrant
     ports:
       - "6333:6333"
+
+  worker:
+    env_file:
+      - ../backend/.env

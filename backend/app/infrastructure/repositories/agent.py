@@ -20,6 +20,7 @@ from app.infrastructure.repositories.mapping import (
 from app.shareddomain.agents.models import (
     AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_AWAITING_INPUT_STATUS,
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_QUEUED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
@@ -817,6 +818,33 @@ async def pause_agent_run(
     return bool(updated.rowcount)
 
 
+async def pause_agent_run_for_input(
+    db: AsyncSession,
+    run_id: str,
+    worker_task_id: str,
+) -> bool:
+    updated = await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.id == run_id,
+            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.worker_task_id == worker_task_id,
+        )
+        .values(
+            status=AGENT_RUN_AWAITING_INPUT_STATUS,
+            attempts=case(
+                (AgentRun.attempts > 0, AgentRun.attempts - 1),
+                else_=0,
+            ),
+            last_error=None,
+            worker_task_id=None,
+            lease_expires_at=None,
+            updated_at=func.now(),
+        )
+    )
+    return bool(updated.rowcount)
+
+
 async def requeue_owned_agent_run(
     db: AsyncSession,
     run_id: str,
@@ -855,6 +883,29 @@ async def queue_agent_run(
         )
         .values(
             status=AGENT_RUN_QUEUED_STATUS,
+            last_error=None,
+            worker_task_id=None,
+            lease_expires_at=None,
+            updated_at=func.now(),
+        )
+    )
+    return bool(updated.rowcount)
+
+
+async def queue_agent_run_from_input(
+    db: AsyncSession,
+    run_id: str,
+    checkpoint: dict,
+) -> bool:
+    updated = await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.id == run_id,
+            AgentRun.status == AGENT_RUN_AWAITING_INPUT_STATUS,
+        )
+        .values(
+            status=AGENT_RUN_QUEUED_STATUS,
+            checkpoint=checkpoint,
             last_error=None,
             worker_task_id=None,
             lease_expires_at=None,

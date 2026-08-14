@@ -314,6 +314,9 @@ async def resolve_public_workflow_files(
     context: PublishedAgentContext,
     user_id: str,
     file_ids: list[str],
+    settings: Settings,
+    *,
+    extract_text: bool = False,
 ) -> list[dict[str, object]]:
     return await _resolve_workflow_files(
         db,
@@ -321,6 +324,8 @@ async def resolve_public_workflow_files(
         user_id,
         file_ids,
         published_interaction_config(context),
+        settings,
+        extract_text=extract_text,
     )
 
 
@@ -331,6 +336,9 @@ async def resolve_workspace_workflow_files(
     actor: User,
     workspace_role: str | None,
     file_ids: list[str],
+    settings: Settings,
+    *,
+    extract_text: bool = False,
 ) -> list[dict[str, object]]:
     agent = await get_workflow_agent(db, workspace_id, agent_id)
     await require_agent_view(db, agent, actor, workspace_role)
@@ -340,6 +348,8 @@ async def resolve_workspace_workflow_files(
         actor.id,
         file_ids,
         AgentInteractionConfig.model_validate(agent.interaction_config),
+        settings,
+        extract_text=extract_text,
     )
 
 
@@ -349,6 +359,9 @@ async def _resolve_workflow_files(
     user_id: str,
     file_ids: list[str],
     config: AgentInteractionConfig,
+    settings: Settings,
+    *,
+    extract_text: bool,
 ) -> list[dict[str, object]]:
     if not file_ids:
         return []
@@ -368,6 +381,32 @@ async def _resolve_workflow_files(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow upload not found.")
     ordered = [by_id[file_id] for file_id in file_ids]
     _validate_upload_policy(ordered, config, "workflow")
+    contents: dict[str, str] = {}
+    if extract_text:
+        storage = create_object_storage(settings.knowledge_storage_dir)
+        parser = build_document_parser()
+        # ponytail: reuse the bounded attachment context; move document text to
+        # storage if workflows need more than this existing 50k-character ceiling.
+        remaining = AGENT_ATTACHMENT_CONTEXT_LIMIT
+        try:
+            for item in ordered:
+                extracted, _assets = await asyncio.to_thread(
+                    parser.extract,
+                    item.filename,
+                    item.content_type,
+                    storage.path(item.object_key),
+                )
+                contents[item.id] = extracted[: min(AGENT_FILE_TEXT_LIMIT, remaining)]
+                remaining -= len(contents[item.id])
+                if remaining <= 0:
+                    break
+        except KnowledgePipelineError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Workflow document content could not be extracted.",
+            ) from exc
+        for item in ordered:
+            contents.setdefault(item.id, "")
     result = [
         {
             "id": item.id,
@@ -375,6 +414,11 @@ async def _resolve_workflow_files(
             "content_type": item.content_type,
             "size_bytes": item.size_bytes,
             "category": item.category,
+            **(
+                {"file_id": item.id, "content": contents[item.id]}
+                if extract_text
+                else {}
+            ),
         }
         for item in ordered
     ]

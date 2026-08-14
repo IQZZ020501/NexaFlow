@@ -22,6 +22,7 @@ from app.application.workflows import (
     list_external_workflow_runs,
     list_public_workflow_conversations,
     stream_external_workflow_run,
+    submit_external_workflow_form,
     upload_public_workflow_files,
 )
 from app.schemas.workflow import (
@@ -31,6 +32,7 @@ from app.schemas.workflow import (
     PublicWorkflowConversationListResponse,
     PublicWorkflowProfileResponse,
     WorkflowApiDocumentationResponse,
+    WorkflowFormSubmitRequest,
     WorkflowUploadResponse,
 )
 
@@ -158,6 +160,21 @@ async def get_public_workflow_run(
     )
 
 
+@public_router.post("/runs/{run_id}/form", response_model=ExternalWorkflowRunResponse)
+async def submit_public_workflow_form(
+    workflow_id: str,
+    run_id: str,
+    payload: WorkflowFormSubmitRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> ExternalWorkflowRunResponse:
+    await get_workspace_published_workflow_context(db, workflow_id, user)
+    return await submit_external_workflow_form(
+        db, workflow_id, run_id, "public", user.id, payload, settings
+    )
+
+
 @public_router.get("/runs/{run_id}/stream", response_class=StreamingResponse)
 async def stream_public_workflow_run(
     workflow_id: str,
@@ -223,6 +240,23 @@ async def get_api_workflow_run(
     _, credential = await _api_context(db, workflow_id, credentials)
     return await get_external_workflow_run(
         db, workflow_id, run_id, "api", credential.id
+    )
+
+
+@api_router.post("/runs/{run_id}/form", response_model=ExternalWorkflowRunResponse)
+async def submit_api_workflow_form(
+    workflow_id: str,
+    run_id: str,
+    payload: WorkflowFormSubmitRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_api_key_scheme)
+    ],
+) -> ExternalWorkflowRunResponse:
+    _, credential = await _api_context(db, workflow_id, credentials)
+    return await submit_external_workflow_form(
+        db, workflow_id, run_id, "api", credential.id, payload, settings
     )
 
 

@@ -1,6 +1,7 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
 import type { AgentInteractionConfig } from "@/lib/api/agents"
+import type { WorkflowNodeType, WorkflowPendingForm } from "@/lib/api/workflows"
 
 export type PublicWorkflowProfile = {
   id: string
@@ -30,8 +31,8 @@ export type PublicWorkflowConversation = {
 export type ExternalWorkflowProgress = {
   id: string
   node_id: string
-  node_type: string
-  status: "running" | "succeeded" | "failed" | "skipped"
+  node_type: WorkflowNodeType
+  status: "running" | "awaiting_input" | "succeeded" | "failed" | "skipped"
   error: string | null
   duration_ms: number | null
 }
@@ -48,11 +49,12 @@ export type ExternalWorkflowRun = {
   started_at: string | null
   finished_at: string | null
   updated_at: string
+  pending_form: WorkflowPendingForm | null
 }
 
 export type PublicWorkflowRunStreamEvent =
   | {
-      type: "run" | "complete" | "error"
+      type: "run" | "complete" | "error" | "workflow_input_required"
       sequence: number
       run: ExternalWorkflowRun
     }
@@ -128,6 +130,23 @@ export function uploadPublicWorkflowFiles(
     method: "POST",
     token,
     body,
+  })
+}
+
+export function submitPublicWorkflowForm(
+  workflowId: string,
+  token: string,
+  runId: string,
+  runtimeNodeId: string,
+  formData: Record<string, unknown>
+) {
+  return request<ExternalWorkflowRun>(path(workflowId, `/runs/${runId}/form`), {
+    method: "POST",
+    token,
+    body: JSON.stringify({
+      runtime_node_id: runtimeNodeId,
+      form_data: formData,
+    }),
   })
 }
 

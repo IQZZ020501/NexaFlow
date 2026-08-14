@@ -37,6 +37,7 @@ class Settings:
     celery_task_always_eager: bool = False
     mcp_allow_private_networks: bool = False
     mcp_request_timeout_seconds: float = 30.0
+    model_request_timeout_seconds: float = 60.0
     agent_tool_timeout_seconds: float = 30.0
     agent_run_timeout_seconds: float = 300.0
     agent_executor_lease_seconds: int = 90
@@ -85,6 +86,9 @@ class Settings:
             in {"1", "true", "yes"},
             mcp_request_timeout_seconds=float(
                 os.getenv("MCP_REQUEST_TIMEOUT_SECONDS", "30")
+            ),
+            model_request_timeout_seconds=float(
+                os.getenv("MODEL_REQUEST_TIMEOUT_SECONDS", "60")
             ),
             agent_tool_timeout_seconds=float(
                 os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "30")
@@ -149,6 +153,10 @@ class Settings:
             raise RuntimeError("MCP_REQUEST_TIMEOUT_SECONDS must be greater than zero.")
         if self.mcp_request_timeout_seconds > 300:
             raise RuntimeError("MCP_REQUEST_TIMEOUT_SECONDS must not exceed 300.")
+        if self.model_request_timeout_seconds <= 0:
+            raise RuntimeError("MODEL_REQUEST_TIMEOUT_SECONDS must be greater than zero.")
+        if self.model_request_timeout_seconds > 300:
+            raise RuntimeError("MODEL_REQUEST_TIMEOUT_SECONDS must not exceed 300.")
         if self.agent_tool_timeout_seconds <= 0:
             raise RuntimeError("AGENT_TOOL_TIMEOUT_SECONDS must be greater than zero.")
         if self.agent_tool_timeout_seconds > 300:

@@ -15,6 +15,7 @@ import {
   type Connection,
   type EdgeChange,
   type NodeChange,
+  type OnSelectionChangeParams,
 } from "@xyflow/react"
 import {
   ChevronDownIcon,
@@ -54,6 +55,7 @@ import {
   createWorkflowNode,
   ensureConditionElseIfBranches,
   serializeWorkflowGraph,
+  workflowNodeLabel,
 } from "@/lib/workflows/graph"
 import {
   applyWorkflowEdgeChanges,
@@ -70,7 +72,6 @@ import {
 import {
   NODE_ICONS,
   WorkflowNodeCard,
-  workflowNodeLabel,
 } from "./workflow-node"
 import { WorkflowEdgeCard } from "./workflow-edge"
 
@@ -412,6 +413,15 @@ function CanvasInner(props: WorkflowCanvasProps) {
       })),
     [deleteEdge, edges, selectedEdgeId, t, props.readOnly]
   )
+  const handleSelectionChange = React.useCallback(
+    ({ edges: selectedEdges }: OnSelectionChangeParams) => {
+      const nextSelectedEdgeId = selectedEdges[0]?.id ?? null
+      setSelectedEdgeId((current) =>
+        current === nextSelectedEdgeId ? current : nextSelectedEdgeId
+      )
+    },
+    []
+  )
   const ariaLabelConfig = React.useMemo<Partial<AriaLabelConfig>>(() => {
     const directions: Record<string, string> = {
       left: t("左"),
@@ -517,11 +527,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
             onPaneClick={() => {
               setSelectedEdgeId(null)
             }}
-            onSelectionChange={({ edges: selectedEdges }) => {
-              if (selectedEdges.length > 0) {
-                setSelectedEdgeId(selectedEdges[0].id)
-              }
-            }}
+            onSelectionChange={handleSelectionChange}
             deleteKeyCode={props.readOnly ? null : ["Backspace", "Delete"]}
             onMoveEnd={(_event, nextViewport) => {
               const transient = transientViewportRef.current

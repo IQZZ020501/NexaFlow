@@ -12,7 +12,9 @@ from app.application.agent_access import (
 )
 from app.application.workflow_runs import (
     create_workflow_run,
+    resume_workflow_form,
     stream_workflow_run,
+    workflow_pending_form,
 )
 from app.application.workflow_uploads import (
     published_interaction_config,
@@ -37,6 +39,8 @@ from app.schemas.workflow import (
     PublicWorkflowConversationResponse,
     PublicWorkflowProfileResponse,
     WorkflowApiDocumentationResponse,
+    WorkflowFormSubmitRequest,
+    WorkflowGraph,
     WorkflowRunCreateRequest,
 )
 
@@ -70,6 +74,7 @@ def _external_run_response(
         started_at=run.started_at,
         finished_at=run.finished_at,
         updated_at=run.updated_at,
+        pending_form=workflow_pending_form(run),
     )
 
 
@@ -86,6 +91,7 @@ def _external_run_from_payload(payload: dict[str, Any]) -> ExternalWorkflowRunRe
         started_at=payload.get("started_at"),
         finished_at=payload.get("finished_at"),
         updated_at=payload["updated_at"],
+        pending_form=payload.get("pending_form"),
     )
 
 
@@ -171,21 +177,26 @@ async def create_external_workflow_run(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "API workflow runs cannot use public upload ids.",
         )
+    version = await workflow_repository.get_version(
+        db, context.agent.workspace_id, context.agent.id
+    )
+    if version is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published workflow not found.")
     files = (
         await resolve_public_workflow_files(
             db,
             context,
             consumer_id,
             payload.file_ids,
+            settings,
+            extract_text=any(
+                node.data.type == "document-extract-node"
+                for node in WorkflowGraph.model_validate(version.graph).nodes
+            ),
         )
         if source == "public"
         else []
     )
-    version = await workflow_repository.get_version(
-        db, context.agent.workspace_id, context.agent.id
-    )
-    if version is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published workflow not found.")
     run = await create_workflow_run(
         db,
         context.agent.workspace_id,
@@ -242,6 +253,20 @@ async def get_external_workflow_run(
             for execution in executions
         ],
     )
+
+
+async def submit_external_workflow_form(
+    db: AsyncSession,
+    workflow_id: str,
+    run_id: str,
+    source: ExternalAccessSource,
+    consumer_id: str,
+    payload: WorkflowFormSubmitRequest,
+    settings: Settings,
+) -> ExternalWorkflowRunResponse:
+    run, detail = await _external_run(db, workflow_id, run_id, source, consumer_id)
+    resumed = await resume_workflow_form(db, run, detail, payload, settings)
+    return _external_run_from_payload(resumed.model_dump(mode="json"))
 
 
 async def list_external_workflow_runs(
@@ -328,7 +353,12 @@ async def stream_external_workflow_run(
 ) -> AsyncIterator[dict[str, Any]]:
     async for event in stream_workflow_run(run_id, settings, after=after):
         event_type = event.get("type")
-        if event_type in {"run", "complete", "error"} and isinstance(event.get("run"), dict):
+        if event_type in {
+            "run",
+            "complete",
+            "error",
+            "workflow_input_required",
+        } and isinstance(event.get("run"), dict):
             yield {
                 **{key: event[key] for key in ("type", "sequence") if key in event},
                 "run": _external_run_from_payload(event["run"]).model_dump(mode="json"),

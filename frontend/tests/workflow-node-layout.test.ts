@@ -6,6 +6,10 @@ const source = readFileSync(
   join(import.meta.dir, "../components/workflows/workflow-node.tsx"),
   "utf8"
 )
+const graphSource = readFileSync(
+  join(import.meta.dir, "../lib/workflows/graph.ts"),
+  "utf8"
+)
 const canvasSource = readFileSync(
   join(import.meta.dir, "../components/workflows/workflow-canvas.tsx"),
   "utf8"
@@ -38,7 +42,7 @@ test("workflow nodes default to expanded when the canvas mounts", () => {
 })
 
 test("reply node is pinned and exposes both reply modes", () => {
-  expect(source).toContain('"reply-node": "指定回复"')
+  expect(graphSource).toContain('"reply-node": "指定回复"')
   expect(source).toContain('node.type === "reply-node"')
   expect(source).toContain('config.reply_type ?? "custom"')
   expect(source).toContain('updateConfig({ fields: [path, description] })')
@@ -56,10 +60,27 @@ test("variable picker shows translated names without changing references", () =>
   expect(variablePicker).toContain('`{{global.${field.value}}}`')
   expect(variablePicker).toContain('`{{${startNodeId}.${field.value}}}`')
   expect(variablePicker).toContain("[startNodeId, field.value]")
-  expect(variablePicker).toContain('source?.data.type === "knowledge"')
-  expect(variablePicker).toContain("KNOWLEDGE_OUTPUT_FIELDS.find")
+  expect(variablePicker).toContain("outputFieldLabel(source.data.type, field, t)")
   expect(variablePicker).toContain("{displayLabel}")
   expect(variablePicker).not.toContain("<BracesIcon")
+  expect(source).toContain("function workflowVariableReferenceLabel")
+  expect(source).toContain(
+    "workflowVariableReferenceLabel(label, node.nodes ?? [], t)"
+  )
+  expect(source).toContain(
+    "workflowVariableTextLabel(rawValue, node.nodes ?? [], t)"
+  )
+})
+
+test("localized variable previews do not replace the editable textarea value", () => {
+  const textEditor = source.slice(
+    source.indexOf("function TextEditor"),
+    source.indexOf("function NumberStepper")
+  )
+
+  expect(textEditor).toContain("value={rawValue}")
+  expect(textEditor).not.toContain("value={displayValue}")
+  expect(textEditor).toContain("localizedValue")
 })
 
 test("output fields use translated labels and confirm successful copies", () => {
@@ -71,7 +92,7 @@ test("output fields use translated labels and confirm successful copies", () => 
   expect(source).toContain('notify("success", t("已复制"))')
 })
 
-test("Python code node orders inputs, code, and outputs", () => {
+test("code, document, and form nodes place outputs after their settings", () => {
   const codeConfig = source.slice(
     source.indexOf('{node.type === "code" ? ('),
     source.indexOf("export function WorkflowNodeCard")
@@ -85,10 +106,33 @@ test("Python code node orders inputs, code, and outputs", () => {
     codeConfig.indexOf("-code-body")
   )
   expect(card).toContain(
-    '["knowledge", "llm", "condition", "reply-node", "code"]'
+    '["knowledge", "llm", "condition", "reply-node", "code", "document-extract-node", "form-node"]'
   )
   expect(card.indexOf("<NodeConfigFields")).toBeLessThan(
     card.lastIndexOf('node.type === "code"')
+  )
+  expect(card.indexOf("<NodeConfigFields")).toBeLessThan(
+    card.lastIndexOf('node.type === "document-extract-node"')
+  )
+  expect(card.indexOf("<NodeConfigFields")).toBeLessThan(
+    card.lastIndexOf('node.type === "form-node"')
+  )
+})
+
+test("reranker settings stay inside the fixed-width node card", () => {
+  const rerankerConfig = source.slice(
+    source.indexOf('{node.type === "reranker-node" ? ('),
+    source.indexOf('{node.type === "form-node" ? (')
+  )
+
+  expect(rerankerConfig).toContain(
+    'className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3"'
+  )
+  expect(rerankerConfig).toContain(
+    '<fieldset className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">'
+  )
+  expect(rerankerConfig).toContain(
+    'className="flex min-w-0 items-center gap-2"'
   )
 })
 
@@ -134,7 +178,7 @@ test("condition node uses ordered branches and stable branch handles", () => {
     /branch\.type === "ELSE IF"[\s\S]*?`ELSE IF \$\{branchIndex\}`/
   )
   expect(conditionEditor).toContain(
-    'source?.data.type === "start" ? t("开始节点")'
+    "workflowVariablePathLabel(sourceId, field, node.nodes ?? [], t)"
   )
   expect(conditionEditor).toMatch(
     /config:\s*\{\s*\.\.\.node\.config,\s*branch: normalizeConditionBranches\(next\)/
@@ -160,6 +204,18 @@ test("saving does not remount or recenter the workflow canvas", () => {
   expect(saveDraft).not.toContain("setCanvasGeneration")
   expect(restoreVersion).toContain(
     "setCanvasGeneration((current) => current + 1)"
+  )
+})
+
+test("React Flow selection changes use a stable state callback", () => {
+  expect(canvasSource).toContain(
+    "const handleSelectionChange = React.useCallback"
+  )
+  expect(canvasSource).toContain(
+    "onSelectionChange={handleSelectionChange}"
+  )
+  expect(canvasSource).not.toContain(
+    "onSelectionChange={({ edges: selectedEdges }) =>"
   )
 })
 
@@ -196,6 +252,22 @@ test("workflow debugging uses an anchored canvas window", () => {
   expect(detailSource).not.toContain("runDetailsOpen")
 })
 
+test("workflow debug node rows expand to execution details", () => {
+  const executionLog = detailSource.slice(
+    detailSource.indexOf('{executions.map((execution) => ('),
+    detailSource.indexOf('{currentRun.status === "awaiting_input"')
+  )
+
+  expect(executionLog).toContain("<details")
+  expect(executionLog).toContain("<summary")
+  expect(executionLog).toContain("group-open:rotate-180")
+  expect(executionLog).toContain("execution.outputs")
+  expect(executionLog).toContain("execution.inputs")
+  expect(executionLog).toContain("execution.model_usage")
+  expect(executionLog).toContain("execution.error")
+  expect(executionLog).toContain('t("暂无输出内容")')
+})
+
 test("LLM advanced parameters live behind the card settings button", () => {
   const advancedDialog = source.slice(
     source.indexOf("function LlmSettingsDialog"),
@@ -207,10 +279,14 @@ test("LLM advanced parameters live behind the card settings button", () => {
   )
 
   expect(source).toContain(
-    '["llm", "knowledge", "reply-node"].includes(node.type)'
+    '["llm", "knowledge", "reply-node", "reranker-node", "form-node"].includes(node.type)'
   )
   expect(source).toContain("<SettingsIcon")
   expect(source).toContain("<LlmSettingsDialog")
+  expect(source).toContain('placeholder={t("默认 4096")}')
+  expect(graphSource).toContain(
+    '"Workflow model request timed out.": "工作流模型请求超时。"'
+  )
   expect(advancedDialog).toContain("${nodeId}-llm-temperature")
   expect(advancedDialog).toContain("${nodeId}-llm-reasoning-content")
   expect(advancedDialog).toContain('role="switch"')
@@ -265,7 +341,7 @@ test("LLM outputs use translated labels at the bottom of its settings", () => {
     nodeConfigFields.indexOf('t("返回内容")')
   )
   expect(source).toContain(
-    '!["knowledge", "llm", "condition", "reply-node", "code"].includes(node.type)'
+    '!["knowledge", "llm", "condition", "reply-node", "code", "document-extract-node", "form-node"].includes(node.type)'
   )
 })
 
@@ -287,7 +363,7 @@ test("knowledge search mode uses the anchored app dropdown", () => {
 
 test("knowledge node presents grouped settings and four documented outputs", () => {
   expect(source).toContain(
-    '["llm", "knowledge", "reply-node"].includes(node.type)'
+    '["llm", "knowledge", "reply-node", "reranker-node", "form-node"].includes(node.type)'
   )
   expect(source).toContain('t("节点设置")')
   expect(source).toContain('t("检索范围")')
@@ -304,7 +380,7 @@ test("knowledge node presents grouped settings and four documented outputs", () 
   expect(source).toContain('displayValue={t(item.label)}')
   expect(source).toContain('reference={`{{${nodeId}.${item.field}}}`}')
   expect(source).toContain('<OutputFieldRow')
-  expect(source.match(/<NumberStepper/g)?.length).toBe(3)
+  expect(source.match(/<NumberStepper/g)?.length).toBe(4)
   expect(source).toContain('grid h-8 w-20 grid-cols-[minmax(0,1fr)_1.25rem]')
   expect(source).toContain('px-1 text-center text-xs')
   expect(source).toContain('aria-label={t("增加数值")}')

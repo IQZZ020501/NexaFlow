@@ -1,5 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import date, timedelta
+import math
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -16,10 +18,14 @@ from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.session import get_session_factory
 from app.application.workflow_uploads import resolve_workspace_workflow_files
 from app.schemas.workflow import (
+    FormNodeConfig,
+    WorkflowFormSubmitRequest,
     WorkflowNodeExecutionListResponse,
     WorkflowNodeExecutionResponse,
     WorkflowRunCreateRequest,
     WorkflowRunResponse,
+    WorkflowPendingForm,
+    WorkflowGraph,
 )
 from app.shareddomain.agents.permissions import require_agent_edit, require_agent_view
 from app.shareddomain.agents.services import ACTIVE_STATUS, get_agent_model
@@ -63,7 +69,81 @@ def workflow_run_to_response(
         finished_at=run.finished_at,
         created_at=run.created_at,
         updated_at=run.updated_at,
+        pending_form=workflow_pending_form(run),
     )
+
+
+def workflow_pending_form(run: AgentRun) -> WorkflowPendingForm | None:
+    value = (run.checkpoint or {}).get("workflow_form")
+    if not isinstance(value, dict):
+        return None
+    return WorkflowPendingForm.model_validate(value)
+
+
+def _validated_form_data(
+    config: FormNodeConfig,
+    submitted: dict[str, Any],
+) -> dict[str, Any]:
+    fields = {field.variable: field for field in config.form_field_list}
+    if set(submitted) - set(fields):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Form contains unknown fields.",
+        )
+    result: dict[str, Any] = {}
+    for variable, field in fields.items():
+        value = submitted.get(variable)
+        if field.is_required and (
+            value is None or (isinstance(value, str) and not value.strip())
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"Form field {variable} is required.",
+            )
+        if value is None or value == "":
+            result[variable] = value
+            continue
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"Form field {variable} has an invalid value.",
+            )
+        text = str(value)
+        if len(text) > 10000:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"Form field {variable} is too long.",
+            )
+        if field.type == "select" and text not in field.optionList:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"Form field {variable} has an invalid option.",
+            )
+        if field.type == "date":
+            try:
+                date.fromisoformat(text)
+            except ValueError as exc:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    f"Form field {variable} has an invalid date.",
+                ) from exc
+        if field.type == "number":
+            try:
+                number = float(text)
+            except ValueError as exc:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    f"Form field {variable} has an invalid number.",
+                ) from exc
+            if not math.isfinite(number):
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    f"Form field {variable} has an invalid number.",
+                )
+            result[variable] = number
+        else:
+            result[variable] = text
+    return result
 
 
 def node_execution_to_response(item) -> WorkflowNodeExecutionResponse:
@@ -158,6 +238,10 @@ async def create_workflow_run(
             actor,
             workspace_role,
             payload.file_ids,
+            settings,
+            extract_text=any(
+                node.data.type == "document-extract-node" for node in parsed.nodes
+            ),
         )
     elif payload.file_ids:
         raise HTTPException(
@@ -202,6 +286,7 @@ async def create_workflow_run(
     run_inputs: dict[str, Any] = {"question": payload.question}
     if files:
         run_inputs["files"] = files
+        run_inputs["document"] = files
     detail = WorkflowRunDetail(
         workspace_id=workspace_id,
         definition_id=definition.id,
@@ -312,6 +397,82 @@ async def list_workflow_node_executions(
     )
 
 
+async def resume_workflow_form(
+    db: AsyncSession,
+    run: AgentRun,
+    detail: WorkflowRunDetail,
+    payload: WorkflowFormSubmitRequest,
+    settings: Settings,
+) -> WorkflowRunResponse:
+    pending = workflow_pending_form(run)
+    if run.status != "awaiting_input" or pending is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Workflow is not awaiting form input.")
+    if pending.runtime_node_id != payload.runtime_node_id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Workflow form node changed.")
+    graph = WorkflowGraph.model_validate(detail.graph_snapshot)
+    node = next(
+        (
+            item
+            for item in graph.nodes
+            if item.id == payload.runtime_node_id and item.data.type == "form-node"
+        ),
+        None,
+    )
+    if node is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Workflow form node is unavailable.")
+    form_data = _validated_form_data(
+        FormNodeConfig.model_validate(node.data.config),
+        payload.form_data,
+    )
+    checkpoint = dict(run.checkpoint or {})
+    submissions = dict(checkpoint.get("workflow_form_submissions") or {})
+    submissions[payload.runtime_node_id] = form_data
+    checkpoint["workflow_form_submissions"] = submissions
+    checkpoint.pop("workflow_form", None)
+    now = utc_now()
+    deadline_reset = await workflow_repository.reset_waiting_run_deadline(
+        db,
+        run.id,
+        now + timedelta(seconds=settings.agent_run_timeout_seconds),
+    )
+    queued = await agent_repository.queue_agent_run_from_input(db, run.id, checkpoint)
+    if not deadline_reset or not queued:
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Workflow form was already submitted.")
+    await db.commit()
+    await enqueue_agent_run(run.id, settings)
+    current = await agent_repository.get_agent_run_by_id(db, run.id)
+    current_detail = await workflow_repository.get_run_detail(db, run.id)
+    if current is None or current_detail is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
+    return workflow_run_to_response(current, current_detail)
+
+
+async def submit_workflow_form(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    run_id: str,
+    payload: WorkflowFormSubmitRequest,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+) -> WorkflowRunResponse:
+    await get_workflow_run(
+        db,
+        workspace_id,
+        agent_id,
+        run_id,
+        actor,
+        workspace_role,
+    )
+    run = await agent_repository.get_agent_run_by_id(db, run_id)
+    detail = await workflow_repository.get_run_detail(db, run_id)
+    if run is None or detail is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
+    return await resume_workflow_form(db, run, detail, payload, settings)
+
+
 async def stream_workflow_run(
     run_id: str,
     settings: Settings,
@@ -321,6 +482,7 @@ async def stream_workflow_run(
     cursor = after
     snapshot_sent = False
     terminal = {"succeeded", "failed", "cancelled"}
+    suspended = {"awaiting_input"}
     while True:
         async with get_session_factory()() as db:
             run = await agent_repository.get_agent_run_by_id(db, run_id)
@@ -342,7 +504,7 @@ async def stream_workflow_run(
             assert row.id is not None
             cursor = row.id
             event = {**row.event, "sequence": cursor}
-            if event.get("type") in {"complete", "error"}:
+            if event.get("type") in {"complete", "error", "workflow_input_required"}:
                 terminal_event = event
             else:
                 yield event
@@ -351,6 +513,13 @@ async def stream_workflow_run(
         if run.status in terminal:
             yield terminal_event or {
                 "type": "complete" if run.status == "succeeded" else "error",
+                "sequence": cursor,
+                "run": workflow_run_to_response(run, detail).model_dump(mode="json"),
+            }
+            return
+        if run.status in suspended:
+            yield terminal_event or {
+                "type": "workflow_input_required",
                 "sequence": cursor,
                 "run": workflow_run_to_response(run, detail).model_dump(mode="json"),
             }

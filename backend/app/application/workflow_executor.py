@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from datetime import datetime, timedelta
 import json
 import traceback
@@ -28,8 +28,13 @@ from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.system_log import record_system_log
-from app.ports.llm import ModelProviderError, RegisteredModel
-from app.schemas.workflow import LlmNodeConfig, WorkflowGraph
+from app.ports.llm import (
+    ModelProviderError,
+    ModelProviderTimeoutError,
+    RegisteredModel,
+)
+from app.ports.model_registry import get_registered_model_by_id
+from app.schemas.workflow import LlmNodeConfig, RerankerNodeConfig, WorkflowGraph
 from app.shareddomain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
@@ -55,6 +60,7 @@ from app.shareddomain.workflows.engine import (
     WorkflowEngine,
     WorkflowEngineError,
     WorkflowEngineState,
+    WorkflowInputRequired,
 )
 
 MAX_WORKFLOW_OUTPUT_BYTES = 256 * 1024
@@ -167,6 +173,21 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
             model_id: await get_agent_model(db, run.workspace_id, model_id)
             for model_id in model_ids
         }
+        for node in graph.nodes:
+            if node.data.type != "reranker-node":
+                continue
+            model_id = RerankerNodeConfig.model_validate(
+                node.data.config
+            ).reranker_model_id
+            model = await get_registered_model_by_id(db, model_id)
+            if (
+                model is None
+                or model.workspace_id != run.workspace_id
+                or model.model_type != "RERANKER"
+                or model.status != "active"
+            ):
+                raise WorkflowEngineError("Workflow reranker model is unavailable.")
+            models[model_id] = model
         knowledge_bases = await accessible_agent_knowledge_bases(
             db,
             run.workspace_id,
@@ -206,6 +227,8 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
 
 
 def _safe_node_error(exc: Exception) -> str:
+    if isinstance(exc, ModelProviderTimeoutError):
+        return "Workflow model request timed out."
     if isinstance(exc, ModelProviderError):
         return "Workflow model request failed."
     if isinstance(exc, WorkflowSandboxError):
@@ -264,6 +287,16 @@ async def _execute_claimed_workflow_run(
         empty_usage(),
         checkpoint.get("model_usage", run.model_usage),
     )
+    form_submissions = {
+        str(key): dict(value)
+        for key, value in checkpoint.get("workflow_form_submissions", {}).items()
+        if isinstance(value, dict)
+    }
+    node_scope = dataclass_replace(
+        node_scope,
+        form_submissions=form_submissions,
+    )
+    node_errors: dict[str, Exception] = {}
 
     async def execute(node, context):
         if lease_lost.is_set():
@@ -282,6 +315,7 @@ async def _execute_claimed_workflow_run(
                 )
             return result
         except Exception as exc:
+            node_errors[node.id] = exc
             raise RuntimeError(_safe_node_error(exc)) from exc
 
     async def on_started(node, sequence):
@@ -358,6 +392,15 @@ async def _execute_claimed_workflow_run(
                     "workflow_engine": current.to_dict(),
                     "model_usage": usage_total,
                 }
+                if (
+                    transition.node.data.type == "form-node"
+                    and transition.status.value == "succeeded"
+                ):
+                    form_submissions.pop(transition.node.id, None)
+                if form_submissions:
+                    checkpoint_payload["workflow_form_submissions"] = form_submissions
+                if transition.result.interrupt is not None:
+                    checkpoint_payload["workflow_form"] = transition.result.interrupt
                 saved = await workflow_repository.finish_node_execution(
                     db, item, worker_task_id
                 )
@@ -395,14 +438,43 @@ async def _execute_claimed_workflow_run(
                 node_executions[transition.node.id] = item
                 await db.commit()
 
-    result = await engine.run(
-        detail.inputs,
-        execute,
-        state=state,
-        on_node_started=on_started,
-        on_node_finished=on_finished,
-        workflow_globals=workflow_globals,
-    )
+    try:
+        result = await engine.run(
+            detail.inputs,
+            execute,
+            state=state,
+            on_node_started=on_started,
+            on_node_finished=on_finished,
+            workflow_globals=workflow_globals,
+        )
+    except WorkflowInputRequired:
+        async with get_session_factory()() as db:
+            paused = await agent_repository.pause_agent_run_for_input(
+                db,
+                run.id,
+                worker_task_id,
+            )
+            if paused:
+                current_run = await agent_repository.get_agent_run_by_id(db, run.id)
+                current_detail = await workflow_repository.get_run_detail(db, run.id)
+                if current_run is None or current_detail is None:
+                    raise WorkflowEngineError("Paused workflow run state is missing.")
+                await agent_repository.append_agent_run_event(
+                    db,
+                    run.workspace_id,
+                    run.id,
+                    {
+                        "type": "workflow_input_required",
+                        "run": _run_payload(current_run, current_detail),
+                    },
+                )
+            await db.commit()
+        return RUN_FINISHED if paused else RUN_BUSY
+    except WorkflowEngineError as exc:
+        original = node_errors.get(exc.node_id or "")
+        if original is not None:
+            raise exc from original
+        raise
     encoded_output = json.dumps(
         result.outputs,
         ensure_ascii=False,

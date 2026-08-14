@@ -4,6 +4,7 @@ import * as React from "react"
 import dynamic from "next/dynamic"
 import {
   ArrowLeftIcon,
+  ChevronDownIcon,
   HistoryIcon,
   LayoutDashboardIcon,
   LoaderCircleIcon,
@@ -52,6 +53,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { IconButton } from "@/components/ui/icon-button"
+import { WorkflowRuntimeForm } from "@/components/workflows/workflow-runtime-form"
 import type { TFunction } from "@/i18n"
 import type { AgentDetailView } from "@/lib/agent-views"
 import type { Agent } from "@/lib/api/agents"
@@ -67,6 +69,7 @@ import {
   observeWorkflowRun,
   publishWorkflow,
   restoreWorkflowVersion,
+  submitWorkflowForm,
   updateWorkflowDefinition,
   uploadWorkflowFiles,
   type WorkflowDefinition,
@@ -80,6 +83,8 @@ import { getErrorMessage } from "@/lib/errors"
 import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import {
   selectWorkflowRunTarget,
+  workflowErrorMessage,
+  workflowExecutionNodeLabel,
   workflowGraphSignature,
 } from "@/lib/workflows/graph"
 import { cn } from "@/lib/utils"
@@ -121,6 +126,7 @@ const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"])
 function runStatusLabel(run: WorkflowRun, t: TFunction) {
   if (run.status === "queued") return t("等待执行")
   if (run.status === "running") return t("运行中")
+  if (run.status === "awaiting_input") return t("等待填写表单")
   if (run.status === "succeeded") return t("运行成功")
   if (run.status === "cancelled") return t("运行已取消")
   return t("运行失败")
@@ -172,6 +178,7 @@ export function WorkflowDetailWorkspace({
   const [isSaving, setIsSaving] = React.useState(false)
   const [isPublishing, setIsPublishing] = React.useState(false)
   const [isRunning, setIsRunning] = React.useState(false)
+  const [isSubmittingForm, setIsSubmittingForm] = React.useState(false)
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [historyOpen, setHistoryOpen] = React.useState(false)
   const [runOpen, setRunOpen] = React.useState(false)
@@ -214,6 +221,14 @@ export function WorkflowDetailWorkspace({
     isRunActive ||
     (runTarget?.source === "draft" && isAppDirty)
   const visibleRunFiles = form.interactionConfig.file_upload ? runFiles : []
+  const executionGraph = currentRun
+    ? currentRun.source === "published"
+      ? (versions.find((version) => version.graph_hash === currentRun.graph_hash)
+          ?.graph ?? null)
+      : definition?.graph_hash === currentRun.graph_hash
+        ? definition.graph
+        : null
+    : null
   const navigationItems = [
     { view: "overview" as const, label: t("概览"), icon: LayoutDashboardIcon },
     { view: "settings" as const, label: t("设置"), icon: SettingsIcon },
@@ -477,6 +492,27 @@ export function WorkflowDetailWorkspace({
       reportError(error)
     } finally {
       setIsRunning(false)
+    }
+  }
+
+  async function handleFormSubmit(data: Record<string, unknown>) {
+    if (!currentRun?.pending_form || isSubmittingForm) return
+    setIsSubmittingForm(true)
+    try {
+      const run = await submitWorkflowForm(
+        token,
+        workspaceId,
+        agent.id,
+        currentRun.id,
+        currentRun.pending_form.runtime_node_id,
+        data
+      )
+      setCurrentRun(run)
+      observeRun(run)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsSubmittingForm(false)
     }
   }
 
@@ -884,43 +920,108 @@ export function WorkflowDetailWorkspace({
                                   <h3 className="text-xs font-medium text-muted-foreground">
                                     {t("节点执行记录")}
                                   </h3>
-                                  <div className="divide-y overflow-hidden rounded-lg border bg-muted/10">
+                                  <div className="overflow-hidden rounded-lg border bg-muted/10">
                                     {executions.map((execution) => (
-                                      <div
+                                      <details
                                         key={execution.id}
-                                        className="flex items-center gap-2 px-3 py-2"
+                                        className="group border-b last:border-b-0"
                                       >
-                                        <span
-                                          className={cn(
-                                            "size-2 shrink-0 rounded-full",
-                                            execution.status === "succeeded"
-                                              ? "bg-emerald-500"
-                                              : execution.status === "failed"
-                                                ? "bg-destructive"
-                                                : execution.status === "running"
-                                                  ? "animate-pulse bg-sky-500"
-                                                  : "bg-muted-foreground/40"
-                                          )}
-                                        />
-                                        <span className="min-w-0 flex-1 truncate text-xs">
-                                          {execution.node_id}
-                                        </span>
-                                        {execution.duration_ms !== null ? (
-                                          <span className="text-[11px] text-muted-foreground">
-                                            {t("{duration} 毫秒", {
-                                              duration: execution.duration_ms,
-                                            })}
+                                        <summary
+                                          className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+                                        >
+                                          <span
+                                            className={cn(
+                                              "size-2 shrink-0 rounded-full",
+                                              execution.status === "succeeded"
+                                                ? "bg-emerald-500"
+                                                : execution.status === "failed"
+                                                  ? "bg-destructive"
+                                                  : execution.status === "running"
+                                                    ? "animate-pulse bg-sky-500"
+                                                    : "bg-muted-foreground/40"
+                                            )}
+                                          />
+                                          <span
+                                            className="min-w-0 flex-1 truncate text-xs"
+                                            title={execution.node_id}
+                                          >
+                                            {workflowExecutionNodeLabel(
+                                              execution.node_id,
+                                              execution.node_type,
+                                              executionGraph,
+                                              t
+                                            )}
                                           </span>
-                                        ) : null}
-                                      </div>
+                                          {execution.duration_ms !== null ? (
+                                            <span className="shrink-0 text-[11px] text-muted-foreground">
+                                              {t("{duration} 毫秒", {
+                                                duration: execution.duration_ms,
+                                              })}
+                                            </span>
+                                          ) : null}
+                                          <ChevronDownIcon
+                                            aria-hidden="true"
+                                            className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                                          />
+                                        </summary>
+                                        <div className="grid gap-3 border-t bg-muted/20 px-3 py-3">
+                                          {execution.error ? (
+                                            <section className="grid gap-1.5">
+                                              <h4 className="text-[11px] font-medium text-destructive">
+                                                {t("错误")}
+                                              </h4>
+                                              <p className="break-words rounded-md bg-destructive/10 px-2.5 py-2 text-xs leading-5 text-destructive whitespace-pre-wrap [overflow-wrap:anywhere]">
+                                                {workflowErrorMessage(
+                                                  execution.error,
+                                                  t
+                                                )}
+                                              </p>
+                                            </section>
+                                          ) : null}
+                                          <section className="grid gap-1.5">
+                                            <h4 className="text-[11px] font-medium text-muted-foreground">
+                                              {t("输出内容")}
+                                            </h4>
+                                            {Object.keys(execution.outputs).length ? (
+                                              <JsonBlock value={execution.outputs} />
+                                            ) : (
+                                              <p className="rounded-md border bg-background px-2.5 py-2 text-xs text-muted-foreground">
+                                                {t("暂无输出内容")}
+                                              </p>
+                                            )}
+                                          </section>
+                                          <section className="grid gap-1.5">
+                                            <h4 className="text-[11px] font-medium text-muted-foreground">
+                                              {t("输入内容")}
+                                            </h4>
+                                            <JsonBlock value={execution.inputs} />
+                                          </section>
+                                          {Object.keys(execution.model_usage).length ? (
+                                            <section className="grid gap-1.5">
+                                              <h4 className="text-[11px] font-medium text-muted-foreground">
+                                                {t("模型用量")}
+                                              </h4>
+                                              <JsonBlock value={execution.model_usage} />
+                                            </section>
+                                          ) : null}
+                                        </div>
+                                      </details>
                                     ))}
                                   </div>
                                 </section>
                               ) : null}
 
-                              {currentRun.last_error ? (
+                              {currentRun.status === "awaiting_input" &&
+                              currentRun.pending_form ? (
+                                <WorkflowRuntimeForm
+                                  key={currentRun.pending_form.runtime_node_id}
+                                  form={currentRun.pending_form}
+                                  submitting={isSubmittingForm}
+                                  onSubmit={handleFormSubmit}
+                                />
+                              ) : currentRun.last_error ? (
                                 <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-                                  {currentRun.last_error}
+                                  {workflowErrorMessage(currentRun.last_error, t)}
                                 </p>
                               ) : currentRun.status === "succeeded" ? (
                                 <section className="grid gap-2">

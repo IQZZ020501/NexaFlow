@@ -8,6 +8,7 @@ import {
   BrainCircuitIcon,
   Code2Icon,
   DatabaseIcon,
+  FileTextIcon,
   FlagIcon,
   GitBranchIcon,
   PlayIcon,
@@ -20,6 +21,8 @@ import {
   CircleDotDashedIcon,
   LoaderCircleIcon,
   MessageSquareMoreIcon,
+  ListFilterIcon,
+  ClipboardListIcon,
   MinusIcon,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -40,6 +43,7 @@ import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
 import type {
+  WorkflowNode,
   WorkflowNodeData,
   WorkflowNodeType,
 } from "@/lib/api/workflows"
@@ -49,6 +53,7 @@ import {
   WORKFLOW_START_FIELDS,
   WORKFLOW_START_GLOBALS,
   upstreamWorkflowFields,
+  workflowNodeLabel,
 } from "@/lib/workflows/graph"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
 import { Button } from "@/components/ui/button"
@@ -85,20 +90,6 @@ function DropdownMenuContent({
   )
 }
 
-const NODE_LABELS: Record<WorkflowNodeType, TranslationKey> = {
-  start: "开始节点",
-  end: "结束节点",
-  llm: "大语言模型",
-  classifier: "问题分类器",
-  knowledge: "知识检索节点",
-  condition: "条件分支",
-  "reply-node": "指定回复",
-  template: "模板转换",
-  variable: "变量赋值",
-  mcp: "MCP 工具节点",
-  code: "Python 代码",
-}
-
 export const NODE_ICONS: Record<
   WorkflowNodeType,
   ComponentType<{ className?: string }>
@@ -108,6 +99,9 @@ export const NODE_ICONS: Record<
   llm: BrainCircuitIcon,
   classifier: RouteIcon,
   knowledge: DatabaseIcon,
+  "reranker-node": ListFilterIcon,
+  "form-node": ClipboardListIcon,
+  "document-extract-node": FileTextIcon,
   condition: GitBranchIcon,
   "reply-node": MessageSquareMoreIcon,
   template: TextCursorInputIcon,
@@ -116,12 +110,9 @@ export const NODE_ICONS: Record<
   code: Code2Icon,
 }
 
-export function workflowNodeLabel(type: WorkflowNodeType, t: TFunction) {
-  return t(NODE_LABELS[type])
-}
-
 const STATUS_STYLES = {
   running: "border-sky-500 ring-2 ring-sky-500/20",
+  awaiting_input: "border-amber-500 ring-2 ring-amber-500/20",
   succeeded: "",
   failed: "border-destructive ring-2 ring-destructive/15",
   skipped: "border-muted-foreground/30 opacity-60",
@@ -129,6 +120,7 @@ const STATUS_STYLES = {
 
 const STATUS_LABELS = {
   running: "运行中",
+  awaiting_input: "等待填写表单",
   succeeded: "运行成功",
   failed: "运行失败",
   skipped: "已跳过",
@@ -136,6 +128,7 @@ const STATUS_LABELS = {
 
 const STATUS_ICONS = {
   running: LoaderCircleIcon,
+  awaiting_input: ClipboardListIcon,
   succeeded: CheckCircle2Icon,
   failed: CircleAlertIcon,
   skipped: CircleDotDashedIcon,
@@ -147,6 +140,9 @@ const NODE_ACCENTS: Record<WorkflowNodeType, string> = {
   llm: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
   classifier: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
   knowledge: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  "reranker-node": "bg-teal-500/10 text-teal-600 dark:text-teal-400",
+  "form-node": "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+  "document-extract-node": "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   condition: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
   "reply-node": "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   template: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
@@ -184,11 +180,70 @@ const OUTPUT_FIELD_LABELS: Partial<
   variable: { value: "变量值" },
   mcp: { result: "工具结果" },
   code: { result: "执行结果", stdout: "标准输出", stderr: "错误输出" },
+  "reranker-node": { result_list: "重排结果列表", result: "重排结果" },
+  "form-node": { form_data: "表单数据", result: "返回内容" },
+  "document-extract-node": { content: "文档内容" },
 }
 
 function outputFieldLabel(type: WorkflowNodeType, field: string, t: TFunction) {
-  const label = OUTPUT_FIELD_LABELS[type]?.[field]
+  const label =
+    type === "knowledge"
+      ? KNOWLEDGE_OUTPUT_FIELDS.find((item) => item.field === field)?.label
+      : type === "llm"
+        ? LLM_OUTPUT_FIELDS.find((item) => item.field === field)?.label
+        : OUTPUT_FIELD_LABELS[type]?.[field]
   return label ? t(label) : field
+}
+
+function workflowVariablePathLabel(
+  sourceId: string,
+  field: string,
+  nodes: WorkflowNode[],
+  t: TFunction
+) {
+  if (sourceId === "global") {
+    const global = WORKFLOW_START_GLOBALS.find((item) => item.value === field)
+    return global ? `${t("全局变量")} · ${t(global.label)}` : null
+  }
+  const source = nodes.find((item) => item.id === sourceId)
+  if (!source) return null
+  const startField =
+    source.data.type === "start"
+      ? WORKFLOW_START_FIELDS.find((item) => item.value === field)
+      : undefined
+  const sourceTitle =
+    source.data.type === "start" ? t("开始节点") : source.data.title
+  const fieldLabel = startField
+    ? t(startField.label)
+    : outputFieldLabel(source.data.type, field, t)
+  return `${sourceTitle} · ${fieldLabel}`
+}
+
+function workflowVariableReferenceLabel(
+  reference: string,
+  nodes: WorkflowNode[],
+  t: TFunction
+) {
+  const match = reference.match(
+    /^{{\s*([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)\s*}}$/
+  )
+  return match
+    ? (workflowVariablePathLabel(match[1], match[2], nodes, t) ?? reference)
+    : reference
+}
+
+function workflowVariableTextLabel(
+  rawValue: string,
+  nodes: WorkflowNode[],
+  t: TFunction
+) {
+  return rawValue.replace(
+    /{{\s*([A-Za-z0-9_-]+)\.([A-Za-z0-9_.-]+)\s*}}/g,
+    (reference, sourceId: string, field: string) => {
+      const label = workflowVariablePathLabel(sourceId, field, nodes, t)
+      return label ? `【${label}】` : reference
+    }
+  )
 }
 
 const KNOWLEDGE_SEARCH_MODES: Array<{
@@ -240,6 +295,16 @@ type ConditionBranch = {
   type: string
   condition: "and" | "or"
   conditions: ConditionRule[]
+}
+
+type FormFieldConfig = {
+  variable: string
+  name: string
+  type: "input" | "textarea" | "select" | "date" | "number"
+  is_required: boolean
+  default_value: unknown
+  show_default_value: boolean
+  optionList: string[]
 }
 
 function conditionBranches(
@@ -335,6 +400,20 @@ function configSummary(node: WorkflowNodeData, t: TFunction) {
     }
     case "knowledge":
       return `${t("检索查询")} · ${previewValue(config.query) || t("未配置")}`
+    case "reranker-node": {
+      const count = Array.isArray(config.reranker_reference_list)
+        ? config.reranker_reference_list.length
+        : 0
+      return `${t("重排内容")} · ${count}`
+    }
+    case "form-node": {
+      const count = Array.isArray(config.form_field_list)
+        ? config.form_field_list.length
+        : 0
+      return `${t("表单字段")} · ${count}`
+    }
+    case "document-extract-node":
+      return `${t("文档")} · ${previewValue(config.document_list) || t("未配置")}`
     case "condition": {
       return `${t("分支")} · ${conditionBranches(config).length}`
     }
@@ -406,6 +485,7 @@ function VariablePicker({
   t,
   label,
   className,
+  disabled = false,
   onInsert,
 }: {
   nodeId: string
@@ -413,6 +493,7 @@ function VariablePicker({
   t: TFunction
   label?: string
   className?: string
+  disabled?: boolean
   onInsert: (reference: string, path: string[], description: string) => void
 }) {
   const [open, setOpen] = React.useState(false)
@@ -426,26 +507,24 @@ function VariablePicker({
   }, [node.edges, node.nodes, nodeId])
   const upstreamFieldLabel = (sourceId: string, field: string) => {
     const source = (node.nodes ?? []).find((item) => item.id === sourceId)
-    const definition =
-      source?.data.type === "knowledge"
-        ? KNOWLEDGE_OUTPUT_FIELDS.find((item) => item.field === field)
-        : source?.data.type === "llm"
-          ? LLM_OUTPUT_FIELDS.find((item) => item.field === field)
-          : undefined
-    return definition ? t(definition.label) : field
+    return source ? outputFieldLabel(source.data.type, field, t) : field
   }
+  const displayLabel = label
+    ? workflowVariableReferenceLabel(label, node.nodes ?? [], t)
+    : t("插入变量")
   return (
     <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
           variant="ghost"
+          disabled={disabled}
           className={cn(
             "h-6 px-1.5 text-[11px] font-normal text-muted-foreground",
             className
           )}
         >
-          <span className="min-w-0 truncate">{label ?? t("插入变量")}</span>
+          <span className="min-w-0 truncate">{displayLabel}</span>
           {label ? <ChevronDownIcon className="ml-auto size-3.5" /> : null}
         </Button>
       </DropdownMenuTrigger>
@@ -553,40 +632,90 @@ function TextEditor({
   insertVariables?: boolean
 }) {
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const [editing, setEditing] = React.useState(false)
+  const rawValue = typeof value === "string" ? value : JSON.stringify(value)
+  const selectionRef = React.useRef({
+    start: rawValue.length,
+    end: rawValue.length,
+  })
+  const localizedValue = insertVariables
+    ? workflowVariableTextLabel(rawValue, node.nodes ?? [], t)
+    : rawValue
+  const showLocalizedPreview = !editing && localizedValue !== rawValue
   const insertReference = React.useCallback(
     (reference: string) => {
-      const textarea = textareaRef.current
-      const start = textarea?.selectionStart ?? (typeof value === "string" ? value.length : 0)
-      const end = textarea?.selectionEnd ?? start
+      const { start, end } = selectionRef.current
       onChange(
-        `${typeof value === "string" ? value : JSON.stringify(value)}`
-          .slice(0, start) + reference + `${typeof value === "string" ? value : JSON.stringify(value)}`.slice(end)
+        rawValue.slice(0, start) + reference + rawValue.slice(end)
       )
+      const nextPosition = start + reference.length
+      selectionRef.current = { start: nextPosition, end: nextPosition }
+      setEditing(true)
       requestAnimationFrame(() => {
+        const textarea = textareaRef.current
         textarea?.focus()
-        textarea?.setSelectionRange(start + reference.length, start + reference.length)
+        textarea?.setSelectionRange(nextPosition, nextPosition)
       })
     },
-    [onChange, value]
+    [onChange, rawValue]
   )
   return (
-    <label className="grid gap-1.5 text-xs font-medium" htmlFor={id}>
+    <div className="grid gap-1.5 text-xs font-medium">
       <span className="flex items-center justify-between gap-2">
-        {label}
+        <label htmlFor={id}>{label}</label>
         {insertVariables && !readOnly ? (
           <VariablePicker nodeId={nodeId} node={node} t={t} onInsert={insertReference} />
         ) : null}
       </span>
-      <textarea
-        ref={textareaRef}
-        id={id}
-        rows={rows}
-        className="w-full min-w-0 resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        value={typeof value === "string" ? value : JSON.stringify(value)}
-        readOnly={readOnly}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
+      {showLocalizedPreview ? (
+        <button
+          type="button"
+          id={id}
+          className="w-full min-w-0 whitespace-pre-wrap break-words rounded-md border bg-background px-2.5 py-2 text-left text-sm font-normal leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+          style={{ minHeight: `${rows * 20 + 18}px` }}
+          disabled={readOnly}
+          onClick={() => {
+            setEditing(true)
+            requestAnimationFrame(() => {
+              const textarea = textareaRef.current
+              textarea?.focus()
+              textarea?.setSelectionRange(
+                selectionRef.current.start,
+                selectionRef.current.end
+              )
+            })
+          }}
+        >
+          {localizedValue}
+        </button>
+      ) : (
+        <textarea
+          ref={textareaRef}
+          id={id}
+          rows={rows}
+          className="w-full min-w-0 resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={rawValue}
+          readOnly={readOnly}
+          onFocus={() => {
+            if (!readOnly) setEditing(true)
+          }}
+          onSelect={(event) => {
+            selectionRef.current = {
+              start: event.currentTarget.selectionStart,
+              end: event.currentTarget.selectionEnd,
+            }
+          }}
+          onBlur={(event) => {
+            selectionRef.current = {
+              start: event.currentTarget.selectionStart,
+              end: event.currentTarget.selectionEnd,
+            }
+            setEditing(false)
+          }}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
+    </div>
   )
 }
 
@@ -741,7 +870,7 @@ function LlmSettingsDialog({
                 type="number"
                 min={1}
                 step={1}
-                placeholder={t("跟随模型默认")}
+                placeholder={t("默认 4096")}
                 value={paramValue("max_tokens")}
                 readOnly={readOnly}
                 onChange={(event) =>
@@ -823,34 +952,10 @@ function ConditionEditor({
       },
     })
   const fieldLabel = ([sourceId, field]: [string, string]) => {
-    if (sourceId === "global") {
-      const global = WORKFLOW_START_GLOBALS.find((item) => item.value === field)
-      return `${t("全局变量")} > ${global ? t(global.label) : field}`
-    }
-    const source = (node.nodes ?? []).find((item) => item.id === sourceId)
-    const startField =
-      source?.data.type === "start"
-        ? WORKFLOW_START_FIELDS.find((item) => item.value === field)
-        : undefined
-    const knowledgeField =
-      source?.data.type === "knowledge"
-        ? KNOWLEDGE_OUTPUT_FIELDS.find((item) => item.field === field)
-        : undefined
-    const llmField =
-      source?.data.type === "llm"
-        ? LLM_OUTPUT_FIELDS.find((item) => item.field === field)
-        : undefined
-    const sourceTitle =
-      source?.data.type === "start" ? t("开始节点") : (source?.data.title ?? sourceId)
-    return `${sourceTitle} > ${
-      startField
-        ? t(startField.label)
-        : knowledgeField
-          ? t(knowledgeField.label)
-          : llmField
-            ? t(llmField.label)
-            : field
-    }`
+    return (
+      workflowVariablePathLabel(sourceId, field, node.nodes ?? [], t) ??
+      `${sourceId} · ${field}`
+    )
   }
   const updateBranch = (
     branchIndex: number,
@@ -952,6 +1057,7 @@ function ConditionEditor({
                       nodeId={nodeId}
                       node={node}
                       t={t}
+                      disabled={readOnly}
                       label={fieldLabel(rule.field)}
                       className="h-8 w-full justify-between rounded-md border border-input bg-background px-2 text-xs text-foreground hover:bg-background"
                       onInsert={(_reference, path) =>
@@ -1167,6 +1273,28 @@ function NodeConfigFields({
   const activeModels = models.filter(
     (model) => model.model_type === "LLM" && model.status === "active"
   )
+  const rerankerModels = models.filter(
+    (model) => model.model_type === "RERANKER" && model.status === "active"
+  )
+  const selectedReranker = rerankerModels.find(
+    (model) => model.id === String(config.reranker_model_id ?? "")
+  )
+  const rerankerReferences = Array.isArray(config.reranker_reference_list)
+    ? config.reranker_reference_list.map(String)
+    : []
+  const rerankerSetting =
+    config.reranker_setting && typeof config.reranker_setting === "object"
+      ? (config.reranker_setting as Record<string, unknown>)
+      : {}
+  const formFields = Array.isArray(config.form_field_list)
+    ? (config.form_field_list as FormFieldConfig[])
+    : []
+  const updateFormField = (index: number, patch: Partial<FormFieldConfig>) =>
+    updateConfig({
+      form_field_list: formFields.map((field, fieldIndex) =>
+        fieldIndex === index ? { ...field, ...patch } : field
+      ),
+    })
   const availableKnowledge = knowledgeBases.filter(
     (item) => item.status === "active" && item.permission !== "none"
   )
@@ -1560,6 +1688,7 @@ function NodeConfigFields({
                 nodeId={nodeId}
                 node={node}
                 t={t}
+                disabled={readOnly}
                 label={
                   replyFieldDescription ||
                   (replyFieldPath.length ? replyFieldPath.join(" > ") : t("选择引用变量"))
@@ -1872,6 +2001,334 @@ function NodeConfigFields({
           </section>
         </div>
       ) : null}
+      {node.type === "reranker-node" ? (
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
+          <label className="grid min-w-0 gap-1.5 text-xs font-medium">
+            {t("重排模型")}
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 w-full justify-between px-2 text-xs font-normal"
+                  disabled={readOnly || !rerankerModels.length}
+                >
+                  <span className="truncate">
+                    {selectedReranker?.name ?? t("选择重排模型")}
+                  </span>
+                  <ChevronDownIcon className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-(--radix-dropdown-menu-trigger-width)">
+                {rerankerModels.map((model) => (
+                  <DropdownMenuItem
+                    key={model.id}
+                    className="justify-between"
+                    onSelect={() => updateConfig({ reranker_model_id: model.id })}
+                  >
+                    {model.name}
+                    {selectedReranker?.id === model.id ? <CheckIcon /> : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </label>
+          <div className="grid min-w-0 gap-1.5 text-xs font-medium">
+            <span>{t("检索问题")}</span>
+            <VariablePicker
+              nodeId={nodeId}
+              node={node}
+              t={t}
+              disabled={readOnly}
+              label={String(config.question_reference_address ?? t("选择引用变量"))}
+              className="h-8 w-full justify-between border bg-background px-2 text-xs"
+              onInsert={(reference) =>
+                updateConfig({ question_reference_address: reference })
+              }
+            />
+          </div>
+          <fieldset className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
+            <legend className="text-xs font-medium">{t("重排内容")}</legend>
+            {rerankerReferences.map((reference, index) => (
+              <div key={`${reference}-${index}`} className="flex min-w-0 items-center gap-2">
+                <VariablePicker
+                  nodeId={nodeId}
+                  node={node}
+                  t={t}
+                  disabled={readOnly}
+                  label={reference}
+                  className="h-8 min-w-0 flex-1 justify-between border bg-background px-2 text-xs"
+                  onInsert={(nextReference) =>
+                    updateConfig({
+                      reranker_reference_list: rerankerReferences.map((item, itemIndex) =>
+                        itemIndex === index ? nextReference : item
+                      ),
+                    })
+                  }
+                />
+                <IconButton
+                  label={t("删除")}
+                  className="size-7"
+                  disabled={readOnly}
+                  onClick={() =>
+                    updateConfig({
+                      reranker_reference_list: rerankerReferences.filter(
+                        (_, itemIndex) => itemIndex !== index
+                      ),
+                    })
+                  }
+                >
+                  <XIcon className="size-3.5" />
+                </IconButton>
+              </div>
+            ))}
+            {!readOnly ? (
+              <VariablePicker
+                nodeId={nodeId}
+                node={node}
+                t={t}
+                label={t("添加引用")}
+                className="h-8 w-full justify-center border border-dashed bg-background px-2 text-xs"
+                onInsert={(reference) =>
+                  updateConfig({
+                    reranker_reference_list: [...rerankerReferences, reference],
+                  })
+                }
+              />
+            ) : null}
+          </fieldset>
+          {(
+            [
+              ["top_n", "引用分段数", 1, 50, 1],
+              ["similarity", "相似度", 0, 2, 0.1],
+              ["max_paragraph_char_number", "最大引用字符数", 1, 20000, 100],
+            ] as const
+          ).map(([key, label, min, max, step]) => (
+            <div key={key} className="flex items-center justify-between gap-3 text-xs">
+              <label htmlFor={`${nodeId}-reranker-${key}`} className="text-muted-foreground">
+                {t(label)}
+              </label>
+              <NumberStepper
+                id={`${nodeId}-reranker-${key}`}
+                value={Number(rerankerSetting[key] ?? (key === "max_paragraph_char_number" ? 5000 : key === "top_n" ? 3 : 0))}
+                min={min}
+                max={max}
+                step={step}
+                readOnly={readOnly}
+                t={t}
+                onChange={(value) =>
+                  updateConfig({
+                    reranker_setting: { ...rerankerSetting, [key]: value },
+                  })
+                }
+              />
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {node.type === "form-node" ? (
+        <div className="grid gap-3">
+          <fieldset className="grid gap-2">
+            <legend className="text-xs font-medium">{t("表单字段")}</legend>
+            {formFields.map((field, index) => (
+              <section key={index} className="grid gap-2 rounded-lg border p-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    value={field.variable}
+                    readOnly={readOnly}
+                    aria-label={t("字段名")}
+                    placeholder={t("字段名")}
+                    onChange={(event) =>
+                      updateFormField(index, { variable: event.target.value })
+                    }
+                  />
+                  <Input
+                    value={field.name}
+                    readOnly={readOnly}
+                    aria-label={t("显示名称")}
+                    placeholder={t("显示名称")}
+                    onChange={(event) =>
+                      updateFormField(index, { name: event.target.value })
+                    }
+                  />
+                </div>
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 justify-between px-2 text-xs font-normal"
+                      disabled={readOnly}
+                    >
+                      {t(
+                        field.type === "select"
+                          ? "下拉选择"
+                          : field.type === "date"
+                            ? "日期"
+                            : field.type === "number"
+                              ? "数字"
+                              : field.type === "textarea"
+                                ? "多行文本"
+                                : "输入框"
+                      )}
+                      <ChevronDownIcon className="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-(--radix-dropdown-menu-trigger-width)">
+                    {(["input", "textarea", "select", "date", "number"] as const).map(
+                      (type) => (
+                        <DropdownMenuItem
+                          key={type}
+                          onSelect={() => updateFormField(index, { type })}
+                        >
+                          {t(
+                            type === "select"
+                              ? "下拉选择"
+                              : type === "date"
+                                ? "日期"
+                                : type === "number"
+                                  ? "数字"
+                                  : type === "textarea"
+                                    ? "多行文本"
+                                    : "输入框"
+                          )}
+                        </DropdownMenuItem>
+                      )
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {field.type === "select" ? (
+                  <Input
+                    value={field.optionList.join(", ")}
+                    readOnly={readOnly}
+                    aria-label={t("选项")}
+                    placeholder={t("用逗号分隔选项")}
+                    onChange={(event) =>
+                      updateFormField(index, {
+                        optionList: event.target.value
+                          .split(",")
+                          .map((item) => item.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                  />
+                ) : null}
+                <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={field.is_required}
+                      disabled={readOnly}
+                      onChange={(event) =>
+                        updateFormField(index, { is_required: event.target.checked })
+                      }
+                    />
+                    {t("必填")}
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={field.show_default_value}
+                      disabled={readOnly}
+                      onChange={(event) =>
+                        updateFormField(index, {
+                          show_default_value: event.target.checked,
+                        })
+                      }
+                    />
+                    {t("预填默认值")}
+                  </label>
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      className="ml-auto text-destructive"
+                      onClick={() =>
+                        updateConfig({
+                          form_field_list: formFields.filter(
+                            (_, fieldIndex) => fieldIndex !== index
+                          ),
+                        })
+                      }
+                    >
+                      {t("删除")}
+                    </button>
+                  ) : null}
+                </div>
+                {field.show_default_value ? (
+                  <Input
+                    value={String(field.default_value ?? "")}
+                    readOnly={readOnly}
+                    aria-label={t("默认值")}
+                    placeholder={t("默认值")}
+                    onChange={(event) =>
+                      updateFormField(index, { default_value: event.target.value })
+                    }
+                  />
+                ) : null}
+              </section>
+            ))}
+            {!readOnly ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  updateConfig({
+                    form_field_list: [
+                      ...formFields,
+                      {
+                        variable: `field_${formFields.length + 1}`,
+                        name: "",
+                        type: "input",
+                        is_required: false,
+                        default_value: "",
+                        show_default_value: false,
+                        optionList: [],
+                      },
+                    ],
+                  })
+                }
+              >
+                <PlusIcon />
+                {t("添加字段")}
+              </Button>
+            ) : null}
+          </fieldset>
+          <TextEditor
+            id={`${nodeId}-form-content`}
+            label={t("表单输出内容")}
+            value={config.form_content_format ?? "{{ form }}"}
+            readOnly={readOnly}
+            rows={4}
+            onChange={(form_content_format) => updateConfig({ form_content_format })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
+          />
+          <label className="flex items-center gap-2 text-xs font-medium">
+            <input
+              type="checkbox"
+              checked={config.is_result !== false}
+              disabled={readOnly}
+              onChange={(event) => updateConfig({ is_result: event.target.checked })}
+            />
+            {t("返回内容")}
+          </label>
+        </div>
+      ) : null}
+      {node.type === "document-extract-node" ? (
+        <TextEditor
+          id={`${nodeId}-document-list`}
+          label={t("文档")}
+          value={config.document_list ?? ""}
+          readOnly={readOnly}
+          rows={2}
+          onChange={(document_list) => updateConfig({ document_list })}
+          node={node}
+          nodeId={nodeId}
+          t={t}
+          insertVariables
+        />
+      ) : null}
       {node.type === "condition" ? (
         <ConditionEditor
           nodeId={nodeId}
@@ -2061,7 +2518,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
         "group relative min-h-24 rounded-xl border bg-card px-3.5 py-3 shadow-md transition-[border-color,box-shadow,opacity] hover:shadow-lg",
         node.type === "condition"
           ? "w-80"
-          : ["llm", "knowledge", "reply-node"].includes(node.type)
+          : ["llm", "knowledge", "reply-node", "reranker-node", "form-node"].includes(node.type)
             ? "w-80"
             : "w-64",
         selected && "border-foreground shadow-lg ring-2 ring-foreground/10",
@@ -2119,6 +2576,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
             className={cn(
               "mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
               status === "running" && "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400",
+              status === "awaiting_input" && "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
               status === "succeeded" && "border-foreground/15 bg-muted text-foreground",
               status === "failed" && "border-destructive/30 bg-destructive/10 text-destructive",
               status === "skipped" && "border-muted-foreground/30 bg-muted text-muted-foreground"
@@ -2201,7 +2659,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
           <span className="block truncate">{summary}</span>
         </div>
       ) : null}
-      {expanded && !["knowledge", "llm", "condition", "reply-node", "code"].includes(node.type) ? (
+      {expanded && !["knowledge", "llm", "condition", "reply-node", "code", "document-extract-node", "form-node"].includes(node.type) ? (
         <div className="mt-2 space-y-1.5 border-t border-border/70 pt-2">
           {node.type === "start" ? (
             <>
@@ -2255,7 +2713,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
           />
         </div>
       ) : null}
-      {expanded && node.type === "code" ? (
+      {expanded && (node.type === "code" || node.type === "document-extract-node" || node.type === "form-node") ? (
         <div className="mt-2 space-y-1.5 border-t border-border/70 pt-2">
           {outputFields.map((field) => (
             <OutputFieldRow
@@ -2365,6 +2823,21 @@ function outputFieldNames(node: WorkflowNodeData) {
   const fields: Partial<Record<WorkflowNodeType, string[]>> = {
     classifier: ["class"],
     knowledge: KNOWLEDGE_OUTPUT_FIELDS.map((item) => item.field),
+    "reranker-node": ["result_list", "result"],
+    "form-node": [
+      ...(
+        Array.isArray(config.form_field_list)
+          ? config.form_field_list.flatMap((item) =>
+              item && typeof item === "object" && "variable" in item
+                ? [String((item as Record<string, unknown>).variable)]
+                : []
+            )
+          : []
+      ),
+      "form_data",
+      "result",
+    ],
+    "document-extract-node": ["content"],
     condition: ["branch_name"],
     "reply-node": ["answer"],
     template: ["text"],

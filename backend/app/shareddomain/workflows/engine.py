@@ -16,11 +16,14 @@ from app.schemas.workflow import (
     ClassifierNodeConfig,
     CodeNodeConfig,
     ConditionNodeConfig,
+    DocumentExtractNodeConfig,
     EndNodeConfig,
+    FormNodeConfig,
     KnowledgeNodeConfig,
     LlmNodeConfig,
     McpNodeConfig,
     ReplyNodeConfig,
+    RerankerNodeConfig,
     StartNodeConfig,
     TemplateNodeConfig,
     VariableNodeConfig,
@@ -39,6 +42,12 @@ class WorkflowEngineError(RuntimeError):
         self.node_id = node_id
 
 
+class WorkflowInputRequired(RuntimeError):
+    def __init__(self, form: dict[str, Any]):
+        super().__init__("Workflow input is required.")
+        self.form = form
+
+
 class EdgeState(StrEnum):
     UNKNOWN = "unknown"
     TAKEN = "taken"
@@ -47,6 +56,7 @@ class EdgeState(StrEnum):
 
 class NodeState(StrEnum):
     PENDING = "pending"
+    AWAITING_INPUT = "awaiting_input"
     SUCCEEDED = "succeeded"
     SKIPPED = "skipped"
     FAILED = "failed"
@@ -58,6 +68,9 @@ NODE_CONFIG_MODELS: dict[str, type[BaseModel]] = {
     "llm": LlmNodeConfig,
     "classifier": ClassifierNodeConfig,
     "knowledge": KnowledgeNodeConfig,
+    "reranker-node": RerankerNodeConfig,
+    "form-node": FormNodeConfig,
+    "document-extract-node": DocumentExtractNodeConfig,
     "condition": ConditionNodeConfig,
     "reply-node": ReplyNodeConfig,
     "template": TemplateNodeConfig,
@@ -91,6 +104,7 @@ class NodeResult:
     selected_handles: frozenset[str] | None = None
     model_tokens: int = 0
     model_usage: dict[str, Any] = field(default_factory=dict)
+    interrupt: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -285,6 +299,8 @@ def validate_graph(graph: WorkflowGraph | Mapping[str, Any]) -> WorkflowGraph:
             ancestors[node_id].update(ancestors[parent])
         node = nodes[node_id]
         references = list(_iter_references(node.data.config))
+        if node.data.type == "form-node":
+            references = [reference for reference in references if reference != "form"]
         if node.data.type == "reply-node":
             reply = ReplyNodeConfig.model_validate(node.data.config)
             if reply.reply_type == "referencing" and reply.fields:
@@ -314,6 +330,11 @@ def validate_graph(graph: WorkflowGraph | Mapping[str, Any]) -> WorkflowGraph:
                 raise WorkflowValidationError(
                     f"Node {node_id} references non-upstream node {reference}."
                 )
+    form_ids = [node.id for node in parsed.nodes if node.data.type == "form-node"]
+    for index, node_id in enumerate(form_ids):
+        for other_id in form_ids[index + 1 :]:
+            if node_id not in ancestors[other_id] and other_id not in ancestors[node_id]:
+                raise WorkflowValidationError("Form nodes must not run in parallel.")
     return parsed
 
 
@@ -428,6 +449,7 @@ class WorkflowEngine:
 
             results = await asyncio.gather(*(execute(node) for node in ready))
             first_error: WorkflowEngineError | None = None
+            pending_form: dict[str, Any] | None = None
             for node, result in zip(ready, results, strict=True):
                 sequence = current.step_count + 1
                 if isinstance(result, BaseException):
@@ -451,6 +473,19 @@ class WorkflowEngine:
                         message,
                         node_id=node.id,
                     )
+                    continue
+
+                if result.interrupt is not None:
+                    await on_node_finished(
+                        NodeTransition(
+                            node=node,
+                            status=NodeState.AWAITING_INPUT,
+                            sequence=sequence,
+                            result=result,
+                        ),
+                        current,
+                    )
+                    pending_form = pending_form or result.interrupt
                     continue
 
                 if result.model_tokens < 0:
@@ -512,6 +547,8 @@ class WorkflowEngine:
                 )
             if first_error:
                 raise first_error
+            if pending_form is not None:
+                raise WorkflowInputRequired(pending_form)
 
         end = next(node for node in self.graph.nodes if node.data.type == "end")
         if current.node_states[end.id] != NodeState.SUCCEEDED:
@@ -527,6 +564,9 @@ class WorkflowEngine:
             elif node.data.type == "reply-node":
                 config = ReplyNodeConfig.model_validate(node.data.config)
                 value = current.node_outputs[node.id].get("answer")
+            elif node.data.type == "form-node":
+                config = FormNodeConfig.model_validate(node.data.config)
+                value = current.node_outputs[node.id].get("result")
             else:
                 continue
             if config.is_result and value is not None:

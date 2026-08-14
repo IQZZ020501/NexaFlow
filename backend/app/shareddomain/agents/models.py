@@ -25,6 +25,7 @@ AGENT_RUN_PLANNING_STATUS = "planning"
 AGENT_RUN_PLANNED_STATUS = "planned"
 AGENT_RUN_RUNNING_STATUS = "running"
 AGENT_RUN_AWAITING_APPROVAL_STATUS = "awaiting_approval"
+AGENT_RUN_AWAITING_INPUT_STATUS = "awaiting_input"
 AGENT_RUN_SUCCEEDED_STATUS = "succeeded"
 AGENT_RUN_FAILED_STATUS = "failed"
 AGENT_RUN_CANCELLED_STATUS = "cancelled"
@@ -34,6 +35,7 @@ AGENT_RUN_ACTIVE_STATUSES = (
     AGENT_RUN_PLANNED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_AWAITING_INPUT_STATUS,
 )
 
 
@@ -207,7 +209,7 @@ class AgentRun(Base):
             ondelete="CASCADE",
         ),
         CheckConstraint(
-            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'succeeded', 'failed', 'cancelled')",
+            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'succeeded', 'failed', 'cancelled')",
             name="ck_agent_runs_status",
         ),
         UniqueConstraint(

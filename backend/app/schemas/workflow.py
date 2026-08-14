@@ -16,6 +16,9 @@ WorkflowNodeType = Literal[
     "llm",
     "classifier",
     "knowledge",
+    "reranker-node",
+    "form-node",
+    "document-extract-node",
     "condition",
     "reply-node",
     "template",
@@ -161,6 +164,67 @@ class KnowledgeNodeConfig(BaseModel):
                 ]
             )
         )
+
+
+class RerankerSetting(BaseModel):
+    top_n: int = Field(default=3, ge=1, le=50)
+    similarity: float = Field(default=0, ge=0, le=2)
+    max_paragraph_char_number: int = Field(default=5000, ge=1, le=20000)
+
+
+class RerankerNodeConfig(BaseModel):
+    reranker_model_id: str = Field(min_length=1, max_length=36)
+    question_reference_address: Any
+    reranker_reference_list: list[Any] = Field(min_length=1, max_length=50)
+    reranker_setting: RerankerSetting = Field(default_factory=RerankerSetting)
+
+
+class FormField(BaseModel):
+    variable: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
+    )
+    name: str = Field(min_length=1, max_length=120)
+    type: Literal["input", "textarea", "select", "date", "number"] = "input"
+    is_required: bool = False
+    default_value: Any = None
+    show_default_value: bool = False
+    optionList: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+
+    @model_validator(mode="after")
+    def validate_options(self) -> "FormField":
+        if self.type == "select" and not self.optionList:
+            raise ValueError("Select form fields require options.")
+        return self
+
+
+class FormNodeConfig(BaseModel):
+    form_field_list: list[FormField] = Field(min_length=1, max_length=50)
+    form_content_format: str = Field(min_length=1, max_length=20000)
+    is_result: bool = True
+
+    @model_validator(mode="after")
+    def validate_form(self) -> "FormNodeConfig":
+        variables = [item.variable for item in self.form_field_list]
+        if len(variables) != len(set(variables)):
+            raise ValueError("Form field variables must be unique.")
+        if set(variables) & {"form_data", "result"}:
+            raise ValueError("Form field variables use reserved output names.")
+        if len(re.findall(r"{{\s*form\s*}}", self.form_content_format)) != 1:
+            raise ValueError("Form content must contain one {{ form }} placeholder.")
+        try:
+            JINJA_ENV.parse(self.form_content_format)
+        except TemplateSyntaxError as exc:
+            raise ValueError(f"Invalid form template: {exc}") from exc
+        return self
+
+
+class DocumentExtractNodeConfig(BaseModel):
+    document_list: Any
 
 
 ConditionCompare = Literal[
@@ -393,12 +457,27 @@ class WorkflowRunCreateRequest(BaseModel):
     file_ids: list[str] = Field(default_factory=list)
 
 
+class WorkflowFormSubmitRequest(BaseModel):
+    runtime_node_id: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    form_data: dict[str, Any] = Field(max_length=50)
+
+
+class WorkflowPendingForm(BaseModel):
+    runtime_node_id: str
+    content: str
+    fields: list[FormField]
+
+
 class WorkflowNodeExecutionResponse(BaseModel):
     id: str
     run_id: str
     node_id: str
     node_type: WorkflowNodeType
-    status: Literal["running", "succeeded", "failed", "skipped"]
+    status: Literal["running", "awaiting_input", "succeeded", "failed", "skipped"]
     sequence: int
     inputs: dict[str, Any]
     outputs: dict[str, Any]
@@ -432,6 +511,7 @@ class WorkflowRunResponse(BaseModel):
     finished_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    pending_form: WorkflowPendingForm | None = None
 
 
 class WorkflowNodeExecutionListResponse(BaseModel):
@@ -479,7 +559,7 @@ class ExternalWorkflowProgressEventResponse(BaseModel):
     id: str
     node_id: str
     node_type: WorkflowNodeType
-    status: Literal["running", "succeeded", "failed", "skipped"]
+    status: Literal["running", "awaiting_input", "succeeded", "failed", "skipped"]
     error: str | None = None
     duration_ms: int | None = None
 
@@ -496,6 +576,7 @@ class ExternalWorkflowRunResponse(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     updated_at: datetime
+    pending_form: WorkflowPendingForm | None = None
 
 
 class ExternalWorkflowRunListResponse(BaseModel):
