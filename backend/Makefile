@@ -1,4 +1,4 @@
-.PHONY: dev migrate worker
+.PHONY: dev migrate worker coverage
 
 HOST ?= 127.0.0.1
 PORT ?= 8000
@@ -19,3 +19,6 @@ migrate:
 
 worker:
 	uv run celery -A app.infrastructure.celery:celery_app worker --loglevel=INFO
+
+coverage:
+	scripts/coverage.sh

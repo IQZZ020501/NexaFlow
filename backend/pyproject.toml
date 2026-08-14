@@ -39,5 +39,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "aiosqlite>=0.22.1",
+    "coverage[toml]>=7.0.0",
     "httpx2>=2.5.0",
 ]

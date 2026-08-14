@@ -54,6 +54,12 @@ docs/MVP_TASK_PLAN.md
 .codegraph
 *.tsbuildinfo
 
+# coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage/
+
 # playwright-cli browser automation artifacts
 .playwright-cli/
 

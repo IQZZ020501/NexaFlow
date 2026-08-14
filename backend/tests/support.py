@@ -25,7 +25,9 @@ os.environ.update(
         "CELERY_TASK_ALWAYS_EAGER": "true",
         "QDRANT_URL": ":memory:",
         "CELERY_BROKER_URL": "redis://localhost:6379/0",
-        "KNOWLEDGE_STORAGE_DIR": "/tmp/app-test-knowledge-storage",
+        "KNOWLEDGE_STORAGE_DIR": os.environ.get(
+            "KNOWLEDGE_STORAGE_DIR", "/tmp/app-test-knowledge-storage"
+        ),
     }
 )
 
@@ -44,7 +46,7 @@ def settings() -> Settings:
         database_url="sqlite+aiosqlite:///:memory:",
         jwt_secret_key="test-secret-for-app-smoke-suite",
         model_secret_key="test-model-secret-for-app-smoke-suite",
-        knowledge_storage_dir=Path("/tmp/app-test-knowledge-storage"),
+        knowledge_storage_dir=Path(os.environ["KNOWLEDGE_STORAGE_DIR"]),
         qdrant_url=":memory:",
         celery_broker_url="redis://localhost:6379/0",
         celery_task_always_eager=True,

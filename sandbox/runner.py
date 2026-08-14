@@ -175,7 +175,7 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
         stdin_path = workdir / "stdin"
         code_path.write_text(code, encoding="utf-8")
         stdin_path.write_text(stdin, encoding="utf-8")
-        if os.geteuid() == 0:
+        if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
             os.chown(workdir, 0, RUNNER_GID)
             os.chown(code_path, 0, RUNNER_GID)
             os.chown(stdin_path, 0, RUNNER_GID)
@@ -193,7 +193,7 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
         }
         child_path = Path(__file__).with_name("child.py")
         identity: dict[str, Any] = {}
-        if os.geteuid() == 0:
+        if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
             identity = {
                 "user": RUNNER_UID,
                 "group": RUNNER_GID,

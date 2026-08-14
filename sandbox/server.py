@@ -76,7 +76,7 @@ class SandboxServer(socketserver.ThreadingUnixStreamServer):
     def __init__(self, socket_path: str | Path):
         self.socket_path = Path(socket_path)
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-        if os.geteuid() == 0:
+        if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
             os.chown(self.socket_path.parent, 0, SOCKET_GID)
         self.socket_path.parent.chmod(0o750)
         if self.socket_path.exists():
@@ -85,7 +85,7 @@ class SandboxServer(socketserver.ThreadingUnixStreamServer):
             self.socket_path.unlink()
         super().__init__(str(self.socket_path), SandboxRequestHandler)
         self.run_slot = threading.BoundedSemaphore(MAX_CONCURRENT_RUNS)
-        if os.geteuid() == 0:
+        if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
             os.chown(self.socket_path, 0, SOCKET_GID)
         self.socket_path.chmod(0o660)
 
