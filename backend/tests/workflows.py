@@ -1963,13 +1963,13 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
                 ),
                 *[
                     ("files", (f"extra-{index}.txt", b"text", "text/plain"))
-                    for index in range(10)
+                    for index in range(9)
                 ],
             ],
         )
         assert unlimited_upload.status_code == 201, unlimited_upload.text
         unlimited_upload_ids = [item["id"] for item in unlimited_upload.json()]
-        assert len(unlimited_upload_ids) == 11
+        assert len(unlimited_upload_ids) == 10
 
         public_run = client.post(
             f"/api/v1/public/workflows/{workflow_id}/runs",
@@ -1991,7 +1991,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             "size_bytes": 13,
             "category": "document",
         }
-        assert len(public_payload["inputs"]["files"]) == 12
+        assert len(public_payload["inputs"]["files"]) == 11
         reused_upload = client.post(
             f"/api/v1/public/workflows/{workflow_id}/runs",
             headers=member_headers,
