@@ -129,11 +129,15 @@ export function ChunkPreviewList({
 }) {
   const { t } = useLanguage()
   const previewRef = React.useRef<HTMLDivElement>(null)
+  const isQaPreview =
+    chunks.length > 0 && chunks.every((chunk) => chunk.kind === "qa")
   const overlapLengths = React.useMemo(
     () =>
       chunks.map((chunk, index) => {
         const previousChunk = chunks[index - 1]
-        return !previousChunk || previousChunk.parent_id !== chunk.parent_id
+        return chunk.kind === "qa" ||
+          !previousChunk ||
+          previousChunk.parent_id !== chunk.parent_id
           ? 0
           : findChunkOverlapLength(previousChunk.content, chunk.content)
       }),
@@ -171,6 +175,53 @@ export function ChunkPreviewList({
       }
     }
   }, [overlapLengths])
+
+  if (isQaPreview) {
+    return (
+      <div className="space-y-3">
+        {chunks.map((chunk) => (
+          <article
+            key={chunk.id}
+            className="overflow-hidden rounded-lg border bg-background"
+          >
+            <div className="flex items-center justify-between gap-3 border-b bg-muted/20 px-4 py-2">
+              <h3 className="text-sm font-semibold text-foreground">
+                {t("行 {value}", {
+                  value: chunk.row_number ?? chunk.chunk_index + 1,
+                })}
+              </h3>
+              {chunk.source ? (
+                <Badge variant="outline">
+                  {t("来源")}：{chunk.source}
+                </Badge>
+              ) : null}
+            </div>
+            <dl className="grid gap-4 px-4 py-3">
+              <div>
+                <dt className="text-xs font-medium text-muted-foreground">
+                  {t("问题")}
+                </dt>
+                <dd className="mt-1 whitespace-pre-wrap text-sm font-medium text-foreground">
+                  {chunk.question}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-muted-foreground">
+                  {t("答案")}
+                </dt>
+                <dd className="mt-1">
+                  <MarkdownContent
+                    content={chunk.content}
+                    className="text-[15px] leading-7"
+                  />
+                </dd>
+              </div>
+            </dl>
+          </article>
+        ))}
+      </div>
+    )
+  }
 
   function renderChunk(
     chunk: KnowledgeDocumentChunk,

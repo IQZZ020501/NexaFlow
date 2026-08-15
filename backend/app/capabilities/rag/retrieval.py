@@ -134,7 +134,7 @@ def apply_rerank_results(
     scored: list[tuple[int, float]] = []
     for fallback_index, result in enumerate(results):
         if not isinstance(result, dict):
-            return None
+            continue
         index = result.get("index", fallback_index)
         score = result.get("relevance_score", 0)
         if not (
@@ -145,7 +145,7 @@ def apply_rerank_results(
             and not isinstance(score, bool)
             and math.isfinite(score)
         ):
-            return None
+            continue
         scored.append((index, float(score)))
     if not scored:
         return None

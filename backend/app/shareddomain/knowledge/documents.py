@@ -267,6 +267,7 @@ async def create_knowledge_documents_from_attachments(
             meta={
                 **DEFAULT_DOCUMENT_META,
                 DOCUMENT_STAGED_META_KEY: payload.staged,
+                "import_mode": payload.import_mode,
             },
             status=DOCUMENT_UPLOADED_STATUS,
             last_error=None,

@@ -1,4 +1,5 @@
 export type KnowledgeUploadStep = "files" | "segment"
+export type KnowledgeImportMode = "document" | "qa"
 
 export type KnowledgeUploadParseSettings = {
   segmentMode: "smart" | "advanced"
@@ -11,6 +12,7 @@ export type KnowledgeUploadParseSettings = {
 export type KnowledgeUploadRouteState = {
   documentIds: string[]
   parseSettings: KnowledgeUploadParseSettings
+  importMode?: KnowledgeImportMode
 }
 
 export type KnowledgeUploadSearchParams = Record<
@@ -66,6 +68,7 @@ export function knowledgeUploadSegmentPath(
   knowledgeBaseId: string,
   documentIds: string[],
   parseSettings: KnowledgeUploadParseSettings,
+  importMode: KnowledgeImportMode = "document",
 ) {
   const searchParams = new URLSearchParams()
   searchParams.set(
@@ -77,6 +80,7 @@ export function knowledgeUploadSegmentPath(
   searchParams.set("chunk_overlap", String(parseSettings.chunkOverlap))
   searchParams.set("separator", parseSettings.splitSeparator)
   searchParams.set("cleaning", parseSettings.cleaningRules.join(","))
+  searchParams.set("import", importMode)
   return `${knowledgeUploadPath(knowledgeBaseId)}/segment?${searchParams}`
 }
 
@@ -90,12 +94,28 @@ export function parseKnowledgeUploadRouteState(
         .filter((documentId) => UUID_PATTERN.test(documentId)),
     ),
   ].slice(0, MAX_KNOWLEDGE_UPLOAD_DOCUMENTS)
+  const importMode =
+    firstValue(searchParams, "import") === "qa" ? "qa" : "document"
+
+  if (importMode === "qa") {
+    return {
+      documentIds,
+      importMode,
+      parseSettings: {
+        ...DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS,
+        cleaningRules: [
+          ...DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.cleaningRules,
+        ],
+      },
+    }
+  }
 
   const segmentMode =
     firstValue(searchParams, "mode") === "advanced" ? "advanced" : "smart"
   if (segmentMode === "smart") {
     return {
       documentIds,
+      importMode,
       parseSettings: {
         ...DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS,
         cleaningRules: [
@@ -136,6 +156,7 @@ export function parseKnowledgeUploadRouteState(
 
   return {
     documentIds,
+    importMode,
     parseSettings: {
       segmentMode,
       chunkSize,

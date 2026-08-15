@@ -15,6 +15,10 @@ from app.application.knowledge_retrieval import (
     query_knowledge_base,
     retrieve_knowledge_base,
 )
+from app.application.knowledge_evaluation import (
+    get_evaluation_summary,
+    get_latest_evaluation_summary,
+)
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
 from app.infrastructure.logger import get_logger
@@ -23,6 +27,14 @@ from app.schemas.knowledge import KnowledgeDocumentResponse
 from app.shareddomain.knowledge.lifecycle import (
     delete_knowledge_document,
     set_knowledge_document_active,
+)
+from app.shareddomain.knowledge.evaluation import (
+    create_evaluation_case,
+    delete_evaluation_case,
+    enqueue_evaluation_run,
+    get_evaluation_run,
+    list_evaluation_cases,
+    list_evaluation_runs,
 )
 from app.shareddomain.knowledge.orchestration import (
     enqueue_index_knowledge_document,
@@ -163,17 +175,25 @@ __all__ = [
     "delete_knowledge_attachment",
     "delete_knowledge_base_permanently",
     "delete_knowledge_document",
+    "create_evaluation_case",
+    "delete_evaluation_case",
     "dispatch_knowledge_task",
     "document_response_with_chunk_count",
     "document_to_response",
     "enqueue_index_knowledge_document",
+    "enqueue_evaluation_run",
     "enqueue_parse_knowledge_document",
     "enqueue_rebuild_knowledge_index",
     "get_knowledge_asset_file",
+    "get_evaluation_run",
+    "get_evaluation_summary",
+    "get_latest_evaluation_summary",
     "get_knowledge_base",
     "get_knowledge_document",
     "knowledge_document_path",
     "list_knowledge_bases",
+    "list_evaluation_cases",
+    "list_evaluation_runs",
     "list_knowledge_document_chunks",
     "list_knowledge_documents",
     "list_knowledge_documents_with_counts",

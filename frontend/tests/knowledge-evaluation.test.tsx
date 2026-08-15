@@ -1,0 +1,342 @@
+/* @jsxImportSource react */
+import { afterEach, describe, expect, test } from "bun:test"
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react"
+
+import {
+  KnowledgeEvaluation,
+  parseEvaluationCsv,
+} from "@/components/knowledge/knowledge-evaluation"
+import type { KnowledgeDocument } from "@/lib/api/knowledge"
+import {
+  jsonResponse,
+  renderPage,
+  resetFetch,
+  withFetch,
+} from "./helpers/dom"
+
+const document: KnowledgeDocument = {
+  id: "doc-1",
+  workspace_id: "ws-1",
+  knowledge_base_id: "kb-1",
+  filename: "guide.md",
+  content_type: "text/markdown",
+  size_bytes: 10,
+  attachment_id: "att-1",
+  meta: {},
+  status: "indexed",
+  is_active: true,
+  chunk_count: 1,
+  last_error: null,
+  created_by_user_id: "user-1",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+}
+
+const evaluationCase = {
+  id: "case-1",
+  workspace_id: "ws-1",
+  knowledge_base_id: "kb-1",
+  question: "如何回滚？",
+  expected_document_ids: ["doc-1"],
+  answer_points: ["管理员批准"],
+  created_by_user_id: "user-1",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+}
+
+const queuedTask = {
+  id: "task-1",
+  workspace_id: "ws-1",
+  knowledge_base_id: "kb-1",
+  document_id: null,
+  task_type: "evaluate",
+  status: "queued",
+  attempts: 0,
+  max_attempts: 3,
+  total_items: 1,
+  processed_items: 0,
+  last_error: null,
+  created_by_user_id: "user-1",
+  started_at: null,
+  finished_at: null,
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+}
+
+afterEach(() => {
+  cleanup()
+  resetFetch()
+})
+
+describe("knowledge evaluation", () => {
+  test("parses quoted CSV and reports scoped document errors", () => {
+    expect(
+      parseEvaluationCsv(
+        'question,expected_document_ids,answer_points\n"如何回滚，服务？",doc-1,"批准|备份"',
+        new Set(["doc-1"]),
+      ),
+    ).toEqual({
+      drafts: [
+        {
+          rowNumber: 2,
+          question: "如何回滚，服务？",
+          expectedDocumentIds: ["doc-1"],
+          answerPoints: ["批准", "备份"],
+        },
+      ],
+      errors: [],
+    })
+    expect(
+      parseEvaluationCsv(
+        "question,expected_document_ids\nunknown,doc-other",
+        new Set(["doc-1"]),
+      ).errors[0],
+    ).toEqual({ rowNumber: 2, code: "document" })
+    expect(
+      parseEvaluationCsv(
+        'question,expected_document_ids\n"如何""回滚？",doc-1',
+        new Set(["doc-1"]),
+      ).drafts[0]?.question,
+    ).toBe('如何"回滚？')
+    expect(parseEvaluationCsv("", new Set()).errors[0]?.code).toBe("headers")
+    expect(
+      parseEvaluationCsv("question,question", new Set()).errors[0]?.code,
+    ).toBe("headers")
+    expect(
+      parseEvaluationCsv(
+        `question,expected_document_ids\n问题,${Array.from(
+          { length: 21 },
+          (_, index) => `doc-${index}`,
+        ).join(";")}`,
+        new Set(Array.from({ length: 21 }, (_, index) => `doc-${index}`)),
+      ).errors[0]?.code,
+    ).toBe("limit")
+    expect(
+      parseEvaluationCsv(
+        `question,expected_document_ids,answer_points\n问题,doc-1,${"答".repeat(2001)}`,
+        new Set(["doc-1"]),
+      ).errors[0]?.code,
+    ).toBe("answerLength")
+  })
+
+  test("creates a case, shows CSV row errors, polls a run, and renders metrics", async () => {
+    const requestBodies: Array<Record<string, unknown>> = []
+    withFetch((url, init) => {
+      const method = init?.method ?? "GET"
+      if (method === "GET" && url.endsWith("/evaluations/cases")) {
+        return jsonResponse([])
+      }
+      if (method === "GET" && url.endsWith("/evaluations/runs")) {
+        return jsonResponse([])
+      }
+      if (method === "POST" && url.endsWith("/evaluations/cases")) {
+        requestBodies.push(JSON.parse(String(init?.body)))
+        return jsonResponse(evaluationCase, 201)
+      }
+      if (method === "POST" && url.endsWith("/evaluations/runs")) {
+        requestBodies.push(JSON.parse(String(init?.body)))
+        return jsonResponse(queuedTask, 202)
+      }
+      if (url.endsWith("/evaluations/runs/task-1/results")) {
+        return jsonResponse({
+          task: { ...queuedTask, status: "succeeded", attempts: 1, processed_items: 1 },
+          count: 1,
+          failed_count: 0,
+          mean_hit_at_k: 1,
+          mean_recall_at_k: 1,
+          mean_reciprocal_rank: 1,
+          mean_ndcg_at_k: 1,
+          p50_latency_ms: 12,
+          p95_latency_ms: 12,
+          results: [
+            {
+              id: "result-1",
+              case_id: "case-1",
+              question: "如何回滚？",
+              returned_document_ids: ["doc-1"],
+              returned_chunk_ids: ["chunk-1"],
+              hit_at_k: 1,
+              recall_at_k: 1,
+              reciprocal_rank: 1,
+              ndcg_at_k: 1,
+              latency_ms: 12,
+              trace: {},
+              error: null,
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+        })
+      }
+      if (url.endsWith("/evaluations/runs/task-1")) {
+        return jsonResponse({
+          ...queuedTask,
+          status: "succeeded",
+          attempts: 1,
+          processed_items: 1,
+        })
+      }
+      return jsonResponse({ detail: "unexpected request" }, 500)
+    })
+
+    const errors: unknown[] = []
+    renderPage(
+      <KnowledgeEvaluation
+        token="token"
+        workspaceId="ws-1"
+        knowledgeBaseId="kb-1"
+        documents={[document]}
+        canEdit
+        reportError={(error) => errors.push(error)}
+      />,
+    )
+
+    await screen.findByText("暂无评测用例")
+    const csvInput = screen.getByLabelText("选择评测 CSV") as HTMLInputElement
+    fireEvent.change(csvInput, {
+      target: {
+        files: [
+          new File(
+            ["question,expected_document_ids\n无效问题,missing-doc"],
+            "evaluation.csv",
+            { type: "text/csv" },
+          ),
+        ],
+      },
+    })
+    await screen.findByText("第 2 行：期望文档不存在或未启用")
+
+    fireEvent.change(screen.getByLabelText("问题"), {
+      target: { value: "如何回滚？" },
+    })
+    fireEvent.click(screen.getByText("guide.md"))
+    fireEvent.change(screen.getByLabelText("答案要点（每行一个）"), {
+      target: { value: "管理员批准" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "添加用例" }))
+
+    await screen.findByText("如何回滚？")
+    expect(requestBodies[0]).toEqual({
+      question: "如何回滚？",
+      expected_document_ids: ["doc-1"],
+      answer_points: ["管理员批准"],
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "开始评测（1 条）" }))
+    await waitFor(
+      () => expect(screen.getByText("P95 延迟")).toBeTruthy(),
+      { timeout: 2500 },
+    )
+    expect(screen.getAllByText("1").length).toBeGreaterThan(0)
+    expect(requestBodies[1]).toEqual({
+      case_ids: ["case-1"],
+      limit: 5,
+      search_mode: "blend",
+      similarity: 2,
+      include_references: true,
+    })
+    expect(errors).toEqual([])
+  })
+
+  test("loads history, imports CSV, deletes a case, and reopens a run", async () => {
+    const succeededTask = {
+      ...queuedTask,
+      status: "succeeded",
+      attempts: 1,
+      processed_items: 1,
+    }
+    const summary = {
+      task: succeededTask,
+      count: 1,
+      failed_count: 0,
+      mean_hit_at_k: 1,
+      mean_recall_at_k: 1,
+      mean_reciprocal_rank: 1,
+      mean_ndcg_at_k: 1,
+      p50_latency_ms: 12,
+      p95_latency_ms: 12,
+      results: [],
+    }
+    let summaryRequests = 0
+    let deleteRequests = 0
+    withFetch((url, init) => {
+      const method = init?.method ?? "GET"
+      if (method === "GET" && url.endsWith("/evaluations/cases")) {
+        return jsonResponse([evaluationCase])
+      }
+      if (method === "GET" && url.endsWith("/evaluations/runs")) {
+        return jsonResponse([succeededTask])
+      }
+      if (method === "GET" && url.endsWith("/evaluations/runs/task-1/results")) {
+        summaryRequests += 1
+        return jsonResponse(summary)
+      }
+      if (method === "POST" && url.endsWith("/evaluations/cases")) {
+        return jsonResponse(
+          {
+            ...evaluationCase,
+            id: "case-2",
+            question: "导入问题",
+            answer_points: ["答案"],
+          },
+          201,
+        )
+      }
+      if (method === "DELETE" && url.endsWith("/evaluations/cases/case-1")) {
+        deleteRequests += 1
+        return new Response(null, { status: 204 })
+      }
+      return jsonResponse({ detail: "unexpected request" }, 500)
+    })
+
+    const originalConfirm = window.confirm
+    window.confirm = () => true
+    try {
+      renderPage(
+        <KnowledgeEvaluation
+          token="token"
+          workspaceId="ws-1"
+          knowledgeBaseId="kb-1"
+          documents={[document]}
+          canEdit
+          reportError={() => undefined}
+        />,
+      )
+
+      await screen.findByText("P95 延迟")
+      const caseCheckbox = screen.getByRole("checkbox", {
+        name: "选择用例：如何回滚？",
+      })
+      fireEvent.click(caseCheckbox)
+      fireEvent.click(caseCheckbox)
+      fireEvent.click(screen.getByText("guide.md"))
+      fireEvent.click(screen.getByText("guide.md"))
+
+      fireEvent.change(screen.getByLabelText("选择评测 CSV"), {
+        target: {
+          files: [
+            new File(
+              [
+                "question,expected_document_ids,answer_points\n导入问题,doc-1,答案",
+              ],
+              "evaluation.csv",
+              { type: "text/csv" },
+            ),
+          ],
+        },
+      })
+      await screen.findByText("已读取 1 条有效用例")
+      fireEvent.click(screen.getByRole("button", { name: "导入用例" }))
+      await screen.findByText("导入问题")
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "删除用例：如何回滚？" }),
+      )
+      await waitFor(() => expect(deleteRequests).toBe(1))
+
+      fireEvent.click(screen.getByRole("button", { name: /成功/ }))
+      await waitFor(() => expect(summaryRequests).toBe(2))
+    } finally {
+      window.confirm = originalConfirm
+    }
+  })
+})

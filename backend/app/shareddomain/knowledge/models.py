@@ -6,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -457,12 +458,18 @@ class KnowledgeTask(Base):
             name="fk_knowledge_tasks_knowledge_workspace",
         ),
         CheckConstraint(
-            "task_type IN ('parse', 'index', 'rebuild_index')",
+            "task_type IN ('parse', 'index', 'rebuild_index', 'evaluate')",
             name="ck_knowledge_tasks_task_type",
         ),
         CheckConstraint(
             "status IN ('queued', 'running', 'succeeded', 'failed')",
             name="ck_knowledge_tasks_status",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "knowledge_base_id",
+            "id",
+            name="uq_knowledge_tasks_scope_id",
         ),
     )
 
@@ -489,6 +496,137 @@ class KnowledgeTask(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class KnowledgeEvaluationCase(Base):
+    __tablename__ = "knowledge_evaluation_cases"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id"],
+            ["knowledge.workspace_id", "knowledge.id"],
+            name="fk_knowledge_evaluation_cases_knowledge_workspace",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "knowledge_base_id",
+            "id",
+            name="uq_knowledge_evaluation_cases_scope_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer_points: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class KnowledgeEvaluationExpectation(Base):
+    __tablename__ = "knowledge_evaluation_expectations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id"],
+            ["knowledge.workspace_id", "knowledge.id"],
+            name="fk_knowledge_evaluation_expectations_knowledge_workspace",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "case_id"],
+            [
+                "knowledge_evaluation_cases.workspace_id",
+                "knowledge_evaluation_cases.knowledge_base_id",
+                "knowledge_evaluation_cases.id",
+            ],
+            name="fk_knowledge_evaluation_expectations_case_scope",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "document_id"],
+            [
+                "knowledge_documents.workspace_id",
+                "knowledge_documents.knowledge_base_id",
+                "knowledge_documents.id",
+            ],
+            name="fk_knowledge_evaluation_expectations_document_scope",
+        ),
+    )
+
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class KnowledgeEvaluationResult(Base):
+    __tablename__ = "knowledge_evaluation_results"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id"],
+            ["knowledge.workspace_id", "knowledge.id"],
+            name="fk_knowledge_evaluation_results_knowledge_workspace",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "task_id"],
+            [
+                "knowledge_tasks.workspace_id",
+                "knowledge_tasks.knowledge_base_id",
+                "knowledge_tasks.id",
+            ],
+            name="fk_knowledge_evaluation_results_task_scope",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "case_id"],
+            [
+                "knowledge_evaluation_cases.workspace_id",
+                "knowledge_evaluation_cases.knowledge_base_id",
+                "knowledge_evaluation_cases.id",
+            ],
+            name="fk_knowledge_evaluation_results_case_scope",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "task_id",
+            "case_id",
+            name="uq_knowledge_evaluation_results_task_case",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False, index=True
+    )
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    case_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    returned_document_ids: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    returned_chunk_ids: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    hit_at_k: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    recall_at_k: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    reciprocal_rank: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    ndcg_at_k: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    trace: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class KnowledgeStorageCleanup(Base):

@@ -27,6 +27,7 @@ from app.entities.knowledge import (
     DOCUMENT_PARSED_STATUS,
     DOCUMENT_PARSING_STATUS,
     TASK_FAILED_STATUS,
+    TASK_EVALUATE,
     TASK_INDEX,
     TASK_PARSE,
     TASK_QUEUED_STATUS,
@@ -68,6 +69,18 @@ TASK_LEASE_SECONDS = 300
 TASK_LEASE_RENEW_SECONDS = 30
 TASK_RUN_BUSY = "busy"
 TASK_RUN_FINISHED = "finished"
+
+EvaluationTaskRunner = Callable[
+    [
+        AsyncSession,
+        KnowledgeTask,
+        KnowledgeBase,
+        User,
+        Settings,
+        asyncio.Event,
+    ],
+    Awaitable[None],
+]
 
 
 def batches(items: list[VectorChunk], size: int) -> list[list[VectorChunk]]:
@@ -422,6 +435,7 @@ async def run_knowledge_task(
     settings: Settings,
     enqueue_task: Callable[[str, Settings], Awaitable[None]] | None = None,
     worker_task_id: str | None = None,
+    evaluation_runner: EvaluationTaskRunner | None = None,
 ) -> str:
     chained_task_id: str | None = None
     worker_task_id = worker_task_id or new_id()
@@ -492,6 +506,15 @@ async def run_knowledge_task(
                     task,
                     knowledge_base,
                     document,
+                    actor,
+                    settings,
+                    lease_lost,
+                )
+            elif task.task_type == TASK_EVALUATE and evaluation_runner is not None:
+                await evaluation_runner(
+                    db,
+                    task,
+                    knowledge_base,
                     actor,
                     settings,
                     lease_lost,
@@ -591,11 +614,18 @@ async def run_knowledge_task(
         if enqueue_task is not None:
             await enqueue_task(chained_task_id, settings)
         else:
-            await run_knowledge_task(chained_task_id, settings)
+            await run_knowledge_task(
+                chained_task_id,
+                settings,
+                evaluation_runner=evaluation_runner,
+            )
     return TASK_RUN_FINISHED
 
 
-async def recover_knowledge_tasks(settings: Settings) -> None:
+async def recover_knowledge_tasks(
+    settings: Settings,
+    evaluation_runner: EvaluationTaskRunner | None = None,
+) -> None:
     async with get_session_factory()() as db:
         tasks = await knowledge_base_repository.list_recoverable_tasks(db)
         for task in tasks:
@@ -608,4 +638,13 @@ async def recover_knowledge_tasks(settings: Settings) -> None:
             await knowledge_base_repository.save_knowledge_task(db, task)
         await db.commit()
 
-    await asyncio.gather(*(run_knowledge_task(task.id, settings) for task in tasks))
+    await asyncio.gather(
+        *(
+            run_knowledge_task(
+                task.id,
+                settings,
+                evaluation_runner=evaluation_runner,
+            )
+            for task in tasks
+        )
+    )

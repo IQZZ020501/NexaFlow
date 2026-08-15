@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 
+from app.application.knowledge_evaluation import run_evaluation_task
 from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
@@ -44,7 +45,14 @@ def run_knowledge_task_job(self, task_id: str) -> None:
         worker_pid=os.getpid(),
     )
     try:
-        outcome = asyncio.run(run_knowledge_task(task_id, settings, enqueue_knowledge_task))
+        outcome = asyncio.run(
+            run_knowledge_task(
+                task_id,
+                settings,
+                enqueue_knowledge_task,
+                evaluation_runner=run_evaluation_task,
+            )
+        )
     except Exception as exc:
         log_error(logger, "Knowledge task job crashed.", exc, task_id=task_id)
         raise
@@ -136,7 +144,12 @@ async def mark_task_dispatch_failed(task_id: str) -> None:
 
 async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
     if settings.celery_task_always_eager:
-        await run_knowledge_task(task_id, settings, enqueue_knowledge_task)
+        await run_knowledge_task(
+            task_id,
+            settings,
+            enqueue_knowledge_task,
+            evaluation_runner=run_evaluation_task,
+        )
         return
 
     celery_app.conf.update(

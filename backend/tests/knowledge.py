@@ -27,10 +27,15 @@ from app.shareddomain.knowledge.models import (
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
     KnowledgeDocumentReference,
+    KnowledgeEvaluationCase,
+    KnowledgeEvaluationExpectation,
+    KnowledgeEvaluationResult,
     KnowledgeTask,
 )
 from app.api.v1.endpoints import knowledge as knowledge_api
+from app.api.v1.endpoints import knowledge_evaluation as knowledge_evaluation_api
 from app.application import knowledge as knowledge_application
+from app.application import knowledge_evaluation as knowledge_evaluation_application
 from app.application import knowledge_retrieval as knowledge_retrieval_application
 from app.capabilities.rag import retrieval as knowledge_retrieval
 from app.capabilities.rag import vector_store as knowledge_vector_store
@@ -42,8 +47,14 @@ from app.capabilities.embedding.pipeline import (
 )
 from app.capabilities.rag.vector_store import VectorChunk, VectorHit
 from app.infrastructure.repositories import knowledge as knowledge_repository
+from app.infrastructure.repositories import (
+    knowledge_evaluation as evaluation_repository,
+)
 from app.infrastructure.repositories import user as user_repository
-from app.entities.knowledge import DOCUMENT_DELETED_STATUS
+from app.entities.knowledge import (
+    DOCUMENT_DELETED_STATUS,
+    KnowledgeEvaluationResult as KnowledgeEvaluationResultEntity,
+)
 from app.shareddomain.knowledge.orchestration import (
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
@@ -51,10 +62,16 @@ from app.shareddomain.knowledge.orchestration import (
 from app.shareddomain.knowledge.task_runner import (
     mark_knowledge_task_failed,
     recover_knowledge_tasks,
+    run_knowledge_task,
     run_parse_task,
 )
 from app.tasks.knowledge import mark_task_dispatch_failed
-from app.schemas.knowledge import KnowledgeQueryRequest
+from app.schemas.knowledge import (
+    KnowledgeQueryHitResponse,
+    KnowledgeQueryInspectResponse,
+    KnowledgeQueryRequest,
+    KnowledgeRetrievalTraceResponse,
+)
 from tests.llm import ModelTestHandler, model_payload, model_test_server, models_url
 from app.domain.resource_permission import ResourcePermission
 
@@ -301,6 +318,15 @@ async def assert_knowledge_base_deleted(knowledge_base_id: str, workspace_id: st
             )
         )
         assert documents.scalars().all() == []
+        for model in (
+            KnowledgeEvaluationCase,
+            KnowledgeEvaluationExpectation,
+            KnowledgeEvaluationResult,
+        ):
+            rows = await db.scalars(
+                select(model).where(model.knowledge_base_id == knowledge_base_id)
+            )
+            assert list(rows) == []
     assert not (test_settings().knowledge_storage_dir / workspace_id / knowledge_base_id).exists()
 
 
@@ -320,6 +346,34 @@ async def assert_document_deleted(document_id: str) -> None:
         )
         assert parents.scalars().all() == []
         assert not (test_settings().knowledge_storage_dir / document.storage_path).exists()
+
+
+async def assert_evaluation_success_resists_stale_error(
+    workspace_id: str,
+    knowledge_base_id: str,
+    task_id: str,
+    case_id: str,
+    result_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        persisted = await evaluation_repository.upsert_result(
+            db,
+            KnowledgeEvaluationResultEntity(
+                workspace_id=workspace_id,
+                knowledge_base_id=knowledge_base_id,
+                task_id=task_id,
+                case_id=case_id,
+                error="stale worker error",
+            ),
+        )
+        await db.commit()
+        assert persisted.id == result_id
+        assert persisted.error is None
+
+        row = await db.get(KnowledgeEvaluationResult, result_id)
+        assert row is not None
+        assert row.error is None
+        assert row.hit_at_k == 1
 
 
 async def enqueue_recoverable_parse_task(
@@ -873,6 +927,7 @@ def upload_document(
     content,
     mime,
     staged=False,
+    import_mode="document",
 ):
     """Two-step decoupled upload: attachment, then document creation."""
     attachment = client.post(
@@ -885,7 +940,11 @@ def upload_document(
     created = client.post(
         knowledge_url(workspace_id, f"/{knowledge_base_id}/documents"),
         headers=auth_headers(token),
-        json={"attachment_ids": [attachment_id], "staged": staged},
+        json={
+            "attachment_ids": [attachment_id],
+            "staged": staged,
+            "import_mode": import_mode,
+        },
     )
     assert created.status_code == 201, created.text
     return created.json()[0]
@@ -1148,10 +1207,10 @@ async def assert_hierarchical_retrieval(
         first_children[0].id,
         second_children[0].id,
     ]
-    assert invalid.trace.rerank_status == "fallback"
+    assert invalid.trace.rerank_status == "applied"
     assert [hit.chunk_id for hit in invalid.hits] == [
-        first_children[0].id,
         second_children[0].id,
+        first_children[0].id,
     ]
     assert unexpected.trace.rerank_status == "fallback"
     assert [hit.chunk_id for hit in unexpected.hits] == [
@@ -1719,6 +1778,97 @@ def main() -> None:
         )
         assert configured_deleted.status_code == 204, configured_deleted.text
         asyncio.run(assert_document_deleted(configured_document_id))
+
+        qa_csv = b"question,answer,source\nWhat is SLA?,99.9%,runbook\n"
+        csv_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "faq.csv",
+            qa_csv,
+            "text/csv",
+        )
+        assert csv_document["meta"]["import_mode"] == "document"
+        csv_parse = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{csv_document['id']}/parse",
+            ),
+            headers=auth_headers(alice_token),
+            json={"auto_index": False},
+        )
+        assert csv_parse.status_code == 202, csv_parse.text
+        csv_chunks = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{csv_document['id']}/chunks",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert csv_chunks.status_code == 200, csv_chunks.text
+        assert {chunk["kind"] for chunk in csv_chunks.json()} == {"document"}
+
+        qa_document = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "faq.csv",
+            qa_csv,
+            "text/csv",
+            import_mode="qa",
+        )
+        assert qa_document["meta"]["import_mode"] == "qa"
+        qa_parse = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{qa_document['id']}/parse",
+            ),
+            headers=auth_headers(alice_token),
+            json={
+                "strategy": "hierarchical",
+                "chunk_size": 100,
+                "chunk_overlap": 99,
+                "split_separator": ".",
+                "cleaning_rules": ["collapse_spaces"],
+                "auto_index": False,
+            },
+        )
+        assert qa_parse.status_code == 202, qa_parse.text
+        qa_chunks = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{qa_document['id']}/chunks",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert qa_chunks.status_code == 200, qa_chunks.text
+        assert qa_chunks.json() == [
+            {
+                **qa_chunks.json()[0],
+                "content": "99.9%",
+                "kind": "qa",
+                "question": "What is SLA?",
+                "source": "runbook",
+                "row_number": 2,
+                "parent_id": None,
+                "parent_title": None,
+                "parent_index": None,
+            }
+        ]
+        assert qa_chunks.json()[0]["char_count"] == len("99.9%")
+
+        for imported_document in (csv_document, qa_document):
+            deleted_import = client.delete(
+                knowledge_url(
+                    default_workspace_id,
+                    f"/{knowledge_base_id}/documents/{imported_document['id']}",
+                ),
+                headers=auth_headers(alice_token),
+            )
+            assert deleted_import.status_code == 204, deleted_import.text
+            asyncio.run(assert_document_deleted(imported_document["id"]))
 
         asyncio.run(
             set_document_chunk_search_text(document_id, "Hello from product docs")
@@ -2515,6 +2665,255 @@ def main() -> None:
                 reference_target_id,
             )
         )
+
+        evaluation_base = knowledge_url(
+            default_workspace_id,
+            f"/{knowledge_base_id}/evaluations",
+        )
+        missing_expected = client.post(
+            f"{evaluation_base}/cases",
+            headers=auth_headers(alice_token),
+            json={"question": "missing expectation", "expected_document_ids": []},
+        )
+        assert missing_expected.status_code == 422, missing_expected.text
+        cross_knowledge_expected = client.post(
+            f"{evaluation_base}/cases",
+            headers=auth_headers(alice_token),
+            json={
+                "question": "cross knowledge",
+                "expected_document_ids": [foreign_reference_target["id"]],
+            },
+        )
+        assert cross_knowledge_expected.status_code == 404, cross_knowledge_expected.text
+        denied_case = client.post(
+            f"{evaluation_base}/cases",
+            headers=auth_headers(bob_token),
+            json={
+                "question": "viewers cannot write",
+                "expected_document_ids": [reference_target_id],
+            },
+        )
+        assert denied_case.status_code == 403, denied_case.text
+
+        evaluation_view_grant = client.put(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/permissions/{bob_id}",
+            ),
+            headers=auth_headers(alice_token),
+            json={"permission": "view"},
+        )
+        assert evaluation_view_grant.status_code == 200, evaluation_view_grant.text
+
+        evaluation_case_ids: list[str] = []
+        for question in ("successful evaluation", "retry evaluation"):
+            created_case = client.post(
+                f"{evaluation_base}/cases",
+                headers=auth_headers(alice_token),
+                json={
+                    "question": question,
+                    "expected_document_ids": [reference_target_id],
+                    "answer_points": ["safe rollback"],
+                },
+            )
+            assert created_case.status_code == 201, created_case.text
+            evaluation_case_ids.append(created_case.json()["id"])
+        visible_cases = client.get(
+            f"{evaluation_base}/cases",
+            headers=auth_headers(bob_token),
+        )
+        assert visible_cases.status_code == 200, visible_cases.text
+        assert {item["id"] for item in visible_cases.json()} == set(
+            evaluation_case_ids
+        )
+
+        original_evaluation_dispatch = (
+            knowledge_evaluation_api.dispatch_knowledge_task
+        )
+        original_evaluation_retrieve = (
+            knowledge_evaluation_application.retrieve_knowledge_base
+        )
+        evaluation_attempts: dict[str, int] = {}
+
+        async def defer_evaluation_dispatch(_task_id, _settings) -> None:
+            return None
+
+        async def fake_evaluation_retrieve(
+            _db,
+            _knowledge_base,
+            payload,
+            _settings,
+        ) -> KnowledgeQueryInspectResponse:
+            evaluation_attempts[payload.query] = (
+                evaluation_attempts.get(payload.query, 0) + 1
+            )
+            if (
+                payload.query == "retry evaluation"
+                and evaluation_attempts[payload.query] == 1
+            ):
+                raise RuntimeError("synthetic evaluation failure")
+            return KnowledgeQueryInspectResponse(
+                hits=[
+                    KnowledgeQueryHitResponse(
+                        chunk_id="evaluation-hit",
+                        document_id=reference_target_id,
+                        document_filename="rollback.md",
+                        chunk_index=0,
+                        content="safe rollback",
+                    )
+                ],
+                trace=KnowledgeRetrievalTraceResponse(
+                    trace_id=f"trace-{evaluation_attempts[payload.query]}",
+                    search_mode=payload.search_mode,
+                    limit=payload.limit,
+                    max_distance=payload.similarity,
+                    vector_candidates=1,
+                    keyword_candidates=0,
+                    reference_candidates=0,
+                    fused_candidates=1,
+                    rerank_status="not_configured",
+                    returned_hits=1,
+                    duration_ms=10.0,
+                    stage_duration_ms={"retrieve": 10.0},
+                ),
+            )
+
+        knowledge_evaluation_api.dispatch_knowledge_task = defer_evaluation_dispatch
+        knowledge_evaluation_application.retrieve_knowledge_base = (
+            fake_evaluation_retrieve
+        )
+        try:
+            queued_run = client.post(
+                f"{evaluation_base}/runs",
+                headers=auth_headers(alice_token),
+                json={
+                    "case_ids": evaluation_case_ids,
+                    "limit": 3,
+                    "search_mode": "blend",
+                    "include_references": True,
+                },
+            )
+            assert queued_run.status_code == 202, queued_run.text
+            evaluation_task_id = queued_run.json()["id"]
+
+            duplicate_run = client.post(
+                f"{evaluation_base}/runs",
+                headers=auth_headers(alice_token),
+                json={"case_ids": evaluation_case_ids},
+            )
+            assert duplicate_run.status_code == 409, duplicate_run.text
+            delete_during_run = client.delete(
+                f"{evaluation_base}/cases/{evaluation_case_ids[0]}",
+                headers=auth_headers(alice_token),
+            )
+            assert delete_during_run.status_code == 409, delete_during_run.text
+            index_during_run = client.post(
+                knowledge_url(
+                    default_workspace_id,
+                    f"/{knowledge_base_id}/documents/{reference_source_id}/index",
+                ),
+                headers=auth_headers(alice_token),
+            )
+            assert index_during_run.status_code == 409, index_during_run.text
+
+            asyncio.run(
+                run_knowledge_task(
+                    evaluation_task_id,
+                    test_settings(),
+                    evaluation_runner=(
+                        knowledge_evaluation_application.run_evaluation_task
+                    ),
+                )
+            )
+            failed_run = client.get(
+                f"{evaluation_base}/runs/{evaluation_task_id}",
+                headers=auth_headers(alice_token),
+            )
+            assert failed_run.status_code == 200, failed_run.text
+            assert failed_run.json()["status"] == "failed"
+            assert failed_run.json()["processed_items"] == 2
+            failed_summary = client.get(
+                f"{evaluation_base}/runs/{evaluation_task_id}/results",
+                headers=auth_headers(bob_token),
+            )
+            assert failed_summary.status_code == 200, failed_summary.text
+            assert failed_summary.json()["count"] == 1
+            assert failed_summary.json()["failed_count"] == 1
+            failed_result_ids = {
+                item["case_id"]: item["id"]
+                for item in failed_summary.json()["results"]
+            }
+
+            retry_run = client.post(
+                knowledge_url(
+                    default_workspace_id,
+                    f"/{knowledge_base_id}/tasks/{evaluation_task_id}/retry",
+                ),
+                headers=auth_headers(alice_token),
+            )
+            assert retry_run.status_code == 202, retry_run.text
+            succeeded_run = client.get(
+                f"{evaluation_base}/runs/{evaluation_task_id}",
+                headers=auth_headers(alice_token),
+            )
+            assert succeeded_run.status_code == 200, succeeded_run.text
+            assert succeeded_run.json()["status"] == "succeeded"
+            assert succeeded_run.json()["attempts"] == 2
+            summary = client.get(
+                f"{evaluation_base}/results/latest",
+                headers=auth_headers(bob_token),
+            )
+            assert summary.status_code == 200, summary.text
+            summary_payload = summary.json()
+            assert summary_payload["count"] == 2
+            assert summary_payload["failed_count"] == 0
+            assert summary_payload["mean_hit_at_k"] == 1.0
+            assert [item["case_id"] for item in summary_payload["results"]] == (
+                evaluation_case_ids
+            )
+            assert {
+                item["case_id"]: item["id"]
+                for item in summary_payload["results"]
+            } == failed_result_ids
+            asyncio.run(
+                assert_evaluation_success_resists_stale_error(
+                    default_workspace_id,
+                    knowledge_base_id,
+                    evaluation_task_id,
+                    evaluation_case_ids[0],
+                    failed_result_ids[evaluation_case_ids[0]],
+                )
+            )
+            assert evaluation_attempts == {
+                "successful evaluation": 1,
+                "retry evaluation": 2,
+            }
+
+            recovery_run = client.post(
+                f"{evaluation_base}/runs",
+                headers=auth_headers(alice_token),
+                json={"case_ids": [evaluation_case_ids[0]], "limit": 1},
+            )
+            assert recovery_run.status_code == 202, recovery_run.text
+            asyncio.run(
+                recover_knowledge_tasks(
+                    test_settings(),
+                    knowledge_evaluation_application.run_evaluation_task,
+                )
+            )
+            recovered_run = client.get(
+                f"{evaluation_base}/runs/{recovery_run.json()['id']}",
+                headers=auth_headers(alice_token),
+            )
+            assert recovered_run.status_code == 200, recovered_run.text
+            assert recovered_run.json()["status"] == "succeeded"
+        finally:
+            knowledge_evaluation_api.dispatch_knowledge_task = (
+                original_evaluation_dispatch
+            )
+            knowledge_evaluation_application.retrieve_knowledge_base = (
+                original_evaluation_retrieve
+            )
 
         deleted_reference_target = client.delete(
             knowledge_url(

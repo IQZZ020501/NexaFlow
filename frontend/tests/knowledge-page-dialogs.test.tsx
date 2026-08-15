@@ -749,6 +749,7 @@ describe("lib/api/knowledge", () => {
 
     await knowledgeApi.createKnowledgeDocuments("tok", "ws-1", "kb-1", ["att-1"], true)
     await knowledgeApi.createKnowledgeDocuments("tok", "ws-1", "kb-1", ["att-2"], false)
+    await knowledgeApi.createKnowledgeDocuments("tok", "ws-1", "kb-1", ["att-3"], true, "qa")
     expect(JSON.parse(calls[0].body)).toEqual({
       attachment_ids: ["att-1"],
       staged: true,
@@ -756,6 +757,11 @@ describe("lib/api/knowledge", () => {
     expect(JSON.parse(calls[1].body)).toEqual({
       attachment_ids: ["att-2"],
       staged: false,
+    })
+    expect(JSON.parse(calls[2].body)).toEqual({
+      attachment_ids: ["att-3"],
+      staged: true,
+      import_mode: "qa",
     })
   })
 

@@ -699,6 +699,699 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
     assert KnowledgeQueryInspectResponse(hits=[hit], trace=trace).trace is trace
 
 
+def test_retrieval_evaluation_metrics_are_deterministic() -> None:
+    from app.capabilities.rag.evaluation import (
+        aggregate_retrieval_metrics,
+        retrieval_case_metrics,
+    )
+
+    metrics = retrieval_case_metrics(
+        returned_document_ids=["doc-b", "doc-x", "doc-a"],
+        expected_document_ids={"doc-a", "doc-b"},
+        limit=3,
+    )
+    assert metrics.hit_at_k == 1
+    assert metrics.recall_at_k == 1.0
+    assert metrics.reciprocal_rank == 1.0
+    assert abs(metrics.ndcg_at_k - 0.9197) < 1e-4
+
+    later_hit = retrieval_case_metrics(["doc-x", "doc-a"], {"doc-a"}, 2)
+    assert later_hit.reciprocal_rank == 0.5
+    missed_expected = retrieval_case_metrics(["doc-a"], {"doc-a", "doc-b"}, 3)
+    assert missed_expected.ndcg_at_k < 1.0
+    aggregate = aggregate_retrieval_metrics(
+        [metrics, later_hit],
+        [100.0, 300.0],
+    )
+    assert aggregate.count == 2
+    assert aggregate.mean_hit_at_k == 1.0
+    assert aggregate.mean_recall_at_k == 1.0
+    assert aggregate.mean_reciprocal_rank == 0.75
+    assert aggregate.p50_latency_ms == 200.0
+    assert aggregate.p95_latency_ms == 290.0
+    empty = aggregate_retrieval_metrics([], [])
+    assert empty.count == 0
+    assert empty.p95_latency_ms == 0.0
+
+
+def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None:
+    from app.application import knowledge_evaluation as evaluation_application
+    from app.entities.knowledge import KnowledgeTask
+    from app.ports.parsing import KnowledgePipelineError
+    from app.schemas.knowledge import KnowledgeEvaluationRunRequest
+    from app.shareddomain.knowledge import evaluation as evaluation_service
+
+    knowledge_base = KnowledgeBase(
+        id="kb-1",
+        workspace_id="ws-1",
+        status="active",
+    )
+    actor = User(id="user-1", username="user")
+    events: list[str] = []
+    state = {
+        "locked": knowledge_base,
+        "open_task": None,
+        "deleted": True,
+        "cases": [SimpleNamespace(id="case-1")],
+        "documents": [SimpleNamespace(id="doc-1")],
+    }
+
+    class FakeDb:
+        async def commit(self) -> None:
+            events.append("commit")
+
+    async def lock_knowledge_base(_db, value):
+        events.append("lock")
+        return state["locked"]
+
+    async def get_open_task(*_args):
+        events.append("open-task")
+        return state["open_task"]
+
+    async def delete_case(*_args):
+        events.append("delete")
+        return state["deleted"]
+
+    async def list_cases(*_args):
+        events.append("cases")
+        return state["cases"]
+
+    async def list_expectations(*_args):
+        events.append("expectations")
+        return [SimpleNamespace(document_id="doc-1")]
+
+    async def list_documents(*_args):
+        events.append("documents")
+        return state["documents"]
+
+    async def create_task(*_args):
+        events.append("task")
+        return SimpleNamespace(id="task-1")
+
+    originals = (
+        evaluation_service.knowledge_repository.lock_knowledge_base,
+        evaluation_service.knowledge_repository.get_open_knowledge_task,
+        evaluation_service.evaluation_repository.delete_case,
+        evaluation_service.evaluation_repository.list_cases_by_ids,
+        evaluation_service.evaluation_repository.list_expectations_for_cases,
+        evaluation_service.knowledge_repository.list_active_documents_by_ids,
+        evaluation_service.create_knowledge_task,
+        evaluation_service.record_audit_log,
+    )
+    evaluation_service.knowledge_repository.lock_knowledge_base = lock_knowledge_base
+    evaluation_service.knowledge_repository.get_open_knowledge_task = get_open_task
+    evaluation_service.evaluation_repository.delete_case = delete_case
+    evaluation_service.evaluation_repository.list_cases_by_ids = list_cases
+    evaluation_service.evaluation_repository.list_expectations_for_cases = (
+        list_expectations
+    )
+    evaluation_service.knowledge_repository.list_active_documents_by_ids = (
+        list_documents
+    )
+    evaluation_service.create_knowledge_task = create_task
+    evaluation_service.record_audit_log = lambda *_args, **_kwargs: None
+    try:
+        async def expect_status(coroutine, expected_status: int) -> None:
+            try:
+                await coroutine
+            except HTTPException as exc:
+                assert exc.status_code == expected_status, exc.status_code
+            else:
+                raise AssertionError("expected HTTPException")
+
+        asyncio.run(
+            evaluation_service.delete_evaluation_case(
+                FakeDb(),
+                knowledge_base,
+                "case-1",
+                actor,
+            )
+        )
+        assert events[:3] == ["lock", "open-task", "delete"]
+
+        events.clear()
+        asyncio.run(
+            evaluation_service.enqueue_evaluation_run(
+                FakeDb(),
+                knowledge_base,
+                KnowledgeEvaluationRunRequest(case_ids=["case-1"]),
+                actor,
+            )
+        )
+        assert events[:4] == ["lock", "cases", "expectations", "documents"]
+        assert events[-1] == "task"
+
+        state["locked"] = None
+        asyncio.run(
+            expect_status(
+                evaluation_service.delete_evaluation_case(
+                    FakeDb(), knowledge_base, "case-1", actor
+                ),
+                404,
+            )
+        )
+        state["locked"] = knowledge_base
+        state["open_task"] = object()
+        asyncio.run(
+            expect_status(
+                evaluation_service.delete_evaluation_case(
+                    FakeDb(), knowledge_base, "case-1", actor
+                ),
+                409,
+            )
+        )
+        state["open_task"] = None
+        state["deleted"] = False
+        asyncio.run(
+            expect_status(
+                evaluation_service.delete_evaluation_case(
+                    FakeDb(), knowledge_base, "case-1", actor
+                ),
+                404,
+            )
+        )
+        state["deleted"] = True
+
+        state["locked"] = None
+        asyncio.run(
+            expect_status(
+                evaluation_service.enqueue_evaluation_run(
+                    FakeDb(),
+                    knowledge_base,
+                    KnowledgeEvaluationRunRequest(case_ids=["case-1"]),
+                    actor,
+                ),
+                404,
+            )
+        )
+        state["locked"] = knowledge_base
+        state["cases"] = []
+        asyncio.run(
+            expect_status(
+                evaluation_service.enqueue_evaluation_run(
+                    FakeDb(),
+                    knowledge_base,
+                    KnowledgeEvaluationRunRequest(case_ids=["case-1"]),
+                    actor,
+                ),
+                404,
+            )
+        )
+        state["cases"] = [SimpleNamespace(id="case-1")]
+        state["documents"] = []
+        asyncio.run(
+            expect_status(
+                evaluation_service.enqueue_evaluation_run(
+                    FakeDb(),
+                    knowledge_base,
+                    KnowledgeEvaluationRunRequest(case_ids=["case-1"]),
+                    actor,
+                ),
+                422,
+            )
+        )
+    finally:
+        (
+            evaluation_service.knowledge_repository.lock_knowledge_base,
+            evaluation_service.knowledge_repository.get_open_knowledge_task,
+            evaluation_service.evaluation_repository.delete_case,
+            evaluation_service.evaluation_repository.list_cases_by_ids,
+            evaluation_service.evaluation_repository.list_expectations_for_cases,
+            evaluation_service.knowledge_repository.list_active_documents_by_ids,
+            evaluation_service.create_knowledge_task,
+            evaluation_service.record_audit_log,
+        ) = originals
+
+    async def reject_stale_worker(*_args):
+        return False
+
+    original_progress_update = (
+        evaluation_application.knowledge_repository.update_owned_knowledge_task_progress
+    )
+    evaluation_application.knowledge_repository.update_owned_knowledge_task_progress = (
+        reject_stale_worker
+    )
+    try:
+        try:
+            asyncio.run(
+                evaluation_application._persist_owned_progress(
+                    FakeDb(),
+                    KnowledgeTask(
+                        id="task-1",
+                        worker_task_id="stale-worker",
+                    ),
+                )
+            )
+        except KnowledgePipelineError:
+            pass
+        else:
+            raise AssertionError("stale evaluation worker retained its lease")
+    finally:
+        evaluation_application.knowledge_repository.update_owned_knowledge_task_progress = (
+            original_progress_update
+        )
+
+
+def test_evaluation_case_service_and_repository_edges() -> None:
+    from app.entities.knowledge import (
+        KnowledgeEvaluationCase,
+        KnowledgeEvaluationExpectation,
+        KnowledgeTask,
+    )
+    from app.infrastructure.repositories import (
+        knowledge_evaluation as evaluation_repository,
+    )
+    from app.schemas.knowledge import KnowledgeEvaluationCaseCreateRequest
+    from app.shareddomain.knowledge import evaluation as evaluation_service
+
+    knowledge_base = KnowledgeBase(id="kb-1", workspace_id="ws-1")
+    actor = User(id="user-1", username="user")
+    existing_case = KnowledgeEvaluationCase(
+        id="case-1",
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        question="Existing question",
+        created_by_user_id=actor.id,
+    )
+    expectation = KnowledgeEvaluationExpectation(
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        case_id=existing_case.id,
+        document_id="doc-1",
+    )
+    task = KnowledgeTask(
+        id="task-1",
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        task_type="evaluate",
+        created_by_user_id=actor.id,
+    )
+    state = {
+        "documents": [SimpleNamespace(id="doc-1")],
+        "task": task,
+    }
+    created: list[tuple[KnowledgeEvaluationCase, list]] = []
+
+    class FakeDb:
+        async def commit(self) -> None:
+            return None
+
+    async def list_cases(*_args, **_kwargs):
+        return [existing_case]
+
+    async def list_expectations(*_args, **_kwargs):
+        return [expectation]
+
+    async def list_documents(*_args, **_kwargs):
+        return state["documents"]
+
+    async def create_case(_db, case, expectations):
+        created.append((case, expectations))
+        return case
+
+    async def get_task(*_args):
+        return state["task"]
+
+    async def list_tasks(*_args, **_kwargs):
+        return [task]
+
+    originals = (
+        evaluation_service.evaluation_repository.list_cases,
+        evaluation_service.evaluation_repository.list_expectations_for_cases,
+        evaluation_service.knowledge_repository.list_active_documents_by_ids,
+        evaluation_service.evaluation_repository.create_case,
+        evaluation_service.knowledge_repository.get_knowledge_task_by_id,
+        evaluation_service.evaluation_repository.list_evaluation_tasks,
+        evaluation_service.record_audit_log,
+    )
+    evaluation_service.evaluation_repository.list_cases = list_cases
+    evaluation_service.evaluation_repository.list_expectations_for_cases = (
+        list_expectations
+    )
+    evaluation_service.knowledge_repository.list_active_documents_by_ids = (
+        list_documents
+    )
+    evaluation_service.evaluation_repository.create_case = create_case
+    evaluation_service.knowledge_repository.get_knowledge_task_by_id = get_task
+    evaluation_service.evaluation_repository.list_evaluation_tasks = list_tasks
+    evaluation_service.record_audit_log = lambda *_args, **_kwargs: None
+    try:
+        listed = asyncio.run(
+            evaluation_service.list_evaluation_cases(
+                FakeDb(), knowledge_base, limit=10, offset=2
+            )
+        )
+        assert listed[0].expected_document_ids == ["doc-1"]
+
+        response = asyncio.run(
+            evaluation_service.create_evaluation_case(
+                FakeDb(),
+                knowledge_base,
+                KnowledgeEvaluationCaseCreateRequest(
+                    question="  New question  ",
+                    expected_document_ids=["doc-1", "doc-1"],
+                    answer_points=["  point  "],
+                ),
+                actor,
+            )
+        )
+        assert response.question == "New question"
+        assert response.answer_points == ["point"]
+        assert response.expected_document_ids == ["doc-1"]
+        assert len(created[0][1]) == 1
+
+        async def create_invalid(payload, expected_status: int) -> None:
+            try:
+                await evaluation_service.create_evaluation_case(
+                    FakeDb(), knowledge_base, payload, actor
+                )
+            except HTTPException as exc:
+                assert exc.status_code == expected_status
+            else:
+                raise AssertionError("invalid evaluation case was accepted")
+
+        asyncio.run(
+            create_invalid(
+                KnowledgeEvaluationCaseCreateRequest(
+                    question="question",
+                    expected_document_ids=["doc-1"],
+                    answer_points=[" "],
+                ),
+                422,
+            )
+        )
+        state["documents"] = []
+        asyncio.run(
+            create_invalid(
+                KnowledgeEvaluationCaseCreateRequest(
+                    question="question",
+                    expected_document_ids=["doc-1"],
+                ),
+                404,
+            )
+        )
+
+        assert asyncio.run(
+            evaluation_service.get_evaluation_task(
+                FakeDb(), knowledge_base, task.id
+            )
+        ) is task
+        assert asyncio.run(
+            evaluation_service.list_evaluation_runs(
+                FakeDb(), knowledge_base, limit=1
+            )
+        )[0].id == task.id
+        state["task"] = KnowledgeTask(
+            id="task-2",
+            workspace_id="ws-1",
+            knowledge_base_id="kb-1",
+            task_type="parse",
+        )
+
+        async def get_invalid_task() -> None:
+            try:
+                await evaluation_service.get_evaluation_task(
+                    FakeDb(), knowledge_base, "task-2"
+                )
+            except HTTPException as exc:
+                assert exc.status_code == 404
+            else:
+                raise AssertionError("non-evaluation task was accepted")
+
+        asyncio.run(get_invalid_task())
+    finally:
+        (
+            evaluation_service.evaluation_repository.list_cases,
+            evaluation_service.evaluation_repository.list_expectations_for_cases,
+            evaluation_service.knowledge_repository.list_active_documents_by_ids,
+            evaluation_service.evaluation_repository.create_case,
+            evaluation_service.knowledge_repository.get_knowledge_task_by_id,
+            evaluation_service.evaluation_repository.list_evaluation_tasks,
+            evaluation_service.record_audit_log,
+        ) = originals
+
+    assert asyncio.run(
+        evaluation_repository.list_cases_by_ids(FakeDb(), knowledge_base, set())
+    ) == []
+    assert asyncio.run(
+        evaluation_repository.list_expectations_for_cases(
+            FakeDb(), knowledge_base, set()
+        )
+    ) == []
+
+
+def test_evaluation_routes_delegate_to_application() -> None:
+    from app.api.v1.endpoints import knowledge_evaluation as evaluation_api
+    from app.schemas.knowledge import (
+        KnowledgeEvaluationCaseCreateRequest,
+        KnowledgeEvaluationRunRequest,
+    )
+
+    knowledge_base = KnowledgeBase(id="kb-1", workspace_id="ws-1")
+    context = SimpleNamespace(
+        workspace=SimpleNamespace(id="ws-1"),
+        user=User(id="user-1", username="user"),
+        membership_role="member",
+    )
+    db = object()
+    settings = object()
+    calls: list[tuple] = []
+
+    async def get_knowledge_base(*args):
+        calls.append(("get", args[1], args[2]))
+        return knowledge_base
+
+    async def require_permission(*args):
+        calls.append(("permission", args[-1]))
+
+    async def list_cases(*_args, **kwargs):
+        calls.append(("list-cases", kwargs))
+        return ["case"]
+
+    async def create_case(*_args):
+        return "created"
+
+    async def delete_case(*_args):
+        calls.append(("delete",))
+
+    async def list_runs(*_args, **kwargs):
+        calls.append(("list-runs", kwargs))
+        return ["run"]
+
+    async def enqueue_run(*_args):
+        return SimpleNamespace(id="task-1")
+
+    async def dispatch(*args):
+        calls.append(("dispatch", args[0]))
+
+    async def get_run(*_args):
+        return "run"
+
+    async def get_summary(*_args):
+        return "summary"
+
+    async def get_latest(*_args):
+        return "latest"
+
+    originals = (
+        evaluation_api.get_knowledge_base,
+        evaluation_api.require_knowledge_base_permission,
+        evaluation_api.list_evaluation_cases,
+        evaluation_api.create_evaluation_case,
+        evaluation_api.delete_evaluation_case,
+        evaluation_api.list_evaluation_runs,
+        evaluation_api.enqueue_evaluation_run,
+        evaluation_api.dispatch_knowledge_task,
+        evaluation_api.get_evaluation_run,
+        evaluation_api.get_evaluation_summary,
+        evaluation_api.get_latest_evaluation_summary,
+    )
+    (
+        evaluation_api.get_knowledge_base,
+        evaluation_api.require_knowledge_base_permission,
+        evaluation_api.list_evaluation_cases,
+        evaluation_api.create_evaluation_case,
+        evaluation_api.delete_evaluation_case,
+        evaluation_api.list_evaluation_runs,
+        evaluation_api.enqueue_evaluation_run,
+        evaluation_api.dispatch_knowledge_task,
+        evaluation_api.get_evaluation_run,
+        evaluation_api.get_evaluation_summary,
+        evaluation_api.get_latest_evaluation_summary,
+    ) = (
+        get_knowledge_base,
+        require_permission,
+        list_cases,
+        create_case,
+        delete_case,
+        list_runs,
+        enqueue_run,
+        dispatch,
+        get_run,
+        get_summary,
+        get_latest,
+    )
+    try:
+        async def run() -> None:
+            assert await evaluation_api.list_workspace_evaluation_cases(
+                "kb-1", context, db, 10, 2
+            ) == ["case"]
+            assert await evaluation_api.create_workspace_evaluation_case(
+                "kb-1",
+                KnowledgeEvaluationCaseCreateRequest(
+                    question="question", expected_document_ids=["doc-1"]
+                ),
+                context,
+                db,
+            ) == "created"
+            deleted = await evaluation_api.delete_workspace_evaluation_case(
+                "kb-1", "case-1", context, db
+            )
+            assert deleted.status_code == 204
+            assert await evaluation_api.list_workspace_evaluation_runs(
+                "kb-1", context, db, 5
+            ) == ["run"]
+            assert (
+                await evaluation_api.create_workspace_evaluation_run(
+                    "kb-1",
+                    KnowledgeEvaluationRunRequest(case_ids=["case-1"]),
+                    context,
+                    settings,
+                    db,
+                )
+            ).id == "task-1"
+            assert await evaluation_api.get_workspace_evaluation_run(
+                "kb-1", "task-1", context, db
+            ) == "run"
+            assert await evaluation_api.get_workspace_evaluation_results(
+                "kb-1", "task-1", context, db
+            ) == "summary"
+            assert await evaluation_api.get_workspace_latest_evaluation_results(
+                "kb-1", context, db
+            ) == "latest"
+
+        asyncio.run(run())
+    finally:
+        (
+            evaluation_api.get_knowledge_base,
+            evaluation_api.require_knowledge_base_permission,
+            evaluation_api.list_evaluation_cases,
+            evaluation_api.create_evaluation_case,
+            evaluation_api.delete_evaluation_case,
+            evaluation_api.list_evaluation_runs,
+            evaluation_api.enqueue_evaluation_run,
+            evaluation_api.dispatch_knowledge_task,
+            evaluation_api.get_evaluation_run,
+            evaluation_api.get_evaluation_summary,
+            evaluation_api.get_latest_evaluation_summary,
+        ) = originals
+
+    assert ("dispatch", "task-1") in calls
+    assert ("permission", {"edit"}) in calls
+    assert ("permission", {"view", "edit"}) in calls
+
+
+def test_qa_import_is_explicit_validated_and_bounded() -> None:
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from openpyxl import Workbook
+
+    from app.capabilities.embedding.pipeline import KnowledgePipelineError
+    from app.capabilities.embedding.qa_import import (
+        QaRow,
+        extract_qa_rows,
+        validate_qa_rows,
+    )
+
+    def expect_error(rows, fragment: str) -> None:
+        try:
+            validate_qa_rows(rows)
+        except KnowledgePipelineError as exc:
+            assert fragment in str(exc), str(exc)
+        else:
+            raise AssertionError("invalid QA rows were accepted")
+
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        csv_path = root / "qa.csv"
+        csv_path.write_text(
+            "问题,答案,来源\n如何回滚？,需要管理员批准。,运维手册 3.2\n",
+            encoding="utf-8-sig",
+        )
+        expected = [
+            QaRow(
+                question="如何回滚？",
+                answer="需要管理员批准。",
+                source="运维手册 3.2",
+                row_number=2,
+            )
+        ]
+        assert extract_qa_rows(csv_path.name, csv_path) == expected
+
+        xlsx_path = root / "qa.xlsx"
+        workbook = Workbook()
+        workbook.active.append(["question", "answer", "source"])
+        workbook.active.append(["如何回滚？", "需要管理员批准。", "运维手册 3.2"])
+        workbook.save(xlsx_path)
+        workbook.close()
+        assert extract_qa_rows(xlsx_path.name, xlsx_path) == expected
+
+        try:
+            extract_qa_rows("qa.txt", csv_path)
+        except KnowledgePipelineError as exc:
+            assert "CSV and XLSX" in str(exc)
+        else:
+            raise AssertionError("unsupported QA file was accepted")
+
+        invalid_csv = root / "invalid.csv"
+        invalid_csv.write_bytes(b"question,answer\n\xff,answer\n")
+        try:
+            extract_qa_rows(invalid_csv.name, invalid_csv)
+        except KnowledgePipelineError as exc:
+            assert "UTF-8" in str(exc)
+        else:
+            raise AssertionError("non-UTF-8 QA CSV was accepted")
+
+        invalid_xlsx = root / "invalid.xlsx"
+        invalid_xlsx.write_bytes(b"not an xlsx archive")
+        try:
+            extract_qa_rows(invalid_xlsx.name, invalid_xlsx)
+        except KnowledgePipelineError as exc:
+            assert "invalid" in str(exc)
+        else:
+            raise AssertionError("invalid QA XLSX was accepted")
+
+    expect_error([], "no header")
+    expect_error([["", ""], ["question", "answer"]], "no data")
+    assert validate_qa_rows(
+        [["ignored", "question", "answer"], ["unused", "q", "a"]]
+    ) == [QaRow(question="q", answer="a", source="", row_number=2)]
+    assert validate_qa_rows(
+        [["", ""], ["question", "answer"], ["", ""], ["q", "a"]]
+    ) == [QaRow(question="q", answer="a", source="", row_number=4)]
+    expect_error([["source"]], "requires")
+    expect_error([["question", "问题", "answer"]], "duplicate question")
+    expect_error([["question", "answer"], ["", "answer"]], "row 2")
+    expect_error([["question", "answer"], ["question", ""]], "row 2")
+    expect_error(
+        [["question", "answer"], ["q" * 2001, "answer"]],
+        "row 2",
+    )
+    expect_error(
+        [["question", "answer"], ["question", "a" * 20001]],
+        "row 2",
+    )
+
+    def too_many_rows():
+        yield ["question", "answer"]
+        for index in range(5001):
+            yield [f"question {index}", "answer"]
+        raise AssertionError("QA parser consumed beyond its row limit")
+
+    expect_error(too_many_rows(), "row 5002")
+
+
 def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
     from app.entities.knowledge import (
         KnowledgeDocument,
@@ -2400,6 +3093,11 @@ def main() -> None:
     test_reciprocal_rank_fusion_merges_and_ranks()
     test_reciprocal_rank_fusion_reports_named_rankings_deterministically()
     test_detailed_knowledge_query_contract_defaults()
+    test_retrieval_evaluation_metrics_are_deterministic()
+    test_evaluation_mutations_lock_before_validation_and_require_lease()
+    test_evaluation_case_service_and_repository_edges()
+    test_evaluation_routes_delegate_to_application()
+    test_qa_import_is_explicit_validated_and_bounded()
     test_explicit_reference_extraction_is_bounded_and_internal()
     test_parent_context_windows_around_child_offsets()
     test_model_type_normalization()

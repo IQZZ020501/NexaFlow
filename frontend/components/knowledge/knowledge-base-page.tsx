@@ -104,6 +104,7 @@ import {
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import { KnowledgeHitTest } from "@/components/knowledge/knowledge-hit-test"
+import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
 import {
   getDocumentFileIcon,
   getDocumentFileIconColor,
@@ -625,7 +626,8 @@ function KnowledgeBasePageContent({
       const path = knowledgeUploadSegmentPath(
         selectedKnowledgeBaseId,
         routeState.documentIds,
-        routeState.parseSettings
+        routeState.parseSettings,
+        routeState.importMode
       )
       router.replace(path)
     },
@@ -1149,6 +1151,7 @@ function KnowledgeBasePageContent({
   }> = [
     { key: "documents", label: t("文档"), icon: FileTextIcon },
     { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
+    { key: "evaluation", label: t("检索评测"), icon: FlaskConicalIcon },
     { key: "hit-test", label: t("命中测试"), icon: TargetIcon },
     { key: "settings", label: t("设置"), icon: SettingsIcon },
   ]
@@ -2064,6 +2067,17 @@ function KnowledgeBasePageContent({
                 token={token}
                 workspaceId={selectedKnowledgeBase.workspace_id}
                 knowledgeBaseId={selectedKnowledgeBase.id}
+                reportError={reportError}
+              />
+            ) : null}
+
+            {activeDetailTab === "evaluation" ? (
+              <KnowledgeEvaluation
+                token={token}
+                workspaceId={selectedKnowledgeBase.workspace_id}
+                knowledgeBaseId={selectedKnowledgeBase.id}
+                documents={documents}
+                canEdit={canEditDocuments}
                 reportError={reportError}
               />
             ) : null}

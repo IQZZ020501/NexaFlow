@@ -26,6 +26,7 @@ describe("knowledge upload routes", () => {
       KNOWLEDGE_BASE_ID,
       DOCUMENT_IDS,
       parseSettings,
+      "document",
     )
     const url = new URL(path, "http://localhost")
 
@@ -34,7 +35,32 @@ describe("knowledge upload routes", () => {
     )
     expect(parseKnowledgeUploadRouteState(Object.fromEntries(url.searchParams))).toEqual({
       documentIds: DOCUMENT_IDS,
+      importMode: "document",
       parseSettings,
+    })
+  })
+
+  test("keeps Q&A mode while ignoring document segmentation settings", () => {
+    const path = knowledgeUploadSegmentPath(
+      KNOWLEDGE_BASE_ID,
+      DOCUMENT_IDS,
+      {
+        segmentMode: "advanced",
+        chunkSize: 900,
+        chunkOverlap: 90,
+        splitSeparator: "。",
+        cleaningRules: ["collapse_spaces"],
+      },
+      "qa",
+    )
+    const url = new URL(path, "http://localhost")
+
+    expect(
+      parseKnowledgeUploadRouteState(Object.fromEntries(url.searchParams)),
+    ).toEqual({
+      documentIds: DOCUMENT_IDS,
+      importMode: "qa",
+      parseSettings: DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS,
     })
   })
 
@@ -50,6 +76,7 @@ describe("knowledge upload routes", () => {
       }),
     ).toEqual({
       documentIds: [DOCUMENT_IDS[0]],
+      importMode: "document",
       parseSettings: DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS,
     })
     expect(knowledgeUploadPath(KNOWLEDGE_BASE_ID)).toBe(

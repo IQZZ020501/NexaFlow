@@ -26,6 +26,7 @@ from app.entities.knowledge import (
     DOCUMENT_PARSING_STATUS,
     DOCUMENT_STAGED_META_KEY,
     TASK_FAILED_STATUS,
+    TASK_EVALUATE,
     TASK_INDEX,
     TASK_PARSE,
     TASK_QUEUED_STATUS,
@@ -41,6 +42,7 @@ from app.entities.knowledge import (
 from app.ports.parsing import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
+    ChildChunkDraft,
     DocumentChunkDrafts,
     KnowledgePipelineError,
     SPLIT_SEPARATORS,
@@ -49,6 +51,7 @@ from app.ports.parsing import (
     chunk_token_count,
     clean_text,
     extract_document,
+    extract_qa_rows,
     split_text,
 )
 from app.ports.vector_store import delete_vectors
@@ -133,6 +136,22 @@ def chunk_to_response(
         start_offset=chunk.start_offset,
         end_offset=chunk.end_offset,
         content=chunk.content,
+        kind=chunk.kind,
+        question=(
+            (chunk.meta or {}).get("question")
+            if isinstance((chunk.meta or {}).get("question"), str)
+            else None
+        ),
+        source=(
+            (chunk.meta or {}).get("source") or None
+            if isinstance((chunk.meta or {}).get("source"), str)
+            else None
+        ),
+        row_number=(
+            (chunk.meta or {}).get("row_number")
+            if isinstance((chunk.meta or {}).get("row_number"), int)
+            else None
+        ),
         char_count=chunk.char_count,
         token_count=chunk.token_count,
         vector_id=chunk.vector_id,
@@ -279,6 +298,28 @@ async def extract_document_chunk_contents(
     settings: Settings,
     options: dict[str, Any],
 ) -> DocumentChunkDrafts:
+    if (document.meta or {}).get("import_mode") == "qa":
+        rows = await asyncio.to_thread(
+            extract_qa_rows,
+            document.filename,
+            knowledge_document_path(settings, document.storage_path),
+        )
+        return DocumentChunkDrafts(
+            parents=[],
+            children=[
+                ChildChunkDraft(
+                    content=row.answer,
+                    kind="qa",
+                    meta={
+                        "question": row.question,
+                        "source": row.source,
+                        "row_number": row.row_number,
+                    },
+                )
+                for row in rows
+            ],
+        )
+
     text, assets = await asyncio.to_thread(
         extract_document,
         document.filename,
@@ -511,6 +552,13 @@ async def create_knowledge_task(
         if not chunks:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Knowledge base has no indexed chunks.")
         total_items = len(chunks)
+    elif task_type == TASK_EVALUATE:
+        total_items = len((options or {}).get("case_ids", []))
+        if total_items == 0:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Evaluation task has no cases.",
+            )
     else:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid knowledge task.")
 
@@ -553,7 +601,7 @@ async def get_conflicting_open_task(
     task_type: str,
     document_id: str | None,
 ) -> KnowledgeTask | None:
-    if task_type == TASK_REBUILD_INDEX:
+    if task_type in {TASK_REBUILD_INDEX, TASK_EVALUATE}:
         return await knowledge_base_repository.get_open_knowledge_base_task(db, knowledge_base)
     if document_id is None:
         return await knowledge_base_repository.get_open_knowledge_task(
@@ -569,12 +617,16 @@ async def get_conflicting_open_task(
     )
     if open_task is not None:
         return open_task
-    return await knowledge_base_repository.get_open_knowledge_task(
-        db,
-        knowledge_base,
-        TASK_REBUILD_INDEX,
-        None,
-    )
+    for blocking_task_type in (TASK_REBUILD_INDEX, TASK_EVALUATE):
+        blocking_task = await knowledge_base_repository.get_open_knowledge_task(
+            db,
+            knowledge_base,
+            blocking_task_type,
+            None,
+        )
+        if blocking_task is not None:
+            return blocking_task
+    return None
 
 
 async def enqueue_parse_knowledge_document(

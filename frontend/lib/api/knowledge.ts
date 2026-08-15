@@ -84,6 +84,10 @@ export type KnowledgeDocumentChunk = {
   start_offset: number | null
   end_offset: number | null
   content: string
+  kind: "document" | "qa"
+  question: string | null
+  source: string | null
+  row_number: number | null
   char_count: number
   token_count: number
   vector_id: string | null
@@ -160,6 +164,55 @@ export type KnowledgeQueryInspectResult = {
   trace: KnowledgeRetrievalTrace
 }
 
+export type KnowledgeEvaluationCase = {
+  id: string
+  workspace_id: string
+  knowledge_base_id: string
+  question: string
+  expected_document_ids: string[]
+  answer_points: string[]
+  created_by_user_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type KnowledgeEvaluationRunRequest = {
+  case_ids: string[]
+  limit: number
+  search_mode: KnowledgeSearchMode
+  similarity: number | null
+  include_references: boolean
+}
+
+export type KnowledgeEvaluationResult = {
+  id: string
+  case_id: string
+  question: string
+  returned_document_ids: string[]
+  returned_chunk_ids: string[]
+  hit_at_k: number
+  recall_at_k: number
+  reciprocal_rank: number
+  ndcg_at_k: number
+  latency_ms: number
+  trace: Record<string, unknown>
+  error: string | null
+  created_at: string
+}
+
+export type KnowledgeEvaluationSummary = {
+  task: KnowledgeTask
+  count: number
+  failed_count: number
+  mean_hit_at_k: number
+  mean_recall_at_k: number
+  mean_reciprocal_rank: number
+  mean_ndcg_at_k: number
+  p50_latency_ms: number
+  p95_latency_ms: number
+  results: KnowledgeEvaluationResult[]
+}
+
 export type KnowledgeBaseForm = {
   name: string
   description: string
@@ -178,7 +231,7 @@ export type KnowledgeBasePermissionForm = {
 }
 
 export type KnowledgeBaseDetailTab =
-  "documents" | "tasks" | "questions" | "hit-test" | "settings"
+  "documents" | "tasks" | "evaluation" | "hit-test" | "settings"
 
 export type KnowledgeModelTestResult = {
   embedding_model_id: string
@@ -303,13 +356,18 @@ export function createKnowledgeDocuments(
   knowledgeBaseId: string,
   attachmentIds: string[],
   staged = true,
+  importMode?: "document" | "qa",
 ) {
   return request<KnowledgeDocument[]>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents`,
     {
       method: "POST",
       token,
-      body: JSON.stringify({ attachment_ids: attachmentIds, staged }),
+      body: JSON.stringify({
+        attachment_ids: attachmentIds,
+        staged,
+        ...(importMode ? { import_mode: importMode } : {}),
+      }),
     },
   )
 }
@@ -519,6 +577,100 @@ export function inspectKnowledgeBase(
       token,
       body: JSON.stringify(payload),
     },
+  )
+}
+
+function evaluationPath(
+  workspaceId: string,
+  knowledgeBaseId: string,
+  suffix = "",
+) {
+  return `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/evaluations${suffix}`
+}
+
+export function listKnowledgeEvaluationCases(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+) {
+  return request<KnowledgeEvaluationCase[]>(
+    evaluationPath(workspaceId, knowledgeBaseId, "/cases"),
+    { token },
+  )
+}
+
+export function createKnowledgeEvaluationCase(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  payload: {
+    question: string
+    expected_document_ids: string[]
+    answer_points: string[]
+  },
+) {
+  return request<KnowledgeEvaluationCase>(
+    evaluationPath(workspaceId, knowledgeBaseId, "/cases"),
+    { method: "POST", token, body: JSON.stringify(payload) },
+  )
+}
+
+export function deleteKnowledgeEvaluationCase(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  caseId: string,
+) {
+  return request<void>(
+    evaluationPath(workspaceId, knowledgeBaseId, `/cases/${caseId}`),
+    { method: "DELETE", token },
+  )
+}
+
+export function listKnowledgeEvaluationRuns(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+) {
+  return request<KnowledgeTask[]>(
+    evaluationPath(workspaceId, knowledgeBaseId, "/runs"),
+    { token },
+  )
+}
+
+export function createKnowledgeEvaluationRun(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  payload: KnowledgeEvaluationRunRequest,
+) {
+  return request<KnowledgeTask>(
+    evaluationPath(workspaceId, knowledgeBaseId, "/runs"),
+    { method: "POST", token, body: JSON.stringify(payload) },
+  )
+}
+
+export function getKnowledgeEvaluationRun(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  taskId: string,
+) {
+  return request<KnowledgeTask>(
+    evaluationPath(workspaceId, knowledgeBaseId, `/runs/${taskId}`),
+    { token },
+  )
+}
+
+export function getKnowledgeEvaluationSummary(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  taskId: string,
+) {
+  return request<KnowledgeEvaluationSummary>(
+    evaluationPath(workspaceId, knowledgeBaseId, `/runs/${taskId}/results`),
+    { token },
   )
 }
 

@@ -40,6 +40,7 @@ from app.shareddomain.knowledge.models import (
     KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
     KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
     KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
+    KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
     KnowledgeStorageCleanup as KnowledgeStorageCleanupORM,
     KnowledgeTask as KnowledgeTaskORM,
 )
@@ -903,6 +904,30 @@ async def renew_knowledge_task_lease(
     return result.rowcount == 1
 
 
+async def update_owned_knowledge_task_progress(
+    db: AsyncSession,
+    task_id: str,
+    worker_task_id: str,
+    total_items: int,
+    processed_items: int,
+    lease_expires_at: datetime,
+) -> bool:
+    result = await db.execute(
+        update(KnowledgeTaskORM)
+        .where(
+            KnowledgeTaskORM.id == task_id,
+            KnowledgeTaskORM.status == TASK_RUNNING_STATUS,
+            KnowledgeTaskORM.worker_task_id == worker_task_id,
+        )
+        .values(
+            total_items=total_items,
+            processed_items=processed_items,
+            lease_expires_at=lease_expires_at,
+        )
+    )
+    return result.rowcount == 1
+
+
 async def get_open_knowledge_task(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
@@ -985,6 +1010,12 @@ async def delete_knowledge_base_graph(
     knowledge_base: KnowledgeBase,
     resource_type: str,
 ) -> None:
+    await db.execute(
+        delete(KnowledgeEvaluationCaseORM).where(
+            KnowledgeEvaluationCaseORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeEvaluationCaseORM.knowledge_base_id == knowledge_base.id,
+        )
+    )
     await db.execute(
         delete(KnowledgeDocumentReferenceORM).where(
             KnowledgeDocumentReferenceORM.workspace_id
