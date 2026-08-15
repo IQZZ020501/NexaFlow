@@ -98,6 +98,25 @@ test("localized variable previews do not replace the editable textarea value", (
   expect(textEditor).toContain("localizedValue")
 })
 
+test("form select options preserve the editing draft", () => {
+  expect(source).toContain("function FormOptionsInput")
+  expect(source).toContain(
+    "const displayValue = editing ? draft : value.join(\", \")"
+  )
+  expect(source).toContain("value={displayValue}")
+  expect(source).toContain("<FormOptionsInput")
+  expect(source).not.toContain('value={field.optionList.join(", ")}')
+})
+
+test("mobile workflow actions keep accessible names", () => {
+  expect(detailSource).toContain('aria-label={t("保存")}')
+  expect(detailSource).toContain('aria-label={t("添加节点")}')
+  expect(detailSource).toContain(
+    'aria-label={agent.can_edit ? t("调试运行") : t("运行已发布版本")}'
+  )
+  expect(detailSource).toContain('aria-label={t("发布版本")}')
+})
+
 test("output fields use translated labels and confirm successful copies", () => {
   expect(source).toContain('variable: { value: "变量值" }')
   expect(source).toContain('code: { result: "执行结果", stdout: "标准输出", stderr: "错误输出" }')
@@ -231,6 +250,21 @@ test("React Flow selection changes use a stable state callback", () => {
   )
   expect(canvasSource).not.toContain(
     "onSelectionChange={({ edges: selectedEdges }) =>"
+  )
+})
+
+test("node form updates reach React Flow before controlled input restoration", () => {
+  const updateNode = canvasSource.slice(
+    canvasSource.indexOf("const updateNode = React.useCallback"),
+    canvasSource.indexOf("const copyNode = React.useCallback")
+  )
+
+  expect(updateNode).toContain("flowState.setNodes")
+  expect(updateNode.indexOf("flowState.setNodes")).toBeLessThan(
+    updateNode.indexOf("setNodes((current)")
+  )
+  expect(canvasSource).toContain(
+    "updateNode(node.id, (item) => ({ ...item, data: nextData }))"
   )
 })
 

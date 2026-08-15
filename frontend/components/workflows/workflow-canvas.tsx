@@ -11,6 +11,7 @@ import {
   ViewportPortal,
   addEdge,
   useReactFlow,
+  useStoreApi,
   type AriaLabelConfig,
   type Connection,
   type EdgeChange,
@@ -97,6 +98,7 @@ type WorkflowCanvasProps = {
 
 function CanvasInner(props: WorkflowCanvasProps) {
   const { screenToFlowPosition, setViewport: setFlowViewport } = useReactFlow()
+  const flowStore = useStoreApi<WorkflowNode, WorkflowEdge>()
   const { t } = props
   const [initialGraph] = React.useState(() =>
     props.readOnly ? props.graph : ensureConditionElseIfBranches(props.graph)
@@ -320,9 +322,19 @@ function CanvasInner(props: WorkflowCanvasProps) {
     setSelectedEdgeId((current) => (current === edgeId ? null : current))
   }, [])
 
-  const updateNode = React.useCallback((nodeId: string, update: (node: WorkflowNode) => WorkflowNode) => {
-    setNodes((current) => current.map((node) => (node.id === nodeId ? update(node) : node)))
-  }, [])
+  const updateNode = React.useCallback(
+    (nodeId: string, update: (node: WorkflowNode) => WorkflowNode) => {
+      const updateMatchingNode = (node: WorkflowNode) =>
+        node.id === nodeId ? update(node) : node
+
+      // React Flow applies controlled nodes in a passive effect. Mirror the
+      // update now so ReactDOM cannot restore IME input from stale node data.
+      const flowState = flowStore.getState()
+      flowState.setNodes(flowState.nodes.map(updateMatchingNode))
+      setNodes((current) => current.map(updateMatchingNode))
+    },
+    [flowStore]
+  )
 
   const copyNode = React.useCallback((nodeId: string) => {
     if (props.readOnly) return
@@ -378,11 +390,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
                   )
                 )
               }
-              setNodes((current) =>
-                current.map((item) =>
-                  item.id === node.id ? { ...item, data: nextData } : item
-                )
-              )
+              updateNode(node.id, (item) => ({ ...item, data: nextData }))
             },
             agent: props.agent,
             models: props.models,
@@ -392,7 +400,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
             edges,
           },
       })),
-    [copyNode, deleteNode, edges, nodes, props.agent, props.knowledgeBases, props.mcpServers, props.models, props.readOnly, props.runtimeStatuses, renameNode]
+    [copyNode, deleteNode, edges, nodes, props.agent, props.knowledgeBases, props.mcpServers, props.models, props.readOnly, props.runtimeStatuses, renameNode, updateNode]
   )
   const renderedEdges = React.useMemo(
     () =>
