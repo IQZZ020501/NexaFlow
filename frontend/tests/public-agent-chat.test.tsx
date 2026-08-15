@@ -1422,7 +1422,15 @@ describe("PublicAgentChat", () => {
     // An answer-only timeline synthesizes an analysis step before it.
     expect(screen.getByText("已完成分析")).toBeTruthy()
     expect(screen.getByText("回答已生成")).toBeTruthy()
-    expect(screen.getByText("第一个会话").closest("button")?.getAttribute("aria-current")).toBe("page")
+    const currentConversationButton = screen
+      .getByText("第一个会话")
+      .closest("button")!
+    expect(currentConversationButton.getAttribute("aria-current")).toBe("page")
+
+    // Selecting the current conversation keeps its already-loaded messages.
+    fireEvent.click(currentConversationButton)
+    expect(Boolean(screen.queryByText("正在加载"))).toBe(false)
+    expect(screen.getByText("第一个问题")).toBeTruthy()
 
     // Switch to the second conversation.
     fireEvent.click(screen.getByRole("button", { name: /第二个会话/ }))

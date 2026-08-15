@@ -3,6 +3,7 @@
 ## medium: 选择当前已激活对话后加载指示器卡死
 
 - 编号: BUG-frontend-001
+- 状态: **已修复（2026-08-15）**
 - 严重度: medium
 - 模块: `frontend/components/agents/public-agent-chat.tsx`（`selectConversation` 与 runs 加载 effect）
 - 现象: 在侧栏或移动端历史对话框里点击"当前已激活"的会话时，`setIsRunsLoading(true)`
@@ -17,3 +18,4 @@
   `frontend/tests/public-agent-chat.test.tsx` 中若在移动端对话框点击当前会话
   （conv-1），"来自对话的记录"随即消失且不再出现（为通过测试只能改为点击另一会话）。
 - 来源: 测试套件 `frontend/tests/public-agent-chat.test.tsx`（2026-08-15）
+- 修复: 当前会话点击直接关闭历史面板并保留已加载内容，不再进入 runs loading 状态。

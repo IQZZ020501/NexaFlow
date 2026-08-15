@@ -59,10 +59,11 @@
 - 复现: 任何一次完整 run_agent 执行。
 - 来源: tests.agent_runtime_coverage（assert_durable_execution_paths）
 
-### low: usage 归一化丢弃非整数 token 计数
+### 复核后非缺陷: usage 归一化拒绝非整数 token 计数
 
 - 编号: BUG-runtime-003
-- 严重度: low
+- 严重度: non-bug
+- 状态: **关闭（输入违反 LangChain 整数 token 契约）**
 - 模块: `backend/app/shareddomain/agents/runtime/usage.py:27-36`（`_number`）
 - 现象: `_number` 对非整数 float（如 `3.5`）返回 `None`，`usage_from_message`
   与 `merge_usage` 会静默把这类值当作 0 / 直接丢弃。若某供应商上报小数 token
@@ -72,10 +73,11 @@
   -> `total_tokens == 0`（应为 4 或 3.5 取整）。
 - 来源: tests.agent_runtime_coverage（assert_usage_normalization）
 
-### low: resolve_agent_run_tool_approval 对已终态 run 的重复批准静默返回
+### 复核后非缺陷: resolve_agent_run_tool_approval 的重复批准幂等语义
 
 - 编号: BUG-runtime-004
-- 严重度: low
+- 严重度: non-bug
+- 状态: **关闭（同一批准人的幂等重试语义）**
 - 模块: `backend/app/application/agent_runs.py:286-291`
 - 现象: 当调用已 `approved` 且 `approved_by_user_id == actor.id` 时，重复
   approve 直接 `refresh_agent_run` 返回，即使该 run 已处于 `succeeded`/

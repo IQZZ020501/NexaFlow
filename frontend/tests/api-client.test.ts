@@ -46,4 +46,21 @@ describe("api client", () => {
 
     expect(await request("/users/1", { method: "DELETE" })).toBeUndefined()
   })
+
+  test("preserves plain-text error responses as API errors", async () => {
+    globalThis.fetch = (async () =>
+      new Response("upstream unavailable", {
+        status: 502,
+        statusText: "Bad Gateway",
+      })) as unknown as typeof fetch
+
+    try {
+      await request("/users")
+      throw new Error("request should fail")
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError)
+      expect((error as ApiError).status).toBe(502)
+      expect((error as ApiError).message).toBe("upstream unavailable")
+    }
+  })
 })

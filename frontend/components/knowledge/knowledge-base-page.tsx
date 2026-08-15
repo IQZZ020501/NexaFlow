@@ -1694,7 +1694,7 @@ function KnowledgeBasePageContent({
                       )}
                     </div>
                   </div>
-                  {filteredDocuments.length > documentPageSize ? (
+                  {filteredDocuments.length > 0 ? (
                     <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
                         <span className="text-muted-foreground">

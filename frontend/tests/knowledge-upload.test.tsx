@@ -930,9 +930,10 @@ describe("knowledge upload flow: segment step route restore", () => {
     }
   })
 
-  test("reports an error when restoring documents fails", async () => {
+  test("retries route restoration from the refresh button after a failure", async () => {
     const api = new KnowledgeApi()
-    api.addDocuments(makeDocument({ id: "doc-1" }))
+    api.addDocuments(makeDocument({ id: "doc-1", status: "parsed" }))
+    api.setChunks("doc-1", parsedChunks("doc-1", ["restored chunk"]))
     api.listDocumentsFailure = true
     withFetch(api.handler)
 
@@ -948,6 +949,10 @@ describe("knowledge upload flow: segment step route restore", () => {
     )
     expect(screen.getByText("暂无文件")).toBeTruthy()
     expect(callbacks.onBackToFiles.mock.calls.length).toBe(0)
+
+    api.listDocumentsFailure = false
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }))
+    await waitFor(() => expect(screen.getByText("restored chunk")).toBeTruthy())
   })
 
   test("refresh reloads the preview documents", async () => {
@@ -977,12 +982,13 @@ describe("knowledge upload flow: segment step route restore", () => {
     )
   })
 
-  test("does not poll or regenerate for parsing documents restored from the route (BUG-frontend-002)", async () => {
+  test("resumes polling for parsing documents restored from the route", async () => {
     const api = new KnowledgeApi()
     api.addDocuments(
       makeDocument({ id: "doc-1", filename: "mid.pdf", status: "parsing" }),
     )
-    api.setChunks("doc-1", parsedChunks("doc-1", ["partial chunk"]))
+    api.setChunks("doc-1", parsedChunks("doc-1", ["restored chunk"]))
+    api.setTaskStatusSequence("doc-1", ["queued", "succeeded"])
     withFetch(api.handler)
     const restoreTimer = patchPollTimer()
 
@@ -992,14 +998,13 @@ describe("knowledge upload flow: segment step route restore", () => {
         routeState: { documentIds: ["doc-1"], parseSettings: SMART_SETTINGS },
       })
 
-      await waitFor(() => screen.getByText("partial chunk"))
-      // Current behavior: a parsing document is neither fully parsed nor
-      // unparsed, so the route restore neither polls its task nor enqueues a
-      // fresh parse. The document is shown as-is with its progress label.
-      expect(screen.getByText("分段中")).toBeTruthy()
+      await waitFor(() => screen.getByText("待向量化"))
+      expect(screen.getByText("restored chunk")).toBeTruthy()
       expect(api.parseRequests).toHaveLength(0)
-      expect(api.taskPollCount.get("doc-1")).toBeUndefined()
-      expect(notifyKinds(callbacks.onNotify.mock.calls)).not.toContain("success")
+      expect(api.taskPollCount.get("doc-1")).toBe(2)
+      expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
+        "已生成分段预览",
+      )
     } finally {
       restoreTimer()
     }

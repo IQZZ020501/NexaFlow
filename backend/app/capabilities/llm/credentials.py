@@ -1,5 +1,7 @@
 import json
 
+from cryptography.fernet import InvalidToken
+
 from app.infrastructure.secrets import decrypt_secret, encrypt_secret
 
 SECRET_BUNDLE_PREFIX = "credential-v1:"
@@ -36,7 +38,10 @@ def decrypt_credential_secrets(
 ) -> dict[str, str]:
     if ciphertext is None:
         return {}
-    payload = decrypt_secret(ciphertext, secret_key)
+    try:
+        payload = decrypt_secret(ciphertext, secret_key)
+    except InvalidToken as exc:
+        raise ValueError("Stored model credentials are invalid.") from exc
     if not payload.startswith(SECRET_BUNDLE_PREFIX):
         return {"api_key": payload}
     value = json.loads(payload.removeprefix(SECRET_BUNDLE_PREFIX))

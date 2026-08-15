@@ -1,12 +1,10 @@
 # FrontendUploadChatFinal — BUG/发现记录（第二轮）
 
-## 已补断言：BUG-frontend-002（parsing 文档路由恢复不轮询）
+## 已修复：BUG-frontend-002（parsing 文档路由恢复继续轮询）
 
-- 第一轮已记录该 bug；本轮在 `frontend/tests/knowledge-upload.test.tsx` 新增
-  `does not poll or regenerate for parsing documents restored from the route (BUG-frontend-002)`
-  作为现状断言：文档状态 `parsing` 恢复时既不轮询任务、也不触发新 parse，
-  界面以“分段中”状态原样展示，`parseRequests`/`taskPollCount` 均为空。
-- 不修产品代码，仅固化当前行为，防止该行为被无意改变。
+- 状态: **已修复（2026-08-15）**
+- 回归用例 `resumes polling for parsing documents restored from the route` 验证恢复中的
+  文档继续查询原任务，任务成功后加载分段，且不会重复提交 parse。
 
 ## low: 若干防御性分支在 UI 上不可达（覆盖率死代码）
 
@@ -41,7 +39,4 @@
 - `lib/api/run-stream.ts` 147 行为 while 循环闭合大括号，bun lcov 归因到
   “循环条件退出”路径，该路径实际不存在（循环恒通过 return/throw 退出），
   为覆盖率归因假象，非可执行缺陷。
-- 全量套件当前 2 个失败用例位于 `tests/knowledge-page.test.tsx`
-  （`reloads the list...`、`selects and deselects individual document rows`，
-  “useLanguage must be used within a LanguageProvider”），单文件运行也失败，
-  属于并发同伴（FrontendKbPageFinal）WIP，与本次三个测试文件无关。
+- 上述历史 WIP 失败已过期；2026-08-15 本轮四个相关测试文件共 202 项通过。

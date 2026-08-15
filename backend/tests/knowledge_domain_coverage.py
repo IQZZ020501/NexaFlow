@@ -742,20 +742,13 @@ def test_api_scenario(model_base_url: str) -> None:
         )
         assert restore_models.status_code == 200, restore_models.text
 
-        # rename conflict: IntegrityError surfaces at flush inside
-        # save_knowledge_base (outside the try around commit) -> 500, not 409.
-        # TestClient re-raises server exceptions, so expect IntegrityError.
-        # See docs/buglog/KnowledgeDomainCoverage.md BUG-kdc-001.
-        try:
-            conflict_rename = client.patch(
-                knowledge_url(default_workspace_id, f"/{bob_owned_id}"),
-                headers=auth_headers(bob_token),
-                json={"name": "Product Docs"},
-            )
-        except IntegrityError:
-            pass
-        else:
-            assert conflict_rename.status_code == 500, conflict_rename.text
+        conflict_rename = client.patch(
+            knowledge_url(default_workspace_id, f"/{bob_owned_id}"),
+            headers=auth_headers(bob_token),
+            json={"name": "Product Docs"},
+        )
+        assert conflict_rename.status_code == 409, conflict_rename.text
+        assert conflict_rename.json()["detail"] == "Knowledge base name already exists."
 
         bob_edit_denied = client.patch(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),

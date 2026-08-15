@@ -4,6 +4,7 @@
 
 - 编号: BUG-frontend-002
 - 严重度: low
+- 状态: **已修复（2026-08-15）**
 - 模块: `frontend/components/knowledge/knowledge-upload-flow.tsx`
   （`step === "segment"` 路由恢复 effect + `UNPARSED_STATUS`/`PARSING_STATUSES`）
 - 现象: 从 URL 恢复分段预览时，如果文档状态为 `parse_queued` 或 `parsing`
@@ -26,10 +27,20 @@
   succeeds` 验证了 `uploaded` 状态会轮询）。
 - 来源: `frontend/tests/knowledge-upload.test.tsx`（知识库导入/分段预览覆盖套件）
 
-## low: segment 恢复时上传 Promise 的 .catch 是不可达死代码
+## low: 分段路由恢复失败后刷新按钮无法重试
+
+- 编号: BUG-frontend-004
+- 状态: **已修复（2026-08-15）**
+- 模块: `frontend/components/knowledge/knowledge-upload-flow.tsx`
+- 现象: 初次恢复请求失败后本地文档数组为空，刷新按钮直接返回。
+- 修复: 刷新回退使用路由中的文档 ID，再恢复已解析内容或继续现有解析任务轮询。
+- 来源: `frontend/tests/knowledge-upload.test.tsx`
+
+## 复核后非缺陷: segment 恢复时上传 Promise 的防御性 catch
 
 - 编号: BUG-frontend-003
 - 严重度: low（test-infra）
+- 状态: **关闭（非产品缺陷）**
 - 模块: `frontend/components/knowledge/knowledge-upload-flow.tsx`
   （`step === "segment"` 空 documentIds 分支 `void upload.then(...).catch(...)`）
 - 现象: `uploadPendingFiles` 内部对全部上传失败/建文档失败都做了兜底：
@@ -45,3 +56,5 @@
   内部触发一次（`frontend/tests/knowledge-upload.test.tsx` 中
   `reports the failure when every upload fails`）。
 - 来源: `frontend/tests/knowledge-upload.test.tsx`（知识库导入/分段预览覆盖套件）
+- 复核: 当前生产 API 失败路径被内部兜底，但通知回调或其他意外异常仍可 reject，
+  因此该 catch 不是绝对不可达，也不需要为覆盖率删除。

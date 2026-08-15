@@ -273,29 +273,6 @@ export function KnowledgeUploadFlow({
     [],
   )
 
-  const refreshPreview = React.useCallback(async () => {
-    if (!uploadedDocuments.length) {
-      return
-    }
-
-    setIsRefreshing(true)
-    try {
-      const nextDocuments = await loadPreviewDocuments(
-        uploadedDocuments.map((document) => document.id),
-      )
-      applyPreviewDocuments(nextDocuments)
-    } catch (error) {
-      reportError(error)
-    } finally {
-      setIsRefreshing(false)
-    }
-  }, [
-    applyPreviewDocuments,
-    loadPreviewDocuments,
-    reportError,
-    uploadedDocuments,
-  ])
-
   function chooseFiles(nextFiles: File[]) {
     if (!nextFiles.length) {
       return
@@ -355,6 +332,7 @@ export function KnowledgeUploadFlow({
   const generatePreviewForDocuments = React.useCallback(async (
     documents: UploadedDocument[],
     parseSettings: KnowledgeUploadParseSettings,
+    resumeExisting = false,
   ) => {
     if (
       !documents.length ||
@@ -365,13 +343,29 @@ export function KnowledgeUploadFlow({
     }
 
     setIsParsing(true)
+    const documentsToEnqueue = resumeExisting
+      ? documents.filter((document) => document.status === UNPARSED_STATUS)
+      : documents
+    const existingPendingDocumentIds = resumeExisting
+      ? documents
+          .filter((document) => document.status in PARSING_STATUSES)
+          .map((document) => document.id)
+      : []
+    const previewDocumentIds = new Set([
+      ...documentsToEnqueue.map((document) => document.id),
+      ...existingPendingDocumentIds,
+    ])
     applyPreviewDocuments(
-      documents.map((document) => ({
-        ...document,
-        status: "parsing",
-        last_error: null,
-        chunks: [],
-      })),
+      documents.map((document) =>
+        previewDocumentIds.has(document.id)
+          ? {
+              ...document,
+              status: "parsing",
+              last_error: null,
+              chunks: [],
+            }
+          : document,
+      ),
     )
     try {
       const parseOptionsSignature = JSON.stringify(parseSettings)
@@ -386,7 +380,7 @@ export function KnowledgeUploadFlow({
         auto_index: false,
       }
       const enqueueResults = await Promise.allSettled(
-        documents.map((document) =>
+        documentsToEnqueue.map((document) =>
           parseKnowledgeDocument(
             token,
             workspaceId,
@@ -398,7 +392,7 @@ export function KnowledgeUploadFlow({
       )
       const taskIdByDocumentId = new Map<string, string>()
       const failedAtEnqueue: UploadedDocument[] = []
-      documents.forEach((document, index) => {
+      documentsToEnqueue.forEach((document, index) => {
         const result = enqueueResults[index]
         if (result?.status === "fulfilled") {
           taskIdByDocumentId.set(document.id, result.value.id)
@@ -413,16 +407,19 @@ export function KnowledgeUploadFlow({
       })
 
       const nextDocuments = [...documents]
-      let pendingDocumentIds = new Set(taskIdByDocumentId.keys())
+      let remainingDocumentIds = new Set([
+        ...existingPendingDocumentIds,
+        ...taskIdByDocumentId.keys(),
+      ])
       const startedAt = Date.now()
       const PARSE_POLL_INTERVAL_MS = 2000
       const PARSE_TIMEOUT_MS = 5 * 60 * 1000
-      while (pendingDocumentIds.size > 0) {
+      while (remainingDocumentIds.size > 0) {
         await new Promise((resolve) =>
           window.setTimeout(resolve, PARSE_POLL_INTERVAL_MS),
         )
         if (Date.now() - startedAt > PARSE_TIMEOUT_MS) {
-          for (const documentId of pendingDocumentIds) {
+          for (const documentId of remainingDocumentIds) {
             const index = documents.findIndex(
               (document) => document.id === documentId,
             )
@@ -439,7 +436,7 @@ export function KnowledgeUploadFlow({
         }
 
         const taskResults = await Promise.allSettled(
-          [...pendingDocumentIds].map((documentId) =>
+          [...remainingDocumentIds].map((documentId) =>
             listKnowledgeTasks(
               token,
               workspaceId,
@@ -448,7 +445,7 @@ export function KnowledgeUploadFlow({
             ),
           ),
         )
-        const documentIds = [...pendingDocumentIds]
+        const documentIds = [...remainingDocumentIds]
         const stillPending: string[] = []
         documentIds.forEach((documentId, index) => {
           const result = taskResults[index]
@@ -477,7 +474,7 @@ export function KnowledgeUploadFlow({
             stillPending.push(documentId)
           }
         })
-        pendingDocumentIds = new Set(stillPending)
+        remainingDocumentIds = new Set(stillPending)
       }
 
       // Load chunks for every parsed document.
@@ -569,6 +566,55 @@ export function KnowledgeUploadFlow({
     workspaceId,
   ])
 
+  const refreshPreview = React.useCallback(async () => {
+    const documentIds = uploadedDocuments.length
+      ? uploadedDocuments.map((document) => document.id)
+      : (routeState?.documentIds ?? [])
+    if (!documentIds.length) {
+      return
+    }
+
+    setIsRefreshing(true)
+    try {
+      const nextDocuments = await loadPreviewDocuments(documentIds)
+      applyPreviewDocuments(nextDocuments)
+      if (!routeState) {
+        return
+      }
+      if (
+        nextDocuments.every(
+          (document) =>
+            document.status === "parsed" && document.chunks.length > 0,
+        )
+      ) {
+        setPreviewOptionsSignature(JSON.stringify(routeState.parseSettings))
+      } else if (
+        nextDocuments.some(
+          (document) =>
+            document.status === UNPARSED_STATUS ||
+            document.status in PARSING_STATUSES,
+        )
+      ) {
+        await generatePreviewForDocuments(
+          nextDocuments,
+          routeState.parseSettings,
+          true,
+        )
+      }
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [
+    applyPreviewDocuments,
+    generatePreviewForDocuments,
+    loadPreviewDocuments,
+    reportError,
+    routeState,
+    uploadedDocuments,
+  ])
+
   React.useEffect(() => {
     if (step !== "segment") {
       return
@@ -652,11 +698,16 @@ export function KnowledgeUploadFlow({
           return
         }
         if (
-          nextDocuments.some((document) => document.status === UNPARSED_STATUS)
+          nextDocuments.some(
+            (document) =>
+              document.status === UNPARSED_STATUS ||
+              document.status in PARSING_STATUSES,
+          )
         ) {
           await generatePreviewForDocuments(
             nextDocuments,
             routeState.parseSettings,
+            true,
           )
         }
       })

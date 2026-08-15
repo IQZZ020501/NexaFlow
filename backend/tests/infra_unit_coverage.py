@@ -715,13 +715,13 @@ def test_registered_model_credentials() -> None:
         ModelProviderError,
     )
 
-    # tampered ciphertext leaks Fernet.InvalidToken (see buglog InfraUnitCoverage)
-    from cryptography.fernet import InvalidToken
-
     tampered = _registered_model(api_key_ciphertext="garbage-not-a-token")
     assert isinstance(
-        expect_error(lambda: _registered_model_credentials(tampered, runtime_settings, "LLM"), InvalidToken),
-        InvalidToken,
+        expect_error(
+            lambda: _registered_model_credentials(tampered, runtime_settings, "LLM"),
+            ModelProviderError,
+        ),
+        ModelProviderError,
     )
 
 
@@ -893,6 +893,26 @@ def test_stored_model_credentials_fallbacks() -> None:
     config, secrets, hints = llm_registry.stored_model_credentials(legacy, runtime_settings)
     assert config == {"api_base": "https://api.anthropic.com"}
     assert hints == {"api_key": "****5678"}
+
+    with patch.object(
+        app_models,
+        "stored_model_credentials",
+        side_effect=ValueError("Stored model credentials are invalid."),
+    ):
+        error = expect_error(
+            lambda: run(
+                app_models.update_registered_model(
+                    AsyncMock(),
+                    model,
+                    RegisteredModelUpdateRequest(status="disabled"),
+                    User(id="user-1"),
+                    runtime_settings,
+                )
+            ),
+            HTTPException,
+        )
+    assert error.status_code == 400
+    assert error.detail == "Stored model credentials are invalid."
 
 
 _CREDENTIAL_ENTRY = {
@@ -1112,6 +1132,13 @@ def test_credentials_roundtrip() -> None:
     not_json = encrypt_secret(llm_credentials.SECRET_BUNDLE_PREFIX + "garbage", key)
     assert isinstance(
         expect_error(lambda: llm_credentials.decrypt_credential_secrets(not_json, key), ValueError),
+        ValueError,
+    )
+    assert isinstance(
+        expect_error(
+            lambda: llm_credentials.decrypt_credential_secrets("garbage-not-a-token", key),
+            ValueError,
+        ),
         ValueError,
     )
 

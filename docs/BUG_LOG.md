@@ -1,8 +1,8 @@
 # 测试与 BUG 记录
 
 > 由全项目覆盖率测试任务（分支 `test/coverage-95`，2026-08-15）产生。
-> 测试过程中发现的 BUG 只记录、不修改，后续统一修复。每个子任务的详细记录在
-> `docs/buglog/<agent>.md`，本文件为主汇总。
+> 测试过程中发现的问题先记录于此；2026-08-15 已完成一次真实性复核并修复确认的
+> 产品缺陷。已有明细记录在 `docs/buglog/`，本文件为主汇总。
 
 ## 记录格式
 
@@ -16,17 +16,20 @@
 - 来源: <测试套件>
 ```
 
-## 严重度分布
+## 复核与修复状态
 
-- medium: 5（KB 重命名 500、模型凭据解密 500、公开对话加载卡死、API 非 JSON 错误体、重复批准幂等）
-- low: 12（死代码/不可达分支 6、前端交互/显示 4、弃用常量 2）
-- test-infra: 7（并发存储目录冲突、coverage 追踪伪影 ×4、--source 崩溃、MarkItDown 偶发）
+- 已修复产品缺陷: 7（知识库重名更新、模型凭据异常归一化、公开对话当前会话
+  loading、API 非 JSON 错误、分段路由恢复轮询、分段恢复失败重试、分页页脚）
+- 复核后非缺陷/观察项: 小数 token、重复批准幂等、向量化进度轮询延迟、覆盖率发现的
+  多数防御分支。
+- test-infra 条目单独保留；共享存储目录冲突已修复，缺少稳定证据的条目不计作产品 BUG。
 
-## 产品 BUG（medium）
+## 已修复产品 BUG
 
 ### medium: 知识库重命名冲突返回 500 而非 409
 
-- 编号: BUG-knowledge-001（KnowledgeDomainCoverage 独立复现为 BUG-kdc-001）
+- 编号: BUG-knowledge-001
+- 状态: **已修复（2026-08-15）**
 - 严重度: medium
 - 模块: `backend/app/shareddomain/knowledge/kb.py::update_knowledge_base`
 - 现象: `PATCH .../knowledge-bases/{id}` 将 name 改为工作区内已存在的名称时返回
@@ -40,6 +43,7 @@
 ### medium: 模型凭据解密失败时 Fernet InvalidToken 逃逸为 500
 
 - 编号: BUG-infraunit-001
+- 状态: **已修复（2026-08-15）**
 - 严重度: medium
 - 模块: `app/capabilities/llm/runtime.py:624-625`、`registry.py:150-153`、
   `credentials.py:33-47`
@@ -55,6 +59,7 @@
 ### medium: 公开对话点击当前已激活会话后加载指示器永久卡住
 
 - 编号: BUG-frontend-001
+- 状态: **已修复（2026-08-15）**
 - 严重度: medium
 - 模块: `frontend/components/agents/public-agent-chat.tsx`（`selectConversation`）
 - 现象: 点击"当前已激活"的会话时 `setIsRunsLoading(true)` 但
@@ -66,7 +71,8 @@
 
 ### medium: request() 对非 JSON 错误响应体抛 JSON.parse 异常吞掉错误消息
 
-- 编号: BUG-frontend-001（FrontendSystemTools）
+- 编号: BUG-api-client-001
+- 状态: **已修复（2026-08-15）**
 - 严重度: medium
 - 模块: `frontend/lib/api-client.ts::request`
 - 现象: 后端返回非 JSON 错误体（如 `500 text/plain`）时 `JSON.parse` 抛
@@ -76,30 +82,34 @@
 - 复现: `new Response("boom text", { status: 500 })` 时 `listTeams` 抛 SyntaxError。
 - 来源: tests/system-tools.test.tsx
 
-### medium: 终态 run 上重复工具批准静默返回而非 409
+### 复核后非缺陷: 终态 run 上重复工具批准幂等返回
 
 - 编号: BUG-runtime-004
-- 严重度: medium
+- 状态: **关闭（预期的幂等重试语义）**
 - 模块: `backend/app/application/agent_runs.py:286-291`
 - 现象: run 已进入终态后，同一用户重复 approve 同一工具调用返回 200 与 run 实体
   （静默），而终态 call 的同类重复会被 409 拒绝——行为不一致。
-- 预期: 终态 run 上的重复批准返回 409，或明确幂等语义。
+- 复核: 同一批准人的重复请求用于处理响应丢失后的安全重试；其他用户或不匹配状态
+  仍返回 409，现有测试也明确锁定该语义。
 - 复现: approve → run 执行完成（succeeded）→ 同一用户再次 approve 同一 call。
 - 来源: tests.agent_runtime_coverage
 
-## 产品 BUG（low）
+## 低优先级记录与复核结论
 
-### low: usage 归一化丢弃非整数 token 计数
+### 复核后非缺陷: usage 归一化拒绝非整数 token 计数
 
 - 编号: BUG-runtime-003
+- 状态: **关闭（输入违反 LangChain 整数 token 契约）**
 - 模块: `backend/app/shareddomain/agents/runtime/usage.py:27-36`（`_number`）
 - 现象: 非整数 float（如 3.5）返回 None → 被当作 0/丢弃；小数 token 上报会少记。
-- 预期: 四舍五入/向上取整后计入。
+- 复核: LangChain `UsageMetadata` 将 token 字段定义为整数；擅自取整会猜测供应商
+  未合法上报的计费数据。
 - 来源: tests.agent_runtime_coverage
 
 ### low: 文档分页页脚在页容量覆盖全部条目后消失
 
 - 编号: BUG-kbp-001
+- 状态: **已修复（2026-08-15）**
 - 模块: `frontend/components/knowledge/knowledge-base-page.tsx`
 - 现象: 文档总数 ≤ 每页条数时分页页脚（含"每页 N 条"下拉）整体消失，无法改回。
 - 预期: 至少保留"每页 N 条"选择器。
@@ -108,19 +118,30 @@
 ### low: 分段中文档路由恢复后不轮询，界面停在无限 spinner
 
 - 编号: BUG-frontend-002
+- 状态: **已修复（2026-08-15）**
 - 模块: `frontend/components/knowledge/knowledge-upload-flow.tsx`
 - 现象: URL 恢复分段预览时 `parse_queued`/`parsing` 状态文档不触发轮询，
   `isPreviewRunning` 为 true，预览区一直 spinner，"生成分段预览"按钮被禁用。
 - 预期: 恢复 parsing 文档时应继续轮询任务或至少不阻塞按钮。
 - 来源: tests/knowledge-upload.test.tsx
 
-### low: 向量化进度文本依赖任务列表加载时机，首屏最多延迟 3 秒
+### low: 分段路由恢复失败后刷新按钮无法重试
+
+- 编号: BUG-frontend-004
+- 状态: **已修复（2026-08-15）**
+- 模块: `frontend/components/knowledge/knowledge-upload-flow.tsx`
+- 现象: 初次恢复请求失败时本地文档数组为空，刷新按钮直接返回，用户只能离开页面重试。
+- 修复: 刷新在本地文档为空时回退使用路由中的文档 ID，并恢复预览或解析轮询。
+- 来源: tests/knowledge-upload.test.tsx
+
+### 观察: 向量化进度文本依赖任务列表加载时机
 
 - 编号: BUG-kbp-002
+- 状态: **关闭（轮询体验取舍）**
 - 模块: `frontend/components/knowledge/knowledge-base-page.tsx`
 - 现象: indexing 文档首次进入"文档"页签只显示普通"向量化中"；切"任务"页签或 3 秒
   轮询后才显示 "2/5" 进度。
-- 预期: 尽快随文档列表加载任务并展示进度。
+- 复核: 详细进度约延迟一个 3 秒轮询周期及请求耗时；没有产品 SLA 要求首屏立即加载任务。
 - 来源: tests/knowledge-page.test.tsx
 
 ### low: 弃用常量 HTTP_422_UNPROCESSABLE_ENTITY
@@ -141,7 +162,10 @@
 - 预期: 测试密钥 ≥32 字节。
 - 来源: 全部后端套件
 
-### low: 死代码/不可达分支（建议清理）
+### 复核: 覆盖率发现的防御分支
+
+以下多数是认证、应用边界或跨模块事件边界的防御代码，不应仅为提高覆盖率删除；
+个别真正不可达分支仅是清理候选，不属于产品行为缺陷。
 
 - BUG-agentaccess-001: `agent_access.py:721-722` 凭证 workspace 不匹配分支不可达
   （凭证创建固定用 agent.workspace_id，且无跨空间迁移功能）。
@@ -151,8 +175,8 @@
 - BUG-kdc-002(部分): `task_runner.py:483` "Unsupported knowledge task type" 被
   DB CHECK `ck_knowledge_tasks_task_type` 挡住，不可达。
 - BUG-low-004: `workflow_runs.py:250-254` console 上传 id 防御分支无 API 触发路径。
-- BUG-frontend-003: `knowledge-upload-flow.tsx` segment 恢复 `.catch` 为死代码
-  （uploadPendingFiles 用 allSettled + 内部 reportError，从不 reject）。
+- BUG-frontend-003: API 失败当前由 `uploadPendingFiles` 吸收，但回调或意外异常仍可
+  reject；作为生产 API BUG 关闭，保留防御性 catch。
 
 ## test-infra 记录
 
@@ -228,7 +252,7 @@
   （LF）统计不稳定（同一文件单文件运行 LF=2161、全量合并 LF=2476，含不可执行行
   的 0 命中记录），并集口径会低估覆盖率。权威口径为
   `bun test --isolate --coverage`（串行 + 每文件独立全局对象，单进程一致 LF）：
-  前端总行覆盖率 98.31%，与各组件单文件测量（95-100%）一致。
+  前端总行覆盖率 99.27%（17997/18129），与各组件单文件测量（95-100%）一致。
   `frontend/scripts/coverage.sh` 已采用该口径。
 - RTL `waitFor` 默认 1s 超时在并行 worker 共享 CPU 下造成偶发失败；
   `tests/setup.ts` 已将 `asyncUtilTimeout` 提到 5000ms（测试基建，非产品缺陷）。

@@ -5,18 +5,19 @@
 
 ## 发现的 BUG 汇总
 
-### low: 文档分页页脚在页容量覆盖全部条目后消失，无法改回分页大小（与 BUG-kbp-001 相同，本轮以现状断言固化）
+### 已修复: 文档分页页脚在页容量覆盖全部条目后消失
 
 - 编号: BUG-kbp-001（已在 `docs/buglog/FrontendKnowledgePages.md` 记录）
+- 状态: **已修复（2026-08-15）**
 - 模块: `frontend/components/knowledge/knowledge-base-page.tsx`
-  （`filteredDocuments.length > documentPageSize` 条件渲染分页区）
-- 现状断言: `knowledge-page.test.tsx > paginates documents and changes the page size`
-  在 12 个文档切换"每页 20 条"后断言页脚（含"每页 20 条"触发器）消失——
-  这是已知 bug 的现状固化，未修产品代码。
+  （原 `filteredDocuments.length > documentPageSize` 条件渲染分页区）
+- 回归断言: `knowledge-page.test.tsx > paginates documents and changes the page size`
+  验证 12 个文档切换到"每页 20 条"后页脚仍保留，并可切回"每页 10 条"。
 
-### low: 文档行"向量化中 {done}/{total}"进度文本依赖任务列表已加载（同 BUG-kbp-002）
+### 观察: 文档行"向量化中 {done}/{total}"进度文本依赖任务列表已加载（同 BUG-kbp-002）
 
 - 编号: BUG-kbp-002（已在 `docs/buglog/FrontendKnowledgePages.md` 记录）
+- 状态: **关闭（轮询体验取舍）**
 - 本轮补充: 新增 `polls for document status while documents are processing` 用例，
   验证 `hasProcessingDocuments` 时 3 秒轮询以 silent 模式刷新文档/任务列表，
   行为符合现状（轮询间隔内进度文本延迟属已知表现）。

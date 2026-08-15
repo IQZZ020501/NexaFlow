@@ -262,10 +262,16 @@ async def update_registered_model(
         current_secrets: dict[str, str] = {}
         current_hints: dict[str, str] = {}
     else:
-        current_config, current_secrets, current_hints = stored_model_credentials(
-            model,
-            settings,
-        )
+        try:
+            current_config, current_secrets, current_hints = stored_model_credentials(
+                model,
+                settings,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Stored model credentials are invalid.",
+            ) from exc
     config, secrets, hints, changed_secrets = normalize_provider_credentials(
         entry,
         payload.credential or {},

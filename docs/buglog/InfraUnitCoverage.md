@@ -9,6 +9,7 @@
 
 - 编号: BUG-infraunit-001
 - 严重度: medium
+- 状态: **已修复（2026-08-15）**
 - 模块:
   - `backend/app/capabilities/llm/runtime.py:624-625`（`_registered_model_credentials`）
   - `backend/app/capabilities/llm/registry.py:150-153`（`stored_model_credentials`）
@@ -40,3 +41,5 @@
   # -> 抛出 cryptography.fernet.InvalidToken（应为 ModelProviderError）
   ```
 - 来源: tests.infra_unit_coverage（`test_registered_model_credentials` 记录实际行为；合法可达的 ValueError 分支用 `SECRET_BUNDLE_PREFIX + 非法 JSON` 密文覆盖）
+- 修复: 共享凭据解密边界将 `InvalidToken` 归一化为 `ValueError`；模型更新接口映射为
+  HTTP 400，Agent/Workflow 构建路径继续映射为 `ModelProviderError`。

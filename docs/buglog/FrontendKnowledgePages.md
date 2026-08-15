@@ -9,6 +9,7 @@
 
 - 编号: BUG-kbp-001
 - 严重度: low
+- 状态: **已修复（2026-08-15）**
 - 模块: `frontend/components/knowledge/knowledge-base-page.tsx`
   （`filteredDocuments.length > documentPageSize` 条件渲染分页区）
 - 现象: 当文档总数 ≤ 当前每页条数时，整个分页页脚（含"每页 N 条"下拉、
@@ -22,7 +23,8 @@
 ### low: 文档行"向量化中 {done}/{total}"进度文本依赖任务列表已加载
 
 - 编号: BUG-kbp-002
-- 严重度: low
+- 严重度: observation
+- 状态: **关闭（轮询体验取舍）**
 - 模块: `frontend/components/knowledge/knowledge-base-page.tsx`
   （`documentStatusText` + 任务加载时机）
 - 现象: 文档状态为 `indexing` 时，首次进入"文档"页签显示的是普通"向量化中"

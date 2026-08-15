@@ -1003,14 +1003,20 @@ describe("KnowledgeBasePage documents tab", () => {
     fireEvent.click(screen.getByText("上一页"))
     expect(screen.getByText("1 / 2")).toBeTruthy()
 
-    // Change page size to 20 → all rows fit on one page, footer disappears.
+    // Page-size controls remain available when all rows fit on one page.
     const pageSizeTrigger = screen.getByRole("button", { name: /每页 10 条/ })
     openMenu(pageSizeTrigger)
     fireEvent.click(await screen.findByText("每页 20 条"))
     await waitFor(() => {
       expect(visibleFilenames()).toHaveLength(12)
     })
-    expect(screen.queryByRole("button", { name: /每页 20 条/ })).toBeNull()
+    expect(screen.getByRole("button", { name: /每页 20 条/ })).toBeTruthy()
+    expect(screen.getByText("1 / 1")).toBeTruthy()
+
+    openMenu(screen.getByRole("button", { name: /每页 20 条/ }))
+    fireEvent.click(await screen.findByText("每页 10 条"))
+    await waitFor(() => expect(visibleFilenames()).toHaveLength(10))
+    expect(screen.getByText("1 / 2")).toBeTruthy()
   })
 
   test("sorts documents by size and chunk count with direction cycling", async () => {
