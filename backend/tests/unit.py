@@ -8,6 +8,7 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 """
 
 import asyncio
+from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
 import tests.support  # noqa: F401  (sets required env before app imports)
@@ -23,6 +24,7 @@ from app.capabilities.llm.registry import (
 )
 from app.capabilities.rag.retrieval import (
     MAX_PARENT_CONTEXT_CHARS,
+    RankedHit,
     parent_context,
     reciprocal_rank_fusion,
 )
@@ -592,6 +594,109 @@ def test_reciprocal_rank_fusion_merges_and_ranks() -> None:
     )
     assert fused_shared[0].chunk_id == "shared"
     assert fused_shared[0].distance == 0.2
+
+
+def test_reciprocal_rank_fusion_reports_named_rankings_deterministically() -> None:
+    ranked = reciprocal_rank_fusion(
+        [
+            VectorHit(chunk_id="a", distance=0.2),
+            VectorHit(chunk_id="b", distance=0.3),
+        ],
+        ["b", "c"],
+        ["c"],
+    )
+
+    assert ranked == [
+        RankedHit(
+            chunk_id="b",
+            distance=0.3,
+            rrf_score=1 / 62 + 1 / 61,
+            vector_rank=2,
+            keyword_rank=1,
+            reference_rank=None,
+            sources=("vector", "keywords"),
+        ),
+        RankedHit(
+            chunk_id="c",
+            distance=None,
+            rrf_score=1 / 62 + 1 / 61,
+            vector_rank=None,
+            keyword_rank=2,
+            reference_rank=1,
+            sources=("keywords", "reference"),
+        ),
+        RankedHit(
+            chunk_id="a",
+            distance=0.2,
+            rrf_score=1 / 61,
+            vector_rank=1,
+            keyword_rank=None,
+            reference_rank=None,
+            sources=("vector",),
+        ),
+    ]
+    try:
+        ranked[0].rrf_score = 0  # type: ignore[misc]
+    except FrozenInstanceError:
+        pass
+    else:
+        raise AssertionError("Ranked hits must be immutable.")
+
+
+def test_detailed_knowledge_query_contract_defaults() -> None:
+    from app.schemas.knowledge import (
+        KnowledgeQueryHitResponse,
+        KnowledgeQueryInspectResponse,
+        KnowledgeQueryRequest,
+        KnowledgeRetrievalTraceResponse,
+    )
+
+    request = KnowledgeQueryRequest(query="private customer question")
+    assert request.include_references is False
+
+    hit = KnowledgeQueryHitResponse(
+        chunk_id="chunk-1",
+        document_id="document-1",
+        document_filename="guide.md",
+        chunk_index=0,
+        content="answer",
+    )
+    assert hit.model_dump() == {
+        "chunk_id": "chunk-1",
+        "document_id": "document-1",
+        "document_filename": "guide.md",
+        "parent_id": None,
+        "parent_title": None,
+        "parent_index": None,
+        "chunk_index": 0,
+        "content": "answer",
+        "distance": None,
+        "kind": "document",
+        "question": None,
+        "source": None,
+        "sources": [],
+        "reference_hops": 0,
+        "rerank_score": None,
+    }
+
+    trace = KnowledgeRetrievalTraceResponse(
+        trace_id="trace-1",
+        search_mode="blend",
+        limit=5,
+        max_distance=None,
+        vector_candidates=2,
+        keyword_candidates=1,
+        reference_candidates=0,
+        fused_candidates=2,
+        rerank_status="not_configured",
+        returned_hits=1,
+        duration_ms=1.25,
+        stage_duration_ms={"retrieve": 0.5, "assemble": 0.75},
+    )
+    dumped_trace = trace.model_dump()
+    assert "query" not in dumped_trace
+    assert all("hash" not in field for field in dumped_trace)
+    assert KnowledgeQueryInspectResponse(hits=[hit], trace=trace).trace is trace
 
 
 def test_parent_context_windows_around_child_offsets() -> None:
@@ -2235,6 +2340,8 @@ def main() -> None:
     test_image_documents_use_pymupdf_ocr()
     test_webp_documents_are_normalized_for_pymupdf_ocr()
     test_reciprocal_rank_fusion_merges_and_ranks()
+    test_reciprocal_rank_fusion_reports_named_rankings_deterministically()
+    test_detailed_knowledge_query_contract_defaults()
     test_parent_context_windows_around_child_offsets()
     test_model_type_normalization()
     test_status_validation()

@@ -777,8 +777,11 @@ async def execute_workflow_node(
         output = result.output if isinstance(result.output, dict) else {"content": result.content}
         hits = output.get("hits")
         selected_hits = hits[: parsed.limit] if isinstance(hits, list) else []
-        paragraph_list = [
-            {
+        paragraph_list = []
+        for item in selected_hits:
+            if not isinstance(item, dict):
+                continue
+            paragraph = {
                 "knowledge_base": str(item.get("knowledge_base") or ""),
                 "document": str(item.get("document") or ""),
                 "chunk_id": str(item.get("chunk_id") or ""),
@@ -786,9 +789,13 @@ async def execute_workflow_node(
                 "content": str(item.get("content") or ""),
                 "distance": item.get("distance"),
             }
-            for item in selected_hits
-            if isinstance(item, dict)
-        ]
+            trace_id = item.get("trace_id")
+            if isinstance(trace_id, str) and trace_id:
+                paragraph["trace_id"] = trace_id[:64]
+            rerank_status = item.get("rerank_status")
+            if rerank_status in {"not_configured", "applied", "fallback", "skipped"}:
+                paragraph["rerank_status"] = rerank_status
+            paragraph_list.append(paragraph)
         # 达到检索相似度阈值的向量命中视为可直接回答（MaxKB 的分段级
         # hit_handling_method 元数据在 NexaFlow 中不存在，故以节点阈值为准）
         is_hit_handling_method_list = [

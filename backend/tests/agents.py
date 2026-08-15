@@ -42,7 +42,11 @@ from app.capabilities.mcp.client import (
     discover_mcp_tools,
     normalize_mcp_url,
 )
-from app.schemas.knowledge import KnowledgeQueryHitResponse
+from app.schemas.knowledge import (
+    KnowledgeQueryHitResponse,
+    KnowledgeQueryInspectResponse,
+    KnowledgeRetrievalTraceResponse,
+)
 from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
 from app.entities.workflows import WorkflowUpload
@@ -754,7 +758,7 @@ async def assert_knowledge_source_failure_is_attributed() -> None:
 
     original_factory = agent_tools.get_session_factory
     original_accessible = agent_tools.accessible_agent_knowledge_bases
-    original_query = agent_tools.query_knowledge_base
+    original_retrieve = agent_tools.retrieve_knowledge_base
 
     async def fake_accessible(*_args, **_kwargs):
         return knowledge_bases
@@ -773,9 +777,29 @@ async def assert_knowledge_source_failure_is_attributed() -> None:
             )
         ]
 
+    async def fake_retrieve(_db, knowledge_base, payload, settings):
+        hits = await fake_query(_db, knowledge_base, payload, settings)
+        return KnowledgeQueryInspectResponse(
+            hits=hits,
+            trace=KnowledgeRetrievalTraceResponse(
+                trace_id=f"trace-{knowledge_base.id}",
+                search_mode=payload.search_mode,
+                limit=payload.limit,
+                max_distance=payload.similarity,
+                vector_candidates=0,
+                keyword_candidates=len(hits),
+                reference_candidates=0,
+                fused_candidates=len(hits),
+                rerank_status="not_configured",
+                returned_hits=len(hits),
+                duration_ms=0,
+                stage_duration_ms={},
+            ),
+        )
+
     agent_tools.get_session_factory = lambda: FakeSessionFactory()
     agent_tools.accessible_agent_knowledge_bases = fake_accessible
-    agent_tools.query_knowledge_base = fake_query
+    agent_tools.retrieve_knowledge_base = fake_retrieve
     try:
         tool = agent_tools.build_knowledge_search_tool(
             knowledge_bases,
@@ -788,11 +812,132 @@ async def assert_knowledge_source_failure_is_attributed() -> None:
     finally:
         agent_tools.get_session_factory = original_factory
         agent_tools.accessible_agent_knowledge_bases = original_accessible
-        agent_tools.query_knowledge_base = original_query
+        agent_tools.retrieve_knowledge_base = original_retrieve
 
     assert isinstance(result, AgentToolResult)
     assert result.output["retrieval_stats"][0]["status"] == "unavailable"
     assert result.output["retrieval_stats"][1]["status"] == "available"
+
+
+async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
+    knowledge_bases = [
+        KnowledgeBase(
+            id="base-applied",
+            workspace_id="workspace-1",
+            name="Applied",
+            reranker_model_id="reranker-1",
+        ),
+        KnowledgeBase(
+            id="base-fallback",
+            workspace_id="workspace-1",
+            name="Fallback",
+            reranker_model_id="reranker-1",
+        ),
+    ]
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class FakeSessionFactory:
+        def __call__(self):
+            return FakeSession()
+
+    retrieve_calls: list[str] = []
+
+    def hit(knowledge_base: KnowledgeBase) -> KnowledgeQueryHitResponse:
+        return KnowledgeQueryHitResponse(
+            chunk_id=f"chunk-{knowledge_base.id}",
+            document_id=f"document-{knowledge_base.id}",
+            document_filename=f"{knowledge_base.id}.md",
+            chunk_index=0,
+            content=f"content-{knowledge_base.id}",
+            distance=0.1,
+            rerank_score=1.0 if knowledge_base.id == "base-applied" else None,
+        )
+
+    async def fake_retrieve(_db, knowledge_base, payload, _settings):
+        retrieve_calls.append(knowledge_base.id)
+        rerank_status = (
+            "applied" if knowledge_base.id == "base-applied" else "fallback"
+        )
+        return KnowledgeQueryInspectResponse(
+            hits=[hit(knowledge_base)],
+            trace=KnowledgeRetrievalTraceResponse(
+                trace_id=f"trace-{knowledge_base.id}",
+                search_mode=payload.search_mode,
+                limit=payload.limit,
+                max_distance=payload.similarity,
+                vector_candidates=2,
+                keyword_candidates=2,
+                reference_candidates=0,
+                fused_candidates=4,
+                rerank_status=rerank_status,
+                returned_hits=1,
+                duration_ms=1,
+                stage_duration_ms={"rerank": 0.5},
+            ),
+        )
+
+    async def fake_accessible(*_args, **_kwargs):
+        return knowledge_bases
+
+    original_factory = agent_tools.get_session_factory
+    original_accessible = agent_tools.accessible_agent_knowledge_bases
+    original_retrieve = agent_tools.retrieve_knowledge_base
+    agent_tools.get_session_factory = lambda: FakeSessionFactory()
+    agent_tools.accessible_agent_knowledge_bases = fake_accessible
+    agent_tools.retrieve_knowledge_base = fake_retrieve
+    try:
+        result = await agent_tools.build_knowledge_search_tool(
+            knowledge_bases,
+            "workspace-1",
+            SimpleNamespace(id="user-1"),  # type: ignore[arg-type]
+            None,
+            test_settings(),
+        ).ainvoke({"query": "release", "limit": 2})
+    finally:
+        agent_tools.get_session_factory = original_factory
+        agent_tools.accessible_agent_knowledge_bases = original_accessible
+        agent_tools.retrieve_knowledge_base = original_retrieve
+
+    assert retrieve_calls == ["base-applied", "base-fallback"]
+    assert [item["chunk_id"] for item in result.output["hits"]] == [
+        "chunk-base-applied",
+        "chunk-base-fallback",
+    ]
+    assert [
+        (item["chunk_id"], item["trace_id"], item["rerank_status"])
+        for item in result.output["hits"]
+    ] == [
+        ("chunk-base-applied", "trace-base-applied", "applied"),
+        ("chunk-base-fallback", "trace-base-fallback", "fallback"),
+    ]
+    assert result.output["retrieval_stats"] == [
+        {
+            "knowledge_base_id": "base-applied",
+            "knowledge_base_name": "Applied",
+            "candidates": 4,
+            "reranked": True,
+            "rerank_status": "applied",
+            "trace_id": "trace-base-applied",
+            "submitted": 1,
+            "status": "available",
+        },
+        {
+            "knowledge_base_id": "base-fallback",
+            "knowledge_base_name": "Fallback",
+            "candidates": 4,
+            "reranked": False,
+            "rerank_status": "fallback",
+            "trace_id": "trace-base-fallback",
+            "submitted": 1,
+            "status": "available",
+        },
+    ]
 
 
 def assert_tool_routing_context_is_explicit() -> None:
@@ -2645,6 +2790,7 @@ def main() -> None:
     asyncio.run(assert_tool_error_returns_to_model())
     asyncio.run(assert_tool_timeout_returns_to_model())
     asyncio.run(assert_knowledge_source_failure_is_attributed())
+    asyncio.run(assert_knowledge_tool_uses_shared_retrieval_trace())
     asyncio.run(assert_final_turn_removes_tools())
     assert_tool_routing_context_is_explicit()
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
@@ -2657,7 +2803,7 @@ def main() -> None:
     assert_public_access_migration_downgrade_drops_external_runs()
     assert_external_agent_access()
 
-    original_query = agent_tools.query_knowledge_base
+    original_retrieve = agent_tools.retrieve_knowledge_base
     original_discover = mcp_services.discover_mcp_tools
     original_call_mcp_tool = agent_tools.call_mcp_tool
     original_run_agent = agent_executor.run_agent
@@ -2683,6 +2829,31 @@ def main() -> None:
                 distance=0.1,
             )
         ]
+
+    async def fake_retrieve_knowledge_base(
+        db,
+        knowledge_base,
+        payload,
+        settings,
+    ) -> KnowledgeQueryInspectResponse:
+        hits = await fake_query_knowledge_base(db, knowledge_base, payload, settings)
+        return KnowledgeQueryInspectResponse(
+            hits=hits,
+            trace=KnowledgeRetrievalTraceResponse(
+                trace_id=f"trace-{knowledge_base.id}",
+                search_mode=payload.search_mode,
+                limit=payload.limit,
+                max_distance=payload.similarity,
+                vector_candidates=0,
+                keyword_candidates=len(hits),
+                reference_candidates=0,
+                fused_candidates=len(hits),
+                rerank_status="not_configured",
+                returned_hits=len(hits),
+                duration_ms=0,
+                stage_duration_ms={},
+            ),
+        )
 
     async def fake_discover_mcp_tools(
         connection,
@@ -2734,7 +2905,7 @@ def main() -> None:
             raise McpClientError("transport interrupted")
         return json.dumps({"release": "approved"}), False
 
-    agent_tools.query_knowledge_base = fake_query_knowledge_base
+    agent_tools.retrieve_knowledge_base = fake_retrieve_knowledge_base
     mcp_services.discover_mcp_tools = fake_discover_mcp_tools
     agent_tools.call_mcp_tool = fake_call_mcp_tool
     try:
@@ -3576,7 +3747,7 @@ def main() -> None:
             assert "agent.create" in actions
             assert "agent.delete" in actions
     finally:
-        agent_tools.query_knowledge_base = original_query
+        agent_tools.retrieve_knowledge_base = original_retrieve
         mcp_services.discover_mcp_tools = original_discover
         agent_tools.call_mcp_tool = original_call_mcp_tool
         agent_executor.run_agent = original_run_agent

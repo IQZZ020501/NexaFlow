@@ -30,6 +30,7 @@ from app.shareddomain.knowledge.models import (
 )
 from app.api.v1.endpoints import knowledge as knowledge_api
 from app.application import knowledge as knowledge_application
+from app.application import knowledge_retrieval as knowledge_retrieval_application
 from app.capabilities.rag import retrieval as knowledge_retrieval
 from app.capabilities.rag import vector_store as knowledge_vector_store
 from app.capabilities.embedding.pipeline import (
@@ -410,7 +411,7 @@ async def replace_document_file_with_text(
 
 
 async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_id: str) -> None:
-    original_query_vectors = knowledge_application.query_vectors
+    original_query_vectors = knowledge_retrieval_application.query_vectors
 
     def fake_query_vectors(*_args) -> list[VectorHit]:
         assert _args[-2] == 5
@@ -420,7 +421,7 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
             VectorHit(chunk_id=indexed_chunk_id, distance=0.1),
         ]
 
-    knowledge_application.query_vectors = fake_query_vectors
+    knowledge_retrieval_application.query_vectors = fake_query_vectors
     try:
         async with get_session_factory()() as db:
             knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
@@ -433,7 +434,7 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
             )
             assert [hit.chunk_id for hit in hits] == [indexed_chunk_id]
     finally:
-        knowledge_application.query_vectors = original_query_vectors
+        knowledge_retrieval_application.query_vectors = original_query_vectors
 
 
 def test_keyword_query_does_not_require_embedding_model() -> None:
@@ -442,11 +443,11 @@ def test_keyword_query_does_not_require_embedding_model() -> None:
     async def run() -> None:
         keyword_query = AsyncMock(return_value=[])
         with patch.object(
-            knowledge_application,
+            knowledge_retrieval_application,
             "resolve_embedding_model",
             new=AsyncMock(side_effect=AssertionError("embedding model was resolved")),
         ) as resolve_model, patch.object(
-            knowledge_application,
+            knowledge_retrieval_application,
             "query_vectors",
             new=Mock(side_effect=AssertionError("vector search was called")),
         ) as vector_query, patch.object(
@@ -461,23 +462,33 @@ def test_keyword_query_does_not_require_embedding_model() -> None:
             knowledge_repository,
             "list_active_documents_by_ids",
             new=AsyncMock(return_value=[]),
-        ):
-            hits = await knowledge_application.query_knowledge_base(
+        ), patch.object(
+            knowledge_retrieval_application,
+            "log_event",
+        ) as completion_log:
+            result = await knowledge_retrieval_application.retrieve_knowledge_base(
                 object(),  # type: ignore[arg-type]
-                SimpleNamespace(id="base-1"),  # type: ignore[arg-type]
+                SimpleNamespace(  # type: ignore[arg-type]
+                    id="base-1",
+                    reranker_model_id=None,
+                ),
                 KnowledgeQueryRequest(
-                    query="keyword only",
+                    query="private keyword only",
                     limit=1,
                     search_mode="keywords",
                 ),
                 SimpleNamespace(),  # type: ignore[arg-type]
             )
 
-        assert hits == []
+        assert result.hits == []
+        assert result.trace.rerank_status == "not_configured"
+        assert "private keyword only" not in str(completion_log.call_args)
+        assert "query" not in completion_log.call_args.kwargs
+        assert all("hash" not in key for key in completion_log.call_args.kwargs)
         resolve_model.assert_not_awaited()
         vector_query.assert_not_called()
         keyword_query.assert_awaited_once()
-        assert keyword_query.await_args.args[2:] == ("keyword only", 5)
+        assert keyword_query.await_args.args[2:] == ("private keyword only", 5)
 
     asyncio.run(run())
 
@@ -623,16 +634,17 @@ def assert_vector_store_mmr_and_metadata() -> None:
             client.close()
         knowledge_vector_store._build_qdrant_client.cache_clear()
 
-    assert knowledge_retrieval.reciprocal_rank_fusion(
+    fused = knowledge_retrieval.reciprocal_rank_fusion(
         [
             VectorHit(chunk_id="vector-only", distance=0.1),
             VectorHit(chunk_id="shared", distance=0.2),
         ],
         ["shared", "keyword-only"],
-    ) == [
-        VectorHit(chunk_id="shared", distance=0.2),
-        VectorHit(chunk_id="vector-only", distance=0.1),
-        VectorHit(chunk_id="keyword-only", distance=None),
+    )
+    assert [(hit.chunk_id, hit.distance) for hit in fused] == [
+        ("shared", 0.2),
+        ("vector-only", 0.1),
+        ("keyword-only", None),
     ]
 
 
@@ -643,7 +655,7 @@ async def assert_query_aggregates_hybrid_hits(
     configured_document_id: str,
     configured_chunks: list[dict],
 ) -> None:
-    original_query_vectors = knowledge_application.query_vectors
+    original_query_vectors = knowledge_retrieval_application.query_vectors
     original_query_keyword_chunk_ids = knowledge_repository.query_keyword_chunk_ids
     configured_by_index = {
         chunk["chunk_index"]: chunk for chunk in configured_chunks
@@ -670,22 +682,36 @@ async def assert_query_aggregates_hybrid_hits(
         assert (query, candidate_limit) == ("exact term", 10)
         return [configured_by_index[0]["id"]]
 
-    knowledge_application.query_vectors = fake_query_vectors
+    knowledge_retrieval_application.query_vectors = fake_query_vectors
     knowledge_repository.query_keyword_chunk_ids = fake_query_keyword_chunk_ids
+    reranker_calls_before = sum(
+        call["path"] == "/v1/rerank" for call in ModelTestHandler.calls
+    )
     try:
         async with get_session_factory()() as db:
             knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
             assert knowledge_base is not None
-            hits = await knowledge_application.query_knowledge_base(
+            result = await knowledge_retrieval_application.retrieve_knowledge_base(
                 db,
                 knowledge_base,
                 KnowledgeQueryRequest(query="exact term", limit=2),
                 test_settings(),
             )
+            hits = result.hits
     finally:
-        knowledge_application.query_vectors = original_query_vectors
+        knowledge_retrieval_application.query_vectors = original_query_vectors
         knowledge_repository.query_keyword_chunk_ids = original_query_keyword_chunk_ids
 
+    assert sum(call["path"] == "/v1/rerank" for call in ModelTestHandler.calls) == (
+        reranker_calls_before + 1
+    )
+    assert result.trace.rerank_status == "applied"
+    assert result.trace.vector_candidates == 5
+    assert result.trace.keyword_candidates == 1
+    assert result.trace.reference_candidates == 0
+    assert result.trace.returned_hits == 2
+    assert result.trace.duration_ms >= 0
+    assert all(value >= 0 for value in result.trace.stage_duration_ms.values())
     assert [hit.document_id for hit in hits] == [
         configured_document_id,
         product_document_id,
@@ -693,6 +719,8 @@ async def assert_query_aggregates_hybrid_hits(
     assert hits[0].chunk_id == configured_by_index[0]["id"]
     assert hits[0].chunk_index == 0
     assert hits[0].distance == 0.2
+    assert hits[0].sources == ["vector", "keywords"]
+    assert hits[0].rerank_score == 1.0
     assert hits[0].content == "\n\n".join(
         configured_by_index[index]["content"] for index in range(3)
     )
@@ -826,12 +854,13 @@ async def assert_hierarchical_retrieval(
     knowledge_base_id: str,
     document_id: str,
 ) -> None:
-    original_query_vectors = knowledge_application.query_vectors
+    original_query_vectors = knowledge_retrieval_application.query_vectors
     original_query_keyword_chunk_ids = knowledge_repository.query_keyword_chunk_ids
-    original_build_registered_reranker = (
-        knowledge_retrieval.build_registered_reranker
-    )
+    original_build_reranker = knowledge_retrieval_application.build_reranker
     reranked_documents: list[str] = []
+    reranker_calls = 0
+    fallback_reranker_calls = 0
+    invalid_reranker_calls = 0
 
     async with get_session_factory()() as db:
         knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
@@ -869,6 +898,8 @@ async def assert_hierarchical_retrieval(
 
         class FakeReranker:
             def rerank(self, query: str, documents: list[str]) -> list[dict]:
+                nonlocal reranker_calls
+                reranker_calls += 1
                 assert query == "hierarchical query"
                 reranked_documents.extend(documents)
                 return [
@@ -877,25 +908,74 @@ async def assert_hierarchical_retrieval(
                     {"index": 0, "relevance_score": 0.8},
                 ]
 
-        knowledge_application.query_vectors = fake_query_vectors
+        knowledge_retrieval_application.query_vectors = fake_query_vectors
         knowledge_repository.query_keyword_chunk_ids = fake_query_keyword_chunk_ids
-        knowledge_retrieval.build_registered_reranker = lambda *_args: FakeReranker()
+        knowledge_retrieval_application.build_reranker = (
+            lambda *_args: FakeReranker()
+        )
         try:
-            hits = await knowledge_application.query_knowledge_base(
+            result = await knowledge_retrieval_application.retrieve_knowledge_base(
+                db,
+                knowledge_base,
+                KnowledgeQueryRequest(query="hierarchical query", limit=2),
+                test_settings(),
+            )
+            hits = result.hits
+
+            class FailingReranker:
+                def rerank(self, _query: str, _documents: list[str]) -> list[dict]:
+                    nonlocal fallback_reranker_calls
+                    fallback_reranker_calls += 1
+                    raise knowledge_retrieval.ModelProviderError("reranker unavailable")
+
+            knowledge_retrieval_application.build_reranker = (
+                lambda *_args: FailingReranker()
+            )
+            fallback = await knowledge_retrieval_application.retrieve_knowledge_base(
+                db,
+                knowledge_base,
+                KnowledgeQueryRequest(query="hierarchical query", limit=2),
+                test_settings(),
+            )
+
+            class InvalidReranker:
+                def rerank(self, _query: str, _documents: list[str]) -> list[dict]:
+                    nonlocal invalid_reranker_calls
+                    invalid_reranker_calls += 1
+                    return [{"index": 0, "relevance_score": float("nan")}]
+
+            knowledge_retrieval_application.build_reranker = (
+                lambda *_args: InvalidReranker()
+            )
+            invalid = await knowledge_retrieval_application.retrieve_knowledge_base(
                 db,
                 knowledge_base,
                 KnowledgeQueryRequest(query="hierarchical query", limit=2),
                 test_settings(),
             )
         finally:
-            knowledge_application.query_vectors = original_query_vectors
+            knowledge_retrieval_application.query_vectors = original_query_vectors
             knowledge_repository.query_keyword_chunk_ids = (
                 original_query_keyword_chunk_ids
             )
-            knowledge_retrieval.build_registered_reranker = (
-                original_build_registered_reranker
-            )
+            knowledge_retrieval_application.build_reranker = original_build_reranker
 
+    assert reranker_calls == 1
+    assert fallback_reranker_calls == 1
+    assert invalid_reranker_calls == 1
+    assert result.trace.rerank_status == "applied"
+    assert hits[0].rerank_score == 1.0
+    assert fallback.trace.rerank_status == "fallback"
+    assert fallback.hits
+    assert [hit.chunk_id for hit in fallback.hits] == [
+        first_children[0].id,
+        second_children[0].id,
+    ]
+    assert invalid.trace.rerank_status == "fallback"
+    assert [hit.chunk_id for hit in invalid.hits] == [
+        first_children[0].id,
+        second_children[0].id,
+    ]
     assert reranked_documents == [chunk.content for chunk in candidates]
     assert [hit.parent_id for hit in hits] == [parents[1].id, parents[0].id]
     assert hits[0].chunk_id == second_children[0].id
@@ -1182,8 +1262,24 @@ def main() -> None:
             json={"query": "product docs", "limit": 1},
         )
         assert knowledge_query.status_code == 200, knowledge_query.text
+        assert isinstance(knowledge_query.json(), list)
         assert knowledge_query.json()[0]["document_id"] == document_id
         assert knowledge_query.json()[0]["content"] == "Hello from product docs"
+        inspected_query = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/query/inspect",
+            ),
+            headers=auth_headers(bob_token),
+            json={"query": "product docs", "limit": 1},
+        )
+        assert inspected_query.status_code == 200, inspected_query.text
+        inspected_payload = inspected_query.json()
+        assert inspected_payload["hits"] == knowledge_query.json()
+        assert inspected_payload["trace"]["returned_hits"] == 1
+        assert inspected_payload["trace"]["rerank_status"] == "applied"
+        assert "query" not in inspected_payload["trace"]
+        assert all("hash" not in key for key in inspected_payload["trace"])
 
         configured_content = ("Alpha   beta " * 12 + "Gamma   delta " * 12).encode()
         configured_document = upload_document(

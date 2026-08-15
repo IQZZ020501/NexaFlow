@@ -66,6 +66,7 @@ from app.api.v1.endpoints import knowledge as knowledge_api
 from app.api.v1.endpoints import knowledge_lifecycle as knowledge_lifecycle_api
 from app.api.v1.endpoints import knowledge_retrieval as knowledge_retrieval_api
 from app.application import knowledge as knowledge_application
+from app.application import knowledge_retrieval as knowledge_retrieval_application
 from app.capabilities.rag import retrieval as knowledge_retrieval
 from app.capabilities.rag import vector_store as knowledge_vector_store
 from app.capabilities.embedding import pipeline as knowledge_pipeline
@@ -860,11 +861,11 @@ def test_query_application_vector_only_branch() -> None:
             side_effect=AssertionError("keyword search was called")
         )
         with patch.object(
-            knowledge_application,
+            knowledge_retrieval_application,
             "resolve_embedding_model",
             new=AsyncMock(return_value=embedding_model),
         ) as resolve_model, patch.object(
-            knowledge_application,
+            knowledge_retrieval_application,
             "query_vectors",
             new=vector_query,
         ), patch.object(
@@ -882,7 +883,10 @@ def test_query_application_vector_only_branch() -> None:
         ):
             hits = await knowledge_application.query_knowledge_base(
                 object(),  # type: ignore[arg-type]
-                SimpleNamespace(id="base-1"),  # type: ignore[arg-type]
+                SimpleNamespace(  # type: ignore[arg-type]
+                    id="base-1",
+                    reranker_model_id=None,
+                ),
                 KnowledgeQueryRequest(
                     query="x",
                     limit=1,
@@ -1891,7 +1895,9 @@ def test_knowledge_api_flow() -> None:
             orphan_parents: bool = False,
         ) -> list:
             async def run() -> list:
-                original_query_vectors = knowledge_application.query_vectors
+                original_query_vectors = (
+                    knowledge_retrieval_application.query_vectors
+                )
                 original_keyword_query = knowledge_repository.query_keyword_chunk_ids
                 parent_lookup_patch = (
                     patch.object(
@@ -1913,7 +1919,9 @@ def test_knowledge_api_flow() -> None:
                         async def fake_keyword_query(*_args) -> list[str]:
                             return []
 
-                        knowledge_application.query_vectors = fake_query_vectors
+                        knowledge_retrieval_application.query_vectors = (
+                            fake_query_vectors
+                        )
                         knowledge_repository.query_keyword_chunk_ids = fake_keyword_query
                         with parent_lookup_patch:
                             return await knowledge_application.query_knowledge_base(
@@ -1926,7 +1934,9 @@ def test_knowledge_api_flow() -> None:
                                 test_settings(),
                             )
                 finally:
-                    knowledge_application.query_vectors = original_query_vectors
+                    knowledge_retrieval_application.query_vectors = (
+                        original_query_vectors
+                    )
                     knowledge_repository.query_keyword_chunk_ids = original_keyword_query
 
             return asyncio.run(run())

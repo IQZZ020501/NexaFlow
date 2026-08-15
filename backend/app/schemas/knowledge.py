@@ -181,6 +181,7 @@ class KnowledgeQueryRequest(BaseModel):
     search_mode: Literal["embedding", "keywords", "blend"] = "blend"
     # 相似度阈值（余弦距离，0–2，保留距离不超过该值的命中）
     similarity: float | None = Field(default=None, ge=0, le=2)
+    include_references: bool = False
 
 
 class KnowledgeQueryHitResponse(BaseModel):
@@ -193,3 +194,29 @@ class KnowledgeQueryHitResponse(BaseModel):
     chunk_index: int
     content: str
     distance: float | None = None
+    kind: Literal["document", "qa"] = "document"
+    question: str | None = None
+    source: str | None = None
+    sources: list[str] = Field(default_factory=list, max_length=3)
+    reference_hops: int = Field(default=0, ge=0, le=1)
+    rerank_score: float | None = None
+
+
+class KnowledgeRetrievalTraceResponse(BaseModel):
+    trace_id: str
+    search_mode: Literal["embedding", "keywords", "blend"]
+    limit: int = Field(ge=1, le=20)
+    max_distance: float | None = Field(default=None, ge=0, le=2)
+    vector_candidates: int = Field(ge=0)
+    keyword_candidates: int = Field(ge=0)
+    reference_candidates: int = Field(ge=0)
+    fused_candidates: int = Field(ge=0)
+    rerank_status: Literal["not_configured", "applied", "fallback", "skipped"]
+    returned_hits: int = Field(ge=0)
+    duration_ms: float = Field(ge=0)
+    stage_duration_ms: dict[str, float] = Field(max_length=8)
+
+
+class KnowledgeQueryInspectResponse(BaseModel):
+    hits: list[KnowledgeQueryHitResponse]
+    trace: KnowledgeRetrievalTraceResponse

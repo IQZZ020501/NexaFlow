@@ -5,7 +5,6 @@ surface): everything about building the agent's tools and converting runs to
 responses lives here, separate from run orchestration.
 """
 
-import asyncio
 from contextvars import ContextVar
 import hashlib
 import json
@@ -16,7 +15,7 @@ from fastapi import HTTPException
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, ValidationError
 
-from app.application.knowledge import query_knowledge_base
+from app.application.knowledge_retrieval import retrieve_knowledge_base
 from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.user import User
@@ -25,7 +24,6 @@ from app.infrastructure.session import get_session_factory
 from app.ports.llm import (
     ModelProviderError,
     ModelProviderStatusError,
-    build_reranker,
 )
 from app.ports.mcp import McpClientError, call_mcp_tool
 from app.schemas.agent import AgentRunResponse
@@ -36,7 +34,6 @@ from app.shareddomain.agents.runtime import (
     create_agent_tool,
 )
 from app.shareddomain.agents.services import accessible_agent_knowledge_bases
-from app.shareddomain.knowledge.services import get_knowledge_model
 from app.shareddomain.tools.services import (
     ResolvedMcpTool,
     effective_mcp_tool_policy_mode,
@@ -45,7 +42,6 @@ from app.shareddomain.tools.services import (
     resolve_mcp_tools,
 )
 
-MAX_RERANK_HITS_PER_BASE = 10
 MAX_KNOWLEDGE_HITS_PER_CALL = 8
 MAX_KNOWLEDGE_CONTENT_CHARS = 2000
 MAX_KNOWLEDGE_SOURCE_METADATA_CHARS = 240
@@ -164,12 +160,16 @@ def build_knowledge_search_tool(
                     "knowledge_base_name": knowledge_base.name,
                     "candidates": 0,
                     "reranked": False,
+                    "rerank_status": (
+                        "not_configured"
+                        if knowledge_base.reranker_model_id is None
+                        else "skipped"
+                    ),
+                    "trace_id": "",
                     "submitted": 0,
                     "status": "available",
                 }
                 retrieval_stats.append(stats_entry)
-                if knowledge_base.reranker_model_id is not None:
-                    stats_entry["reranked"] = True
             hit_groups = []
             failed_sources = 0
             for knowledge_base in available_knowledge_bases:
@@ -179,16 +179,12 @@ def build_knowledge_search_tool(
                     if entry["knowledge_base_id"] == knowledge_base.id
                 )
                 try:
-                    hits = await query_knowledge_base(
+                    result = await retrieve_knowledge_base(
                         tool_db,
                         knowledge_base,
                         KnowledgeQueryRequest(
                             query=payload.query,
-                            limit=(
-                                MAX_RERANK_HITS_PER_BASE
-                                if knowledge_base.reranker_model_id is not None
-                                else payload.limit
-                            ),
+                            limit=payload.limit,
                             search_mode=payload.search_mode,
                             similarity=payload.similarity,
                         ),
@@ -198,71 +194,15 @@ def build_knowledge_search_tool(
                     failed_sources += 1
                     stats_entry["status"] = "unavailable"
                     continue
-                hit_groups.append((knowledge_base, hits))
-
-            reranked_groups: list[tuple[KnowledgeBase, list[Any]]] = []
-            for knowledge_base, hits in hit_groups:
-                stats_entry = next(
-                    entry
-                    for entry in retrieval_stats
-                    if entry["knowledge_base_id"] == knowledge_base.id
-                )
-                stats_entry["candidates"] = len(hits)
-                if (
-                    knowledge_base.reranker_model_id is not None
-                    and len(hits) > 0
-                    and all(hit.parent_id is None for hit in hits)
-                ):
-                    try:
-                        reranker_model = await get_knowledge_model(
-                            tool_db,
-                            knowledge_base.workspace_id,
-                            knowledge_base.reranker_model_id,
-                            "RERANKER",
-                        )
-                    except HTTPException:
-                        reranked_groups.append(
-                            (knowledge_base, hits[: payload.limit])
-                        )
-                        continue
-                    if reranker_model is not None:
-                        docs = [hit.content for hit in hits[:MAX_RERANK_HITS_PER_BASE]]
-                        try:
-                            rerank_results = await asyncio.to_thread(
-                                build_reranker(
-                                    settings, reranker_model
-                                ).rerank,
-                                payload.query,
-                                docs,
-                            )
-                        except ModelProviderError:
-                            reranked_groups.append(
-                                (knowledge_base, hits[: payload.limit])
-                            )
-                            continue
-                        scored = sorted(
-                            [
-                                (
-                                    result.get("index", idx),
-                                    result.get("relevance_score", 0),
-                                )
-                                for idx, result in enumerate(rerank_results)
-                            ],
-                            key=lambda item: item[1],
-                            reverse=True,
-                        )
-                        reranked = [
-                            hits[idx]
-                            for idx, _ in scored[:payload.limit]
-                            if idx < len(hits)
-                        ]
-                        reranked_groups.append((knowledge_base, reranked))
-                        continue
-                reranked_groups.append((knowledge_base, hits[: payload.limit]))
+                stats_entry["candidates"] = result.trace.fused_candidates
+                stats_entry["rerank_status"] = result.trace.rerank_status
+                stats_entry["reranked"] = result.trace.rerank_status == "applied"
+                stats_entry["trace_id"] = result.trace.trace_id
+                hit_groups.append((knowledge_base, result.hits))
 
             selected_hits: list[tuple[KnowledgeBase, Any]] = []
             for index in range(payload.limit):
-                for knowledge_base, hits in reranked_groups:
+                for knowledge_base, hits in hit_groups:
                     if index < len(hits):
                         selected_hits.append((knowledge_base, hits[index]))
                         if len(selected_hits) == payload.limit:
@@ -280,6 +220,11 @@ def build_knowledge_search_tool(
 
             tool_hits = []
             for knowledge_base, hit in selected_hits:
+                stats_entry = next(
+                    entry
+                    for entry in retrieval_stats
+                    if entry["knowledge_base_id"] == knowledge_base.id
+                )
                 tool_hits.append(
                     {
                         "knowledge_base": knowledge_base.name,
@@ -288,6 +233,8 @@ def build_knowledge_search_tool(
                         "document_id": hit.document_id,
                         "content": hit.content[:MAX_KNOWLEDGE_CONTENT_CHARS],
                         "distance": hit.distance,
+                        "trace_id": str(stats_entry["trace_id"])[:64],
+                        "rerank_status": stats_entry["rerank_status"],
                     }
                 )
 
