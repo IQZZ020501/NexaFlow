@@ -975,6 +975,8 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                             "distance": 0.3,
                             "trace_id": "trace-1",
                             "rerank_status": "applied",
+                            "sources": ["vector", "reference"],
+                            "reference_hops": 1,
                         },
                         {
                             "chunk_id": "chunk-2",
@@ -982,6 +984,8 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                             "distance": 0.7,
                             "trace_id": "trace-2",
                             "rerank_status": "fallback",
+                            "sources": ["keywords"],
+                            "reference_hops": 0,
                         },
                         {
                             "chunk_id": "chunk-3",
@@ -1063,11 +1067,19 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                 item["chunk_id"],
                 item["trace_id"],
                 item["rerank_status"],
+                item["sources"],
+                item["reference_hops"],
             )
             for item in result.outputs["paragraph_list"]
         ] == [
-            ("chunk-1", "trace-1", "applied"),
-            ("chunk-2", "trace-2", "fallback"),
+            (
+                "chunk-1",
+                "trace-1",
+                "applied",
+                ["vector", "reference"],
+                1,
+            ),
+            ("chunk-2", "trace-2", "fallback", ["keywords"], 0),
         ]
         assert result.outputs["retrieval_stats"] == [
             {

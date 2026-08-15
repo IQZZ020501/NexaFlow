@@ -861,6 +861,7 @@ async def assert_hierarchical_retrieval(
     reranker_calls = 0
     fallback_reranker_calls = 0
     invalid_reranker_calls = 0
+    unexpected_reranker_calls = 0
 
     async with get_session_factory()() as db:
         knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
@@ -942,12 +943,31 @@ async def assert_hierarchical_retrieval(
                 def rerank(self, _query: str, _documents: list[str]) -> list[dict]:
                     nonlocal invalid_reranker_calls
                     invalid_reranker_calls += 1
-                    return [{"index": 0, "relevance_score": float("nan")}]
+                    return [
+                        {"index": 2, "relevance_score": 1.0},
+                        {"index": 0, "relevance_score": float("nan")},
+                    ]
 
             knowledge_retrieval_application.build_reranker = (
                 lambda *_args: InvalidReranker()
             )
             invalid = await knowledge_retrieval_application.retrieve_knowledge_base(
+                db,
+                knowledge_base,
+                KnowledgeQueryRequest(query="hierarchical query", limit=2),
+                test_settings(),
+            )
+
+            class UnexpectedFailingReranker:
+                def rerank(self, _query: str, _documents: list[str]) -> list[dict]:
+                    nonlocal unexpected_reranker_calls
+                    unexpected_reranker_calls += 1
+                    raise RuntimeError("unexpected provider failure")
+
+            knowledge_retrieval_application.build_reranker = (
+                lambda *_args: UnexpectedFailingReranker()
+            )
+            unexpected = await knowledge_retrieval_application.retrieve_knowledge_base(
                 db,
                 knowledge_base,
                 KnowledgeQueryRequest(query="hierarchical query", limit=2),
@@ -963,6 +983,7 @@ async def assert_hierarchical_retrieval(
     assert reranker_calls == 1
     assert fallback_reranker_calls == 1
     assert invalid_reranker_calls == 1
+    assert unexpected_reranker_calls == 1
     assert result.trace.rerank_status == "applied"
     assert hits[0].rerank_score == 1.0
     assert fallback.trace.rerank_status == "fallback"
@@ -973,6 +994,11 @@ async def assert_hierarchical_retrieval(
     ]
     assert invalid.trace.rerank_status == "fallback"
     assert [hit.chunk_id for hit in invalid.hits] == [
+        first_children[0].id,
+        second_children[0].id,
+    ]
+    assert unexpected.trace.rerank_status == "fallback"
+    assert [hit.chunk_id for hit in unexpected.hits] == [
         first_children[0].id,
         second_children[0].id,
     ]

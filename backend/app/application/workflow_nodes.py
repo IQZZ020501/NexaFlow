@@ -795,6 +795,20 @@ async def execute_workflow_node(
             rerank_status = item.get("rerank_status")
             if rerank_status in {"not_configured", "applied", "fallback", "skipped"}:
                 paragraph["rerank_status"] = rerank_status
+            sources = item.get("sources")
+            if isinstance(sources, list):
+                paragraph["sources"] = [
+                    source
+                    for source in sources[:3]
+                    if source in {"vector", "keywords", "reference"}
+                ]
+            reference_hops = item.get("reference_hops")
+            if (
+                isinstance(reference_hops, int)
+                and not isinstance(reference_hops, bool)
+                and 0 <= reference_hops <= 1
+            ):
+                paragraph["reference_hops"] = reference_hops
             paragraph_list.append(paragraph)
         # 达到检索相似度阈值的向量命中视为可直接回答（MaxKB 的分段级
         # hit_handling_method 元数据在 NexaFlow 中不存在，故以节点阈值为准）

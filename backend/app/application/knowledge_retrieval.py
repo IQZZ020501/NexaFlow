@@ -24,7 +24,7 @@ from app.infrastructure.config import Settings
 from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.model_utils import new_id
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.ports.llm import ModelProviderError, build_reranker
+from app.ports.llm import build_reranker
 from app.ports.vector_store import query_vectors
 from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
@@ -74,7 +74,7 @@ async def _rerank_hits(
             query,
             [chunk.content for chunk, _ in candidates],
         )
-    except ModelProviderError:
+    except Exception:
         return hits, "fallback"
 
     ordered = apply_rerank_results(hits, results)

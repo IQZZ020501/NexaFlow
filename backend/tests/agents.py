@@ -856,6 +856,8 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             chunk_index=0,
             content=f"content-{knowledge_base.id}",
             distance=0.1,
+            sources=["vector", "reference"],
+            reference_hops=1,
             rerank_score=1.0 if knowledge_base.id == "base-applied" else None,
         )
 
@@ -910,11 +912,29 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
         "chunk-base-fallback",
     ]
     assert [
-        (item["chunk_id"], item["trace_id"], item["rerank_status"])
+        (
+            item["chunk_id"],
+            item["trace_id"],
+            item["rerank_status"],
+            item["sources"],
+            item["reference_hops"],
+        )
         for item in result.output["hits"]
     ] == [
-        ("chunk-base-applied", "trace-base-applied", "applied"),
-        ("chunk-base-fallback", "trace-base-fallback", "fallback"),
+        (
+            "chunk-base-applied",
+            "trace-base-applied",
+            "applied",
+            ["vector", "reference"],
+            1,
+        ),
+        (
+            "chunk-base-fallback",
+            "trace-base-fallback",
+            "fallback",
+            ["vector", "reference"],
+            1,
+        ),
     ]
     assert result.output["retrieval_stats"] == [
         {

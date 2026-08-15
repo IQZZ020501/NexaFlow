@@ -235,6 +235,8 @@ def build_knowledge_search_tool(
                         "distance": hit.distance,
                         "trace_id": str(stats_entry["trace_id"])[:64],
                         "rerank_status": stats_entry["rerank_status"],
+                        "sources": hit.sources[:3],
+                        "reference_hops": hit.reference_hops,
                     }
                 )
 
