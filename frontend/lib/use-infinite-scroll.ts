@@ -6,8 +6,7 @@ export const CARD_BATCH_SIZE = 50
 
 export function useInfiniteScroll(loadMore: () => void) {
   const loadMoreRef = React.useRef(loadMore)
-
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     loadMoreRef.current = loadMore
   }, [loadMore])
 
