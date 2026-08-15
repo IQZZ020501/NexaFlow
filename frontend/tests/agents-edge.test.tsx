@@ -23,6 +23,7 @@ import {
   uploadWorkflowFiles,
   validateWorkflowDefinition,
   type WorkflowGraph,
+  type WorkflowNode,
   type WorkflowRun,
 } from "@/lib/api/workflows"
 import {
@@ -212,11 +213,27 @@ describe("lib/api/workflows", () => {
       init?: RequestInit
     ) => {
       calls.push({ url: String(input), method: init?.method ?? "GET", body: init?.body })
-      return jsonResponse([{ id: "up-1" }])
+      return jsonResponse([
+        {
+          id: "up-1",
+          filename: "a.txt",
+          content_type: "text/plain",
+          size_bytes: 1,
+          category: "document",
+        },
+      ])
     }) as unknown as typeof fetch
     const files = [new File(["a"], "a.txt", { type: "text/plain" })]
     const uploaded = await uploadWorkflowFiles("token", "ws-1", "workflow-1", files)
-    expect(uploaded).toEqual([{ id: "up-1" }])
+    expect(uploaded).toEqual([
+      {
+        id: "up-1",
+        filename: "a.txt",
+        content_type: "text/plain",
+        size_bytes: 1,
+        category: "document",
+      },
+    ])
     expect(calls[0].url).toContain("/workflows/workflow-1/uploads")
     expect(calls[0].body).toBeInstanceOf(FormData)
     expect((calls[0].body as FormData).getAll("files")).toEqual(files)
@@ -325,7 +342,7 @@ describe("lib/workflows/graph", () => {
 
   test("workflowExecutionNodeLabel resolves titles and falls back to type labels", () => {
     const t = ((key: string) => key) as never
-    const graph = {
+    const graph: WorkflowGraph = {
       nodes: [
         {
           id: "llm-1",
@@ -461,7 +478,7 @@ describe("lib/workflows/graph", () => {
   })
 
   test("ensureConditionElseIfBranches migrates IF/ELSE pairs and skips others", () => {
-    const conditionNode = {
+    const conditionNode: WorkflowNode = {
       id: "condition-1",
       type: "workflow",
       position: { x: 0, y: 0 },
@@ -476,7 +493,7 @@ describe("lib/workflows/graph", () => {
         },
       },
     }
-    const graph = {
+    const graph: WorkflowGraph = {
       nodes: [
         { id: "start", type: "workflow", position: { x: 0, y: 0 }, data: { type: "start", title: "Start", config: {} } },
         conditionNode,
@@ -492,7 +509,7 @@ describe("lib/workflows/graph", () => {
     expect(migrated.edges.map((edge) => edge.sourceHandle)).toContain(branches[1].id)
 
     // Single-branch conditions and non-condition nodes are untouched.
-    const untouchedInput = {
+    const untouchedInput: WorkflowGraph = {
       nodes: [
         {
           ...conditionNode,
@@ -508,7 +525,7 @@ describe("lib/workflows/graph", () => {
       viewport: { x: 0, y: 0, zoom: 1 },
     }
     expect(ensureConditionElseIfBranches(untouchedInput)).toBe(untouchedInput)
-    const threeBranches = {
+    const threeBranches: WorkflowGraph = {
       nodes: [
         {
           ...conditionNode,
@@ -578,7 +595,7 @@ describe("lib/workflows/graph", () => {
   })
 
   test("upstreamWorkflowFields collects reachable fields and guards cycles", () => {
-    const nodes = [
+    const nodes: WorkflowNode[] = [
       { id: "start", type: "workflow", position: { x: 0, y: 0 }, data: { type: "start", title: "Start", config: {} } },
       { id: "llm-1", type: "workflow", position: { x: 0, y: 0 }, data: { type: "llm", title: "LLM", config: {} } },
       { id: "knowledge-1", type: "workflow", position: { x: 0, y: 0 }, data: { type: "knowledge", title: "Knowledge", config: {} } },
