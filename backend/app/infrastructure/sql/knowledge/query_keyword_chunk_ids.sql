@@ -13,10 +13,10 @@ WHERE chunk.workspace_id = :workspace_id
     AND chunk.status = 'indexed'
     AND document.status <> 'deleted'
     AND document.is_active IS TRUE
-    AND to_tsvector('simple'::regconfig, chunk.content) @@ search_query.value
+    AND to_tsvector('simple'::regconfig, chunk.search_text) @@ search_query.value
 ORDER BY
     ts_rank_cd(
-        to_tsvector('simple'::regconfig, chunk.content),
+        to_tsvector('simple'::regconfig, chunk.search_text),
         search_query.value
     ) DESC,
     chunk.id

@@ -136,6 +136,9 @@ class KnowledgeDocumentChunk:
     start_offset: int | None = None
     end_offset: int | None = None
     content: str = ""
+    kind: str = "document"
+    search_text: str = ""
+    meta: dict[str, Any] = field(default_factory=dict)
     char_count: int = 0
     token_count: int = 0
     vector_id: str | None = None

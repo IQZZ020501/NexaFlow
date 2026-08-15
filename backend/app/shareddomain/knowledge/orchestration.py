@@ -80,6 +80,27 @@ DEFAULT_PARSE_OPTIONS: dict[str, Any] = {
 }
 
 
+def chunk_search_text(
+    document: KnowledgeDocument,
+    parent: KnowledgeDocumentParentChunk | None,
+    chunk: KnowledgeDocumentChunk,
+) -> str:
+    if chunk.kind == "qa":
+        question = (chunk.meta or {}).get("question")
+        parts = [question if isinstance(question, str) else "", chunk.content]
+    else:
+        path = (parent.meta or {}).get("section_path") if parent else None
+        section_path = (
+            [value for value in path if isinstance(value, str) and value]
+            if isinstance(path, list)
+            else []
+        )
+        if not section_path and parent and parent.title:
+            section_path = [parent.title]
+        parts = [document.filename, *section_path, chunk.content]
+    return "\n".join(part for part in parts if part)
+
+
 def asset_to_response(asset: KnowledgeAsset) -> KnowledgeAssetResponse:
     return KnowledgeAssetResponse(
         id=asset.id,
@@ -352,7 +373,7 @@ async def replace_document_chunks(
                     title=draft.title,
                     content=draft.content,
                     char_count=len(draft.content),
-                    meta={},
+                    meta={"section_path": draft.section_path},
                 )
             )
 
@@ -384,10 +405,13 @@ async def replace_document_chunks(
                 start_offset=draft.start_offset,
                 end_offset=draft.end_offset,
                 content=draft.content,
+                kind=draft.kind,
+                meta=draft.meta,
                 char_count=len(draft.content),
                 token_count=chunk_token_count(draft.content),
                 status=CHUNK_PREVIEW_STATUS,
             )
+            chunk.search_text = chunk_search_text(document, parent, chunk)
             children.append(chunk)
             for asset_index, document_asset_index in enumerate(
                 draft.asset_indexes

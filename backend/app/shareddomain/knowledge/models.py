@@ -272,6 +272,10 @@ class KnowledgeDocumentChunk(Base):
             name="ck_knowledge_document_chunks_status",
         ),
         CheckConstraint(
+            "kind IN ('document', 'qa')",
+            name="ck_knowledge_document_chunks_kind",
+        ),
+        CheckConstraint(
             "(parent_id IS NULL AND start_offset IS NULL AND end_offset IS NULL) OR "
             "(parent_id IS NOT NULL AND start_offset IS NOT NULL AND end_offset IS NOT NULL "
             "AND start_offset >= 0 AND end_offset > start_offset)",
@@ -288,6 +292,9 @@ class KnowledgeDocumentChunk(Base):
     start_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     end_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="document")
+    search_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    meta: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     char_count: Mapped[int] = mapped_column(Integer, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
     vector_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)

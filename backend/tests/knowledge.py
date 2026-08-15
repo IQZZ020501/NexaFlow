@@ -172,6 +172,35 @@ async def assert_document_saved(document_id: str, expected_content: bytes) -> No
         assert path.read_bytes() == expected_content
 
 
+async def set_document_chunk_search_text(
+    document_id: str,
+    search_text: str,
+) -> None:
+    async with get_session_factory()() as db:
+        chunks = list(
+            await db.scalars(
+                select(KnowledgeDocumentChunk).where(
+                    KnowledgeDocumentChunk.document_id == document_id
+                )
+            )
+        )
+        assert chunks
+        for chunk in chunks:
+            chunk.search_text = search_text
+        await db.commit()
+
+
+async def document_chunk_search_texts(document_id: str) -> list[str]:
+    async with get_session_factory()() as db:
+        return list(
+            await db.scalars(
+                select(KnowledgeDocumentChunk.search_text)
+                .where(KnowledgeDocumentChunk.document_id == document_id)
+                .order_by(KnowledgeDocumentChunk.chunk_index)
+            )
+        )
+
+
 async def clear_knowledge_base_embedding_model(knowledge_base_id: str) -> None:
     async with get_session_factory()() as db:
         knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
@@ -757,7 +786,7 @@ def upload_document(
 
 async def assert_hierarchical_chunks_persisted(
     document_id: str,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     async with get_session_factory()() as db:
         chunks = list(
             await db.scalars(
@@ -775,7 +804,12 @@ async def assert_hierarchical_chunks_persisted(
         )
         parents_by_id = {parent.id: parent for parent in parents}
         assert [parent.title for parent in parents] == ["First", "Second"]
+        assert [parent.meta["section_path"] for parent in parents] == [
+            ["First"],
+            ["First", "Second"],
+        ]
         assert len(chunks) > len(parents)
+        assert all(chunk.kind == "document" and chunk.meta == {} for chunk in chunks)
         assert all(chunk.parent_id in parents_by_id for chunk in chunks)
         assert all(
             parents_by_id[chunk.parent_id].content[
@@ -784,7 +818,22 @@ async def assert_hierarchical_chunks_persisted(
             == chunk.content
             for chunk in chunks
         )
-        return [chunk.id for chunk in chunks], [parent.id for parent in parents]
+        search_texts = [
+            "\n".join(
+                [
+                    "hierarchical-guide.md",
+                    *parents_by_id[chunk.parent_id].meta["section_path"],
+                    chunk.content,
+                ]
+            )
+            for chunk in chunks
+        ]
+        assert [chunk.search_text for chunk in chunks] == search_texts
+        return (
+            [chunk.id for chunk in chunks],
+            [parent.id for parent in parents],
+            search_texts,
+        )
 
 
 async def assert_parent_scope_constraint(
@@ -1002,7 +1051,9 @@ async def assert_hierarchical_retrieval(
         first_children[0].id,
         second_children[0].id,
     ]
-    assert reranked_documents == [chunk.content for chunk in candidates]
+    assert reranked_documents == [
+        chunk.search_text or chunk.content for chunk in candidates
+    ]
     assert [hit.parent_id for hit in hits] == [parents[1].id, parents[0].id]
     assert hits[0].chunk_id == second_children[0].id
     assert hits[1].chunk_id == first_children[1].id
@@ -1044,6 +1095,10 @@ def main() -> None:
         overlap=5,
     )
     assert [parent.title for parent in hierarchical_drafts.parents] == ["One", "Two"]
+    assert [parent.section_path for parent in hierarchical_drafts.parents] == [
+        ["One"],
+        ["Two"],
+    ]
     assert all(
         hierarchical_drafts.parents[chunk.parent_index].content[
             chunk.start_offset : chunk.end_offset
@@ -1277,6 +1332,7 @@ def main() -> None:
         )
         assert document_chunks.status_code == 200, document_chunks.text
         assert [chunk["content"] for chunk in document_chunks.json()] == ["Hello from product docs"]
+        assert "search_text" not in document_chunks.json()[0]
         assert document_chunks.json()[0]["status"] == "indexed"
         assert document_chunks.json()[0]["vector_id"] == document_chunks.json()[0]["id"]
         asyncio.run(assert_knowledge_base_embedding_model(knowledge_base_id, embedding_model_id))
@@ -1423,6 +1479,10 @@ def main() -> None:
         assert configured_deleted.status_code == 204, configured_deleted.text
         asyncio.run(assert_document_deleted(configured_document_id))
 
+        asyncio.run(
+            set_document_chunk_search_text(document_id, "Hello from product docs")
+        )
+        rebuild_embedding_calls_before = len(ModelTestHandler.calls)
         rebuild_task = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/rebuild-index"),
             headers=auth_headers(alice_token),
@@ -1431,6 +1491,17 @@ def main() -> None:
         assert rebuild_task.json()["task_type"] == "rebuild_index"
         assert rebuild_task.json()["total_items"] == 1
         assert rebuild_task.json()["processed_items"] == 0
+        assert asyncio.run(document_chunk_search_texts(document_id)) == [
+            "product-guide.txt\nHello from product docs"
+        ]
+        rebuild_embedding_calls = [
+            call
+            for call in ModelTestHandler.calls[rebuild_embedding_calls_before:]
+            if call["path"] == "/v1/embeddings"
+        ]
+        assert rebuild_embedding_calls[-1]["body"]["input"] == [
+            "product-guide.txt\nHello from product docs"
+        ]
 
         ModelTestHandler.fail_next = True
         failed_rebuild_task = client.post(
@@ -1984,7 +2055,7 @@ def main() -> None:
         )
         second_parent_body = "SECOND " * 80
         hierarchical_content = (
-            f"# First\n\n{first_parent_body}\n\n# Second\n\n{second_parent_body}"
+            f"# First\n\n{first_parent_body}\n\n## Second\n\n{second_parent_body}"
         ).encode()
         hierarchical_document = upload_document(
             client,
@@ -2031,10 +2102,15 @@ def main() -> None:
             and chunk["end_offset"] is not None
             for chunk in hierarchical_preview.json()
         )
-        hierarchical_child_ids, hierarchical_parent_ids = asyncio.run(
+        (
+            hierarchical_child_ids,
+            hierarchical_parent_ids,
+            hierarchical_search_texts,
+        ) = asyncio.run(
             assert_hierarchical_chunks_persisted(hierarchical_document_id)
         )
 
+        hierarchical_embedding_calls_before = len(ModelTestHandler.calls)
         hierarchical_index = client.post(
             knowledge_url(
                 default_workspace_id,
@@ -2043,6 +2119,16 @@ def main() -> None:
             headers=auth_headers(alice_token),
         )
         assert hierarchical_index.status_code == 202, hierarchical_index.text
+        hierarchical_embedding_calls = [
+            call
+            for call in ModelTestHandler.calls[hierarchical_embedding_calls_before:]
+            if call["path"] == "/v1/embeddings"
+        ]
+        assert [
+            value
+            for call in hierarchical_embedding_calls
+            for value in call["body"]["input"]
+        ] == hierarchical_search_texts
         vector_client = knowledge_vector_store._client(test_settings())
         stored_hierarchical_ids = {
             str(point.id)

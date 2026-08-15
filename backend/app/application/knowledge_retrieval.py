@@ -72,7 +72,7 @@ async def _rerank_hits(
         results = await asyncio.to_thread(
             provider.rerank,
             query,
-            [chunk.content for chunk, _ in candidates],
+            [chunk.search_text or chunk.content for chunk, _ in candidates],
         )
     except Exception:
         return hits, "fallback"

@@ -47,6 +47,7 @@ from app.ports.vector_store import (
     upsert_vectors,
 )
 from app.shareddomain.knowledge.orchestration import (
+    chunk_search_text,
     enqueue_index_knowledge_document,
     extract_document_chunk_contents,
     parse_task_options_from_task,
@@ -214,6 +215,22 @@ async def run_index_task(
                 raise KnowledgePipelineError("Knowledge chunk document is missing.")
             documents[chunk.document_id] = loaded
 
+    parents = await knowledge_base_repository.list_parent_chunks_by_ids(
+        db,
+        knowledge_base,
+        {chunk.parent_id for chunk in chunks if chunk.parent_id},
+    )
+    parents_by_id = {parent.id: parent for parent in parents}
+    for chunk in chunks:
+        search_text = chunk_search_text(
+            documents[chunk.document_id],
+            parents_by_id.get(chunk.parent_id) if chunk.parent_id else None,
+            chunk,
+        )
+        if chunk.search_text != search_text:
+            chunk.search_text = search_text
+            await knowledge_base_repository.save_knowledge_document_chunk(db, chunk)
+
     if task.task_type != TASK_REBUILD_INDEX:
         for chunk_document in documents.values():
             chunk_document = (
@@ -243,7 +260,7 @@ async def run_index_task(
             document_id=chunk.document_id,
             document_filename=documents[chunk.document_id].filename,
             chunk_index=chunk.chunk_index,
-            content=chunk.content,
+            content=chunk.search_text or chunk.content,
             document_metadata={
                 **(documents[chunk.document_id].meta or {}),
                 "content_type": documents[chunk.document_id].content_type,
