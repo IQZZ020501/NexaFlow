@@ -221,7 +221,7 @@ async def assert_document_reference_target(
         assert len(references) == 1
         reference = references[0]
         assert reference.target_label == "rollback.md"
-        assert reference.target_section == "Rollback"
+        assert reference.target_section == "rollback-procedure"
         assert reference.reference_type == "markdown"
         assert reference.source_ordinal == 0
         assert reference.target_document_id == target_document_id
@@ -235,6 +235,46 @@ async def assert_document_reference_target(
             assert parent is not None
             assert parent.document_id == target_document_id
             assert parent.title == target_parent_title
+
+
+async def assert_reference_parent_requires_document(
+    source_document_id: str,
+    target_document_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        source_chunk = await db.scalar(
+            select(KnowledgeDocumentChunk).where(
+                KnowledgeDocumentChunk.document_id == source_document_id
+            )
+        )
+        target_parent = await db.scalar(
+            select(KnowledgeDocumentParentChunk).where(
+                KnowledgeDocumentParentChunk.document_id == target_document_id
+            )
+        )
+        assert source_chunk is not None
+        assert target_parent is not None
+        db.add(
+            KnowledgeDocumentReference(
+                id="invalid-parent-reference",
+                workspace_id=source_chunk.workspace_id,
+                knowledge_base_id=source_chunk.knowledge_base_id,
+                source_document_id=source_document_id,
+                source_chunk_id=source_chunk.id,
+                target_document_id=None,
+                target_parent_id=target_parent.id,
+                target_label="invalid-parent.md",
+                target_section="Invalid",
+                reference_type="markdown",
+                source_ordinal=99,
+            )
+        )
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+        else:
+            raise AssertionError("Parent references must include their target document.")
 
 
 async def clear_knowledge_base_embedding_model(knowledge_base_id: str) -> None:
@@ -1153,6 +1193,11 @@ async def assert_one_hop_reference_retrieval(
         assert knowledge_base is not None
 
         original_query_vectors = knowledge_retrieval_application.query_vectors
+        original_list_references = (
+            knowledge_retrieval_application.knowledge_reference_repository
+            .list_resolved_references_for_chunks
+        )
+        reference_calls = 0
 
         def fake_query_vectors(
             _settings,
@@ -1195,8 +1240,51 @@ async def assert_one_hop_reference_retrieval(
                 ),
                 test_settings(),
             )
+
+            async def capped_references(
+                _db,
+                _knowledge_base,
+                source_chunk_ids,
+                limit,
+            ):
+                nonlocal reference_calls
+                reference_calls += 1
+                assert source_chunk_ids == [source_chunk.id]
+                assert limit == 100
+                return [
+                    SimpleNamespace(
+                        target_document_id=f"unretrievable-{index}",
+                        target_parent_id=None,
+                    )
+                    for index in range(8)
+                ] + [
+                    SimpleNamespace(
+                        target_document_id=target_document_id,
+                        target_parent_id=None,
+                    )
+                ]
+
+            (
+                knowledge_retrieval_application.knowledge_reference_repository
+                .list_resolved_references_for_chunks
+            ) = capped_references
+            capped = await knowledge_retrieval_application.retrieve_knowledge_base(
+                db,
+                knowledge_base,
+                KnowledgeQueryRequest(
+                    query="release overview",
+                    limit=2,
+                    search_mode="embedding",
+                    include_references=True,
+                ),
+                test_settings(),
+            )
         finally:
             knowledge_retrieval_application.query_vectors = original_query_vectors
+            (
+                knowledge_retrieval_application.knowledge_reference_repository
+                .list_resolved_references_for_chunks
+            ) = original_list_references
 
     assert [hit.document_filename for hit in enabled.hits] == [
         "overview.md",
@@ -1206,10 +1294,15 @@ async def assert_one_hop_reference_retrieval(
     assert enabled.hits[0].reference_hops == 0
     assert enabled.hits[1].sources == ["reference"]
     assert enabled.hits[1].reference_hops == 1
-    assert enabled.hits[1].parent_title == "Rollback"
+    assert enabled.hits[1].parent_title == "Rollback Procedure"
     assert enabled.trace.reference_candidates >= 1
     assert [hit.document_filename for hit in disabled.hits] == ["overview.md"]
     assert disabled.trace.reference_candidates == 0
+    assert [hit.document_filename for hit in capped.hits] == [
+        "overview.md",
+        "rollback.md",
+    ]
+    assert reference_calls == 1
 
 
 async def assert_document_open_tasks_failed(
@@ -2319,7 +2412,7 @@ def main() -> None:
             default_workspace_id,
             knowledge_base_id,
             "overview.md",
-            b"Release overview. [Rollback](rollback.md#Rollback).",
+            b"Release overview. [Rollback](rollback.md#rollback-procedure).",
             "text/markdown",
         )
         reference_source_id = reference_source["id"]
@@ -2340,7 +2433,7 @@ def main() -> None:
             default_workspace_id,
             knowledge_base_id,
             "rollback.md",
-            b"# Rollback\n\nUse the safe rollback procedure.",
+            b"# Rollback Procedure\n\nUse the safe rollback procedure.",
             "text/markdown",
         )
         reference_target_id = reference_target["id"]
@@ -2357,7 +2450,13 @@ def main() -> None:
             assert_document_reference_target(
                 reference_source_id,
                 reference_target_id,
-                "Rollback",
+                "Rollback Procedure",
+            )
+        )
+        asyncio.run(
+            assert_reference_parent_requires_document(
+                reference_source_id,
+                reference_target_id,
             )
         )
 
@@ -2367,7 +2466,7 @@ def main() -> None:
             default_workspace_id,
             knowledge_base_id,
             "rollback.md",
-            b"# Rollback\n\nAmbiguous duplicate target.",
+            b"# Rollback Procedure\n\nAmbiguous duplicate target.",
             "text/markdown",
         )
         duplicate_reference_target_id = duplicate_reference_target["id"]
@@ -2396,7 +2495,7 @@ def main() -> None:
             assert_document_reference_target(
                 reference_source_id,
                 reference_target_id,
-                "Rollback",
+                "Rollback Procedure",
             )
         )
 

@@ -45,6 +45,11 @@ def _normalize_section(value: str | None) -> str:
     return " ".join(unquote(value or "").split())[:500]
 
 
+def _section_anchor(value: str) -> str:
+    normalized = re.sub(r"[^\w\s-]", "", unquote(value).casefold())
+    return re.sub(r"[-\s]+", "-", normalized).strip("-")
+
+
 def extract_reference_labels(content: str) -> list[ReferenceLabel]:
     candidates: list[tuple[int, ReferenceLabel]] = []
     for match in MARKDOWN_REFERENCE_PATTERN.finditer(content):
@@ -136,15 +141,13 @@ def _resolved_target(
     document = candidates[0]
     if not target_section:
         return document.id, None
-    parent = next(
-        (
-            item
-            for item in parents_by_document.get(document.id, [])
-            if item.title == target_section
-        ),
-        None,
-    )
-    return document.id, parent.id if parent else None
+    section_anchor = _section_anchor(target_section)
+    parents = [
+        item
+        for item in parents_by_document.get(document.id, [])
+        if _section_anchor(item.title) == section_anchor
+    ]
+    return document.id, parents[0].id if len(parents) == 1 else None
 
 
 async def prepare_document_reference_rebuild(

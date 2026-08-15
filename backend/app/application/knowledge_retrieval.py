@@ -208,10 +208,24 @@ async def retrieve_knowledge_base(
                 MAX_REFERENCES,
             )
         )
+        retrievable_document_ids = (
+            await knowledge_base_repository.list_retrievable_document_ids(
+                db,
+                knowledge_base,
+                {
+                    reference.target_document_id
+                    for reference in references
+                    if reference.target_document_id
+                },
+            )
+        )
         target_document_ids: list[str] = []
         for reference in references:
             target_document_id = reference.target_document_id
-            if target_document_id and target_document_id not in target_document_ids:
+            if (
+                target_document_id in retrievable_document_ids
+                and target_document_id not in target_document_ids
+            ):
                 target_document_ids.append(target_document_id)
                 if len(target_document_ids) == MAX_REFERENCE_TARGET_DOCUMENTS:
                     break

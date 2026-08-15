@@ -39,6 +39,10 @@ def upgrade() -> None:
             "source_ordinal >= 0",
             name="ck_knowledge_document_references_source_ordinal",
         ),
+        sa.CheckConstraint(
+            "target_parent_id IS NULL OR target_document_id IS NOT NULL",
+            name="ck_knowledge_document_references_parent_requires_document",
+        ),
         sa.ForeignKeyConstraint(
             ["workspace_id", "knowledge_base_id"],
             ["knowledge.workspace_id", "knowledge.id"],

@@ -677,6 +677,34 @@ async def list_active_documents_by_ids(
     return [to_entity(KnowledgeDocument, row) for row in result]
 
 
+async def list_retrievable_document_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_ids: set[str],
+) -> set[str]:
+    active_document_ids = {
+        document.id
+        for document in await list_active_documents_by_ids(
+            db,
+            knowledge_base,
+            document_ids,
+        )
+    }
+    if not active_document_ids:
+        return set()
+    rows = await db.scalars(
+        select(KnowledgeDocumentChunkORM.document_id)
+        .where(
+            KnowledgeDocumentChunkORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentChunkORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocumentChunkORM.status == CHUNK_INDEXED_STATUS,
+            KnowledgeDocumentChunkORM.document_id.in_(active_document_ids),
+        )
+        .distinct()
+    )
+    return set(rows)
+
+
 async def query_keyword_chunk_ids(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,

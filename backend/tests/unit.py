@@ -700,7 +700,15 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
 
 
 def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
-    from app.shareddomain.knowledge.references import extract_reference_labels
+    from app.entities.knowledge import (
+        KnowledgeDocument,
+        KnowledgeDocumentParentChunk,
+    )
+    from app.shareddomain.knowledge.references import (
+        _resolution_context,
+        _resolved_target,
+        extract_reference_labels,
+    )
 
     labels = extract_reference_labels(
         "详见《发布手册.md》第三章，或参考 "
@@ -718,6 +726,35 @@ def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
 
     many = " ".join(f"[文档 {index}](doc-{index}.md)" for index in range(101))
     assert len(extract_reference_labels(many)) == 100
+
+    document = KnowledgeDocument(id="document-1", filename="release.md")
+    parent = KnowledgeDocumentParentChunk(
+        id="parent-1",
+        document_id=document.id,
+        title="Rollback Procedure",
+    )
+    documents_by_alias, parents_by_document = _resolution_context(
+        [document],
+        [parent],
+    )
+    assert _resolved_target(
+        "release.md",
+        "rollback-procedure",
+        documents_by_alias,
+        parents_by_document,
+    ) == (document.id, parent.id)
+    duplicate = KnowledgeDocumentParentChunk(
+        id="parent-2",
+        document_id=document.id,
+        title="Rollback Procedure",
+    )
+    _, duplicate_parents = _resolution_context([document], [parent, duplicate])
+    assert _resolved_target(
+        "release.md",
+        "rollback-procedure",
+        documents_by_alias,
+        duplicate_parents,
+    ) == (document.id, None)
 
 
 def test_parent_context_windows_around_child_offsets() -> None:
