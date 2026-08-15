@@ -2029,6 +2029,8 @@ async def run_task_runner_direct_tests(
     embedding_model_id: str,
 ) -> None:
     settings = test_settings()
+    assert run_knowledge_task_job.soft_time_limit == 900
+    assert run_knowledge_task_job.time_limit == 960
 
     # get_task_scope error branches
     async with get_session_factory()() as db:

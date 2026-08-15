@@ -85,6 +85,7 @@ export const en = {
   "团队成员已更新": "Team member updated",
   "团队成员已移除": "Team member removed",
   "用户已新建": "User created",
+  "用户已新建，初始密码：{password}": "User created. Initial password: {password}",
   "用户已停用": "User deactivated",
   "用户已启用": "User activated",
   "用户已更新": "User updated",

@@ -9,6 +9,11 @@ from fastapi import HTTPException, status
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
 from app.infrastructure.logger import get_logger, log_event
+from app.infrastructure.agent_rate_limit import (
+    LoginRateLimitExceeded,
+    LoginRateLimitUnavailable,
+    enforce_login_rate_limit,
+)
 from app.infrastructure.validation import normalize_email, normalize_name, normalize_username
 from app.entities.user import RefreshSession, User
 from app.infrastructure.model_utils import utc_now
@@ -40,9 +45,6 @@ from app.entities.team import Team, TeamMembership
 from app.entities.workspace import Workspace, WorkspaceMembership
 
 logger = get_logger(__name__)
-
-DEFAULT_USER_PASSWORD = "NexaFlow@123"
-
 
 def access_token_response(user: User, settings: Settings) -> TokenResponse:
     return TokenResponse(
@@ -182,6 +184,7 @@ async def create_user(
     db: AsyncSession,
     payload: UserCreateRequest,
     actor: User,
+    settings: Settings,
 ) -> UserPasswordResetResponse:
     team_ids = list(dict.fromkeys(payload.team_ids))
     if team_ids and not payload.workspace_id:
@@ -212,7 +215,7 @@ async def create_user(
                 "Teams must belong to selected workspace.",
             )
 
-    initial_password = DEFAULT_USER_PASSWORD
+    initial_password = settings.managed_user_initial_password
     user = User(
         username=normalize_username(payload.username),
         email=normalize_email(payload.email),
@@ -369,6 +372,19 @@ async def authenticate_user(
     ip_address: str | None = None,
 ) -> tuple[TokenResponse, str]:
     username = normalize_username(username)
+    try:
+        await enforce_login_rate_limit(settings, username, ip_address)
+    except LoginRateLimitExceeded as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many login attempts.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    except LoginRateLimitUnavailable as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Login rate limiter is unavailable.",
+        ) from exc
     user = await user_repository.get_active_user_by_username(db, username)
     if user is None or not verify_password(password, user.password_hash):
         log_event(
@@ -455,9 +471,7 @@ async def change_password(
     settings: Settings,
     current_password: str | None = None,
 ) -> str:
-    if not user.must_change_password and not (
-        current_password and verify_password(current_password, user.password_hash)
-    ):
+    if not current_password or not verify_password(current_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is invalid.")
     if verify_password(new_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "New password must be different.")

@@ -86,7 +86,9 @@ from app.capabilities.mcp.client import (
     McpClientError,
     McpConnection,
     McpDiscovery,
+    McpResolvedDestination,
     MultiTransportMcpClient,
+    _PinnedNetworkBackend,
     _hardened_http_client_factory,
     call_mcp_tool,
     discover_mcp_tools,
@@ -1192,7 +1194,48 @@ def test_validate_mcp_destination() -> None:
         "socket.getaddrinfo",
         return_value=[("AF_INET", "SOCK_STREAM", 6, "", ("8.8.8.8", 80))],
     ):
-        run(validate_mcp_destination("http://example.com/mcp", allow_private_networks=False))
+        destination = run(
+            validate_mcp_destination(
+                "http://example.com/mcp",
+                allow_private_networks=False,
+            )
+        )
+    assert destination == McpResolvedDestination(
+        hostname="example.com",
+        port=80,
+        addresses=("8.8.8.8",),
+    )
+
+
+def test_pinned_mcp_network_backend() -> None:
+    class FakeBackend:
+        def __init__(self) -> None:
+            self.hosts: list[str] = []
+
+        async def connect_tcp(self, host, port, **_kwargs):
+            self.hosts.append(host)
+            if host == "8.8.8.8":
+                raise mcp_capabilities.client.httpcore2.ConnectError("first failed")
+            return "stream"
+
+        async def sleep(self, _seconds):
+            return None
+
+    backend = _PinnedNetworkBackend(
+        McpResolvedDestination(
+            hostname="example.com",
+            port=443,
+            addresses=("8.8.8.8", "1.1.1.1"),
+        )
+    )
+    fake = FakeBackend()
+    backend._backend = fake
+    assert run(backend.connect_tcp("example.com", 443)) == "stream"
+    assert fake.hosts == ["8.8.8.8", "1.1.1.1"]
+    expect_error(
+        lambda: run(backend.connect_tcp("internal.example", 443)),
+        mcp_capabilities.client.httpcore2.ConnectError,
+    )
 
 
 def test_hardened_http_client_factory() -> None:
@@ -2099,6 +2142,7 @@ def _valid_settings() -> config_mod.Settings:
         bootstrap_admin_email="admin@app.local",
         bootstrap_admin_name="Admin",
         bootstrap_admin_password="Admin@12345.",
+        managed_user_initial_password="Managed@12345.",
         jwt_secret_key="jwt-key",
         model_secret_key="model-key",
         knowledge_storage_dir=Path("/tmp/nexaflow-test"),
@@ -2134,6 +2178,7 @@ def test_settings_defaults_and_validation() -> None:
     cases = [
         (replace(base, bootstrap_admin_username=""), "Missing initialization"),
         (replace(base, bootstrap_admin_email=""), "Missing initialization"),
+        (replace(base, managed_user_initial_password=""), "MANAGED_USER_INITIAL_PASSWORD"),
         (replace(base, jwt_secret_key=""), "JWT_SECRET_KEY"),
         (replace(base, model_secret_key=""), "MODEL_SECRET_KEY"),
         (replace(base, knowledge_storage_dir=None), "KNOWLEDGE_STORAGE_DIR"),
@@ -2177,6 +2222,7 @@ def test_settings_from_env() -> None:
         "BOOTSTRAP_ADMIN_EMAIL": "env-admin@app.local",
         "BOOTSTRAP_ADMIN_NAME": "Env Admin",
         "BOOTSTRAP_ADMIN_PASSWORD": "Env@12345.",
+        "MANAGED_USER_INITIAL_PASSWORD": "ManagedEnv@12345.",
         "JWT_SECRET_KEY": "env-jwt",
         "MODEL_SECRET_KEY": "env-model",
         "KNOWLEDGE_STORAGE_DIR": "/tmp/env-storage",
@@ -2200,6 +2246,7 @@ def test_settings_from_env() -> None:
     ):
         parsed = config_mod.Settings.from_env()
         assert parsed.bootstrap_admin_username == "env-admin"
+        assert parsed.managed_user_initial_password == "ManagedEnv@12345."
         assert parsed.jwt_secret_key == "env-jwt"
         assert parsed.knowledge_storage_dir == Path("/tmp/env-storage")
         assert parsed.cors_origins == ("https://a.example.com", "https://b.example.com")
@@ -3904,6 +3951,7 @@ def main() -> None:
     test_normalize_mcp_url_unit()
     test_is_private_address()
     test_validate_mcp_destination()
+    test_pinned_mcp_network_backend()
     test_hardened_http_client_factory()
     test_mcp_client_streamable_http()
     test_mcp_client_sse()

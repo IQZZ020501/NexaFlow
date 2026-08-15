@@ -27,7 +27,6 @@ import { Input } from "@/components/ui/input"
 import type { MeResponse, Team, Workspace } from "@/lib/api/system"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import { cn } from "@/lib/utils"
-import { DEFAULT_USER_PASSWORD } from "@/lib/constants"
 import { displayTeamName, displayWorkspaceName } from "@/lib/display"
 import type {
   UserCreateForm,
@@ -140,12 +139,6 @@ export function CreateUserDialog({
                 }
                 required
               />
-            </Field>
-            <Field>
-              <FieldLabel>{t("默认密码")}</FieldLabel>
-              <p className="text-sm font-medium text-foreground">
-                {DEFAULT_USER_PASSWORD}
-              </p>
             </Field>
             {me.user.is_global_admin ? (
               <Field>

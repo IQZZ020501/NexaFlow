@@ -71,8 +71,8 @@ Correctness, safety, evidence, and validation take priority over speed.
   explicit write workflows, seed data, and complex queries; keep parameter
   binding in Python services.
 - `backend/.env.example` documents initialization env keys. Real `.env` files are
-  local-only and gitignored; bootstrap admin credentials must come from env
-  values, not Python constants.
+  local-only and gitignored; bootstrap admin credentials and managed-user initial
+  passwords must come from env values, not Python constants.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
 - Regression suites live in `backend/tests/` and run from `backend/` with

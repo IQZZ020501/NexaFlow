@@ -1573,13 +1573,17 @@ class _FakeUploadStorage:
         self.keys: list[str] = []
         self.put_calls = 0
 
-    async def put_chunks(self, key, chunks, content_type=None):
+    async def put_chunks(self, key, chunks, max_bytes=None):
         self.put_calls += 1
         if self.error is not None:
             raise self.error
         size = 0
         async for chunk in chunks:
             size += len(chunk)
+            if max_bytes is not None and size > max_bytes:
+                from app.infrastructure.object_storage import ObjectTooLargeError
+
+                raise ObjectTooLargeError("too large")
         self.keys.append(key)
         return size
 
@@ -1723,6 +1727,69 @@ def test_workflow_uploads_upload_branches() -> None:
                 assert "Unsupported" in str(exc.detail)
             else:
                 raise AssertionError("unsupported type was accepted")
+
+        # file-count limit is enforced before any object is written
+        fake = _FakeUploadStorage()
+        with storage_patch(fake), patch.object(
+            uploads_module,
+            "MAX_WORKFLOW_UPLOAD_FILES",
+            10,
+            create=True,
+        ), patch(
+            "app.application.workflow_uploads.workspace_repository.lock_workspace",
+            new=AsyncMock(return_value=object()),
+        ), patch(
+            "app.application.workflow_uploads.user_repository.lock_user",
+            new=AsyncMock(return_value=object()),
+        ), patch(
+            "app.application.workflow_uploads.workflow_repository."
+            "lock_upload_application",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "app.application.workflow_uploads.workflow_repository.create_upload",
+            new=AsyncMock(side_effect=lambda db_session, item: item),
+        ):
+            try:
+                await upload(uploads=[_upload_file(f"{index}.txt") for index in range(11)])
+            except HTTPException as exc:
+                assert exc.status_code == 413
+            else:
+                raise AssertionError("too many upload files were accepted")
+        assert fake.put_calls == 0
+
+        # total request bytes are shared across every file in the request
+        fake = _FakeUploadStorage()
+        with storage_patch(fake), patch.object(
+            uploads_module,
+            "MAX_WORKFLOW_UPLOAD_BYTES",
+            8,
+            create=True,
+        ), patch(
+            "app.application.workflow_uploads.workspace_repository.lock_workspace",
+            new=AsyncMock(return_value=object()),
+        ), patch(
+            "app.application.workflow_uploads.user_repository.lock_user",
+            new=AsyncMock(return_value=object()),
+        ), patch(
+            "app.application.workflow_uploads.workflow_repository."
+            "lock_upload_application",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "app.application.workflow_uploads.workflow_repository.create_upload",
+            new=AsyncMock(side_effect=lambda db_session, item: item),
+        ):
+            try:
+                await upload(
+                    uploads=[
+                        _upload_file("a.txt", b"12345"),
+                        _upload_file("b.txt", b"67890"),
+                    ]
+                )
+            except HTTPException as exc:
+                assert exc.status_code == 413
+            else:
+                raise AssertionError("oversized upload request was accepted")
+        assert fake.keys == []
 
         # empty object -> rollback + delete
         fake = _FakeUploadStorage(EmptyObjectError("empty"))

@@ -132,9 +132,16 @@ async def add_member(
 async def create_member_user(
     payload: WorkspaceUserCreateRequest,
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserPasswordResetResponse:
-    return await create_workspace_user(db, context.workspace, payload, context.user)
+    return await create_workspace_user(
+        db,
+        context.workspace,
+        payload,
+        context.user,
+        settings,
+    )
 
 
 @router.patch("/{workspace_id}/members/{user_id}", response_model=WorkspaceMemberResponse)

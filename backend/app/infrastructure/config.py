@@ -28,6 +28,7 @@ class Settings:
     bootstrap_admin_email: str
     bootstrap_admin_name: str
     bootstrap_admin_password: str
+    managed_user_initial_password: str
     jwt_secret_key: str = ""
     model_secret_key: str = ""
     knowledge_storage_dir: Path | None = None
@@ -71,6 +72,10 @@ class Settings:
             bootstrap_admin_email=os.getenv("BOOTSTRAP_ADMIN_EMAIL", ""),
             bootstrap_admin_name=os.getenv("BOOTSTRAP_ADMIN_NAME", ""),
             bootstrap_admin_password=os.getenv("BOOTSTRAP_ADMIN_PASSWORD", ""),
+            managed_user_initial_password=os.getenv(
+                "MANAGED_USER_INITIAL_PASSWORD",
+                "",
+            ),
             model_secret_key=os.getenv("MODEL_SECRET_KEY", ""),
             knowledge_storage_dir=(
                 Path(os.getenv("KNOWLEDGE_STORAGE_DIR"))
@@ -137,6 +142,10 @@ class Settings:
         missing = [key for key, value in required.items() if not value]
         if require_bootstrap and missing:
             raise RuntimeError(f"Missing initialization env values: {', '.join(missing)}.")
+        if not self.managed_user_initial_password:
+            raise RuntimeError(
+                "MANAGED_USER_INITIAL_PASSWORD must be set via environment or the .env file."
+            )
         if not self.jwt_secret_key:
             raise RuntimeError("JWT_SECRET_KEY must be set via environment or the .env file.")
         if not self.model_secret_key:

@@ -49,10 +49,6 @@ def clear_refresh_cookie(response: Response, settings: Settings) -> None:
 
 
 def get_request_ip(request: Request) -> str | None:
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    ip_address = forwarded_for.split(",", 1)[0].strip()
-    if ip_address:
-        return ip_address
     return request.client.host if request.client else None
 
 

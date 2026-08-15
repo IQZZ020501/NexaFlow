@@ -8,9 +8,11 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Literal
 from urllib.parse import urlparse
 
+import httpcore2
 import httpx2
 from mcp import Client
 from mcp.client.sse import sse_client
@@ -55,6 +57,66 @@ class McpDiscovery:
     tools: list[dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class McpResolvedDestination:
+    hostname: str
+    port: int
+    addresses: tuple[str, ...]
+
+
+class _PinnedNetworkBackend(httpcore2.AsyncNetworkBackend):
+    def __init__(self, destination: McpResolvedDestination) -> None:
+        self.destination = destination
+        self._backend = httpcore2.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ):
+        if host.lower() != self.destination.hostname or port != self.destination.port:
+            raise httpcore2.ConnectError("MCP request destination changed.")
+
+        last_error: Exception | None = None
+        for address in self.destination.addresses:
+            try:
+                return await self._backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore2.ConnectError, httpcore2.ConnectTimeout) as exc:
+                last_error = exc
+        assert last_error is not None
+        raise last_error
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options=None,
+    ):
+        raise httpcore2.ConnectError("MCP Unix sockets are not allowed.")
+
+    async def sleep(self, seconds: float) -> None:
+        await self._backend.sleep(seconds)
+
+
+def _pinned_http_transport(
+    destination: McpResolvedDestination,
+) -> httpx2.AsyncHTTPTransport:
+    transport = httpx2.AsyncHTTPTransport(trust_env=False)
+    # httpx2 2.5 has no public resolver hook; its pool accepts the backend
+    # internally and is covered by the pinned-connection regression test.
+    transport._pool._network_backend = _PinnedNetworkBackend(destination)
+    return transport
+
+
 def normalize_mcp_url(value: str, *, preserve_trailing_slash: bool = False) -> str:
     stripped = value.strip()
     url = stripped if preserve_trailing_slash else stripped.rstrip("/")
@@ -87,9 +149,12 @@ def is_private_address(value: str) -> bool:
     )
 
 
-async def validate_mcp_destination(url: str, allow_private_networks: bool) -> None:
+async def validate_mcp_destination(
+    url: str,
+    allow_private_networks: bool,
+) -> McpResolvedDestination | None:
     if allow_private_networks:
-        return
+        return None
     parsed = urlparse(url)
     hostname = parsed.hostname
     if hostname is None:
@@ -103,8 +168,14 @@ async def validate_mcp_destination(url: str, allow_private_networks: bool) -> No
         )
     except OSError as exc:
         raise McpClientError("MCP server hostname could not be resolved.") from exc
-    if not addresses or any(is_private_address(item[4][0]) for item in addresses):
+    resolved = tuple(dict.fromkeys(item[4][0] for item in addresses))
+    if not resolved or any(is_private_address(address) for address in resolved):
         raise McpClientError("Private MCP server addresses are not allowed.")
+    return McpResolvedDestination(
+        hostname=hostname.encode("idna").decode("ascii").lower(),
+        port=parsed.port or (80 if parsed.scheme == "http" else 443),
+        addresses=resolved,
+    )
 
 
 @asynccontextmanager
@@ -113,11 +184,17 @@ async def _hardened_http_client_factory(
     headers: dict[str, Any] | None = None,
     auth: httpx2.Auth | None = None,
     timeout: httpx2.Timeout | None = None,
+    destination: McpResolvedDestination | None = None,
 ) -> AsyncIterator[httpx2.AsyncClient]:
     async with httpx2.AsyncClient(
         headers=headers,
         auth=auth,
         timeout=timeout,
+        transport=(
+            _pinned_http_transport(destination)
+            if destination is not None
+            else None
+        ),
         follow_redirects=False,
         trust_env=False,
     ) as client:
@@ -143,7 +220,7 @@ async def mcp_client(
                         connection.url,
                         preserve_trailing_slash=connection.transport == "sse",
                     )
-                    await validate_mcp_destination(
+                    destination = await validate_mcp_destination(
                         normalized_url,
                         settings.mcp_allow_private_networks,
                     )
@@ -154,11 +231,10 @@ async def mcp_client(
                     )
                     if connection.transport == "streamable_http":
                         http_client = await stack.enter_async_context(
-                            httpx2.AsyncClient(
+                            _hardened_http_client_factory(
                                 headers=headers,
                                 timeout=timeout_seconds,
-                                follow_redirects=False,
-                                trust_env=False,
+                                destination=destination,
                             )
                         )
                         transport = streamable_http_client(
@@ -171,7 +247,10 @@ async def mcp_client(
                             headers=headers,
                             timeout=timeout_seconds,
                             sse_read_timeout=timeout_seconds,
-                            httpx_client_factory=_hardened_http_client_factory,
+                            httpx_client_factory=partial(
+                                _hardened_http_client_factory,
+                                destination=destination,
+                            ),
                         )
                 elif connection.transport == "stdio":
                     config = connection.stdio_config

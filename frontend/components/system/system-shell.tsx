@@ -1069,7 +1069,12 @@ function SystemPageContent({
         teamIds: [],
       })
       setUserCreateTeams([])
-      onNotify("success", t("用户已新建"))
+      onNotify(
+        "success",
+        t("用户已新建，初始密码：{password}", {
+          password: payload.initial_password,
+        })
+      )
     } catch (error) {
       reportError(error)
     } finally {

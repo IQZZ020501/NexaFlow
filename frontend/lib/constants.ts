@@ -1,7 +1,5 @@
 import { type TranslationKey } from "@/i18n"
 
-export const DEFAULT_USER_PASSWORD = "NexaFlow@123"
-
 export const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
   active: "已启用",
   archived: "已归档",

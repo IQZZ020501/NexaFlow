@@ -3,7 +3,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_global_admin
+from app.api.deps import get_settings, require_global_admin
+from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
 from app.entities.user import User
 from app.schemas.user import (
@@ -43,9 +44,10 @@ async def list_all_users(
 async def create_new_user(
     payload: UserCreateRequest,
     actor: Annotated[User, Depends(require_global_admin)],
+    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserPasswordResetResponse:
-    return await create_user(db, payload, actor)
+    return await create_user(db, payload, actor, settings)
 
 
 @router.patch("/{user_id}", response_model=UserResponse)

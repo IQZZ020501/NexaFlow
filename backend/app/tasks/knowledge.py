@@ -30,6 +30,8 @@ logger = get_logger(__name__)
     name="app.knowledge.run_task",
     ignore_result=True,
     max_retries=None,
+    soft_time_limit=900,
+    time_limit=960,
 )
 def run_knowledge_task_job(self, task_id: str) -> None:
     settings = Settings.from_env(require_bootstrap=False)

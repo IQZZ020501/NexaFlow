@@ -871,7 +871,8 @@ def run_identity_block() -> None:
         )
         assert scoped_user.status_code == 201, scoped_user.text
         scoped_payload = scoped_user.json()
-        assert scoped_payload["initial_password"] == "NexaFlow@123"
+        scoped_initial_password = scoped_payload["initial_password"]
+        assert scoped_initial_password
         assert scoped_payload["user"]["workspaces"][0]["id"] == hosted_workspace_id
         assert scoped_payload["user"]["workspaces"][0]["role"] == "member"
         assert [t["id"] for t in scoped_payload["user"]["teams"]] == [hosted_team_id]
@@ -938,7 +939,10 @@ def run_identity_block() -> None:
         # Disable a user with no workspace admin roles -> 200.
         scoped_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "scoped-user-renamed", "password": "NexaFlow@123"},
+            json={
+                "username": "scoped-user-renamed",
+                "password": scoped_initial_password,
+            },
         )
         assert scoped_login.status_code == 200, scoped_login.text
         disabled_user = client.patch(
@@ -952,7 +956,10 @@ def run_identity_block() -> None:
         assert client.post("/api/v1/auth/refresh").status_code == 401
         disabled_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "scoped-user-renamed", "password": "NexaFlow@123"},
+            json={
+                "username": "scoped-user-renamed",
+                "password": scoped_initial_password,
+            },
         )
         assert disabled_login.status_code == 401, disabled_login.text
         # Re-enable so the managed-password flow below can log in.
@@ -1029,7 +1036,10 @@ def run_identity_block() -> None:
         # Old password no longer works; new one does.
         old_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "scoped-user-renamed", "password": "NexaFlow@123"},
+            json={
+                "username": "scoped-user-renamed",
+                "password": scoped_initial_password,
+            },
         )
         assert old_login.status_code == 401, old_login.text
         new_login = client.post(

@@ -966,7 +966,7 @@ describe("system API client", () => {
     const calls = recordRequests((url, init) => {
       if (init?.method === "DELETE") return jsonResponse(null, 204)
       if (url.endsWith("/change-password")) return jsonResponse(user)
-      if (init?.method === "POST") return jsonResponse({ user, initial_password: "NexaFlow@123" })
+      if (init?.method === "POST") return jsonResponse({ user, initial_password: "NexaFlow@123.." })
       if (init?.method === "PATCH") return jsonResponse(user)
       return jsonResponse([user])
     })
@@ -974,7 +974,7 @@ describe("system API client", () => {
     await expect(listUsers("tok")).resolves.toEqual([user])
     await expect(
       createUser("tok", { username: "bob", email: "b@app.local", name: "Bob", workspace_id: "w-1", team_ids: ["t-1"] })
-    ).resolves.toEqual({ user, initial_password: "NexaFlow@123" })
+    ).resolves.toEqual({ user, initial_password: "NexaFlow@123.." })
     await updateUser("tok", "u-1", { name: "Alice 2", is_active: false })
     await changeUserPassword("tok", "u-1", "new-pass")
     await deleteUser("tok", "u-1")
