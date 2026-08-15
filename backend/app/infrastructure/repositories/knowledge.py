@@ -39,6 +39,7 @@ from app.shareddomain.knowledge.models import (
     KnowledgeDocument as KnowledgeDocumentORM,
     KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
     KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
+    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
     KnowledgeStorageCleanup as KnowledgeStorageCleanupORM,
     KnowledgeTask as KnowledgeTaskORM,
 )
@@ -681,8 +682,11 @@ async def query_keyword_chunk_ids(
     knowledge_base: KnowledgeBase,
     query: str,
     candidate_limit: int,
+    document_ids: set[str] | None = None,
 ) -> list[str]:
-    if db.get_bind().dialect.name != "postgresql":
+    if db.get_bind().dialect.name != "postgresql" or (
+        document_ids is not None and not document_ids
+    ):
         return []
     result = await db.execute(
         _QUERY_KEYWORD_CHUNK_IDS,
@@ -691,9 +695,45 @@ async def query_keyword_chunk_ids(
             "knowledge_base_id": knowledge_base.id,
             "query": query,
             "candidate_limit": candidate_limit,
+            "document_ids": sorted(document_ids) if document_ids is not None else None,
         },
     )
     return list(result.scalars())
+
+
+async def list_indexed_chunk_ids_for_parent_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    parent_ids: list[str],
+) -> list[str]:
+    if not parent_ids:
+        return []
+    rows = list(
+        await db.scalars(
+            select(KnowledgeDocumentChunkORM)
+            .where(
+                KnowledgeDocumentChunkORM.workspace_id
+                == knowledge_base.workspace_id,
+                KnowledgeDocumentChunkORM.knowledge_base_id
+                == knowledge_base.id,
+                KnowledgeDocumentChunkORM.status == CHUNK_INDEXED_STATUS,
+                KnowledgeDocumentChunkORM.parent_id.in_(parent_ids),
+            )
+            .order_by(KnowledgeDocumentChunkORM.chunk_index)
+        )
+    )
+    positions = {parent_id: index for index, parent_id in enumerate(parent_ids)}
+    return [
+        row.id
+        for row in sorted(
+            rows,
+            key=lambda row: (
+                positions.get(row.parent_id, len(positions)),
+                row.chunk_index,
+                row.id,
+            ),
+        )
+    ]
 
 
 async def delete_document_chunks(db: AsyncSession, document_id: str) -> None:
@@ -917,6 +957,14 @@ async def delete_knowledge_base_graph(
     knowledge_base: KnowledgeBase,
     resource_type: str,
 ) -> None:
+    await db.execute(
+        delete(KnowledgeDocumentReferenceORM).where(
+            KnowledgeDocumentReferenceORM.workspace_id
+            == knowledge_base.workspace_id,
+            KnowledgeDocumentReferenceORM.knowledge_base_id
+            == knowledge_base.id,
+        )
+    )
     await db.execute(
         delete(KnowledgeTaskORM).where(
             KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,

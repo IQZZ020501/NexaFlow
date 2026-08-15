@@ -258,8 +258,9 @@ def query_vectors(
     query: str,
     limit: int,
     score_threshold: float | None = None,
+    document_ids: set[str] | None = None,
 ) -> list[VectorHit]:
-    if limit <= 0:
+    if limit <= 0 or (document_ids is not None and not document_ids):
         return []
     client = _client(settings)
     collection_name = vector_collection_name(knowledge_base_id)
@@ -272,6 +273,18 @@ def query_vectors(
     ).embed_query(query)
     started = time.monotonic()
     try:
+        query_kwargs: dict[str, Any] = {}
+        if score_threshold is not None:
+            query_kwargs["score_threshold"] = score_threshold
+        if document_ids is not None:
+            query_kwargs["query_filter"] = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchAny(any=sorted(document_ids)),
+                    )
+                ]
+            )
         results = client.query_points(
             collection_name,
             query=models.NearestQuery(
@@ -280,7 +293,7 @@ def query_vectors(
             ),
             limit=limit,
             with_payload=["chunk_id"],
-            **({"score_threshold": score_threshold} if score_threshold is not None else {}),
+            **query_kwargs,
         ).points
     except Exception as exc:
         log_error(
@@ -341,6 +354,7 @@ class QdrantVectorStore:
         query: str,
         limit: int,
         score_threshold: float | None = None,
+        document_ids: set[str] | None = None,
     ) -> list[VectorHit]:
         return query_vectors(
             self._settings,
@@ -349,4 +363,5 @@ class QdrantVectorStore:
             query,
             limit,
             score_threshold,
+            document_ids,
         )

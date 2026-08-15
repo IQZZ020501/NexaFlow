@@ -1652,6 +1652,7 @@ async def assert_knowledge_tool_paths(
         )
 
     async def succeed_retrieve(_db, knowledge_base, payload, _settings):
+        assert payload.include_references is True
         return knowledge_inspect_result(
             knowledge_base,
             payload,

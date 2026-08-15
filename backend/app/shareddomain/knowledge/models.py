@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     JSON,
     String,
@@ -301,6 +302,107 @@ class KnowledgeDocumentChunk(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="preview")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class KnowledgeDocumentReference(Base):
+    __tablename__ = "knowledge_document_references"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id"],
+            ["knowledge.workspace_id", "knowledge.id"],
+            name="fk_knowledge_document_references_knowledge_workspace",
+        ),
+        ForeignKeyConstraint(
+            [
+                "workspace_id",
+                "knowledge_base_id",
+                "source_document_id",
+                "source_chunk_id",
+            ],
+            [
+                "knowledge_document_chunks.workspace_id",
+                "knowledge_document_chunks.knowledge_base_id",
+                "knowledge_document_chunks.document_id",
+                "knowledge_document_chunks.id",
+            ],
+            name="fk_knowledge_document_references_source_chunk_scope",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "knowledge_base_id", "target_document_id"],
+            [
+                "knowledge_documents.workspace_id",
+                "knowledge_documents.knowledge_base_id",
+                "knowledge_documents.id",
+            ],
+            name="fk_knowledge_document_references_target_document_scope",
+        ),
+        ForeignKeyConstraint(
+            [
+                "workspace_id",
+                "knowledge_base_id",
+                "target_document_id",
+                "target_parent_id",
+            ],
+            [
+                "knowledge_document_parent_chunks.workspace_id",
+                "knowledge_document_parent_chunks.knowledge_base_id",
+                "knowledge_document_parent_chunks.document_id",
+                "knowledge_document_parent_chunks.id",
+            ],
+            name="fk_knowledge_document_references_target_parent_scope",
+        ),
+        UniqueConstraint(
+            "source_chunk_id",
+            "target_label",
+            "target_section",
+            name="uq_knowledge_document_references_source_label",
+        ),
+        CheckConstraint(
+            "reference_type IN ('markdown', 'text')",
+            name="ck_knowledge_document_references_type",
+        ),
+        CheckConstraint(
+            "source_ordinal >= 0",
+            name="ck_knowledge_document_references_source_ordinal",
+        ),
+        Index(
+            "ix_knowledge_document_references_source_scope",
+            "workspace_id",
+            "knowledge_base_id",
+            "source_chunk_id",
+        ),
+        Index(
+            "ix_knowledge_document_references_target_document",
+            "workspace_id",
+            "knowledge_base_id",
+            "target_document_id",
+        ),
+        Index(
+            "ix_knowledge_document_references_target_label",
+            "workspace_id",
+            "knowledge_base_id",
+            "target_label",
+            "target_document_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False
+    )
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_chunk_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    target_document_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    target_parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    target_label: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_section: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    reference_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
+    )
 
 
 class KnowledgeChunkAsset(Base):

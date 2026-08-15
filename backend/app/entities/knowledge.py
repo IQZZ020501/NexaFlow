@@ -148,6 +148,22 @@ class KnowledgeDocumentChunk:
 
 
 @dataclass
+class KnowledgeDocumentReference:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    knowledge_base_id: str = ""
+    source_document_id: str = ""
+    source_chunk_id: str = ""
+    target_document_id: str | None = None
+    target_parent_id: str | None = None
+    target_label: str = ""
+    target_section: str = ""
+    reference_type: str = "text"
+    source_ordinal: int = 0
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
 class KnowledgeChunkAsset:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""

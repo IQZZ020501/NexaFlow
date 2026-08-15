@@ -59,6 +59,10 @@ from app.schemas.knowledge import (
     KnowledgeTaskResponse,
 )
 from app.shareddomain.knowledge.permissions import require_knowledge_base_active
+from app.shareddomain.knowledge.references import (
+    prepare_document_reference_rebuild,
+    rebuild_document_references,
+)
 from app.shareddomain.knowledge.services import (
     get_knowledge_model,
     knowledge_document_path,
@@ -325,6 +329,11 @@ async def replace_document_chunks(
         document.id,
     )
     vector_ids = [chunk.vector_id for chunk in existing_chunks if chunk.vector_id]
+    await prepare_document_reference_rebuild(
+        db,
+        knowledge_base,
+        document.id,
+    )
     stale_asset_keys = await knowledge_base_repository.delete_document_assets(
         db,
         document.id,
@@ -434,6 +443,12 @@ async def replace_document_chunks(
             children,
             assets,
             chunk_asset_links,
+        )
+        await rebuild_document_references(
+            db,
+            knowledge_base,
+            document,
+            children,
         )
     except Exception:
         for object_key in written_asset_keys:

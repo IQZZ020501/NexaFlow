@@ -187,6 +187,7 @@ def build_knowledge_search_tool(
                             limit=payload.limit,
                             search_mode=payload.search_mode,
                             similarity=payload.similarity,
+                            include_references=True,
                         ),
                         settings,
                     )

@@ -699,6 +699,27 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
     assert KnowledgeQueryInspectResponse(hits=[hit], trace=trace).trace is trace
 
 
+def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
+    from app.shareddomain.knowledge.references import extract_reference_labels
+
+    labels = extract_reference_labels(
+        "详见《发布手册.md》第三章，或参考 "
+        "[回滚章节](docs/%E5%8F%91%E5%B8%83%E6%89%8B%E5%86%8C.md#%E5%9B%9E%E6%BB%9A)。"
+        "![架构图](architecture.png)"
+        "[外链](https://example.com/发布手册.md)"
+    )
+    assert [
+        (item.target_label, item.target_section, item.reference_type)
+        for item in labels
+    ] == [
+        ("发布手册.md", "第三章", "text"),
+        ("发布手册.md", "回滚", "markdown"),
+    ]
+
+    many = " ".join(f"[文档 {index}](doc-{index}.md)" for index in range(101))
+    assert len(extract_reference_labels(many)) == 100
+
+
 def test_parent_context_windows_around_child_offsets() -> None:
     long_content = "x" * (MAX_PARENT_CONTEXT_CHARS + 500)
     parent = SimpleNamespace(content=long_content)
@@ -2342,6 +2363,7 @@ def main() -> None:
     test_reciprocal_rank_fusion_merges_and_ranks()
     test_reciprocal_rank_fusion_reports_named_rankings_deterministically()
     test_detailed_knowledge_query_contract_defaults()
+    test_explicit_reference_extraction_is_bounded_and_internal()
     test_parent_context_windows_around_child_offsets()
     test_model_type_normalization()
     test_status_validation()

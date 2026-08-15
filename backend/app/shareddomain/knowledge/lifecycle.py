@@ -15,6 +15,10 @@ from app.entities.knowledge import (
 )
 from app.ports.vector_store import delete_vectors
 from app.shareddomain.knowledge.permissions import require_knowledge_base_active
+from app.shareddomain.knowledge.references import (
+    detach_document_references,
+    resolve_references_matching_document,
+)
 from app.shareddomain.knowledge.services import knowledge_object_storage
 
 
@@ -45,6 +49,7 @@ async def delete_knowledge_document(
         document.id,
     )
     vector_ids = [chunk.vector_id for chunk in chunks if chunk.vector_id]
+    await detach_document_references(db, knowledge_base, document.id)
     asset_object_keys = await knowledge_base_repository.delete_document_assets(
         db,
         document.id,
@@ -61,6 +66,7 @@ async def delete_knowledge_document(
             attachment.status = "deleted"
             await knowledge_base_repository.save_knowledge_attachment(db, attachment)
     await knowledge_base_repository.save_knowledge_document(db, document)
+    await resolve_references_matching_document(db, knowledge_base, document)
     record_audit_log(
         db,
         actor,

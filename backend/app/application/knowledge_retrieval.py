@@ -24,6 +24,9 @@ from app.infrastructure.config import Settings
 from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.model_utils import new_id
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
+from app.infrastructure.repositories import (
+    knowledge_reference as knowledge_reference_repository,
+)
 from app.ports.llm import build_reranker
 from app.ports.vector_store import query_vectors
 from app.schemas.knowledge import (
@@ -37,10 +40,57 @@ from app.shareddomain.knowledge.services import get_knowledge_model
 
 logger = get_logger(__name__)
 RerankStatus = Literal["not_configured", "applied", "fallback", "skipped"]
+MAX_REFERENCE_TARGET_DOCUMENTS = 8
+MAX_REFERENCES = 100
 
 
 def _elapsed_ms(started_at: float) -> float:
     return round(max(0.0, (time.perf_counter() - started_at) * 1000), 3)
+
+
+async def _query_candidates(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    query: str,
+    candidate_limit: int,
+    use_vector: bool,
+    use_keywords: bool,
+    embedding_model: object | None,
+    score_threshold: float | None,
+    settings: Settings,
+    document_ids: set[str] | None = None,
+):
+    vector_task = None
+    if use_vector:
+        vector_args = (
+            settings,
+            knowledge_base.id,
+            embedding_model,
+            query,
+            candidate_limit,
+            score_threshold,
+        )
+        if document_ids is not None:
+            vector_args += (document_ids,)
+        vector_task = asyncio.to_thread(
+            query_vectors,
+            *vector_args,
+        )
+    keyword_task = None
+    if use_keywords:
+        keyword_args = (db, knowledge_base, query, candidate_limit)
+        if document_ids is not None:
+            keyword_args += (document_ids,)
+        keyword_task = knowledge_base_repository.query_keyword_chunk_ids(
+            *keyword_args,
+        )
+    if vector_task is not None and keyword_task is not None:
+        return await asyncio.gather(vector_task, keyword_task)
+    if vector_task is not None:
+        return await vector_task, []
+    if keyword_task is None:
+        return [], []
+    return [], await keyword_task
 
 
 async def _rerank_hits(
@@ -110,49 +160,115 @@ async def retrieve_knowledge_base(
     qdrant_score_threshold = (
         1.0 - payload.similarity if payload.similarity is not None else None
     )
-    vector_task = (
-        asyncio.to_thread(
-            query_vectors,
-            settings,
-            knowledge_base.id,
-            embedding_model,
-            payload.query,
-            candidate_limit,
-            qdrant_score_threshold,
-        )
-        if use_vector
-        else None
+    vector_hits, keyword_chunk_ids = await _query_candidates(
+        db,
+        knowledge_base,
+        payload.query,
+        candidate_limit,
+        use_vector,
+        use_keywords,
+        embedding_model,
+        qdrant_score_threshold,
+        settings,
     )
-    keyword_task = (
-        knowledge_base_repository.query_keyword_chunk_ids(
-            db,
-            knowledge_base,
-            payload.query,
-            candidate_limit,
-        )
-        if use_keywords
-        else None
+    direct_ranked_hits = reciprocal_rank_fusion(
+        vector_hits,
+        keyword_chunk_ids,
     )
-    if vector_task is not None and keyword_task is not None:
-        vector_hits, keyword_chunk_ids = await asyncio.gather(
-            vector_task,
-            keyword_task,
-        )
-    elif vector_task is not None:
-        vector_hits = await vector_task
-        keyword_chunk_ids = []
-    else:
-        vector_hits = []
-        keyword_chunk_ids = await keyword_task
+    stage_duration_ms["candidates"] = _elapsed_ms(candidate_started_at)
+
+    entity_started_at = time.perf_counter()
+    direct_chunks = await knowledge_base_repository.list_chunks_by_ids(
+        db,
+        knowledge_base,
+        [hit.chunk_id for hit in direct_ranked_hits],
+    )
+    direct_chunks_by_id = {chunk.id: chunk for chunk in direct_chunks}
+    direct_documents = await knowledge_base_repository.list_active_documents_by_ids(
+        db,
+        knowledge_base,
+        {chunk.document_id for chunk in direct_chunks},
+    )
+    direct_document_ids = {document.id for document in direct_documents}
+    seed_hits = [
+        (chunk, hit)
+        for hit in direct_ranked_hits
+        if (chunk := direct_chunks_by_id.get(hit.chunk_id)) is not None
+        and chunk.document_id in direct_document_ids
+    ]
+
     reference_chunk_ids: list[str] = []
+    if payload.include_references and seed_hits:
+        reference_started_at = time.perf_counter()
+        references = (
+            await knowledge_reference_repository.list_resolved_references_for_chunks(
+                db,
+                knowledge_base,
+                [chunk.id for chunk, _ in seed_hits[: payload.limit]],
+                MAX_REFERENCES,
+            )
+        )
+        target_document_ids: list[str] = []
+        for reference in references:
+            target_document_id = reference.target_document_id
+            if target_document_id and target_document_id not in target_document_ids:
+                target_document_ids.append(target_document_id)
+                if len(target_document_ids) == MAX_REFERENCE_TARGET_DOCUMENTS:
+                    break
+        allowed_target_ids = set(target_document_ids)
+        selected_references = [
+            reference
+            for reference in references
+            if reference.target_document_id in allowed_target_ids
+        ]
+        parent_ids = list(
+            dict.fromkeys(
+                reference.target_parent_id
+                for reference in selected_references
+                if reference.target_parent_id
+            )
+        )
+        anchored_chunk_ids = (
+            await knowledge_base_repository.list_indexed_chunk_ids_for_parent_ids(
+                db,
+                knowledge_base,
+                parent_ids,
+            )
+        )
+        document_scope_ids = {
+            reference.target_document_id
+            for reference in selected_references
+            if reference.target_document_id and reference.target_parent_id is None
+        }
+        if document_scope_ids:
+            scoped_vectors, scoped_keywords = await _query_candidates(
+                db,
+                knowledge_base,
+                payload.query,
+                candidate_limit,
+                use_vector,
+                use_keywords,
+                embedding_model,
+                qdrant_score_threshold,
+                settings,
+                document_scope_ids,
+            )
+            scoped_chunk_ids = [
+                hit.chunk_id
+                for hit in reciprocal_rank_fusion(scoped_vectors, scoped_keywords)
+            ]
+        else:
+            scoped_chunk_ids = []
+        reference_chunk_ids = list(
+            dict.fromkeys([*anchored_chunk_ids, *scoped_chunk_ids])
+        )[:candidate_limit]
+        stage_duration_ms["references"] = _elapsed_ms(reference_started_at)
+
     ranked_hits = reciprocal_rank_fusion(
         vector_hits,
         keyword_chunk_ids,
         reference_chunk_ids,
     )
-    stage_duration_ms["candidates"] = _elapsed_ms(candidate_started_at)
-
-    entity_started_at = time.perf_counter()
     chunks = await knowledge_base_repository.list_chunks_by_ids(
         db,
         knowledge_base,
@@ -210,6 +326,9 @@ async def retrieve_knowledge_base(
                     ),
                     distance=representative_hit.distance,
                     sources=list(representative_hit.sources),
+                    reference_hops=(
+                        1 if representative_hit.reference_rank is not None else 0
+                    ),
                     rerank_score=representative_hit.rerank_score,
                 )
             )
@@ -267,6 +386,7 @@ async def retrieve_knowledge_base(
                     content=content,
                     distance=hit.distance,
                     sources=list(hit.sources),
+                    reference_hops=1 if hit.reference_rank is not None else 0,
                     rerank_score=hit.rerank_score,
                 )
             )

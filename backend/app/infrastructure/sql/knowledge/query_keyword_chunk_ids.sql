@@ -13,6 +13,10 @@ WHERE chunk.workspace_id = :workspace_id
     AND chunk.status = 'indexed'
     AND document.status <> 'deleted'
     AND document.is_active IS TRUE
+    AND (
+        CAST(:document_ids AS varchar[]) IS NULL
+        OR chunk.document_id = ANY(CAST(:document_ids AS varchar[]))
+    )
     AND to_tsvector('simple'::regconfig, chunk.search_text) @@ search_query.value
 ORDER BY
     ts_rank_cd(
