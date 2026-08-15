@@ -1,12 +1,15 @@
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
 
 from tests.support import (
     ADMIN_PASSWORD,
     BOOTSTRAP_ADMIN_PASSWORD,
+    MANAGED_USER_INITIAL_PASSWORD,
     auth_headers,
     login,
+    settings as test_settings,
     test_client,
 )
 from app.api.v1.endpoints.auth import REFRESH_TOKEN_COOKIE
@@ -14,6 +17,8 @@ from app.entities.user import RefreshSession
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.security import hash_refresh_token
+from app.infrastructure import agent_rate_limit
+from app.infrastructure.agent_rate_limit import LoginRateLimitExceeded
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.system_log import SystemLog
 
@@ -33,7 +38,30 @@ async def get_refresh_session(token: str) -> RefreshSession | None:
         )
 
 
+async def check_login_rate_limit() -> None:
+    class FakeRedis:
+        args: tuple = ()
+
+        async def eval(self, *args):
+            self.args = args
+            return [11, 1, 42, 42]
+
+    redis = FakeRedis()
+    with patch.object(agent_rate_limit, "_rate_limit_redis", return_value=redis):
+        try:
+            await agent_rate_limit.enforce_login_rate_limit(
+                test_settings(),
+                "rate-limited-user",
+                "203.0.113.10",
+            )
+            raise AssertionError("expected LoginRateLimitExceeded")
+        except LoginRateLimitExceeded as exc:
+            assert exc.retry_after == 42
+    assert "rate-limited-user" not in repr(redis.args)
+
+
 def main() -> None:
+    asyncio.run(check_login_rate_limit())
     with test_client() as client:
         first_login_response = client.post(
             "/api/v1/auth/login",
@@ -75,10 +103,20 @@ def main() -> None:
         )
         assert weak_password.status_code == 422, weak_password.text
 
-        changed = client.post(
+        missing_current_password = client.post(
             "/api/v1/auth/change-password",
             headers=auth_headers(admin_token),
             json={"new_password": ADMIN_PASSWORD},
+        )
+        assert missing_current_password.status_code == 400, missing_current_password.text
+
+        changed = client.post(
+            "/api/v1/auth/change-password",
+            headers=auth_headers(admin_token),
+            json={
+                "current_password": BOOTSTRAP_ADMIN_PASSWORD,
+                "new_password": ADMIN_PASSWORD,
+            },
         )
         assert changed.status_code == 204, changed.text
         assert client.post("/api/v1/auth/refresh").status_code == 200
@@ -124,6 +162,17 @@ def main() -> None:
         )
         assert failed_login.status_code == 401, failed_login.text
 
+        with patch(
+            "app.application.identity.enforce_login_rate_limit",
+            new=AsyncMock(side_effect=LoginRateLimitExceeded(42)),
+        ):
+            limited_login = client.post(
+                "/api/v1/auth/login",
+                json={"username": "admin", "password": rotated_password},
+            )
+        assert limited_login.status_code == 429, limited_login.text
+        assert limited_login.headers["retry-after"] == "42"
+
         users = client.get("/api/v1/admin/users", headers=auth_headers(admin_token))
         assert users.status_code == 200, users.text
         admin_user = users.json()[0]
@@ -143,14 +192,41 @@ def main() -> None:
         )
         assert created_user.status_code == 201, created_user.text
         payload = created_user.json()
-        assert payload["initial_password"] == "NexaFlow@123"
+        assert payload["initial_password"] == MANAGED_USER_INITIAL_PASSWORD
         assert payload["user"]["username"] == "analyst"
         assert payload["user"]["workspaces"] == []
         analyst_id = payload["user"]["id"]
         analyst_login = login(client, "analyst", payload["initial_password"])
         assert analyst_login["must_change_password"] is True
+        analyst_token = analyst_login["access_token"]
         analyst_refresh_token = client.cookies.get(REFRESH_TOKEN_COOKIE)
         assert analyst_refresh_token
+
+        analyst_self_password = "AnalystSelf@123"
+        analyst_missing_current = client.post(
+            "/api/v1/auth/change-password",
+            headers=auth_headers(analyst_token),
+            json={"new_password": analyst_self_password},
+        )
+        assert analyst_missing_current.status_code == 400, analyst_missing_current.text
+        analyst_wrong_current = client.post(
+            "/api/v1/auth/change-password",
+            headers=auth_headers(analyst_token),
+            json={
+                "current_password": "Wrong@12345.",
+                "new_password": analyst_self_password,
+            },
+        )
+        assert analyst_wrong_current.status_code == 400, analyst_wrong_current.text
+        analyst_self_changed = client.post(
+            "/api/v1/auth/change-password",
+            headers=auth_headers(analyst_token),
+            json={
+                "current_password": payload["initial_password"],
+                "new_password": analyst_self_password,
+            },
+        )
+        assert analyst_self_changed.status_code == 204, analyst_self_changed.text
 
         updated_user = client.patch(
             f"/api/v1/admin/users/{analyst_id}",

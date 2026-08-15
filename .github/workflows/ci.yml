@@ -79,7 +79,16 @@ jobs:
         working-directory: .
         run: |
           docker build --file deploy/dockerfiles/sandbox.Dockerfile --tag nexaflow-sandbox-ci .
-          docker run --rm --network none --entrypoint python nexaflow-sandbox-ci -m sandbox.self_check
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=0711,uid=0,gid=0 \
+            --tmpfs /dev/shm:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=0,gid=0 \
+            --tmpfs /run/sandbox:rw,noexec,nosuid,nodev,size=1m,mode=0750,uid=0,gid=65533 \
+            --entrypoint python nexaflow-sandbox-ci -m sandbox.self_check
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=0711,uid=0,gid=0 \
+            --tmpfs /dev/shm:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=0,gid=0 \
+            --tmpfs /run/sandbox:rw,noexec,nosuid,nodev,size=1m,mode=0750,uid=0,gid=65533 \
+            --entrypoint python nexaflow-sandbox-ci -m sandbox.tests
 
       - name: Run main smoke tests
         run: uv run python -m tests.test_main
@@ -109,7 +118,7 @@ jobs:
         run: bun run lint
 
       - name: Test
-        run: bun test
+        run: bun test --parallel
 
       - name: Build
         run: bun run build

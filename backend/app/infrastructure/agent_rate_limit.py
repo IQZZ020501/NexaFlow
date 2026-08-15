@@ -1,3 +1,4 @@
+import hashlib
 import time
 
 from redis.asyncio import Redis
@@ -43,6 +44,41 @@ class AgentRateLimitExceeded(Exception):
 
 class AgentRateLimitUnavailable(Exception):
     pass
+
+
+class LoginRateLimitExceeded(Exception):
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(f"Login rate limit exceeded; retry after {retry_after}s.")
+        self.retry_after = retry_after
+
+
+class LoginRateLimitUnavailable(Exception):
+    pass
+
+
+async def enforce_login_rate_limit(
+    settings: Settings,
+    username: str,
+    source_ip: str | None,
+) -> None:
+    window_seconds = 60
+    window = int(time.time()) // window_seconds
+    account_key = hashlib.sha256(username.encode("utf-8")).hexdigest()
+    source_key = hashlib.sha256((source_ip or "unknown").encode("utf-8")).hexdigest()
+    try:
+        values = await _rate_limit_redis(settings.celery_broker_url).eval(
+            _FIXED_WINDOW_SCRIPT,
+            2,
+            f"nexaflow:login-rate:account:{account_key}:{window}",
+            f"nexaflow:login-rate:source:{source_key}:{window}",
+            window_seconds,
+        )
+    except (RedisError, OSError, TimeoutError, ValueError) as exc:
+        raise LoginRateLimitUnavailable from exc
+
+    account_count, source_count, account_ttl, source_ttl = map(int, values)
+    if account_count > 10 or source_count > 300:
+        raise LoginRateLimitExceeded(max(1, account_ttl, source_ttl))
 
 
 async def enforce_external_agent_rate_limit(

@@ -2079,7 +2079,7 @@ def assert_external_agent_access() -> None:
                     ("files", ("context.txt", b"release attachment", "text/plain")),
                     *[
                         ("files", (f"extra-{index}.txt", b"text", "text/plain"))
-                        for index in range(9)
+                        for index in range(8)
                     ],
                     (
                         "files",
@@ -2092,7 +2092,7 @@ def assert_external_agent_access() -> None:
                 ],
             )
             assert uploaded.status_code == 201, uploaded.text
-            assert len(uploaded.json()) == 11
+            assert len(uploaded.json()) == 10
             pending_upload_agent = client.post(
                 agents_url(workspace_id),
                 headers=auth_headers(admin_token),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ RUNNER_UID = int(os.environ.get("SANDBOX_RUNNER_UID", "65532"))
 RUNNER_GID = int(os.environ.get("SANDBOX_RUNNER_GID", "65532"))
 MAX_CODE_BYTES = 256 * 1024
 MAX_STDIN_BYTES = 256 * 1024
+PR_SET_CHILD_SUBREAPER = 36
 
 
 @dataclass(frozen=True)
@@ -96,6 +98,75 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
                 pass
 
 
+def _enable_linux_subreaper() -> None:  # pragma: no cover - Linux CI Docker only
+    if sys.platform != "linux":
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
+
+
+def _linux_descendant_pids(parent_pid: int) -> set[int]:  # pragma: no cover
+    if sys.platform != "linux":
+        return set()
+
+    children_by_parent: dict[int, set[int]] = {}
+    for status_path in Path("/proc").glob("[0-9]*/status"):
+        try:
+            pid = int(status_path.parent.name)
+            parent = next(
+                int(line.split(":", 1)[1].strip())
+                for line in status_path.read_text(encoding="utf-8").splitlines()
+                if line.startswith("PPid:")
+            )
+        except (FileNotFoundError, ProcessLookupError, StopIteration, ValueError):
+            continue
+        children_by_parent.setdefault(parent, set()).add(pid)
+
+    descendants: set[int] = set()
+    pending = list(children_by_parent.get(parent_pid, ()))
+    while pending:
+        pid = pending.pop()
+        if pid in descendants:
+            continue
+        descendants.add(pid)
+        pending.extend(children_by_parent.get(pid, ()))
+    return descendants
+
+
+def _reap_children() -> None:  # pragma: no cover - Linux CI Docker only
+    while True:
+        try:
+            pid, _status = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if pid == 0:
+            return
+
+
+def _terminate_linux_descendants() -> None:  # pragma: no cover
+    if sys.platform != "linux":
+        return
+
+    for _ in range(50):
+        descendants = _linux_descendant_pids(os.getpid())
+        if not descendants:
+            _reap_children()
+            if not _linux_descendant_pids(os.getpid()):
+                return
+        for pid in descendants:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        _reap_children()
+        time.sleep(0.01)
+
+    if _linux_descendant_pids(os.getpid()):
+        raise RuntimeError("sandbox descendants survived cleanup")
+
+
 def _collect_output(
     process: subprocess.Popen[bytes],
     limit: int,
@@ -168,6 +239,7 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
     if stdin_size > MAX_STDIN_BYTES:
         raise ValueError("stdin exceeds the 256 KiB limit")
     limits = limits or Limits()
+    _enable_linux_subreaper()
 
     with tempfile.TemporaryDirectory(prefix="nexaflow-sandbox-") as directory:
         workdir = Path(directory)
@@ -175,7 +247,7 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
         stdin_path = workdir / "stdin"
         code_path.write_text(code, encoding="utf-8")
         stdin_path.write_text(stdin, encoding="utf-8")
-        if os.geteuid() == 0:
+        if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
             os.chown(workdir, 0, RUNNER_GID)
             os.chown(code_path, 0, RUNNER_GID)
             os.chown(stdin_path, 0, RUNNER_GID)
@@ -190,10 +262,11 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
             "PATH": "/usr/local/bin:/usr/bin:/bin",
             "PYTHONHASHSEED": "0",
             "PYTHONNOUSERSITE": "1",
+            "TMPDIR": str(workdir),
         }
         child_path = Path(__file__).with_name("child.py")
         identity: dict[str, Any] = {}
-        if os.geteuid() == 0:
+        if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
             identity = {
                 "user": RUNNER_UID,
                 "group": RUNNER_GID,
@@ -220,13 +293,17 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
                 start_new_session=True,
                 **identity,
             )
-            stdout, stderr, error = _collect_output(
-                process,
-                limits.max_output_bytes,
-                time.monotonic() + limits.timeout_ms / 1000,
-            )
-            if error is None:
-                process.wait()
+            try:
+                stdout, stderr, error = _collect_output(
+                    process,
+                    limits.max_output_bytes,
+                    time.monotonic() + limits.timeout_ms / 1000,
+                )
+                if error is None:
+                    process.wait()
+            finally:
+                _terminate(process)
+                _terminate_linux_descendants()
 
     exit_code = process.returncode
     return ExecutionResult(

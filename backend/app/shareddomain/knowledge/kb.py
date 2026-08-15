@@ -288,18 +288,18 @@ async def update_knowledge_base(
         )
         knowledge_base.reranker_model_id = reranker_model.id if reranker_model else None
 
-    await knowledge_base_repository.save_knowledge_base(db, knowledge_base)
-    record_audit_log(
-        db,
-        actor,
-        "knowledge_base.update",
-        RESOURCE_TYPE,
-        knowledge_base.id,
-        knowledge_base.name,
-        details,
-        workspace_id=knowledge_base.workspace_id,
-    )
     try:
+        await knowledge_base_repository.save_knowledge_base(db, knowledge_base)
+        record_audit_log(
+            db,
+            actor,
+            "knowledge_base.update",
+            RESOURCE_TYPE,
+            knowledge_base.id,
+            knowledge_base.name,
+            details,
+            workspace_id=knowledge_base.workspace_id,
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()

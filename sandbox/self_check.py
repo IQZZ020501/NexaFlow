@@ -92,13 +92,39 @@ def main() -> None:
 
     if sys.platform == "linux":
         descendant = run_code(
-            "import os\n"
-            "if os.fork() == 0:\n"
-            "    while True: pass\n"
+            "import os, time\n"
+            "pid = os.fork()\n"
+            "if pid == 0:\n"
+            "    os.setsid()\n"
+            "    for fd in (0, 1, 2):\n"
+            "        try: os.close(fd)\n"
+            "        except OSError: pass\n"
+            "    time.sleep(30)\n"
+            "print(pid, flush=True)\n"
             "os._exit(0)\n",
-            limits=Limits(timeout_ms=200, cpu_seconds=1),
         )
-        assert descendant.error == "wall_time_limit_exceeded", descendant
+        assert descendant.ok, descendant
+        detached_pid = int(descendant.stdout.strip())
+        try:
+            os.kill(detached_pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            raise AssertionError("detached child survived cleanup")
+
+        shared_temp = run_code(
+            "import tempfile\n"
+            "from pathlib import Path\n"
+            "for path in ('/tmp/nexaflow-fixed', '/dev/shm/nexaflow-fixed'):\n"
+            "    try:\n"
+            "        open(path, 'w').write('x')\n"
+            "    except PermissionError:\n"
+            "        print('blocked')\n"
+            "temp_path = Path(tempfile.mkstemp()[1])\n"
+            "print('temp-ok' if temp_path.parent == Path.cwd() else temp_path)\n"
+        )
+        assert shared_temp.ok, shared_temp
+        assert shared_temp.stdout.splitlines() == ["blocked", "blocked", "temp-ok"]
 
         memory = run_code(
             "try:\n"

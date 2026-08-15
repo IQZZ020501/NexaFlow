@@ -330,6 +330,81 @@ def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
     assert drafts.children[0].asset_indexes == [0, 1]
 
 
+def test_docx_image_mime_cannot_shape_asset_paths() -> None:
+    from io import BytesIO
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    from app.capabilities.embedding import pipeline
+
+    image = SimpleNamespace(
+        content_type="image/../../../../other-document/asset",
+        alt_text="Diagram",
+        open=lambda: BytesIO(b"image"),
+    )
+
+    def fake_convert_to_html(_stream, *, convert_image):
+        return SimpleNamespace(value=convert_image(image))
+
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "image.docx"
+        path.touch()
+        with (
+            patch.object(pipeline, "pre_process_docx", lambda stream: stream),
+            patch.object(pipeline.mammoth.images, "img_element", lambda callback: callback),
+            patch.object(pipeline.mammoth, "convert_to_html", fake_convert_to_html),
+            patch.object(
+                pipeline.HtmlConverter,
+                "convert_string",
+                return_value=SimpleNamespace(text_content="Diagram"),
+            ),
+        ):
+            _text, assets = pipeline.extract_document(
+                path.name,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                path,
+            )
+
+    assert assets[0].filename.endswith(".bin")
+    assert "/" not in assets[0].filename
+    assert assets[0].content_type == "application/octet-stream"
+
+
+def test_archive_limits_run_before_document_conversion() -> None:
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+    from zipfile import ZIP_DEFLATED, ZipFile
+
+    from app.capabilities.embedding import pipeline
+
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "expanded.zip"
+        with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("large.txt", b"x" * 9)
+
+        with (
+            patch.object(
+                pipeline,
+                "MAX_ARCHIVE_UNCOMPRESSED_BYTES",
+                8,
+                create=True,
+            ),
+            patch.object(
+                pipeline.MARKITDOWN,
+                "convert_local",
+                return_value=SimpleNamespace(text_content="converted"),
+            ),
+        ):
+            try:
+                pipeline.extract_document(path.name, "application/zip", path)
+            except pipeline.KnowledgePipelineError as exc:
+                assert "expanded data" in str(exc)
+            else:
+                raise AssertionError("oversized archive was converted")
+
+
 def test_supported_document_formats_are_accepted() -> None:
     from pathlib import Path
     from tempfile import TemporaryDirectory
@@ -2153,6 +2228,8 @@ def main() -> None:
     test_markdown_table_keeps_single_overlong_row_intact()
     test_markdown_table_rules_apply_to_parent_and_child_chunks()
     test_docx_images_without_alt_text_do_not_add_placeholder_content()
+    test_docx_image_mime_cannot_shape_asset_paths()
+    test_archive_limits_run_before_document_conversion()
     test_supported_document_formats_are_accepted()
     test_pdf_documents_use_pymupdf_markdown_with_ocr()
     test_image_documents_use_pymupdf_ocr()

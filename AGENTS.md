@@ -71,8 +71,8 @@ Correctness, safety, evidence, and validation take priority over speed.
   explicit write workflows, seed data, and complex queries; keep parameter
   binding in Python services.
 - `backend/.env.example` documents initialization env keys. Real `.env` files are
-  local-only and gitignored; bootstrap admin credentials must come from env
-  values, not Python constants.
+  local-only and gitignored; bootstrap admin credentials and managed-user initial
+  passwords must come from env values, not Python constants.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
 - Regression suites live in `backend/tests/` and run from `backend/` with
@@ -269,14 +269,35 @@ Run the smallest relevant checks first, then broaden only when impact is
 broad. Never claim a check passed unless it completed successfully.
 
 - `frontend/` changes: use the smallest relevant Bun script from `frontend/package.json`
-  (typecheck, lint, test, build as applicable).
+  (typecheck, lint, test, build as applicable). Full suite runs as
+  `bun test --parallel` (per-file isolation is required: happy-dom state leaks
+  between files in serial mode). DOM-level page tests use the happy-dom
+  preload in `frontend/bunfig.toml` and helpers in `frontend/tests/helpers/dom.tsx`;
+  new DOM test files must start with `/* @jsxImportSource react */` because
+  `tsconfig.json` uses `jsx: preserve`.
 - `backend/` changes: use the project's Python tooling. Run `compileall` over the
   touched packages, then run the affected suite from `backend/` with
-  `uv run python -m tests.<suite>` (identity, workspaces, teams, knowledge,
-  agents, workflows, llm, mcp_transports, test_main). For migration changes,
+  `uv run python -m tests.<suite>` (unit, logger, identity, workspaces, teams,
+  knowledge, llm, agents, workflows, mcp_transports, test_main, agent_access,
+  workflow_run_coverage, workflow_node_coverage, workspace_admin_coverage,
+  knowledge_domain_coverage, knowledge_api_coverage, agent_services_coverage,
+  agent_runtime_coverage, infra_unit_coverage). For migration changes,
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
+- Coverage gates (do not claim a percentage unless measured):
+  - Backend: `make coverage` / `backend/scripts/coverage.sh` — runs all suites
+    in parallel (each with an isolated `KNOWLEDGE_STORAGE_DIR`), merges with
+    coverage.py. Backend coverage is at 97%+.
+  - Sandbox: `sandbox/run_coverage.sh` — `sandbox/tests.py` extends
+    `self_check.py`; `sandbox/child.py` is excluded from measurement because
+    `os.execve(..., "-S")` cannot host a coverage tracer (its rlimits are
+    verified behaviorally). Root/Linux-gated lines carry
+    `# pragma: no cover` and are exercised by the CI Docker run.
+  - Frontend: `frontend/scripts/coverage.sh` — runs `bun test --isolate
+    --coverage` (serial + per-file fresh globals; bun's parallel-worker lcov
+    aggregation under-reports and inflates the line denominator). Frontend
+    coverage is 99%+.
 - If a check cannot be run, say exactly why in the final response.
 
 ## 9. Keeping This File Current

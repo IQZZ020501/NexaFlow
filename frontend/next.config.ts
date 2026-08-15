@@ -9,11 +9,9 @@ const BACKEND_ORIGIN = process.env.NEXAFLOW_API_PROXY ?? "http://127.0.0.1:8000"
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
-  // Next requires a finite clone-buffer ceiling for rewritten request bodies.
-  // Use JavaScript's largest safe integer so development uploads have no
-  // product-level size limit.
+  // Keep the proxy request-body ceiling aligned with the backend upload limit.
   experimental: {
-    middlewareClientMaxBodySize: Number.MAX_SAFE_INTEGER,
+    middlewareClientMaxBodySize: "100mb",
     proxyTimeout: 120_000,
   },
   async rewrites() {

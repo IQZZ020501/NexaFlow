@@ -102,7 +102,7 @@ export function SessionGate({ children }: { children: React.ReactNode }) {
             : t("设置一个新的登录密码")
         }
         canDismiss={!mustChangePassword}
-        requireCurrentPassword={!mustChangePassword}
+        requireCurrentPassword
         onOpenChange={closePasswordDialog}
         onNotify={notify}
         onChanged={() => void passwordChanged()}

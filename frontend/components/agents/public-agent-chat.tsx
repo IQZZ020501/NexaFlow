@@ -814,6 +814,10 @@ export function PublicAgentChat({
   }, [runs, isRunsLoading])
 
   function selectConversation(conversationId: string) {
+    if (conversationId === activeConversationId) {
+      setIsHistoryOpen(false)
+      return
+    }
     cancelPublicAgentStream(streamControllerRef)
     setIsSending(false)
     setSendError(null)

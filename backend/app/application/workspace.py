@@ -366,6 +366,7 @@ async def create_workspace_user(
     workspace: Workspace,
     payload: WorkspaceUserCreateRequest,
     actor: User,
+    settings: Settings,
 ) -> UserPasswordResetResponse:
     return await create_user(
         db,
@@ -378,6 +379,7 @@ async def create_workspace_user(
             team_ids=[],
         ),
         actor,
+        settings,
     )
 
 

@@ -14,6 +14,7 @@ from app.infrastructure.config import Settings
 from app.infrastructure.model_utils import new_id
 from app.infrastructure.object_storage import (
     EmptyObjectError,
+    ObjectTooLargeError,
     create_object_storage,
 )
 from app.infrastructure.repositories import workflow as workflow_repository
@@ -24,6 +25,7 @@ from app.schemas.agent import AgentInteractionConfig, AgentUploadResponse
 from app.schemas.workflow import WorkflowUploadResponse
 from app.shareddomain.agents.permissions import require_agent_view
 from app.shareddomain.agents.services import get_agent
+from app.shareddomain.knowledge.services import MAX_DOCUMENT_UPLOAD_BYTES
 from app.shareddomain.workflows.services import get_workflow_agent
 from app.shareddomain.workflows.uploads import queue_upload_cleanups
 
@@ -31,6 +33,8 @@ if TYPE_CHECKING:
     from app.application.agent_access import PublishedAgentContext
 
 UPLOAD_CHUNK_BYTES = 1024 * 1024
+MAX_WORKFLOW_UPLOAD_BYTES = MAX_DOCUMENT_UPLOAD_BYTES
+MAX_WORKFLOW_UPLOAD_FILES = 10
 UPLOAD_EXTENSIONS = {
     "document": {
         ".csv", ".docx", ".epub", ".html", ".ipynb", ".json", ".md",
@@ -201,6 +205,11 @@ async def _upload_files(
         raise HTTPException(status.HTTP_409_CONFLICT, "File upload is disabled.")
     if not uploads:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Upload files.")
+    if len(uploads) > MAX_WORKFLOW_UPLOAD_FILES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"Upload at most {MAX_WORKFLOW_UPLOAD_FILES} files per request.",
+        )
     upload_config = config.file_upload_setting
 
     if await workspace_repository.lock_workspace(db, agent.workspace_id) is None:
@@ -217,6 +226,7 @@ async def _upload_files(
     storage = create_object_storage(settings.knowledge_storage_dir)
     stored: list[WorkflowUpload] = []
     stored_keys: list[str] = []
+    total_size = 0
     try:
         for upload in uploads:
             filename = Path(upload.filename or "").name.strip()[:255]
@@ -243,8 +253,9 @@ async def _upload_files(
             size_bytes = await storage.put_chunks(
                 object_key,
                 chunks(),
-                None,
+                MAX_WORKFLOW_UPLOAD_BYTES - total_size,
             )
+            total_size += size_bytes
             stored_keys.append(object_key)
             stored.append(
                 await workflow_repository.create_upload(
@@ -263,6 +274,14 @@ async def _upload_files(
                 )
             )
         await db.commit()
+    except ObjectTooLargeError as exc:
+        await db.rollback()
+        for object_key in stored_keys:
+            storage.delete(object_key)
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"{application_type.title()} uploads are too large.",
+        ) from exc
     except EmptyObjectError as exc:
         await db.rollback()
         for object_key in stored_keys:

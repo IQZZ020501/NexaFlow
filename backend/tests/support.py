@@ -4,12 +4,14 @@ import shutil
 from pathlib import Path
 from collections.abc import Iterator
 from contextlib import contextmanager
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 BOOTSTRAP_ADMIN_PASSWORD = "NexaFlow@123."
 ADMIN_PASSWORD = "NexaFlow@12345."
+MANAGED_USER_INITIAL_PASSWORD = "NexaFlow@123.."
 RESEARCH_PASSWORD = "Research@12345."
 
 os.environ.update(
@@ -21,11 +23,14 @@ os.environ.update(
         "BOOTSTRAP_ADMIN_EMAIL": "admin@app.local",
         "BOOTSTRAP_ADMIN_NAME": "NexaFlow Admin",
         "BOOTSTRAP_ADMIN_PASSWORD": BOOTSTRAP_ADMIN_PASSWORD,
+        "MANAGED_USER_INITIAL_PASSWORD": MANAGED_USER_INITIAL_PASSWORD,
         "ENVIRONMENT": "test",
         "CELERY_TASK_ALWAYS_EAGER": "true",
         "QDRANT_URL": ":memory:",
         "CELERY_BROKER_URL": "redis://localhost:6379/0",
-        "KNOWLEDGE_STORAGE_DIR": "/tmp/app-test-knowledge-storage",
+        "KNOWLEDGE_STORAGE_DIR": os.environ.get(
+            "KNOWLEDGE_STORAGE_DIR", "/tmp/app-test-knowledge-storage"
+        ),
     }
 )
 
@@ -44,7 +49,7 @@ def settings() -> Settings:
         database_url="sqlite+aiosqlite:///:memory:",
         jwt_secret_key="test-secret-for-app-smoke-suite",
         model_secret_key="test-model-secret-for-app-smoke-suite",
-        knowledge_storage_dir=Path("/tmp/app-test-knowledge-storage"),
+        knowledge_storage_dir=Path(os.environ["KNOWLEDGE_STORAGE_DIR"]),
         qdrant_url=":memory:",
         celery_broker_url="redis://localhost:6379/0",
         celery_task_always_eager=True,
@@ -52,8 +57,14 @@ def settings() -> Settings:
         bootstrap_admin_email="admin@app.local",
         bootstrap_admin_name="NexaFlow Admin",
         bootstrap_admin_password=BOOTSTRAP_ADMIN_PASSWORD,
+        managed_user_initial_password=MANAGED_USER_INITIAL_PASSWORD,
         environment="test",
     )
+
+
+class _PermissiveRateLimitRedis:
+    async def eval(self, *_args):
+        return [1, 1, 60, 60]
 
 
 @contextmanager
@@ -69,8 +80,12 @@ def test_client() -> Iterator[TestClient]:
 
     asyncio.run(create_schema())
 
-    with TestClient(app) as client:
-        yield client
+    with patch(
+        "app.infrastructure.agent_rate_limit._rate_limit_redis",
+        return_value=_PermissiveRateLimitRedis(),
+    ):
+        with TestClient(app) as client:
+            yield client
 
 
 def login(client: TestClient, username: str, password: str) -> dict:
@@ -95,7 +110,10 @@ def activate_user(
     changed = client.post(
         "/api/v1/auth/change-password",
         headers=auth_headers(token),
-        json={"new_password": new_password},
+        json={
+            "current_password": current_password,
+            "new_password": new_password,
+        },
     )
     assert changed.status_code == 204, changed.text
 

@@ -88,14 +88,19 @@ export async function request<T>(path: string, options: RequestOptions = {}) {
     return undefined as T
   }
 
-  const text = await response.text()
-  const payload = text ? JSON.parse(text) : null
-
   if (!response.ok) {
+    const text = await response.text()
+    let payload: unknown = text
+    try {
+      payload = text ? JSON.parse(text) : null
+    } catch {
+      // Keep the plain response body as the fallback message.
+    }
     throw new ApiError(response.status, errorMessage(payload, response.statusText))
   }
 
-  return payload as T
+  const text = await response.text()
+  return (text ? JSON.parse(text) : null) as T
 }
 
 

@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
+from zipfile import BadZipFile, LargeZipFile, ZipFile, is_zipfile
 
 import mammoth
 import pymupdf
@@ -71,6 +72,10 @@ DOCX_EXTENSION_BY_MIME = {
     "image/tiff": "tiff",
     "image/webp": "webp",
 }
+ARCHIVE_MEMBER_EXTENSIONS = frozenset({".docx", ".epub", ".pptx", ".xlsx", ".zip"})
+MAX_ARCHIVE_ENTRIES = 5_000
+MAX_ARCHIVE_NESTING_DEPTH = 3
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 
 
 def asset_marker(asset_index: int) -> str:
@@ -162,6 +167,54 @@ class KnowledgePipelineError(Exception):
     pass
 
 
+def validate_archive(path: Path) -> None:
+    if not is_zipfile(path):
+        return
+
+    state = {"entries": 0, "bytes": 0}
+
+    def inspect(source, depth: int) -> None:
+        try:
+            with ZipFile(source) as archive:
+                for member in archive.infolist():
+                    state["entries"] += 1
+                    if state["entries"] > MAX_ARCHIVE_ENTRIES:
+                        raise KnowledgePipelineError(
+                            "Document archive contains too many entries."
+                        )
+                    if member.is_dir():
+                        continue
+
+                    state["bytes"] += member.file_size
+                    if state["bytes"] > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                        raise KnowledgePipelineError(
+                            "Document archive contains too much expanded data."
+                        )
+
+                    if Path(member.filename).suffix.lower() not in ARCHIVE_MEMBER_EXTENSIONS:
+                        continue
+                    if depth >= MAX_ARCHIVE_NESTING_DEPTH:
+                        raise KnowledgePipelineError(
+                            "Document archive nesting is too deep."
+                        )
+                    with archive.open(member) as nested:
+                        nested_content = nested.read(
+                            MAX_ARCHIVE_UNCOMPRESSED_BYTES + 1
+                        )
+                    if len(nested_content) > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                        raise KnowledgePipelineError(
+                            "Document archive contains too much expanded data."
+                        )
+                    nested_stream = BytesIO(nested_content)
+                    if is_zipfile(nested_stream):
+                        nested_stream.seek(0)
+                        inspect(nested_stream, depth + 1)
+        except (BadZipFile, LargeZipFile) as exc:
+            raise KnowledgePipelineError("Document archive is invalid.") from exc
+
+    inspect(path, 1)
+
+
 def normalize_pdf_markdown(filename: str, markdown: str) -> str:
     markdown = PDF_INLINE_FORMAT_TAG_PATTERN.sub("", markdown)
     markdown = PDF_CJK_SPACE_PATTERN.sub("", markdown)
@@ -216,6 +269,7 @@ def extract_document(
         raise KnowledgePipelineError("Document format is not supported.")
 
     content_type = content_type.split(";", 1)[0].strip().lower()
+    validate_archive(path)
     assets: list[DocumentAssetDraft] = []
     try:
         if extension == ".docx":
@@ -223,10 +277,10 @@ def extract_document(
                 asset_id = new_id()
                 asset_index = len(assets)
                 image_content_type = image.content_type or "application/octet-stream"
-                extension_name = DOCX_EXTENSION_BY_MIME.get(
-                    image_content_type,
-                    image_content_type.split("/", 1)[-1] or "bin",
-                )
+                extension_name = DOCX_EXTENSION_BY_MIME.get(image_content_type)
+                if extension_name is None:
+                    image_content_type = "application/octet-stream"
+                    extension_name = "bin"
                 alt_text = (image.alt_text or "").strip()[:500]
                 with image.open() as image_bytes:
                     image_content = image_bytes.read()

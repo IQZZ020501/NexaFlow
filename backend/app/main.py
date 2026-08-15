@@ -10,6 +10,7 @@ from app.infrastructure.config import Settings
 from app.infrastructure.errors import classify_error, log_error
 from app.infrastructure.event_loop import configure_windows_event_loop_policy
 from app.infrastructure.logger import get_logger, setup_logging
+from app.infrastructure.request_body_limit import RequestBodyLimitMiddleware
 from app.infrastructure.seed import seed_bootstrap_admin
 from app.infrastructure.session import configure_database, get_session_factory
 from app.infrastructure.system_log import record_system_log
@@ -32,6 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="NexaFlow API", lifespan=lifespan)
     app.state.settings = settings
+    app.add_middleware(RequestBodyLimitMiddleware)
 
     if settings.cors_origins:
         app.add_middleware(
