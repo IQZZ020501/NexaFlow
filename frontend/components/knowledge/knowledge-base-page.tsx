@@ -71,7 +71,6 @@ import {
   listKnowledgeDocuments,
   listKnowledgeTasks,
   parseKnowledgeDocument,
-  queryKnowledgeBase,
   rebuildKnowledgeIndex,
   retryKnowledgeTask,
   revokeKnowledgeBasePermission,
@@ -85,7 +84,6 @@ import type {
   KnowledgeBaseListItem,
   KnowledgeDocument,
   KnowledgeModelTestResult,
-  KnowledgeQueryHit,
   KnowledgeTask,
   ResourcePermission,
 } from "@/lib/api/knowledge"
@@ -104,8 +102,8 @@ import {
   type KnowledgeUploadStep,
 } from "@/lib/knowledge-upload-route"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
-import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
+import { KnowledgeHitTest } from "@/components/knowledge/knowledge-hit-test"
 import {
   getDocumentFileIcon,
   getDocumentFileIconColor,
@@ -282,9 +280,6 @@ function KnowledgeBasePageContent({
   const [knowledgeTasks, setKnowledgeTasks] = React.useState<KnowledgeTask[]>(
     []
   )
-  const [queryText, setQueryText] = React.useState("")
-  const [queryLimit, setQueryLimit] = React.useState(5)
-  const [queryHits, setQueryHits] = React.useState<KnowledgeQueryHit[]>([])
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<
     string[]
   >([])
@@ -338,7 +333,6 @@ function KnowledgeBasePageContent({
     SMART_CLEANING_RULES
   )
   const [isRetryingTask, setIsRetryingTask] = React.useState(false)
-  const [isQuerying, setIsQuerying] = React.useState(false)
   const [isTestingModels, setIsTestingModels] = React.useState(false)
   const [modelTestResult, setModelTestResult] =
     React.useState<KnowledgeModelTestResult | null>(null)
@@ -670,10 +664,6 @@ function KnowledgeBasePageContent({
     )
   }
 
-  function formatDistance(distance: number | null) {
-    return distance === null ? "-" : distance.toFixed(4)
-  }
-
   function resetForm() {
     setForm({
       name: "",
@@ -696,8 +686,6 @@ function KnowledgeBasePageContent({
     setDocumentSearch("")
     setSelectedDocumentIds([])
     setKnowledgeTasks([])
-    setQueryHits([])
-    setQueryText("")
     router.push(`/app/knowledge/${knowledgeBase.id}`)
   }
 
@@ -1035,33 +1023,6 @@ function KnowledgeBasePageContent({
       reportError(error)
     } finally {
       setIsRetryingTask(false)
-    }
-  }
-
-  async function handleQueryKnowledgeBase(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!selectedWorkspaceId || !selectedKnowledgeBase) {
-      return
-    }
-
-    const query = queryText.trim()
-    if (!query) {
-      return
-    }
-
-    setIsQuerying(true)
-    try {
-      setQueryHits(
-        await queryKnowledgeBase(token, selectedWorkspaceId, selectedKnowledgeBase.id, {
-          query,
-          limit: queryLimit,
-        })
-      )
-    } catch (error) {
-      setQueryHits([])
-      reportError(error)
-    } finally {
-      setIsQuerying(false)
     }
   }
 
@@ -2099,89 +2060,12 @@ function KnowledgeBasePageContent({
             ) : null}
 
             {activeDetailTab === "hit-test" ? (
-              <div className="p-4 lg:p-5">
-                <div className="max-w-4xl">
-                  <h1 className="text-xl font-semibold">{t("命中测试")}</h1>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t("使用当前知识库的向量索引和权威切片状态验证召回结果")}
-                  </p>
-
-                  <form
-                    className="mt-4 rounded-lg border bg-background p-4"
-                    onSubmit={(event) => void handleQueryKnowledgeBase(event)}
-                  >
-                    <label className="text-sm font-medium" htmlFor="query-text">
-                      {t("查询内容")}
-                    </label>
-                    <textarea
-                      id="query-text"
-                      value={queryText}
-                      onChange={(event) => setQueryText(event.target.value)}
-                      className="mt-2 min-h-28 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder={t("输入要测试的检索问题")}
-                    />
-                    <div className="mt-3 flex flex-wrap items-end gap-3">
-                      <label className="grid gap-1 text-sm font-medium">
-                        {t("返回数量")}
-                        <Input
-                          type="number"
-                          min={1}
-                          max={20}
-                          value={queryLimit}
-                          onChange={(event) =>
-                            setQueryLimit(
-                              Math.min(
-                                20,
-                                Math.max(1, Number(event.target.value) || 1)
-                              )
-                            )
-                          }
-                          className="w-28"
-                        />
-                      </label>
-                      <Button
-                        type="submit"
-                        disabled={!queryText.trim() || isQuerying}
-                      >
-                        {isQuerying ? (
-                          <LoaderCircleIcon
-                            className="animate-spin"
-                            data-icon="inline-start"
-                          />
-                        ) : (
-                          <TargetIcon data-icon="inline-start" />
-                        )}
-                        {t("测试召回")}
-                      </Button>
-                    </div>
-                  </form>
-
-                  <div className="mt-4 rounded-lg border bg-background">
-                    <div className="border-b px-4 py-3">
-                      <h2 className="text-sm font-semibold">{t("召回结果")}</h2>
-                    </div>
-                    {queryHits.length ? (
-                      <div className="divide-y">
-                        {queryHits.map((hit) => (
-                          <article key={hit.chunk_id} className="p-4">
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                              <span className="font-medium text-foreground">
-                                {hit.document_filename} / #{hit.chunk_index + 1}
-                              </span>
-                              <span>distance {formatDistance(hit.distance)}</span>
-                            </div>
-                            <MarkdownContent content={hit.content} className="mt-3" />
-                          </article>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex min-h-40 items-center justify-center px-4 text-sm text-muted-foreground">
-                        {t("暂无测试结果")}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <KnowledgeHitTest
+                token={token}
+                workspaceId={selectedKnowledgeBase.workspace_id}
+                knowledgeBaseId={selectedKnowledgeBase.id}
+                reportError={reportError}
+              />
             ) : null}
 
             {activeDetailTab === "settings" ? (

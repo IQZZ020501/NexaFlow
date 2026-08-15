@@ -916,6 +916,31 @@ describe("lib/api/knowledge", () => {
     expect(JSON.parse(calls[0].body)).toEqual({ query: "hello", limit: 3 })
   })
 
+  test("inspects retrieval with production query controls", async () => {
+    const calls: Array<{ url: string; body: string }> = []
+    stubFetch((url, init) => {
+      calls.push({ url, body: String(init?.body ?? "") })
+      return new Response('{"hits":[],"trace":{}}', { status: 200 })
+    })
+    await knowledgeApi.inspectKnowledgeBase("tok", "ws-1", "kb-1", {
+      query: "hello",
+      limit: 7,
+      search_mode: "keywords",
+      similarity: 0.4,
+      include_references: true,
+    })
+    expect(calls[0].url).toBe(
+      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/query/inspect",
+    )
+    expect(JSON.parse(calls[0].body)).toEqual({
+      query: "hello",
+      limit: 7,
+      search_mode: "keywords",
+      similarity: 0.4,
+      include_references: true,
+    })
+  })
+
   test("tests knowledge base models", async () => {
     let body = ""
     stubFetch((_url, init) => {

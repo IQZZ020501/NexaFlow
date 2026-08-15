@@ -122,6 +122,42 @@ export type KnowledgeQueryHit = {
   chunk_index: number
   content: string
   distance: number | null
+  kind: "document" | "qa"
+  question: string | null
+  source: string | null
+  sources: Array<"vector" | "keywords" | "reference">
+  reference_hops: 0 | 1
+  rerank_score: number | null
+}
+
+export type KnowledgeSearchMode = "embedding" | "keywords" | "blend"
+
+export type KnowledgeQueryInspectRequest = {
+  query: string
+  limit: number
+  search_mode: KnowledgeSearchMode
+  similarity: number | null
+  include_references: boolean
+}
+
+export type KnowledgeRetrievalTrace = {
+  trace_id: string
+  search_mode: KnowledgeSearchMode
+  limit: number
+  max_distance: number | null
+  vector_candidates: number
+  keyword_candidates: number
+  reference_candidates: number
+  fused_candidates: number
+  rerank_status: "not_configured" | "applied" | "fallback" | "skipped"
+  returned_hits: number
+  duration_ms: number
+  stage_duration_ms: Record<string, number>
+}
+
+export type KnowledgeQueryInspectResult = {
+  hits: KnowledgeQueryHit[]
+  trace: KnowledgeRetrievalTrace
 }
 
 export type KnowledgeBaseForm = {
@@ -462,6 +498,22 @@ export function queryKnowledgeBase(
 ) {
   return request<KnowledgeQueryHit[]>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/query`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export function inspectKnowledgeBase(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  payload: KnowledgeQueryInspectRequest,
+) {
+  return request<KnowledgeQueryInspectResult>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/query/inspect`,
     {
       method: "POST",
       token,
