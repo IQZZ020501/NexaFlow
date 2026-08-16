@@ -15,7 +15,13 @@ from types import SimpleNamespace
 
 from tests.support import activate_admin, test_client
 
-from sqlalchemy import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKeyConstraint,
+    MetaData,
+    Table,
+    UniqueConstraint,
+)
 
 from app.infrastructure.session import get_session_factory
 
@@ -426,6 +432,33 @@ def test_orm_enforces_tenant_scoped_relations_and_legal_states() -> None:
         "mcp_servers.workspace_id",
         "mcp_servers.id",
     )) in foreign_key_columns(ToolSource.__table__)
+    mcp_source_fk = next(
+        constraint
+        for constraint in ToolSource.__table__.constraints
+        if constraint.name == "fk_tool_sources_mcp_server_workspace"
+    )
+    assert isinstance(mcp_source_fk, ForeignKeyConstraint)
+    assert mcp_source_fk.ondelete is None
+    migration = load_migration()
+    metadata = MetaData()
+    original_op = migration.op
+    migration.op = SimpleNamespace(
+        create_table=lambda name, *items, **kwargs: Table(
+            name, metadata, *items, **kwargs
+        ),
+        create_index=lambda *_args, **_kwargs: None,
+        create_foreign_key=lambda *_args, **_kwargs: None,
+    )
+    try:
+        migration_tables = migration._create_tables()
+    finally:
+        migration.op = original_op
+    migration_source_fk = next(
+        constraint
+        for constraint in migration_tables["tool_sources"].constraints
+        if constraint.name == "fk_tool_sources_mcp_server_workspace"
+    )
+    assert migration_source_fk.ondelete is None
     assert (("workspace_id", "id", "current_version_id"), (
         "tool_versions.workspace_id",
         "tool_versions.tool_id",
@@ -577,10 +610,192 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert policy.effect == "pure"
 
 
+async def assert_mcp_server_deletion_preserves_tool_history(
+    workspace_id: str,
+) -> None:
+    from app.capabilities.llm.models import RegisteredModel
+    from app.entities.agents import Agent
+    from app.entities.tools import (
+        ApplicationToolBinding,
+        McpServer,
+        Tool,
+        ToolInvocation,
+        ToolPolicy,
+        ToolSource,
+        ToolVersion,
+    )
+    from app.infrastructure.repositories import agent as agent_repository
+    from app.infrastructure.repositories import mcp as mcp_repository
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+    from app.shareddomain.tools import services as tool_services
+
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        server = await mcp_repository.create_mcp_server(
+            db,
+            McpServer(
+                workspace_id=workspace_id,
+                name="History MCP",
+                url="https://tools.example.com/mcp",
+                tools=[],
+                status="active",
+                created_by_user_id=actor.id,
+            ),
+        )
+        source = await tool_repository.save_tool_source(
+            db,
+            ToolSource(
+                workspace_id=workspace_id,
+                mcp_server_id=server.id,
+                kind="mcp",
+                name="History MCP",
+                status="active",
+                created_by_user_id=actor.id,
+            ),
+        )
+        tool = await tool_repository.save_tool(
+            db,
+            Tool(
+                workspace_id=workspace_id,
+                source_id=source.id,
+                kind="mcp",
+                stable_key="echo",
+                function_name="mcp_echo_history",
+                status="active",
+                availability="available",
+                created_by_user_id=actor.id,
+            ),
+        )
+        definition_hash = "a" * 64
+        version = await tool_repository.save_tool_version(
+            db,
+            ToolVersion(
+                workspace_id=workspace_id,
+                tool_id=tool.id,
+                revision=1,
+                display_name="echo",
+                input_schema={"type": "object"},
+                execution_spec={"server_id": server.id, "tool_name": "echo"},
+                definition_hash=definition_hash,
+                created_by_user_id=actor.id,
+            ),
+        )
+        tool.current_version_id = version.id
+        await tool_repository.save_tool(db, tool)
+        policy = await tool_repository.save_tool_policy(
+            db,
+            ToolPolicy(
+                workspace_id=workspace_id,
+                tool_id=tool.id,
+                tool_version_id=version.id,
+                definition_hash=definition_hash,
+                approval="auto",
+                effect="external_read",
+                allowed_access_sources=["console"],
+                reviewed_by_user_id=actor.id,
+            ),
+        )
+
+        model = RegisteredModel(
+            workspace_id=workspace_id,
+            name="Tool History Model",
+            provider="model_custom_provider",
+            provider_type="openai_compatible",
+            api_base="",
+            model_type="LLM",
+            model_name="history-model",
+            status="active",
+            created_by_user_id=actor.id,
+        )
+        db.add(model)
+        await db.flush()
+        application = await agent_repository.create_agent(
+            db,
+            Agent(
+                workspace_id=workspace_id,
+                name="Tool History Agent",
+                instructions="Use the bound tool.",
+                model_id=model.id,
+                created_by_user_id=actor.id,
+            ),
+        )
+        binding = await tool_repository.save_application_tool_binding(
+            db,
+            ApplicationToolBinding(
+                workspace_id=workspace_id,
+                application_id=application.id,
+                tool_id=tool.id,
+                tool_version_id=version.id,
+                bound_by_user_id=actor.id,
+            ),
+        )
+        invocation = await tool_repository.save_tool_invocation(
+            db,
+            ToolInvocation(
+                workspace_id=workspace_id,
+                origin="test",
+                invocation_id="history-invocation",
+                execution_user_id=actor.id,
+                access_source="console",
+                tool_id=tool.id,
+                tool_version_id=version.id,
+                policy_snapshot={"policy_id": policy.id},
+                arguments={},
+                arguments_hash="b" * 64,
+                idempotency_key="history-invocation",
+                status="succeeded",
+                attempts=1,
+                outcome="confirmed",
+            ),
+        )
+        await db.commit()
+
+        await tool_services.delete_mcp_server(db, server, actor)
+
+        assert await mcp_repository.get_mcp_server_by_id(db, server.id) is None
+        retained_source = await tool_repository.get_tool_source(
+            db, workspace_id, source.id
+        )
+        retained_tool = await tool_repository.get_tool(db, workspace_id, tool.id)
+        assert retained_source is not None
+        assert retained_source.status == "archived"
+        assert retained_source.mcp_server_id is None
+        assert retained_tool is not None
+        assert retained_tool.status == "archived"
+        assert retained_tool.availability == "unavailable"
+        assert retained_tool.current_version_id == version.id
+        retained_version = await tool_repository.get_tool_version(
+            db, workspace_id, version.id
+        )
+        retained_policy = await tool_repository.get_tool_policy(
+            db, workspace_id, tool.id
+        )
+        retained_binding = await tool_repository.get_application_tool_binding(
+            db, workspace_id, application.id, tool.id
+        )
+        retained_invocation = await tool_repository.get_tool_invocation(
+            db, workspace_id, invocation.id
+        )
+        assert retained_version is not None
+        assert retained_version.definition_hash == definition_hash
+        assert retained_policy is not None
+        assert retained_policy.id == policy.id
+        assert retained_policy.tool_version_id == version.id
+        assert retained_binding is not None
+        assert retained_binding.id == binding.id
+        assert retained_binding.tool_version_id == version.id
+        assert retained_invocation is not None
+        assert retained_invocation.id == invocation.id
+        assert retained_invocation.tool_version_id == version.id
+
+
 def test_workspace_creation_initializes_system_catalog() -> None:
     with test_client() as client:
         _token, workspace_id = activate_admin(client)
         run(assert_workspace_system_catalog(workspace_id))
+        run(assert_mcp_server_deletion_preserves_tool_history(workspace_id))
 
 
 def main() -> None:

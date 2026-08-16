@@ -2823,10 +2823,14 @@ def test_delete_mcp_server() -> None:
     db = AsyncMock()
     actor = User(id="u1", username="alice", name="Alice")
     server = McpServer(id="srv-1", workspace_id="ws-1", name="Server", transport="streamable_http", url="https://x")
-    with patch.object(mcp_repo, "delete_mcp_server", new=AsyncMock()), patch.object(
+    tombstone = AsyncMock()
+    with patch.object(
+        tools_services, "tombstone_mcp_server_catalog", new=tombstone
+    ), patch.object(mcp_repo, "delete_mcp_server", new=AsyncMock()), patch.object(
         tools_services, "record_audit_log", return_value=None
     ):
         run(tools_services.delete_mcp_server(db, server, actor))
+        tombstone.assert_awaited_once_with(db, "ws-1", "srv-1")
         assert db.commit.await_count == 1
 
 
@@ -3861,7 +3865,7 @@ async def db_resource_permission_tests() -> None:
         await db.commit()
 
         assert (
-            await rp_repo.get_user_grant(db, "rp-ws-1", "agent", "res-1", "rp-user-1")
+            await rp_repo.get_user_grant(db, "rp-ws-1", "tool", "res-1", "rp-user-1")
             is None
         )
         assert (
@@ -3872,7 +3876,7 @@ async def db_resource_permission_tests() -> None:
 
         entity = ResourcePermission(
             workspace_id="rp-ws-1",
-            resource_type="agent",
+            resource_type="tool",
             resource_id="res-1",
             user_id="rp-user-1",
             permission="view",
@@ -3881,24 +3885,24 @@ async def db_resource_permission_tests() -> None:
         created = await rp_repo.create_resource_permission(db, entity)
         assert created.id is not None
 
-        grant = await rp_repo.get_user_grant(db, "rp-ws-1", "agent", "res-1", "rp-user-1")
+        grant = await rp_repo.get_user_grant(db, "rp-ws-1", "tool", "res-1", "rp-user-1")
         assert grant is not None and grant.permission == "view"
 
-        created.permission = "edit"
+        created.permission = "use"
         await rp_repo.save_resource_permission(db, created)
 
-        rows = await rp_repo.list_resource_permission_rows(db, "rp-ws-1", "agent", "res-1")
+        rows = await rp_repo.list_resource_permission_rows(db, "rp-ws-1", "tool", "res-1")
         assert len(rows) == 1
         permission, grant_user = rows[0]
-        assert permission.permission == "edit"
+        assert permission.permission == "use"
         assert grant_user.username == "rp-user"
 
         deleted = await rp_repo.delete_resource_permission(
-            db, "rp-ws-1", "agent", "res-1", "rp-user-1"
+            db, "rp-ws-1", "tool", "res-1", "rp-user-1"
         )
         assert deleted == 1
         deleted_again = await rp_repo.delete_resource_permission(
-            db, "rp-ws-1", "agent", "res-1", "rp-user-1"
+            db, "rp-ws-1", "tool", "res-1", "rp-user-1"
         )
         assert deleted_again == 0
 

@@ -33,6 +33,7 @@ from app.schemas.mcp import (
     McpServerResponse,
 )
 from app.shareddomain.audit.services import record_audit_log
+from app.shareddomain.tools.catalog import tombstone_mcp_server_catalog
 
 
 @dataclass(frozen=True)
@@ -317,6 +318,7 @@ async def delete_mcp_server(
         server.name,
         workspace_id=server.workspace_id,
     )
+    await tombstone_mcp_server_catalog(db, server.workspace_id, server.id)
     await mcp_repository.delete_mcp_server(db, server)
     await db.commit()
 

@@ -48,6 +48,24 @@ async def list_tool_sources(
     return [to_entity(ToolSource, row) for row in rows.all()]
 
 
+async def list_mcp_tool_sources(
+    db: AsyncSession,
+    workspace_id: str,
+    mcp_server_id: str | None = None,
+) -> list[ToolSource]:
+    statement = select(ToolSourceOrm).where(
+        ToolSourceOrm.workspace_id == workspace_id,
+        ToolSourceOrm.kind == "mcp",
+        ToolSourceOrm.mcp_server_id.is_not(None),
+    )
+    if mcp_server_id is not None:
+        statement = statement.where(ToolSourceOrm.mcp_server_id == mcp_server_id)
+    rows = await db.scalars(
+        statement.order_by(ToolSourceOrm.created_at, ToolSourceOrm.id)
+    )
+    return [to_entity(ToolSource, row) for row in rows.all()]
+
+
 async def save_tool_source(db: AsyncSession, entity: ToolSource) -> ToolSource:
     row = await save(db, ToolSourceOrm, entity)
     return to_entity(ToolSource, row)
@@ -71,6 +89,22 @@ async def list_tools(db: AsyncSession, workspace_id: str) -> list[Tool]:
     rows = await db.scalars(
         select(ToolOrm)
         .where(ToolOrm.workspace_id == workspace_id)
+        .order_by(ToolOrm.created_at, ToolOrm.id)
+    )
+    return [to_entity(Tool, row) for row in rows.all()]
+
+
+async def list_tools_by_source(
+    db: AsyncSession,
+    workspace_id: str,
+    source_id: str,
+) -> list[Tool]:
+    rows = await db.scalars(
+        select(ToolOrm)
+        .where(
+            ToolOrm.workspace_id == workspace_id,
+            ToolOrm.source_id == source_id,
+        )
         .order_by(ToolOrm.created_at, ToolOrm.id)
     )
     return [to_entity(Tool, row) for row in rows.all()]

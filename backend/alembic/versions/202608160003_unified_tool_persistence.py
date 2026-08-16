@@ -220,7 +220,6 @@ def _create_tables() -> dict[str, sa.Table]:
             ["workspace_id", "mcp_server_id"],
             ["mcp_servers.workspace_id", "mcp_servers.id"],
             name="fk_tool_sources_mcp_server_workspace",
-            ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
             ["created_by_user_id"],

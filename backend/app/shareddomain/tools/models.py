@@ -26,7 +26,6 @@ class ToolSource(Base):
             ["workspace_id", "mcp_server_id"],
             ["mcp_servers.workspace_id", "mcp_servers.id"],
             name="fk_tool_sources_mcp_server_workspace",
-            ondelete="CASCADE",
         ),
         UniqueConstraint(
             "workspace_id", "id", name="uq_tool_sources_workspace_id"

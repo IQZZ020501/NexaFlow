@@ -19,7 +19,7 @@ from app.shareddomain.knowledge.models import (
     KnowledgeTask,
 )
 from app.shareddomain.knowledge.services import knowledge_object_storage
-from app.shareddomain.tools.models import McpServer
+from app.shareddomain.tools.models import McpServer, ToolSource
 from tests.support import (
     activate_admin,
     auth_headers,
@@ -51,7 +51,7 @@ async def assert_workspace_cascade_deleted(
         assert await db.get(Agent, agent_id) is None
         assert await db.get(AgentRun, agent_run_id) is None
         assert await db.get(McpServer, mcp_server_id) is None
-        for model in (AgentKnowledgeBase, AgentMcpTool):
+        for model in (AgentKnowledgeBase, AgentMcpTool, ToolSource):
             rows = await db.scalars(
                 select(model).where(model.workspace_id == workspace_id)
             )
@@ -94,6 +94,16 @@ async def seed_workspace_dependencies(
         )
         db.add_all([model, mcp_server])
         await db.flush()
+        db.add(
+            ToolSource(
+                workspace_id=workspace_id,
+                mcp_server_id=mcp_server.id,
+                kind="mcp",
+                name=mcp_server.name,
+                status="active",
+                created_by_user_id=actor_id,
+            )
+        )
 
         agent = Agent(
             workspace_id=workspace_id,

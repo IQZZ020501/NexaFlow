@@ -194,3 +194,52 @@ async def ensure_workspace_system_catalog(
     if tool.current_version_id is None:
         tool.current_version_id = catalog.version.id
         await repository.save_tool(db, tool)
+
+
+async def _tombstone_mcp_sources(
+    db: AsyncSession,
+    sources: list[ToolSource],
+) -> None:
+    from app.infrastructure.repositories import tools as repository
+
+    timestamp = utc_now()
+    for source in sources:
+        tools = await repository.list_tools_by_source(
+            db,
+            source.workspace_id,
+            source.id,
+        )
+        for tool in tools:
+            tool.status = "archived"
+            tool.availability = "unavailable"
+            tool.updated_at = timestamp
+            await repository.save_tool(db, tool)
+        source.status = "archived"
+        source.mcp_server_id = None
+        source.updated_at = timestamp
+        await repository.save_tool_source(db, source)
+
+
+async def tombstone_mcp_server_catalog(
+    db: AsyncSession,
+    workspace_id: str,
+    mcp_server_id: str,
+) -> None:
+    from app.infrastructure.repositories import tools as repository
+
+    sources = await repository.list_mcp_tool_sources(
+        db,
+        workspace_id,
+        mcp_server_id,
+    )
+    await _tombstone_mcp_sources(db, sources)
+
+
+async def tombstone_workspace_mcp_catalog(
+    db: AsyncSession,
+    workspace_id: str,
+) -> None:
+    from app.infrastructure.repositories import tools as repository
+
+    sources = await repository.list_mcp_tool_sources(db, workspace_id)
+    await _tombstone_mcp_sources(db, sources)

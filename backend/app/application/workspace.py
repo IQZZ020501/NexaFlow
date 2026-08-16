@@ -25,7 +25,10 @@ from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.ports import model_registry
 from app.shareddomain.knowledge.services import delete_workspace_knowledge_bases
-from app.shareddomain.tools.catalog import ensure_workspace_system_catalog
+from app.shareddomain.tools.catalog import (
+    ensure_workspace_system_catalog,
+    tombstone_workspace_mcp_catalog,
+)
 from app.shareddomain.workflows.uploads import queue_upload_cleanups
 from app.tasks.knowledge import enqueue_knowledge_storage_cleanup
 from app.tasks.knowledge import enqueue_upload_storage_cleanups
@@ -472,6 +475,7 @@ async def delete_workspace_permanently(
         workspace_id=workspace.id,
     )
     await agent_repository.delete_workspace_agent_graph(db, workspace.id)
+    await tombstone_workspace_mcp_catalog(db, workspace.id)
     await mcp_repository.delete_workspace_mcp_servers(db, workspace.id)
     await model_registry.delete_registered_models_in_workspace(db, workspace.id)
     await workspace_repository.delete_workspace_graph(db, workspace.id)
