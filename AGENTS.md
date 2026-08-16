@@ -124,6 +124,10 @@ Correctness, safety, evidence, and validation take priority over speed.
   published agents and Agent API docs); shared components in `components/`,
   providers in `contexts/`, trilingual dictionaries in `i18n/`, and feature
   API modules in `lib/api/`.
+- Every new user-navigable frontend page must have a stable App Router entry
+  under `frontend/app/`; do not leave navigation-level views only in component
+  state. Dialogs and responsive panels remain component states unless they are
+  intentionally promoted to pages.
 - `sandbox/` is a standard-library Python execution service for Workflow code
   nodes. It accepts bounded JSON-line requests over a shared Unix socket and
   runs each program in a deprivileged subprocess with CPU, memory, process,

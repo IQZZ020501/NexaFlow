@@ -5,9 +5,17 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { KnowledgeBasePage } from "@/components/knowledge/knowledge-base-page"
 import { KnowledgeUploadStateProvider } from "@/components/knowledge/knowledge-upload-state"
 import { LanguageProvider } from "@/contexts/language-provider"
-import type { KnowledgeDocument, KnowledgeTask } from "@/lib/api/knowledge"
+import type {
+  KnowledgeBaseDetailTab,
+  KnowledgeDocument,
+  KnowledgeTask,
+} from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { WorkspaceMember } from "@/lib/api/system"
+import {
+  knowledgeBaseDetailPath,
+  parseKnowledgeBaseDetailTab,
+} from "@/lib/knowledge-views"
 import {
   jsonResponse,
   makeSession,
@@ -867,6 +875,7 @@ function renderDetailPage(options: {
   knowledgeBases?: Array<Record<string, unknown>>
   documents?: KnowledgeDocument[]
   models?: RegisteredModel[]
+  initialDetailTab?: KnowledgeBaseDetailTab
 } = {}) {
   const knowledgeBases = options.knowledgeBases ?? [makeKnowledgeBase()]
   const documents = options.documents ?? []
@@ -879,10 +888,45 @@ function renderDetailPage(options: {
     return jsonResponse([])
   }
   routeParams.id = KB_ID
-  return renderPage(<KnowledgeBasePage />)
+  return renderPage(
+    <KnowledgeBasePage initialDetailTab={options.initialDetailTab} />,
+  )
 }
 
 describe("KnowledgeBasePage documents tab", () => {
+  test("routes every knowledge base detail page", async () => {
+    expect(parseKnowledgeBaseDetailTab("tasks")).toBe("tasks")
+    expect(parseKnowledgeBaseDetailTab("unknown")).toBeNull()
+    expect(knowledgeBaseDetailPath(KB_ID, "documents")).toBe(
+      `/app/knowledge/${KB_ID}`,
+    )
+    expect(knowledgeBaseDetailPath(KB_ID, "evaluation")).toBe(
+      `/app/knowledge/${KB_ID}/evaluation`,
+    )
+
+    renderDetailPage()
+    fireEvent.click(await screen.findByText("任务"))
+    expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}/tasks`)
+    await waitFor(() => expect(screen.getByText("暂无任务")).toBeTruthy())
+
+    fireEvent.click(screen.getByText("设置"))
+    expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}/settings`)
+    await waitFor(() => expect(screen.getByText("Alpha docs")).toBeTruthy())
+
+    fireEvent.click(screen.getByText("文档"))
+    expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}`)
+    await waitFor(() => expect(screen.getByText("暂无文档")).toBeTruthy())
+  })
+
+  test("restores the detail page selected by the route", async () => {
+    renderDetailPage({ initialDetailTab: "tasks" })
+
+    await waitFor(() => expect(screen.getByText("暂无任务")).toBeTruthy())
+    expect(
+      screen.getByRole("button", { name: "任务" }).getAttribute("aria-current"),
+    ).toBe("page")
+  })
+
   test("renders document rows with status, size, chunks and dates", async () => {
     const documents = [
       makeDocument({

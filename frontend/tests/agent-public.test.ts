@@ -333,12 +333,33 @@ describe("public agent API", () => {
     expect(parseAgentDetailView("unknown")).toBe("overview")
   })
 
-  test("opens workflow settings on the dedicated canvas route", () => {
+  test("builds routes for every application detail view", () => {
     expect(appViewPath("workflow-1", "workflow", "settings")).toBe(
       "/workflow/workflow-1"
     )
     expect(appViewPath("workflow-1", "workflow", "overview")).toBe(
-      "/app/apps/workflow-1?view=overview"
+      "/app/apps/workflow-1"
+    )
+    expect(appViewPath("agent-1", "agent", "settings")).toBe(
+      "/app/apps/agent-1/settings"
+    )
+    expect(appViewPath("agent-1", "agent", "logs")).toBe(
+      "/app/apps/agent-1/logs"
+    )
+    expect(appViewPath("agent-1", "agent", "monitoring")).toBe(
+      "/app/apps/agent-1/monitoring"
+    )
+    expect(appViewPath("agent-1", "agent", "users")).toBe(
+      "/app/apps/agent-1/users"
+    )
+    expect(
+      appViewPath("agent-1", "agent", "settings", "conversation-1")
+    ).toBe("/app/apps/agent-1/settings?conversation_id=conversation-1")
+  })
+
+  test("uses the overview route for unknown detail views", () => {
+    expect(appViewPath("agent-1", "agent", parseAgentDetailView("unknown"))).toBe(
+      "/app/apps/agent-1"
     )
   })
 

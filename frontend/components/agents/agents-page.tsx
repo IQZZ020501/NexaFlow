@@ -338,12 +338,14 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
 type AgentsPageProps = {
   initialConversationId?: string | null
   initialView?: AgentDetailView
+  hasLegacyView?: boolean
   workflowCanvasMode?: boolean
 }
 
 export function AgentsPage({
   initialConversationId = null,
   initialView = "overview",
+  hasLegacyView = false,
   workflowCanvasMode = false,
 }: AgentsPageProps) {
   const router = useRouter()
@@ -677,6 +679,17 @@ export function AgentsPage({
       router.replace(appViewPath(selectedAgentId, "agent", "overview"))
       return
     }
+    if (hasLegacyView && !workflowCanvasMode) {
+      router.replace(
+        appViewPath(
+          selectedAgentId,
+          selectedAppType,
+          activeView,
+          initialConversationId
+        )
+      )
+      return
+    }
     if (
       !workflowCanvasMode &&
       selectedAppType === "workflow" &&
@@ -686,6 +699,8 @@ export function AgentsPage({
     }
   }, [
     activeView,
+    hasLegacyView,
+    initialConversationId,
     router,
     selectedAppType,
     selectedAgentId,
@@ -763,7 +778,12 @@ export function AgentsPage({
         setRuns(visibleRuns)
         if (!initialConversationId) {
           router.replace(
-            `/app/apps/${selectedAgentId}?view=settings&conversation_id=${encodeURIComponent(resolvedConversationId)}`
+            appViewPath(
+              selectedAgentId,
+              "agent",
+              "settings",
+              resolvedConversationId
+            )
           )
         }
         for (const run of visibleRuns) {
@@ -1177,7 +1197,7 @@ export function AgentsPage({
     activeConversationIdRef.current = conversationId
     if (!initialConversationId) {
       router.replace(
-        `/app/apps/${selectedAgent.id}?view=settings&conversation_id=${encodeURIComponent(conversationId)}`
+        appViewPath(selectedAgent.id, "agent", "settings", conversationId)
       )
     }
     setQuestion("")
@@ -1324,7 +1344,7 @@ export function AgentsPage({
     setIsRunsLoading(false)
     setResolvingCallId(null)
     router.push(
-      `/app/apps/${selectedAgentId}?view=settings&conversation_id=${encodeURIComponent(conversationId)}`
+      appViewPath(selectedAgentId, "agent", "settings", conversationId)
     )
   }
 

@@ -101,6 +101,7 @@ import {
   type KnowledgeUploadRouteState,
   type KnowledgeUploadStep,
 } from "@/lib/knowledge-upload-route"
+import { knowledgeBaseDetailPath } from "@/lib/knowledge-views"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
@@ -309,9 +310,11 @@ function documentStatusText(
 }
 
 export function KnowledgeBasePage({
+  initialDetailTab = "documents",
   uploadStep,
   uploadRouteState,
 }: {
+  initialDetailTab?: KnowledgeBaseDetailTab
   uploadStep?: KnowledgeUploadStep
   uploadRouteState?: KnowledgeUploadRouteState
 } = {}) {
@@ -327,6 +330,7 @@ export function KnowledgeBasePage({
       me={me}
       selectedWorkspaceId={selectedWorkspaceId}
       notify={notify}
+      initialDetailTab={initialDetailTab}
       uploadStep={uploadStep}
       uploadRouteState={uploadRouteState}
     />
@@ -338,6 +342,7 @@ function KnowledgeBasePageContent({
   me,
   selectedWorkspaceId,
   notify,
+  initialDetailTab,
   uploadStep,
   uploadRouteState,
 }: {
@@ -345,6 +350,7 @@ function KnowledgeBasePageContent({
   me: MeResponse
   selectedWorkspaceId: string | null
   notify: (kind: AppNotification["kind"], message: string) => void
+  initialDetailTab: KnowledgeBaseDetailTab
   uploadStep?: KnowledgeUploadStep
   uploadRouteState?: KnowledgeUploadRouteState
 }) {
@@ -391,7 +397,7 @@ function KnowledgeBasePageContent({
   >([])
   const [permissions, setPermissions] = React.useState<ResourcePermission[]>([])
   const [activeDetailTab, setActiveDetailTab] =
-    React.useState<KnowledgeBaseDetailTab>("documents")
+    React.useState<KnowledgeBaseDetailTab>(initialDetailTab)
   const [form, setForm] = React.useState<KnowledgeBaseForm>({
     name: "",
     description: "",
@@ -685,6 +691,11 @@ function KnowledgeBasePageContent({
     void loadKnowledgeTasks()
   }, [activeDetailTab, loadKnowledgeTasks])
 
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setActiveDetailTab(initialDetailTab)
+  }, [activeKnowledgeBaseId, initialDetailTab])
+
   const hasProcessingDocuments = documents.some(
     (document) => PROCESSING_DOCUMENT_STATUSES[document.status]
   )
@@ -784,6 +795,14 @@ function KnowledgeBasePageContent({
   function closeKnowledgeBase() {
     setKnowledgeTasks([])
     router.push("/app/knowledge")
+  }
+
+  function changeDetailTab(tab: KnowledgeBaseDetailTab) {
+    if (!selectedKnowledgeBaseId) {
+      return
+    }
+    setActiveDetailTab(tab)
+    router.push(knowledgeBaseDetailPath(selectedKnowledgeBaseId, tab))
   }
 
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
@@ -1315,7 +1334,8 @@ function KnowledgeBasePageContent({
                       "flex h-10 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:w-full",
                       isActive && "bg-primary/10 text-primary"
                     )}
-                    onClick={() => setActiveDetailTab(tab.key)}
+                    aria-current={isActive ? "page" : undefined}
+                    onClick={() => changeDetailTab(tab.key)}
                   >
                     <TabIcon className="size-4" />
                     {tab.label}

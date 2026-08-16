@@ -408,6 +408,7 @@ function openModelDropdown() {
 async function renderDetail(opts: {
   agent?: Agent
   initialView?: string
+  hasLegacyView?: boolean
   agents?: Agent[]
   extraRoutes?: FetchCase[]
 } = {}) {
@@ -423,7 +424,10 @@ async function renderDetail(opts: {
       respond: () => jsonResponse(agent),
     },
   ]
-  const viewProps = opts.initialView ? { initialView: opts.initialView as never } : {}
+  const viewProps = {
+    ...(opts.initialView ? { initialView: opts.initialView as never } : {}),
+    ...(opts.hasLegacyView ? { hasLegacyView: true } : {}),
+  }
   renderPage(<AgentsPage {...viewProps} />)
   await waitFor(() => expect(screen.getByText(agent.name)).toBeTruthy())
   return agent
@@ -469,7 +473,7 @@ describe("AgentsPage list view", () => {
     await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
 
     fireEvent.click(cardOf("Research Assistant"))
-    expect(navState.pushCalls).toContain("/app/apps/agent-1?view=overview")
+    expect(navState.pushCalls).toContain("/app/apps/agent-1")
   })
 
   test("opens an agent from the pencil edit button", async () => {
@@ -478,7 +482,7 @@ describe("AgentsPage list view", () => {
     await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
 
     fireEvent.click(within(cardOf("Research Assistant")).getByRole("button", { name: "编辑应用" }))
-    expect(navState.pushCalls).toContain("/app/apps/agent-1?view=overview")
+    expect(navState.pushCalls).toContain("/app/apps/agent-1")
   })
 
   test("filters cards by search across name and model", async () => {
@@ -646,9 +650,9 @@ describe("AgentsPage list view", () => {
     await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
     const card = cardOf("Research Assistant")
     fireEvent.keyDown(card, { key: "Enter" })
-    expect(navState.pushCalls).toContain("/app/apps/agent-1?view=overview")
+    expect(navState.pushCalls).toContain("/app/apps/agent-1")
     fireEvent.keyDown(card, { key: " " })
-    expect(navState.pushCalls.filter((href) => href === "/app/apps/agent-1?view=overview").length).toBe(2)
+    expect(navState.pushCalls.filter((href) => href === "/app/apps/agent-1").length).toBe(2)
   })
 
   test("shows the loading indicator while fetching more agents", async () => {
@@ -939,6 +943,7 @@ describe("AgentsPage detail view", () => {
     expect(settingsNavButton).toBeTruthy()
     fireEvent.click(settingsNavButton!)
     await waitFor(() => expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy())
+    expect(navState.replaceCalls).toContain("/app/apps/agent-1/settings")
 
     const nameInput = screen.getByLabelText("Agent 名称") as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: "Renamed Assistant" } })
@@ -1029,7 +1034,15 @@ describe("AgentsPage detail view", () => {
     navState.params.id = "agent-1"
     renderPage(<AgentsPage workflowCanvasMode />)
     await waitFor(() =>
-      expect(navState.replaceCalls).toContain("/app/apps/agent-1?view=overview")
+      expect(navState.replaceCalls).toContain("/app/apps/agent-1")
+    )
+  })
+
+  test("canonicalizes legacy application view links", async () => {
+    await renderDetail({ initialView: "logs", hasLegacyView: true })
+
+    await waitFor(() =>
+      expect(navState.replaceCalls).toContain("/app/apps/agent-1/logs")
     )
   })
 
@@ -1252,7 +1265,7 @@ describe("AgentsPage detail view", () => {
     renderPage(<AgentsPage workflowCanvasMode />)
     await waitFor(() => expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy())
     fireEvent.click(screen.getByText("stub-back").closest("button")!)
-    expect(navState.replaceCalls).toContain("/app/apps/agent-2?view=overview")
+    expect(navState.replaceCalls).toContain("/app/apps/agent-2")
   })
 
   test("routes workflow settings changes to the canvas", async () => {
@@ -1935,7 +1948,7 @@ describe("AgentsPage run flows", () => {
 
     fireEvent.click(screen.getByLabelText("新建对话"))
     await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
-    expect(navState.pushCalls.some((href) => href.startsWith("/app/apps/agent-1?view=settings&conversation_id="))).toBe(true)
+    expect(navState.pushCalls.some((href) => href.startsWith("/app/apps/agent-1/settings?conversation_id="))).toBe(true)
   })
 
   test("ignores empty ask submissions", async () => {
