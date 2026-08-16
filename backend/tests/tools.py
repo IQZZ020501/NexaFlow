@@ -6,6 +6,7 @@ Run from ``backend/`` with:
 """
 
 import asyncio
+import random
 from dataclasses import asdict, fields
 from datetime import UTC, datetime
 from importlib.util import module_from_spec, spec_from_file_location
@@ -234,6 +235,80 @@ def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
     assert policy_row == asdict(catalog.policy)
 
 
+def test_mcp_hash_matches_legacy_annotation_normalization() -> None:
+    from app.shareddomain.tools.catalog import mcp_definition_hash
+    from app.shareddomain.tools.services import (
+        _mcp_tool_definition,
+        mcp_tool_definition_hash,
+    )
+
+    migration = load_migration()
+
+    def assert_matches_legacy(definition: dict) -> None:
+        legacy_definition = dict(definition)
+        if "input_schema" not in legacy_definition:
+            legacy_definition["input_schema"] = legacy_definition["inputSchema"]
+        expected = mcp_tool_definition_hash(
+            _mcp_tool_definition(legacy_definition)
+        )
+        assert mcp_definition_hash(definition) == expected
+        assert migration._mcp_definition_hash(definition) == expected
+
+    assert_matches_legacy(
+        {
+            "name": "alias-test",
+            "description": None,
+            "inputSchema": {"type": "object", "properties": {}},
+            "annotations": {
+                "readOnlyHint": None,
+                "destructive_hint": False,
+                "idempotentHint": True,
+                "open_world_hint": None,
+                "unknownHint": True,
+            },
+        }
+    )
+    assert_matches_legacy(
+        {
+            "name": "explicit-null",
+            "input_schema": {"type": "object"},
+            "annotations": None,
+        }
+    )
+
+    generator = random.Random(20260817)
+    annotation_fields = (
+        ("read_only_hint", "readOnlyHint"),
+        ("destructive_hint", "destructiveHint"),
+        ("idempotent_hint", "idempotentHint"),
+        ("open_world_hint", "openWorldHint"),
+    )
+    annotation_values = (None, True, False, 0, 1, "true", "false")
+    for index in range(32):
+        annotations = {}
+        for snake_name, alias in annotation_fields:
+            if generator.choice((True, False)):
+                key = generator.choice((snake_name, alias))
+                annotations[key] = generator.choice(annotation_values)
+            if generator.randrange(8) == 0:
+                annotations[snake_name] = True
+                annotations[alias] = False
+        if generator.choice((True, False)):
+            annotations["title"] = generator.choice((None, "Audit hint"))
+        schema_key = generator.choice(("input_schema", "inputSchema"))
+        assert_matches_legacy(
+            {
+                "name": f"sample-{index}",
+                "description": "Representative MCP Tool",
+                schema_key: {
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                },
+                "annotations": annotations,
+            }
+        )
+
+
 def test_migration_collects_policy_only_tools_deterministically() -> None:
     migration = load_migration()
     references = {}
@@ -275,6 +350,35 @@ def test_migration_collects_policy_only_tools_deterministically() -> None:
     ])
     disabled = {**servers[("workspace-1", "server-1")], "status": "disabled"}
     assert not migration._mcp_tool_available({"name": "policy-only"}, disabled)
+
+
+def test_migration_grants_tools_only_to_regular_members() -> None:
+    migration = load_migration()
+    common = {
+        "bound_by_user_id": "agent-owner",
+        "tool_owner_id": "server-owner",
+        "grant_exists": False,
+    }
+    assert migration._should_backfill_use_grant(
+        **common,
+        workspace_role="member",
+        is_global_admin=False,
+    )
+    assert not migration._should_backfill_use_grant(
+        **common,
+        workspace_role="admin",
+        is_global_admin=False,
+    )
+    assert not migration._should_backfill_use_grant(
+        **common,
+        workspace_role="member",
+        is_global_admin=True,
+    )
+    assert not migration._should_backfill_use_grant(
+        **{**common, "bound_by_user_id": "server-owner"},
+        workspace_role="member",
+        is_global_admin=False,
+    )
 
 
 def test_entities_and_orm_columns_match_exactly() -> None:
@@ -481,7 +585,9 @@ def test_workspace_creation_initializes_system_catalog() -> None:
 
 def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
+    test_mcp_hash_matches_legacy_annotation_normalization()
     test_migration_collects_policy_only_tools_deterministically()
+    test_migration_grants_tools_only_to_regular_members()
     test_entities_and_orm_columns_match_exactly()
     test_orm_enforces_tenant_scoped_relations_and_legal_states()
     test_tool_versions_are_immutable_at_repository_boundary()

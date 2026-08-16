@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid5
 
+from mcp.types import Tool as McpTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
@@ -30,14 +31,26 @@ def canonical_definition_hash(payload: dict[str, Any]) -> str:
 
 
 def mcp_definition_hash(definition: dict[str, Any]) -> str:
+    tool = McpTool(
+        name=str(definition.get("name") or ""),
+        description=str(definition.get("description") or ""),
+        input_schema=(
+            definition.get("input_schema")
+            or definition.get("inputSchema")
+            or {"type": "object"}
+        ),
+        annotations=definition.get("annotations"),
+    )
     return canonical_definition_hash(
         {
-            "name": str(definition.get("name") or ""),
-            "description": str(definition.get("description") or ""),
-            "input_schema": definition.get("input_schema") or {"type": "object"},
+            "name": tool.name,
+            "description": tool.description or "",
+            "input_schema": tool.input_schema,
             "annotations": (
-                definition.get("annotations")
-                if "annotations" in definition
+                tool.annotations.model_dump(
+                    mode="json", by_alias=True, exclude_none=True
+                )
+                if tool.annotations is not None
                 else None
             ),
         }

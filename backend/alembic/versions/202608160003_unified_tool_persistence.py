@@ -35,16 +35,65 @@ def _canonical_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _mcp_input_schema(definition: Mapping[str, Any]) -> Any:
+    return (
+        definition.get("input_schema")
+        or definition.get("inputSchema")
+        or {"type": "object"}
+    )
+
+
+def _mcp_annotation_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if type(value) in (int, float) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.lower()
+        if normalized in {"1", "on", "t", "true", "y", "yes"}:
+            return True
+        if normalized in {"0", "off", "f", "false", "n", "no"}:
+            return False
+    raise ValueError("Invalid MCP ToolAnnotations boolean value.")
+
+
+def _normalize_mcp_annotations(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("MCP Tool annotations must be an object.")
+
+    normalized: dict[str, Any] = {}
+    title = value.get("title")
+    if title is not None:
+        if not isinstance(title, str):
+            raise ValueError("MCP Tool annotation title must be a string.")
+        normalized["title"] = title
+    for field_name, alias in (
+        ("read_only_hint", "readOnlyHint"),
+        ("destructive_hint", "destructiveHint"),
+        ("idempotent_hint", "idempotentHint"),
+        ("open_world_hint", "openWorldHint"),
+    ):
+        if alias in value:
+            field_value = value[alias]
+        elif field_name in value:
+            field_value = value[field_name]
+        else:
+            continue
+        if field_value is not None:
+            normalized[alias] = _mcp_annotation_bool(field_value)
+    return normalized
+
+
 def _mcp_definition_hash(definition: dict[str, Any]) -> str:
     return _canonical_hash(
         {
             "name": str(definition.get("name") or ""),
             "description": str(definition.get("description") or ""),
-            "input_schema": definition.get("input_schema") or {"type": "object"},
-            "annotations": (
+            "input_schema": _mcp_input_schema(definition),
+            "annotations": _normalize_mcp_annotations(
                 definition.get("annotations")
-                if "annotations" in definition
-                else None
             ),
         }
     )
@@ -127,6 +176,22 @@ def _mcp_tool_available(
         definition is not None
         and server is not None
         and server["status"] == "active"
+    )
+
+
+def _should_backfill_use_grant(
+    *,
+    bound_by_user_id: str,
+    tool_owner_id: str | None,
+    workspace_role: str | None,
+    is_global_admin: bool,
+    grant_exists: bool,
+) -> bool:
+    return (
+        bound_by_user_id != tool_owner_id
+        and workspace_role == "member"
+        and not is_global_admin
+        and not grant_exists
     )
 
 
@@ -840,6 +905,12 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
         "workspace_memberships",
         sa.column("workspace_id", sa.String(36)),
         sa.column("user_id", sa.String(36)),
+        sa.column("role", sa.String(20)),
+    )
+    users = sa.table(
+        "users",
+        sa.column("id", sa.String(36)),
+        sa.column("is_global_admin", sa.Boolean()),
     )
 
     timestamp = _now()
@@ -1101,7 +1172,7 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
             "revision": 1,
             "display_name": tool_name[:120],
             "description": str(definition.get("description") or ""),
-            "input_schema": definition.get("input_schema") or {"type": "object"},
+            "input_schema": _mcp_input_schema(definition),
             "output_schema": None,
             "execution_spec": (
                 {"server_id": server_id, "tool_name": tool_name}
@@ -1183,9 +1254,15 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
 
     application_bindings: dict[str, dict[str, Any]] = {}
     grant_rows: dict[tuple[str, str, str], dict[str, Any]] = {}
-    membership_keys = {
-        (row["workspace_id"], row["user_id"])
+    membership_roles = {
+        (row["workspace_id"], row["user_id"]): row["role"]
         for row in bind.execute(sa.select(memberships)).mappings()
+    }
+    global_admin_ids = {
+        row["id"]
+        for row in bind.execute(
+            sa.select(users.c.id).where(users.c.is_global_admin.is_(True))
+        ).mappings()
     }
     existing_grants = {
         (row["workspace_id"], row["resource_id"], row["user_id"])
@@ -1221,10 +1298,14 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
             "created_at": binding["created_at"] or timestamp,
         }
         grant_key = (binding["workspace_id"], tool_id, bound_by_user_id)
-        if (
-            bound_by_user_id != tool_owner_id
-            and (binding["workspace_id"], bound_by_user_id) in membership_keys
-            and grant_key not in existing_grants
+        if _should_backfill_use_grant(
+            bound_by_user_id=bound_by_user_id,
+            tool_owner_id=tool_owner_id,
+            workspace_role=membership_roles.get(
+                (binding["workspace_id"], bound_by_user_id)
+            ),
+            is_global_admin=bound_by_user_id in global_admin_ids,
+            grant_exists=grant_key in existing_grants,
         ):
             grant_rows[grant_key] = {
                 "id": _stable_catalog_id(
