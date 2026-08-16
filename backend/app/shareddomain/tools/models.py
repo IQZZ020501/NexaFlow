@@ -484,6 +484,10 @@ class McpServer(Base):
             name="ck_mcp_servers_transport",
         ),
         CheckConstraint(
+            "network_policy IN ('public_only', 'deployment')",
+            name="ck_mcp_servers_network_policy",
+        ),
+        CheckConstraint(
             "(transport IN ('streamable_http', 'sse') AND url IS NOT NULL "
             "AND stdio_command IS NULL AND stdio_config_ciphertext IS NULL) OR "
             "(transport = 'stdio' AND url IS NULL "
@@ -505,6 +509,12 @@ class McpServer(Base):
         nullable=False,
         default="streamable_http",
         server_default="streamable_http",
+    )
+    network_policy: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="deployment",
+        server_default="deployment",
     )
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     stdio_command: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -60,6 +60,85 @@ async def check_login_rate_limit() -> None:
     assert "rate-limited-user" not in repr(redis.args)
 
 
+async def seed_owned_mcp_source(
+    workspace_id: str,
+    user_id: str,
+) -> tuple[str, str]:
+    from app.entities.tools import McpServer, ToolSource
+    from app.infrastructure.repositories import mcp as mcp_repository
+    from app.infrastructure.repositories import tools as tools_repository
+
+    async with get_session_factory()() as db:
+        server = await mcp_repository.create_mcp_server(
+            db,
+            McpServer(
+                workspace_id=workspace_id,
+                name="Analyst MCP",
+                url="https://analyst.example.com/mcp",
+                created_by_user_id=user_id,
+            ),
+        )
+        source = await tools_repository.save_tool_source(
+            db,
+            ToolSource(
+                workspace_id=workspace_id,
+                mcp_server_id=server.id,
+                kind="mcp",
+                name=server.name,
+                created_by_user_id=user_id,
+            ),
+        )
+        await db.commit()
+        return server.id, source.id
+
+
+async def assert_owned_mcp_source_tombstoned(
+    workspace_id: str,
+    server_id: str,
+    source_id: str,
+) -> None:
+    from app.infrastructure.repositories import mcp as mcp_repository
+    from app.infrastructure.repositories import tools as tools_repository
+
+    async with get_session_factory()() as db:
+        assert await mcp_repository.get_mcp_server_by_id(db, server_id) is None
+        source = await tools_repository.get_tool_source(db, workspace_id, source_id)
+        assert source is not None
+        assert source.status == "archived"
+        assert source.mcp_server_id is None
+        assert source.created_by_user_id is None
+
+
+async def seed_retained_tool_invocation(workspace_id: str, user_id: str) -> None:
+    from app.entities.tools import ToolInvocation
+    from app.infrastructure.repositories import tools as tools_repository
+
+    async with get_session_factory()() as db:
+        tool = next(
+            item
+            for item in await tools_repository.list_tools(db, workspace_id)
+            if item.stable_key == "current_time"
+        )
+        assert tool.current_version_id is not None
+        await tools_repository.save_tool_invocation(
+            db,
+            ToolInvocation(
+                workspace_id=workspace_id,
+                origin="test",
+                invocation_id=f"identity-{user_id}",
+                execution_user_id=user_id,
+                access_source="console",
+                tool_id=tool.id,
+                tool_version_id=tool.current_version_id,
+                policy_snapshot={},
+                arguments={},
+                arguments_hash="a" * 64,
+                idempotency_key=f"identity-{user_id}",
+            ),
+        )
+        await db.commit()
+
+
 def main() -> None:
     asyncio.run(check_login_rate_limit())
     with test_client() as client:
@@ -180,6 +259,16 @@ def main() -> None:
         assert admin_user["is_active"] is True
         assert admin_user["created_at"]
         admin_user_id = admin_user["id"]
+        identity_workspace = client.post(
+            "/api/v1/workspaces",
+            headers=auth_headers(admin_token),
+            json={
+                "name": "Identity Tool Lifecycle",
+                "admin_user_id": admin_user_id,
+            },
+        )
+        assert identity_workspace.status_code == 201, identity_workspace.text
+        identity_workspace_id = identity_workspace.json()["workspace"]["id"]
 
         created_user = client.post(
             "/api/v1/admin/users",
@@ -262,11 +351,43 @@ def main() -> None:
         )
         assert self_delete.status_code == 400, self_delete.text
 
+        server_id, source_id = asyncio.run(
+            seed_owned_mcp_source(identity_workspace_id, analyst_id)
+        )
+
         deleted_user = client.delete(
             f"/api/v1/admin/users/{analyst_id}",
             headers=auth_headers(admin_token),
         )
         assert deleted_user.status_code == 204, deleted_user.text
+        asyncio.run(
+            assert_owned_mcp_source_tombstoned(
+                identity_workspace_id,
+                server_id,
+                source_id,
+            )
+        )
+
+        retained_user = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "retained-tool-user",
+                "email": "retained-tool-user@example.com",
+                "name": "Retained Tool User",
+            },
+        )
+        assert retained_user.status_code == 201, retained_user.text
+        retained_user_id = retained_user.json()["user"]["id"]
+        asyncio.run(
+            seed_retained_tool_invocation(identity_workspace_id, retained_user_id)
+        )
+        retained_delete = client.delete(
+            f"/api/v1/admin/users/{retained_user_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert retained_delete.status_code == 409, retained_delete.text
+        assert "Tool binding or invocation" in retained_delete.json()["detail"]
 
         users = client.get("/api/v1/admin/users", headers=auth_headers(admin_token))
         assert users.status_code == 200, users.text

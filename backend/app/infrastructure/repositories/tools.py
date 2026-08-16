@@ -1,4 +1,4 @@
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.resource_permission import ResourcePermission as ResourcePermissionOrm
@@ -52,6 +52,22 @@ async def get_tool_source(
     return to_entity(ToolSource, row) if row is not None else None
 
 
+async def lock_tool_source(
+    db: AsyncSession,
+    workspace_id: str,
+    source_id: str,
+) -> ToolSource | None:
+    row = await db.scalar(
+        select(ToolSourceOrm)
+        .where(
+            ToolSourceOrm.workspace_id == workspace_id,
+            ToolSourceOrm.id == source_id,
+        )
+        .with_for_update()
+    )
+    return to_entity(ToolSource, row) if row is not None else None
+
+
 async def list_tool_sources(
     db: AsyncSession,
     workspace_id: str,
@@ -96,6 +112,36 @@ async def get_tool(
         select(ToolOrm).where(
             ToolOrm.workspace_id == workspace_id,
             ToolOrm.id == tool_id,
+        )
+    )
+    return to_entity(Tool, row) if row is not None else None
+
+
+async def get_tool_by_function_name(
+    db: AsyncSession,
+    workspace_id: str,
+    function_name: str,
+) -> Tool | None:
+    row = await db.scalar(
+        select(ToolOrm).where(
+            ToolOrm.workspace_id == workspace_id,
+            ToolOrm.function_name == function_name,
+        )
+    )
+    return to_entity(Tool, row) if row is not None else None
+
+
+async def get_tool_by_source_key(
+    db: AsyncSession,
+    workspace_id: str,
+    source_id: str,
+    stable_key: str,
+) -> Tool | None:
+    row = await db.scalar(
+        select(ToolOrm).where(
+            ToolOrm.workspace_id == workspace_id,
+            ToolOrm.source_id == source_id,
+            ToolOrm.stable_key == stable_key,
         )
     )
     return to_entity(Tool, row) if row is not None else None
@@ -392,6 +438,39 @@ async def save_tool_policy(db: AsyncSession, entity: ToolPolicy) -> ToolPolicy:
     return to_entity(ToolPolicy, row)
 
 
+async def update_tool_policy_if_revision(
+    db: AsyncSession,
+    entity: ToolPolicy,
+    expected_revision: int,
+) -> ToolPolicy | None:
+    if entity.revision != expected_revision + 1:
+        raise ValueError("ToolPolicy revision must advance exactly once.")
+    result = await db.execute(
+        update(ToolPolicyOrm)
+        .where(
+            ToolPolicyOrm.id == entity.id,
+            ToolPolicyOrm.workspace_id == entity.workspace_id,
+            ToolPolicyOrm.tool_id == entity.tool_id,
+            ToolPolicyOrm.revision == expected_revision,
+        )
+        .values(
+            tool_version_id=entity.tool_version_id,
+            definition_hash=entity.definition_hash,
+            revision=entity.revision,
+            approval=entity.approval,
+            effect=entity.effect,
+            allowed_access_sources=entity.allowed_access_sources,
+            workflow_callable=entity.workflow_callable,
+            parallel_safe=entity.parallel_safe,
+            reviewed_by_user_id=entity.reviewed_by_user_id,
+            reviewed_at=entity.reviewed_at,
+            updated_at=entity.updated_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return entity if result.rowcount == 1 else None
+
+
 async def get_application_tool_binding(
     db: AsyncSession,
     workspace_id: str,
@@ -468,3 +547,22 @@ async def save_tool_invocation(
 ) -> ToolInvocation:
     row = await save(db, ToolInvocationOrm, entity)
     return to_entity(ToolInvocation, row)
+
+
+async def has_retained_user_audit_references(
+    db: AsyncSession,
+    user_id: str,
+) -> bool:
+    binding_id = await db.scalar(
+        select(ApplicationToolBindingOrm.id)
+        .where(ApplicationToolBindingOrm.bound_by_user_id == user_id)
+        .limit(1)
+    )
+    if binding_id is not None:
+        return True
+    invocation_id = await db.scalar(
+        select(ToolInvocationOrm.id)
+        .where(ToolInvocationOrm.execution_user_id == user_id)
+        .limit(1)
+    )
+    return invocation_id is not None

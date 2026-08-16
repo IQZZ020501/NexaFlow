@@ -441,6 +441,7 @@ class McpServer:
     workspace_id: str = ""
     name: str = ""
     transport: str = "streamable_http"
+    network_policy: str = "deployment"
     url: str | None = None
     stdio_command: str | None = None
     stdio_config_ciphertext: str | None = None

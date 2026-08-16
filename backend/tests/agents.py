@@ -93,6 +93,38 @@ async def assert_upload_cleanup_queued(object_key: str) -> None:
         assert await workflow_repository.has_upload_cleanup_for_object(db, object_key)
 
 
+async def grant_mcp_tool_use(
+    workspace_id: str,
+    server_id: str,
+    user_id: str,
+) -> None:
+    from app.entities.resource_permission import ResourcePermission
+    from app.infrastructure.repositories import resource_permission as permission_repository
+    from app.shareddomain.tools.catalog import get_mcp_catalog_leaf
+
+    async with get_session_factory()() as db:
+        leaf = await get_mcp_catalog_leaf(
+            db,
+            workspace_id,
+            server_id,
+            "lookup_release",
+        )
+        assert leaf is not None
+        assert leaf.source.created_by_user_id is not None
+        await permission_repository.create_resource_permission(
+            db,
+            ResourcePermission(
+                workspace_id=workspace_id,
+                resource_type="tool",
+                resource_id=leaf.tool.id,
+                user_id=user_id,
+                permission="use",
+                created_by_user_id=leaf.source.created_by_user_id,
+            ),
+        )
+        await db.commit()
+
+
 class AgentModelHandler(BaseHTTPRequestHandler):
     calls: list[dict] = []
 
@@ -2906,6 +2938,14 @@ def main() -> None:
                 }
             )
         else:
+            if (
+                connection.network_policy == "public_only"
+                and connection.url is not None
+                and "127.0.0.1" in connection.url
+            ):
+                raise McpClientError(
+                    "Private MCP server addresses are not allowed."
+                )
             assert connection.bearer_token == "mcp-secret-token"
         return McpDiscovery(
             tools=[
@@ -3294,11 +3334,111 @@ def main() -> None:
                 mcp_url(workspace_id),
                 headers=auth_headers(member_token),
                 json={
-                    "name": "Release MCP",
+                    "name": "Member private MCP",
                     "url": "http://127.0.0.1:9999/mcp",
+                    "bearer_token": "mcp-secret-token",
                 },
             )
-            assert member_mcp_create.status_code == 403, member_mcp_create.text
+            assert member_mcp_create.status_code == 400, member_mcp_create.text
+
+            member_stdio_create = client.post(
+                mcp_url(workspace_id),
+                headers=auth_headers(member_token),
+                json={
+                    "name": "Member stdio MCP",
+                    "transport": "stdio",
+                    "stdio_config": {"command": sys.executable},
+                },
+            )
+            assert member_stdio_create.status_code == 403, member_stdio_create.text
+
+            member_public_mcp = client.post(
+                mcp_url(workspace_id),
+                headers=auth_headers(member_token),
+                json={
+                    "name": "Member public MCP",
+                    "url": "https://public-tools.example.com/mcp",
+                    "bearer_token": "mcp-secret-token",
+                },
+            )
+            assert member_public_mcp.status_code == 201, member_public_mcp.text
+            member_public_data = member_public_mcp.json()
+            member_sources = client.get(
+                mcp_url(workspace_id),
+                headers=auth_headers(member_token),
+            )
+            assert member_sources.status_code == 200, member_sources.text
+            assert [item["id"] for item in member_sources.json()] == [
+                member_public_data["id"]
+            ]
+            admin_sources = client.get(
+                mcp_url(workspace_id),
+                headers=auth_headers(admin_token),
+            )
+            assert admin_sources.status_code == 200, admin_sources.text
+            assert member_public_data["id"] in {
+                item["id"] for item in admin_sources.json()
+            }
+
+            owner_read_only_policy = client.put(
+                mcp_url(
+                    workspace_id,
+                    f"/{member_public_data['id']}/tools/lookup_release/policy",
+                ),
+                headers=auth_headers(member_token),
+                json={"mode": "read_only"},
+            )
+            assert owner_read_only_policy.status_code == 200, (
+                owner_read_only_policy.text
+            )
+            assert owner_read_only_policy.json()["mode"] == "read_only"
+            owner_disabled_policy = client.put(
+                mcp_url(
+                    workspace_id,
+                    f"/{member_public_data['id']}/tools/lookup_release/policy",
+                ),
+                headers=auth_headers(member_token),
+                json={"mode": "disabled"},
+            )
+            assert owner_disabled_policy.status_code == 403, (
+                owner_disabled_policy.text
+            )
+
+            disabled_member_source = client.post(
+                mcp_url(workspace_id, f"/{member_public_data['id']}/disable"),
+                headers=auth_headers(member_token),
+            )
+            assert disabled_member_source.status_code == 200, (
+                disabled_member_source.text
+            )
+            assert disabled_member_source.json()["status"] == "disabled"
+            assert disabled_member_source.json()["tools"][0]["policy_mode"] == (
+                "disabled"
+            )
+            refreshed_disabled_source = client.post(
+                mcp_url(workspace_id, f"/{member_public_data['id']}/refresh"),
+                headers=auth_headers(member_token),
+            )
+            assert refreshed_disabled_source.status_code == 200, (
+                refreshed_disabled_source.text
+            )
+            assert refreshed_disabled_source.json()["status"] == "disabled"
+            assert refreshed_disabled_source.json()["tools"][0]["policy_mode"] == (
+                "disabled"
+            )
+            enabled_member_source = client.post(
+                mcp_url(workspace_id, f"/{member_public_data['id']}/enable"),
+                headers=auth_headers(member_token),
+            )
+            assert enabled_member_source.status_code == 200, (
+                enabled_member_source.text
+            )
+            assert enabled_member_source.json()["status"] == "active"
+            removed_member_source = client.delete(
+                mcp_url(workspace_id, f"/{member_public_data['id']}"),
+                headers=auth_headers(member_token),
+            )
+            assert removed_member_source.status_code == 204, removed_member_source.text
 
             legacy_stdio = client.post(
                 mcp_url(workspace_id),
@@ -3360,6 +3500,19 @@ def main() -> None:
             assert "bearer_token" not in mcp_server_data
             assert mcp_server_data["tools"][0]["policy_mode"] == "approval_required"
             assert len(mcp_server_data["tools"][0]["definition_hash"]) == 64
+            asyncio.run(
+                grant_mcp_tool_use(
+                    workspace_id,
+                    mcp_server_data["id"],
+                    member_id,
+                )
+            )
+            member_sources = client.get(
+                mcp_url(workspace_id),
+                headers=auth_headers(member_token),
+            )
+            assert member_sources.status_code == 200, member_sources.text
+            assert member_sources.json() == []
 
             sse_server = client.post(
                 mcp_url(workspace_id),

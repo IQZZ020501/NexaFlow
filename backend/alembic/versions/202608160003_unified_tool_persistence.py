@@ -99,10 +99,14 @@ def _mcp_definition_hash(definition: dict[str, Any]) -> str:
     )
 
 
-def _mcp_function_name(server_id: str, tool_name: str) -> str:
+def _mcp_function_name_candidates(server_id: str, tool_name: str) -> tuple[str, ...]:
     stem = re.sub(r"[^a-zA-Z0-9_-]", "_", tool_name).strip("_")[:40] or "tool"
-    digest = hashlib.sha256(f"{server_id}:{tool_name}".encode()).hexdigest()[:8]
-    return f"mcp_{stem}_{digest}"
+    digest = hashlib.sha256(f"{server_id}:{tool_name}".encode()).hexdigest()
+    return tuple(f"mcp_{stem}_{digest[:length]}" for length in range(8, 65, 4))
+
+
+def _mcp_function_name(server_id: str, tool_name: str) -> str:
+    return _mcp_function_name_candidates(server_id, tool_name)[0]
 
 
 def _extract_mcp_references(value: Any) -> set[tuple[str, str]]:
@@ -1096,6 +1100,11 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
         policy_rows[policy["id"]] = policy
         current_versions[tool["id"]] = version["id"]
 
+    reserved_function_names = {
+        (row["workspace_id"], row["function_name"])
+        for row in tool_rows.values()
+    }
+
     for server in server_rows:
         source_id = _stable_catalog_id(
             f"source:{server['workspace_id']}:mcp:{server['id']}"
@@ -1150,13 +1159,19 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
         )
         created_at = server["created_at"] if server else timestamp
         updated_at = server["updated_at"] if server else timestamp
+        function_name = next(
+            candidate
+            for candidate in _mcp_function_name_candidates(server_id, tool_name)
+            if (workspace_id, candidate) not in reserved_function_names
+        )
+        reserved_function_names.add((workspace_id, function_name))
         tool_rows[tool_id] = {
             "id": tool_id,
             "workspace_id": workspace_id,
             "source_id": source_id,
             "kind": "mcp",
             "stable_key": tool_name,
-            "function_name": _mcp_function_name(server_id, tool_name),
+            "function_name": function_name,
             "current_version_id": None,
             "status": "active" if server else "archived",
             "availability": "available" if available else "unavailable",
@@ -1174,9 +1189,21 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
             "input_schema": _mcp_input_schema(definition),
             "output_schema": None,
             "execution_spec": (
-                {"server_id": server_id, "tool_name": tool_name}
+                {
+                    "server_id": server_id,
+                    "tool_name": tool_name,
+                    "annotations": _normalize_mcp_annotations(
+                        definition.get("annotations")
+                    ),
+                }
                 if server
-                else {"legacy_server_id": server_id, "tool_name": tool_name}
+                else {
+                    "legacy_server_id": server_id,
+                    "tool_name": tool_name,
+                    "annotations": _normalize_mcp_annotations(
+                        definition.get("annotations")
+                    ),
+                }
             ),
             "definition_hash": definition_hash,
             "created_by_user_id": owner_id,

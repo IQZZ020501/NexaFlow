@@ -1282,14 +1282,20 @@ def test_mcp_client_streamable_http() -> None:
     async def scenario() -> None:
         fake_client = _FakeMcpClient()
         client_factory = MagicMock(return_value=fake_client)
+        destination_validator = AsyncMock(return_value=None)
         with patch.object(mcp_capabilities.client, "Client", client_factory), patch.object(
             mcp_capabilities.client, "streamable_http_client", return_value=_FakeTransport()
+        ), patch.object(
+            mcp_capabilities.client,
+            "validate_mcp_destination",
+            new=destination_validator,
         ):
             async with mcp_client(
                 McpConnection(
                     transport="streamable_http",
                     url="https://example.com/mcp",
                     bearer_token="tok",
+                    network_policy="public_only",
                 ),
                 _mcp_settings(),
                 timeout_seconds=5,
@@ -1297,6 +1303,42 @@ def test_mcp_client_streamable_http() -> None:
                 assert client is fake_client
                 assert client_factory.call_args.kwargs["read_timeout_seconds"] == 5
                 assert client_factory.call_args.kwargs["cache"] is None
+            destination_validator.assert_awaited_once_with(
+                "https://example.com/mcp",
+                False,
+            )
+
+            destination_validator.reset_mock()
+            async with mcp_client(
+                McpConnection(
+                    transport="streamable_http",
+                    url="https://example.com/mcp",
+                    network_policy="deployment",
+                ),
+                _mcp_settings(mcp_allow_private_networks=True),
+                timeout_seconds=5,
+            ):
+                pass
+            destination_validator.assert_awaited_once_with(
+                "https://example.com/mcp",
+                True,
+            )
+
+            destination_validator.reset_mock()
+            async with mcp_client(
+                McpConnection(
+                    transport="streamable_http",
+                    url="https://example.com/mcp",
+                    network_policy="deployment",
+                ),
+                _mcp_settings(mcp_allow_private_networks=False),
+                timeout_seconds=5,
+            ):
+                pass
+            destination_validator.assert_awaited_once_with(
+                "https://example.com/mcp",
+                False,
+            )
 
     run(scenario())
 
@@ -2528,6 +2570,68 @@ def _mcp_tool_dict(name="echo", description="Echo tool", schema=None):
     }
 
 
+def _mcp_catalog_leaf(
+    server_id="srv-1",
+    name="echo",
+    *,
+    owner_id="u1",
+    annotations=None,
+    approval="each_call",
+    effect="unknown",
+    tool_status="active",
+):
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
+    from app.shareddomain.tools.catalog import (
+        McpCatalogLeaf,
+        mcp_definition_hash,
+    )
+
+    definition = _mcp_tool_dict(name)
+    definition["annotations"] = annotations
+    definition_hash = mcp_definition_hash(definition)
+    source = ToolSource(
+        id=f"source-{server_id}",
+        workspace_id="ws-1",
+        mcp_server_id=server_id,
+        kind="mcp",
+        created_by_user_id=owner_id,
+    )
+    tool = Tool(
+        id=f"tool-{server_id}-{name}",
+        workspace_id="ws-1",
+        source_id=source.id,
+        kind="mcp",
+        stable_key=name,
+        function_name=f"mcp_{name}_12345678",
+        current_version_id=f"version-{server_id}-{name}",
+        status=tool_status,
+        created_by_user_id=owner_id,
+    )
+    version = ToolVersion(
+        id=tool.current_version_id,
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        description=definition["description"],
+        input_schema=definition["input_schema"],
+        execution_spec={
+            "server_id": server_id,
+            "tool_name": name,
+            "annotations": annotations,
+        },
+        definition_hash=definition_hash,
+    )
+    policy = ToolPolicy(
+        id=f"policy-{server_id}-{name}",
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        tool_version_id=version.id,
+        definition_hash=definition_hash,
+        approval=approval,
+        effect=effect,
+    )
+    return McpCatalogLeaf(source, tool, version, policy)
+
+
 def test_mcp_tool_hash_and_policy_mode() -> None:
     tool = McpTool(name="echo", description="d", input_schema={"type": "object"})
     hash_one = tools_services.mcp_tool_definition_hash(tool)
@@ -2565,6 +2669,9 @@ def test_mcp_tool_hash_and_policy_mode() -> None:
 
 
 def test_mcp_server_to_response() -> None:
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
+    from app.shareddomain.tools.catalog import McpCatalogLeaf
+
     server = McpServer(
         id="srv-1",
         workspace_id="ws-1",
@@ -2578,23 +2685,57 @@ def test_mcp_server_to_response() -> None:
     )
     definition = tools_services._mcp_tool_definition(server.tools[0])
     expected_hash = tools_services.mcp_tool_definition_hash(definition)
-    policy = McpToolPolicy(
-        id="pol-1",
+    source = ToolSource(
+        id="source-1",
         workspace_id="ws-1",
         mcp_server_id="srv-1",
-        tool_name="echo",
-        definition_hash=expected_hash,
-        mode="disabled",
+        kind="mcp",
+        created_by_user_id="u1",
     )
-    response = tools_services.mcp_server_to_response(server, [policy])
+    tool = Tool(
+        id="tool-1",
+        workspace_id="ws-1",
+        source_id=source.id,
+        kind="mcp",
+        stable_key="echo",
+        function_name="mcp_echo_12345678",
+        current_version_id="version-1",
+        status="disabled",
+        created_by_user_id="u1",
+    )
+    version = ToolVersion(
+        id="version-1",
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        description="Echo",
+        input_schema={"type": "object"},
+        execution_spec={
+            "server_id": "srv-1",
+            "tool_name": "echo",
+            "annotations": None,
+        },
+        definition_hash=expected_hash,
+    )
+    policy = ToolPolicy(
+        id="pol-1",
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        tool_version_id=version.id,
+        definition_hash=expected_hash,
+        approval="disabled",
+        effect="unknown",
+    )
+    response = tools_services.mcp_server_to_response(
+        server,
+        [McpCatalogLeaf(source, tool, version, policy)],
+    )
     assert response.id == "srv-1"
     assert response.transport == "streamable_http"
     assert response.has_bearer_token is False
     assert response.tools[0].definition_hash == expected_hash
     assert response.tools[0].policy_mode == "disabled"
 
-    response = tools_services.mcp_server_to_response(server)
-    assert response.tools[0].policy_mode == "approval_required"
+    assert tools_services.mcp_server_to_response(server).tools == []
 
 
 def test_bearer_token_and_stdio_config() -> None:
@@ -2655,12 +2796,23 @@ def test_tools_get_and_list_servers() -> None:
         created_by_user_id="u1",
     )
     db = AsyncMock()
+    actor = User(id="u1", username="alice", name="Alice")
+    leaf = _mcp_catalog_leaf()
 
-    with patch.object(mcp_repo, "list_mcp_tool_policies", new=AsyncMock(return_value=[])), patch.object(
-        mcp_repo, "list_mcp_servers", new=AsyncMock(return_value=[server])
+    with patch.object(
+        mcp_repo,
+        "list_manageable_mcp_servers",
+        new=AsyncMock(return_value=[server]),
+    ), patch.object(
+        tools_services,
+        "list_mcp_catalog_leaves",
+        new=AsyncMock(return_value=[leaf]),
     ):
-        responses = run(tools_services.list_mcp_servers(db, "ws-1"))
+        responses = run(
+            tools_services.list_mcp_servers(db, "ws-1", actor, "member")
+        )
         assert [item.id for item in responses] == ["srv-1"]
+        assert responses[0].tools[0].name == "echo"
 
     with patch.object(mcp_repo, "get_mcp_server_by_id", new=AsyncMock(return_value=server)):
         assert run(tools_services.get_mcp_server(db, "ws-1", "srv-1")) is server
@@ -2672,11 +2824,48 @@ def test_tools_get_and_list_servers() -> None:
     with patch.object(mcp_repo, "get_mcp_server_by_id", new=AsyncMock(return_value=cross_ws)):
         expect_http_error(lambda: run(tools_services.get_mcp_server(db, "ws-1", "srv-1")), 404)
 
+    with patch.object(
+        mcp_repo,
+        "get_mcp_server_by_id",
+        new=AsyncMock(return_value=server),
+    ), patch.object(
+        tools_services.tools_repository,
+        "list_mcp_tool_sources",
+        new=AsyncMock(return_value=[leaf.source]),
+    ):
+        assert run(
+            tools_services.get_mcp_server(
+                db,
+                "ws-1",
+                "srv-1",
+                actor,
+                "member",
+            )
+        ) is server
+        stranger = User(id="u2", username="bob")
+        expect_http_error(
+            lambda: run(
+                tools_services.get_mcp_server(
+                    db,
+                    "ws-1",
+                    "srv-1",
+                    stranger,
+                    "member",
+                )
+            ),
+            404,
+        )
+
 
 def test_create_mcp_server() -> None:
     runtime_settings = settings()
     db = AsyncMock()
-    actor = User(id="u1", username="alice", name="Alice")
+    actor = User(
+        id="u1",
+        username="alice",
+        name="Alice",
+        is_global_admin=True,
+    )
 
     http_payload = McpServerCreateRequest(
         name="My Server",
@@ -2701,7 +2890,25 @@ def test_create_mcp_server() -> None:
     ), patch.object(
         mcp_repo, "refresh_mcp_server", new=AsyncMock(side_effect=lambda db, entity: entity)
     ), patch.object(
-        mcp_repo, "list_mcp_tool_policies", new=AsyncMock(return_value=[])
+        tools_services.tools_repository,
+        "save_tool_source",
+        new=AsyncMock(side_effect=lambda db, entity: entity),
+    ), patch.object(
+        tools_services,
+        "reconcile_mcp_discovery",
+        new=AsyncMock(),
+    ), patch.object(
+        tools_services,
+        "list_mcp_catalog_leaves",
+        new=AsyncMock(
+            side_effect=lambda _db, _workspace_id, server_id, **_kwargs: [
+                _mcp_catalog_leaf(server_id)
+            ]
+        ),
+    ), patch.object(
+        mcp_repo,
+        "save_mcp_server",
+        new=AsyncMock(),
     ), patch.object(
         tools_services, "record_audit_log", return_value=None
     ):
@@ -2745,7 +2952,21 @@ def test_create_mcp_server() -> None:
     ), patch.object(mcp_repo, "create_mcp_server", new=AsyncMock(return_value=stdio_created)), patch.object(
         mcp_repo, "refresh_mcp_server", new=AsyncMock(return_value=stdio_created)
     ), patch.object(
-        mcp_repo, "list_mcp_tool_policies", new=AsyncMock(return_value=[])
+        tools_services.tools_repository,
+        "save_tool_source",
+        new=AsyncMock(side_effect=lambda db, entity: entity),
+    ), patch.object(
+        tools_services,
+        "reconcile_mcp_discovery",
+        new=AsyncMock(),
+    ), patch.object(
+        tools_services,
+        "list_mcp_catalog_leaves",
+        new=AsyncMock(return_value=[_mcp_catalog_leaf("srv-stdio")]),
+    ), patch.object(
+        mcp_repo,
+        "save_mcp_server",
+        new=AsyncMock(),
     ), patch.object(
         tools_services, "record_audit_log", return_value=None
     ):
@@ -2757,6 +2978,18 @@ def test_create_mcp_server() -> None:
     with patch.object(
         tools_services, "discover_mcp_tools", new=AsyncMock(return_value=McpDiscovery(tools=[]))
     ), patch.object(mcp_repo, "create_mcp_server", new=AsyncMock(return_value=created)), patch.object(
+        tools_services.tools_repository,
+        "save_tool_source",
+        new=AsyncMock(side_effect=lambda db, entity: entity),
+    ), patch.object(
+        tools_services,
+        "reconcile_mcp_discovery",
+        new=AsyncMock(),
+    ), patch.object(
+        mcp_repo,
+        "save_mcp_server",
+        new=AsyncMock(),
+    ), patch.object(
         tools_services, "record_audit_log", return_value=None
     ):
         db.commit.side_effect = IntegrityError("dup", {}, Exception())
@@ -2783,13 +3016,24 @@ def test_refresh_mcp_server() -> None:
         status="active",
         created_by_user_id="u1",
     )
+    source = _mcp_catalog_leaf().source
 
     with patch.object(
         tools_services, "discover_mcp_tools", new=AsyncMock(return_value=McpDiscovery(tools=[_mcp_tool_dict("new-tool")]))
     ), patch.object(mcp_repo, "save_mcp_server", new=AsyncMock()), patch.object(
         mcp_repo, "refresh_mcp_server", new=AsyncMock(return_value=server)
     ), patch.object(
-        mcp_repo, "list_mcp_tool_policies", new=AsyncMock(return_value=[])
+        tools_services,
+        "_require_mcp_source_manager",
+        new=AsyncMock(return_value=source),
+    ), patch.object(
+        tools_services,
+        "reconcile_mcp_discovery",
+        new=AsyncMock(),
+    ), patch.object(
+        tools_services,
+        "list_mcp_catalog_leaves",
+        new=AsyncMock(return_value=[_mcp_catalog_leaf(name="new-tool")]),
     ), patch.object(
         tools_services, "record_audit_log", return_value=None
     ):
@@ -2809,14 +3053,24 @@ def test_refresh_mcp_server() -> None:
         status="active",
         created_by_user_id="u1",
     )
+    failed_reconcile = AsyncMock()
     with patch.object(tools_services, "discover_mcp_tools", new=AsyncMock(side_effect=McpClientError("offline"))), patch.object(
         mcp_repo, "save_mcp_server", new=AsyncMock()
+    ), patch.object(
+        tools_services,
+        "_require_mcp_source_manager",
+        new=AsyncMock(return_value=source),
+    ), patch.object(
+        tools_services,
+        "reconcile_mcp_discovery",
+        new=failed_reconcile,
     ), patch.object(tools_services, "record_audit_log", return_value=None):
         expect_http_error(
             lambda: run(tools_services.refresh_mcp_server(db, failing, actor, runtime_settings)),
             400,
         )
         assert failing.last_error == "offline"
+        failed_reconcile.assert_not_awaited()
 
 
 def test_delete_mcp_server() -> None:
@@ -2826,6 +3080,10 @@ def test_delete_mcp_server() -> None:
     tombstone = AsyncMock()
     with patch.object(
         tools_services, "tombstone_mcp_server_catalog", new=tombstone
+    ), patch.object(
+        tools_services,
+        "_require_mcp_source_manager",
+        new=AsyncMock(return_value=_mcp_catalog_leaf().source),
     ), patch.object(mcp_repo, "delete_mcp_server", new=AsyncMock()), patch.object(
         tools_services, "record_audit_log", return_value=None
     ):
@@ -2850,7 +3108,23 @@ def test_resolve_mcp_tools() -> None:
         status="active",
         created_by_user_id="u1",
     )
-    with patch.object(mcp_repo, "list_mcp_servers_by_ids", new=AsyncMock(return_value=[server])):
+    leaves = {
+        "echo": _mcp_catalog_leaf("s1", "echo"),
+        "wait": _mcp_catalog_leaf("s1", "wait"),
+    }
+
+    async def get_leaf(_db, _workspace_id, _server_id, tool_name):
+        return leaves.get(tool_name)
+
+    with patch.object(
+        mcp_repo,
+        "list_mcp_servers_by_ids",
+        new=AsyncMock(return_value=[server]),
+    ), patch.object(
+        tools_services,
+        "get_mcp_catalog_leaf",
+        new=get_leaf,
+    ):
         resolved = run(tools_services.resolve_mcp_tools(db, "ws-1", references, strict=True))
         assert [item.definition.name for item in resolved] == ["echo", "wait"]
         assert resolved[0].server is server
@@ -2861,13 +3135,29 @@ def test_resolve_mcp_tools() -> None:
 
     # missing tool strict / non-strict
     missing_tool = [{"server_id": "s1", "tool_name": "nope"}]
-    with patch.object(mcp_repo, "list_mcp_servers_by_ids", new=AsyncMock(return_value=[server])):
+    with patch.object(
+        mcp_repo,
+        "list_mcp_servers_by_ids",
+        new=AsyncMock(return_value=[server]),
+    ), patch.object(
+        tools_services,
+        "get_mcp_catalog_leaf",
+        new=get_leaf,
+    ):
         expect_http_error(lambda: run(tools_services.resolve_mcp_tools(db, "ws-1", missing_tool, strict=True)), 422)
         assert run(tools_services.resolve_mcp_tools(db, "ws-1", missing_tool, strict=False)) == []
 
     # missing server strict / non-strict
     missing_server = [{"server_id": "missing", "tool_name": "echo"}]
-    with patch.object(mcp_repo, "list_mcp_servers_by_ids", new=AsyncMock(return_value=[server])):
+    with patch.object(
+        mcp_repo,
+        "list_mcp_servers_by_ids",
+        new=AsyncMock(return_value=[server]),
+    ), patch.object(
+        tools_services,
+        "get_mcp_catalog_leaf",
+        new=get_leaf,
+    ):
         expect_http_error(lambda: run(tools_services.resolve_mcp_tools(db, "ws-1", missing_server, strict=True)), 422)
         assert run(tools_services.resolve_mcp_tools(db, "ws-1", missing_server, strict=False)) == []
 
@@ -2889,7 +3179,12 @@ def test_resolve_mcp_tools() -> None:
 
 def test_mcp_tool_policy_services() -> None:
     db = AsyncMock()
-    actor = User(id="u1", username="alice", name="Alice")
+    actor = User(
+        id="u1",
+        username="alice",
+        name="Alice",
+        is_global_admin=True,
+    )
     server = McpServer(
         id="srv-1",
         workspace_id="ws-1",
@@ -2900,46 +3195,119 @@ def test_mcp_tool_policy_services() -> None:
         status="active",
         created_by_user_id="u1",
     )
-
-    policy = McpToolPolicy(
-        id="pol-1",
-        workspace_id="ws-1",
-        mcp_server_id="srv-1",
-        tool_name="echo",
-        definition_hash="h",
-        mode="read_only",
+    leaf = _mcp_catalog_leaf(
+        annotations={"readOnlyHint": True, "destructiveHint": False}
     )
-    with patch.object(mcp_repo, "get_mcp_tool_policy", new=AsyncMock(return_value=policy)):
-        assert run(tools_services.get_mcp_tool_policy(db, "ws-1", "srv-1", "echo")) is policy
-
-    saved = McpToolPolicy(
-        id="pol-2",
-        workspace_id="ws-1",
-        mcp_server_id="srv-1",
-        tool_name="echo",
-        definition_hash=tools_services.mcp_tool_definition_hash(tools_services._mcp_tool_definition(_mcp_tool_dict())),
-        mode="disabled",
-        reviewed_by_user_id="u1",
-        reviewed_at=utc_now(),
-    )
-    with patch.object(mcp_repo, "save_mcp_tool_policy", new=AsyncMock(return_value=saved)), patch.object(
-        tools_services, "record_audit_log", return_value=None
+    with patch.object(
+        tools_services,
+        "get_mcp_catalog_leaf",
+        new=AsyncMock(return_value=leaf),
     ):
-        result = run(tools_services.set_mcp_tool_policy(db, server, "echo", "disabled", actor))
+        projected = run(
+            tools_services.get_mcp_tool_policy(db, "ws-1", "srv-1", "echo")
+        )
+        assert projected is not None
+        assert projected.definition_hash == leaf.policy.definition_hash
+        assert projected.mode == "approval_required"
+
+    cas = AsyncMock(side_effect=lambda _db, entity, _revision: entity)
+    with patch.object(
+        tools_services,
+        "_require_mcp_source_manager",
+        new=AsyncMock(return_value=leaf.source),
+    ), patch.object(
+        tools_services,
+        "get_mcp_catalog_leaf",
+        new=AsyncMock(return_value=leaf),
+    ), patch.object(
+        tools_services.tools_repository,
+        "update_tool_policy_if_revision",
+        new=cas,
+    ), patch.object(
+        tools_services.tools_repository,
+        "save_tool",
+        new=AsyncMock(side_effect=lambda _db, entity: entity),
+    ), patch.object(
+        tools_services,
+        "record_audit_log",
+        return_value=None,
+    ):
+        result = run(
+            tools_services.set_mcp_tool_policy(
+                db,
+                server,
+                "echo",
+                "disabled",
+                actor,
+            )
+        )
         assert result.mode == "disabled"
         assert result.reviewed_by_user_id == "u1"
+        assert cas.await_args.args[2] == 1
+        assert cas.await_args.args[1].revision == 2
 
-    no_tool_server = McpServer(
-        id="srv-2",
-        workspace_id="ws-1",
-        name="Server",
-        transport="streamable_http",
-        url="https://x",
-        tools=[_mcp_tool_dict("other")],
-        status="active",
-        created_by_user_id="u1",
-    )
-    expect_http_error(lambda: run(tools_services.set_mcp_tool_policy(db, no_tool_server, "echo", "read_only", actor)), 404)
+    owner = User(id="u1", username="alice")
+    unannotated = _mcp_catalog_leaf()
+    with patch.object(
+        tools_services,
+        "_require_mcp_source_manager",
+        new=AsyncMock(return_value=unannotated.source),
+    ), patch.object(
+        tools_services,
+        "get_mcp_catalog_leaf",
+        new=AsyncMock(return_value=unannotated),
+    ):
+        expect_http_error(
+            lambda: run(
+                tools_services.set_mcp_tool_policy(
+                    db,
+                    server,
+                    "echo",
+                    "read_only",
+                    owner,
+                )
+            ),
+            422,
+        )
+
+    with patch.object(
+        tools_services,
+        "_require_mcp_source_manager",
+        new=AsyncMock(return_value=leaf.source),
+    ), patch.object(
+        tools_services,
+        "get_mcp_catalog_leaf",
+        new=AsyncMock(return_value=None),
+    ):
+        expect_http_error(
+            lambda: run(
+                tools_services.set_mcp_tool_policy(
+                    db,
+                    server,
+                    "missing",
+                    "approval_required",
+                    actor,
+                )
+            ),
+            404,
+        )
+
+
+def test_retained_tool_user_reference_query() -> None:
+    from app.infrastructure.repositories import tools as tools_repo
+
+    binding_db = AsyncMock()
+    binding_db.scalar.side_effect = ["binding-1"]
+    assert run(tools_repo.has_retained_user_audit_references(binding_db, "u1"))
+    assert binding_db.scalar.await_count == 1
+
+    invocation_db = AsyncMock()
+    invocation_db.scalar.side_effect = [None, "invocation-1"]
+    assert run(tools_repo.has_retained_user_audit_references(invocation_db, "u1"))
+
+    empty_db = AsyncMock()
+    empty_db.scalar.side_effect = [None, None]
+    assert not run(tools_repo.has_retained_user_audit_references(empty_db, "u1"))
 
 
 # ================================================================ teams/services
@@ -3999,6 +4367,7 @@ def main() -> None:
     test_delete_mcp_server()
     test_resolve_mcp_tools()
     test_mcp_tool_policy_services()
+    test_retained_tool_user_reference_query()
 
     test_team_services_basics()
     test_create_team()

@@ -40,6 +40,11 @@ def canonical_definition_hash(payload: dict[str, Any]) -> str:
 
 
 def mcp_definition_hash(definition: dict[str, Any]) -> str:
+    normalized = normalize_mcp_definition(definition)
+    return canonical_definition_hash(normalized)
+
+
+def normalize_mcp_definition(definition: dict[str, Any]) -> dict[str, Any]:
     tool = McpTool(
         name=str(definition.get("name") or ""),
         description=str(definition.get("description") or ""),
@@ -50,26 +55,159 @@ def mcp_definition_hash(definition: dict[str, Any]) -> str:
         ),
         annotations=definition.get("annotations"),
     )
-    return canonical_definition_hash(
-        {
-            "name": tool.name,
-            "description": tool.description or "",
-            "input_schema": tool.input_schema,
-            "annotations": (
-                tool.annotations.model_dump(
-                    mode="json", by_alias=True, exclude_none=True
-                )
-                if tool.annotations is not None
-                else None
-            ),
-        }
-    )
+    return {
+        "name": tool.name,
+        "description": tool.description or "",
+        "input_schema": tool.input_schema,
+        "annotations": (
+            tool.annotations.model_dump(
+                mode="json", by_alias=True, exclude_none=True
+            )
+            if tool.annotations is not None
+            else None
+        ),
+    }
+
+
+def mcp_function_name_candidates(server_id: str, tool_name: str) -> tuple[str, ...]:
+    stem = re.sub(r"[^a-zA-Z0-9_-]", "_", tool_name).strip("_")[:40] or "tool"
+    digest = hashlib.sha256(f"{server_id}:{tool_name}".encode()).hexdigest()
+    return tuple(f"mcp_{stem}_{digest[:length]}" for length in range(8, 65, 4))
 
 
 def mcp_function_name(server_id: str, tool_name: str) -> str:
-    stem = re.sub(r"[^a-zA-Z0-9_-]", "_", tool_name).strip("_")[:40] or "tool"
-    digest = hashlib.sha256(f"{server_id}:{tool_name}".encode()).hexdigest()[:8]
-    return f"mcp_{stem}_{digest}"
+    return mcp_function_name_candidates(server_id, tool_name)[0]
+
+
+async def reconcile_mcp_discovery(
+    db: AsyncSession,
+    server: Any,
+    source: ToolSource,
+    discovery: list[dict[str, Any]],
+) -> None:
+    from app.infrastructure.repositories import tools as repository
+    from app.infrastructure.repositories import workspace as workspace_repository
+
+    await workspace_repository.lock_workspace(db, source.workspace_id)
+    locked_source = await repository.lock_tool_source(
+        db,
+        source.workspace_id,
+        source.id,
+    )
+    if locked_source is None or locked_source.mcp_server_id != server.id:
+        raise ValueError("MCP Tool source is unavailable.")
+
+    normalized = [normalize_mcp_definition(item) for item in discovery]
+    names = [item["name"] for item in normalized]
+    if len(names) != len(set(names)):
+        raise ValueError("MCP discovery contains duplicate Tool names.")
+
+    timestamp = utc_now()
+    existing_tools = await repository.list_tools_by_source(
+        db,
+        source.workspace_id,
+        source.id,
+    )
+    by_key = {tool.stable_key: tool for tool in existing_tools}
+    discovered_names = set(names)
+    for tool in existing_tools:
+        if tool.stable_key not in discovered_names and tool.availability != "unavailable":
+            tool.availability = "unavailable"
+            tool.updated_at = timestamp
+            await repository.save_tool(db, tool)
+
+    for definition in normalized:
+        tool_name = definition["name"]
+        tool = by_key.get(tool_name)
+        is_new_tool = tool is None
+        if tool is None:
+            function_name = ""
+            for candidate in mcp_function_name_candidates(server.id, tool_name):
+                if (
+                    await repository.get_tool_by_function_name(
+                        db,
+                        source.workspace_id,
+                        candidate,
+                    )
+                    is None
+                ):
+                    function_name = candidate
+                    break
+            if not function_name:
+                raise ValueError("MCP Tool function name could not be allocated.")
+            tool = await repository.save_tool(
+                db,
+                Tool(
+                    workspace_id=source.workspace_id,
+                    source_id=source.id,
+                    kind="mcp",
+                    stable_key=tool_name,
+                    function_name=function_name,
+                    current_version_id=None,
+                    status="active",
+                    availability="available",
+                    created_by_user_id=locked_source.created_by_user_id,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                ),
+            )
+            by_key[tool_name] = tool
+
+        definition_hash = canonical_definition_hash(definition)
+        version = await repository.get_tool_version_by_hash(
+            db,
+            source.workspace_id,
+            tool.id,
+            definition_hash,
+        )
+        if version is None:
+            versions = await repository.list_tool_versions(
+                db,
+                source.workspace_id,
+                tool.id,
+            )
+            version = await repository.save_tool_version(
+                db,
+                ToolVersion(
+                    workspace_id=source.workspace_id,
+                    tool_id=tool.id,
+                    revision=(versions[0].revision + 1) if versions else 1,
+                    display_name=tool_name[:120],
+                    description=definition["description"],
+                    input_schema=definition["input_schema"],
+                    output_schema=None,
+                    execution_spec={
+                        "server_id": server.id,
+                        "tool_name": tool_name,
+                        "annotations": definition["annotations"],
+                    },
+                    definition_hash=definition_hash,
+                    created_by_user_id=locked_source.created_by_user_id,
+                    created_at=timestamp,
+                ),
+            )
+        if is_new_tool:
+            await repository.save_tool_policy(
+                db,
+                ToolPolicy(
+                    workspace_id=source.workspace_id,
+                    tool_id=tool.id,
+                    tool_version_id=version.id,
+                    definition_hash=definition_hash,
+                    revision=1,
+                    approval="each_call",
+                    effect="unknown",
+                    allowed_access_sources=["console"],
+                    workflow_callable=False,
+                    parallel_safe=False,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                ),
+            )
+        tool.current_version_id = version.id
+        tool.availability = "available"
+        tool.updated_at = timestamp
+        await repository.save_tool(db, tool)
 
 
 @dataclass(frozen=True)
@@ -104,6 +242,91 @@ class ToolCatalogDetail:
     @property
     def permission(self) -> ToolPermissionLabel | None:
         return self.authorization.permission
+
+
+@dataclass(frozen=True)
+class McpCatalogLeaf:
+    source: ToolSource
+    tool: Tool
+    version: ToolVersion
+    policy: ToolPolicy | None
+
+
+def mcp_catalog_leaf_definition(leaf: McpCatalogLeaf) -> McpTool:
+    return McpTool(
+        name=leaf.tool.stable_key,
+        description=leaf.version.description,
+        input_schema=leaf.version.input_schema,
+        annotations=leaf.version.execution_spec.get("annotations"),
+    )
+
+
+def legacy_mcp_policy_mode(leaf: McpCatalogLeaf) -> str:
+    if leaf.source.status != "active" or leaf.tool.status != "active":
+        return "disabled"
+    policy = leaf.policy
+    if (
+        policy is None
+        or policy.tool_version_id != leaf.version.id
+        or policy.definition_hash != leaf.version.definition_hash
+    ):
+        return "approval_required"
+    if policy.approval == "disabled":
+        return "disabled"
+    if policy.approval == "auto" and policy.effect == "external_read":
+        return "read_only"
+    return "approval_required"
+
+
+async def list_mcp_catalog_leaves(
+    db: AsyncSession,
+    workspace_id: str,
+    mcp_server_id: str,
+    *,
+    available_only: bool = False,
+) -> list[McpCatalogLeaf]:
+    from app.infrastructure.repositories import tools as repository
+
+    sources = await repository.list_mcp_tool_sources(
+        db,
+        workspace_id,
+        mcp_server_id,
+    )
+    if not sources:
+        return []
+    source = sources[0]
+    leaves: list[McpCatalogLeaf] = []
+    for tool in await repository.list_tools_by_source(db, workspace_id, source.id):
+        if available_only and tool.availability != "available":
+            continue
+        if tool.current_version_id is None:
+            continue
+        version = await repository.get_tool_version(
+            db,
+            workspace_id,
+            tool.current_version_id,
+        )
+        if version is None:
+            continue
+        leaves.append(
+            McpCatalogLeaf(
+                source=source,
+                tool=tool,
+                version=version,
+                policy=await repository.get_tool_policy(db, workspace_id, tool.id),
+            )
+        )
+    return leaves
+
+
+async def get_mcp_catalog_leaf(
+    db: AsyncSession,
+    workspace_id: str,
+    mcp_server_id: str,
+    tool_name: str,
+) -> McpCatalogLeaf | None:
+    leaves = await list_mcp_catalog_leaves(db, workspace_id, mcp_server_id)
+    return next((leaf for leaf in leaves if leaf.tool.stable_key == tool_name), None)
 
 
 async def list_tool_catalog(

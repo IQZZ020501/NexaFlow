@@ -7,7 +7,6 @@ from app.api.deps import (
     WorkspaceContext,
     get_settings,
     get_workspace_context_from_path,
-    require_workspace_path_role,
 )
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
@@ -17,6 +16,7 @@ from app.application.tools import (
     get_mcp_server,
     list_mcp_servers,
     refresh_mcp_server,
+    set_mcp_server_enabled,
     set_mcp_tool_policy,
 )
 from app.schemas.mcp import (
@@ -39,7 +39,14 @@ async def list_workspace_mcp_servers(
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[McpServerResponse]:
-    return await list_mcp_servers(db, context.workspace.id, limit, offset)
+    return await list_mcp_servers(
+        db,
+        context.workspace.id,
+        context.user,
+        context.membership_role,
+        limit,
+        offset,
+    )
 
 
 @router.post(
@@ -49,10 +56,7 @@ async def list_workspace_mcp_servers(
 )
 async def create_workspace_mcp_server(
     payload: McpServerCreateRequest,
-    context: Annotated[
-        WorkspaceContext,
-        Depends(require_workspace_path_role({"admin"})),
-    ],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> McpServerResponse:
@@ -62,34 +66,96 @@ async def create_workspace_mcp_server(
         payload,
         context.user,
         settings,
+        context.membership_role,
     )
 
 
 @router.post("/{server_id}/refresh", response_model=McpServerResponse)
 async def refresh_workspace_mcp_server(
     server_id: str,
-    context: Annotated[
-        WorkspaceContext,
-        Depends(require_workspace_path_role({"admin"})),
-    ],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> McpServerResponse:
-    server = await get_mcp_server(db, context.workspace.id, server_id)
-    return await refresh_mcp_server(db, server, context.user, settings)
+    server = await get_mcp_server(
+        db,
+        context.workspace.id,
+        server_id,
+        context.user,
+        context.membership_role,
+    )
+    return await refresh_mcp_server(
+        db,
+        server,
+        context.user,
+        settings,
+        context.membership_role,
+    )
+
+
+@router.post("/{server_id}/disable", response_model=McpServerResponse)
+async def disable_workspace_mcp_server(
+    server_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> McpServerResponse:
+    server = await get_mcp_server(
+        db,
+        context.workspace.id,
+        server_id,
+        context.user,
+        context.membership_role,
+    )
+    return await set_mcp_server_enabled(
+        db,
+        server,
+        False,
+        context.user,
+        context.membership_role,
+    )
+
+
+@router.post("/{server_id}/enable", response_model=McpServerResponse)
+async def enable_workspace_mcp_server(
+    server_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> McpServerResponse:
+    server = await get_mcp_server(
+        db,
+        context.workspace.id,
+        server_id,
+        context.user,
+        context.membership_role,
+    )
+    return await set_mcp_server_enabled(
+        db,
+        server,
+        True,
+        context.user,
+        context.membership_role,
+    )
 
 
 @router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace_mcp_server(
     server_id: str,
-    context: Annotated[
-        WorkspaceContext,
-        Depends(require_workspace_path_role({"admin"})),
-    ],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
-    server = await get_mcp_server(db, context.workspace.id, server_id)
-    await delete_mcp_server(db, server, context.user)
+    server = await get_mcp_server(
+        db,
+        context.workspace.id,
+        server_id,
+        context.user,
+        context.membership_role,
+    )
+    await delete_mcp_server(
+        db,
+        server,
+        context.user,
+        context.membership_role,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -101,19 +167,23 @@ async def update_workspace_mcp_tool_policy(
     server_id: str,
     tool_name: str,
     payload: McpToolPolicyRequest,
-    context: Annotated[
-        WorkspaceContext,
-        Depends(require_workspace_path_role({"admin"})),
-    ],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> McpToolPolicyResponse:
-    server = await get_mcp_server(db, context.workspace.id, server_id)
+    server = await get_mcp_server(
+        db,
+        context.workspace.id,
+        server_id,
+        context.user,
+        context.membership_role,
+    )
     policy = await set_mcp_tool_policy(
         db,
         server,
         tool_name,
         payload.mode,
         context.user,
+        context.membership_role,
     )
     await db.commit()
     return McpToolPolicyResponse(

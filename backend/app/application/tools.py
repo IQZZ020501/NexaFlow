@@ -20,6 +20,7 @@ from app.shareddomain.tools.services import (
     require_tool_view,
     revoke_tool_permission,
     set_mcp_tool_policy,
+    set_mcp_server_enabled,
     upsert_tool_permission,
 )
 
@@ -43,5 +44,6 @@ __all__ = [
     "require_tool_view",
     "revoke_tool_permission",
     "set_mcp_tool_policy",
+    "set_mcp_server_enabled",
     "upsert_tool_permission",
 ]

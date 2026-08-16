@@ -50,6 +50,7 @@ class McpConnection:
     url: str | None = None
     bearer_token: str | None = None
     stdio_config: McpStdioConfig | None = None
+    network_policy: Literal["public_only", "deployment"] = "public_only"
 
 
 @dataclass(frozen=True)
@@ -222,7 +223,8 @@ async def mcp_client(
                     )
                     destination = await validate_mcp_destination(
                         normalized_url,
-                        settings.mcp_allow_private_networks,
+                        settings.mcp_allow_private_networks
+                        and connection.network_policy == "deployment",
                     )
                     headers = (
                         {"Authorization": f"Bearer {connection.bearer_token}"}

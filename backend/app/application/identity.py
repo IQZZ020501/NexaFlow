@@ -18,6 +18,7 @@ from app.infrastructure.validation import normalize_email, normalize_name, norma
 from app.entities.user import RefreshSession, User
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import user as user_repository
+from app.infrastructure.repositories import tools as tools_repository
 from app.infrastructure.repositories import team as team_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.schemas.user import (
@@ -41,6 +42,7 @@ from app.infrastructure.security import (
 )
 from app.infrastructure.system_log import record_system_log
 from app.shareddomain.workflows.uploads import queue_upload_cleanups
+from app.shareddomain.tools.services import delete_owned_mcp_servers_for_user
 from app.entities.team import Team, TeamMembership
 from app.entities.workspace import Workspace, WorkspaceMembership
 
@@ -350,6 +352,11 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
     user = await user_repository.lock_user(db, user.id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    if await tools_repository.has_retained_user_audit_references(db, user.id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "User is retained by Tool binding or invocation audit records.",
+        )
     record_audit_log(
         db,
         actor,
@@ -360,6 +367,7 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
         {"username": user.username, "email": user.email},
     )
     await queue_upload_cleanups(db, uploaded_by_user_id=user.id)
+    await delete_owned_mcp_servers_for_user(db, user.id, actor)
     await user_repository.delete_user_graph(db, user.id)
     await db.commit()
 

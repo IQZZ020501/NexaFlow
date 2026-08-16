@@ -3643,7 +3643,15 @@ def test_agent_memory_query_is_bounded_and_projected() -> None:
 
 
 def test_mcp_server_to_response() -> None:
-    from app.entities.tools import McpServer, McpToolPolicy
+    from app.entities.tools import (
+        McpServer,
+        McpToolPolicy,
+        Tool,
+        ToolPolicy,
+        ToolSource,
+        ToolVersion,
+    )
+    from app.shareddomain.tools.catalog import McpCatalogLeaf
     from app.shareddomain.tools.services import (
         effective_mcp_tool_policy_mode,
         mcp_server_to_response,
@@ -3678,14 +3686,79 @@ def test_mcp_server_to_response() -> None:
         last_error=None,
         created_by_user_id="user-1",
     )
-    stale_policy = McpToolPolicy(
+    source = ToolSource(
+        id="source-1",
         workspace_id="ws-1",
         mcp_server_id="mcp-1",
-        tool_name="search",
-        definition_hash="stale",
-        mode="read_only",
+        kind="mcp",
+        created_by_user_id="user-1",
     )
-    response = mcp_server_to_response(server, [stale_policy])
+    search_tool = Tool(
+        id="tool-search",
+        workspace_id="ws-1",
+        source_id=source.id,
+        kind="mcp",
+        stable_key="search",
+        function_name="mcp_search_12345678",
+        current_version_id="version-search",
+        created_by_user_id="user-1",
+    )
+    search_definition = McpTool(
+        name="search",
+        description="Search public records.",
+        input_schema={"type": "object"},
+        annotations={"readOnlyHint": True, "destructiveHint": False},
+    )
+    search_hash = mcp_tool_definition_hash(search_definition)
+    search_version = ToolVersion(
+        id="version-search",
+        workspace_id="ws-1",
+        tool_id=search_tool.id,
+        description="Search public records.",
+        input_schema={"type": "object"},
+        execution_spec={
+            "server_id": "mcp-1",
+            "tool_name": "search",
+            "annotations": {"readOnlyHint": True, "destructiveHint": False},
+        },
+        definition_hash=search_hash,
+    )
+    stale_policy = ToolPolicy(
+        workspace_id="ws-1",
+        tool_id=search_tool.id,
+        tool_version_id=search_version.id,
+        definition_hash="stale",
+        approval="auto",
+        effect="external_read",
+    )
+    unknown_tool = Tool(
+        id="tool-unknown",
+        workspace_id="ws-1",
+        source_id=source.id,
+        kind="mcp",
+        stable_key="unknown",
+        function_name="mcp_unknown_12345678",
+        current_version_id="version-unknown",
+        created_by_user_id="user-1",
+    )
+    unknown_version = ToolVersion(
+        id="version-unknown",
+        workspace_id="ws-1",
+        tool_id=unknown_tool.id,
+        description="Unclassified operation.",
+        input_schema={"type": "object"},
+        execution_spec={
+            "server_id": "mcp-1",
+            "tool_name": "unknown",
+            "annotations": None,
+        },
+        definition_hash="u" * 64,
+    )
+    leaves = [
+        McpCatalogLeaf(source, search_tool, search_version, stale_policy),
+        McpCatalogLeaf(source, unknown_tool, unknown_version, None),
+    ]
+    response = mcp_server_to_response(server, leaves)
     assert response.id == "mcp-1"
     assert response.workspace_id == "ws-1"
     assert response.url == "https://tools.example.com/mcp"
@@ -3694,9 +3767,7 @@ def test_mcp_server_to_response() -> None:
     assert response.tools[0].policy_mode == "approval_required"
     assert response.tools[1].policy_mode == "approval_required"
 
-    response = mcp_server_to_response(server)
-    assert response.tools[0].policy_mode == "approval_required"
-    assert response.tools[1].policy_mode == "approval_required"
+    assert mcp_server_to_response(server).tools == []
     assert (
         effective_mcp_tool_policy_mode(
             McpTool(
@@ -3708,23 +3779,49 @@ def test_mcp_server_to_response() -> None:
         )
         == "approval_required"
     )
-    read_only_policy = McpToolPolicy(
-        workspace_id="ws-1",
-        mcp_server_id="mcp-1",
-        tool_name="search",
-        definition_hash=response.tools[0].definition_hash,
-        mode="read_only",
-    )
-    response = mcp_server_to_response(server, [read_only_policy])
+    stale_policy.definition_hash = search_hash
+    response = mcp_server_to_response(server, leaves)
     assert response.tools[0].policy_mode == "read_only"
-    assert response.tools[0].definition_hash == mcp_tool_definition_hash(
-        McpTool(
-            name="search",
-            description="Search public records.",
-            input_schema={"type": "object"},
-            annotations={"readOnlyHint": True, "destructiveHint": False},
-        )
+    assert response.tools[0].definition_hash == search_hash
+
+
+def test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch() -> None:
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
+    from app.shareddomain.tools.catalog import (
+        McpCatalogLeaf,
+        legacy_mcp_policy_mode,
     )
+
+    source = ToolSource(id="source-1", workspace_id="ws-1", kind="mcp")
+    tool = Tool(
+        id="tool-1",
+        workspace_id="ws-1",
+        source_id=source.id,
+        kind="mcp",
+        current_version_id="version-2",
+    )
+    version = ToolVersion(
+        id="version-2",
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        definition_hash="b" * 64,
+    )
+    policy = ToolPolicy(
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        tool_version_id=version.id,
+        definition_hash=version.definition_hash,
+        approval="auto",
+        effect="external_read",
+    )
+    leaf = McpCatalogLeaf(source=source, tool=tool, version=version, policy=policy)
+    assert legacy_mcp_policy_mode(leaf) == "read_only"
+
+    policy.definition_hash = "a" * 64
+    assert legacy_mcp_policy_mode(leaf) == "approval_required"
+
+    tool.status = "disabled"
+    assert legacy_mcp_policy_mode(leaf) == "disabled"
 
 
 def test_celery_worker_pool_is_fork_safe_without_prefork() -> None:
@@ -4180,6 +4277,7 @@ def main() -> None:
     test_agent_memory_compacts_old_turns()
     test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()
+    test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch()
     test_celery_worker_pool_is_fork_safe_without_prefork()
     test_worker_database_rejects_in_memory_sqlite()
     test_windows_event_loop_policy_is_selector_based()

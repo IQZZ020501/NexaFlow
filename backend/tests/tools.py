@@ -219,6 +219,18 @@ def load_migration():
     return module
 
 
+def load_network_policy_migration():
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202608160004_mcp_network_policy.py"
+    )
+    spec = spec_from_file_location("mcp_network_policy", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def constraint_sql(table, name: str) -> str:
     constraint = next(item for item in table.constraints if item.name == name)
     assert isinstance(constraint, CheckConstraint)
@@ -301,6 +313,52 @@ def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
     assert version_row == asdict(catalog.version)
     assert policy_row == asdict(catalog.policy)
 
+
+def test_mcp_network_policy_migration_is_reversible_and_defaults_legacy() -> None:
+    from app.shareddomain.tools.models import McpServer
+
+    migration = load_network_policy_migration()
+    assert migration.revision == "202608160004"
+    assert migration.down_revision == "202608160003"
+    column = McpServer.__table__.c.network_policy
+    assert column.nullable is False
+    assert column.server_default is not None
+    assert column.server_default.arg == "deployment"
+    assert "public_only" in constraint_sql(
+        McpServer.__table__,
+        "ck_mcp_servers_network_policy",
+    )
+
+    calls: list[tuple] = []
+    migration.op = SimpleNamespace(
+        add_column=lambda *args: calls.append(("add_column", *args)),
+        create_check_constraint=lambda *args: calls.append(("create_check", *args)),
+        drop_constraint=lambda *args, **kwargs: calls.append(
+            ("drop_constraint", *args, kwargs)
+        ),
+        drop_column=lambda *args: calls.append(("drop_column", *args)),
+    )
+    migration.upgrade()
+    added = calls[0][2]
+    assert added.name == "network_policy"
+    assert added.nullable is False
+    assert added.server_default.arg == "deployment"
+    assert calls[1][0] == "create_check"
+    calls.clear()
+    migration.downgrade()
+    assert [call[0] for call in calls] == ["drop_constraint", "drop_column"]
+
+
+def test_mcp_function_name_candidates_extend_stable_digest_on_collision() -> None:
+    from app.shareddomain.tools.catalog import mcp_function_name_candidates
+
+    candidates = mcp_function_name_candidates("server-1", "order items!")
+    assert candidates[:3] == (
+        "mcp_order_items_bd4a7707",
+        "mcp_order_items_bd4a77076205",
+        "mcp_order_items_bd4a770762057d62",
+    )
+    assert len(candidates[-1].rsplit("_", 1)[-1]) == 64
 
 def test_mcp_hash_matches_legacy_annotation_normalization() -> None:
     from app.shareddomain.tools.catalog import mcp_definition_hash
@@ -1481,15 +1539,230 @@ async def assert_mcp_server_deletion_preserves_tool_history(
         assert retained_invocation.tool_version_id == version.id
 
 
+async def assert_mcp_discovery_materializes_first_leaf(
+    workspace_id: str,
+) -> None:
+    from app.entities.tools import McpServer, Tool, ToolSource
+    from app.infrastructure.repositories import mcp as mcp_repository
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+    from app.shareddomain.tools.catalog import (
+        mcp_function_name_candidates,
+        reconcile_mcp_discovery,
+    )
+
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        server = await mcp_repository.create_mcp_server(
+            db,
+            McpServer(
+                workspace_id=workspace_id,
+                name="Catalog MCP",
+                url="https://catalog.example.com/mcp",
+                tools=[],
+                created_by_user_id=actor.id,
+            ),
+        )
+        source = await tool_repository.save_tool_source(
+            db,
+            ToolSource(
+                workspace_id=workspace_id,
+                mcp_server_id=server.id,
+                kind="mcp",
+                name=server.name,
+                created_by_user_id=actor.id,
+            ),
+        )
+        discovery = [
+            {
+                "name": "lookup",
+                "description": "Lookup a record.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}},
+                },
+                "annotations": {
+                    "readOnlyHint": True,
+                    "destructiveHint": False,
+                },
+            }
+        ]
+
+        candidates = mcp_function_name_candidates(server.id, "lookup")
+        sources = await tool_repository.list_tool_sources(db, workspace_id)
+        python_source = next(item for item in sources if item.kind == "python")
+        await tool_repository.save_tool(
+            db,
+            Tool(
+                workspace_id=workspace_id,
+                source_id=python_source.id,
+                kind="python",
+                stable_key="mcp_collision_blocker",
+                function_name=candidates[0],
+                created_by_user_id=actor.id,
+            ),
+        )
+
+        await reconcile_mcp_discovery(db, server, source, discovery)
+        tools = await tool_repository.list_tools_by_source(
+            db,
+            workspace_id,
+            source.id,
+        )
+        assert len(tools) == 1
+        tool = tools[0]
+        assert tool.stable_key == "lookup"
+        assert tool.function_name == candidates[1]
+        assert tool.created_by_user_id == actor.id
+        assert tool.availability == "available"
+        assert tool.current_version_id is not None
+        version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            tool.current_version_id,
+        )
+        assert version is not None
+        assert version.revision == 1
+        assert version.execution_spec == {
+            "server_id": server.id,
+            "tool_name": "lookup",
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+            },
+        }
+        policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
+        assert policy is not None
+        assert policy.tool_version_id == version.id
+        assert policy.definition_hash == version.definition_hash
+        assert policy.approval == "each_call"
+        assert policy.effect == "unknown"
+        assert policy.allowed_access_sources == ["console"]
+        assert policy.workflow_callable is False
+        assert policy.parallel_safe is False
+
+        original_tool_id = tool.id
+        original_version_id = version.id
+        original_policy_hash = policy.definition_hash
+        await reconcile_mcp_discovery(db, server, source, discovery)
+        versions = await tool_repository.list_tool_versions(
+            db,
+            workspace_id,
+            tool.id,
+        )
+        assert [item.id for item in versions] == [original_version_id]
+
+        changed = [
+            {
+                **discovery[0],
+                "description": "Lookup a changed record.",
+            }
+        ]
+        await reconcile_mcp_discovery(db, server, source, changed)
+        tool = (await tool_repository.list_tools_by_source(
+            db,
+            workspace_id,
+            source.id,
+        ))[0]
+        versions = await tool_repository.list_tool_versions(
+            db,
+            workspace_id,
+            tool.id,
+        )
+        assert tool.id == original_tool_id
+        assert len(versions) == 2
+        assert versions[0].revision == 2
+        assert tool.current_version_id == versions[0].id
+        policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
+        assert policy is not None
+        assert policy.definition_hash == original_policy_hash
+        assert policy.tool_version_id == original_version_id
+
+        await reconcile_mcp_discovery(db, server, source, [])
+        tool = (await tool_repository.list_tools_by_source(
+            db,
+            workspace_id,
+            source.id,
+        ))[0]
+        assert tool.availability == "unavailable"
+
+        await reconcile_mcp_discovery(db, server, source, discovery)
+        tool = (await tool_repository.list_tools_by_source(
+            db,
+            workspace_id,
+            source.id,
+        ))[0]
+        versions = await tool_repository.list_tool_versions(
+            db,
+            workspace_id,
+            tool.id,
+        )
+        assert tool.id == original_tool_id
+        assert tool.current_version_id == original_version_id
+        assert tool.availability == "available"
+        assert len(versions) == 2
+        await db.rollback()
+
+
+async def assert_tool_policy_revision_compare_and_swap(workspace_id: str) -> None:
+    from app.infrastructure.repositories import tools as tool_repository
+
+    async with get_session_factory()() as first_db, get_session_factory()() as second_db:
+        tools = await tool_repository.list_tools(first_db, workspace_id)
+        builtin = next(tool for tool in tools if tool.stable_key == "current_time")
+        first = await tool_repository.get_tool_policy(
+            first_db,
+            workspace_id,
+            builtin.id,
+        )
+        second = await tool_repository.get_tool_policy(
+            second_db,
+            workspace_id,
+            builtin.id,
+        )
+        assert first is not None and second is not None
+        assert first.revision == second.revision
+
+        expected_revision = first.revision
+        first.revision += 1
+        first.effect = "external_read"
+        assert (
+            await tool_repository.update_tool_policy_if_revision(
+                first_db,
+                first,
+                expected_revision,
+            )
+            is not None
+        )
+        await first_db.commit()
+
+        second.revision += 1
+        second.effect = "external_write"
+        assert (
+            await tool_repository.update_tool_policy_if_revision(
+                second_db,
+                second,
+                expected_revision,
+            )
+            is None
+        )
+        await second_db.rollback()
+
+
 def test_workspace_creation_initializes_system_catalog() -> None:
     with test_client() as client:
         _token, workspace_id = activate_admin(client)
         run(assert_workspace_system_catalog(workspace_id))
+        run(assert_tool_policy_revision_compare_and_swap(workspace_id))
+        run(assert_mcp_discovery_materializes_first_leaf(workspace_id))
         run(assert_mcp_server_deletion_preserves_tool_history(workspace_id))
 
 
 def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
+    test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()
+    test_mcp_function_name_candidates_extend_stable_digest_on_collision()
     test_mcp_hash_matches_legacy_annotation_normalization()
     test_migration_collects_policy_only_tools_deterministically()
     test_migration_grants_tools_only_to_regular_members()
