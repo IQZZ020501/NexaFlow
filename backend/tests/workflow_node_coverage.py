@@ -86,7 +86,12 @@ class _FakeLlmLedger:
 
 def _node_scope(**overrides) -> SimpleNamespace:
     scope = SimpleNamespace(
-        run=SimpleNamespace(model_id="model-1", workspace_id="workspace-1", goal="g"),
+        run=SimpleNamespace(
+            agent_id="workflow-1",
+            model_id="model-1",
+            workspace_id="workspace-1",
+            goal="g",
+        ),
         actor=SimpleNamespace(id="user-1"),
         workspace_role="member",
         settings=None,

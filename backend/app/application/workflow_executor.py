@@ -201,6 +201,7 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
             run.workspace_id,
             run.mcp_tools,
             strict=False,
+            application_id=run.agent_id,
         )
         mcp_tools = {}
         for tool in resolved_mcp:

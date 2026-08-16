@@ -7,11 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ports import model_registry as model_repository
 from app.ports.llm import RegisteredModel
 from app.entities.agents import Agent
+from app.entities.tools import ApplicationToolBinding
 from app.entities.workflows import WorkflowDefinition
 from app.entities.knowledge import KnowledgeBase
 from app.entities.user import User
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import tools as tools_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.validation import normalize_name
 from app.schemas.agent import (
@@ -332,11 +334,13 @@ async def create_agent(
         workspace_role,
     )
     mcp_references = [item.model_dump() for item in payload.mcp_tools]
-    await resolve_mcp_tools(
+    resolved_mcp_tools = await resolve_mcp_tools(
         db,
         workspace_id,
         mcp_references,
         strict=True,
+        actor=actor,
+        workspace_role=workspace_role,
     )
     agent = Agent(
         workspace_id=workspace_id,
@@ -371,6 +375,21 @@ async def create_agent(
             [knowledge_base.id for knowledge_base in knowledge_bases],
         )
         await agent_repository.replace_mcp_bindings(db, agent, mcp_references)
+        await tools_repository.replace_application_tool_bindings(
+            db,
+            workspace_id,
+            agent.id,
+            [
+                ApplicationToolBinding(
+                    workspace_id=workspace_id,
+                    application_id=agent.id,
+                    tool_id=item.tool_id,
+                    tool_version_id=item.tool_version_id,
+                    bound_by_user_id=actor.id,
+                )
+                for item in resolved_mcp_tools
+            ],
+        )
         record_audit_log(
             db,
             actor,
@@ -452,6 +471,7 @@ async def apply_agent_publication(
             agent.workspace_id,
             publication_mcp_bindings,
             strict=True,
+            application_id=agent.id,
         )
         agent.published = True
         agent.published_snapshot = agent_publication_snapshot(
@@ -554,13 +574,30 @@ async def update_agent(
 
     if payload.mcp_tools is not None:
         mcp_references = [item.model_dump() for item in payload.mcp_tools]
-        await resolve_mcp_tools(
+        resolved_mcp_tools = await resolve_mcp_tools(
             db,
             agent.workspace_id,
             mcp_references,
             strict=True,
+            actor=actor,
+            workspace_role=workspace_role,
         )
         await agent_repository.replace_mcp_bindings(db, agent, mcp_references)
+        await tools_repository.replace_application_tool_bindings(
+            db,
+            agent.workspace_id,
+            agent.id,
+            [
+                ApplicationToolBinding(
+                    workspace_id=agent.workspace_id,
+                    application_id=agent.id,
+                    tool_id=item.tool_id,
+                    tool_version_id=item.tool_version_id,
+                    bound_by_user_id=actor.id,
+                )
+                for item in resolved_mcp_tools
+            ],
+        )
         configuration_changed = configuration_changed or {
             (item["server_id"], item["tool_name"]) for item in mcp_references
         } != {

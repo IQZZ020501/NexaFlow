@@ -233,6 +233,7 @@ async def create_workflow_run(
         actor,
         workspace_role,
         default_model_id=default_model_id,
+        binding_application_id=agent.id,
     )
     if access_source == "console":
         files = await resolve_workspace_workflow_files(

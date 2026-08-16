@@ -360,6 +360,56 @@ def test_mcp_function_name_candidates_extend_stable_digest_on_collision() -> Non
     )
     assert len(candidates[-1].rsplit("_", 1)[-1]) == 64
 
+
+def test_resolved_mcp_tool_preserves_catalog_function_name() -> None:
+    from mcp.types import Tool as McpTool
+
+    from app.application.agent_tools import mcp_function_name
+    from app.entities.tools import McpServer
+    from app.shareddomain.tools.services import ResolvedMcpTool
+
+    resolved = ResolvedMcpTool(
+        server=McpServer(id="server-1", workspace_id="workspace-1"),
+        definition=McpTool(name="lookup", input_schema={"type": "object"}),
+        tool_id="tool-1",
+        tool_version_id="version-1",
+        function_name="mcp_lookup_bd4a77076205",
+    )
+
+    assert mcp_function_name(resolved) == "mcp_lookup_bd4a77076205"
+
+
+def test_disabled_mcp_policy_wins_over_definition_drift() -> None:
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
+    from app.shareddomain.tools.catalog import McpCatalogLeaf, legacy_mcp_policy_mode
+
+    leaf = McpCatalogLeaf(
+        source=ToolSource(id="source-1", workspace_id="workspace-1", kind="mcp"),
+        tool=Tool(
+            id="tool-1",
+            workspace_id="workspace-1",
+            source_id="source-1",
+            kind="mcp",
+            stable_key="lookup",
+        ),
+        version=ToolVersion(
+            id="version-2",
+            workspace_id="workspace-1",
+            tool_id="tool-1",
+            definition_hash="new-hash",
+        ),
+        policy=ToolPolicy(
+            workspace_id="workspace-1",
+            tool_id="tool-1",
+            tool_version_id="version-1",
+            definition_hash="old-hash",
+            approval="disabled",
+        ),
+    )
+
+    assert legacy_mcp_policy_mode(leaf) == "disabled"
+
+
 def test_mcp_hash_matches_legacy_annotation_normalization() -> None:
     from app.shareddomain.tools.catalog import mcp_definition_hash
     from app.shareddomain.tools.services import (
@@ -1358,6 +1408,212 @@ def test_private_tool_permission_lifecycle_preserves_bindings() -> None:
         run(assert_permission_lifecycle())
 
 
+def test_mcp_resolution_requires_current_binding_owner_use_permission() -> None:
+    from fastapi import HTTPException
+
+    from app.capabilities.llm.models import RegisteredModel
+    from app.entities.agents import Agent
+    from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
+    from app.infrastructure.repositories import agent as agent_repository
+    from app.infrastructure.repositories import mcp as mcp_repository
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+    from app.shareddomain.tools.catalog import reconcile_mcp_discovery
+    from app.shareddomain.tools.permissions import (
+        revoke_tool_permission,
+        upsert_tool_permission,
+    )
+    from app.shareddomain.tools.services import resolve_mcp_tools
+
+    async def expect_status(expected_status: int, operation) -> None:
+        try:
+            await operation()
+        except HTTPException as exc:
+            assert exc.status_code == expected_status
+        else:
+            raise AssertionError(f"Expected HTTP {expected_status}.")
+
+    with test_client() as client:
+        admin_token, workspace_id = activate_admin(client)
+        owner_id, _ = create_active_user(client, admin_token, "mcp-use-owner")
+        grantee_id, _ = create_active_user(client, admin_token, "mcp-use-grantee")
+        add_workspace_member(client, admin_token, workspace_id, owner_id)
+        add_workspace_member(client, admin_token, workspace_id, grantee_id)
+
+        async def assert_resolution() -> None:
+            async with get_session_factory()() as db:
+                owner = await user_repository.get_user_by_id(db, owner_id)
+                grantee = await user_repository.get_user_by_id(db, grantee_id)
+                assert owner is not None and grantee is not None
+                server = await mcp_repository.create_mcp_server(
+                    db,
+                    McpServer(
+                        workspace_id=workspace_id,
+                        name="Private Resolution MCP",
+                        url="https://private-resolution.example.com/mcp",
+                        created_by_user_id=owner.id,
+                    ),
+                )
+                source = await tool_repository.save_tool_source(
+                    db,
+                    ToolSource(
+                        workspace_id=workspace_id,
+                        mcp_server_id=server.id,
+                        kind="mcp",
+                        name=server.name,
+                        created_by_user_id=owner.id,
+                    ),
+                )
+                await reconcile_mcp_discovery(
+                    db,
+                    server,
+                    source,
+                    [
+                        {
+                            "name": "lookup",
+                            "description": "Lookup a record.",
+                            "input_schema": {"type": "object"},
+                            "annotations": {"readOnlyHint": True},
+                        }
+                    ],
+                )
+                tool = (await tool_repository.list_tools_by_source(
+                    db,
+                    workspace_id,
+                    source.id,
+                ))[0]
+                assert tool.current_version_id is not None
+                reference = [{"server_id": server.id, "tool_name": "lookup"}]
+                await db.commit()
+
+                await expect_status(
+                    404,
+                    lambda: resolve_mcp_tools(
+                        db,
+                        workspace_id,
+                        reference,
+                        strict=True,
+                        actor=grantee,
+                        workspace_role="member",
+                    ),
+                )
+                await upsert_tool_permission(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    grantee.id,
+                    "view",
+                    owner,
+                    "member",
+                )
+                await expect_status(
+                    403,
+                    lambda: resolve_mcp_tools(
+                        db,
+                        workspace_id,
+                        reference,
+                        strict=True,
+                        actor=grantee,
+                        workspace_role="member",
+                    ),
+                )
+                await upsert_tool_permission(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    grantee.id,
+                    "use",
+                    owner,
+                    "member",
+                )
+                resolved = await resolve_mcp_tools(
+                    db,
+                    workspace_id,
+                    reference,
+                    strict=True,
+                    actor=grantee,
+                    workspace_role="member",
+                )
+                assert [(item.tool_id, item.tool_version_id) for item in resolved] == [
+                    (tool.id, tool.current_version_id)
+                ]
+
+                model = RegisteredModel(
+                    workspace_id=workspace_id,
+                    name="Private Resolution Model",
+                    provider="private_resolution_provider",
+                    provider_type="openai_compatible",
+                    api_base="",
+                    model_type="LLM",
+                    model_name="private-resolution-model",
+                    status="active",
+                    created_by_user_id=owner.id,
+                )
+                db.add(model)
+                await db.flush()
+                application = await agent_repository.create_agent(
+                    db,
+                    Agent(
+                        workspace_id=workspace_id,
+                        name="Private Resolution Agent",
+                        model_id=model.id,
+                        created_by_user_id=owner.id,
+                    ),
+                )
+                await tool_repository.save_application_tool_binding(
+                    db,
+                    ApplicationToolBinding(
+                        workspace_id=workspace_id,
+                        application_id=application.id,
+                        tool_id=tool.id,
+                        tool_version_id=tool.current_version_id,
+                        bound_by_user_id=grantee.id,
+                    ),
+                )
+                await db.commit()
+                assert len(await resolve_mcp_tools(
+                    db,
+                    workspace_id,
+                    reference,
+                    strict=True,
+                    application_id=application.id,
+                )) == 1
+
+                await revoke_tool_permission(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    grantee.id,
+                    owner,
+                    "member",
+                )
+                assert await resolve_mcp_tools(
+                    db,
+                    workspace_id,
+                    reference,
+                    strict=False,
+                    application_id=application.id,
+                ) == []
+
+        run(assert_resolution())
+
+
+def test_mcp_resolution_rejects_missing_authorization_context() -> None:
+    from app.shareddomain.tools.services import resolve_mcp_tools
+
+    try:
+        run(resolve_mcp_tools(
+            SimpleNamespace(),
+            "workspace-1",
+            [{"server_id": "server-1", "tool_name": "lookup"}],
+            strict=True,
+        ))
+    except ValueError as exc:
+        assert str(exc) == "MCP Tool resolution requires an authorization context."
+    else:
+        raise AssertionError("MCP Tool resolution must fail closed without authorization.")
+
+
 async def assert_mcp_server_deletion_preserves_tool_history(
     workspace_id: str,
 ) -> None:
@@ -1763,6 +2019,8 @@ def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
     test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()
     test_mcp_function_name_candidates_extend_stable_digest_on_collision()
+    test_resolved_mcp_tool_preserves_catalog_function_name()
+    test_disabled_mcp_policy_wins_over_definition_drift()
     test_mcp_hash_matches_legacy_annotation_normalization()
     test_migration_collects_policy_only_tools_deterministically()
     test_migration_grants_tools_only_to_regular_members()
@@ -1772,6 +2030,8 @@ def main() -> None:
     test_migration_reference_scanner_keeps_historical_mcp_tuples()
     test_private_catalog_filters_before_pagination_for_every_role()
     test_private_tool_permission_lifecycle_preserves_bindings()
+    test_mcp_resolution_requires_current_binding_owner_use_permission()
+    test_mcp_resolution_rejects_missing_authorization_context()
     test_workspace_creation_initializes_system_catalog()
     print("TOOLS_SUITE_OK")
 

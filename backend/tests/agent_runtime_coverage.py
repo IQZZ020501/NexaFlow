@@ -43,11 +43,12 @@ from app.application import agent_executor, agent_memory, agent_runs, agent_tool
 from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.entities.agents import Agent, AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import McpServer
+from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
 from app.infrastructure import agent_live_stream as live_stream_module
 from app.infrastructure.config import Settings
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import mcp as mcp_repository
+from app.infrastructure.repositories import tools as tool_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.model_utils import utc_now
@@ -79,6 +80,7 @@ from app.shareddomain.tools.services import (
     ResolvedMcpTool,
     mcp_tool_definition_hash,
 )
+from app.shareddomain.tools.catalog import reconcile_mcp_discovery
 from mcp.types import Tool as McpTool
 
 MODEL_BASE_URL = "http://127.0.0.1:9"
@@ -1272,6 +1274,33 @@ async def db_setup(
             created_by_user_id=admin_user_id,
         )
         await mcp_repository.save_mcp_server(db, server)
+        source = await tool_repository.save_tool_source(
+            db,
+            ToolSource(
+                workspace_id=workspace_id,
+                mcp_server_id=server.id,
+                kind="mcp",
+                name=server.name,
+                created_by_user_id=admin_user_id,
+            ),
+        )
+        await reconcile_mcp_discovery(db, server, source, server.tools)
+        tool = (await tool_repository.list_tools_by_source(
+            db,
+            workspace_id,
+            source.id,
+        ))[0]
+        assert tool.current_version_id is not None
+        await tool_repository.save_application_tool_binding(
+            db,
+            ApplicationToolBinding(
+                workspace_id=workspace_id,
+                application_id=agent_id,
+                tool_id=tool.id,
+                tool_version_id=tool.current_version_id,
+                bound_by_user_id=admin_user_id,
+            ),
+        )
         await db.commit()
         mcp_server_id = server.id
 
@@ -1849,11 +1878,27 @@ async def assert_mcp_tool_paths(
             },
         )
         resolved = ResolvedMcpTool(server=server, definition=definition)
-    tool = build_mcp_agent_tool(resolved, settings, "read_only")
+    tool = build_mcp_agent_tool(resolved, settings, "agent-1", "read_only")
 
     original_call = agent_tools.call_mcp_tool
+    original_resolve = agent_tools.resolve_mcp_tools
     original_set = agent_tools.set_agent_tool_idempotency_key
     try:
+        async def fake_resolve(
+            _db,
+            requested_workspace_id,
+            references,
+            *,
+            strict,
+            application_id,
+        ):
+            assert requested_workspace_id == workspace_id
+            assert strict is False
+            assert application_id == "agent-1"
+            return [] if references[0]["server_id"] == "ghost-server" else [resolved]
+
+        agent_tools.resolve_mcp_tools = fake_resolve
+
         # inner JSON decode failure (361-362) and non-object payload (370):
         # reachable only when the tool's own schema accepts the arguments, so
         # drive the module-level json reference used by the executor.
@@ -1922,11 +1967,16 @@ async def assert_mcp_tool_paths(
             raise McpClientError("transport interrupted")
 
         agent_tools.call_mcp_tool = failing_call
-        write_tool = build_mcp_agent_tool(resolved, settings, "approval_required")
+        write_tool = build_mcp_agent_tool(
+            resolved,
+            settings,
+            "agent-1",
+            "approval_required",
+        )
         result = await write_tool.ainvoke({"topic": "release"})
         assert result.is_error and result.outcome_uncertain is True
         assert "request failed" in result.summary
-        read_tool = build_mcp_agent_tool(resolved, settings, "read_only")
+        read_tool = build_mcp_agent_tool(resolved, settings, "agent-1", "read_only")
         result = await read_tool.ainvoke({"topic": "release"})
         assert result.is_error and result.outcome_uncertain is False
 
@@ -1954,7 +2004,7 @@ async def assert_mcp_tool_paths(
             ),
             definition=definition,
         )
-        ghost_tool = build_mcp_agent_tool(ghost, settings, "read_only")
+        ghost_tool = build_mcp_agent_tool(ghost, settings, "agent-1", "read_only")
         result = await ghost_tool.ainvoke({"topic": "release"})
         assert result.is_error and "no longer available" in result.content
 
@@ -1974,11 +2024,17 @@ async def assert_mcp_tool_paths(
                 },
             ),
         )
-        drifted_tool = build_mcp_agent_tool(drifted, settings, "read_only")
+        drifted_tool = build_mcp_agent_tool(
+            drifted,
+            settings,
+            "agent-1",
+            "read_only",
+        )
         result = await drifted_tool.ainvoke({"topic": "release"})
         assert result.is_error and "definition changed" in result.content
     finally:
         agent_tools.call_mcp_tool = original_call
+        agent_tools.resolve_mcp_tools = original_resolve
         agent_tools.set_agent_tool_idempotency_key = original_set
         agent_tools.set_agent_tool_idempotency_key(None)
 
@@ -3545,8 +3601,16 @@ async def assert_ledger_db_paths(
         "server_name": "Runtime Server",
         "definition_hash": "def-v2",
     }
-    read_only_metadata = {**metadata, "policy_mode": "read_only"}
-    disabled_metadata = {**metadata, "policy_mode": "disabled"}
+    read_only_metadata = {
+        **metadata,
+        "kind": "knowledge",
+        "policy_mode": "read_only",
+    }
+    disabled_metadata = {
+        **metadata,
+        "kind": "knowledge",
+        "policy_mode": "disabled",
+    }
 
     async def new_ledger(run, lease_lost=None):
         return agent_executor.DurableToolLedger(

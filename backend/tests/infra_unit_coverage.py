@@ -3094,6 +3094,23 @@ def test_delete_mcp_server() -> None:
 
 def test_resolve_mcp_tools() -> None:
     db = AsyncMock()
+    actor = User(id="u1", username="admin", name="Admin", is_global_admin=True)
+
+    async def resolve(references, *, strict):
+        with patch.object(
+            tools_services.permission_repository,
+            "get_user_grant",
+            new=AsyncMock(return_value=None),
+        ):
+            return await tools_services.resolve_mcp_tools(
+                db,
+                "ws-1",
+                references,
+                strict=strict,
+                actor=actor,
+                workspace_role="admin",
+            )
+
     references = [
         {"server_id": "s1", "tool_name": "echo"},
         {"server_id": "s1", "tool_name": "wait"},
@@ -3125,13 +3142,13 @@ def test_resolve_mcp_tools() -> None:
         "get_mcp_catalog_leaf",
         new=get_leaf,
     ):
-        resolved = run(tools_services.resolve_mcp_tools(db, "ws-1", references, strict=True))
+        resolved = run(resolve(references, strict=True))
         assert [item.definition.name for item in resolved] == ["echo", "wait"]
         assert resolved[0].server is server
 
     # duplicate pair
     duplicates = [{"server_id": "s1", "tool_name": "echo"}, {"server_id": "s1", "tool_name": "echo"}]
-    expect_http_error(lambda: run(tools_services.resolve_mcp_tools(db, "ws-1", duplicates, strict=True)), 422)
+    expect_http_error(lambda: run(resolve(duplicates, strict=True)), 422)
 
     # missing tool strict / non-strict
     missing_tool = [{"server_id": "s1", "tool_name": "nope"}]
@@ -3144,8 +3161,8 @@ def test_resolve_mcp_tools() -> None:
         "get_mcp_catalog_leaf",
         new=get_leaf,
     ):
-        expect_http_error(lambda: run(tools_services.resolve_mcp_tools(db, "ws-1", missing_tool, strict=True)), 422)
-        assert run(tools_services.resolve_mcp_tools(db, "ws-1", missing_tool, strict=False)) == []
+        expect_http_error(lambda: run(resolve(missing_tool, strict=True)), 422)
+        assert run(resolve(missing_tool, strict=False)) == []
 
     # missing server strict / non-strict
     missing_server = [{"server_id": "missing", "tool_name": "echo"}]
@@ -3158,8 +3175,8 @@ def test_resolve_mcp_tools() -> None:
         "get_mcp_catalog_leaf",
         new=get_leaf,
     ):
-        expect_http_error(lambda: run(tools_services.resolve_mcp_tools(db, "ws-1", missing_server, strict=True)), 422)
-        assert run(tools_services.resolve_mcp_tools(db, "ws-1", missing_server, strict=False)) == []
+        expect_http_error(lambda: run(resolve(missing_server, strict=True)), 422)
+        assert run(resolve(missing_server, strict=False)) == []
 
     # inactive server
     inactive = McpServer(
@@ -3173,8 +3190,8 @@ def test_resolve_mcp_tools() -> None:
         created_by_user_id="u1",
     )
     with patch.object(mcp_repo, "list_mcp_servers_by_ids", new=AsyncMock(return_value=[inactive])):
-        expect_http_error(lambda: run(tools_services.resolve_mcp_tools(db, "ws-1", references[:1], strict=True)), 422)
-        assert run(tools_services.resolve_mcp_tools(db, "ws-1", references[:1], strict=False)) == []
+        expect_http_error(lambda: run(resolve(references[:1], strict=True)), 422)
+        assert run(resolve(references[:1], strict=False)) == []
 
 
 def test_mcp_tool_policy_services() -> None:

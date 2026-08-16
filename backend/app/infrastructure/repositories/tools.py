@@ -1,4 +1,4 @@
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.resource_permission import ResourcePermission as ResourcePermissionOrm
@@ -509,6 +509,22 @@ async def save_application_tool_binding(
 ) -> ApplicationToolBinding:
     row = await save(db, ApplicationToolBindingOrm, entity)
     return to_entity(ApplicationToolBinding, row)
+
+
+async def replace_application_tool_bindings(
+    db: AsyncSession,
+    workspace_id: str,
+    application_id: str,
+    bindings: list[ApplicationToolBinding],
+) -> None:
+    await db.execute(
+        delete(ApplicationToolBindingOrm).where(
+            ApplicationToolBindingOrm.workspace_id == workspace_id,
+            ApplicationToolBindingOrm.application_id == application_id,
+        )
+    )
+    for binding in bindings:
+        await save_application_tool_binding(db, binding)
 
 
 async def get_tool_invocation(

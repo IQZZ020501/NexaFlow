@@ -2178,7 +2178,7 @@ class _FakeLlmLedger:
 
 def _llm_scope(**overrides) -> SimpleNamespace:
     scope = SimpleNamespace(
-        run=SimpleNamespace(model_id="model-1"),
+        run=SimpleNamespace(agent_id="workflow-1", model_id="model-1"),
         settings=None,
         models={"model-1": SimpleNamespace(provider_type="openai_compatible")},
         mcp_tools={},

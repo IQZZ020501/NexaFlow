@@ -1576,10 +1576,12 @@ def test_workflow_services_boundaries() -> None:
                 try:
                     await save_definition(
                         db,
+                        workflow_agent,
                         created_def,
                         WorkflowGraph.model_validate(_simple_graph()),
                         99,
                         actor,
+                        "admin",
                     )
                     raise AssertionError("expected 409 stale revision")
                 except HTTPException as exc:
@@ -1588,10 +1590,12 @@ def test_workflow_services_boundaries() -> None:
                 # 276-277: successful save bumps the revision
                 updated = await save_definition(
                     db,
+                    workflow_agent,
                     created_def,
                     WorkflowGraph.model_validate(_simple_graph()),
                     created_def.revision,
                     actor,
+                    "admin",
                 )
                 assert updated.revision == created_def.revision + 1
 

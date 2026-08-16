@@ -3407,7 +3407,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
     assert name == f"mcp_order_items_{digest}"
     # deterministic for the same server/tool pair
     assert mcp_function_name(tool) == name
-    built = build_mcp_agent_tool(tool, SimpleNamespace())
+    built = build_mcp_agent_tool(tool, SimpleNamespace(), "agent-1")
     assert built.metadata is not None
     assert built.metadata["policy_mode"] == "approval_required"
 

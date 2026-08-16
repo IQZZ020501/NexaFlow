@@ -585,7 +585,12 @@ async def execute_workflow_node(
                         "Workflow MCP tool is unavailable or not read-only."
                     )
                 tools.append(
-                    build_mcp_agent_tool(resolved[0], scope.settings, "read_only")
+                    build_mcp_agent_tool(
+                        resolved[0],
+                        scope.settings,
+                        scope.run.agent_id,
+                        "read_only",
+                    )
                 )
         async def emit_output_delta(delta: str) -> None:
             assert scope.output_delta is not None
@@ -853,7 +858,12 @@ async def execute_workflow_node(
         resolved = scope.mcp_tools.get((parsed.server_id, parsed.tool_name))
         if resolved is None:
             raise ValueError("Workflow MCP tool is unavailable or not read-only.")
-        tool = build_mcp_agent_tool(resolved[0], scope.settings, "read_only")
+        tool = build_mcp_agent_tool(
+            resolved[0],
+            scope.settings,
+            scope.run.agent_id,
+            "read_only",
+        )
         metadata = agent_tool_metadata(tool)
         call: PendingToolCall = {
             "id": f"workflow-{node.id}",

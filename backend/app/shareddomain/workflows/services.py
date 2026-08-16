@@ -5,11 +5,13 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.agents import Agent
+from app.entities.tools import ApplicationToolBinding
 from app.entities.user import User
 from app.entities.workflows import WorkflowDefinition, WorkflowVersion
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
+from app.infrastructure.repositories import tools as tools_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.ports.model_registry import get_registered_model_by_id
 from app.schemas.workflow import (
@@ -95,6 +97,7 @@ async def validate_workflow_resources(
     actor: User,
     workspace_role: str | None,
     default_model_id: str | None = None,
+    binding_application_id: str | None = None,
 ) -> WorkflowGraph:
     try:
         parsed = validate_graph(graph)
@@ -176,6 +179,9 @@ async def validate_workflow_resources(
             agent.workspace_id,
             mcp_tools,
             strict=True,
+            actor=actor if binding_application_id is None else None,
+            workspace_role=workspace_role,
+            application_id=binding_application_id,
         )
         for tool in resolved:
             policy = await get_mcp_tool_policy(
@@ -253,11 +259,22 @@ async def get_or_create_definition(
 
 async def save_definition(
     db: AsyncSession,
+    agent: Agent,
     definition: WorkflowDefinition,
     graph: WorkflowGraph,
     expected_revision: int,
     actor: User,
+    workspace_role: str | None,
 ) -> WorkflowDefinition:
+    _, mcp_references = workflow_resource_references(graph)
+    resolved_mcp_tools = await resolve_mcp_tools(
+        db,
+        agent.workspace_id,
+        mcp_references,
+        strict=True,
+        actor=actor,
+        workspace_role=workspace_role,
+    )
     serialized = graph.model_dump(by_alias=True, mode="json")
     updated = await workflow_repository.update_definition_graph(
         db,
@@ -273,6 +290,21 @@ async def save_definition(
             status.HTTP_409_CONFLICT,
             "Workflow draft changed; reload it before saving.",
         )
+    await tools_repository.replace_application_tool_bindings(
+        db,
+        agent.workspace_id,
+        agent.id,
+        [
+            ApplicationToolBinding(
+                workspace_id=agent.workspace_id,
+                application_id=agent.id,
+                tool_id=item.tool_id,
+                tool_version_id=item.tool_version_id,
+                bound_by_user_id=actor.id,
+            )
+            for item in resolved_mcp_tools
+        ],
+    )
     await db.commit()
     return await workflow_repository.refresh_definition(db, updated)
 
@@ -289,7 +321,12 @@ async def publish_definition(
     if definition is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow definition not found.")
     graph = await validate_workflow_resources(
-        db, agent, definition.graph, actor, workspace_role
+        db,
+        agent,
+        definition.graph,
+        actor,
+        workspace_role,
+        binding_application_id=agent.id,
     )
     serialized = graph.model_dump(by_alias=True, mode="json")
     version = WorkflowVersion(

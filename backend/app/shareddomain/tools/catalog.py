@@ -265,14 +265,14 @@ def legacy_mcp_policy_mode(leaf: McpCatalogLeaf) -> str:
     if leaf.source.status != "active" or leaf.tool.status != "active":
         return "disabled"
     policy = leaf.policy
+    if policy is not None and policy.approval == "disabled":
+        return "disabled"
     if (
         policy is None
         or policy.tool_version_id != leaf.version.id
         or policy.definition_hash != leaf.version.definition_hash
     ):
         return "approval_required"
-    if policy.approval == "disabled":
-        return "disabled"
     if policy.approval == "auto" and policy.effect == "external_read":
         return "read_only"
     return "approval_required"

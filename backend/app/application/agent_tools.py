@@ -288,6 +288,8 @@ def build_knowledge_search_tool(
 
 
 def mcp_function_name(tool: ResolvedMcpTool) -> str:
+    if tool.function_name:
+        return tool.function_name
     name = tool.definition.name
     stem = re.sub(r"[^a-zA-Z0-9_-]", "_", name).strip("_")[:40] or "tool"
     digest = hashlib.sha256(f"{tool.server.id}:{name}".encode()).hexdigest()[:8]
@@ -297,6 +299,7 @@ def mcp_function_name(tool: ResolvedMcpTool) -> str:
 def build_mcp_agent_tool(
     tool: ResolvedMcpTool,
     settings: Settings,
+    application_id: str,
     policy_mode: str | None = None,
 ) -> StructuredTool:
     definition = tool.definition
@@ -331,6 +334,7 @@ def build_mcp_agent_tool(
                 tool.server.workspace_id,
                 [reference],
                 strict=False,
+                application_id=application_id,
             )
             if not current_tools:
                 return AgentToolResult(

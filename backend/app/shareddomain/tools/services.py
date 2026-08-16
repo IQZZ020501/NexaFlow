@@ -19,7 +19,10 @@ from app.entities.tools import McpServer, McpToolPolicy, ToolPolicy, ToolSource
 from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.repositories import mcp as mcp_repository
+from app.infrastructure.repositories import resource_permission as permission_repository
 from app.infrastructure.repositories import tools as tools_repository
+from app.infrastructure.repositories import user as user_repository
+from app.infrastructure.repositories import workspace as workspace_repository
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.mcp_stdio import (
     McpStdioConfig,
@@ -65,6 +68,9 @@ from app.shareddomain.tools.permissions import (
 class ResolvedMcpTool:
     server: McpServer
     definition: McpTool
+    tool_id: str = ""
+    tool_version_id: str = ""
+    function_name: str = ""
 
 
 def mcp_tool_definition_hash(definition: McpTool) -> str:
@@ -509,7 +515,14 @@ async def resolve_mcp_tools(
     references: list[dict[str, str]],
     *,
     strict: bool,
+    actor: User | None = None,
+    workspace_role: str | None = None,
+    application_id: str | None = None,
 ) -> list[ResolvedMcpTool]:
+    if actor is not None and application_id is not None:
+        raise ValueError("Resolve MCP Tools by actor or application, not both.")
+    if references and actor is None and application_id is None:
+        raise ValueError("MCP Tool resolution requires an authorization context.")
     pairs = [(item["server_id"], item["tool_name"]) for item in references]
     if len(set(pairs)) != len(pairs):
         raise HTTPException(
@@ -542,10 +555,64 @@ async def resolve_mcp_tools(
                     "Agent MCP tool is not available.",
                 )
             continue
+        try:
+            authorization_actor = actor
+            authorization_role = workspace_role
+            if application_id is not None:
+                binding = await tools_repository.get_application_tool_binding(
+                    db,
+                    workspace_id,
+                    application_id,
+                    leaf.tool.id,
+                )
+                if (
+                    binding is None
+                    or binding.tool_version_id != leaf.version.id
+                ):
+                    raise HTTPException(status.HTTP_404_NOT_FOUND, "Tool not found.")
+                authorization_actor = await user_repository.get_user_by_id(
+                    db,
+                    binding.bound_by_user_id,
+                )
+                membership = (
+                    await workspace_repository.get_workspace_membership(
+                        db,
+                        workspace_id,
+                        binding.bound_by_user_id,
+                    )
+                    if authorization_actor is not None
+                    else None
+                )
+                authorization_role = membership.role if membership is not None else None
+            if authorization_actor is not None:
+                grant = await permission_repository.get_user_grant(
+                    db,
+                    workspace_id,
+                    "tool",
+                    leaf.tool.id,
+                    authorization_actor.id,
+                )
+                require_tool_use(
+                    evaluate_tool_authorization(
+                        leaf.tool,
+                        authorization_actor,
+                        authorization_role,
+                        grant,
+                    )
+                )
+            elif application_id is not None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Tool not found.")
+        except HTTPException:
+            if strict:
+                raise
+            continue
         resolved.append(
             ResolvedMcpTool(
                 server=server,
                 definition=mcp_catalog_leaf_definition(leaf),
+                tool_id=leaf.tool.id,
+                tool_version_id=leaf.version.id,
+                function_name=leaf.tool.function_name,
             )
         )
     return resolved

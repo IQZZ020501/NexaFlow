@@ -265,6 +265,7 @@ class DurableToolLedger:
                             }
                         ],
                         strict=False,
+                        application_id=self.run.agent_id,
                     )
                     if resolved_tools:
                         current_definition_hash = mcp_tool_definition_hash(
@@ -470,6 +471,7 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
             run.workspace_id,
             run.mcp_tools,
             strict=False,
+            application_id=run.agent_id,
         )
         mcp_tools: list[tuple[ResolvedMcpTool, str]] = []
         for tool in resolved_mcp_tools:
@@ -673,7 +675,7 @@ async def _execute_claimed_agent_run(
     if knowledge_tool is not None and run.knowledge_query_mode == "agentic":
         tools.append(knowledge_tool)
     tools.extend(
-        build_mcp_agent_tool(tool, settings, policy_mode)
+        build_mcp_agent_tool(tool, settings, run.agent_id, policy_mode)
         for tool, policy_mode in scope.mcp_tools
     )
     from app.application.agent_runs import execution_messages
