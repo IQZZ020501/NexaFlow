@@ -169,9 +169,10 @@ def test_tool_snapshot_is_an_immutable_internal_contract() -> None:
 
 def test_tool_contracts_deep_freeze_nested_json() -> None:
     import json
+    from copy import copy, deepcopy
     from operator import setitem
 
-    from app.entities.tools import ToolSnapshot
+    from app.entities.tools import ToolSnapshot, validate_tool_json_schema
     from app.ports.tool_runtime import ToolRuntimeResult
 
     input_schema = {
@@ -272,6 +273,45 @@ def test_tool_contracts_deep_freeze_nested_json() -> None:
         result.usage,
     ):
         json.loads(json.dumps(value))
+
+    for value in (
+        snapshot.input_schema,
+        snapshot.input_schema["required"],
+    ):
+        assert copy(value) is value
+        assert deepcopy(value) is value
+    assert validate_tool_json_schema(snapshot.input_schema) == snapshot.input_schema
+
+
+def test_freeze_json_rejects_non_json_values() -> None:
+    from app.entities.tools import freeze_json
+
+    source = {
+        "values": (None, False, "text", 1, 1.5),
+        "nested": [{"ok": True}],
+    }
+    frozen = freeze_json(source)
+    assert frozen == {
+        "values": [None, False, "text", 1, 1.5],
+        "nested": [{"ok": True}],
+    }
+    assert frozen is not source
+    assert frozen["nested"] is not source["nested"]
+
+    for invalid in (
+        {1: "non-string key"},
+        {"value": {1, 2}},
+        {"value": b"bytes"},
+        {"value": object()},
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ):
+        try:
+            freeze_json(invalid)
+        except ValueError:
+            continue
+        raise AssertionError(f"Non-JSON Tool value was accepted: {invalid!r}")
 
 
 def test_tool_adapter_contract_is_provider_neutral() -> None:
@@ -577,6 +617,16 @@ def test_python_tool_schema_validation_enforces_limits() -> None:
                 "value": {
                     "type": "string",
                     "maxLength": MAX_TOOL_STRING_LENGTH + 1,
+                }
+            },
+        },
+        {
+            "type": "object",
+            "properties": {
+                "value": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "pattern": "^(a+)+$",
                 }
             },
         },
@@ -3986,6 +4036,7 @@ def main() -> None:
     test_tool_ref_requires_stable_ids()
     test_tool_snapshot_is_an_immutable_internal_contract()
     test_tool_contracts_deep_freeze_nested_json()
+    test_freeze_json_rejects_non_json_values()
     test_tool_adapter_contract_is_provider_neutral()
     test_public_tool_responses_exclude_execution_details()
     test_builtin_tool_summary_accepts_system_owner()

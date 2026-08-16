@@ -1,8 +1,8 @@
 import json
 from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
+from math import isfinite
 from typing import Any, Literal
 
 from jsonschema import Draft202012Validator
@@ -30,6 +30,12 @@ class FrozenJsonDict(dict[str, Any]):
     def __init__(self, values: Any = ()) -> None:
         pass
 
+    def __copy__(self) -> "FrozenJsonDict":
+        return self
+
+    def __deepcopy__(self, _memo: dict[int, Any]) -> "FrozenJsonDict":
+        return self
+
     def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
         raise TypeError("Frozen JSON cannot be modified.")
 
@@ -54,6 +60,12 @@ class FrozenJsonList(list[Any]):
     def __init__(self, values: Any = ()) -> None:
         pass
 
+    def __copy__(self) -> "FrozenJsonList":
+        return self
+
+    def __deepcopy__(self, _memo: dict[int, Any]) -> "FrozenJsonList":
+        return self
+
     def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
         raise TypeError("Frozen JSON cannot be modified.")
 
@@ -73,12 +85,18 @@ class FrozenJsonList(list[Any]):
 
 def freeze_json(value: Any) -> Any:
     if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("Tool JSON object keys must be strings.")
         return FrozenJsonDict(
             (key, freeze_json(child)) for key, child in value.items()
         )
     if isinstance(value, (list, tuple)):
         return FrozenJsonList(freeze_json(child) for child in value)
-    return value
+    if value is None or type(value) in (bool, str, int):
+        return value
+    if type(value) is float and isfinite(value):
+        return value
+    raise ValueError("Tool JSON contains a non-JSON value.")
 
 
 @dataclass(frozen=True)
@@ -193,7 +211,7 @@ def validate_tool_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if contains_reference(schema):
         raise ValueError("Tool schemas cannot contain references.")
 
-    restricted = deepcopy(schema)
+    restricted = json.loads(json.dumps(schema, ensure_ascii=False, allow_nan=False))
     property_count = 0
 
     def schema_types(node: dict[str, Any]) -> set[str]:
@@ -233,6 +251,7 @@ def validate_tool_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
             for keyword in (
                 "$defs",
                 "definitions",
+                "pattern",
                 "patternProperties",
                 "unevaluatedProperties",
                 "dependentSchemas",
@@ -248,7 +267,7 @@ def validate_tool_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
                 "contains",
             )
         ):
-            raise ValueError("Tool schema uses an unsupported composition keyword.")
+            raise ValueError("Tool schema uses an unsupported keyword.")
 
         types = schema_types(node)
         if "object" in types:
