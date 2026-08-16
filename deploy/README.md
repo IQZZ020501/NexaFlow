@@ -1,8 +1,8 @@
 # NexaFlow container deployment
 
 Runs the full stack with Docker Compose: PostgreSQL, Redis, Qdrant, FastAPI
-(`api`), Celery worker and beat, the isolated Python sandbox, and the Next.js
-frontend.
+(`api`), a Celery worker with embedded Beat, the isolated Python sandbox, and
+the Next.js frontend.
 
 ## Quick start
 
@@ -48,8 +48,7 @@ uploaded files.
 | `redis` | redis:7-alpine | — |
 | `qdrant` | qdrant/qdrant:v1.19.0 | vector database |
 | `api` | `deploy/dockerfiles/backend.Dockerfile` | uvicorn |
-| `worker` | same backend image | celery worker |
-| `beat` | same backend image | celery beat |
+| `worker` | same backend image | celery worker with embedded Beat |
 | `sandbox` | `deploy/dockerfiles/sandbox.Dockerfile` | isolated Python runner over a Unix socket |
 | `frontend` | `deploy/dockerfiles/frontend.Dockerfile` | Next.js standalone |
 
@@ -72,9 +71,10 @@ network respectively.
 `JWT_EXPIRES_MINUTES` controls access token lifetime;
 `REFRESH_TOKEN_EXPIRES_DAYS` controls persisted refresh sessions.
 `AGENT_EXECUTOR_LEASE_SECONDS` and `AGENT_EXECUTOR_HEARTBEAT_SECONDS` control
-Agent worker takeover; keep the heartbeat below half the lease. Keep exactly
-one `beat` instance running so queued and expired Knowledge tasks and Agent
-runs are redispatched.
+Agent worker takeover; keep the heartbeat below half the lease. The Compose
+worker embeds Beat, so keep that combined worker at one instance and do not run
+a separate Beat process. It redispatches queued and expired Knowledge tasks and
+Agent runs.
 Celery uses `solo` automatically on macOS (HTTPS trust evaluation is unsafe
 after a multithreaded process fork) and Windows (`prefork` needs `os.fork()`,
 which Windows lacks); Linux containers keep `prefork`.

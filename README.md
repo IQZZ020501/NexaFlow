@@ -67,8 +67,7 @@ flowchart LR
     API --> Redis[(Redis)]
     API --> Qdrant[(Qdrant)]
     API --> Storage[("Shared upload storage")]
-    Redis --> Worker[Celery worker]
-    Beat[Celery beat] --> Redis
+    Redis <--> Worker["Celery worker + embedded Beat"]
     Worker --> DB
     Worker --> Qdrant
     Worker --> Storage[(Shared upload storage)]
@@ -164,18 +163,11 @@ uv sync --dev --frozen
 make dev
 ```
 
-分别在两个终端启动 Worker 和 Beat：
+在另一个终端启动合并后的 Worker 与 Beat：
 
 ```bash
-# 终端 A
 cd backend
 make worker
-```
-
-```bash
-# 终端 B
-cd backend
-uv run celery -A app.infrastructure.celery:celery_app beat --loglevel=INFO
 ```
 
 API 默认运行在 <http://127.0.0.1:8000>。需要测试 Python Code 节点时，可以改用 Compose Worker（不要同时运行 `make worker`）：
@@ -247,7 +239,7 @@ python3 -m sandbox.self_check
 
 ## 安全说明
 
-- API、Worker 与 Beat 必须连接同一 PostgreSQL、Redis、Qdrant，并共享上传存储和加密密钥。
+- API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL、Redis、Qdrant，并共享上传存储和加密密钥；不要同时运行第二个 Beat。
 - 远程 MCP 默认拒绝私网与回环地址；只有明确可信的部署才应启用 `MCP_ALLOW_PRIVATE_NETWORKS`。
 - stdio MCP 配置允许工作空间管理员启动后端进程，因此只应向可信管理员开放管理权限。
 - Python Code 节点必须运行在独立沙箱服务中；不要把沙箱 socket 暴露给 API 或宿主外部网络。

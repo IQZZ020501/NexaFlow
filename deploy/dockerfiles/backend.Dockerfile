@@ -1,4 +1,4 @@
-# Backend image: FastAPI API, Celery worker, and beat share this image;
+# Backend image: FastAPI API and the Celery worker with embedded Beat share this image;
 # the container command selects the process (see deploy/docker-compose.yml).
 FROM python:3.11-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \

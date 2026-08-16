@@ -18,7 +18,7 @@ migrate:
 	uv run python -m alembic upgrade head
 
 worker:
-	uv run celery -A app.infrastructure.celery:celery_app worker --loglevel=INFO
+	uv run celery -A app.infrastructure.celery:celery_app worker --beat --loglevel=INFO
 
 coverage:
 	scripts/coverage.sh
