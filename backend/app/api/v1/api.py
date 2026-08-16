@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     mcp_servers,
     models,
     teams,
+    tools,
     workflows,
     workflow_access,
     workspaces,
@@ -33,6 +34,7 @@ api_router.include_router(knowledge_lifecycle.router)
 api_router.include_router(knowledge_retrieval.router)
 api_router.include_router(models.router)
 api_router.include_router(mcp_servers.router)
+api_router.include_router(tools.router)
 api_router.include_router(agents.router)
 api_router.include_router(workflows.router)
 api_router.include_router(agent_access.public_router)

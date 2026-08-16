@@ -2427,9 +2427,14 @@ def test_celery() -> None:
         "recover-knowledge-storage-cleanups",
         "recover-upload-storage-cleanups",
         "recover-agent-runs",
+        "recover-tool-invocations",
     }
     assert beat["recover-knowledge-tasks"]["schedule"] == 30.0
     assert beat["recover-agent-runs"]["schedule"] == 30.0
+    assert beat["recover-tool-invocations"] == {
+        "task": "app.tools.recover",
+        "schedule": 30.0,
+    }
     assert app.conf.accept_content == ["json"]
     assert app.conf.task_acks_late is True
 
@@ -3322,8 +3327,12 @@ def test_retained_tool_user_reference_query() -> None:
     invocation_db.scalar.side_effect = [None, "invocation-1"]
     assert run(tools_repo.has_retained_user_audit_references(invocation_db, "u1"))
 
+    draft_db = AsyncMock()
+    draft_db.scalar.side_effect = [None, None, "draft-1"]
+    assert run(tools_repo.has_retained_user_audit_references(draft_db, "u1"))
+
     empty_db = AsyncMock()
-    empty_db.scalar.side_effect = [None, None]
+    empty_db.scalar.side_effect = [None, None, None]
     assert not run(tools_repo.has_retained_user_audit_references(empty_db, "u1"))
 
 

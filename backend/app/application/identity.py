@@ -355,7 +355,7 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
     if await tools_repository.has_retained_user_audit_references(db, user.id):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "User is retained by Tool binding or invocation audit records.",
+            "User is retained by Tool binding or invocation audit records, or a draft.",
         )
     record_audit_log(
         db,

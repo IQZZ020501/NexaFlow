@@ -132,6 +132,9 @@ class ToolSnapshot:
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None
     definition_hash: str
+    policy_id: str
+    policy_revision: int
+    bound_by_user_id: str
     approval: ToolApproval
     effect: ToolEffect
     allowed_access_sources: tuple[str, ...]
@@ -141,6 +144,19 @@ class ToolSnapshot:
 
     def __post_init__(self) -> None:
         ToolRef(tool_id=self.tool_id, version_id=self.version_id)
+        if (
+            not isinstance(self.policy_id, str)
+            or not self.policy_id.strip()
+            or not isinstance(self.policy_revision, int)
+            or isinstance(self.policy_revision, bool)
+            or self.policy_revision < 1
+        ):
+            raise ValueError("Tool snapshots require a policy revision.")
+        if (
+            not isinstance(self.bound_by_user_id, str)
+            or not self.bound_by_user_id.strip()
+        ):
+            raise ValueError("Tool snapshots require a binding user.")
         object.__setattr__(self, "input_schema", freeze_json(self.input_schema))
         object.__setattr__(self, "output_schema", freeze_json(self.output_schema))
         object.__setattr__(self, "execution_spec", freeze_json(self.execution_spec))

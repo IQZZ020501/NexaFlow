@@ -10,7 +10,14 @@ from fastapi import HTTPException, status
 from mcp.types import Tool as McpTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.tools import Tool, ToolAccess, ToolPolicy, ToolSource, ToolVersion
+from app.entities.tools import (
+    Tool,
+    ToolAccess,
+    ToolDraft,
+    ToolPolicy,
+    ToolSource,
+    ToolVersion,
+)
 from app.entities.user import User
 from app.infrastructure.model_utils import utc_now
 from app.shareddomain.tools.permissions import (
@@ -223,6 +230,7 @@ class ToolCatalogItem:
     tool: Tool
     source: ToolSource
     version: ToolVersion | None
+    draft: ToolDraft | None
     access: ToolAccess
     permission: ToolPermissionLabel | None
 
@@ -232,6 +240,7 @@ class ToolCatalogDetail:
     tool: Tool
     source: ToolSource
     version: ToolVersion | None
+    draft: ToolDraft | None
     policy: ToolPolicy | None
     authorization: ToolAuthorization
 
@@ -328,7 +337,7 @@ async def list_tool_catalog(
         offset,
     )
     items: list[ToolCatalogItem] = []
-    for tool, source, version, grant in rows:
+    for tool, source, version, draft, grant in rows:
         authorization = evaluate_tool_authorization(
             tool,
             actor,
@@ -340,6 +349,7 @@ async def list_tool_catalog(
                 tool=tool,
                 source=source,
                 version=version,
+                draft=draft,
                 access=authorization.access,
                 permission=authorization.permission,
             )
@@ -364,7 +374,7 @@ async def get_tool_catalog_detail(
     )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tool not found.")
-    tool, source, version, policy, grant = row
+    tool, source, version, draft, policy, grant = row
     authorization = require_tool_view(
         evaluate_tool_authorization(tool, actor, workspace_role, grant)
     )
@@ -372,6 +382,7 @@ async def get_tool_catalog_detail(
         tool=tool,
         source=source,
         version=version,
+        draft=draft,
         policy=policy,
         authorization=authorization,
     )

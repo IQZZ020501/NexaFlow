@@ -95,7 +95,7 @@ def validate_tool_permission(permission: str) -> None:
         )
 
 
-async def _require_managed_tool(
+async def require_managed_tool(
     db: AsyncSession,
     workspace_id: str,
     tool_id: str,
@@ -135,7 +135,7 @@ async def list_tool_permissions(
 ) -> list[ToolPermissionEntry]:
     from app.infrastructure.repositories import resource_permission as repository
 
-    tool = await _require_managed_tool(
+    tool = await require_managed_tool(
         db,
         workspace_id,
         tool_id,
@@ -165,7 +165,7 @@ async def upsert_tool_permission(
 ) -> ToolPermissionEntry:
     from app.infrastructure.repositories import resource_permission as repository
 
-    tool = await _require_managed_tool(
+    tool = await require_managed_tool(
         db,
         workspace_id,
         tool_id,
@@ -238,7 +238,7 @@ async def revoke_tool_permission(
 ) -> None:
     from app.infrastructure.repositories import resource_permission as repository
 
-    tool = await _require_managed_tool(
+    tool = await require_managed_tool(
         db,
         workspace_id,
         tool_id,
@@ -279,6 +279,7 @@ __all__ = [
     "has_tool_workspace_access",
     "list_tool_permissions",
     "require_tool_manage",
+    "require_managed_tool",
     "require_tool_use",
     "require_tool_view",
     "revoke_tool_permission",

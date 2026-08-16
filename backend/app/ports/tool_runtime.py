@@ -7,11 +7,16 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from app.entities.tools import ToolKind, ToolRef, ToolSnapshot, freeze_json
 
 
+class ToolAdapterBusy(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class ToolInvocationContext:
     workspace_id: str
-    root_run_id: str
-    run_id: str
+    origin: Literal["test", "agent", "workflow"]
+    root_run_id: str | None
+    run_id: str | None
     invocation_id: str
     execution_user_id: str
     access_source: str
@@ -48,6 +53,7 @@ class ToolAdapter(Protocol):
 
 __all__ = [
     "ToolAdapter",
+    "ToolAdapterBusy",
     "ToolInvocationContext",
     "ToolRef",
     "ToolRuntimeResult",

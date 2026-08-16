@@ -2092,6 +2092,510 @@ async def assert_tool_policy_revision_compare_and_swap(workspace_id: str) -> Non
         await second_db.rollback()
 
 
+async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
+    from datetime import timedelta
+
+    from app.application.tool_runtime import (
+        execute_tool_invocation,
+        list_recoverable_tool_test_invocation_ids,
+        queue_tool_invocation,
+    )
+    from app.infrastructure.config import Settings
+    from app.infrastructure.model_utils import utc_now
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+    from app.ports.tool_runtime import (
+        ToolAdapterBusy,
+        ToolInvocationContext,
+        ToolRuntimeResult,
+    )
+    from app.shareddomain.tools.runtime import build_tool_snapshot
+
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        tool = next(
+            item
+            for item in await tool_repository.list_tools(db, workspace_id)
+            if item.stable_key == "current_time"
+        )
+        source = await tool_repository.get_tool_source(db, workspace_id, tool.source_id)
+        version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            tool.current_version_id or "",
+        )
+        policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
+        assert source is not None and version is not None and policy is not None
+        snapshot = build_tool_snapshot(tool, source, version, policy, actor.id)
+        context = ToolInvocationContext(
+            workspace_id=workspace_id,
+            origin="test",
+            root_run_id=None,
+            run_id=None,
+            invocation_id="durable-runtime",
+            execution_user_id=actor.id,
+            access_source="console",
+            deadline_at=utc_now() + timedelta(seconds=30),
+            idempotency_key=f"durable-runtime:{workspace_id}",
+        )
+        rolled_back_context = ToolInvocationContext(
+            **{
+                **context.__dict__,
+                "invocation_id": "rolled-back-runtime",
+                "idempotency_key": f"rolled-back-runtime:{workspace_id}",
+            }
+        )
+        rolled_back = await queue_tool_invocation(
+            db,
+            snapshot,
+            {},
+            rolled_back_context,
+        )
+        await db.rollback()
+
+    async with get_session_factory()() as db:
+        assert await tool_repository.get_tool_invocation(
+            db,
+            workspace_id,
+            rolled_back.id,
+        ) is None
+        invocation = await queue_tool_invocation(db, snapshot, {}, context)
+        await db.commit()
+    async with get_session_factory()() as db:
+        invocation = await queue_tool_invocation(db, snapshot, {}, context)
+        duplicate = await queue_tool_invocation(db, snapshot, {}, context)
+        assert duplicate.id == invocation.id
+        await db.commit()
+
+    class FakeAdapter:
+        kind = "builtin"
+
+        def __init__(self, data: dict[str, str]) -> None:
+            self.data = data
+            self.calls = 0
+
+        async def invoke(self, snapshot, arguments, context):
+            self.calls += 1
+            return ToolRuntimeResult(
+                ok=True,
+                data=self.data,
+                summary="Done.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={},
+            )
+
+    adapter = FakeAdapter({"iso8601": "2026-08-17T00:00:00+00:00"})
+    settings = Settings.from_env(require_bootstrap=False)
+    first = await execute_tool_invocation(
+        invocation.id,
+        settings,
+        worker_task_id="runtime-worker-1",
+        adapter=adapter,
+    )
+    assert first.ok is True
+    assert adapter.calls == 1
+
+    async with get_session_factory()() as db:
+        tool = await tool_repository.get_tool(db, workspace_id, snapshot.tool_id)
+        assert tool is not None
+        tool.status = "disabled"
+        await tool_repository.save_tool(db, tool)
+        await db.commit()
+
+    replay = await execute_tool_invocation(
+        invocation.id,
+        settings,
+        worker_task_id="runtime-worker-2",
+        adapter=adapter,
+    )
+    assert replay.ok is True
+    assert adapter.calls == 1
+
+    disabled_context = ToolInvocationContext(
+        **{
+            **context.__dict__,
+            "invocation_id": "disabled-runtime",
+            "idempotency_key": f"disabled-runtime:{workspace_id}",
+        }
+    )
+    async with get_session_factory()() as db:
+        disabled_invocation = await queue_tool_invocation(
+            db,
+            snapshot,
+            {},
+            disabled_context,
+        )
+        await db.commit()
+    disabled = await execute_tool_invocation(
+        disabled_invocation.id,
+        settings,
+        worker_task_id="runtime-worker-3",
+        adapter=adapter,
+    )
+    assert disabled.ok is False
+    assert disabled.error_code == "tool_disabled"
+    assert adapter.calls == 1
+
+    async with get_session_factory()() as db:
+        tool = await tool_repository.get_tool(db, workspace_id, snapshot.tool_id)
+        assert tool is not None
+        tool.status = "active"
+        await tool_repository.save_tool(db, tool)
+        await db.commit()
+        invalid_context = ToolInvocationContext(
+            **{
+                **context.__dict__,
+                "invocation_id": "invalid-output-runtime",
+                "idempotency_key": f"invalid-output-runtime:{workspace_id}",
+            }
+        )
+        invalid_invocation = await queue_tool_invocation(
+            db,
+            snapshot,
+            {},
+            invalid_context,
+        )
+        await db.commit()
+    invalid_adapter = FakeAdapter({})
+    invalid = await execute_tool_invocation(
+        invalid_invocation.id,
+        settings,
+        worker_task_id="runtime-worker-4",
+        adapter=invalid_adapter,
+    )
+    assert invalid.ok is False
+    assert invalid.error_code == "invalid_tool_output"
+
+    async with get_session_factory()() as db:
+        concurrent_context = ToolInvocationContext(
+            **{
+                **context.__dict__,
+                "invocation_id": "concurrent-runtime",
+                "idempotency_key": f"concurrent-runtime:{workspace_id}",
+            }
+        )
+        concurrent_invocation = await queue_tool_invocation(
+            db,
+            snapshot,
+            {},
+            concurrent_context,
+        )
+        await db.commit()
+
+    class BlockingAdapter(FakeAdapter):
+        def __init__(self) -> None:
+            super().__init__({"iso8601": "2026-08-17T00:00:00+00:00"})
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def invoke(self, snapshot, arguments, context):
+            self.calls += 1
+            self.started.set()
+            await self.release.wait()
+            return ToolRuntimeResult(
+                ok=True,
+                data=self.data,
+                summary="Done.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={},
+            )
+
+    blocking = BlockingAdapter()
+    first_worker = asyncio.create_task(
+        execute_tool_invocation(
+            concurrent_invocation.id,
+            settings,
+            worker_task_id="concurrent-worker-1",
+            adapter=blocking,
+        )
+    )
+    await blocking.started.wait()
+    try:
+        await execute_tool_invocation(
+            concurrent_invocation.id,
+            settings,
+            worker_task_id="concurrent-worker-2",
+            adapter=blocking,
+        )
+    except Exception as exc:
+        from app.application.tool_runtime import ToolInvocationBusy
+
+        assert isinstance(exc, ToolInvocationBusy)
+    else:
+        raise AssertionError("A second worker must not execute a claimed invocation.")
+    blocking.release.set()
+    assert (await first_worker).ok is True
+    assert blocking.calls == 1
+
+    async with get_session_factory()() as db:
+        busy_context = ToolInvocationContext(
+            **{
+                **context.__dict__,
+                "invocation_id": "busy-runtime",
+                "idempotency_key": f"busy-runtime:{workspace_id}",
+            }
+        )
+        busy_invocation = await queue_tool_invocation(db, snapshot, {}, busy_context)
+        await db.commit()
+
+    class BusyAdapter:
+        kind = "builtin"
+
+        async def invoke(self, snapshot, arguments, context):
+            raise ToolAdapterBusy("busy")
+
+    for attempt in range(2):
+        try:
+            await execute_tool_invocation(
+                busy_invocation.id,
+                settings,
+                worker_task_id=f"busy-worker-{attempt}",
+                adapter=BusyAdapter(),
+            )
+        except Exception as exc:
+            from app.application.tool_runtime import ToolInvocationBusy
+
+            assert isinstance(exc, ToolInvocationBusy)
+        else:
+            raise AssertionError("A busy provider must requeue before the last attempt.")
+    exhausted = await execute_tool_invocation(
+        busy_invocation.id,
+        settings,
+        worker_task_id="busy-worker-2",
+        adapter=BusyAdapter(),
+    )
+    assert exhausted.ok is False
+    assert exhausted.error_code == "tool_attempts_exhausted"
+    async with get_session_factory()() as db:
+        stored_busy = await tool_repository.get_tool_invocation(
+            db,
+            workspace_id,
+            busy_invocation.id,
+        )
+        assert stored_busy is not None
+        assert stored_busy.status == "failed"
+        assert stored_busy.attempts == stored_busy.max_attempts == 3
+
+        drift_context = ToolInvocationContext(
+            **{
+                **context.__dict__,
+                "invocation_id": "policy-drift-runtime",
+                "idempotency_key": f"policy-drift-runtime:{workspace_id}",
+            }
+        )
+        drift_invocation = await queue_tool_invocation(db, snapshot, {}, drift_context)
+        await db.commit()
+        policy = await tool_repository.get_tool_policy(db, workspace_id, snapshot.tool_id)
+        assert policy is not None
+        expected_revision = policy.revision
+        policy.revision += 1
+        policy.updated_at = utc_now()
+        assert await tool_repository.update_tool_policy_if_revision(
+            db,
+            policy,
+            expected_revision,
+        ) is not None
+        await db.commit()
+    drifted = await execute_tool_invocation(
+        drift_invocation.id,
+        settings,
+        worker_task_id="drift-worker",
+        adapter=adapter,
+    )
+    assert drifted.ok is False
+    assert drifted.error_code == "tool_policy_changed"
+
+    async with get_session_factory()() as db:
+        tool = await tool_repository.get_tool(db, workspace_id, snapshot.tool_id)
+        source = await tool_repository.get_tool_source(
+            db,
+            workspace_id,
+            snapshot.source_id,
+        )
+        version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            snapshot.version_id,
+        )
+        policy = await tool_repository.get_tool_policy(db, workspace_id, snapshot.tool_id)
+        assert tool is not None and source is not None and version is not None
+        assert policy is not None
+        expected_revision = policy.revision
+        policy.revision += 1
+        policy.effect = "external_write"
+        policy.updated_at = utc_now()
+        assert await tool_repository.update_tool_policy_if_revision(
+            db,
+            policy,
+            expected_revision,
+        ) is not None
+        write_snapshot = build_tool_snapshot(tool, source, version, policy, actor.id)
+        write_context = ToolInvocationContext(
+            **{
+                **context.__dict__,
+                "invocation_id": "expired-write-runtime",
+                "idempotency_key": f"expired-write-runtime:{workspace_id}",
+            }
+        )
+        write_invocation = await queue_tool_invocation(
+            db,
+            write_snapshot,
+            {},
+            write_context,
+        )
+        write_invocation.status = "running"
+        write_invocation.attempts = write_invocation.max_attempts
+        write_invocation.worker_task_id = "crashed-write-worker"
+        write_invocation.lease_expires_at = utc_now() - timedelta(seconds=1)
+        write_invocation.started_at = write_invocation.lease_expires_at
+        await tool_repository.save_tool_invocation(db, write_invocation)
+        await db.commit()
+    assert write_invocation.id in await list_recoverable_tool_test_invocation_ids()
+    calls_before_recovery = adapter.calls
+    recovered_write = await execute_tool_invocation(
+        write_invocation.id,
+        settings,
+        worker_task_id="write-recovery-worker",
+        adapter=adapter,
+    )
+    assert recovered_write.ok is False
+    assert recovered_write.outcome == "uncertain"
+    assert recovered_write.error_code == "tool_outcome_uncertain"
+    assert adapter.calls == calls_before_recovery
+
+
+async def assert_python_tool_lifecycle(workspace_id: str) -> None:
+    from datetime import timedelta
+
+    from app.application.tool_runtime import execute_tool_invocation, queue_tool_invocation
+    from app.infrastructure.config import Settings
+    from app.infrastructure.model_utils import utc_now
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+    from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
+    from app.shareddomain.tools.python_tools import (
+        build_python_test_snapshot,
+        create_python_tool,
+        publish_python_tool,
+        update_python_tool_draft,
+    )
+
+    input_schema = {
+        "type": "object",
+        "properties": {"value": {"type": "string", "maxLength": 64}},
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {"value": {"type": "string", "maxLength": 64}},
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        tool, draft = await create_python_tool(
+            db,
+            workspace_id,
+            actor,
+            "admin",
+            display_name="Uppercase value",
+            description="Uppercase one value.",
+            input_schema=input_schema,
+            output_schema=output_schema,
+            code="result = {'value': inputs['value'].upper()}",
+        )
+        assert tool.current_version_id is None
+        assert draft.revision == 1
+        draft = await update_python_tool_draft(
+            db,
+            workspace_id,
+            tool.id,
+            actor,
+            "admin",
+            expected_revision=1,
+            display_name="Uppercase value",
+            description="Uppercase one value safely.",
+            input_schema=input_schema,
+            output_schema=output_schema,
+            code="result = {'value': inputs['value'].upper()}",
+        )
+        assert draft.revision == 2
+        snapshot = await build_python_test_snapshot(
+            db,
+            workspace_id,
+            tool.id,
+            actor,
+            "admin",
+        )
+        stored_tool = await tool_repository.get_tool(db, workspace_id, tool.id)
+        assert stored_tool is not None and stored_tool.current_version_id is None
+        context = ToolInvocationContext(
+            workspace_id=workspace_id,
+            origin="test",
+            root_run_id=None,
+            run_id=None,
+            invocation_id=f"python-test:{tool.id}",
+            execution_user_id=actor.id,
+            access_source="console",
+            deadline_at=utc_now() + timedelta(seconds=30),
+            idempotency_key=f"python-test:{tool.id}",
+        )
+        invocation = await queue_tool_invocation(
+            db,
+            snapshot,
+            {"value": "nexa"},
+            context,
+        )
+        await db.commit()
+
+    class PythonFakeAdapter:
+        kind = "python"
+
+        async def invoke(self, snapshot, arguments, context):
+            return ToolRuntimeResult(
+                ok=True,
+                data={"value": arguments["value"].upper()},
+                summary="Done.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={},
+            )
+
+    result = await execute_tool_invocation(
+        invocation.id,
+        Settings.from_env(require_bootstrap=False),
+        worker_task_id="python-test-worker",
+        adapter=PythonFakeAdapter(),
+    )
+    assert result.ok is True
+    assert result.data == {"value": "NEXA"}
+
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        published_tool, version, policy = await publish_python_tool(
+            db,
+            workspace_id,
+            tool.id,
+            actor,
+            "admin",
+        )
+        assert published_tool.current_version_id == snapshot.version_id == version.id
+        assert policy.tool_version_id == version.id
+        assert policy.approval == "auto"
+        assert policy.effect == "pure"
+        assert policy.parallel_safe is False
+
+
+
 def test_workspace_creation_initializes_system_catalog() -> None:
     with test_client() as client:
         _token, workspace_id = activate_admin(client)
@@ -2099,6 +2603,332 @@ def test_workspace_creation_initializes_system_catalog() -> None:
         run(assert_tool_policy_revision_compare_and_swap(workspace_id))
         run(assert_mcp_discovery_materializes_first_leaf(workspace_id))
         run(assert_mcp_server_deletion_preserves_tool_history(workspace_id))
+        run(assert_tool_runtime_is_durable(workspace_id))
+        run(assert_python_tool_lifecycle(workspace_id))
+
+
+def test_python_tool_http_lifecycle_and_private_grants() -> None:
+    input_schema = {
+        "type": "object",
+        "properties": {"value": {"type": "string", "maxLength": 64}},
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {"value": {"type": "string", "maxLength": 64}},
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+    definition = {
+        "display_name": "Uppercase value",
+        "description": "Uppercase one value.",
+        "input_schema": input_schema,
+        "output_schema": output_schema,
+        "code": "result = {'value': inputs['value'].upper()}",
+    }
+
+    with test_client() as client:
+        admin_token, workspace_id = activate_admin(client)
+        owner_id, owner_token = create_active_user(
+            client,
+            admin_token,
+            "python-tool-owner",
+        )
+        viewer_id, viewer_token = create_active_user(
+            client,
+            admin_token,
+            "python-tool-viewer",
+        )
+        stranger_id, stranger_token = create_active_user(
+            client,
+            admin_token,
+            "python-tool-stranger",
+        )
+        draft_owner_id, draft_owner_token = create_active_user(
+            client,
+            admin_token,
+            "python-draft-owner",
+        )
+        for user_id in (owner_id, viewer_id, stranger_id, draft_owner_id):
+            add_workspace_member(client, admin_token, workspace_id, user_id)
+
+        tools_url = f"/api/v1/workspaces/{workspace_id}/tools"
+        draft_only = client.post(
+            f"{tools_url}/python",
+            headers=auth_headers(draft_owner_token),
+            json={**definition, "display_name": "Draft only"},
+        )
+        assert draft_only.status_code == 201, draft_only.text
+        retained_draft_owner = client.delete(
+            f"/api/v1/admin/users/{draft_owner_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert retained_draft_owner.status_code == 409, retained_draft_owner.text
+
+        created = client.post(
+            f"{tools_url}/python",
+            headers=auth_headers(owner_token),
+            json=definition,
+        )
+        assert created.status_code == 201, created.text
+        tool = created.json()
+        tool_id = tool["id"]
+        assert tool["kind"] == "python"
+        assert tool["current_version_id"] is None
+        assert tool["draft"]["revision"] == 1
+        assert tool["draft"]["code"] == definition["code"]
+
+        owner_catalog = client.get(tools_url, headers=auth_headers(owner_token))
+        viewer_catalog = client.get(tools_url, headers=auth_headers(viewer_token))
+        stranger_catalog = client.get(tools_url, headers=auth_headers(stranger_token))
+        assert owner_catalog.status_code == 200, owner_catalog.text
+        assert tool_id in {item["id"] for item in owner_catalog.json()}
+        assert tool_id not in {item["id"] for item in viewer_catalog.json()}
+        assert tool_id not in {item["id"] for item in stranger_catalog.json()}
+
+        hidden = client.get(
+            f"{tools_url}/{tool_id}",
+            headers=auth_headers(viewer_token),
+        )
+        assert hidden.status_code == 404, hidden.text
+
+        granted = client.put(
+            f"{tools_url}/{tool_id}/permissions/{viewer_id}",
+            headers=auth_headers(owner_token),
+            json={"permission": "view"},
+        )
+        assert granted.status_code == 200, granted.text
+        assert granted.json()["permission"] == "view"
+        viewer_detail = client.get(
+            f"{tools_url}/{tool_id}",
+            headers=auth_headers(viewer_token),
+        )
+        assert viewer_detail.status_code == 200, viewer_detail.text
+        assert viewer_detail.json()["can_view"] is True
+        assert viewer_detail.json()["can_use"] is False
+        assert viewer_detail.json()["draft"] is None
+        assert "code" not in viewer_detail.text
+        permissions = client.get(
+            f"{tools_url}/{tool_id}/permissions",
+            headers=auth_headers(owner_token),
+        )
+        assert permissions.status_code == 200, permissions.text
+        assert [
+            (item["user"]["id"], item["permission"])
+            for item in permissions.json()
+        ] == [(viewer_id, "view")]
+
+        denied_test = client.post(
+            f"{tools_url}/{tool_id}/tests",
+            headers=auth_headers(viewer_token),
+            json={"arguments": {"value": "nexa"}},
+        )
+        assert denied_test.status_code == 403, denied_test.text
+        invalid_test = client.post(
+            f"{tools_url}/{tool_id}/tests",
+            headers=auth_headers(owner_token),
+            json={"arguments": {}},
+        )
+        assert invalid_test.status_code == 422, invalid_test.text
+
+        stale = client.put(
+            f"{tools_url}/{tool_id}/draft",
+            headers=auth_headers(owner_token),
+            json={**definition, "expected_revision": 99},
+        )
+        assert stale.status_code == 409, stale.text
+        updated = client.put(
+            f"{tools_url}/{tool_id}/draft",
+            headers=auth_headers(owner_token),
+            json={
+                **definition,
+                "expected_revision": 1,
+                "description": "Uppercase one value safely.",
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["revision"] == 2
+
+        from unittest.mock import AsyncMock, patch
+
+        with patch(
+            "app.application.tool_management.enqueue_tool_invocation",
+            new_callable=AsyncMock,
+        ) as dispatch:
+            queued = client.post(
+                f"{tools_url}/{tool_id}/tests",
+                headers=auth_headers(owner_token),
+                json={"arguments": {"value": "nexa"}},
+            )
+        assert queued.status_code == 202, queued.text
+        invocation = queued.json()
+        assert invocation["status"] == "queued"
+        assert dispatch.await_count == 1
+        assert dispatch.await_args.args[0] == invocation["id"]
+
+        published = client.post(
+            f"{tools_url}/{tool_id}/publish",
+            headers=auth_headers(owner_token),
+        )
+        assert published.status_code == 200, published.text
+        assert published.json()["current_version_id"]
+        assert published.json()["approval"] == "auto"
+        assert published.json()["effect"] == "pure"
+
+        upgraded = client.put(
+            f"{tools_url}/{tool_id}/permissions/{viewer_id}",
+            headers=auth_headers(owner_token),
+            json={"permission": "use"},
+        )
+        assert upgraded.status_code == 200, upgraded.text
+        viewer_detail = client.get(
+            f"{tools_url}/{tool_id}",
+            headers=auth_headers(viewer_token),
+        )
+        assert viewer_detail.json()["can_use"] is True
+
+        revoked = client.delete(
+            f"{tools_url}/{tool_id}/permissions/{viewer_id}",
+            headers=auth_headers(owner_token),
+        )
+        assert revoked.status_code == 204, revoked.text
+        assert client.get(
+            f"{tools_url}/{tool_id}",
+            headers=auth_headers(viewer_token),
+        ).status_code == 404
+
+        disabled = client.post(
+            f"{tools_url}/{tool_id}/disable",
+            headers=auth_headers(owner_token),
+        )
+        assert disabled.status_code == 200, disabled.text
+        assert disabled.json()["status"] == "disabled"
+        enabled = client.post(
+            f"{tools_url}/{tool_id}/enable",
+            headers=auth_headers(owner_token),
+        )
+        assert enabled.status_code == 200, enabled.text
+        assert enabled.json()["status"] == "active"
+
+        removed = client.delete(
+            f"{tools_url}/{tool_id}",
+            headers=auth_headers(owner_token),
+        )
+        assert removed.status_code == 204, removed.text
+        assert client.get(
+            f"{tools_url}/{tool_id}",
+            headers=auth_headers(owner_token),
+        ).status_code == 404
+        archived_publish = client.post(
+            f"{tools_url}/{tool_id}/publish",
+            headers=auth_headers(owner_token),
+        )
+        assert archived_publish.status_code == 409, archived_publish.text
+
+
+def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
+    from app.application.tool_runtime import ToolInvocationBusy
+    from app.infrastructure import tool_dispatch
+    from app.tasks import tools as tool_tasks
+    from tests.support import settings as test_settings
+
+    original_configure = tool_tasks.configure_task_worker
+    original_execute = tool_tasks.execute_tool_invocation
+    original_recover = tool_tasks.list_recoverable_tool_test_invocation_ids
+    original_apply_async = tool_tasks.run_tool_invocation_job.apply_async
+    original_send_task = tool_dispatch.celery_app.send_task
+    original_log_error = tool_dispatch.log_error
+    original_broker_url = tool_dispatch.celery_app.conf.broker_url
+    original_eager = tool_dispatch.celery_app.conf.task_always_eager
+    try:
+        tool_tasks.configure_task_worker = lambda _settings: None
+        tool_dispatch.log_error = lambda *args, **kwargs: None
+        calls: list[tuple[str, str]] = []
+
+        async def execute(invocation_id, _settings, worker_task_id):
+            calls.append((invocation_id, worker_task_id))
+
+        tool_tasks.execute_tool_invocation = execute
+        real_task = tool_tasks.run_tool_invocation_job._get_current_object()
+        run_body = type(real_task).run
+        run_body(
+            SimpleNamespace(
+                request=SimpleNamespace(id="tool-worker-1"),
+                retry=lambda **_kwargs: None,
+            ),
+            "invocation-1",
+        )
+        assert calls == [("invocation-1", "tool-worker-1")]
+
+        async def busy(*_args, **_kwargs):
+            raise ToolInvocationBusy("busy")
+
+        retry_kwargs: dict = {}
+
+        class RetrySignal(Exception):
+            pass
+
+        def retry(**kwargs):
+            retry_kwargs.update(kwargs)
+            raise RetrySignal()
+
+        tool_tasks.execute_tool_invocation = busy
+        try:
+            run_body(
+                SimpleNamespace(
+                    request=SimpleNamespace(id="tool-worker-2"),
+                    retry=retry,
+                ),
+                "invocation-2",
+            )
+        except RetrySignal:
+            assert retry_kwargs["countdown"] == 30
+        else:
+            raise AssertionError("A busy Tool invocation must be retried.")
+
+        async def recoverable():
+            return ["invocation-3", "invocation-4"]
+
+        dispatched: list[dict] = []
+        tool_tasks.list_recoverable_tool_test_invocation_ids = recoverable
+        tool_tasks.run_tool_invocation_job.apply_async = lambda **kwargs: dispatched.append(
+            kwargs
+        )
+        tool_tasks.recover_tool_invocations_job()
+        assert dispatched == [
+            {"args": ("invocation-3",)},
+            {"args": ("invocation-4",)},
+        ]
+
+        dispatched.clear()
+        tool_dispatch.celery_app.send_task = lambda *args, **kwargs: dispatched.append(
+            {"task": args[0], **kwargs}
+        )
+        asyncio.run(
+            tool_dispatch.enqueue_tool_invocation("invocation-5", test_settings())
+        )
+        assert dispatched == [
+            {"task": "app.tools.run", "args": ("invocation-5",)}
+        ]
+        assert calls == [("invocation-1", "tool-worker-1")]
+
+        def unavailable(**_kwargs):
+            raise OSError("broker unavailable")
+
+        tool_dispatch.celery_app.send_task = unavailable
+        asyncio.run(
+            tool_dispatch.enqueue_tool_invocation("invocation-6", test_settings())
+        )
+    finally:
+        tool_tasks.configure_task_worker = original_configure
+        tool_tasks.execute_tool_invocation = original_execute
+        tool_tasks.list_recoverable_tool_test_invocation_ids = original_recover
+        tool_tasks.run_tool_invocation_job.apply_async = original_apply_async
+        tool_dispatch.celery_app.send_task = original_send_task
+        tool_dispatch.log_error = original_log_error
+        tool_dispatch.celery_app.conf.broker_url = original_broker_url
+        tool_dispatch.celery_app.conf.task_always_eager = original_eager
 
 
 def main() -> None:
@@ -2120,6 +2950,8 @@ def main() -> None:
     test_mcp_resolution_requires_current_binding_owner_use_permission()
     test_mcp_resolution_rejects_missing_authorization_context()
     test_workspace_creation_initializes_system_catalog()
+    test_python_tool_http_lifecycle_and_private_grants()
+    test_tool_tasks_never_execute_inline_and_recover_queued_tests()
     print("TOOLS_SUITE_OK")
 
 

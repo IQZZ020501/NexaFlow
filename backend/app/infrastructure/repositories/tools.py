@@ -1,4 +1,9 @@
-from sqlalchemy import and_, delete, or_, select, update
+from dataclasses import fields
+from datetime import datetime
+
+from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.resource_permission import ResourcePermission as ResourcePermissionOrm
@@ -22,17 +27,24 @@ from app.shareddomain.tools.models import ToolInvocation as ToolInvocationOrm
 from app.shareddomain.tools.models import ToolPolicy as ToolPolicyOrm
 from app.shareddomain.tools.models import ToolSource as ToolSourceOrm
 from app.shareddomain.tools.models import ToolVersion as ToolVersionOrm
+from app.shareddomain.tools.runtime import (
+    TOOL_INVOCATION_CLAIMABLE_STATUSES,
+    TOOL_INVOCATION_QUEUED,
+    TOOL_INVOCATION_RUNNING,
+)
 
 ToolCatalogRow = tuple[
     Tool,
     ToolSource,
     ToolVersion | None,
+    ToolDraft | None,
     ResourcePermission | None,
 ]
 ToolCatalogDetailRow = tuple[
     Tool,
     ToolSource,
     ToolVersion | None,
+    ToolDraft | None,
     ToolPolicy | None,
     ResourcePermission | None,
 ]
@@ -234,7 +246,7 @@ async def list_tool_catalog_rows(
 ) -> list[ToolCatalogRow]:
     grant = ResourcePermissionOrm
     statement = (
-        select(ToolOrm, ToolSourceOrm, ToolVersionOrm, grant)
+        select(ToolOrm, ToolSourceOrm, ToolVersionOrm, ToolDraftOrm, grant)
         .join(
             ToolSourceOrm,
             and_(
@@ -251,6 +263,13 @@ async def list_tool_catalog_rows(
             ),
         )
         .outerjoin(
+            ToolDraftOrm,
+            and_(
+                ToolDraftOrm.workspace_id == ToolOrm.workspace_id,
+                ToolDraftOrm.tool_id == ToolOrm.id,
+            ),
+        )
+        .outerjoin(
             grant,
             and_(
                 grant.workspace_id == ToolOrm.workspace_id,
@@ -261,6 +280,7 @@ async def list_tool_catalog_rows(
         )
         .where(
             ToolOrm.workspace_id == workspace_id,
+            ToolOrm.status != "archived",
             or_(
                 ToolOrm.kind == "builtin",
                 ToolOrm.created_by_user_id == actor_id,
@@ -277,11 +297,12 @@ async def list_tool_catalog_rows(
             to_entity(Tool, tool),
             to_entity(ToolSource, source),
             to_entity(ToolVersion, version) if version is not None else None,
+            to_entity(ToolDraft, draft) if draft is not None else None,
             to_entity(ResourcePermission, permission)
             if permission is not None
             else None,
         )
-        for tool, source, version, permission in rows.all()
+        for tool, source, version, draft, permission in rows.all()
     ]
 
 
@@ -298,6 +319,7 @@ async def get_tool_catalog_detail_row(
                 ToolOrm,
                 ToolSourceOrm,
                 ToolVersionOrm,
+                ToolDraftOrm,
                 ToolPolicyOrm,
                 grant,
             )
@@ -314,6 +336,13 @@ async def get_tool_catalog_detail_row(
                     ToolVersionOrm.workspace_id == ToolOrm.workspace_id,
                     ToolVersionOrm.tool_id == ToolOrm.id,
                     ToolVersionOrm.id == ToolOrm.current_version_id,
+                ),
+            )
+            .outerjoin(
+                ToolDraftOrm,
+                and_(
+                    ToolDraftOrm.workspace_id == ToolOrm.workspace_id,
+                    ToolDraftOrm.tool_id == ToolOrm.id,
                 ),
             )
             .outerjoin(
@@ -335,16 +364,18 @@ async def get_tool_catalog_detail_row(
             .where(
                 ToolOrm.workspace_id == workspace_id,
                 ToolOrm.id == tool_id,
+                ToolOrm.status != "archived",
             )
         )
     ).one_or_none()
     if row is None:
         return None
-    tool, source, version, policy, permission = row
+    tool, source, version, draft, policy, permission = row
     return (
         to_entity(Tool, tool),
         to_entity(ToolSource, source),
         to_entity(ToolVersion, version) if version is not None else None,
+        to_entity(ToolDraft, draft) if draft is not None else None,
         to_entity(ToolPolicy, policy) if policy is not None else None,
         to_entity(ResourcePermission, permission)
         if permission is not None
@@ -594,6 +625,206 @@ async def get_tool_invocation(
     return to_entity(ToolInvocation, row) if row is not None else None
 
 
+async def get_tool_invocation_by_id(
+    db: AsyncSession,
+    invocation_id: str,
+) -> ToolInvocation | None:
+    row = await db.get(ToolInvocationOrm, invocation_id)
+    return to_entity(ToolInvocation, row) if row is not None else None
+
+
+async def get_tool_invocation_by_idempotency_key(
+    db: AsyncSession,
+    workspace_id: str,
+    idempotency_key: str,
+) -> ToolInvocation | None:
+    row = await db.scalar(
+        select(ToolInvocationOrm).where(
+            ToolInvocationOrm.workspace_id == workspace_id,
+            ToolInvocationOrm.idempotency_key == idempotency_key,
+        )
+    )
+    return to_entity(ToolInvocation, row) if row is not None else None
+
+
+async def create_or_get_tool_invocation(
+    db: AsyncSession,
+    entity: ToolInvocation,
+) -> ToolInvocation:
+    existing = await get_tool_invocation_by_idempotency_key(
+        db,
+        entity.workspace_id,
+        entity.idempotency_key,
+    )
+    if existing is not None:
+        return existing
+    values = {
+        field.name: getattr(entity, field.name) for field in fields(ToolInvocation)
+    }
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        statement = postgresql_insert(ToolInvocationOrm)
+    elif dialect == "sqlite":
+        statement = sqlite_insert(ToolInvocationOrm)
+    else:
+        raise RuntimeError(f"Unsupported Tool invocation dialect: {dialect}")
+    await db.execute(
+        statement.values(**values).on_conflict_do_nothing(
+            index_elements=("workspace_id", "idempotency_key")
+        )
+    )
+    stored = await get_tool_invocation_by_idempotency_key(
+        db,
+        entity.workspace_id,
+        entity.idempotency_key,
+    )
+    if stored is None:
+        raise RuntimeError("Tool invocation could not be persisted.")
+    return stored
+
+
+async def claim_tool_invocation(
+    db: AsyncSession,
+    workspace_id: str,
+    invocation_id: str,
+    worker_task_id: str,
+    now: datetime,
+    lease_expires_at: datetime,
+) -> bool:
+    result = await db.execute(
+        update(ToolInvocationOrm)
+        .where(
+            ToolInvocationOrm.workspace_id == workspace_id,
+            ToolInvocationOrm.id == invocation_id,
+            ToolInvocationOrm.attempts < ToolInvocationOrm.max_attempts,
+            or_(
+                ToolInvocationOrm.status.in_(TOOL_INVOCATION_CLAIMABLE_STATUSES),
+                and_(
+                    ToolInvocationOrm.status == TOOL_INVOCATION_RUNNING,
+                    or_(
+                        ToolInvocationOrm.lease_expires_at.is_(None),
+                        ToolInvocationOrm.lease_expires_at < now,
+                    ),
+                ),
+            ),
+        )
+        .values(
+            status=TOOL_INVOCATION_RUNNING,
+            attempts=ToolInvocationOrm.attempts + 1,
+            worker_task_id=worker_task_id,
+            lease_expires_at=lease_expires_at,
+            started_at=func.coalesce(ToolInvocationOrm.started_at, now),
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount == 1
+
+
+async def finalize_tool_invocation(
+    db: AsyncSession,
+    workspace_id: str,
+    invocation_id: str,
+    worker_task_id: str,
+    result: ToolInvocation,
+) -> bool:
+    updated = await db.execute(
+        update(ToolInvocationOrm)
+        .where(
+            ToolInvocationOrm.workspace_id == workspace_id,
+            ToolInvocationOrm.id == invocation_id,
+            ToolInvocationOrm.status == TOOL_INVOCATION_RUNNING,
+            ToolInvocationOrm.worker_task_id == worker_task_id,
+        )
+        .values(
+            status=result.status,
+            result_data=result.result_data,
+            result_summary=result.result_summary,
+            outcome=result.outcome,
+            error_code=result.error_code,
+            error_message=result.error_message,
+            usage=result.usage,
+            worker_task_id=None,
+            lease_expires_at=None,
+            finished_at=result.finished_at,
+            updated_at=result.updated_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return updated.rowcount == 1
+
+
+async def fail_pending_tool_invocation(
+    db: AsyncSession,
+    workspace_id: str,
+    invocation_id: str,
+    result: ToolInvocation,
+    now: datetime,
+) -> bool:
+    updated = await db.execute(
+        update(ToolInvocationOrm)
+        .where(
+            ToolInvocationOrm.workspace_id == workspace_id,
+            ToolInvocationOrm.id == invocation_id,
+            or_(
+                ToolInvocationOrm.status.in_(TOOL_INVOCATION_CLAIMABLE_STATUSES),
+                and_(
+                    ToolInvocationOrm.status == TOOL_INVOCATION_RUNNING,
+                    or_(
+                        ToolInvocationOrm.lease_expires_at.is_(None),
+                        ToolInvocationOrm.lease_expires_at < now,
+                    ),
+                ),
+            ),
+        )
+        .values(
+            status=result.status,
+            result_data=result.result_data,
+            result_summary=result.result_summary,
+            outcome=result.outcome,
+            error_code=result.error_code,
+            error_message=result.error_message,
+            usage=result.usage,
+            worker_task_id=None,
+            lease_expires_at=None,
+            finished_at=result.finished_at,
+            updated_at=result.updated_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return updated.rowcount == 1
+
+
+async def requeue_tool_invocation(
+    db: AsyncSession,
+    workspace_id: str,
+    invocation_id: str,
+    worker_task_id: str,
+    error_code: str,
+    error_message: str,
+    now: datetime,
+) -> bool:
+    updated = await db.execute(
+        update(ToolInvocationOrm)
+        .where(
+            ToolInvocationOrm.workspace_id == workspace_id,
+            ToolInvocationOrm.id == invocation_id,
+            ToolInvocationOrm.status == TOOL_INVOCATION_RUNNING,
+            ToolInvocationOrm.worker_task_id == worker_task_id,
+        )
+        .values(
+            status=TOOL_INVOCATION_QUEUED,
+            worker_task_id=None,
+            lease_expires_at=None,
+            error_code=error_code,
+            error_message=error_message,
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return updated.rowcount == 1
+
+
 async def list_tool_invocations(
     db: AsyncSession,
     workspace_id: str,
@@ -608,6 +839,35 @@ async def list_tool_invocations(
         statement.order_by(ToolInvocationOrm.created_at.desc(), ToolInvocationOrm.id)
     )
     return [to_entity(ToolInvocation, row) for row in rows.all()]
+
+
+async def list_recoverable_tool_test_invocation_ids(
+    db: AsyncSession,
+    now: datetime,
+    limit: int = 100,
+) -> list[str]:
+    rows = await db.scalars(
+        select(ToolInvocationOrm.id)
+        .where(
+            ToolInvocationOrm.origin == "test",
+            or_(
+                and_(
+                    ToolInvocationOrm.status == TOOL_INVOCATION_QUEUED,
+                    ToolInvocationOrm.attempts < ToolInvocationOrm.max_attempts,
+                ),
+                and_(
+                    ToolInvocationOrm.status == TOOL_INVOCATION_RUNNING,
+                    or_(
+                        ToolInvocationOrm.lease_expires_at.is_(None),
+                        ToolInvocationOrm.lease_expires_at < now,
+                    ),
+                ),
+            ),
+        )
+        .order_by(ToolInvocationOrm.created_at, ToolInvocationOrm.id)
+        .limit(limit)
+    )
+    return list(rows.all())
 
 
 async def save_tool_invocation(
@@ -634,4 +894,11 @@ async def has_retained_user_audit_references(
         .where(ToolInvocationOrm.execution_user_id == user_id)
         .limit(1)
     )
-    return invocation_id is not None
+    if invocation_id is not None:
+        return True
+    draft_id = await db.scalar(
+        select(ToolDraftOrm.id)
+        .where(ToolDraftOrm.updated_by_user_id == user_id)
+        .limit(1)
+    )
+    return draft_id is not None
