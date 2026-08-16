@@ -18,7 +18,7 @@ NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队�
 ## 核心能力
 
 - **应用构建**：统一管理 Agent 与工作流，支持草稿、发布快照、公开访问和 API 调用。
-- **知识库与 RAG**：文档解析、OCR、Parent/Child 分段、向量与全文混合检索、重排和权限过滤。
+- **知识库与 RAG**：文档与显式 QA 导入、OCR、Parent/Child 分段、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/重排、权限过滤、显式一跳引用与离线评测。
 - **Agent 运行时**：基于 Celery 的耐久执行、运行租约、checkpoint、可重放事件、对话记忆和模型用量记录。
 - **可视化工作流**：React Flow 画布、不可变发布版本、节点审计，以及隔离的 Python Code 节点沙箱。
 - **模型管理**：支持 OpenAI-compatible、Anthropic、Amazon Bedrock、Azure OpenAI、DeepSeek、Gemini 和 Ollama。
@@ -41,7 +41,7 @@ Agent 和工作流都可以发布为公开访问页面，也可以通过独立 A
 
 ### 知识库文档
 
-知识库集中管理文档上传、解析、向量化、启停、重建索引和命中测试，并记录文件状态、大小和分段数量。
+知识库集中管理文档/QA 上传、解析、向量化、启停、重建索引和命中测试，并提供检索 Trace 与异步评测。
 
 ![NexaFlow 知识库文档界面](docs/assets/knowledge-base-documents.png)
 
@@ -63,9 +63,10 @@ Agent 和工作流都可以发布为公开访问页面，也可以通过独立 A
 flowchart LR
     Browser[Browser] --> Web[Next.js frontend]
     Web --> API[FastAPI API]
-    API --> DB[(PostgreSQL)]
+    API --> DB[("PostgreSQL 17 + pg_search")]
     API --> Redis[(Redis)]
     API --> Qdrant[(Qdrant)]
+    API --> Storage[("Shared upload storage")]
     Redis --> Worker[Celery worker]
     Beat[Celery beat] --> Redis
     Worker --> DB
@@ -81,8 +82,8 @@ flowchart LR
 | 前端 | Next.js 15、React 19、TypeScript、Bun、shadcn/ui、Tailwind CSS、React Flow |
 | API | Python 3.11+、FastAPI、SQLAlchemy Async、Alembic |
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
-| 检索 | Qdrant、PostgreSQL 全文检索、RRF、可选 reranker |
-| 部署 | Docker Compose、Nginx、独立无网络 Python 沙箱 |
+| 检索 | Qdrant、PostgreSQL `pg_search` 0.25.2（Jieba/BM25）、RRF、显式引用一跳扩展、可选 reranker |
+| 部署 | PostgreSQL 17 + `pg_search`、Docker Compose、Nginx、独立无网络 Python 沙箱 |
 
 ## 快速开始
 
@@ -108,10 +109,13 @@ cp deploy/.env.example deploy/.env
 ### 2. 初始化并启动
 
 ```bash
+docker compose -f deploy/docker-compose.yml build db
 docker compose -f deploy/docker-compose.yml up -d db redis qdrant sandbox
 docker compose -f deploy/docker-compose.yml run --rm api alembic upgrade head
-docker compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
+
+`db` 镜像内置 PostgreSQL 17、`pg_search` 0.25.2 及 `pgvector`，并在数据库启动时预加载 `pg_search`。使用外部 PostgreSQL 时必须先安装 `pg_search` 与 `pgvector`，将 `pg_search` 加入 `shared_preload_libraries` 并重启数据库，再执行 Alembic 迁移。
 
 启动完成后访问：
 
@@ -119,7 +123,7 @@ docker compose -f deploy/docker-compose.yml up -d
 - API 健康检查：<http://localhost:8000/health>
 - OpenAPI：<http://localhost:8000/docs>
 
-使用 `deploy/.env` 中的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 登录。首次登录后建议立即修改密码。
+使用 `deploy/.env` 中的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 登录。首次登录必须修改初始密码。
 
 ### 3. 查看状态与日志
 
@@ -134,6 +138,8 @@ docker compose -f deploy/docker-compose.yml logs -f api worker frontend
 docker compose -f deploy/docker-compose.yml down
 ```
 
+数据保存在 `deploy/data` 的 bind mount 中，`down` 不会删除它。如需重置本地数据，必须先停止相关容器；不要在 Redis、PostgreSQL 或 Qdrant 运行时删除其挂载目录。
+
 详细的部署、迁移、Nginx 和安全配置见 [deploy/README.md](deploy/README.md)。
 
 ## 本地开发
@@ -146,7 +152,7 @@ docker compose -f deploy/docker-compose.yml down
 docker compose \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.dev.yml \
-  up -d db redis qdrant
+  up -d --build db redis qdrant
 ```
 
 ### 后端
@@ -158,17 +164,30 @@ uv sync --dev --frozen
 make dev
 ```
 
-另开终端启动 Worker 和 Beat：
+分别在两个终端启动 Worker 和 Beat：
 
 ```bash
+# 终端 A
 cd backend
 make worker
+```
+
+```bash
+# 终端 B
+cd backend
 uv run celery -A app.infrastructure.celery:celery_app beat --loglevel=INFO
 ```
 
-API 默认运行在 <http://127.0.0.1:8000>。Python Code 工作流节点依赖 Unix socket 沙箱，开发这部分功能时优先使用完整 Docker Compose 栈。
-当 Compose Worker 已运行时，`make dev` 会自动把带 `worker-1 |` 前缀的
-Worker 日志同步到同一个终端；退出 API 时日志跟随进程也会一起结束。
+API 默认运行在 <http://127.0.0.1:8000>。需要测试 Python Code 节点时，可以改用 Compose Worker（不要同时运行 `make worker`）：
+
+```bash
+docker compose \
+  -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.dev.yml \
+  up -d --build sandbox worker
+```
+
+开发覆盖会把 `backend/storage` 挂载到 Worker 的 `/data`，与宿主 API 共享上传文件。当 Compose Worker 已运行时，`make dev` 会自动把带 `worker-1 |` 前缀的 Worker 日志同步到同一个终端；退出 API 时日志跟随进程也会一起结束。
 
 ### 前端
 
@@ -214,7 +233,7 @@ uv run python -m tests.workflows
 cd frontend
 bun run typecheck
 bun run lint
-bun test
+bun test --parallel
 bun run build
 ```
 
@@ -246,4 +265,4 @@ python3 -m sandbox.self_check
 
 ## 许可证
 
-本项目基于 [GNU General Public License v3.0](LICENSE) 发布。
+本项目基于 [GNU General Public License v3.0](LICENSE) 发布。内置数据库镜像使用的 `pg_search` Community 扩展采用 AGPLv3，第三方组件仍保留各自许可条款；部署前请查阅 [deploy/README.md](deploy/README.md)。
