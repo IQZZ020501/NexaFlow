@@ -106,7 +106,12 @@ def knowledge_inspect_result(
             trace_id=f"trace-{knowledge_base.id}",
             search_mode=payload.search_mode,
             limit=payload.limit,
-            max_distance=payload.similarity,
+            min_similarity=payload.similarity,
+            max_distance=(
+                2 * (1 - payload.similarity)
+                if payload.similarity is not None
+                else None
+            ),
             vector_candidates=len(resolved_hits),
             keyword_candidates=0,
             reference_candidates=0,

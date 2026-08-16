@@ -1,11 +1,15 @@
 import asyncio
 import time
 from datetime import timedelta
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.knowledge_retrieval import retrieve_knowledge_base
+from app.application.knowledge_retrieval import (
+    normalized_cosine_similarity,
+    retrieve_knowledge_base,
+)
 from app.capabilities.rag.evaluation import (
     RetrievalCaseMetrics,
     aggregate_retrieval_metrics,
@@ -30,7 +34,10 @@ from app.schemas.knowledge import (
     KnowledgeEvaluationSummaryResponse,
     KnowledgeQueryRequest,
 )
-from app.shareddomain.knowledge.evaluation import get_evaluation_task
+from app.shareddomain.knowledge.evaluation import (
+    EVALUATION_SIMILARITY_SEMANTICS,
+    get_evaluation_task,
+)
 from app.shareddomain.knowledge.orchestration import (
     task_error_message,
     task_to_response,
@@ -58,6 +65,18 @@ async def _persist_owned_progress(
         raise KnowledgePipelineError("Knowledge task lease was lost.")
 
 
+def _evaluation_run_request(options: dict[str, Any]) -> KnowledgeEvaluationRunRequest:
+    normalized_options = dict(options)
+    if (
+        normalized_options.get("similarity_semantics")
+        != EVALUATION_SIMILARITY_SEMANTICS
+    ):
+        normalized_options["similarity"] = normalized_cosine_similarity(
+            normalized_options.get("similarity")
+        )
+    return KnowledgeEvaluationRunRequest.model_validate(normalized_options)
+
+
 async def run_evaluation_task(
     db: AsyncSession,
     task: KnowledgeTask,
@@ -66,7 +85,7 @@ async def run_evaluation_task(
     settings: Settings,
     lease_lost: asyncio.Event,
 ) -> None:
-    payload = KnowledgeEvaluationRunRequest.model_validate(task.options)
+    payload = _evaluation_run_request(task.options)
     case_ids = list(dict.fromkeys(payload.case_ids))
     cases = await evaluation_repository.list_cases_by_ids(
         db,

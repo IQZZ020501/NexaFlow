@@ -16,6 +16,7 @@ import {
   XIcon,
 } from "lucide-react"
 import { useLanguage } from "@/contexts/language-provider"
+import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -1045,20 +1046,21 @@ export function KnowledgeUploadFlow({
                         : t("先确认分段效果，点击开始导入后才会写入知识库。")
                     }
                   />
-                  <label className="flex shrink-0 items-center gap-2 text-sm font-medium">
+                  <div className="flex shrink-0 items-center gap-2 text-sm font-medium">
                     <span>{t("导入类型")}</span>
-                    <select
-                      aria-label={t("导入类型")}
-                      className="h-9 rounded-md border bg-background px-3 text-sm"
+                    <FilterDropdown
+                      ariaLabel={t("导入类型")}
+                      className="h-9 min-w-28 px-3"
                       value={importMode}
-                      onChange={(event) =>
-                        changeImportMode(event.target.value as KnowledgeImportMode)
+                      options={[
+                        { value: "document", label: t("普通文档") },
+                        { value: "qa", label: t("问答表") },
+                      ]}
+                      onChange={(value) =>
+                        changeImportMode(value as KnowledgeImportMode)
                       }
-                    >
-                      <option value="document">{t("普通文档")}</option>
-                      <option value="qa">{t("问答表")}</option>
-                    </select>
-                  </label>
+                    />
+                  </div>
                 </div>
 
                 <div
@@ -1258,20 +1260,14 @@ export function KnowledgeUploadFlow({
                       <FieldLabel htmlFor="knowledge-split-separator">
                         {t("切分字符")}
                       </FieldLabel>
-                      <select
+                      <FilterDropdown
                         id="knowledge-split-separator"
-                        className="h-9 rounded-md border bg-background px-3 text-sm"
+                        ariaLabel={t("切分字符")}
+                        className="h-9 px-3"
                         value={splitSeparator}
-                        onChange={(event) =>
-                          setSplitSeparator(event.target.value)
-                        }
-                      >
-                        {splitSeparatorOptions.map((separator) => (
-                          <option key={separator.value} value={separator.value}>
-                            {separator.label}
-                          </option>
-                        ))}
-                      </select>
+                        options={splitSeparatorOptions}
+                        onChange={setSplitSeparator}
+                      />
                     </Field>
                     {isSegmentInvalid ? (
                       <FieldDescription className="text-destructive">

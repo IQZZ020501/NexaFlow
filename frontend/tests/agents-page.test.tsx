@@ -1163,60 +1163,55 @@ describe("AgentsPage detail view", () => {
   })
 
   test("confirms discarding dirty changes before leaving", async () => {
-    const originalConfirm = window.confirm
-    const confirmCalls: boolean[] = []
-    window.confirm = (() => {
-      confirmCalls.push(true)
-      return true
-    }) as typeof window.confirm
-    try {
-      const agent = makeAgent()
-      await renderDetail({
-        agent,
-        extraRoutes: [
-          {
-            method: "PATCH",
-            pathname: `/api/v1/workspaces/${WS}/agents/agent-1`,
-            exact: true,
-            respond: (init) => jsonResponse({ ...agent, ...JSON.parse(String(init?.body ?? "{}")) }),
-          },
-        ],
-      })
-      const settingsNavButton = screen
-        .getAllByRole("button", { name: "设置" })
-        .find((button) => Boolean(button.closest("nav")))
-      fireEvent.click(settingsNavButton!)
-      await waitFor(() => expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy())
-      const nameInput = screen.getByLabelText("Agent 名称") as HTMLInputElement
-      fireEvent.change(nameInput, { target: { value: "Renamed" } })
-      await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
-      fireEvent.click(screen.getByLabelText("返回 Agent 列表"))
-      await waitFor(() => expect(confirmCalls.length).toBe(1))
-      await waitFor(() => expect(navState.pushCalls).toContain("/app/apps"))
-    } finally {
-      window.confirm = originalConfirm
-    }
+    const agent = makeAgent()
+    await renderDetail({
+      agent,
+      extraRoutes: [
+        {
+          method: "PATCH",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1`,
+          exact: true,
+          respond: (init) => jsonResponse({ ...agent, ...JSON.parse(String(init?.body ?? "{}")) }),
+        },
+      ],
+    })
+    const settingsNavButton = screen
+      .getAllByRole("button", { name: "设置" })
+      .find((button) => Boolean(button.closest("nav")))
+    fireEvent.click(settingsNavButton!)
+    await waitFor(() => expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy())
+    const nameInput = screen.getByLabelText("Agent 名称") as HTMLInputElement
+    fireEvent.change(nameInput, { target: { value: "Renamed" } })
+    await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
+    fireEvent.click(screen.getByLabelText("返回 Agent 列表"))
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
+        "button",
+        { name: "放弃更改" },
+      ),
+    )
+    await waitFor(() => expect(navState.pushCalls).toContain("/app/apps"))
   })
 
   test("stays on the page when discarding changes is declined", async () => {
-    const originalConfirm = window.confirm
-    window.confirm = (() => false) as typeof window.confirm
-    try {
-      const agent = makeAgent()
-      await renderDetail({ agent })
-      const settingsNavButton = screen
-        .getAllByRole("button", { name: "设置" })
-        .find((button) => Boolean(button.closest("nav")))
-      fireEvent.click(settingsNavButton!)
-      await waitFor(() => expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy())
-      const nameInput = screen.getByLabelText("Agent 名称") as HTMLInputElement
-      fireEvent.change(nameInput, { target: { value: "Renamed" } })
-      await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
-      fireEvent.click(screen.getByLabelText("返回 Agent 列表"))
-      await waitFor(() => expect(navState.pushCalls).not.toContain("/app/apps"))
-    } finally {
-      window.confirm = originalConfirm
-    }
+    const agent = makeAgent()
+    await renderDetail({ agent })
+    const settingsNavButton = screen
+      .getAllByRole("button", { name: "设置" })
+      .find((button) => Boolean(button.closest("nav")))
+    fireEvent.click(settingsNavButton!)
+    await waitFor(() => expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy())
+    const nameInput = screen.getByLabelText("Agent 名称") as HTMLInputElement
+    fireEvent.change(nameInput, { target: { value: "Renamed" } })
+    await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
+    fireEvent.click(screen.getByLabelText("返回 Agent 列表"))
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
+        "button",
+        { name: "取消" },
+      ),
+    )
+    expect(navState.pushCalls).not.toContain("/app/apps")
   })
 
   test("opens permissions from the detail workspace menu", async () => {

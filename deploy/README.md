@@ -73,7 +73,8 @@ network respectively.
 `REFRESH_TOKEN_EXPIRES_DAYS` controls persisted refresh sessions.
 `AGENT_EXECUTOR_LEASE_SECONDS` and `AGENT_EXECUTOR_HEARTBEAT_SECONDS` control
 Agent worker takeover; keep the heartbeat below half the lease. Keep exactly
-one `beat` instance running so queued and expired Agent runs are redispatched.
+one `beat` instance running so queued and expired Knowledge tasks and Agent
+runs are redispatched.
 Celery uses `solo` automatically on macOS (HTTPS trust evaluation is unsafe
 after a multithreaded process fork) and Windows (`prefork` needs `os.fork()`,
 which Windows lacks); Linux containers keep `prefork`.

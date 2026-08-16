@@ -31,6 +31,7 @@ from app.shareddomain.knowledge.lifecycle import (
 from app.shareddomain.knowledge.evaluation import (
     create_evaluation_case,
     delete_evaluation_case,
+    delete_evaluation_run,
     enqueue_evaluation_run,
     get_evaluation_run,
     list_evaluation_cases,
@@ -177,6 +178,7 @@ __all__ = [
     "delete_knowledge_document",
     "create_evaluation_case",
     "delete_evaluation_case",
+    "delete_evaluation_run",
     "dispatch_knowledge_task",
     "document_response_with_chunk_count",
     "document_to_response",

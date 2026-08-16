@@ -3,6 +3,7 @@
 import * as React from "react"
 import { LoaderCircleIcon, SendIcon } from "lucide-react"
 
+import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/contexts/language-provider"
@@ -65,24 +66,22 @@ export function WorkflowRuntimeForm({
                   className="resize-y rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               ) : field.type === "select" ? (
-                <select
-                  name={field.variable}
-                  required={field.is_required}
+                <FilterDropdown
+                  ariaLabel={field.name}
+                  className="h-9 px-3"
+                  modal={false}
                   value={values[field.variable] ?? defaultValue}
-                  onChange={(event) =>
-                    updateValue(field.variable, event.target.value)
+                  options={[
+                    { value: "", label: t("请选择") },
+                    ...field.optionList.map((option) => ({
+                      value: option,
+                      label: option,
+                    })),
+                  ]}
+                  onChange={(value) =>
+                    updateValue(field.variable, value)
                   }
-                  className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <option value="" disabled={field.is_required}>
-                    {t("请选择")}
-                  </option>
-                  {field.optionList.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
+                />
               ) : (
                 <Input
                   name={field.variable}

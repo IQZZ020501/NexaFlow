@@ -973,6 +973,7 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                             "chunk_id": "chunk-1",
                             "content": "first",
                             "distance": 0.3,
+                            "similarity": 0.85,
                             "trace_id": "trace-1",
                             "rerank_status": "applied",
                             "sources": ["vector", "reference"],
@@ -981,7 +982,8 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                         {
                             "chunk_id": "chunk-2",
                             "content": "second",
-                            "distance": 0.7,
+                            "distance": 0.9,
+                            "similarity": 0.55,
                             "trace_id": "trace-2",
                             "rerank_status": "fallback",
                             "sources": ["keywords"],
@@ -991,6 +993,7 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                             "chunk_id": "chunk-3",
                             "content": "third",
                             "distance": 0.2,
+                            "similarity": 0.9,
                             "trace_id": "trace-3",
                             "rerank_status": "not_configured",
                         },
@@ -1062,6 +1065,7 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
         assert result.outputs["content"] == "first\n\nsecond"
         assert result.outputs["data"] == "first\n\nsecond"
         assert result.outputs["paragraph_list"][0]["distance"] == 0.3
+        assert result.outputs["paragraph_list"][0]["similarity"] == 0.85
         assert [
             (
                 item["chunk_id"],
@@ -1167,6 +1171,7 @@ def test_workflow_knowledge_node_maxkb_settings_and_truncation() -> None:
                             "document_id": "doc-1",
                             "content": "alpha beta",
                             "distance": 0.1,
+                            "similarity": 0.95,
                         }
                     ],
                     "evidence_status": "found",
@@ -1220,6 +1225,7 @@ def test_workflow_knowledge_node_maxkb_settings_and_truncation() -> None:
                 "document_id": "doc-1",
                 "content": "alpha beta",
                 "distance": 0.1,
+                "similarity": 0.95,
             }
         ]
         assert result.outputs["is_hit_handling_method_list"] == [

@@ -450,14 +450,15 @@ async def run_knowledge_task(
         )
         if not claimed:
             task = await knowledge_base_repository.lock_knowledge_task(db, task_id)
-            if (
-                task is not None
-                and task.status == "running"
-                and (
-                    task.lease_expires_at is None
-                    or task.lease_expires_at <= started_at
+            if task is not None and task.attempts >= task.max_attempts and (
+                task.status == TASK_QUEUED_STATUS
+                or (
+                    task.status == TASK_RUNNING_STATUS
+                    and (
+                        task.lease_expires_at is None
+                        or task.lease_expires_at <= started_at
+                    )
                 )
-                and task.attempts >= task.max_attempts
             ):
                 await mark_knowledge_task_failed(
                     db,
@@ -626,25 +627,21 @@ async def recover_knowledge_tasks(
     settings: Settings,
     evaluation_runner: EvaluationTaskRunner | None = None,
 ) -> None:
-    async with get_session_factory()() as db:
-        tasks = await knowledge_base_repository.list_recoverable_tasks(db)
-        for task in tasks:
-            task.status = TASK_QUEUED_STATUS
-            task.started_at = None
-            task.lease_expires_at = None
-            task.worker_task_id = None
-            task.finished_at = None
-            task.processed_items = 0
-            await knowledge_base_repository.save_knowledge_task(db, task)
-        await db.commit()
-
+    task_ids = await list_recoverable_knowledge_task_ids(settings)
     await asyncio.gather(
         *(
             run_knowledge_task(
-                task.id,
+                task_id,
                 settings,
                 evaluation_runner=evaluation_runner,
             )
-            for task in tasks
+            for task_id in task_ids
         )
     )
+
+
+async def list_recoverable_knowledge_task_ids(settings: Settings) -> list[str]:
+    del settings
+    async with get_session_factory()() as db:
+        tasks = await knowledge_base_repository.list_recoverable_tasks(db, utc_now())
+    return [task.id for task in tasks]

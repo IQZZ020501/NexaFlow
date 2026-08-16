@@ -521,7 +521,11 @@ class KnowledgeEvaluationCase(Base):
     )
     knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     question: Mapped[str] = mapped_column(Text, nullable=False)
-    answer_points: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    answer_points: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        server_default="[]",
+    )
     created_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True
     )

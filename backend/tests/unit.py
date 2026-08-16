@@ -691,12 +691,19 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
     request = KnowledgeQueryRequest(query="  private customer question  ")
     assert request.query == "private customer question"
     assert request.include_references is False
+    assert KnowledgeQueryRequest(query="question", similarity=0.75).similarity == 0.75
     try:
         KnowledgeQueryRequest(query="   ")
     except ValueError:
         pass
     else:
         raise AssertionError("Whitespace-only retrieval queries must be rejected.")
+    try:
+        KnowledgeQueryRequest(query="question", similarity=1.01)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Retrieval similarity must stay within 0..1.")
 
     hit = KnowledgeQueryHitResponse(
         chunk_id="chunk-1",
@@ -715,6 +722,7 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
         "chunk_index": 0,
         "content": "answer",
         "distance": None,
+        "similarity": None,
         "kind": "document",
         "question": None,
         "source": None,
@@ -727,6 +735,7 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
         trace_id="trace-1",
         search_mode="blend",
         limit=5,
+        min_similarity=None,
         max_distance=None,
         vector_candidates=2,
         keyword_candidates=1,
@@ -785,6 +794,17 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
     from app.schemas.knowledge import KnowledgeEvaluationRunRequest
     from app.shareddomain.knowledge import evaluation as evaluation_service
 
+    assert evaluation_application._evaluation_run_request(
+        {"case_ids": ["case-1"], "similarity": 0.4}
+    ).similarity == 0.8
+    assert evaluation_application._evaluation_run_request(
+        {
+            "case_ids": ["case-1"],
+            "similarity": 0.4,
+            "similarity_semantics": evaluation_service.EVALUATION_SIMILARITY_SEMANTICS,
+        }
+    ).similarity == 0.4
+
     knowledge_base = KnowledgeBase(
         id="kb-1",
         workspace_id="ws-1",
@@ -798,6 +818,15 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
         "deleted": True,
         "cases": [SimpleNamespace(id="case-1")],
         "documents": [SimpleNamespace(id="doc-1")],
+        "evaluation_task": KnowledgeTask(
+            id="task-1",
+            workspace_id="ws-1",
+            knowledge_base_id="kb-1",
+            task_type="evaluate",
+            status="succeeded",
+        ),
+        "evaluation_task_deleted": True,
+        "task_options": None,
     }
 
     class FakeDb:
@@ -830,7 +859,16 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
 
     async def create_task(*_args):
         events.append("task")
+        state["task_options"] = _args[-1]
         return SimpleNamespace(id="task-1")
+
+    async def lock_evaluation_task(*_args):
+        events.append("lock-run")
+        return state["evaluation_task"]
+
+    async def delete_evaluation_task(*_args):
+        events.append("delete-run")
+        return state["evaluation_task_deleted"]
 
     originals = (
         evaluation_service.knowledge_repository.lock_knowledge_base,
@@ -840,6 +878,8 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
         evaluation_service.evaluation_repository.list_expectations_for_cases,
         evaluation_service.knowledge_repository.list_active_documents_by_ids,
         evaluation_service.create_knowledge_task,
+        evaluation_service.evaluation_repository.lock_evaluation_task,
+        evaluation_service.evaluation_repository.delete_evaluation_task,
         evaluation_service.record_audit_log,
     )
     evaluation_service.knowledge_repository.lock_knowledge_base = lock_knowledge_base
@@ -853,6 +893,10 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
         list_documents
     )
     evaluation_service.create_knowledge_task = create_task
+    evaluation_service.evaluation_repository.lock_evaluation_task = lock_evaluation_task
+    evaluation_service.evaluation_repository.delete_evaluation_task = (
+        delete_evaluation_task
+    )
     evaluation_service.record_audit_log = lambda *_args, **_kwargs: None
     try:
         async def expect_status(coroutine, expected_status: int) -> None:
@@ -875,6 +919,48 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
 
         events.clear()
         asyncio.run(
+            evaluation_service.delete_evaluation_run(
+                FakeDb(), knowledge_base, "task-1", actor
+            )
+        )
+        assert events == ["lock", "lock-run", "delete-run", "commit"]
+
+        events.clear()
+        state["evaluation_task"] = KnowledgeTask(
+            id="task-1",
+            workspace_id="ws-1",
+            knowledge_base_id="kb-1",
+            task_type="evaluate",
+            status="running",
+        )
+        asyncio.run(
+            expect_status(
+                evaluation_service.delete_evaluation_run(
+                    FakeDb(), knowledge_base, "task-1", actor
+                ),
+                409,
+            )
+        )
+        assert events == ["lock", "lock-run"]
+        state["evaluation_task"] = None
+        asyncio.run(
+            expect_status(
+                evaluation_service.delete_evaluation_run(
+                    FakeDb(), knowledge_base, "task-1", actor
+                ),
+                404,
+            )
+        )
+        state["evaluation_task"] = KnowledgeTask(
+            id="task-1",
+            workspace_id="ws-1",
+            knowledge_base_id="kb-1",
+            task_type="evaluate",
+            status="succeeded",
+        )
+
+        events.clear()
+        asyncio.run(
             evaluation_service.enqueue_evaluation_run(
                 FakeDb(),
                 knowledge_base,
@@ -884,6 +970,9 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
         )
         assert events[:4] == ["lock", "cases", "expectations", "documents"]
         assert events[-1] == "task"
+        assert state["task_options"]["similarity_semantics"] == (
+            evaluation_service.EVALUATION_SIMILARITY_SEMANTICS
+        )
 
         state["locked"] = None
         asyncio.run(
@@ -963,6 +1052,8 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
             evaluation_service.evaluation_repository.list_expectations_for_cases,
             evaluation_service.knowledge_repository.list_active_documents_by_ids,
             evaluation_service.create_knowledge_task,
+            evaluation_service.evaluation_repository.lock_evaluation_task,
+            evaluation_service.evaluation_repository.delete_evaluation_task,
             evaluation_service.record_audit_log,
         ) = originals
 
@@ -1031,6 +1122,7 @@ def test_evaluation_case_service_and_repository_edges() -> None:
         created_by_user_id=actor.id,
     )
     state = {
+        "knowledge_base": knowledge_base,
         "documents": [SimpleNamespace(id="doc-1")],
         "task": task,
     }
@@ -1049,6 +1141,9 @@ def test_evaluation_case_service_and_repository_edges() -> None:
     async def list_documents(*_args, **_kwargs):
         return state["documents"]
 
+    async def lock_knowledge_base(*_args, **_kwargs):
+        return state["knowledge_base"]
+
     async def create_case(_db, case, expectations):
         created.append((case, expectations))
         return case
@@ -1063,6 +1158,7 @@ def test_evaluation_case_service_and_repository_edges() -> None:
         evaluation_service.evaluation_repository.list_cases,
         evaluation_service.evaluation_repository.list_expectations_for_cases,
         evaluation_service.knowledge_repository.list_active_documents_by_ids,
+        evaluation_service.knowledge_repository.lock_knowledge_base,
         evaluation_service.evaluation_repository.create_case,
         evaluation_service.knowledge_repository.get_knowledge_task_by_id,
         evaluation_service.evaluation_repository.list_evaluation_tasks,
@@ -1075,6 +1171,7 @@ def test_evaluation_case_service_and_repository_edges() -> None:
     evaluation_service.knowledge_repository.list_active_documents_by_ids = (
         list_documents
     )
+    evaluation_service.knowledge_repository.lock_knowledge_base = lock_knowledge_base
     evaluation_service.evaluation_repository.create_case = create_case
     evaluation_service.knowledge_repository.get_knowledge_task_by_id = get_task
     evaluation_service.evaluation_repository.list_evaluation_tasks = list_tasks
@@ -1094,13 +1191,11 @@ def test_evaluation_case_service_and_repository_edges() -> None:
                 KnowledgeEvaluationCaseCreateRequest(
                     question="  New question  ",
                     expected_document_ids=["doc-1", "doc-1"],
-                    answer_points=["  point  "],
                 ),
                 actor,
             )
         )
         assert response.question == "New question"
-        assert response.answer_points == ["point"]
         assert response.expected_document_ids == ["doc-1"]
         assert len(created[0][1]) == 1
 
@@ -1117,9 +1212,8 @@ def test_evaluation_case_service_and_repository_edges() -> None:
         asyncio.run(
             create_invalid(
                 KnowledgeEvaluationCaseCreateRequest(
-                    question="question",
+                    question=" ",
                     expected_document_ids=["doc-1"],
-                    answer_points=[" "],
                 ),
                 422,
             )
@@ -1134,6 +1228,22 @@ def test_evaluation_case_service_and_repository_edges() -> None:
                 404,
             )
         )
+        state["documents"] = [SimpleNamespace(id="doc-1")]
+        state["knowledge_base"] = KnowledgeBase(
+            id="kb-1",
+            workspace_id="ws-1",
+            status="archived",
+        )
+        asyncio.run(
+            create_invalid(
+                KnowledgeEvaluationCaseCreateRequest(
+                    question="question",
+                    expected_document_ids=["doc-1"],
+                ),
+                403,
+            )
+        )
+        state["knowledge_base"] = knowledge_base
 
         assert asyncio.run(
             evaluation_service.get_evaluation_task(
@@ -1168,6 +1278,7 @@ def test_evaluation_case_service_and_repository_edges() -> None:
             evaluation_service.evaluation_repository.list_cases,
             evaluation_service.evaluation_repository.list_expectations_for_cases,
             evaluation_service.knowledge_repository.list_active_documents_by_ids,
+            evaluation_service.knowledge_repository.lock_knowledge_base,
             evaluation_service.evaluation_repository.create_case,
             evaluation_service.knowledge_repository.get_knowledge_task_by_id,
             evaluation_service.evaluation_repository.list_evaluation_tasks,
@@ -1218,6 +1329,9 @@ def test_evaluation_routes_delegate_to_application() -> None:
     async def delete_case(*_args):
         calls.append(("delete",))
 
+    async def delete_run(*_args):
+        calls.append(("delete-run",))
+
     async def list_runs(*_args, **kwargs):
         calls.append(("list-runs", kwargs))
         return ["run"]
@@ -1243,6 +1357,7 @@ def test_evaluation_routes_delegate_to_application() -> None:
         evaluation_api.list_evaluation_cases,
         evaluation_api.create_evaluation_case,
         evaluation_api.delete_evaluation_case,
+        evaluation_api.delete_evaluation_run,
         evaluation_api.list_evaluation_runs,
         evaluation_api.enqueue_evaluation_run,
         evaluation_api.dispatch_knowledge_task,
@@ -1256,6 +1371,7 @@ def test_evaluation_routes_delegate_to_application() -> None:
         evaluation_api.list_evaluation_cases,
         evaluation_api.create_evaluation_case,
         evaluation_api.delete_evaluation_case,
+        evaluation_api.delete_evaluation_run,
         evaluation_api.list_evaluation_runs,
         evaluation_api.enqueue_evaluation_run,
         evaluation_api.dispatch_knowledge_task,
@@ -1268,6 +1384,7 @@ def test_evaluation_routes_delegate_to_application() -> None:
         list_cases,
         create_case,
         delete_case,
+        delete_run,
         list_runs,
         enqueue_run,
         dispatch,
@@ -1292,6 +1409,10 @@ def test_evaluation_routes_delegate_to_application() -> None:
                 "kb-1", "case-1", context, db
             )
             assert deleted.status_code == 204
+            deleted_run = await evaluation_api.delete_workspace_evaluation_run(
+                "kb-1", "task-1", context, db
+            )
+            assert deleted_run.status_code == 204
             assert await evaluation_api.list_workspace_evaluation_runs(
                 "kb-1", context, db, 5
             ) == ["run"]
@@ -1322,6 +1443,7 @@ def test_evaluation_routes_delegate_to_application() -> None:
             evaluation_api.list_evaluation_cases,
             evaluation_api.create_evaluation_case,
             evaluation_api.delete_evaluation_case,
+            evaluation_api.delete_evaluation_run,
             evaluation_api.list_evaluation_runs,
             evaluation_api.enqueue_evaluation_run,
             evaluation_api.dispatch_knowledge_task,

@@ -1,6 +1,6 @@
 /* @jsxImportSource react */
 import { afterEach, describe, expect, test } from "bun:test"
-import { act, fireEvent, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 
 import { ChunkPreviewList } from "@/components/knowledge/chunk-preview-list"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
@@ -646,9 +646,8 @@ describe("knowledge upload flow: files step", () => {
     })
     expect(screen.getByText("notes.txt")).toBeTruthy()
 
-    fireEvent.change(screen.getByRole("combobox", { name: "导入类型" }), {
-      target: { value: "qa" },
-    })
+    fireEvent.pointerDown(screen.getByRole("button", { name: "导入类型" }))
+    fireEvent.click(within(screen.getByRole("menu")).getByText("问答表"))
     expect(screen.queryByText("notes.txt")).toBeNull()
     expect(screen.queryByRole("button", { name: "选择文件夹" })).toBeNull()
     expect(screen.getByText("拖入 CSV 或 XLSX 文件")).toBeTruthy()
@@ -1393,9 +1392,8 @@ describe("knowledge upload flow: preview generation", () => {
       fireEvent.click(collapseCheckbox)
       fireEvent.click(collapseCheckbox)
       fireEvent.click(collapseCheckbox)
-      fireEvent.change(screen.getByLabelText("切分字符"), {
-        target: { value: "。" },
-      })
+      fireEvent.pointerDown(screen.getByRole("button", { name: "切分字符" }))
+      fireEvent.click(within(screen.getByRole("menu")).getByText("中文句号（。）"))
 
       fireEvent.click(screen.getByRole("button", { name: "重新生成预览" }))
       await waitFor(() =>

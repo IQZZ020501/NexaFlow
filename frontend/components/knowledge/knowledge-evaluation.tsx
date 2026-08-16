@@ -2,19 +2,29 @@
 
 import * as React from "react"
 import {
+  CircleAlertIcon,
   LoaderCircleIcon,
   PlayIcon,
   PlusIcon,
   RotateCcwIcon,
   Trash2Icon,
 } from "lucide-react"
+import { Popover as PopoverPrimitive } from "radix-ui"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useLanguage } from "@/contexts/language-provider"
 import {
   createKnowledgeEvaluationCase,
   createKnowledgeEvaluationRun,
   deleteKnowledgeEvaluationCase,
+  deleteKnowledgeEvaluationRun,
   getKnowledgeEvaluationRun,
   getKnowledgeEvaluationSummary,
   listKnowledgeEvaluationCases,
@@ -24,12 +34,14 @@ import type {
   KnowledgeDocument,
   KnowledgeEvaluationCase,
   KnowledgeEvaluationSummary,
+  KnowledgeQueryInspectResult,
   KnowledgeSearchMode,
   KnowledgeTask,
 } from "@/lib/api/knowledge"
 import { languageLocales, type TranslationKey } from "@/i18n"
 import { formatDateTime } from "@/lib/display"
 import { taskStatusLabel } from "@/components/knowledge/status-labels"
+import { KnowledgeHitTest } from "@/components/knowledge/knowledge-hit-test"
 
 type KnowledgeEvaluationProps = {
   token: string
@@ -65,20 +77,44 @@ export function KnowledgeEvaluation({
   const [cases, setCases] = React.useState<KnowledgeEvaluationCase[]>([])
   const [runs, setRuns] = React.useState<KnowledgeTask[]>([])
   const [selectedCaseIds, setSelectedCaseIds] = React.useState<string[]>([])
-  const [question, setQuestion] = React.useState("")
-  const [expectedDocumentIds, setExpectedDocumentIds] = React.useState<string[]>([])
-  const [answerPoints, setAnswerPoints] = React.useState("")
+  const [testedQuery, setTestedQuery] = React.useState("")
   const [limit, setLimit] = React.useState(5)
   const [searchMode, setSearchMode] = React.useState<KnowledgeSearchMode>("blend")
-  const [similarity, setSimilarity] = React.useState(2)
+  const [similarity, setSimilarity] = React.useState(0.6)
   const [includeReferences, setIncludeReferences] = React.useState(true)
+  const [expectedDocumentIds, setExpectedDocumentIds] = React.useState<string[]>([])
   const [activeTask, setActiveTask] = React.useState<KnowledgeTask | null>(null)
   const [summary, setSummary] = React.useState<KnowledgeEvaluationSummary | null>(null)
-  const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
+  const [isDeleting, setIsDeleting] = React.useState(false)
+  const [deleteTarget, setDeleteTarget] = React.useState<
+    | { type: "case"; item: KnowledgeEvaluationCase }
+    | { type: "run"; item: KnowledgeTask }
+    | null
+  >(null)
+
+  const handleTested = React.useCallback((payload: {
+    query: string
+    result: KnowledgeQueryInspectResult
+    limit: number
+    searchMode: KnowledgeSearchMode
+    similarity: number
+    includeReferences: boolean
+  }) => {
+    const activeDocumentIds = new Set(activeDocuments.map((document) => document.id))
+    setTestedQuery(payload.query)
+    setExpectedDocumentIds(
+      [...new Set(payload.result.hits.map((hit) => hit.document_id))].filter((id) =>
+        activeDocumentIds.has(id),
+      ),
+    )
+    setLimit(payload.limit)
+    setSearchMode(payload.searchMode)
+    setSimilarity(payload.similarity)
+    setIncludeReferences(payload.includeReferences)
+  }, [activeDocuments])
 
   const load = React.useCallback(async () => {
-    setIsLoading(true)
     try {
       const [nextCases, nextRuns] = await Promise.all([
         listKnowledgeEvaluationCases(token, workspaceId, knowledgeBaseId),
@@ -105,8 +141,6 @@ export function KnowledgeEvaluation({
       }
     } catch (error) {
       reportError(error)
-    } finally {
-      setIsLoading(false)
     }
   }, [knowledgeBaseId, reportError, token, workspaceId])
 
@@ -156,7 +190,6 @@ export function KnowledgeEvaluation({
   async function addCase(payload: {
     question: string
     expected_document_ids: string[]
-    answer_points: string[]
   }) {
     const created = await createKnowledgeEvaluationCase(
       token,
@@ -169,21 +202,15 @@ export function KnowledgeEvaluation({
     return created
   }
 
-  async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function handleSaveTest() {
+    if (!testedQuery.trim() || !expectedDocumentIds.length) return
     setIsSaving(true)
     try {
       await addCase({
-        question: question.trim(),
+        question: testedQuery.trim(),
         expected_document_ids: expectedDocumentIds,
-        answer_points: answerPoints
-          .split("\n")
-          .map((value) => value.trim())
-          .filter(Boolean),
       })
-      setQuestion("")
       setExpectedDocumentIds([])
-      setAnswerPoints("")
     } catch (error) {
       reportError(error)
     } finally {
@@ -191,14 +218,41 @@ export function KnowledgeEvaluation({
     }
   }
 
-  async function handleDelete(item: KnowledgeEvaluationCase) {
-    if (!window.confirm(t("删除评测用例？"))) return
+  async function handleDeleteCase(item: KnowledgeEvaluationCase) {
+    await deleteKnowledgeEvaluationCase(token, workspaceId, knowledgeBaseId, item.id)
+    setCases((current) => current.filter((entry) => entry.id !== item.id))
+    setSelectedCaseIds((current) => current.filter((id) => id !== item.id))
+  }
+
+  async function handleDeleteRun(item: KnowledgeTask) {
+    await deleteKnowledgeEvaluationRun(
+      token,
+      workspaceId,
+      knowledgeBaseId,
+      item.id,
+    )
+    setRuns((current) => current.filter((entry) => entry.id !== item.id))
+    if (activeTask?.id === item.id) {
+      setActiveTask(null)
+      setSummary(null)
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget || isDeleting) return
+    const target = deleteTarget
+    setIsDeleting(true)
     try {
-      await deleteKnowledgeEvaluationCase(token, workspaceId, knowledgeBaseId, item.id)
-      setCases((current) => current.filter((entry) => entry.id !== item.id))
-      setSelectedCaseIds((current) => current.filter((id) => id !== item.id))
+      if (target.type === "case") {
+        await handleDeleteCase(target.item)
+      } else {
+        await handleDeleteRun(target.item)
+      }
+      setDeleteTarget(null)
     } catch (error) {
       reportError(error)
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -244,23 +298,12 @@ export function KnowledgeEvaluation({
     }
   }
 
-  if (isLoading) {
-    return (
-      <div className="flex min-h-64 items-center justify-center">
-        <LoaderCircleIcon className="animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
   return (
     <div className="p-4 lg:p-5">
       <div className="max-w-6xl">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold">{t("检索评测")}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t("用固定问题和期望文档持续验证真实检索链路")}
-            </p>
           </div>
           <Button type="button" variant="outline" onClick={() => void load()}>
             <RotateCcwIcon data-icon="inline-start" />
@@ -268,58 +311,52 @@ export function KnowledgeEvaluation({
           </Button>
         </div>
 
-        {canEdit ? (
-          <div className="mt-4">
-            <form className="rounded-lg border p-4" onSubmit={(event) => void handleCreate(event)}>
-              <h2 className="text-sm font-semibold">{t("新建评测用例")}</h2>
-              <label className="mt-3 grid gap-1 text-sm font-medium" htmlFor="evaluation-question">
-                {t("问题")}
-                <textarea
-                  id="evaluation-question"
-                  className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm"
-                  value={question}
-                  maxLength={2000}
-                  onChange={(event) => setQuestion(event.target.value)}
-                />
-              </label>
-              <fieldset className="mt-3">
-                <legend className="text-sm font-medium">{t("期望文档")}</legend>
-                <div className="mt-2 max-h-36 space-y-2 overflow-y-auto rounded-md border p-3">
-                  {activeDocuments.length ? activeDocuments.map((document) => (
-                    <label key={document.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={expectedDocumentIds.includes(document.id)}
-                        onChange={(event) => setExpectedDocumentIds((current) =>
-                          event.target.checked
-                            ? [...current, document.id]
-                            : current.filter((id) => id !== document.id),
-                        )}
-                      />
-                      <span className="break-all">{document.filename}</span>
-                    </label>
-                  )) : <p className="text-sm text-muted-foreground">{t("暂无已启用文档")}</p>}
-                </div>
-              </fieldset>
-              <label className="mt-3 grid gap-1 text-sm font-medium" htmlFor="evaluation-answer-points">
-                {t("答案要点（每行一个）")}
-                <textarea
-                  id="evaluation-answer-points"
-                  className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm"
-                  value={answerPoints}
-                  onChange={(event) => setAnswerPoints(event.target.value)}
-                />
-              </label>
+        <KnowledgeHitTest
+          token={token}
+          workspaceId={workspaceId}
+          knowledgeBaseId={knowledgeBaseId}
+          reportError={reportError}
+          onTested={handleTested}
+        />
+
+        {canEdit && testedQuery ? (
+          <section className="mt-4 rounded-lg border p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold">{t("保存当前检索")}</h3>
+                <p className="mt-1 break-words text-sm text-muted-foreground">
+                  {testedQuery}
+                </p>
+              </div>
               <Button
-                type="submit"
-                className="mt-3"
-                disabled={isSaving || !question.trim() || !expectedDocumentIds.length}
+                type="button"
+                disabled={isSaving || !expectedDocumentIds.length}
+                onClick={() => void handleSaveTest()}
               >
                 <PlusIcon data-icon="inline-start" />
                 {t("添加用例")}
               </Button>
-            </form>
-          </div>
+            </div>
+            <fieldset className="mt-3">
+              <legend className="text-sm font-medium">{t("期望文档")}</legend>
+              <div className="mt-2 max-h-36 space-y-2 overflow-y-auto rounded-md border p-3">
+                {activeDocuments.length ? activeDocuments.map((document) => (
+                  <label key={document.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={expectedDocumentIds.includes(document.id)}
+                      onChange={(event) => setExpectedDocumentIds((current) =>
+                        event.target.checked
+                          ? [...current, document.id]
+                          : current.filter((id) => id !== document.id),
+                      )}
+                    />
+                    <span className="break-all">{document.filename}</span>
+                  </label>
+                )) : <p className="text-sm text-muted-foreground">{t("暂无已启用文档")}</p>}
+              </div>
+            </fieldset>
+          </section>
         ) : null}
 
         <section className="mt-4 rounded-lg border">
@@ -357,7 +394,7 @@ export function KnowledgeEvaluation({
                       size="icon-sm"
                       variant="ghost"
                       aria-label={t("删除用例：{value}", { value: item.question })}
-                      onClick={() => void handleDelete(item)}
+                      onClick={() => setDeleteTarget({ type: "case", item })}
                     >
                       <Trash2Icon />
                     </Button>
@@ -375,52 +412,6 @@ export function KnowledgeEvaluation({
         {canEdit ? (
           <section className="mt-4 rounded-lg border p-4">
             <h2 className="text-sm font-semibold">{t("运行评测")}</h2>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="grid gap-1 text-sm font-medium" htmlFor="evaluation-mode">
-                {t("检索模式")}
-                <select
-                  id="evaluation-mode"
-                  className="h-9 rounded-md border bg-background px-3 text-sm"
-                  value={searchMode}
-                  onChange={(event) => setSearchMode(event.target.value as KnowledgeSearchMode)}
-                >
-                  <option value="blend">{t("混合检索")}</option>
-                  <option value="embedding">{t("向量检索")}</option>
-                  <option value="keywords">{t("关键词检索")}</option>
-                </select>
-              </label>
-              <label className="grid gap-1 text-sm font-medium" htmlFor="evaluation-distance">
-                {t("最大余弦距离")}
-                <Input
-                  id="evaluation-distance"
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.05}
-                  value={similarity}
-                  onChange={(event) => setSimilarity(Math.min(2, Math.max(0, Number(event.target.value) || 0)))}
-                />
-              </label>
-              <label className="grid gap-1 text-sm font-medium" htmlFor="evaluation-limit">
-                {t("Top K")}
-                <Input
-                  id="evaluation-limit"
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={limit}
-                  onChange={(event) => setLimit(Math.min(20, Math.max(1, Number(event.target.value) || 1)))}
-                />
-              </label>
-              <label className="flex min-h-9 items-center gap-2 self-end text-sm font-medium">
-                <input
-                  type="checkbox"
-                  checked={includeReferences}
-                  onChange={(event) => setIncludeReferences(event.target.checked)}
-                />
-                {t("扩展文档引用")}
-              </label>
-            </div>
             <Button
               type="button"
               className="mt-3"
@@ -446,28 +437,100 @@ export function KnowledgeEvaluation({
           <section className="rounded-lg border">
             <div className="border-b p-4"><h2 className="text-sm font-semibold">{t("运行历史")}</h2></div>
             {runs.length ? runs.map((task) => (
-              <button
-                key={task.id}
-                type="button"
-                className="block w-full border-b p-3 text-left text-sm last:border-b-0 hover:bg-muted/40"
-                onClick={() => void openRun(task)}
-              >
-                <span className="block font-medium">{taskStatusLabel(task.status, t)}</span>
-                <span className="mt-1 block text-xs text-muted-foreground">{formatDateTime(task.created_at, locale)}</span>
-              </button>
+              <div key={task.id} className="flex items-center border-b last:border-b-0 hover:bg-muted/40">
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 p-3 text-left text-sm"
+                  onClick={() => void openRun(task)}
+                >
+                  <span className="block font-medium">{taskStatusLabel(task.status, t)}</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">{formatDateTime(task.created_at, locale)}</span>
+                </button>
+                {canEdit && ["succeeded", "failed"].includes(task.status) ? (
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    className="mr-2"
+                    title={t("删除运行记录：{value}", { value: formatDateTime(task.created_at, locale) })}
+                    aria-label={t("删除运行记录：{value}", { value: formatDateTime(task.created_at, locale) })}
+                    disabled={isDeleting}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setDeleteTarget({ type: "run", item: task })
+                    }}
+                  >
+                    <Trash2Icon />
+                  </Button>
+                ) : null}
+              </div>
             )) : <div className="p-4 text-sm text-muted-foreground">{t("暂无评测记录")}</div>}
           </section>
 
           <section className="min-w-0 rounded-lg border">
-            <div className="border-b p-4"><h2 className="text-sm font-semibold">{t("评测结果")}</h2></div>
+            <div className="flex items-center gap-1 border-b p-4">
+              <h2 className="text-sm font-semibold">{t("评测结果")}</h2>
+              <PopoverPrimitive.Root>
+                <PopoverPrimitive.Trigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="-my-1 text-muted-foreground"
+                    aria-label={t("查看评测说明")}
+                    title={t("查看评测说明")}
+                  >
+                    <CircleAlertIcon className="size-4" />
+                  </Button>
+                </PopoverPrimitive.Trigger>
+                <PopoverPrimitive.Portal>
+                  <PopoverPrimitive.Content
+                    side="right"
+                    align="center"
+                    sideOffset={6}
+                    collisionPadding={16}
+                    className="z-50 max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-lg overflow-y-auto rounded-lg border bg-popover p-4 text-popover-foreground shadow-md outline-none"
+                  >
+                    <p className="font-semibold">{t("评测指标说明")}</p>
+                    <div className="mt-3 space-y-3 text-sm leading-6">
+                      <p>
+                        {t("输入一个问题后，系统召回的前 K 个结果，是否来自你事先标记的“期望文档”，以及这些文档排得够不够靠前。")}
+                      </p>
+                      <p className="text-muted-foreground">
+                        {t("它不是在评测召回片段的正文是否真的包含答案，也不评测 Agent 最终回答是否正确。")}
+                      </p>
+                      <div className="rounded-md bg-muted/50 p-3">
+                        <p className="font-medium">{t("示例")}</p>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <p>{t("测试问题：怎么申请年假？")}</p>
+                          <p>{t("期望文档：A《员工手册》、B《请假制度》")}</p>
+                          <p>{t("实际召回文档顺序：B、X、A")}</p>
+                        </div>
+                        <ul className="mt-3 list-disc space-y-1 pl-5">
+                          {([
+                            "Hit@K = 1：至少命中了一篇期望文档",
+                            "Recall@K = 1：A、B 两篇都找到了",
+                            "MRR = 1：第一名就是期望文档",
+                            "nDCG@K ≈ 0.92：都找到了，但 A 排到第三名，因此被扣一点分",
+                            "P50/P95：检索耗时",
+                          ] as TranslationKey[]).map((item) => (
+                            <li key={item}>{t(item)}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </PopoverPrimitive.Content>
+                </PopoverPrimitive.Portal>
+              </PopoverPrimitive.Root>
+            </div>
             {summary ? (
               <div>
                 <dl className="grid grid-cols-2 gap-3 p-4 text-sm sm:grid-cols-4">
                   {[
-                    ["Hit@K" as TranslationKey, metric(summary.mean_hit_at_k)],
-                    ["Recall@K" as TranslationKey, metric(summary.mean_recall_at_k)],
-                    ["MRR" as TranslationKey, metric(summary.mean_reciprocal_rank)],
-                    ["nDCG@K" as TranslationKey, metric(summary.mean_ndcg_at_k)],
+                    ["Hit@K 命中率" as TranslationKey, metric(summary.mean_hit_at_k)],
+                    ["Recall@K 召回率" as TranslationKey, metric(summary.mean_recall_at_k)],
+                    ["MRR 首次命中排名" as TranslationKey, metric(summary.mean_reciprocal_rank)],
+                    ["nDCG@K 排序质量" as TranslationKey, metric(summary.mean_ndcg_at_k)],
                     ["P50 延迟" as TranslationKey, t("{value} 毫秒", { value: metric(summary.p50_latency_ms) })],
                     ["P95 延迟" as TranslationKey, t("{value} 毫秒", { value: metric(summary.p95_latency_ms) })],
                     ["成功用例" as TranslationKey, summary.count],
@@ -508,6 +571,48 @@ export function KnowledgeEvaluation({
           </section>
         </div>
       </div>
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setDeleteTarget(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {deleteTarget?.type === "run"
+                ? t("删除运行记录")
+                : t("删除评测用例")}
+            </DialogTitle>
+            <DialogDescription>
+              {deleteTarget?.type === "run"
+                ? t("删除运行记录说明")
+                : t("删除评测用例说明")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isDeleting}
+              onClick={() => setDeleteTarget(null)}
+            >
+              {t("取消")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isDeleting}
+              onClick={() => void confirmDelete()}
+            >
+              {isDeleting ? (
+                <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+              ) : null}
+              {t("删除")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

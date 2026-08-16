@@ -25,7 +25,6 @@ import {
   SearchIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
-  TargetIcon,
   Trash2Icon,
   UploadIcon,
   UsersIcon,
@@ -35,6 +34,7 @@ import type { MeResponse } from "@/lib/api/auth"
 import type { AppNotification } from "@/lib/notifications"
 import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import {
   CARD_BATCH_SIZE,
@@ -103,7 +103,6 @@ import {
 } from "@/lib/knowledge-upload-route"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
-import { KnowledgeHitTest } from "@/components/knowledge/knowledge-hit-test"
 import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
 import {
   getDocumentFileIcon,
@@ -174,6 +173,87 @@ export function paginateDocuments<T>(
 
 export function documentPageCount(total: number, pageSize: number): number {
   return Math.max(1, Math.ceil(total / pageSize))
+}
+
+function PaginationFooter({
+  total,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  total: number
+  page: number
+  pageSize: DocumentPageSize
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: DocumentPageSize) => void
+}) {
+  const { t } = useLanguage()
+  const totalPages = documentPageCount(total, pageSize)
+
+  if (!total) {
+    return null
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground">
+          {t("共 {value} 条", { value: total })}
+        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 justify-between gap-2"
+            >
+              <span>{t("每页 {value} 条", { value: pageSize })}</span>
+              <ChevronDownIcon className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-36">
+            {DOCUMENT_PAGE_SIZES.map((option) => (
+              <DropdownMenuItem
+                key={option}
+                className="justify-between"
+                onSelect={() => onPageSizeChange(option)}
+              >
+                {t("每页 {value} 条", { value: option })}
+                {pageSize === option ? (
+                  <CheckIcon className="size-3.5 text-primary" />
+                ) : null}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={page <= 1}
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+        >
+          {t("上一页")}
+        </Button>
+        <span className="text-muted-foreground">
+          {page} / {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+        >
+          {t("下一页")}
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 const SMART_CHUNK_SIZE = 1200
@@ -268,6 +348,7 @@ function KnowledgeBasePageContent({
   const activeKnowledgeBaseId = params.id ?? null
   const Icon = DatabaseIcon
   const { language, t } = useLanguage()
+  const [confirmAction, confirmDialog] = useConfirmDialog()
   const locale = languageLocales[language]
   const [knowledgeBases, setKnowledgeBases] = React.useState<
     KnowledgeBaseListItem[]
@@ -291,6 +372,9 @@ function KnowledgeBasePageContent({
   const [documentSearch, setDocumentSearch] = React.useState("")
   const [documentPage, setDocumentPage] = React.useState(1)
   const [documentPageSize, setDocumentPageSize] =
+    React.useState<DocumentPageSize>(10)
+  const [knowledgeTaskPage, setKnowledgeTaskPage] = React.useState(1)
+  const [knowledgeTaskPageSize, setKnowledgeTaskPageSize] =
     React.useState<DocumentPageSize>(10)
   const [documentSortKey, setDocumentSortKey] =
     React.useState<DocumentSortKey>("created_at")
@@ -409,9 +493,10 @@ function KnowledgeBasePageContent({
     documentPage,
     documentPageSize,
   )
-  const documentTotalPages = documentPageCount(
-    filteredDocuments.length,
-    documentPageSize,
+  const visibleKnowledgeTasks = paginateDocuments(
+    knowledgeTasks,
+    knowledgeTaskPage,
+    knowledgeTaskPageSize,
   )
   const isAllFilteredDocumentsSelected =
     visibleDocuments.length > 0 &&
@@ -802,9 +887,13 @@ function KnowledgeBasePageContent({
     }
 
     if (
-      !window.confirm(
-        t("永久删除 {name}？此操作不可恢复。", { name: knowledgeBase.name })
-      )
+      !(await confirmAction({
+        description: t("永久删除 {name}？此操作不可恢复。", {
+          name: knowledgeBase.name,
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -947,11 +1036,13 @@ function KnowledgeBasePageContent({
     }
 
     if (
-      !window.confirm(
-        t("永久删除选中的 {value} 个文档？此操作不可恢复。", {
+      !(await confirmAction({
+        description: t("永久删除选中的 {value} 个文档？此操作不可恢复。", {
           value: selectedDocuments.length,
-        })
-      )
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -1034,9 +1125,13 @@ function KnowledgeBasePageContent({
     }
 
     if (
-      !window.confirm(
-        t("永久删除 {name}？此操作不可恢复。", { name: document.filename })
-      )
+      !(await confirmAction({
+        description: t("永久删除 {name}？此操作不可恢复。", {
+          name: document.filename,
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -1152,7 +1247,6 @@ function KnowledgeBasePageContent({
     { key: "documents", label: t("文档"), icon: FileTextIcon },
     { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
     { key: "evaluation", label: t("检索评测"), icon: FlaskConicalIcon },
-    { key: "hit-test", label: t("命中测试"), icon: TargetIcon },
     { key: "settings", label: t("设置"), icon: SettingsIcon },
   ]
 
@@ -1658,78 +1752,16 @@ function KnowledgeBasePageContent({
                       )}
                     </div>
                   </div>
-                  {filteredDocuments.length > 0 ? (
-                    <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground">
-                          {t("共 {value} 条", { value: filteredDocuments.length })}
-                        </span>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 justify-between gap-2"
-                            >
-                              <span>
-                                {t("每页 {value} 条", {
-                                  value: documentPageSize,
-                                })}
-                              </span>
-                              <ChevronDownIcon className="size-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start" className="w-36">
-                            {DOCUMENT_PAGE_SIZES.map((pageSize) => (
-                              <DropdownMenuItem
-                                key={pageSize}
-                                className="justify-between"
-                                onSelect={() => {
-                                  setDocumentPageSize(pageSize)
-                                  setDocumentPage(1)
-                                }}
-                              >
-                                {t("每页 {value} 条", { value: pageSize })}
-                                {documentPageSize === pageSize ? (
-                                  <CheckIcon className="size-3.5 text-primary" />
-                                ) : null}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={documentPage <= 1}
-                          onClick={() =>
-                            setDocumentPage((current) => Math.max(1, current - 1))
-                          }
-                        >
-                          {t("上一页")}
-                        </Button>
-                        <span className="text-muted-foreground">
-                          {documentPage} / {documentTotalPages}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={documentPage >= documentTotalPages}
-                          onClick={() =>
-                            setDocumentPage((current) =>
-                              Math.min(documentTotalPages, current + 1)
-                            )
-                          }
-                        >
-                          {t("下一页")}
-                        </Button>
-                      </div>
-                    </div>
-                  ) : null}
+                  <PaginationFooter
+                    total={filteredDocuments.length}
+                    page={documentPage}
+                    pageSize={documentPageSize}
+                    onPageChange={setDocumentPage}
+                    onPageSizeChange={(pageSize) => {
+                      setDocumentPageSize(pageSize)
+                      setDocumentPage(1)
+                    }}
+                  />
                 </div>
               </div>
             ) : null}
@@ -2002,8 +2034,8 @@ function KnowledgeBasePageContent({
                       <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
                         <LoaderCircleIcon className="animate-spin" />
                       </div>
-                    ) : knowledgeTasks.length ? (
-                      knowledgeTasks.map((task) => (
+                    ) : visibleKnowledgeTasks.length ? (
+                      visibleKnowledgeTasks.map((task) => (
                         <div
                           key={task.id}
                           className="grid min-h-16 grid-cols-[120px_120px_140px_120px_minmax(220px,1fr)_120px] items-center border-b px-4 py-3 text-sm last:border-b-0"
@@ -2058,17 +2090,18 @@ function KnowledgeBasePageContent({
                       </div>
                     )}
                   </div>
+                  <PaginationFooter
+                    total={knowledgeTasks.length}
+                    page={knowledgeTaskPage}
+                    pageSize={knowledgeTaskPageSize}
+                    onPageChange={setKnowledgeTaskPage}
+                    onPageSizeChange={(pageSize) => {
+                      setKnowledgeTaskPageSize(pageSize)
+                      setKnowledgeTaskPage(1)
+                    }}
+                  />
                 </div>
               </div>
-            ) : null}
-
-            {activeDetailTab === "hit-test" ? (
-              <KnowledgeHitTest
-                token={token}
-                workspaceId={selectedKnowledgeBase.workspace_id}
-                knowledgeBaseId={selectedKnowledgeBase.id}
-                reportError={reportError}
-              />
             ) : null}
 
             {activeDetailTab === "evaluation" ? (
@@ -2246,6 +2279,7 @@ function KnowledgeBasePageContent({
           handleGrantPermission={handleGrantPermission}
           handleRevokePermission={handleRevokePermission}
         />
+        {confirmDialog}
       </>
     )
   }
@@ -2502,6 +2536,7 @@ function KnowledgeBasePageContent({
         handleGrantPermission={handleGrantPermission}
         handleRevokePermission={handleRevokePermission}
       />
+      {confirmDialog}
     </>
   )
 }

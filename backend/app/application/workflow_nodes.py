@@ -788,6 +788,7 @@ async def execute_workflow_node(
                 "document_id": str(item.get("document_id") or ""),
                 "content": str(item.get("content") or ""),
                 "distance": item.get("distance"),
+                "similarity": item.get("similarity"),
             }
             trace_id = item.get("trace_id")
             if isinstance(trace_id, str) and trace_id:
@@ -815,9 +816,9 @@ async def execute_workflow_node(
         is_hit_handling_method_list = [
             item
             for item in paragraph_list
-            if isinstance(item["distance"], (int, float))
-            and not isinstance(item["distance"], bool)
-            and item["distance"] <= parsed.similarity
+            if isinstance(item["similarity"], (int, float))
+            and not isinstance(item["similarity"], bool)
+            and item["similarity"] >= parsed.similarity
         ]
         joined = "\n\n".join(
             item["content"] for item in paragraph_list if item["content"]

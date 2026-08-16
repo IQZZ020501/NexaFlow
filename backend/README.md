@@ -57,13 +57,13 @@ the configured `KNOWLEDGE_STORAGE_DIR` and connect to the same `QDRANT_URL`;
 otherwise workers can miss uploaded files or write vectors to a different
 Qdrant instance.
 
-Run one Celery Beat process for storage-cleanup and Agent lease recovery. Agent
-workers, the API, and Beat must use the same PostgreSQL database and Redis
-broker. Agent answer and reasoning deltas use bounded, short-lived Redis
-Streams while checkpoints, process events, and terminal answers stay in
-PostgreSQL. Closing an Agent event stream only stops observation; it does not
-cancel the durable run. If Redis live reads fail, the client still receives the
-durable terminal answer.
+Run one Celery Beat process for storage-cleanup, Knowledge task, and Agent
+lease recovery. Agent workers, the API, and Beat must use the same PostgreSQL
+database and Redis broker. Agent answer and reasoning deltas use bounded,
+short-lived Redis Streams while checkpoints, process events, and terminal
+answers stay in PostgreSQL. Closing an Agent event stream only stops
+observation; it does not cancel the durable run. If Redis live reads fail, the
+client still receives the durable terminal answer.
 
 ## MCP transports
 

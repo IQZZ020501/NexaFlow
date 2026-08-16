@@ -3,6 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import (
     TASK_EVALUATE,
+    TASK_FAILED_STATUS,
+    TASK_SUCCEEDED_STATUS,
     KnowledgeBase,
     KnowledgeEvaluationCase,
     KnowledgeEvaluationExpectation,
@@ -100,6 +102,41 @@ async def delete_case(
             KnowledgeEvaluationCaseORM.workspace_id == knowledge_base.workspace_id,
             KnowledgeEvaluationCaseORM.knowledge_base_id == knowledge_base.id,
             KnowledgeEvaluationCaseORM.id == case_id,
+        )
+    )
+    return result.rowcount == 1
+
+
+async def lock_evaluation_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    task_id: str,
+) -> KnowledgeTask | None:
+    row = await db.scalar(
+        select(KnowledgeTaskORM)
+        .where(
+            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeTaskORM.id == task_id,
+            KnowledgeTaskORM.task_type == TASK_EVALUATE,
+        )
+        .with_for_update()
+    )
+    return to_entity(KnowledgeTask, row) if row else None
+
+
+async def delete_evaluation_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    task_id: str,
+) -> bool:
+    result = await db.execute(
+        delete(KnowledgeTaskORM).where(
+            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeTaskORM.id == task_id,
+            KnowledgeTaskORM.task_type == TASK_EVALUATE,
+            KnowledgeTaskORM.status.in_([TASK_SUCCEEDED_STATUS, TASK_FAILED_STATUS]),
         )
     )
     return result.rowcount == 1

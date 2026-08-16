@@ -6,6 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { cn } from "@/lib/utils"
 
 export type FilterDropdownOption = {
   value: string
@@ -13,25 +14,38 @@ export type FilterDropdownOption = {
 }
 
 export function FilterDropdown({
+  id,
   ariaLabel,
   value,
   options,
+  className,
+  disabled = false,
+  modal,
   onChange,
 }: {
+  id?: string
   ariaLabel: string
   value: string
   options: FilterDropdownOption[]
+  className?: string
+  disabled?: boolean
+  modal?: boolean
   onChange: (value: string) => void
 }) {
   const selectedOption = options.find((option) => option.value === value)
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={modal}>
       <DropdownMenuTrigger asChild>
         <button
+          id={id}
           type="button"
-          className="flex h-8 w-full items-center justify-between gap-2 rounded-lg border bg-background px-2 text-sm"
+          className={cn(
+            "flex h-8 w-full items-center justify-between gap-2 rounded-lg border bg-background px-2 text-sm disabled:pointer-events-none disabled:opacity-50",
+            className,
+          )}
           aria-label={ariaLabel}
+          disabled={disabled}
         >
           <span className="truncate">{selectedOption?.label ?? value}</span>
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />

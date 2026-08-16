@@ -2381,10 +2381,12 @@ def test_celery() -> None:
     assert app.conf.worker_pool in {"solo", "prefork"}
     beat = app.conf.beat_schedule
     assert set(beat) == {
+        "recover-knowledge-tasks",
         "recover-knowledge-storage-cleanups",
         "recover-upload-storage-cleanups",
         "recover-agent-runs",
     }
+    assert beat["recover-knowledge-tasks"]["schedule"] == 30.0
     assert beat["recover-agent-runs"]["schedule"] == 30.0
     assert app.conf.accept_content == ["json"]
     assert app.conf.task_acks_late is True

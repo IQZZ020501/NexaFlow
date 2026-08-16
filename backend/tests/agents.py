@@ -785,7 +785,12 @@ async def assert_knowledge_source_failure_is_attributed() -> None:
                 trace_id=f"trace-{knowledge_base.id}",
                 search_mode=payload.search_mode,
                 limit=payload.limit,
-                max_distance=payload.similarity,
+                min_similarity=payload.similarity,
+                max_distance=(
+                    2 * (1 - payload.similarity)
+                    if payload.similarity is not None
+                    else None
+                ),
                 vector_candidates=0,
                 keyword_candidates=len(hits),
                 reference_candidates=0,
@@ -872,7 +877,12 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
                 trace_id=f"trace-{knowledge_base.id}",
                 search_mode=payload.search_mode,
                 limit=payload.limit,
-                max_distance=payload.similarity,
+                min_similarity=payload.similarity,
+                max_distance=(
+                    2 * (1 - payload.similarity)
+                    if payload.similarity is not None
+                    else None
+                ),
                 vector_candidates=2,
                 keyword_candidates=2,
                 reference_candidates=0,
@@ -2863,7 +2873,12 @@ def main() -> None:
                 trace_id=f"trace-{knowledge_base.id}",
                 search_mode=payload.search_mode,
                 limit=payload.limit,
-                max_distance=payload.similarity,
+                min_similarity=payload.similarity,
+                max_distance=(
+                    2 * (1 - payload.similarity)
+                    if payload.similarity is not None
+                    else None
+                ),
                 vector_candidates=0,
                 keyword_candidates=len(hits),
                 reference_candidates=0,

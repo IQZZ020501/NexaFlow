@@ -55,6 +55,10 @@ def create_celery_app() -> Celery:
         worker_pool=worker_pool_for_platform(sys.platform),
         worker_prefetch_multiplier=1,
         beat_schedule={
+            "recover-knowledge-tasks": {
+                "task": "app.knowledge.recover",
+                "schedule": 30.0,
+            },
             "recover-knowledge-storage-cleanups": {
                 "task": "app.knowledge.recover_storage_cleanups",
                 "schedule": 60.0,

@@ -96,9 +96,27 @@ async def set_knowledge_document_active(
     document: KnowledgeDocument,
     actor: User,
     is_active: bool,
-) -> None:
+) -> KnowledgeDocument:
+    knowledge_base = await knowledge_base_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    require_knowledge_base_active(knowledge_base)
+    document = await knowledge_base_repository.get_knowledge_document_by_id(
+        db,
+        document.id,
+    )
+    if (
+        document is None
+        or document.workspace_id != knowledge_base.workspace_id
+        or document.knowledge_base_id != knowledge_base.id
+        or document.status == DOCUMENT_DELETED_STATUS
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge document not found.")
     if document.is_active == is_active:
-        return
+        return document
 
     document.is_active = is_active
     await knowledge_base_repository.save_knowledge_document(db, document)
@@ -113,3 +131,4 @@ async def set_knowledge_document_active(
         workspace_id=knowledge_base.workspace_id,
     )
     await db.commit()
+    return document

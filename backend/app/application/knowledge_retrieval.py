@@ -48,6 +48,12 @@ def _elapsed_ms(started_at: float) -> float:
     return round(max(0.0, (time.perf_counter() - started_at) * 1000), 3)
 
 
+def normalized_cosine_similarity(distance: float | None) -> float | None:
+    if distance is None:
+        return None
+    return max(0.0, min(1.0, 1.0 - distance / 2.0))
+
+
 async def _query_candidates(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
@@ -158,7 +164,9 @@ async def retrieve_knowledge_base(
             )
 
     qdrant_score_threshold = (
-        1.0 - payload.similarity if payload.similarity is not None else None
+        2.0 * payload.similarity - 1.0
+        if payload.similarity is not None and payload.similarity > 0
+        else None
     )
     vector_hits, keyword_chunk_ids = await _query_candidates(
         db,
@@ -339,6 +347,9 @@ async def retrieve_knowledge_base(
                         )
                     ),
                     distance=representative_hit.distance,
+                    similarity=normalized_cosine_similarity(
+                        representative_hit.distance
+                    ),
                     sources=list(representative_hit.sources),
                     reference_hops=(
                         1 if representative_hit.reference_rank is not None else 0
@@ -399,6 +410,7 @@ async def retrieve_knowledge_base(
                     chunk_index=chunk.chunk_index,
                     content=content,
                     distance=hit.distance,
+                    similarity=normalized_cosine_similarity(hit.distance),
                     sources=list(hit.sources),
                     reference_hops=1 if hit.reference_rank is not None else 0,
                     rerank_score=hit.rerank_score,
@@ -417,7 +429,12 @@ async def retrieve_knowledge_base(
         trace_id=trace_id,
         search_mode=payload.search_mode,
         limit=payload.limit,
-        max_distance=payload.similarity,
+        min_similarity=payload.similarity,
+        max_distance=(
+            2.0 * (1.0 - payload.similarity)
+            if payload.similarity is not None
+            else None
+        ),
         vector_candidates=len(vector_hits),
         keyword_candidates=len(keyword_chunk_ids),
         reference_candidates=len(reference_chunk_ids),

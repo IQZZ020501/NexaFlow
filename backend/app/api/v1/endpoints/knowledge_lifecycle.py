@@ -167,7 +167,7 @@ async def update_workspace_knowledge_base_document_status(
         {"edit"},
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)
-    await set_knowledge_document_active(
+    document = await set_knowledge_document_active(
         db,
         knowledge_base,
         document,

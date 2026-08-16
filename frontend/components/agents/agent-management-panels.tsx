@@ -28,6 +28,7 @@ import {
 } from "recharts"
 
 import { FilterDropdown } from "@/components/app/filter-dropdown"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -203,6 +204,7 @@ export function AgentOverviewPanel({
   notify,
 }: AgentOverviewPanelProps) {
   const { language } = useLanguage()
+  const [confirmAction, confirmDialog] = useConfirmDialog()
   const [origin, setOrigin] = React.useState("")
   const [credentials, setCredentials] = React.useState<AgentApiCredential[]>([])
   const [isKeyDialogOpen, setIsKeyDialogOpen] = React.useState(false)
@@ -303,7 +305,16 @@ export function AgentOverviewPanel({
   }
 
   async function handleRevokeKey(credential: AgentApiCredential) {
-    if (keyAction || !window.confirm(t("确定撤销此 API Key 吗？"))) return
+    if (
+      keyAction ||
+      !(await confirmAction({
+        description: t("确定撤销此 API Key 吗？"),
+        confirmLabel: t("撤销"),
+        destructive: true,
+      }))
+    ) {
+      return
+    }
     setKeyAction(credential.id)
     try {
       await revokeAgentApiCredential(
@@ -605,6 +616,7 @@ export function AgentOverviewPanel({
           </div>
         </div>
       </section>
+      {confirmDialog}
     </div>
   )
 }

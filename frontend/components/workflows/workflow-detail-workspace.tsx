@@ -29,6 +29,7 @@ import {
 } from "lucide-react"
 
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { AgentAttachmentList } from "@/components/agents/agent-attachment-list"
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import {
@@ -166,6 +167,7 @@ export function WorkflowDetailWorkspace({
   notify,
   t,
 }: WorkflowDetailWorkspaceProps) {
+  const [confirmAction, confirmDialog] = useConfirmDialog()
   const [definition, setDefinition] = React.useState<WorkflowDefinition | null>(
     null
   )
@@ -268,12 +270,16 @@ export function WorkflowDetailWorkspace({
   const currentViewLabel =
     navigationItems.find((item) => item.view === visibleActiveView)?.label ??
     t("概览")
-  const changeView = (view: AgentDetailView) => {
+  const changeView = async (view: AgentDetailView) => {
     if (
       visibleActiveView === "settings" &&
       view !== "settings" &&
       hasUnsavedChanges &&
-      !window.confirm(t("放弃未保存的更改？"))
+      !(await confirmAction({
+        description: t("放弃未保存的更改？"),
+        confirmLabel: t("放弃更改"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -287,7 +293,7 @@ export function WorkflowDetailWorkspace({
         variant={visibleActiveView === navView ? "secondary" : "ghost"}
         className={itemClassName}
         aria-current={visibleActiveView === navView ? "page" : undefined}
-        onClick={() => changeView(navView)}
+        onClick={() => void changeView(navView)}
       >
         <Icon data-icon="inline-start" />
         {label}
@@ -602,11 +608,12 @@ export function WorkflowDetailWorkspace({
     if (
       !agent.can_edit ||
       !definition ||
-      !window.confirm(
-        t("将版本 v{version} 恢复为当前草稿？", {
+      !(await confirmAction({
+        description: t("将版本 v{version} 恢复为当前草稿？", {
           version: version.version_number,
-        })
-      )
+        }),
+        confirmLabel: t("恢复"),
+      }))
     ) {
       return
     }
@@ -626,6 +633,35 @@ export function WorkflowDetailWorkspace({
     } catch (error) {
       reportError(error)
     }
+  }
+
+  async function handleBack() {
+    if (
+      hasUnsavedChanges &&
+      !(await confirmAction({
+        description: t("放弃未保存的更改？"),
+        confirmLabel: t("放弃更改"),
+        destructive: true,
+      }))
+    ) {
+      return
+    }
+    onBack()
+  }
+
+  async function changeSettingsOpen(open: boolean) {
+    if (
+      !open &&
+      isAppDirty &&
+      !(await confirmAction({
+        description: t("放弃未保存的更改？"),
+        confirmLabel: t("放弃更改"),
+        destructive: true,
+      }))
+    ) {
+      return
+    }
+    setSettingsOpen(open)
   }
 
   if (isLoading || !definition || !graph) {
@@ -654,11 +690,10 @@ export function WorkflowDetailWorkspace({
           title={t("返回")}
           onClick={() => {
             if (visibleActiveView === "settings") {
-              changeView("overview")
+              void changeView("overview")
               return
             }
-            if (!hasUnsavedChanges || window.confirm(t("放弃未保存的更改？")))
-              onBack()
+            void handleBack()
           }}
         >
           <ArrowLeftIcon />
@@ -1389,11 +1424,7 @@ export function WorkflowDetailWorkspace({
 
       <Dialog
         open={settingsOpen}
-        onOpenChange={(open) => {
-          if (open || !isAppDirty || window.confirm(t("放弃未保存的更改？"))) {
-            setSettingsOpen(open)
-          }
-        }}
+        onOpenChange={(open) => void changeSettingsOpen(open)}
       >
         <DialogContent className="max-h-[calc(100svh-2rem)] max-w-xl overflow-y-auto">
           <DialogHeader>
@@ -1416,7 +1447,7 @@ export function WorkflowDetailWorkspace({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setSettingsOpen(false)}
+                onClick={() => void changeSettingsOpen(false)}
               >
                 {t("关闭")}
               </Button>
@@ -1432,6 +1463,7 @@ export function WorkflowDetailWorkspace({
           </form>
         </DialogContent>
       </Dialog>
+      {confirmDialog}
     </div>
   )
 }

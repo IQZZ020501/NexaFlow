@@ -804,11 +804,28 @@ async def list_knowledge_tasks(
     return [to_entity(KnowledgeTask, row) for row in result]
 
 
-async def list_recoverable_tasks(db: AsyncSession) -> list[KnowledgeTask]:
+async def list_recoverable_tasks(
+    db: AsyncSession,
+    now: datetime,
+    *,
+    limit: int = 200,
+) -> list[KnowledgeTask]:
     result = await db.scalars(
         select(KnowledgeTaskORM)
-        .where(KnowledgeTaskORM.status.in_([TASK_QUEUED_STATUS, TASK_RUNNING_STATUS]))
-        .order_by(KnowledgeTaskORM.created_at)
+        .where(
+            or_(
+                KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
+                and_(
+                    KnowledgeTaskORM.status == TASK_RUNNING_STATUS,
+                    or_(
+                        KnowledgeTaskORM.lease_expires_at.is_(None),
+                        KnowledgeTaskORM.lease_expires_at <= now,
+                    ),
+                ),
+            )
+        )
+        .order_by(KnowledgeTaskORM.created_at, KnowledgeTaskORM.id)
+        .limit(limit)
     )
     return [to_entity(KnowledgeTask, row) for row in result]
 

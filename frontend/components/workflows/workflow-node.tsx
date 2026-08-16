@@ -56,6 +56,7 @@ import {
   workflowNodeLabel,
 } from "@/lib/workflows/graph"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -1788,25 +1789,49 @@ function NodeConfigFields({
       ) : null}
       {node.type === "classifier" ? (
         <>
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-classifier-model`}>
-            {t("节点模型")}
-            <select
-              id={`${nodeId}-classifier-model`}
-              className="h-9 rounded-md border bg-background px-2 text-sm"
-              value={String(config.model_id ?? "")}
-              disabled={readOnly}
-              onChange={(event) =>
-                updateConfig({ model_id: event.target.value || null })
-              }
-            >
-              <option value="">{t("使用工作流默认模型")}</option>
-              {activeModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="grid gap-1.5 text-xs font-medium">
+            <span>{t("节点模型")}</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  id={`${nodeId}-classifier-model`}
+                  type="button"
+                  className="flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-2 text-sm disabled:pointer-events-none disabled:opacity-50"
+                  aria-label={t("节点模型")}
+                  disabled={readOnly}
+                >
+                  <span className="truncate">
+                    {activeModels.find(
+                      (model) => model.id === String(config.model_id ?? "")
+                    )?.name ?? t("使用工作流默认模型")}
+                  </span>
+                  <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="w-(--radix-dropdown-menu-trigger-width)"
+              >
+                {[
+                  { id: "", name: t("使用工作流默认模型") },
+                  ...activeModels,
+                ].map((model) => (
+                  <DropdownMenuItem
+                    key={model.id || "default"}
+                    className="justify-between"
+                    onSelect={() =>
+                      updateConfig({ model_id: model.id || null })
+                    }
+                  >
+                    <span className="truncate">{model.name}</span>
+                    {model.id === String(config.model_id ?? "") ? (
+                      <CheckIcon className="text-primary" />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
           <TextEditor
             id={`${nodeId}-classifier-input`}
             label={t("分类输入")}
@@ -2487,6 +2512,7 @@ function NodeConfigFields({
 
 export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
   const { t } = useLanguage()
+  const [confirmAction, confirmDialog] = useConfirmDialog()
   const node = data as WorkflowNodeData
   const Icon = NODE_ICONS[node.type]
   const status = node.runtimeStatus
@@ -2661,9 +2687,15 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
                 <DropdownMenuItem
                   variant="destructive"
                   onSelect={() => {
-                    if (window.confirm(t("确定删除节点“{name}”吗？", { name: node.title }))) {
-                      onDelete?.(nodeId)
-                    }
+                    void confirmAction({
+                      description: t("确定删除节点“{name}”吗？", {
+                        name: node.title,
+                      }),
+                      confirmLabel: t("删除"),
+                      destructive: true,
+                    }).then((confirmed) => {
+                      if (confirmed) onDelete?.(nodeId)
+                    })
                   }}
                 >
                   <Trash2Icon />
@@ -2799,6 +2831,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
           />
         </React.Fragment>
       ))}
+      {confirmDialog}
     </div>
   )
 }

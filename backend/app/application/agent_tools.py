@@ -60,7 +60,7 @@ class KnowledgeSearchInput(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     limit: int = Field(default=3, ge=1, le=MAX_KNOWLEDGE_HITS_PER_CALL)
     search_mode: Literal["embedding", "keywords", "blend"] = "blend"
-    similarity: float | None = Field(default=None, ge=0, le=2)
+    similarity: float | None = Field(default=None, ge=0, le=1)
 
 
 def describe_knowledge_sources(knowledge_bases: list[KnowledgeBase]) -> str:
@@ -234,6 +234,7 @@ def build_knowledge_search_tool(
                         "document_id": hit.document_id,
                         "content": hit.content[:MAX_KNOWLEDGE_CONTENT_CHARS],
                         "distance": hit.distance,
+                        "similarity": hit.similarity,
                         "trace_id": str(stats_entry["trace_id"])[:64],
                         "rerank_status": stats_entry["rerank_status"],
                         "sources": hit.sources[:3],

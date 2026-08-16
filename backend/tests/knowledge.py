@@ -376,6 +376,17 @@ async def assert_evaluation_success_resists_stale_error(
         assert row.hit_at_k == 1
 
 
+async def assert_evaluation_run_deleted(task_id: str) -> None:
+    async with get_session_factory()() as db:
+        assert await db.get(KnowledgeTask, task_id) is None
+        results = await db.scalars(
+            select(KnowledgeEvaluationResult).where(
+                KnowledgeEvaluationResult.task_id == task_id
+            )
+        )
+        assert list(results) == []
+
+
 async def enqueue_recoverable_parse_task(
     knowledge_base_id: str,
     document_id: str,
@@ -909,6 +920,7 @@ async def assert_query_aggregates_hybrid_hits(
     assert hits[0].chunk_id == configured_by_index[0]["id"]
     assert hits[0].chunk_index == 0
     assert hits[0].distance == 0.2
+    assert hits[0].similarity == 0.9
     assert hits[0].sources == ["vector", "keywords"]
     assert hits[0].rerank_score == 1.0
     assert hits[0].content == "\n\n".join(
@@ -916,6 +928,7 @@ async def assert_query_aggregates_hybrid_hits(
     )
     assert hits[1].chunk_id == product_chunk_id
     assert hits[1].distance == 0.05
+    assert hits[1].similarity == 0.975
 
 
 def upload_document(
@@ -2713,7 +2726,6 @@ def main() -> None:
                 json={
                     "question": question,
                     "expected_document_ids": [reference_target_id],
-                    "answer_points": ["safe rollback"],
                 },
             )
             assert created_case.status_code == 201, created_case.text
@@ -2766,7 +2778,12 @@ def main() -> None:
                     trace_id=f"trace-{evaluation_attempts[payload.query]}",
                     search_mode=payload.search_mode,
                     limit=payload.limit,
-                    max_distance=payload.similarity,
+                    min_similarity=payload.similarity,
+                    max_distance=(
+                        2 * (1 - payload.similarity)
+                        if payload.similarity is not None
+                        else None
+                    ),
                     vector_candidates=1,
                     keyword_candidates=0,
                     reference_candidates=0,
@@ -2795,6 +2812,12 @@ def main() -> None:
             )
             assert queued_run.status_code == 202, queued_run.text
             evaluation_task_id = queued_run.json()["id"]
+
+            delete_queued_run = client.delete(
+                f"{evaluation_base}/runs/{evaluation_task_id}",
+                headers=auth_headers(alice_token),
+            )
+            assert delete_queued_run.status_code == 409, delete_queued_run.text
 
             duplicate_run = client.post(
                 f"{evaluation_base}/runs",
@@ -2889,6 +2912,44 @@ def main() -> None:
                 "retry evaluation": 2,
             }
 
+            failed_write_run = client.post(
+                f"{evaluation_base}/runs",
+                headers=auth_headers(alice_token),
+                json={"case_ids": [evaluation_case_ids[0]], "limit": 1},
+            )
+            assert failed_write_run.status_code == 202, failed_write_run.text
+            original_upsert_result = evaluation_repository.upsert_result
+
+            async def fail_result_write(*_args, **_kwargs):
+                raise RuntimeError("synthetic result write failure")
+
+            evaluation_repository.upsert_result = fail_result_write
+            try:
+                asyncio.run(
+                    run_knowledge_task(
+                        failed_write_run.json()["id"],
+                        test_settings(),
+                        evaluation_runner=(
+                            knowledge_evaluation_application.run_evaluation_task
+                        ),
+                    )
+                )
+            finally:
+                evaluation_repository.upsert_result = original_upsert_result
+            failed_write_task = client.get(
+                f"{evaluation_base}/runs/{failed_write_run.json()['id']}",
+                headers=auth_headers(alice_token),
+            )
+            assert failed_write_task.status_code == 200, failed_write_task.text
+            assert failed_write_task.json()["status"] == "failed"
+            assert failed_write_task.json()["processed_items"] == 0
+            failed_write_summary = client.get(
+                f"{evaluation_base}/runs/{failed_write_run.json()['id']}/results",
+                headers=auth_headers(alice_token),
+            )
+            assert failed_write_summary.status_code == 200, failed_write_summary.text
+            assert failed_write_summary.json()["results"] == []
+
             recovery_run = client.post(
                 f"{evaluation_base}/runs",
                 headers=auth_headers(alice_token),
@@ -2907,6 +2968,23 @@ def main() -> None:
             )
             assert recovered_run.status_code == 200, recovered_run.text
             assert recovered_run.json()["status"] == "succeeded"
+            recovery_task_id = recovery_run.json()["id"]
+            denied_delete_run = client.delete(
+                f"{evaluation_base}/runs/{recovery_task_id}",
+                headers=auth_headers(bob_token),
+            )
+            assert denied_delete_run.status_code == 403, denied_delete_run.text
+            deleted_run = client.delete(
+                f"{evaluation_base}/runs/{recovery_task_id}",
+                headers=auth_headers(alice_token),
+            )
+            assert deleted_run.status_code == 204, deleted_run.text
+            missing_run = client.get(
+                f"{evaluation_base}/runs/{recovery_task_id}",
+                headers=auth_headers(alice_token),
+            )
+            assert missing_run.status_code == 404, missing_run.text
+            asyncio.run(assert_evaluation_run_deleted(recovery_task_id))
         finally:
             knowledge_evaluation_api.dispatch_knowledge_task = (
                 original_evaluation_dispatch

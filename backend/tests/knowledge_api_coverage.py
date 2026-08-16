@@ -899,7 +899,7 @@ def test_query_application_vector_only_branch() -> None:
         assert hits == []
         resolve_model.assert_awaited_once()
         vector_query.assert_called_once()
-        assert vector_query.call_args.args[-2:] == (5, 0.5)
+        assert vector_query.call_args.args[-2:] == (5, 0.0)
         keyword_query.assert_not_called()
 
     asyncio.run(run())

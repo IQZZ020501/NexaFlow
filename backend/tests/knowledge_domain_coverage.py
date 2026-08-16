@@ -73,6 +73,7 @@ from app.tasks import knowledge as knowledge_tasks_module
 from app.tasks.knowledge import (
     enqueue_knowledge_storage_cleanup,
     enqueue_knowledge_task,
+    recover_knowledge_tasks_job,
     enqueue_upload_storage_cleanups,
     recover_knowledge_storage_cleanups_job,
     recover_upload_storage_cleanups_job,
@@ -3039,6 +3040,25 @@ def run_celery_job_tests(
             raise AssertionError("busy outcome must request a retry")
     assert fake_self_busy.retry_kwargs
 
+    # recover_knowledge_tasks_job: only redispatches task ids selected by the
+    # durable lease-aware recovery query.
+    with (
+        patch.object(
+            knowledge_tasks_module,
+            "list_recoverable_knowledge_task_ids",
+            new=AsyncMock(return_value=["task-recover-1", "task-recover-2"]),
+        ),
+        patch.object(
+            knowledge_tasks_module.run_knowledge_task_job,
+            "apply_async",
+        ) as apply_async,
+    ):
+        recover_knowledge_tasks_job()
+    assert [call.kwargs for call in apply_async.call_args_list] == [
+        {"args": ("task-recover-1",)},
+        {"args": ("task-recover-2",)},
+    ]
+
     # run_knowledge_storage_cleanup_job: success
     cleanup_kb_id = _create_kb(client, research_token, workspace_id, "Cleanup Job KB")
     cleanup_id = asyncio.run(create_cleanup_record(workspace_id, cleanup_kb_id))
@@ -3461,9 +3481,6 @@ async def run_repository_direct_tests(
         )
         assert len(all_tasks) >= len(doc_tasks)
 
-        recoverable = await knowledge_repository.list_recoverable_tasks(db)
-        assert isinstance(recoverable, list)
-
         sample_task = doc_tasks[0]
         by_id = await knowledge_repository.get_knowledge_task_by_id(db, sample_task.id)
         assert by_id is not None and by_id.id == sample_task.id
@@ -3496,6 +3513,11 @@ async def run_repository_direct_tests(
         )
         await knowledge_repository.save_knowledge_task(db, running_task)
         await db.commit()
+        recoverable = await knowledge_repository.list_recoverable_tasks(
+            db,
+            utc_now(),
+        )
+        assert sample_task.id not in {task.id for task in recoverable}
         claimed = await knowledge_repository.claim_knowledge_task(
             db,
             sample_task.id,
@@ -3504,6 +3526,17 @@ async def run_repository_direct_tests(
             "worker-claim-3",
         )
         assert claimed is False  # running with valid lease
+
+        running_task.lease_expires_at = (utc_now() - timedelta(seconds=1)).replace(
+            tzinfo=None
+        )
+        await knowledge_repository.save_knowledge_task(db, running_task)
+        await db.commit()
+        recoverable = await knowledge_repository.list_recoverable_tasks(
+            db,
+            utc_now(),
+        )
+        assert sample_task.id in {task.id for task in recoverable}
 
         renewed_wrong = await knowledge_repository.renew_knowledge_task_lease(
             db,
@@ -4494,27 +4527,47 @@ async def run_direct_shareddomain_tests(
             raise AssertionError("archived KB delete must 403")
 
         # lifecycle: set_knowledge_document_active
-        await lifecycle_service.set_knowledge_document_active(
+        try:
+            await lifecycle_service.set_knowledge_document_active(
+                db,
+                direct_kb,
+                doc_entity,
+                alice,
+                False,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("deleted document status update must 404")
+        status_document = await knowledge_repository.get_knowledge_document_by_id(
             db,
-            direct_kb,
-            doc_entity,
-            alice,
-            doc_entity.is_active,
+            created_docs[1].id,
         )
-        await lifecycle_service.set_knowledge_document_active(
+        assert status_document is not None
+        unchanged = await lifecycle_service.set_knowledge_document_active(
             db,
             direct_kb,
-            doc_entity,
+            status_document,
+            alice,
+            status_document.is_active,
+        )
+        assert unchanged.is_active is status_document.is_active
+        deactivated_document = await lifecycle_service.set_knowledge_document_active(
+            db,
+            direct_kb,
+            status_document,
             alice,
             False,
         )
-        await lifecycle_service.set_knowledge_document_active(
+        assert deactivated_document.is_active is False
+        reactivated_document = await lifecycle_service.set_knowledge_document_active(
             db,
             direct_kb,
-            doc_entity,
+            status_document,
             alice,
             True,
         )
+        assert reactivated_document.is_active is True
 
         # ---- orchestration tails ----
         # get_knowledge_document success

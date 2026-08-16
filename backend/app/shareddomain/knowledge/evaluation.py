@@ -3,6 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import (
     TASK_EVALUATE,
+    TASK_FAILED_STATUS,
+    TASK_SUCCEEDED_STATUS,
     KnowledgeBase,
     KnowledgeEvaluationCase,
     KnowledgeEvaluationExpectation,
@@ -21,10 +23,13 @@ from app.schemas.knowledge import (
     KnowledgeTaskResponse,
 )
 from app.shareddomain.audit.services import record_audit_log
+from app.shareddomain.knowledge.permissions import require_knowledge_base_active
 from app.shareddomain.knowledge.orchestration import (
     create_knowledge_task,
     task_to_response,
 )
+
+EVALUATION_SIMILARITY_SEMANTICS = "normalized_cosine"
 
 
 def _case_responses(
@@ -43,7 +48,6 @@ def _case_responses(
             knowledge_base_id=case.knowledge_base_id,
             question=case.question,
             expected_document_ids=expected_by_case.get(case.id, []),
-            answer_points=case.answer_points,
             created_by_user_id=case.created_by_user_id,
             created_at=case.created_at,
             updated_at=case.updated_at,
@@ -80,12 +84,18 @@ async def create_evaluation_case(
     actor: User,
 ) -> KnowledgeEvaluationCaseResponse:
     question = payload.question.strip()
-    answer_points = [point.strip() for point in payload.answer_points]
-    if not question or any(not point for point in answer_points):
+    if not question:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Evaluation text cannot be blank.",
         )
+    knowledge_base = await knowledge_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    require_knowledge_base_active(knowledge_base)
     document_ids = list(dict.fromkeys(payload.expected_document_ids))
     documents = await knowledge_repository.list_active_documents_by_ids(
         db,
@@ -100,7 +110,7 @@ async def create_evaluation_case(
         workspace_id=knowledge_base.workspace_id,
         knowledge_base_id=knowledge_base.id,
         question=question,
-        answer_points=answer_points,
+        answer_points=[],
         created_by_user_id=actor.id,
     )
     expectations = [
@@ -217,6 +227,7 @@ async def enqueue_evaluation_run(
             "limit": payload.limit,
             "search_mode": payload.search_mode,
             "similarity": payload.similarity,
+            "similarity_semantics": EVALUATION_SIMILARITY_SEMANTICS,
             "include_references": payload.include_references,
         },
     )
@@ -236,6 +247,49 @@ async def get_evaluation_task(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Evaluation run not found.")
     return task
+
+
+async def delete_evaluation_run(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    task_id: str,
+    actor: User,
+) -> None:
+    knowledge_base = await knowledge_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    task = await evaluation_repository.lock_evaluation_task(
+        db,
+        knowledge_base,
+        task_id,
+    )
+    if task is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Evaluation run not found.")
+    if task.status not in {TASK_SUCCEEDED_STATUS, TASK_FAILED_STATUS}:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Only finished evaluation runs can be deleted.",
+        )
+    if not await evaluation_repository.delete_evaluation_task(
+        db,
+        knowledge_base,
+        task.id,
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Evaluation run not found.")
+    record_audit_log(
+        db,
+        actor,
+        "knowledge_evaluation_run.delete",
+        "knowledge_task",
+        task.id,
+        task.id,
+        {"knowledge_base_id": knowledge_base.id},
+        workspace_id=knowledge_base.workspace_id,
+    )
+    await db.commit()
 
 
 async def list_evaluation_runs(

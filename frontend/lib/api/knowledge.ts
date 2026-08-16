@@ -126,6 +126,7 @@ export type KnowledgeQueryHit = {
   chunk_index: number
   content: string
   distance: number | null
+  similarity: number | null
   kind: "document" | "qa"
   question: string | null
   source: string | null
@@ -148,6 +149,7 @@ export type KnowledgeRetrievalTrace = {
   trace_id: string
   search_mode: KnowledgeSearchMode
   limit: number
+  min_similarity: number | null
   max_distance: number | null
   vector_candidates: number
   keyword_candidates: number
@@ -170,7 +172,6 @@ export type KnowledgeEvaluationCase = {
   knowledge_base_id: string
   question: string
   expected_document_ids: string[]
-  answer_points: string[]
   created_by_user_id: string
   created_at: string
   updated_at: string
@@ -231,7 +232,7 @@ export type KnowledgeBasePermissionForm = {
 }
 
 export type KnowledgeBaseDetailTab =
-  "documents" | "tasks" | "evaluation" | "hit-test" | "settings"
+  "documents" | "tasks" | "evaluation" | "settings"
 
 export type KnowledgeModelTestResult = {
   embedding_model_id: string
@@ -606,7 +607,6 @@ export function createKnowledgeEvaluationCase(
   payload: {
     question: string
     expected_document_ids: string[]
-    answer_points: string[]
   },
 ) {
   return request<KnowledgeEvaluationCase>(
@@ -659,6 +659,18 @@ export function getKnowledgeEvaluationRun(
   return request<KnowledgeTask>(
     evaluationPath(workspaceId, knowledgeBaseId, `/runs/${taskId}`),
     { token },
+  )
+}
+
+export function deleteKnowledgeEvaluationRun(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  taskId: string,
+) {
+  return request<void>(
+    evaluationPath(workspaceId, knowledgeBaseId, `/runs/${taskId}`),
+    { method: "DELETE", token },
   )
 }
 

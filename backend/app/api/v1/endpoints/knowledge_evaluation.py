@@ -13,6 +13,7 @@ from app.api.deps import (
 from app.application.knowledge import (
     create_evaluation_case,
     delete_evaluation_case,
+    delete_evaluation_run,
     dispatch_knowledge_task,
     enqueue_evaluation_run,
     get_evaluation_run,
@@ -167,6 +168,23 @@ async def create_workspace_evaluation_run(
     )
     await dispatch_knowledge_task(task.id, settings)
     return task
+
+
+@router.delete("/runs/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace_evaluation_run(
+    knowledge_base_id: str,
+    task_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    knowledge_base = await _authorized_knowledge_base(
+        db,
+        context,
+        knowledge_base_id,
+        {"edit"},
+    )
+    await delete_evaluation_run(db, knowledge_base, task_id, context.user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/runs/{task_id}", response_model=KnowledgeTaskResponse)

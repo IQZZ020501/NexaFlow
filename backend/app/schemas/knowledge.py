@@ -190,8 +190,8 @@ class KnowledgeQueryRequest(BaseModel):
     ]
     limit: int = Field(default=5, ge=1, le=20)
     search_mode: Literal["embedding", "keywords", "blend"] = "blend"
-    # 相似度阈值（余弦距离，0–2，保留距离不超过该值的命中）
-    similarity: float | None = Field(default=None, ge=0, le=2)
+    # 归一化余弦相似度阈值（0–1，保留相似度不低于该值的命中）
+    similarity: float | None = Field(default=None, ge=0, le=1)
     include_references: bool = False
 
 
@@ -205,6 +205,7 @@ class KnowledgeQueryHitResponse(BaseModel):
     chunk_index: int
     content: str
     distance: float | None = None
+    similarity: float | None = Field(default=None, ge=0, le=1)
     kind: Literal["document", "qa"] = "document"
     question: str | None = None
     source: str | None = None
@@ -217,6 +218,7 @@ class KnowledgeRetrievalTraceResponse(BaseModel):
     trace_id: str
     search_mode: Literal["embedding", "keywords", "blend"]
     limit: int = Field(ge=1, le=20)
+    min_similarity: float | None = Field(default=None, ge=0, le=1)
     max_distance: float | None = Field(default=None, ge=0, le=2)
     vector_candidates: int = Field(ge=0)
     keyword_candidates: int = Field(ge=0)
@@ -234,20 +236,12 @@ class KnowledgeQueryInspectResponse(BaseModel):
 
 
 KnowledgeEvaluationId = Annotated[str, Field(min_length=1, max_length=36)]
-KnowledgeEvaluationAnswerPoint = Annotated[
-    str,
-    Field(min_length=1, max_length=2000),
-]
 
 
 class KnowledgeEvaluationCaseCreateRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     expected_document_ids: list[KnowledgeEvaluationId] = Field(
         min_length=1,
-        max_length=20,
-    )
-    answer_points: list[KnowledgeEvaluationAnswerPoint] = Field(
-        default_factory=list,
         max_length=20,
     )
 
@@ -258,7 +252,6 @@ class KnowledgeEvaluationCaseResponse(BaseModel):
     knowledge_base_id: str
     question: str
     expected_document_ids: list[str]
-    answer_points: list[str]
     created_by_user_id: str
     created_at: datetime
     updated_at: datetime
@@ -268,7 +261,7 @@ class KnowledgeEvaluationRunRequest(BaseModel):
     case_ids: list[KnowledgeEvaluationId] = Field(min_length=1, max_length=200)
     limit: int = Field(default=5, ge=1, le=20)
     search_mode: Literal["embedding", "keywords", "blend"] = "blend"
-    similarity: float | None = Field(default=None, ge=0, le=2)
+    similarity: float | None = Field(default=None, ge=0, le=1)
     include_references: bool = True
 
 

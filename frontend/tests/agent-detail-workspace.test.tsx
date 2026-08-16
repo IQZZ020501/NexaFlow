@@ -787,11 +787,6 @@ describe("AgentOverviewPanel", () => {
   })
 
   test("manages API keys: create, rotate and revoke", async () => {
-    const originalConfirm = window.confirm
-    window.confirm = (() => true) as typeof window.confirm
-    afterEach(() => {
-      window.confirm = originalConfirm
-    })
     routes = [
       {
         method: "GET",
@@ -840,6 +835,12 @@ describe("AgentOverviewPanel", () => {
     expect(notifyCalls.some((call) => call.message === "API Key 已轮换")).toBe(true)
 
     fireEvent.click(screen.getByText("撤销").closest("button")!)
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
+        "button",
+        { name: "撤销" },
+      ),
+    )
     await waitFor(() => expect(notifyCalls.some((call) => call.message === "API Key 已撤销")).toBe(true))
     expect(screen.getByText("已撤销")).toBeTruthy()
 
@@ -978,61 +979,61 @@ describe("AgentOverviewPanel API key failure paths", () => {
   })
 
   test("reports an error when revoking an API key fails", async () => {
-    const originalConfirm = window.confirm
-    window.confirm = (() => true) as typeof window.confirm
-    try {
-      routes = [
-        {
-          method: "GET",
-          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/api-credentials`,
-          exact: true,
-          respond: () => jsonResponse({ items: [credential("cred-v")] }),
-        },
-        {
-          method: "DELETE",
-          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/api-credentials/cred-v`,
-          exact: true,
-          respond: () => jsonResponse({ detail: "boom" }, 500),
-        },
-      ]
-      renderPage(<Harness />)
-      fireEvent.click(screen.getByText("管理 API Key").closest("button")!)
-      await waitFor(() => expect(screen.getByText("Key cred-v")).toBeTruthy())
-      fireEvent.click(screen.getByText("撤销").closest("button")!)
-      await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
-    } finally {
-      window.confirm = originalConfirm
-    }
+    routes = [
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/agents/agent-1/api-credentials`,
+        exact: true,
+        respond: () => jsonResponse({ items: [credential("cred-v")] }),
+      },
+      {
+        method: "DELETE",
+        pathname: `/api/v1/workspaces/${WS}/agents/agent-1/api-credentials/cred-v`,
+        exact: true,
+        respond: () => jsonResponse({ detail: "boom" }, 500),
+      },
+    ]
+    renderPage(<Harness />)
+    fireEvent.click(screen.getByText("管理 API Key").closest("button")!)
+    await waitFor(() => expect(screen.getByText("Key cred-v")).toBeTruthy())
+    fireEvent.click(screen.getByText("撤销").closest("button")!)
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
+        "button",
+        { name: "撤销" },
+      ),
+    )
+    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
   })
 
   test("revoking one key leaves the other credentials untouched", async () => {
-    const originalConfirm = window.confirm
-    window.confirm = (() => true) as typeof window.confirm
-    try {
-      routes = [
-        {
-          method: "GET",
-          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/api-credentials`,
-          exact: true,
-          respond: () => jsonResponse({ items: [credential("cred-a"), credential("cred-b")] }),
-        },
-        {
-          method: "DELETE",
-          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/api-credentials/cred-a`,
-          exact: true,
-          respond: () => new Response(null, { status: 204 }),
-        },
-      ]
-      renderPage(<Harness />)
-      fireEvent.click(screen.getByText("管理 API Key").closest("button")!)
-      await waitFor(() => expect(screen.getByText("Key cred-a")).toBeTruthy())
-      fireEvent.click(screen.getAllByText("撤销")[0].closest("button")!)
-      await waitFor(() => expect(notifyCalls.some((call) => call.message === "API Key 已撤销")).toBe(true))
-      expect(screen.getByText("已撤销")).toBeTruthy()
-      expect(screen.getByText("Key cred-b")).toBeTruthy()
-    } finally {
-      window.confirm = originalConfirm
-    }
+    routes = [
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/agents/agent-1/api-credentials`,
+        exact: true,
+        respond: () => jsonResponse({ items: [credential("cred-a"), credential("cred-b")] }),
+      },
+      {
+        method: "DELETE",
+        pathname: `/api/v1/workspaces/${WS}/agents/agent-1/api-credentials/cred-a`,
+        exact: true,
+        respond: () => new Response(null, { status: 204 }),
+      },
+    ]
+    renderPage(<Harness />)
+    fireEvent.click(screen.getByText("管理 API Key").closest("button")!)
+    await waitFor(() => expect(screen.getByText("Key cred-a")).toBeTruthy())
+    fireEvent.click(screen.getAllByText("撤销")[0].closest("button")!)
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
+        "button",
+        { name: "撤销" },
+      ),
+    )
+    await waitFor(() => expect(notifyCalls.some((call) => call.message === "API Key 已撤销")).toBe(true))
+    expect(screen.getByText("已撤销")).toBeTruthy()
+    expect(screen.getByText("Key cred-b")).toBeTruthy()
   })
 
   test("copies a freshly created API key token", async () => {

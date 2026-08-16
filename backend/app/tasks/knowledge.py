@@ -11,6 +11,7 @@ from app.infrastructure.session import get_session_factory
 from app.shareddomain.knowledge.task_runner import (
     TASK_LEASE_RENEW_SECONDS,
     TASK_RUN_BUSY,
+    list_recoverable_knowledge_task_ids,
     mark_knowledge_task_failed,
     run_knowledge_task,
 )
@@ -64,6 +65,18 @@ def run_knowledge_task_job(self, task_id: str) -> None:
             task_id=task_id,
         )
         raise self.retry(countdown=TASK_LEASE_RENEW_SECONDS)
+
+
+@celery_app.task(
+    name="app.knowledge.recover",
+    ignore_result=True,
+)
+def recover_knowledge_tasks_job() -> None:
+    settings = Settings.from_env(require_bootstrap=False)
+    configure_task_worker(settings)
+    task_ids = asyncio.run(list_recoverable_knowledge_task_ids(settings))
+    for task_id in task_ids:
+        run_knowledge_task_job.apply_async(args=(task_id,))
 
 
 @celery_app.task(
