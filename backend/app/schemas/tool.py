@@ -41,7 +41,7 @@ class ToolSummaryResponse(_PublicToolResponse):
     status: str
     availability: Literal["available", "unavailable"]
     source: ToolSourceSummaryResponse
-    created_by_user_id: str
+    created_by_user_id: str | None
     permission: Literal["owner", "admin", "view", "use"] | None
     can_view: bool
     can_use: bool

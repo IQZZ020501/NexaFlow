@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from app.entities.tools import ToolKind, ToolRef, ToolSnapshot
+from app.entities.tools import ToolKind, ToolRef, ToolSnapshot, freeze_json
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,10 @@ class ToolRuntimeResult:
     error_message: str | None
     outcome: Literal["confirmed", "uncertain"]
     usage: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "data", freeze_json(self.data))
+        object.__setattr__(self, "usage", freeze_json(self.usage))
 
 
 @runtime_checkable

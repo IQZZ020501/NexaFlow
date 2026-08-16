@@ -117,6 +117,8 @@ def test_tool_ref_requires_stable_ids() -> None:
     for fields in (
         {"tool_id": "", "version_id": "version-1"},
         {"tool_id": "tool-1", "version_id": "   "},
+        {"tool_id": None, "version_id": "version-1"},
+        {"tool_id": "tool-1", "version_id": 1},
     ):
         try:
             ToolRef(**fields)
@@ -163,6 +165,113 @@ def test_tool_snapshot_is_an_immutable_internal_contract() -> None:
         pass
     else:
         raise AssertionError("ToolSnapshot must be immutable.")
+
+
+def test_tool_contracts_deep_freeze_nested_json() -> None:
+    import json
+    from operator import setitem
+
+    from app.entities.tools import ToolSnapshot
+    from app.ports.tool_runtime import ToolRuntimeResult
+
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "maxLength": 64,
+                "examples": ["one"],
+            }
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {"type": "integer"},
+            }
+        },
+        "additionalProperties": False,
+    }
+    execution_spec = {
+        "provider": {"name": "python", "limits": [{"cpu": 1}]}
+    }
+    snapshot = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-1",
+        version_id="version-1",
+        source_id="source-1",
+        kind="python",
+        function_name="lookup_order",
+        display_name="Lookup order",
+        description="Returns one order.",
+        input_schema=input_schema,
+        output_schema=output_schema,
+        definition_hash="hash-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console",),
+        workflow_callable=True,
+        parallel_safe=False,
+        execution_spec=execution_spec,
+    )
+    usage = {"tokens": {"input": 1}, "providers": ["sandbox"]}
+    result = ToolRuntimeResult(
+        ok=True,
+        data={"items": [{"id": 1}]},
+        summary="Done.",
+        error_code=None,
+        error_message=None,
+        outcome="confirmed",
+        usage=usage,
+    )
+    assert snapshot.output_schema is not None
+
+    mutations = (
+        (snapshot.input_schema, "type", "string"),
+        (snapshot.input_schema["properties"], "extra", {}),
+        (snapshot.input_schema["properties"]["query"], "maxLength", 1),
+        (snapshot.input_schema["properties"]["query"]["examples"], 0, "two"),
+        (snapshot.input_schema["required"], 0, "other"),
+        (snapshot.output_schema, "type", "array"),
+        (snapshot.output_schema["properties"]["items"], "maxItems", 3),
+        (snapshot.execution_spec, "provider", {}),
+        (snapshot.execution_spec["provider"], "name", "mcp"),
+        (snapshot.execution_spec["provider"]["limits"], 0, {}),
+        (result.data, "items", []),
+        (result.data["items"], 0, {}),
+        (result.data["items"][0], "id", 2),
+        (result.usage, "tokens", {}),
+        (result.usage["tokens"], "input", 2),
+        (result.usage["providers"], 0, "remote"),
+    )
+    for target, key, value in mutations:
+        try:
+            setitem(target, key, value)
+        except TypeError:
+            continue
+        raise AssertionError(f"Nested Tool JSON remained mutable: {target}")
+
+    input_schema["required"][0] = "changed"
+    execution_spec["provider"]["limits"][0]["cpu"] = 99
+    usage["tokens"]["input"] = 99
+    assert isinstance(snapshot.input_schema["required"], list)
+    assert snapshot.input_schema["required"] == ["query"]
+    assert snapshot.execution_spec["provider"]["limits"][0]["cpu"] == 1
+    assert result.usage["tokens"]["input"] == 1
+
+    for value in (
+        snapshot.input_schema,
+        snapshot.output_schema,
+        snapshot.execution_spec,
+        result.data,
+        result.usage,
+    ):
+        json.loads(json.dumps(value))
 
 
 def test_tool_adapter_contract_is_provider_neutral() -> None:
@@ -279,6 +388,36 @@ def test_public_tool_responses_exclude_execution_details() -> None:
     assert sensitive_fields.isdisjoint(detail)
     assert "connection" not in summary["source"]
     assert "connection" not in detail["source"]
+
+
+def test_builtin_tool_summary_accepts_system_owner() -> None:
+    from app.schemas.tool import ToolSummaryResponse
+
+    summary = ToolSummaryResponse.model_validate(
+        {
+            "id": "tool-current-time",
+            "workspace_id": "workspace-1",
+            "kind": "builtin",
+            "function_name": "current_time",
+            "display_name": "Current time",
+            "description": "Returns the current time.",
+            "current_version_id": "version-1",
+            "status": "active",
+            "availability": "available",
+            "source": {
+                "id": "source-builtin",
+                "name": "Builtins",
+                "kind": "builtin",
+            },
+            "created_by_user_id": None,
+            "permission": None,
+            "can_view": True,
+            "can_use": True,
+            "can_manage": False,
+        }
+    )
+
+    assert summary.created_by_user_id is None
 
 
 def test_tool_ref_schema_requires_canonical_ids() -> None:
@@ -448,6 +587,51 @@ def test_python_tool_schema_validation_enforces_limits() -> None:
         except ValueError:
             continue
         raise AssertionError(f"Over-broad Python Tool schema accepted: {schema}")
+
+
+def test_python_tool_schema_rejects_defs_depth_bypass() -> None:
+    from app.entities.tools import (
+        MAX_TOOL_SCHEMA_DEPTH,
+        validate_tool_json_schema,
+    )
+
+    hidden_depth: dict[str, object] = {"type": "integer"}
+    for index in range(MAX_TOOL_SCHEMA_DEPTH):
+        hidden_depth = {
+            "type": "object",
+            "properties": {f"level_{index}": hidden_depth},
+        }
+    schema = {"type": "object", "$defs": {"hidden": hidden_depth}}
+    try:
+        validate_tool_json_schema(schema)
+    except ValueError:
+        return
+    raise AssertionError("$defs bypassed the Tool schema depth limit.")
+
+
+def test_python_tool_schema_rejects_legacy_definitions_property_bypass() -> None:
+    from app.entities.tools import (
+        MAX_TOOL_SCHEMA_PROPERTIES,
+        validate_tool_json_schema,
+    )
+
+    schema = {
+        "type": "object",
+        "definitions": {
+            "hidden": {
+                "type": "object",
+                "properties": {
+                    f"field_{index}": {"type": "integer"}
+                    for index in range(MAX_TOOL_SCHEMA_PROPERTIES + 1)
+                },
+            }
+        },
+    }
+    try:
+        validate_tool_json_schema(schema)
+    except ValueError:
+        return
+    raise AssertionError("definitions bypassed the Tool schema property limit.")
 
 
 def test_python_tool_code_is_limited_to_eight_kibibytes() -> None:
@@ -3801,12 +3985,16 @@ def main() -> None:
     test_validate_permission_rejects_unknown()
     test_tool_ref_requires_stable_ids()
     test_tool_snapshot_is_an_immutable_internal_contract()
+    test_tool_contracts_deep_freeze_nested_json()
     test_tool_adapter_contract_is_provider_neutral()
     test_public_tool_responses_exclude_execution_details()
+    test_builtin_tool_summary_accepts_system_owner()
     test_tool_ref_schema_requires_canonical_ids()
     test_effective_tool_access_matrix()
     test_python_tool_schema_validation_closes_objects()
     test_python_tool_schema_validation_enforces_limits()
+    test_python_tool_schema_rejects_defs_depth_bypass()
+    test_python_tool_schema_rejects_legacy_definitions_property_bypass()
     test_python_tool_code_is_limited_to_eight_kibibytes()
     test_knowledge_writes_recheck_locked_owner()
     test_clean_upload_filename_sanitizes_path_and_classification()

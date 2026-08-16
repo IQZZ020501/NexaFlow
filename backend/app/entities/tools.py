@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -18,13 +19,80 @@ MAX_TOOL_ARRAY_ITEMS = 100
 MAX_TOOL_STRING_LENGTH = 8 * 1024
 
 
+class FrozenJsonDict(dict[str, Any]):
+    """A JSON-serializable mapping that rejects in-place mutation."""
+
+    def __new__(cls, values: Any = ()) -> "FrozenJsonDict":
+        instance = super().__new__(cls)
+        dict.update(instance, values)
+        return instance
+
+    def __init__(self, values: Any = ()) -> None:
+        pass
+
+    def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("Frozen JSON cannot be modified.")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    __ior__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+
+
+class FrozenJsonList(list[Any]):
+    """A JSON-serializable list that rejects in-place mutation."""
+
+    def __new__(cls, values: Any = ()) -> "FrozenJsonList":
+        instance = super().__new__(cls)
+        list.extend(instance, values)
+        return instance
+
+    def __init__(self, values: Any = ()) -> None:
+        pass
+
+    def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("Frozen JSON cannot be modified.")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    __iadd__ = _immutable
+    __imul__ = _immutable
+    append = _immutable
+    clear = _immutable
+    extend = _immutable
+    insert = _immutable
+    pop = _immutable
+    remove = _immutable
+    reverse = _immutable
+    sort = _immutable
+
+
+def freeze_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return FrozenJsonDict(
+            (key, freeze_json(child)) for key, child in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return FrozenJsonList(freeze_json(child) for child in value)
+    return value
+
+
 @dataclass(frozen=True)
 class ToolRef:
     tool_id: str
     version_id: str
 
     def __post_init__(self) -> None:
-        if not self.tool_id.strip() or not self.version_id.strip():
+        if (
+            not isinstance(self.tool_id, str)
+            or not self.tool_id.strip()
+            or not isinstance(self.version_id, str)
+            or not self.version_id.strip()
+        ):
             raise ValueError("Tool references require tool and version IDs.")
 
 
@@ -55,6 +123,14 @@ class ToolSnapshot:
 
     def __post_init__(self) -> None:
         ToolRef(tool_id=self.tool_id, version_id=self.version_id)
+        object.__setattr__(self, "input_schema", freeze_json(self.input_schema))
+        object.__setattr__(self, "output_schema", freeze_json(self.output_schema))
+        object.__setattr__(self, "execution_spec", freeze_json(self.execution_spec))
+        object.__setattr__(
+            self,
+            "allowed_access_sources",
+            tuple(self.allowed_access_sources),
+        )
 
 
 ToolGrant = Literal["view", "use"]
@@ -155,6 +231,8 @@ def validate_tool_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
         if any(
             keyword in node
             for keyword in (
+                "$defs",
+                "definitions",
                 "patternProperties",
                 "unevaluatedProperties",
                 "dependentSchemas",
