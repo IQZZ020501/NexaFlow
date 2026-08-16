@@ -121,8 +121,10 @@ def extract_qa_rows(filename: str, path: Path) -> list[QaRow]:
         try:
             workbook = load_workbook(path, read_only=True, data_only=True)
             try:
+                if not workbook.worksheets:
+                    raise KnowledgePipelineError("QA XLSX has no worksheet.")
                 return validate_qa_rows(
-                    workbook.active.iter_rows(values_only=True)
+                    workbook.worksheets[0].iter_rows(values_only=True)
                 )
             finally:
                 workbook.close()

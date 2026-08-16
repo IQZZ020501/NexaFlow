@@ -12,20 +12,20 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.alter_column(
-        "knowledge_evaluation_cases",
-        "answer_points",
-        existing_type=sa.JSON(),
-        nullable=False,
-        server_default=sa.text("'[]'::json"),
-    )
+    with op.batch_alter_table("knowledge_evaluation_cases") as batch_op:
+        batch_op.alter_column(
+            "answer_points",
+            existing_type=sa.JSON(),
+            nullable=False,
+            server_default=sa.text("'[]'"),
+        )
 
 
 def downgrade() -> None:
-    op.alter_column(
-        "knowledge_evaluation_cases",
-        "answer_points",
-        existing_type=sa.JSON(),
-        nullable=False,
-        server_default=None,
-    )
+    with op.batch_alter_table("knowledge_evaluation_cases") as batch_op:
+        batch_op.alter_column(
+            "answer_points",
+            existing_type=sa.JSON(),
+            nullable=False,
+            server_default=None,
+        )

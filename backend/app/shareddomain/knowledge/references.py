@@ -36,6 +36,12 @@ class ReferenceLabel:
     reference_type: Literal["markdown", "text"] = "text"
 
 
+_ResolutionContext = tuple[
+    dict[str, list[KnowledgeDocument]],
+    dict[str, list[KnowledgeDocumentParentChunk]],
+]
+
+
 def normalize_reference_label(value: str) -> str:
     path = unquote(value).strip().replace("\\", "/")
     return " ".join(PurePosixPath(path).name.split())[:255]
@@ -115,10 +121,7 @@ def _document_aliases(document: KnowledgeDocument) -> set[str]:
 def _resolution_context(
     documents: list[KnowledgeDocument],
     parents: list[KnowledgeDocumentParentChunk],
-) -> tuple[
-    dict[str, list[KnowledgeDocument]],
-    dict[str, list[KnowledgeDocumentParentChunk]],
-]:
+) -> _ResolutionContext:
     documents_by_alias: dict[str, list[KnowledgeDocument]] = {}
     for document in documents:
         for alias in _document_aliases(document):
@@ -171,6 +174,7 @@ async def resolve_references_matching_document(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     document: KnowledgeDocument,
+    resolution_context: _ResolutionContext | None = None,
 ) -> None:
     references = await reference_repository.list_references_matching_aliases(
         db,
@@ -179,16 +183,18 @@ async def resolve_references_matching_document(
     )
     if not references:
         return
-    documents = await reference_repository.list_active_documents(db, knowledge_base)
-    parents = await reference_repository.list_parent_chunks_for_documents(
-        db,
-        knowledge_base,
-        {item.id for item in documents},
-    )
-    documents_by_alias, parents_by_document = _resolution_context(
-        documents,
-        parents,
-    )
+    if resolution_context is None:
+        documents = await reference_repository.list_active_documents(
+            db,
+            knowledge_base,
+        )
+        parents = await reference_repository.list_parent_chunks_for_documents(
+            db,
+            knowledge_base,
+            {item.id for item in documents},
+        )
+        resolution_context = _resolution_context(documents, parents)
+    documents_by_alias, parents_by_document = resolution_context
     for reference in references:
         target_document_id, target_parent_id = _resolved_target(
             reference.target_label,
@@ -223,10 +229,11 @@ async def rebuild_document_references(
         knowledge_base,
         {item.id for item in documents},
     )
-    documents_by_alias, parents_by_document = _resolution_context(
+    resolution_context = _resolution_context(
         documents,
         parents,
     )
+    documents_by_alias, parents_by_document = resolution_context
     references: list[KnowledgeDocumentReference] = []
     for chunk in sorted(chunks, key=lambda item: item.chunk_index):
         for label in extract_reference_labels(chunk.content):
@@ -256,7 +263,12 @@ async def rebuild_document_references(
         if len(references) == MAX_REFERENCES_PER_DOCUMENT:
             break
     await reference_repository.add_references(db, references)
-    await resolve_references_matching_document(db, knowledge_base, document)
+    await resolve_references_matching_document(
+        db,
+        knowledge_base,
+        document,
+        resolution_context,
+    )
 
 
 async def detach_document_references(

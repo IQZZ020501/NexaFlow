@@ -1,4 +1,5 @@
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import (
@@ -182,7 +183,7 @@ async def upsert_result(
     db: AsyncSession,
     result: KnowledgeEvaluationResult,
 ) -> KnowledgeEvaluationResult:
-    row = await db.scalar(
+    statement = (
         select(KnowledgeEvaluationResultORM)
         .where(
             KnowledgeEvaluationResultORM.workspace_id == result.workspace_id,
@@ -193,14 +194,22 @@ async def upsert_result(
         )
         .with_for_update()
     )
+    row = await db.scalar(statement)
     if row is None:
-        row = to_orm(KnowledgeEvaluationResultORM, result)
-        db.add(row)
-    elif row.error is None and result.error is not None:
+        try:
+            async with db.begin_nested():
+                row = to_orm(KnowledgeEvaluationResultORM, result)
+                db.add(row)
+                await db.flush()
+            return to_entity(KnowledgeEvaluationResult, row)
+        except IntegrityError:
+            row = await db.scalar(statement)
+            if row is None:
+                raise
+    if row.error is None and result.error is not None:
         return to_entity(KnowledgeEvaluationResult, row)
-    else:
-        result.id = row.id
-        apply_to_orm(row, result)
+    result.id = row.id
+    apply_to_orm(row, result)
     await db.flush()
     return to_entity(KnowledgeEvaluationResult, row)
 

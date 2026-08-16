@@ -12,21 +12,19 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        "ck_knowledge_tasks_task_type",
-        "knowledge_tasks",
-        type_="check",
-    )
-    op.create_check_constraint(
-        "ck_knowledge_tasks_task_type",
-        "knowledge_tasks",
-        "task_type IN ('parse', 'index', 'rebuild_index', 'evaluate')",
-    )
-    op.create_unique_constraint(
-        "uq_knowledge_tasks_scope_id",
-        "knowledge_tasks",
-        ["workspace_id", "knowledge_base_id", "id"],
-    )
+    with op.batch_alter_table("knowledge_tasks") as batch_op:
+        batch_op.drop_constraint(
+            "ck_knowledge_tasks_task_type",
+            type_="check",
+        )
+        batch_op.create_check_constraint(
+            "ck_knowledge_tasks_task_type",
+            "task_type IN ('parse', 'index', 'rebuild_index', 'evaluate')",
+        )
+        batch_op.create_unique_constraint(
+            "uq_knowledge_tasks_scope_id",
+            ["workspace_id", "knowledge_base_id", "id"],
+        )
     op.create_table(
         "knowledge_evaluation_cases",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -163,18 +161,16 @@ def downgrade() -> None:
         table_name="knowledge_evaluation_cases",
     )
     op.drop_table("knowledge_evaluation_cases")
-    op.drop_constraint(
-        "uq_knowledge_tasks_scope_id",
-        "knowledge_tasks",
-        type_="unique",
-    )
-    op.drop_constraint(
-        "ck_knowledge_tasks_task_type",
-        "knowledge_tasks",
-        type_="check",
-    )
-    op.create_check_constraint(
-        "ck_knowledge_tasks_task_type",
-        "knowledge_tasks",
-        "task_type IN ('parse', 'index', 'rebuild_index')",
-    )
+    with op.batch_alter_table("knowledge_tasks") as batch_op:
+        batch_op.drop_constraint(
+            "uq_knowledge_tasks_scope_id",
+            type_="unique",
+        )
+        batch_op.drop_constraint(
+            "ck_knowledge_tasks_task_type",
+            type_="check",
+        )
+        batch_op.create_check_constraint(
+            "ck_knowledge_tasks_task_type",
+            "task_type IN ('parse', 'index', 'rebuild_index')",
+        )

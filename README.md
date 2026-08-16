@@ -110,7 +110,7 @@ cp deploy/.env.example deploy/.env
 ```bash
 docker compose -f deploy/docker-compose.yml build db
 docker compose -f deploy/docker-compose.yml up -d db redis qdrant sandbox
-docker compose -f deploy/docker-compose.yml run --rm api alembic upgrade head
+docker compose -f deploy/docker-compose.yml run --rm --build api alembic upgrade head
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 

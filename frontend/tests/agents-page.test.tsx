@@ -1191,6 +1191,8 @@ describe("AgentsPage detail view", () => {
       ),
     )
     await waitFor(() => expect(navState.pushCalls).toContain("/app/apps"))
+    await waitFor(() => expect(nameInput.value).toBe(agent.name))
+    expect(screen.queryByText("未保存")).toBeNull()
   })
 
   test("stays on the page when discarding changes is declined", async () => {
@@ -1210,6 +1212,9 @@ describe("AgentsPage detail view", () => {
         "button",
         { name: "取消" },
       ),
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull(),
     )
     expect(navState.pushCalls).not.toContain("/app/apps")
   })

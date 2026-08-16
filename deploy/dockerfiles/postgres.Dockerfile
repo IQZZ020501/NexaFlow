@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim AS pg-search-package
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS pg-search-package
 
 ARG PG_SEARCH_VERSION=0.25.2
 
@@ -16,14 +16,14 @@ RUN set -eux; \
         -o /tmp/pg_search.deb; \
     echo "$checksum  /tmp/pg_search.deb" | sha256sum -c -
 
-FROM postgres:17-bookworm
+FROM postgres:17-bookworm@sha256:84560e3b9c6874893fc4e2854f5dc3e7c1a37bc9d1dfd7a8c641310ae22ba5ad
 
 COPY --from=pg-search-package /tmp/pg_search.deb /tmp/pg_search.deb
 
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        postgresql-17-pgvector \
+        postgresql-17-pgvector=0.8.6-1.pgdg12+1 \
         /tmp/pg_search.deb; \
     rm -f /tmp/pg_search.deb; \
     rm -rf /var/lib/apt/lists/*

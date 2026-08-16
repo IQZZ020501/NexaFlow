@@ -190,6 +190,11 @@ function PaginationFooter({
 }) {
   const { t } = useLanguage()
   const totalPages = documentPageCount(total, pageSize)
+  const currentPage = Math.min(page, totalPages)
+
+  React.useEffect(() => {
+    if (page > totalPages) onPageChange(totalPages)
+  }, [onPageChange, page, totalPages])
 
   if (!total) {
     return null
@@ -234,20 +239,20 @@ function PaginationFooter({
           type="button"
           variant="outline"
           size="sm"
-          disabled={page <= 1}
-          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={currentPage <= 1}
+          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
         >
           {t("上一页")}
         </Button>
         <span className="text-muted-foreground">
-          {page} / {totalPages}
+          {currentPage} / {totalPages}
         </span>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          disabled={page >= totalPages}
-          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={currentPage >= totalPages}
+          onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
         >
           {t("下一页")}
         </Button>

@@ -813,6 +813,7 @@ async def list_recoverable_tasks(
     result = await db.scalars(
         select(KnowledgeTaskORM)
         .where(
+            KnowledgeTaskORM.attempts < KnowledgeTaskORM.max_attempts,
             or_(
                 KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
                 and_(

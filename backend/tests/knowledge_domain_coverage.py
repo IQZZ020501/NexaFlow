@@ -3538,6 +3538,15 @@ async def run_repository_direct_tests(
         )
         assert sample_task.id in {task.id for task in recoverable}
 
+        running_task.attempts = running_task.max_attempts
+        await knowledge_repository.save_knowledge_task(db, running_task)
+        await db.commit()
+        recoverable = await knowledge_repository.list_recoverable_tasks(
+            db,
+            utc_now(),
+        )
+        assert sample_task.id not in {task.id for task in recoverable}
+
         renewed_wrong = await knowledge_repository.renew_knowledge_task_lease(
             db,
             sample_task.id,
@@ -3893,6 +3902,91 @@ async def run_repository_direct_tests(
         await knowledge_repository.delete_knowledge_document(db, marker_doc2)
 
 
+def test_evaluation_migrations_support_sqlite() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    def load_migration(filename: str, module_name: str):
+        path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / filename
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    evaluation = load_migration(
+        "202608150003_knowledge_evaluation.py",
+        "knowledge_evaluation_migration",
+    )
+    answer_points = load_migration(
+        "202608160002_remove_evaluation_answer_points.py",
+        "knowledge_answer_points_migration",
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    sa.Table(
+        "workspaces",
+        metadata,
+        sa.Column("id", sa.String(36), primary_key=True),
+    )
+    sa.Table(
+        "users",
+        metadata,
+        sa.Column("id", sa.String(36), primary_key=True),
+    )
+    sa.Table(
+        "knowledge",
+        metadata,
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("workspace_id", sa.String(36), nullable=False),
+        sa.UniqueConstraint("workspace_id", "id"),
+    )
+    sa.Table(
+        "knowledge_tasks",
+        metadata,
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("workspace_id", sa.String(36), nullable=False),
+        sa.Column("knowledge_base_id", sa.String(36), nullable=False),
+        sa.Column("task_type", sa.String(32), nullable=False),
+        sa.CheckConstraint(
+            "task_type IN ('parse', 'index', 'rebuild_index')",
+            name="ck_knowledge_tasks_task_type",
+        ),
+    )
+
+    with engine.begin() as connection:
+        metadata.create_all(connection)
+        operations = Operations(MigrationContext.configure(connection))
+        evaluation.op = operations
+        answer_points.op = operations
+
+        evaluation.upgrade()
+        answer_points.upgrade()
+
+        inspector = sa.inspect(connection)
+        assert "knowledge_evaluation_cases" in inspector.get_table_names()
+        constraints = inspector.get_check_constraints("knowledge_tasks")
+        assert any("evaluate" in item["sqltext"] for item in constraints)
+        defaults = {
+            item["name"]: item["default"]
+            for item in inspector.get_columns("knowledge_evaluation_cases")
+        }
+        assert "[]" in defaults["answer_points"]
+
+        answer_points.downgrade()
+        evaluation.downgrade()
+        inspector = sa.inspect(connection)
+        assert "knowledge_evaluation_cases" not in inspector.get_table_names()
+        constraints = inspector.get_check_constraints("knowledge_tasks")
+        assert all("evaluate" not in item["sqltext"] for item in constraints)
+
+    engine.dispose()
+
+
 def main() -> None:
     import app.tasks as tasks_package
 
@@ -3904,6 +3998,7 @@ def main() -> None:
     test_run_knowledge_model_test_branches()
     test_ensure_knowledge_task_lease()
     test_maintain_knowledge_task_lease()
+    test_evaluation_migrations_support_sqlite()
     with model_test_server() as model_base_url:
         test_api_scenario(model_base_url)
     print("OK: knowledge_domain_coverage")

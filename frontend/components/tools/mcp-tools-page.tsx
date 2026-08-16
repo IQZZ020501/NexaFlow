@@ -404,18 +404,18 @@ export function McpToolsPage() {
     if (!token || !selectedWorkspaceId || busyServerId) {
       return
     }
-    if (
-      mode === "read_only" &&
-      !(await confirmAction({
-        description: t("确认将工具“{name}”标记为只读并允许自动执行吗？", {
-          name: toolName,
-        }),
-      }))
-    ) {
-      return
-    }
     setBusyServerId(server.id)
     try {
+      if (
+        mode === "read_only" &&
+        !(await confirmAction({
+          description: t("确认将工具“{name}”标记为只读并允许自动执行吗？", {
+            name: toolName,
+          }),
+        }))
+      ) {
+        return
+      }
       const policy = await updateMcpToolPolicy(
         token,
         selectedWorkspaceId,

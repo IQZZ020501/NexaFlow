@@ -1017,6 +1017,7 @@ export function AgentsPage({
   }
 
   async function handleBackFromAgent() {
+    if (!selectedAgent) return
     if (
       isDirty &&
       !(await confirmAction({
@@ -1027,6 +1028,7 @@ export function AgentsPage({
     ) {
       return
     }
+    if (isDirty) setForm(formFromAgent(selectedAgent))
     router.push("/app/apps")
   }
 
@@ -1404,6 +1406,7 @@ export function AgentsPage({
             canManagePublishing={canManagePublishing}
             isAppDirty={isDirty}
             isSavingApp={isSaving}
+            onDiscardAppChanges={() => setForm(formFromAgent(selectedAgent))}
             activeView={workflowCanvasMode ? "settings" : activeView}
             standalone={workflowCanvasMode}
             onBack={() =>

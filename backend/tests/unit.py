@@ -1295,6 +1295,80 @@ def test_evaluation_case_service_and_repository_edges() -> None:
     ) == []
 
 
+def test_evaluation_result_upsert_recovers_concurrent_insert() -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    from app.entities.knowledge import KnowledgeEvaluationResult
+    from app.infrastructure.repositories import (
+        knowledge_evaluation as evaluation_repository,
+    )
+    from app.shareddomain.knowledge.models import (
+        KnowledgeEvaluationResult as KnowledgeEvaluationResultORM,
+    )
+
+    result = KnowledgeEvaluationResult(
+        id="loser-result",
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        task_id="task-1",
+        case_id="case-1",
+        returned_document_ids=["doc-1"],
+        returned_chunk_ids=["chunk-1"],
+        hit_at_k=1,
+    )
+    winner = KnowledgeEvaluationResultORM(
+        id="winner-result",
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        task_id="task-1",
+        case_id="case-1",
+        returned_document_ids=[],
+        returned_chunk_ids=[],
+        hit_at_k=0,
+        recall_at_k=0.0,
+        reciprocal_rank=0.0,
+        ndcg_at_k=0.0,
+        latency_ms=0.0,
+        trace={},
+        error="first attempt failed",
+        created_at=result.created_at,
+    )
+
+    class NestedTransaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class FakeDb:
+        scalar_calls = 0
+        flush_calls = 0
+
+        async def scalar(self, _statement):
+            self.scalar_calls += 1
+            return None if self.scalar_calls == 1 else winner
+
+        def begin_nested(self):
+            return NestedTransaction()
+
+        def add(self, _row) -> None:
+            return None
+
+        async def flush(self) -> None:
+            self.flush_calls += 1
+            if self.flush_calls == 1:
+                raise IntegrityError("insert", {}, RuntimeError("duplicate"))
+
+    db = FakeDb()
+    persisted = asyncio.run(evaluation_repository.upsert_result(db, result))
+
+    assert db.scalar_calls == 2
+    assert persisted.id == "winner-result"
+    assert persisted.error is None
+    assert persisted.hit_at_k == 1
+
+
 def test_evaluation_routes_delegate_to_application() -> None:
     from app.api.v1.endpoints import knowledge_evaluation as evaluation_api
     from app.schemas.knowledge import (
@@ -1460,8 +1534,10 @@ def test_evaluation_routes_delegate_to_application() -> None:
 def test_qa_import_is_explicit_validated_and_bounded() -> None:
     from pathlib import Path
     from tempfile import TemporaryDirectory
+    from unittest.mock import patch
 
     from openpyxl import Workbook
+    from openpyxl.chart import BarChart, Reference
 
     from app.capabilities.embedding.pipeline import KnowledgePipelineError
     from app.capabilities.embedding.qa_import import (
@@ -1497,11 +1573,33 @@ def test_qa_import_is_explicit_validated_and_bounded() -> None:
 
         xlsx_path = root / "qa.xlsx"
         workbook = Workbook()
-        workbook.active.append(["question", "answer", "source"])
-        workbook.active.append(["如何回滚？", "需要管理员批准。", "运维手册 3.2"])
+        worksheet = workbook.active
+        assert worksheet is not None
+        worksheet.append(["question", "answer", "source"])
+        worksheet.append(["如何回滚？", "需要管理员批准。", "运维手册 3.2"])
+        chart = BarChart()
+        chart.add_data(
+            Reference(worksheet, min_col=2, min_row=1, max_row=2),
+            titles_from_data=True,
+        )
+        chartsheet = workbook.create_chartsheet("Chart")
+        chartsheet.add_chart(chart)
+        workbook.active = chartsheet
         workbook.save(xlsx_path)
         workbook.close()
         assert extract_qa_rows(xlsx_path.name, xlsx_path) == expected
+
+        empty_workbook = SimpleNamespace(worksheets=[], close=lambda: None)
+        with patch(
+            "app.capabilities.embedding.qa_import.load_workbook",
+            return_value=empty_workbook,
+        ):
+            try:
+                extract_qa_rows(xlsx_path.name, xlsx_path)
+            except KnowledgePipelineError as exc:
+                assert "no worksheet" in str(exc)
+            else:
+                raise AssertionError("QA workbook without worksheets was accepted")
 
         try:
             extract_qa_rows("qa.txt", csv_path)
@@ -1614,6 +1712,104 @@ def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
         documents_by_alias,
         duplicate_parents,
     ) == (document.id, None)
+
+
+def test_reference_rebuild_reuses_resolution_context() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.entities.knowledge import (
+        KnowledgeDocument,
+        KnowledgeDocumentChunk,
+        KnowledgeDocumentParentChunk,
+        KnowledgeDocumentReference,
+    )
+    from app.shareddomain.knowledge import references as reference_service
+
+    knowledge_base = KnowledgeBase(id="kb-1", workspace_id="ws-1")
+    source = KnowledgeDocument(
+        id="source-1",
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        filename="source.md",
+    )
+    target = KnowledgeDocument(
+        id="target-1",
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        filename="target.md",
+    )
+    parent = KnowledgeDocumentParentChunk(
+        id="parent-1",
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        document_id=target.id,
+        title="Section",
+    )
+    chunk = KnowledgeDocumentChunk(
+        id="chunk-1",
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        document_id=source.id,
+        content="[Target](target.md#section)",
+    )
+    incoming = KnowledgeDocumentReference(
+        id="reference-1",
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        source_document_id=target.id,
+        source_chunk_id="chunk-2",
+        target_label="source.md",
+    )
+
+    with (
+        patch.object(
+            reference_service.reference_repository,
+            "delete_source_references",
+            new=AsyncMock(),
+        ),
+        patch.object(
+            reference_service.reference_repository,
+            "list_active_documents",
+            new=AsyncMock(return_value=[source, target]),
+        ) as list_documents,
+        patch.object(
+            reference_service.reference_repository,
+            "list_parent_chunks_for_documents",
+            new=AsyncMock(return_value=[parent]),
+        ) as list_parents,
+        patch.object(
+            reference_service.reference_repository,
+            "add_references",
+            new=AsyncMock(),
+        ) as add_references,
+        patch.object(
+            reference_service.reference_repository,
+            "list_references_matching_aliases",
+            new=AsyncMock(return_value=[incoming]),
+        ),
+        patch.object(
+            reference_service.reference_repository,
+            "save_reference",
+            new=AsyncMock(),
+        ),
+    ):
+        asyncio.run(
+            reference_service.rebuild_document_references(
+                SimpleNamespace(),
+                knowledge_base,
+                source,
+                [chunk],
+            )
+        )
+
+    assert list_documents.await_count == 1
+    assert list_parents.await_count == 1
+    outgoing = add_references.await_args.args[1][0]
+    assert (outgoing.target_document_id, outgoing.target_parent_id) == (
+        target.id,
+        parent.id,
+    )
+    assert incoming.target_document_id == source.id
 
 
 def test_parent_context_windows_around_child_offsets() -> None:
@@ -3263,9 +3459,11 @@ def main() -> None:
     test_retrieval_evaluation_metrics_are_deterministic()
     test_evaluation_mutations_lock_before_validation_and_require_lease()
     test_evaluation_case_service_and_repository_edges()
+    test_evaluation_result_upsert_recovers_concurrent_insert()
     test_evaluation_routes_delegate_to_application()
     test_qa_import_is_explicit_validated_and_bounded()
     test_explicit_reference_extraction_is_bounded_and_internal()
+    test_reference_rebuild_reuses_resolution_context()
     test_parent_context_windows_around_child_offsets()
     test_model_type_normalization()
     test_status_validation()

@@ -64,7 +64,6 @@
   - `202608040002_drop_agent_run_citations.py` — 删除 agent run citations 字段/表
   - `202608040004_agent_published.py` — agent 表增加 published 发布标记列
   - `202608050001_knowledge_chunk_search.py` — 知识块 content 全文检索 GIN 索引（仅 PostgreSQL）
-  - `202608160001_knowledge_bm25_search.py` — 安装 `pg_search` 扩展并将知识关键词索引切换为 Jieba + BM25；回滚恢复原生 GIN 索引
   - `202608050002_model_provider_credentials.py` — 模型凭据改造：credential_config/secret_hints JSON 列与 provider_type 归一化
   - `202608050003_knowledge_parent_chunks.py` — 智能分段 Parent 表、Child 父级偏移及文档/租户组合外键约束
   - `202608050004_knowledge_assets.py` — 知识附件与解析资产表
@@ -75,6 +74,7 @@
   - `202608100001_agent_conversation_memory.py` — Agent 会话边界、持久摘要和模型用量
   - `202608100002_localize_default_agent_instructions.py` — 本地化默认 Agent 指令
   - `202608100003_agent_public_access.py` — Agent 发布身份、外部来源主体、API 凭据与会话隔离索引；回滚时删除无法还原为登录用户语义的外部 Run
+  - `202608160001_knowledge_bm25_search.py` — 安装 `pg_search` 扩展并将知识关键词索引切换为 Jieba + BM25；回滚恢复原生 GIN 索引
 
 ## backend 根配置
 

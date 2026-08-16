@@ -271,7 +271,7 @@ export function KnowledgeHitTest({
               </span>
           </div>
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-              {Object.entries(trace.stage_duration_ms).map(
+              {Object.entries(trace.stage_duration_ms ?? {}).map(
                 ([stage, duration]) => {
                   const label = stageLabels[stage]
                   return label ? (

@@ -115,6 +115,7 @@ type WorkflowDetailWorkspaceProps = {
   canManagePublishing: boolean
   isAppDirty: boolean
   isSavingApp: boolean
+  onDiscardAppChanges: () => void
   activeView: AgentDetailView
   standalone?: boolean
   onBack: () => void
@@ -157,6 +158,7 @@ export function WorkflowDetailWorkspace({
   canManagePublishing,
   isAppDirty,
   isSavingApp,
+  onDiscardAppChanges,
   activeView,
   standalone,
   onBack,
@@ -270,11 +272,20 @@ export function WorkflowDetailWorkspace({
   const currentViewLabel =
     navigationItems.find((item) => item.view === visibleActiveView)?.label ??
     t("概览")
+  const discardChanges = () => {
+    if (definition) {
+      setGraph(definition.graph)
+      setCanvasGeneration((current) => current + 1)
+    }
+    onDiscardAppChanges()
+  }
   const changeView = async (view: AgentDetailView) => {
-    if (
+    const shouldDiscard =
       visibleActiveView === "settings" &&
       view !== "settings" &&
-      hasUnsavedChanges &&
+      hasUnsavedChanges
+    if (
+      shouldDiscard &&
       !(await confirmAction({
         description: t("放弃未保存的更改？"),
         confirmLabel: t("放弃更改"),
@@ -283,6 +294,7 @@ export function WorkflowDetailWorkspace({
     ) {
       return
     }
+    if (shouldDiscard) discardChanges()
     onViewChange(view)
   }
   const renderNavItems = (itemClassName: string) =>
@@ -646,6 +658,7 @@ export function WorkflowDetailWorkspace({
     ) {
       return
     }
+    if (hasUnsavedChanges) discardChanges()
     onBack()
   }
 
@@ -661,6 +674,7 @@ export function WorkflowDetailWorkspace({
     ) {
       return
     }
+    if (!open && isAppDirty) onDiscardAppChanges()
     setSettingsOpen(open)
   }
 

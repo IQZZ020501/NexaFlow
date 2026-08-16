@@ -412,15 +412,38 @@ export function KnowledgeEvaluation({
         {canEdit ? (
           <section className="mt-4 rounded-lg border p-4">
             <h2 className="text-sm font-semibold">{t("运行评测")}</h2>
-            <Button
-              type="button"
-              className="mt-3"
-              disabled={isSaving || !selectedCaseIds.length || Boolean(activeTask && ["queued", "running"].includes(activeTask.status))}
-              onClick={() => void handleRun()}
-            >
-              <PlayIcon data-icon="inline-start" />
-              {t("开始评测（{value} 条）", { value: selectedCaseIds.length })}
-            </Button>
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <Button
+                type="button"
+                disabled={isSaving || !selectedCaseIds.length || Boolean(activeTask && ["queued", "running"].includes(activeTask.status))}
+                onClick={() => void handleRun()}
+              >
+                <PlayIcon data-icon="inline-start" />
+                {t("开始评测（{value} 条）", { value: selectedCaseIds.length })}
+              </Button>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>
+                  {t("{label}：{value}", {
+                    label: t("检索模式"),
+                    value: t(
+                      searchMode === "embedding"
+                        ? "向量检索"
+                        : searchMode === "keywords"
+                          ? "关键词检索"
+                          : "混合检索",
+                    ),
+                  })}
+                </span>
+                <span>{t("{label}：{value}", { label: t("返回数量"), value: limit })}</span>
+                <span>{t("{label}：{value}", { label: t("相似度"), value: similarity })}</span>
+                <span>
+                  {t("{label}：{value}", {
+                    label: t("扩展文档引用"),
+                    value: t(includeReferences ? "是" : "否"),
+                  })}
+                </span>
+              </div>
+            </div>
             {activeTask ? (
               <p className="mt-3 text-sm text-muted-foreground" aria-live="polite">
                 {t("评测状态：{status}，进度 {done}/{total}", {

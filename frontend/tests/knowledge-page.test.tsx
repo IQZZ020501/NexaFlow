@@ -114,6 +114,9 @@ function resetSession() {
 async function respondToConfirm(label: string) {
   const dialog = await screen.findByRole("dialog", { name: "确认操作" })
   fireEvent.click(within(dialog).getByRole("button", { name: label }))
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull(),
+  )
 }
 
 afterEach(() => {
@@ -1021,6 +1024,39 @@ describe("KnowledgeBasePage documents tab", () => {
     fireEvent.click(await screen.findByText("每页 10 条"))
     await waitFor(() => expect(visibleFilenames()).toHaveLength(10))
     expect(screen.getByText("1 / 2")).toBeTruthy()
+  })
+
+  test("clamps the page after deleting its last document", async () => {
+    const documents = Array.from({ length: 11 }, (_, index) =>
+      makeDocument({
+        id: `doc-${index}`,
+        filename: `file-${String(index).padStart(2, "0")}.md`,
+        created_at: `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+      }),
+    )
+    const deletes: string[] = []
+    fetchHandler = (url, init) => {
+      if (init?.method === "DELETE") deletes.push(url)
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse(documents)
+      if (url.includes("/tasks")) return jsonResponse([])
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    await screen.findByText("共 11 条")
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }))
+    await screen.findByText("file-00.md")
+    openMenu(screen.getByRole("button", { name: "操作 file-00.md" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "删除" }))
+    await respondToConfirm("删除")
+
+    await waitFor(() => expect(deletes).toHaveLength(1))
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeTruthy())
+    expect(screen.getByText("file-10.md")).toBeTruthy()
+    expect(screen.queryByText("2 / 1")).toBeNull()
   })
 
   test("sorts documents by size and chunk count with direction cycling", async () => {
@@ -2009,6 +2045,9 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
               content: "## 标题\n\n正文内容",
               distance: 0.123456,
               similarity: 0.938272,
+              kind: "document",
+              question: null,
+              source: null,
               sources: ["vector", "reference"],
               reference_hops: 1,
               rerank_score: 0.91,
@@ -2024,6 +2063,9 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
               content: "no distance",
               distance: null,
               similarity: null,
+              kind: "document",
+              question: null,
+              source: null,
               sources: ["keywords"],
               reference_hops: 0,
               rerank_score: null,
@@ -2042,7 +2084,6 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
             rerank_status: "applied",
             returned_hits: 2,
             duration_ms: 12.345,
-            stage_duration_ms: { candidates: 4.5, rerank: 2.25 },
           },
         })
       }
@@ -2097,7 +2138,7 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     expect(screen.getByText("融合候选：6")).toBeTruthy()
     expect(screen.getByText("重排状态：已应用")).toBeTruthy()
     expect(screen.getByText("总耗时：12.345 毫秒")).toBeTruthy()
-    expect(screen.getByText("候选召回：4.5 毫秒")).toBeTruthy()
+    expect(screen.queryByText("候选召回：4.5 毫秒")).toBeNull()
     // Markdown content rendered for the hit body.
     expect(screen.getByText("正文内容")).toBeTruthy()
     expect(JSON.parse(queryCalls[0].body)).toEqual({

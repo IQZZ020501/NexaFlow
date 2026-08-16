@@ -180,6 +180,10 @@ describe("knowledge evaluation", () => {
     )
 
     await screen.findByText("暂无评测用例")
+    expect(screen.getByText("检索模式：混合检索")).toBeTruthy()
+    expect(screen.getByText("返回数量：5")).toBeTruthy()
+    expect(screen.getByText("相似度：0.6")).toBeTruthy()
+    expect(screen.getByText("扩展文档引用：是")).toBeTruthy()
     const queryInput = screen.getByLabelText("查询内容") as HTMLTextAreaElement
     fireEvent.change(queryInput, {
       target: { value: "如何回滚？" },
@@ -194,6 +198,7 @@ describe("knowledge evaluation", () => {
 
     await waitFor(() => expect(inspectRequests).toBe(1))
     expect(inspectBodies[0]?.search_mode).toBe("keywords")
+    await screen.findByText("检索模式：关键词检索")
     await screen.findByText("保存当前检索")
     fireEvent.click(screen.getByRole("button", { name: "添加用例" }))
     await screen.findByRole("checkbox", { name: "选择用例：如何回滚？" })

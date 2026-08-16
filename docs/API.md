@@ -36,10 +36,9 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/endpoints/workspaces.py` — `/workspaces`：工作区 CRUD、成员管理、成员用户创建、工作区审计日志
 - `backend/app/api/v1/endpoints/teams.py` — `/workspaces/{workspace_id}/teams`：团队 CRUD（admin 角色限定）
 - `backend/app/api/v1/endpoints/knowledge.py` — `/workspaces/{workspace_id}/knowledge-bases` 主接口族：知识库 CRUD、普通文档/QA 表上传、分块/解析/索引、任务列表与重试、重建索引、模型测试、资源权限管理；文档创建通过 `import_mode=document|qa` 显式选择导入语义
-- `backend/app/api/v1/endpoints/knowledge_legacy.py` — 同前缀兼容接口族：文档拆分预览 `POST /documents/split`、批量创建 `POST /documents/batch-create`
-- `backend/app/api/v1/endpoints/knowledge_lifecycle.py` — 同前缀文档生命周期：下载、删除、激活状态更新（PATCH）
+- `backend/app/api/v1/endpoints/knowledge_lifecycle.py` — 同前缀文档生命周期：文档下载、解析资产下载、删除、激活状态更新（PATCH）
 - `backend/app/api/v1/endpoints/knowledge_retrieval.py` — 同前缀 RAG 检索接口：兼容结果列表 `POST /{kb_id}/query` 与带生产链路 trace 的 `POST /{kb_id}/query/inspect`
-- `backend/app/api/v1/endpoints/knowledge_evaluation.py` — 同前缀 `/evaluations`：评测用例 CRUD、异步运行、运行列表/详情、指定运行与最近运行指标汇总；读取要求 view/edit，写入要求 edit
+- `backend/app/api/v1/endpoints/knowledge_evaluation.py` — 同前缀 `/evaluations`：评测用例列表/创建/删除、异步运行、运行列表/详情、指定运行与最近运行指标汇总；读取要求 view/edit，写入要求 edit
 - `backend/app/api/v1/endpoints/models.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
 - `backend/app/api/v1/endpoints/mcp_servers.py` — MCP Server CRUD/刷新，以及管理员按工具定义哈希审核执行策略；创建请求用 `transport` 区分 `streamable_http`/`sse`（URL + 可选 Bearer）与 `stdio`（命令、参数、工作目录和环境变量）
 - `backend/app/api/v1/endpoints/agents.py` — Agent CRUD、发布、API 凭据、跨来源对话日志/用户/统计，以及登录态 Run 提交、工具账本、审批/拒绝与游标 NDJSON 订阅

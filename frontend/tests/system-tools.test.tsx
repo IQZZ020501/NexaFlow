@@ -850,6 +850,7 @@ describe("McpToolsPage", () => {
     await chooseDropdownOption(select, "只读自动执行")
     const dialog = await screen.findByRole("dialog", { name: "确认操作" })
     expect(dialog.textContent).toContain("确认将工具“web_search”标记为只读并允许自动执行吗？")
+    expect((select as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(within(dialog).getByRole("button", { name: "确认" }))
     await waitFor(() => expect(notifications).toEqual([["success", "MCP 工具策略已更新"]]))
     const put = calls.find((c) => c.url.includes("/tools/web_search/policy"))
