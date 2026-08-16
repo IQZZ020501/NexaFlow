@@ -1,19 +1,47 @@
-"""MCP server use cases (facade over the tools domain)."""
+"""Unified Tool use cases (facade over the tools domain)."""
 
 from app.shareddomain.tools.services import (
+    ToolAuthorization,
+    ToolCatalogDetail,
+    ToolCatalogItem,
+    ToolPermissionEntry,
     create_mcp_server,
     delete_mcp_server,
+    evaluate_tool_authorization,
     get_mcp_server,
+    get_tool_catalog_detail,
+    has_tool_workspace_access,
+    list_tool_catalog,
+    list_tool_permissions,
     list_mcp_servers,
     refresh_mcp_server,
+    require_tool_manage,
+    require_tool_use,
+    require_tool_view,
+    revoke_tool_permission,
     set_mcp_tool_policy,
+    upsert_tool_permission,
 )
 
 __all__ = [
+    "ToolAuthorization",
+    "ToolCatalogDetail",
+    "ToolCatalogItem",
+    "ToolPermissionEntry",
     "create_mcp_server",
     "delete_mcp_server",
+    "evaluate_tool_authorization",
     "get_mcp_server",
+    "get_tool_catalog_detail",
+    "has_tool_workspace_access",
+    "list_tool_catalog",
+    "list_tool_permissions",
     "list_mcp_servers",
     "refresh_mcp_server",
+    "require_tool_manage",
+    "require_tool_use",
+    "require_tool_view",
+    "revoke_tool_permission",
     "set_mcp_tool_policy",
+    "upsert_tool_permission",
 ]

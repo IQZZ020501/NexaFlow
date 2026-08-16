@@ -520,6 +520,90 @@ def test_effective_tool_access_matrix() -> None:
     ) == ToolAccess(can_view=False, can_use=False, can_manage=False)
 
 
+def test_tool_authorization_applies_builtin_and_global_admin_rules() -> None:
+    from app.application.tools import evaluate_tool_authorization
+    from app.entities.resource_permission import ResourcePermission
+    from app.entities.tools import Tool, ToolAccess
+    from app.entities.user import User
+
+    member = User(id="member-1")
+    builtin = Tool(id="builtin-1", kind="builtin")
+    builtin_authorization = evaluate_tool_authorization(
+        builtin,
+        member,
+        "member",
+        None,
+    )
+    assert builtin_authorization.access == ToolAccess(
+        can_view=True,
+        can_use=True,
+        can_manage=False,
+    )
+    assert builtin_authorization.permission == "use"
+    outside_workspace = evaluate_tool_authorization(
+        builtin,
+        member,
+        None,
+        None,
+    )
+    assert outside_workspace.access == ToolAccess(
+        can_view=False,
+        can_use=False,
+        can_manage=False,
+    )
+    assert outside_workspace.permission is None
+
+    global_admin = User(id="global-admin-1", is_global_admin=True)
+    private_tool = Tool(
+        id="private-1",
+        kind="python",
+        status="disabled",
+        availability="unavailable",
+        created_by_user_id="owner-1",
+    )
+    admin_authorization = evaluate_tool_authorization(
+        private_tool,
+        global_admin,
+        "member",
+        None,
+    )
+    assert admin_authorization.access == ToolAccess(
+        can_view=True,
+        can_use=True,
+        can_manage=True,
+    )
+    assert admin_authorization.permission == "admin"
+
+    former_owner = User(id="owner-1")
+    former_owner_authorization = evaluate_tool_authorization(
+        private_tool,
+        former_owner,
+        None,
+        None,
+    )
+    assert former_owner_authorization.access == ToolAccess(False, False, False)
+    assert former_owner_authorization.permission is None
+
+    stale_grant_authorization = evaluate_tool_authorization(
+        private_tool,
+        member,
+        None,
+        ResourcePermission(permission="use", user_id=member.id),
+    )
+    assert stale_grant_authorization.access == ToolAccess(False, False, False)
+    assert stale_grant_authorization.permission is None
+
+    inactive_owner = User(id="owner-1", is_active=False)
+    inactive_authorization = evaluate_tool_authorization(
+        private_tool,
+        inactive_owner,
+        "member",
+        None,
+    )
+    assert inactive_authorization.access == ToolAccess(False, False, False)
+    assert inactive_authorization.permission is None
+
+
 def test_python_tool_schema_validation_closes_objects() -> None:
     from app.entities.tools import validate_tool_json_schema
 
@@ -4042,6 +4126,7 @@ def main() -> None:
     test_builtin_tool_summary_accepts_system_owner()
     test_tool_ref_schema_requires_canonical_ids()
     test_effective_tool_access_matrix()
+    test_tool_authorization_applies_builtin_and_global_admin_rules()
     test_python_tool_schema_validation_closes_objects()
     test_python_tool_schema_validation_enforces_limits()
     test_python_tool_schema_rejects_defs_depth_bypass()

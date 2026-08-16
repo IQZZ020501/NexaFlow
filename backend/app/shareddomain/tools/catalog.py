@@ -6,11 +6,20 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid5
 
+from fastapi import HTTPException, status
 from mcp.types import Tool as McpTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
+from app.entities.tools import Tool, ToolAccess, ToolPolicy, ToolSource, ToolVersion
+from app.entities.user import User
 from app.infrastructure.model_utils import utc_now
+from app.shareddomain.tools.permissions import (
+    ToolAuthorization,
+    ToolPermissionLabel,
+    evaluate_tool_authorization,
+    has_tool_workspace_access,
+    require_tool_view,
+)
 
 
 CATALOG_ID_NAMESPACE = UUID("2df58f89-2f5c-4e2b-9545-d50fb806a6db")
@@ -69,6 +78,101 @@ class WorkspaceSystemCatalog:
     tool: Tool
     version: ToolVersion
     policy: ToolPolicy
+
+
+@dataclass(frozen=True)
+class ToolCatalogItem:
+    tool: Tool
+    source: ToolSource
+    version: ToolVersion | None
+    access: ToolAccess
+    permission: ToolPermissionLabel | None
+
+
+@dataclass(frozen=True)
+class ToolCatalogDetail:
+    tool: Tool
+    source: ToolSource
+    version: ToolVersion | None
+    policy: ToolPolicy | None
+    authorization: ToolAuthorization
+
+    @property
+    def access(self) -> ToolAccess:
+        return self.authorization.access
+
+    @property
+    def permission(self) -> ToolPermissionLabel | None:
+        return self.authorization.permission
+
+
+async def list_tool_catalog(
+    db: AsyncSession,
+    workspace_id: str,
+    actor: User,
+    workspace_role: str | None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[ToolCatalogItem]:
+    from app.infrastructure.repositories import tools as repository
+
+    if not has_tool_workspace_access(actor, workspace_role):
+        return []
+    rows = await repository.list_tool_catalog_rows(
+        db,
+        workspace_id,
+        actor.id,
+        limit,
+        offset,
+    )
+    items: list[ToolCatalogItem] = []
+    for tool, source, version, grant in rows:
+        authorization = evaluate_tool_authorization(
+            tool,
+            actor,
+            workspace_role,
+            grant,
+        )
+        items.append(
+            ToolCatalogItem(
+                tool=tool,
+                source=source,
+                version=version,
+                access=authorization.access,
+                permission=authorization.permission,
+            )
+        )
+    return items
+
+
+async def get_tool_catalog_detail(
+    db: AsyncSession,
+    workspace_id: str,
+    tool_id: str,
+    actor: User,
+    workspace_role: str | None,
+) -> ToolCatalogDetail:
+    from app.infrastructure.repositories import tools as repository
+
+    row = await repository.get_tool_catalog_detail_row(
+        db,
+        workspace_id,
+        tool_id,
+        actor.id,
+    )
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tool not found.")
+    tool, source, version, policy, grant = row
+    authorization = require_tool_view(
+        evaluate_tool_authorization(tool, actor, workspace_role, grant)
+    )
+    return ToolCatalogDetail(
+        tool=tool,
+        source=source,
+        version=version,
+        policy=policy,
+        authorization=authorization,
+    )
 
 
 def build_workspace_system_catalog(

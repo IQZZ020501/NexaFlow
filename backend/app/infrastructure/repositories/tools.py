@@ -1,6 +1,8 @@
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.resource_permission import ResourcePermission as ResourcePermissionOrm
+from app.entities.resource_permission import ResourcePermission
 from app.entities.tools import (
     ApplicationToolBinding,
     Tool,
@@ -20,6 +22,20 @@ from app.shareddomain.tools.models import ToolInvocation as ToolInvocationOrm
 from app.shareddomain.tools.models import ToolPolicy as ToolPolicyOrm
 from app.shareddomain.tools.models import ToolSource as ToolSourceOrm
 from app.shareddomain.tools.models import ToolVersion as ToolVersionOrm
+
+ToolCatalogRow = tuple[
+    Tool,
+    ToolSource,
+    ToolVersion | None,
+    ResourcePermission | None,
+]
+ToolCatalogDetailRow = tuple[
+    Tool,
+    ToolSource,
+    ToolVersion | None,
+    ToolPolicy | None,
+    ResourcePermission | None,
+]
 
 
 async def get_tool_source(
@@ -85,6 +101,22 @@ async def get_tool(
     return to_entity(Tool, row) if row is not None else None
 
 
+async def lock_tool(
+    db: AsyncSession,
+    workspace_id: str,
+    tool_id: str,
+) -> Tool | None:
+    row = await db.scalar(
+        select(ToolOrm)
+        .where(
+            ToolOrm.workspace_id == workspace_id,
+            ToolOrm.id == tool_id,
+        )
+        .with_for_update()
+    )
+    return to_entity(Tool, row) if row is not None else None
+
+
 async def list_tools(db: AsyncSession, workspace_id: str) -> list[Tool]:
     rows = await db.scalars(
         select(ToolOrm)
@@ -92,6 +124,133 @@ async def list_tools(db: AsyncSession, workspace_id: str) -> list[Tool]:
         .order_by(ToolOrm.created_at, ToolOrm.id)
     )
     return [to_entity(Tool, row) for row in rows.all()]
+
+
+async def list_tool_catalog_rows(
+    db: AsyncSession,
+    workspace_id: str,
+    actor_id: str,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[ToolCatalogRow]:
+    grant = ResourcePermissionOrm
+    statement = (
+        select(ToolOrm, ToolSourceOrm, ToolVersionOrm, grant)
+        .join(
+            ToolSourceOrm,
+            and_(
+                ToolSourceOrm.workspace_id == ToolOrm.workspace_id,
+                ToolSourceOrm.id == ToolOrm.source_id,
+            ),
+        )
+        .outerjoin(
+            ToolVersionOrm,
+            and_(
+                ToolVersionOrm.workspace_id == ToolOrm.workspace_id,
+                ToolVersionOrm.tool_id == ToolOrm.id,
+                ToolVersionOrm.id == ToolOrm.current_version_id,
+            ),
+        )
+        .outerjoin(
+            grant,
+            and_(
+                grant.workspace_id == ToolOrm.workspace_id,
+                grant.resource_type == "tool",
+                grant.resource_id == ToolOrm.id,
+                grant.user_id == actor_id,
+            ),
+        )
+        .where(
+            ToolOrm.workspace_id == workspace_id,
+            or_(
+                ToolOrm.kind == "builtin",
+                ToolOrm.created_by_user_id == actor_id,
+                grant.id.is_not(None),
+            ),
+        )
+        .order_by(ToolOrm.created_at.desc(), ToolOrm.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = await db.execute(statement)
+    return [
+        (
+            to_entity(Tool, tool),
+            to_entity(ToolSource, source),
+            to_entity(ToolVersion, version) if version is not None else None,
+            to_entity(ResourcePermission, permission)
+            if permission is not None
+            else None,
+        )
+        for tool, source, version, permission in rows.all()
+    ]
+
+
+async def get_tool_catalog_detail_row(
+    db: AsyncSession,
+    workspace_id: str,
+    tool_id: str,
+    actor_id: str,
+) -> ToolCatalogDetailRow | None:
+    grant = ResourcePermissionOrm
+    row = (
+        await db.execute(
+            select(
+                ToolOrm,
+                ToolSourceOrm,
+                ToolVersionOrm,
+                ToolPolicyOrm,
+                grant,
+            )
+            .join(
+                ToolSourceOrm,
+                and_(
+                    ToolSourceOrm.workspace_id == ToolOrm.workspace_id,
+                    ToolSourceOrm.id == ToolOrm.source_id,
+                ),
+            )
+            .outerjoin(
+                ToolVersionOrm,
+                and_(
+                    ToolVersionOrm.workspace_id == ToolOrm.workspace_id,
+                    ToolVersionOrm.tool_id == ToolOrm.id,
+                    ToolVersionOrm.id == ToolOrm.current_version_id,
+                ),
+            )
+            .outerjoin(
+                ToolPolicyOrm,
+                and_(
+                    ToolPolicyOrm.workspace_id == ToolOrm.workspace_id,
+                    ToolPolicyOrm.tool_id == ToolOrm.id,
+                ),
+            )
+            .outerjoin(
+                grant,
+                and_(
+                    grant.workspace_id == ToolOrm.workspace_id,
+                    grant.resource_type == "tool",
+                    grant.resource_id == ToolOrm.id,
+                    grant.user_id == actor_id,
+                ),
+            )
+            .where(
+                ToolOrm.workspace_id == workspace_id,
+                ToolOrm.id == tool_id,
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    tool, source, version, policy, permission = row
+    return (
+        to_entity(Tool, tool),
+        to_entity(ToolSource, source),
+        to_entity(ToolVersion, version) if version is not None else None,
+        to_entity(ToolPolicy, policy) if policy is not None else None,
+        to_entity(ResourcePermission, permission)
+        if permission is not None
+        else None,
+    )
 
 
 async def list_tools_by_source(

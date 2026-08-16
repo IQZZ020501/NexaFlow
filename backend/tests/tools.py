@@ -13,7 +13,12 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests.support import activate_admin, test_client
+from tests.support import (
+    activate_admin,
+    auth_headers,
+    create_active_user,
+    test_client,
+)
 
 from sqlalchemy import (
     CheckConstraint,
@@ -144,6 +149,62 @@ EXPECTED_COLUMNS = {
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def add_workspace_member(
+    client,
+    admin_token: str,
+    workspace_id: str,
+    user_id: str,
+    role: str = "member",
+) -> None:
+    response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/members",
+        headers=auth_headers(admin_token),
+        json={"user_id": user_id, "role": role},
+    )
+    assert response.status_code == 201, response.text
+
+
+async def seed_private_tool(
+    workspace_id: str,
+    owner_id: str,
+    stable_key: str,
+):
+    from app.entities.tools import Tool, ToolVersion
+    from app.infrastructure.repositories import tools as tool_repository
+
+    async with get_session_factory()() as db:
+        sources = await tool_repository.list_tool_sources(db, workspace_id)
+        python_source = next(source for source in sources if source.kind == "python")
+        tool = await tool_repository.save_tool(
+            db,
+            Tool(
+                workspace_id=workspace_id,
+                source_id=python_source.id,
+                kind="python",
+                stable_key=stable_key,
+                function_name=stable_key,
+                created_by_user_id=owner_id,
+            ),
+        )
+        version = await tool_repository.save_tool_version(
+            db,
+            ToolVersion(
+                workspace_id=workspace_id,
+                tool_id=tool.id,
+                revision=1,
+                display_name=stable_key,
+                input_schema={"type": "object"},
+                execution_spec={"code": "result = {}"},
+                definition_hash=(stable_key.encode().hex() + "0" * 64)[:64],
+                created_by_user_id=owner_id,
+            ),
+        )
+        tool.current_version_id = version.id
+        tool = await tool_repository.save_tool(db, tool)
+        await db.commit()
+        return tool, version
 
 
 def load_migration():
@@ -610,6 +671,635 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert policy.effect == "pure"
 
 
+def test_private_catalog_filters_before_pagination_for_every_role() -> None:
+    from fastapi import HTTPException
+
+    from app.application.tools import (
+        get_tool_catalog_detail,
+        list_tool_catalog,
+        require_tool_manage,
+        require_tool_use,
+    )
+    from app.entities.resource_permission import ResourcePermission
+    from app.infrastructure.repositories import resource_permission as permission_repository
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+
+    with test_client() as client:
+        admin_token, workspace_id = activate_admin(client)
+        owner_id, _ = create_active_user(client, admin_token, "tool-owner")
+        grantee_id, _ = create_active_user(client, admin_token, "tool-grantee")
+        stranger_id, _ = create_active_user(client, admin_token, "tool-stranger")
+        workspace_admin_id, _ = create_active_user(
+            client,
+            admin_token,
+            "tool-workspace-admin",
+        )
+        global_admin_id, _ = create_active_user(
+            client,
+            admin_token,
+            "tool-global-admin",
+        )
+        for user_id in (owner_id, grantee_id, stranger_id, global_admin_id):
+            add_workspace_member(client, admin_token, workspace_id, user_id)
+        add_workspace_member(
+            client,
+            admin_token,
+            workspace_id,
+            workspace_admin_id,
+            "admin",
+        )
+
+        owner_tool, owner_version = run(
+            seed_private_tool(workspace_id, owner_id, "owner_private_tool")
+        )
+        workspace_admin_tool, _ = run(
+            seed_private_tool(
+                workspace_id,
+                workspace_admin_id,
+                "workspace_admin_private_tool",
+            )
+        )
+
+        async def assert_catalog_scope() -> None:
+            from app.entities.tools import ToolPolicy, ToolVersion
+
+            async with get_session_factory()() as db:
+                owner = await user_repository.get_user_by_id(db, owner_id)
+                grantee = await user_repository.get_user_by_id(db, grantee_id)
+                stranger = await user_repository.get_user_by_id(db, stranger_id)
+                workspace_admin = await user_repository.get_user_by_id(
+                    db,
+                    workspace_admin_id,
+                )
+                global_admin = await user_repository.get_user_by_id(db, global_admin_id)
+                assert all(
+                    actor is not None
+                    for actor in (owner, grantee, stranger, workspace_admin, global_admin)
+                )
+                assert global_admin is not None
+                global_admin.is_global_admin = True
+                await user_repository.save_user(db, global_admin)
+                stale_policy = await tool_repository.save_tool_policy(
+                    db,
+                    ToolPolicy(
+                        workspace_id=workspace_id,
+                        tool_id=owner_tool.id,
+                        tool_version_id=owner_version.id,
+                        definition_hash=owner_version.definition_hash,
+                        approval="auto",
+                        effect="pure",
+                    ),
+                )
+                current_version = await tool_repository.save_tool_version(
+                    db,
+                    ToolVersion(
+                        workspace_id=workspace_id,
+                        tool_id=owner_tool.id,
+                        revision=2,
+                        display_name="owner_private_tool_v2",
+                        input_schema={"type": "object"},
+                        execution_spec={"code": "result = {}"},
+                        definition_hash="f" * 64,
+                        created_by_user_id=owner_id,
+                    ),
+                )
+                owner_tool.current_version_id = current_version.id
+                await tool_repository.save_tool(db, owner_tool)
+                await permission_repository.create_resource_permission(
+                    db,
+                    ResourcePermission(
+                        workspace_id=workspace_id,
+                        resource_type="tool",
+                        resource_id=owner_tool.id,
+                        user_id=grantee_id,
+                        permission="view",
+                        created_by_user_id=owner_id,
+                    ),
+                )
+                await db.commit()
+
+                async def visible_ids(actor, role: str, **pagination) -> list[str]:
+                    rows = await list_tool_catalog(
+                        db,
+                        workspace_id,
+                        actor,
+                        role,
+                        **pagination,
+                    )
+                    return [row.tool.id for row in rows]
+
+                assert owner is not None
+                assert grantee is not None
+                assert stranger is not None
+                assert workspace_admin is not None
+                owner_ids = await visible_ids(owner, "member")
+                grantee_ids = await visible_ids(grantee, "member")
+                stranger_page = await visible_ids(stranger, "member", limit=1)
+                workspace_admin_ids = await visible_ids(workspace_admin, "admin")
+                global_admin_ids = await visible_ids(global_admin, "member")
+
+                assert owner_tool.id in owner_ids
+                assert owner_tool.id in grantee_ids
+                assert owner_tool.id not in stranger_page
+                assert owner_tool.id not in workspace_admin_ids
+                assert owner_tool.id not in global_admin_ids
+                assert workspace_admin_tool.id in workspace_admin_ids
+                for ids in (
+                    owner_ids,
+                    grantee_ids,
+                    stranger_page,
+                    workspace_admin_ids,
+                    global_admin_ids,
+                ):
+                    assert len(ids) >= 1
+                builtin_id = stranger_page[0]
+                assert builtin_id in owner_ids
+                assert builtin_id in grantee_ids
+                assert builtin_id in workspace_admin_ids
+                assert builtin_id in global_admin_ids
+
+                owner_detail = await get_tool_catalog_detail(
+                    db,
+                    workspace_id,
+                    owner_tool.id,
+                    owner,
+                    "member",
+                )
+                assert owner_detail.permission == "owner"
+                assert owner_detail.access.can_manage is True
+                assert owner_detail.version is not None
+                assert owner_detail.version.id == current_version.id
+                assert owner_detail.policy is not None
+                assert owner_detail.policy.id == stale_policy.id
+                assert owner_detail.policy.tool_version_id == owner_version.id
+                grantee_detail = await get_tool_catalog_detail(
+                    db,
+                    workspace_id,
+                    owner_tool.id,
+                    grantee,
+                    "member",
+                )
+                assert grantee_detail.permission == "view"
+                assert grantee_detail.access.can_view is True
+                assert grantee_detail.access.can_use is False
+                for check in (require_tool_use, require_tool_manage):
+                    try:
+                        check(grantee_detail.authorization)
+                    except HTTPException as exc:
+                        assert exc.status_code == 403
+                    else:
+                        raise AssertionError("A view grant must not imply use or manage.")
+
+                for hidden_workspace_id, hidden_actor in (
+                    (workspace_id, stranger),
+                    ("wrong-workspace", owner),
+                ):
+                    try:
+                        await get_tool_catalog_detail(
+                            db,
+                            hidden_workspace_id,
+                            owner_tool.id,
+                            hidden_actor,
+                            "member",
+                        )
+                    except HTTPException as exc:
+                        assert exc.status_code == 404
+                    else:
+                        raise AssertionError("Unseen Tools must be masked as not found.")
+
+                for admin_actor, role in (
+                    (workspace_admin, "admin"),
+                    (global_admin, "member"),
+                ):
+                    admin_detail = await get_tool_catalog_detail(
+                        db,
+                        workspace_id,
+                        owner_tool.id,
+                        admin_actor,
+                        role,
+                    )
+                    assert admin_detail.permission == "admin"
+                    require_tool_manage(admin_detail.authorization)
+
+                builtin_detail = await get_tool_catalog_detail(
+                    db,
+                    workspace_id,
+                    builtin_id,
+                    stranger,
+                    "member",
+                )
+                assert builtin_detail.permission == "use"
+                require_tool_use(builtin_detail.authorization)
+                builtin_admin_detail = await get_tool_catalog_detail(
+                    db,
+                    workspace_id,
+                    builtin_id,
+                    workspace_admin,
+                    "admin",
+                )
+                require_tool_manage(builtin_admin_detail.authorization)
+
+        run(assert_catalog_scope())
+
+
+def test_private_tool_permission_lifecycle_preserves_bindings() -> None:
+    from fastapi import HTTPException
+
+    from app.application.tools import (
+        get_tool_catalog_detail,
+        list_tool_permissions,
+        require_tool_use,
+        revoke_tool_permission,
+        upsert_tool_permission,
+    )
+    from app.capabilities.llm.models import RegisteredModel
+    from app.entities.agents import Agent
+    from app.entities.tools import ApplicationToolBinding
+    from app.infrastructure.repositories import agent as agent_repository
+    from app.infrastructure.repositories import audit as audit_repository
+    from app.infrastructure.repositories import resource_permission as permission_repository
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+
+    async def expect_status(expected_status: int, operation) -> None:
+        try:
+            await operation()
+        except HTTPException as exc:
+            assert exc.status_code == expected_status
+        else:
+            raise AssertionError(f"Expected HTTP {expected_status}.")
+
+    with test_client() as client:
+        admin_token, workspace_id = activate_admin(client)
+        owner_id, _ = create_active_user(client, admin_token, "grant-owner")
+        grantee_id, _ = create_active_user(client, admin_token, "grant-grantee")
+        stranger_id, _ = create_active_user(client, admin_token, "grant-stranger")
+        workspace_admin_id, _ = create_active_user(
+            client,
+            admin_token,
+            "grant-workspace-admin",
+        )
+        global_admin_id, _ = create_active_user(
+            client,
+            admin_token,
+            "grant-global-admin",
+        )
+        inactive_id, _ = create_active_user(client, admin_token, "grant-inactive")
+        nonmember_id, _ = create_active_user(client, admin_token, "grant-nonmember")
+        cross_tenant_id, _ = create_active_user(
+            client,
+            admin_token,
+            "grant-cross-tenant",
+        )
+        for user_id in (
+            owner_id,
+            grantee_id,
+            stranger_id,
+            global_admin_id,
+            inactive_id,
+        ):
+            add_workspace_member(client, admin_token, workspace_id, user_id)
+        add_workspace_member(
+            client,
+            admin_token,
+            workspace_id,
+            workspace_admin_id,
+            "admin",
+        )
+        cross_workspace = client.post(
+            "/api/v1/workspaces",
+            headers=auth_headers(admin_token),
+            json={
+                "name": "Cross Tenant Workspace",
+                "admin_user_id": cross_tenant_id,
+            },
+        )
+        assert cross_workspace.status_code == 201, cross_workspace.text
+        tool, version = run(
+            seed_private_tool(workspace_id, owner_id, "permission_lifecycle_tool")
+        )
+
+        async def assert_permission_lifecycle() -> None:
+            async with get_session_factory()() as db:
+                owner = await user_repository.get_user_by_id(db, owner_id)
+                grantee = await user_repository.get_user_by_id(db, grantee_id)
+                stranger = await user_repository.get_user_by_id(db, stranger_id)
+                workspace_admin = await user_repository.get_user_by_id(
+                    db,
+                    workspace_admin_id,
+                )
+                global_admin = await user_repository.get_user_by_id(db, global_admin_id)
+                inactive = await user_repository.get_user_by_id(db, inactive_id)
+                assert all(
+                    actor is not None
+                    for actor in (
+                        owner,
+                        grantee,
+                        stranger,
+                        workspace_admin,
+                        global_admin,
+                        inactive,
+                    )
+                )
+                assert global_admin is not None
+                assert inactive is not None
+                global_admin.is_global_admin = True
+                inactive.is_active = False
+                await user_repository.save_user(db, global_admin)
+                await user_repository.save_user(db, inactive)
+                await db.commit()
+                assert owner is not None
+                assert grantee is not None
+                assert stranger is not None
+                assert workspace_admin is not None
+
+                first = await upsert_tool_permission(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    grantee_id,
+                    "view",
+                    owner,
+                    "member",
+                )
+                assert first.user.id == grantee_id
+                assert first.grant.permission == "view"
+                original_identity = (
+                    first.grant.id,
+                    first.grant.created_by_user_id,
+                    first.grant.created_at.replace(tzinfo=None),
+                )
+
+                listed_by_owner = await list_tool_permissions(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    owner,
+                    "member",
+                )
+                listed_by_workspace_admin = await list_tool_permissions(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    workspace_admin,
+                    "admin",
+                )
+                listed_by_global_admin = await list_tool_permissions(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    global_admin,
+                    "member",
+                )
+                for entries in (
+                    listed_by_owner,
+                    listed_by_workspace_admin,
+                    listed_by_global_admin,
+                ):
+                    assert [(entry.user.id, entry.grant.permission) for entry in entries] == [
+                        (grantee_id, "view")
+                    ]
+
+                await expect_status(
+                    403,
+                    lambda: list_tool_permissions(
+                        db,
+                        workspace_id,
+                        tool.id,
+                        grantee,
+                        "member",
+                    ),
+                )
+                await expect_status(
+                    404,
+                    lambda: list_tool_permissions(
+                        db,
+                        workspace_id,
+                        tool.id,
+                        stranger,
+                        "member",
+                    ),
+                )
+                await expect_status(
+                    403,
+                    lambda: upsert_tool_permission(
+                        db,
+                        workspace_id,
+                        tool.id,
+                        stranger_id,
+                        "view",
+                        grantee,
+                        "member",
+                    ),
+                )
+
+                upgraded = await upsert_tool_permission(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    grantee_id,
+                    "use",
+                    workspace_admin,
+                    "admin",
+                )
+                repeated = await upsert_tool_permission(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    grantee_id,
+                    "use",
+                    global_admin,
+                    "member",
+                )
+                for entry in (upgraded, repeated):
+                    identity = (
+                        entry.grant.id,
+                        entry.grant.created_by_user_id,
+                        entry.grant.created_at.replace(tzinfo=None),
+                    )
+                    assert identity == original_identity, (
+                        identity,
+                        original_identity,
+                    )
+                    assert entry.grant.permission == "use"
+
+                model = RegisteredModel(
+                    workspace_id=workspace_id,
+                    name="Grant Binding Model",
+                    provider="grant_binding_provider",
+                    provider_type="openai_compatible",
+                    api_base="",
+                    model_type="LLM",
+                    model_name="grant-binding-model",
+                    status="active",
+                    created_by_user_id=owner_id,
+                )
+                db.add(model)
+                await db.flush()
+                application = await agent_repository.create_agent(
+                    db,
+                    Agent(
+                        workspace_id=workspace_id,
+                        name="Grant Binding Agent",
+                        model_id=model.id,
+                        created_by_user_id=owner_id,
+                    ),
+                )
+                binding = await tool_repository.save_application_tool_binding(
+                    db,
+                    ApplicationToolBinding(
+                        workspace_id=workspace_id,
+                        application_id=application.id,
+                        tool_id=tool.id,
+                        tool_version_id=version.id,
+                        bound_by_user_id=grantee_id,
+                    ),
+                )
+                await db.commit()
+
+                downgraded = await upsert_tool_permission(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    grantee_id,
+                    "view",
+                    owner,
+                    "member",
+                )
+                assert downgraded.grant.permission == "view"
+                assert downgraded.grant.id == original_identity[0]
+                retained = await tool_repository.get_application_tool_binding(
+                    db,
+                    workspace_id,
+                    application.id,
+                    tool.id,
+                )
+                assert retained is not None
+                assert retained.id == binding.id
+                view_detail = await get_tool_catalog_detail(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    grantee,
+                    "member",
+                )
+                try:
+                    require_tool_use(view_detail.authorization)
+                except HTTPException as exc:
+                    assert exc.status_code == 403
+                else:
+                    raise AssertionError("A downgraded grant must not permit use.")
+
+                await revoke_tool_permission(
+                    db,
+                    workspace_id,
+                    tool.id,
+                    grantee_id,
+                    global_admin,
+                    "member",
+                )
+                assert (
+                    await permission_repository.get_user_grant(
+                        db,
+                        workspace_id,
+                        "tool",
+                        tool.id,
+                        grantee_id,
+                    )
+                    is None
+                )
+                retained = await tool_repository.get_application_tool_binding(
+                    db,
+                    workspace_id,
+                    application.id,
+                    tool.id,
+                )
+                assert retained is not None
+                assert retained.id == binding.id
+                await expect_status(
+                    404,
+                    lambda: get_tool_catalog_detail(
+                        db,
+                        workspace_id,
+                        tool.id,
+                        grantee,
+                        "member",
+                    ),
+                )
+
+                for permission in ("edit", "manage"):
+                    await expect_status(
+                        422,
+                        lambda permission=permission: upsert_tool_permission(
+                            db,
+                            workspace_id,
+                            tool.id,
+                            grantee_id,
+                            permission,
+                            owner,
+                            "member",
+                        ),
+                    )
+                await expect_status(
+                    422,
+                    lambda: upsert_tool_permission(
+                        db,
+                        workspace_id,
+                        tool.id,
+                        owner_id,
+                        "view",
+                        owner,
+                        "member",
+                    ),
+                )
+                await expect_status(
+                    422,
+                    lambda: upsert_tool_permission(
+                        db,
+                        workspace_id,
+                        tool.id,
+                        owner_id,
+                        "view",
+                        global_admin,
+                        "member",
+                    ),
+                )
+                for target_id in (inactive_id, nonmember_id, cross_tenant_id):
+                    await expect_status(
+                        404,
+                        lambda target_id=target_id: upsert_tool_permission(
+                            db,
+                            workspace_id,
+                            tool.id,
+                            target_id,
+                            "view",
+                            owner,
+                            "member",
+                        ),
+                    )
+
+                logs = await audit_repository.list_workspace_audit_logs(
+                    db,
+                    workspace_id,
+                    20,
+                )
+                tool_logs = [
+                    log
+                    for log in logs
+                    if log.resource_type == "tool" and log.resource_id == tool.id
+                ]
+                assert {log.action for log in tool_logs} == {
+                    "resource_permission.grant",
+                    "resource_permission.revoke",
+                }
+                assert all(
+                    log.details["user_id"] == grantee_id for log in tool_logs
+                )
+
+        run(assert_permission_lifecycle())
+
+
 async def assert_mcp_server_deletion_preserves_tool_history(
     workspace_id: str,
 ) -> None:
@@ -807,6 +1497,8 @@ def main() -> None:
     test_orm_enforces_tenant_scoped_relations_and_legal_states()
     test_tool_versions_are_immutable_at_repository_boundary()
     test_migration_reference_scanner_keeps_historical_mcp_tuples()
+    test_private_catalog_filters_before_pagination_for_every_role()
+    test_private_tool_permission_lifecycle_preserves_bindings()
     test_workspace_creation_initializes_system_catalog()
     print("TOOLS_SUITE_OK")
 

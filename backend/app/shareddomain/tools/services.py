@@ -33,7 +33,25 @@ from app.schemas.mcp import (
     McpServerResponse,
 )
 from app.shareddomain.audit.services import record_audit_log
-from app.shareddomain.tools.catalog import tombstone_mcp_server_catalog
+from app.shareddomain.tools.catalog import (
+    ToolCatalogDetail,
+    ToolCatalogItem,
+    get_tool_catalog_detail,
+    list_tool_catalog,
+    tombstone_mcp_server_catalog,
+)
+from app.shareddomain.tools.permissions import (
+    ToolAuthorization,
+    ToolPermissionEntry,
+    evaluate_tool_authorization,
+    has_tool_workspace_access,
+    list_tool_permissions,
+    require_tool_manage,
+    require_tool_use,
+    require_tool_view,
+    revoke_tool_permission,
+    upsert_tool_permission,
+)
 
 
 @dataclass(frozen=True)
