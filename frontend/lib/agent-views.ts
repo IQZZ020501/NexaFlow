@@ -24,9 +24,10 @@ export function appViewPath(
   conversationId?: string | null
 ) {
   if (appType === "workflow" && view === "settings") {
-    return `/workflow/${appId}`
+    return `/workflow/${encodeURIComponent(appId)}`
   }
-  const query = new URLSearchParams({ view })
-  if (conversationId) query.set("conversation_id", conversationId)
-  return `/app/apps/${appId}?${query.toString()}`
+  const basePath = `/app/apps/${encodeURIComponent(appId)}`
+  const path = view === "overview" ? basePath : `${basePath}/${view}`
+  if (!conversationId) return path
+  return `${path}?${new URLSearchParams({ conversation_id: conversationId })}`
 }

@@ -18,6 +18,7 @@ export default async function AgentDetailPage({
     : (value ?? null)
   return (
     <AgentsPage
+      hasLegacyView={params.view !== undefined}
       initialConversationId={conversationId}
       initialView={parseAgentDetailView(params.view)}
     />
