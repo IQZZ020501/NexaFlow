@@ -36,6 +36,7 @@ ToolCatalogDetailRow = tuple[
     ToolPolicy | None,
     ResourcePermission | None,
 ]
+McpCatalogRow = tuple[ToolSource, Tool, ToolVersion, ToolPolicy | None]
 
 
 async def get_tool_source(
@@ -96,6 +97,58 @@ async def list_mcp_tool_sources(
         statement.order_by(ToolSourceOrm.created_at, ToolSourceOrm.id)
     )
     return [to_entity(ToolSource, row) for row in rows.all()]
+
+
+async def list_mcp_catalog_rows(
+    db: AsyncSession,
+    workspace_id: str,
+    mcp_server_id: str,
+    *,
+    available_only: bool = False,
+) -> list[McpCatalogRow]:
+    statement = (
+        select(ToolSourceOrm, ToolOrm, ToolVersionOrm, ToolPolicyOrm)
+        .join(
+            ToolOrm,
+            and_(
+                ToolOrm.workspace_id == ToolSourceOrm.workspace_id,
+                ToolOrm.source_id == ToolSourceOrm.id,
+            ),
+        )
+        .join(
+            ToolVersionOrm,
+            and_(
+                ToolVersionOrm.workspace_id == ToolOrm.workspace_id,
+                ToolVersionOrm.tool_id == ToolOrm.id,
+                ToolVersionOrm.id == ToolOrm.current_version_id,
+            ),
+        )
+        .outerjoin(
+            ToolPolicyOrm,
+            and_(
+                ToolPolicyOrm.workspace_id == ToolOrm.workspace_id,
+                ToolPolicyOrm.tool_id == ToolOrm.id,
+            ),
+        )
+        .where(
+            ToolSourceOrm.workspace_id == workspace_id,
+            ToolSourceOrm.kind == "mcp",
+            ToolSourceOrm.mcp_server_id == mcp_server_id,
+        )
+        .order_by(ToolOrm.created_at, ToolOrm.id)
+    )
+    if available_only:
+        statement = statement.where(ToolOrm.availability == "available")
+    rows = await db.execute(statement)
+    return [
+        (
+            to_entity(ToolSource, source),
+            to_entity(Tool, tool),
+            to_entity(ToolVersion, version),
+            to_entity(ToolPolicy, policy) if policy is not None else None,
+        )
+        for source, tool, version, policy in rows.all()
+    ]
 
 
 async def save_tool_source(db: AsyncSession, entity: ToolSource) -> ToolSource:

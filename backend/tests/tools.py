@@ -26,6 +26,7 @@ from sqlalchemy import (
     MetaData,
     Table,
     UniqueConstraint,
+    event,
 )
 
 from app.infrastructure.session import get_session_factory
@@ -1869,6 +1870,7 @@ async def assert_mcp_discovery_materializes_first_leaf(
     from app.infrastructure.repositories import tools as tool_repository
     from app.infrastructure.repositories import user as user_repository
     from app.shareddomain.tools.catalog import (
+        list_mcp_catalog_leaves,
         mcp_function_name_candidates,
         reconcile_mcp_discovery,
     )
@@ -1963,6 +1965,24 @@ async def assert_mcp_discovery_materializes_first_leaf(
         assert policy.allowed_access_sources == ["console"]
         assert policy.workflow_callable is False
         assert policy.parallel_safe is False
+
+        query_count = 0
+
+        def count_query(*_args) -> None:
+            nonlocal query_count
+            query_count += 1
+
+        assert db.bind is not None
+        event.listen(db.bind.sync_engine, "before_cursor_execute", count_query)
+        try:
+            leaves = await list_mcp_catalog_leaves(db, workspace_id, server.id)
+        finally:
+            event.remove(db.bind.sync_engine, "before_cursor_execute", count_query)
+        assert len(leaves) == 1
+        assert leaves[0].tool.id == tool.id
+        assert leaves[0].version.id == version.id
+        assert leaves[0].policy is not None
+        assert query_count == 1
 
         original_tool_id = tool.id
         original_version_id = version.id

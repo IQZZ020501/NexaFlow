@@ -287,36 +287,15 @@ async def list_mcp_catalog_leaves(
 ) -> list[McpCatalogLeaf]:
     from app.infrastructure.repositories import tools as repository
 
-    sources = await repository.list_mcp_tool_sources(
-        db,
-        workspace_id,
-        mcp_server_id,
-    )
-    if not sources:
-        return []
-    source = sources[0]
-    leaves: list[McpCatalogLeaf] = []
-    for tool in await repository.list_tools_by_source(db, workspace_id, source.id):
-        if available_only and tool.availability != "available":
-            continue
-        if tool.current_version_id is None:
-            continue
-        version = await repository.get_tool_version(
+    return [
+        McpCatalogLeaf(source=source, tool=tool, version=version, policy=policy)
+        for source, tool, version, policy in await repository.list_mcp_catalog_rows(
             db,
             workspace_id,
-            tool.current_version_id,
+            mcp_server_id,
+            available_only=available_only,
         )
-        if version is None:
-            continue
-        leaves.append(
-            McpCatalogLeaf(
-                source=source,
-                tool=tool,
-                version=version,
-                policy=await repository.get_tool_policy(db, workspace_id, tool.id),
-            )
-        )
-    return leaves
+    ]
 
 
 async def get_mcp_catalog_leaf(
