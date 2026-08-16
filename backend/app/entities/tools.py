@@ -310,6 +310,132 @@ def validate_python_tool_code(code: str) -> str:
 
 
 @dataclass
+class ToolSource:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    mcp_server_id: str | None = None
+    kind: str = "builtin"
+    name: str = ""
+    status: str = "active"
+    created_by_user_id: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class Tool:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    source_id: str = ""
+    kind: str = "builtin"
+    stable_key: str = ""
+    function_name: str = ""
+    current_version_id: str | None = None
+    status: str = "active"
+    availability: str = "available"
+    created_by_user_id: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class ToolDraft:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    tool_id: str = ""
+    display_name: str = ""
+    description: str = ""
+    input_schema: dict[str, Any] = field(default_factory=dict)
+    output_schema: dict[str, Any] | None = None
+    execution_spec: dict[str, Any] = field(default_factory=dict)
+    revision: int = 1
+    updated_by_user_id: str = ""
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class ToolVersion:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    tool_id: str = ""
+    revision: int = 1
+    display_name: str = ""
+    description: str = ""
+    input_schema: dict[str, Any] = field(default_factory=dict)
+    output_schema: dict[str, Any] | None = None
+    execution_spec: dict[str, Any] = field(default_factory=dict)
+    definition_hash: str = ""
+    created_by_user_id: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class ToolPolicy:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    tool_id: str = ""
+    tool_version_id: str = ""
+    definition_hash: str = ""
+    revision: int = 1
+    approval: str = "each_call"
+    effect: str = "unknown"
+    allowed_access_sources: list[str] = field(default_factory=list)
+    workflow_callable: bool = False
+    parallel_safe: bool = False
+    reviewed_by_user_id: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class ApplicationToolBinding:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    application_id: str = ""
+    tool_id: str = ""
+    tool_version_id: str = ""
+    bound_by_user_id: str = ""
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class ToolInvocation:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    origin: str = "test"
+    root_run_id: str | None = None
+    run_id: str | None = None
+    invocation_id: str = ""
+    execution_user_id: str = ""
+    access_source: str = "console"
+    tool_id: str = ""
+    tool_version_id: str = ""
+    policy_snapshot: dict[str, Any] = field(default_factory=dict)
+    arguments: dict[str, Any] = field(default_factory=dict)
+    arguments_hash: str = ""
+    idempotency_key: str = ""
+    status: str = "queued"
+    attempts: int = 0
+    max_attempts: int = 3
+    approved_by_user_id: str | None = None
+    approved_at: datetime | None = None
+    worker_task_id: str | None = None
+    lease_expires_at: datetime | None = None
+    result_data: Any = None
+    result_summary: str = ""
+    outcome: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    usage: dict[str, Any] = field(default_factory=dict)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
 class McpServer:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""

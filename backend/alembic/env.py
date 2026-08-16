@@ -31,7 +31,17 @@ from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
-from app.shareddomain.tools.models import McpServer, McpToolPolicy  # noqa: F401
+from app.shareddomain.tools.models import (  # noqa: F401
+    ApplicationToolBinding,
+    McpServer,
+    McpToolPolicy,
+    Tool,
+    ToolDraft,
+    ToolInvocation,
+    ToolPolicy,
+    ToolSource,
+    ToolVersion,
+)
 from app.shareddomain.workflows.models import (  # noqa: F401
     WorkflowDefinition,
     WorkflowNodeExecution,

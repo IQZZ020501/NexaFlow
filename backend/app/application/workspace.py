@@ -25,6 +25,7 @@ from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.ports import model_registry
 from app.shareddomain.knowledge.services import delete_workspace_knowledge_bases
+from app.shareddomain.tools.catalog import ensure_workspace_system_catalog
 from app.shareddomain.workflows.uploads import queue_upload_cleanups
 from app.tasks.knowledge import enqueue_knowledge_storage_cleanup
 from app.tasks.knowledge import enqueue_upload_storage_cleanups
@@ -216,6 +217,7 @@ async def create_workspace(
                 role="admin",
             ),
         )
+        await ensure_workspace_system_catalog(db, workspace.id)
         record_audit_log(
             db,
             actor,
