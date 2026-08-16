@@ -352,6 +352,9 @@ describe("public agent API", () => {
     expect(appViewPath("agent-1", "agent", "users")).toBe(
       "/app/apps/agent-1/users"
     )
+    expect(appViewPath("agent-1", "agent", "overview", "conversation-1")).toBe(
+      "/app/apps/agent-1?conversation_id=conversation-1"
+    )
     expect(
       appViewPath("agent-1", "agent", "settings", "conversation-1")
     ).toBe("/app/apps/agent-1/settings?conversation_id=conversation-1")

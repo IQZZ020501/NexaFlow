@@ -16,7 +16,7 @@ export default async function AgentDetailViewPage({
   const conversationId = Array.isArray(value) ? (value[0] ?? null) : (value ?? null)
 
   if (initialView === "overview") {
-    redirect(appViewPath(id, "agent", "overview"))
+    redirect(appViewPath(id, "agent", "overview", conversationId))
   }
 
   return (
