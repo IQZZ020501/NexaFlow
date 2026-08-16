@@ -14,6 +14,7 @@ from app.entities.tools import (
     ToolDraft,
     ToolInvocation,
     ToolPolicy,
+    ToolRef,
     ToolSource,
     ToolVersion,
 )
@@ -28,9 +29,14 @@ from app.shareddomain.tools.models import ToolPolicy as ToolPolicyOrm
 from app.shareddomain.tools.models import ToolSource as ToolSourceOrm
 from app.shareddomain.tools.models import ToolVersion as ToolVersionOrm
 from app.shareddomain.tools.runtime import (
+    TOOL_INVOCATION_APPROVED,
+    TOOL_INVOCATION_AWAITING_APPROVAL,
     TOOL_INVOCATION_CLAIMABLE_STATUSES,
     TOOL_INVOCATION_QUEUED,
     TOOL_INVOCATION_RUNNING,
+    TOOL_INVOCATION_TERMINAL_STATUSES,
+    TOOL_INVOCATION_UNCERTAIN,
+    exhausted_tool_invocation_terminal_state,
 )
 
 ToolCatalogRow = tuple[
@@ -587,6 +593,76 @@ async def list_application_tool_bindings(
     return [to_entity(ApplicationToolBinding, row) for row in rows.all()]
 
 
+async def list_application_tool_reference_map(
+    db: AsyncSession,
+    application_ids: list[str],
+) -> dict[str, list[ToolRef]]:
+    references = {application_id: [] for application_id in application_ids}
+    if not application_ids:
+        return references
+    rows = await db.execute(
+        select(
+            ApplicationToolBindingOrm.application_id,
+            ApplicationToolBindingOrm.tool_id,
+            ApplicationToolBindingOrm.tool_version_id,
+        )
+        .where(ApplicationToolBindingOrm.application_id.in_(application_ids))
+        .order_by(
+            ApplicationToolBindingOrm.created_at,
+            ApplicationToolBindingOrm.id,
+        )
+    )
+    for application_id, tool_id, version_id in rows.all():
+        references[application_id].append(
+            ToolRef(tool_id=tool_id, version_id=version_id)
+        )
+    return references
+
+
+async def list_application_mcp_reference_map(
+    db: AsyncSession,
+    application_ids: list[str],
+) -> dict[str, list[dict[str, str]]]:
+    references = {application_id: [] for application_id in application_ids}
+    if not application_ids:
+        return references
+    rows = await db.execute(
+        select(
+            ApplicationToolBindingOrm.application_id,
+            ToolVersionOrm.execution_spec,
+        )
+        .join(
+            ToolVersionOrm,
+            and_(
+                ToolVersionOrm.workspace_id
+                == ApplicationToolBindingOrm.workspace_id,
+                ToolVersionOrm.id == ApplicationToolBindingOrm.tool_version_id,
+            ),
+        )
+        .join(
+            ToolOrm,
+            and_(
+                ToolOrm.workspace_id == ApplicationToolBindingOrm.workspace_id,
+                ToolOrm.id == ApplicationToolBindingOrm.tool_id,
+                ToolOrm.kind == "mcp",
+            ),
+        )
+        .where(ApplicationToolBindingOrm.application_id.in_(application_ids))
+        .order_by(
+            ApplicationToolBindingOrm.created_at,
+            ApplicationToolBindingOrm.id,
+        )
+    )
+    for application_id, execution_spec in rows.all():
+        server_id = execution_spec.get("server_id") if execution_spec else None
+        tool_name = execution_spec.get("tool_name") if execution_spec else None
+        if isinstance(server_id, str) and isinstance(tool_name, str):
+            references[application_id].append(
+                {"server_id": server_id, "tool_name": tool_name}
+            )
+    return references
+
+
 async def save_application_tool_binding(
     db: AsyncSession,
     entity: ApplicationToolBinding,
@@ -607,6 +683,26 @@ async def replace_application_tool_bindings(
             ApplicationToolBindingOrm.application_id == application_id,
         )
     )
+    for binding in bindings:
+        await save_application_tool_binding(db, binding)
+
+
+async def sync_application_tool_bindings(
+    db: AsyncSession,
+    workspace_id: str,
+    application_id: str,
+    bindings: list[ApplicationToolBinding],
+) -> None:
+    desired_tool_ids = {binding.tool_id for binding in bindings}
+    statement = delete(ApplicationToolBindingOrm).where(
+        ApplicationToolBindingOrm.workspace_id == workspace_id,
+        ApplicationToolBindingOrm.application_id == application_id,
+    )
+    if desired_tool_ids:
+        statement = statement.where(
+            ApplicationToolBindingOrm.tool_id.not_in(desired_tool_ids)
+        )
+    await db.execute(statement)
     for binding in bindings:
         await save_application_tool_binding(db, binding)
 
@@ -681,6 +777,82 @@ async def create_or_get_tool_invocation(
     if stored is None:
         raise RuntimeError("Tool invocation could not be persisted.")
     return stored
+
+
+async def refresh_tool_invocation_deadline(
+    db: AsyncSession,
+    workspace_id: str,
+    invocation_id: str,
+    deadline_at: datetime,
+) -> ToolInvocation | None:
+    row = await db.scalar(
+        select(ToolInvocationOrm)
+        .where(
+            ToolInvocationOrm.workspace_id == workspace_id,
+            ToolInvocationOrm.id == invocation_id,
+        )
+        .with_for_update()
+    )
+    if row is None:
+        return None
+    if row.status in TOOL_INVOCATION_CLAIMABLE_STATUSES:
+        row.policy_snapshot = {
+            **row.policy_snapshot,
+            "deadline_at": deadline_at.isoformat(),
+        }
+        row.updated_at = datetime.now(deadline_at.tzinfo)
+        await db.flush()
+    return to_entity(ToolInvocation, row)
+
+
+async def resolve_tool_invocation_approval(
+    db: AsyncSession,
+    workspace_id: str,
+    invocation_id: str,
+    actor_id: str,
+    resolved_at: datetime,
+    deadline_at: datetime,
+    *,
+    approve: bool,
+) -> bool:
+    row = await db.scalar(
+        select(ToolInvocationOrm)
+        .where(
+            ToolInvocationOrm.workspace_id == workspace_id,
+            ToolInvocationOrm.id == invocation_id,
+        )
+        .with_for_update()
+    )
+    allowed_statuses = (
+        {TOOL_INVOCATION_AWAITING_APPROVAL}
+        if approve
+        else {TOOL_INVOCATION_AWAITING_APPROVAL, TOOL_INVOCATION_UNCERTAIN}
+    )
+    if row is None or row.status not in allowed_statuses:
+        return False
+    row.approved_by_user_id = actor_id
+    row.approved_at = resolved_at
+    row.worker_task_id = None
+    row.lease_expires_at = None
+    row.updated_at = resolved_at
+    if approve:
+        row.status = TOOL_INVOCATION_APPROVED
+        row.policy_snapshot = {
+            **row.policy_snapshot,
+            "deadline_at": deadline_at.isoformat(),
+        }
+        row.error_code = None
+        row.error_message = None
+        row.finished_at = None
+    else:
+        row.status = "rejected"
+        row.result_summary = "Tool call rejected by user."
+        row.error_code = "tool_call_rejected"
+        row.error_message = "Tool call rejected by user."
+        row.outcome = row.outcome or "confirmed"
+        row.finished_at = resolved_at
+    await db.flush()
+    return True
 
 
 async def claim_tool_invocation(
@@ -841,6 +1013,64 @@ async def list_tool_invocations(
     return [to_entity(ToolInvocation, row) for row in rows.all()]
 
 
+async def settle_exhausted_agent_tool_invocations(
+    db: AsyncSession,
+    run_ids: list[str],
+    now: datetime,
+) -> int:
+    if not run_ids:
+        return 0
+    rows = await db.scalars(
+        select(ToolInvocationOrm)
+        .where(
+            ToolInvocationOrm.run_id.in_(run_ids),
+            ToolInvocationOrm.status.in_(
+                ("queued", "awaiting_approval", "approved", "running")
+            ),
+        )
+        .with_for_update()
+    )
+    invocations = list(rows.all())
+    for invocation in invocations:
+        snapshot = invocation.policy_snapshot.get("tool_snapshot", {})
+        effect = snapshot.get("effect") if isinstance(snapshot, dict) else None
+        status, outcome, summary, message = (
+            exhausted_tool_invocation_terminal_state(invocation.status, effect)
+        )
+        invocation.status = status
+        invocation.outcome = outcome
+        invocation.result_summary = summary
+        invocation.error_code = "agent_run_retry_exhausted"
+        invocation.error_message = message
+        invocation.worker_task_id = None
+        invocation.lease_expires_at = None
+        invocation.finished_at = now
+        invocation.updated_at = now
+    await db.flush()
+    return len(invocations)
+
+
+async def has_unsettled_agent_tool_invocations(
+    db: AsyncSession,
+    workspace_id: str,
+    run_ids: list[str],
+) -> bool:
+    if not run_ids:
+        return False
+    invocation_id = await db.scalar(
+        select(ToolInvocationOrm.id)
+        .where(
+            ToolInvocationOrm.workspace_id == workspace_id,
+            ToolInvocationOrm.run_id.in_(run_ids),
+            ToolInvocationOrm.status.not_in(
+                tuple(TOOL_INVOCATION_TERMINAL_STATUSES)
+            ),
+        )
+        .limit(1)
+    )
+    return invocation_id is not None
+
+
 async def list_recoverable_tool_test_invocation_ids(
     db: AsyncSession,
     now: datetime,
@@ -896,6 +1126,18 @@ async def has_retained_user_audit_references(
     )
     if invocation_id is not None:
         return True
+    policy_snapshots = await db.scalars(select(ToolInvocationOrm.policy_snapshot))
+    for policy_snapshot in policy_snapshots.all():
+        tool_snapshot = (
+            policy_snapshot.get("tool_snapshot", {})
+            if isinstance(policy_snapshot, dict)
+            else {}
+        )
+        if (
+            isinstance(tool_snapshot, dict)
+            and tool_snapshot.get("bound_by_user_id") == user_id
+        ):
+            return True
     draft_id = await db.scalar(
         select(ToolDraftOrm.id)
         .where(ToolDraftOrm.updated_by_user_id == user_id)

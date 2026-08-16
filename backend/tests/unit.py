@@ -134,6 +134,172 @@ def test_tool_ref_requires_stable_ids() -> None:
         raise AssertionError("ToolRef must be immutable.")
 
 
+def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
+    from app.entities.agents import AgentPublicationVersion, AgentRun
+    from app.entities.tools import ToolSnapshot
+    from app.shareddomain.agents.services import agent_publication_from_version
+    from app.shareddomain.agents.publications import (
+        agent_publication_hash,
+        build_agent_configuration_snapshot,
+        build_agent_resource_snapshot,
+        publication_from_snapshots,
+    )
+
+    agent = Agent(
+        id="agent-1",
+        workspace_id="ws-1",
+        name="Research",
+        description="Searches releases.",
+        interaction_config={"prologue": "Hello"},
+        instructions="Use tools when needed.",
+        model_id="model-1",
+        knowledge_query_mode="required",
+    )
+    first = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-b",
+        version_id="version-b",
+        source_id="source-1",
+        kind="python",
+        function_name="second",
+        display_name="Second",
+        description="",
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "additionalProperties": False},
+        definition_hash="hash-b",
+        policy_id="policy-b",
+        policy_revision=2,
+        bound_by_user_id="user-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console",),
+        workflow_callable=True,
+        parallel_safe=False,
+        execution_spec={"code": "result = {}"},
+    )
+    second = ToolSnapshot(
+        **{
+            **first.__dict__,
+            "tool_id": "tool-a",
+            "version_id": "version-a",
+            "function_name": "first",
+            "definition_hash": "hash-a",
+            "policy_id": "policy-a",
+        }
+    )
+
+    configuration = build_agent_configuration_snapshot(agent)
+    resources = build_agent_resource_snapshot(
+        ["kb-b", "kb-a"],
+        [first, second],
+    )
+    reordered = build_agent_resource_snapshot(
+        ["kb-a", "kb-b"],
+        [second, first],
+    )
+    assert resources == reordered
+    assert [item["tool_id"] for item in resources["tools"]] == ["tool-a", "tool-b"]
+    assert agent_publication_hash(configuration, resources) == agent_publication_hash(
+        configuration,
+        reordered,
+    )
+
+    publication = publication_from_snapshots(configuration, resources)
+    assert publication.name == "Research"
+    assert publication.knowledge_base_ids == ["kb-a", "kb-b"]
+    assert [item.tool_id for item in publication.tools] == ["tool-a", "tool-b"]
+
+    version = AgentPublicationVersion(
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        version_number=1,
+        schema_version=1,
+        configuration_snapshot=configuration,
+        resource_snapshot=resources,
+        configuration_hash=agent_publication_hash(configuration, resources),
+        published_by_user_id="user-1",
+    )
+    run = AgentRun(
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        configuration_source="published",
+        agent_publication_version_id=version.id,
+        snapshot_schema_version=version.schema_version,
+        application_snapshot={
+            "configuration": configuration,
+            "resources": resources,
+        },
+        application_snapshot_hash=version.configuration_hash,
+        tool_snapshots=resources["tools"],
+    )
+    assert run.agent_publication_version_id == version.id
+    assert run.configuration_source == "published"
+    assert agent_publication_from_version(version).name == agent.name
+    version.configuration_hash = "0" * 64
+    try:
+        agent_publication_from_version(version)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("A drifted Agent publication version was accepted.")
+
+
+def test_agent_tool_binding_requires_current_available_policy() -> None:
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
+    from app.shareddomain.tools.bindings import build_bindable_tool_snapshot
+
+    source = ToolSource(id="source-1", workspace_id="ws-1", kind="python")
+    tool = Tool(
+        id="tool-1",
+        workspace_id="ws-1",
+        source_id=source.id,
+        kind="python",
+        function_name="lookup",
+        current_version_id="version-1",
+    )
+    version = ToolVersion(
+        id="version-1",
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        display_name="Lookup",
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "additionalProperties": False},
+        execution_spec={"code": "result = {}"},
+        definition_hash="hash-1",
+    )
+    policy = ToolPolicy(
+        id="policy-1",
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        tool_version_id=version.id,
+        definition_hash=version.definition_hash,
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=["console", "public", "api"],
+        workflow_callable=True,
+    )
+    assert (
+        build_bindable_tool_snapshot(tool, source, version, policy, "user-1").tool_id
+        == tool.id
+    )
+
+    tool.current_version_id = "version-2"
+    expect_http_error(
+        lambda: build_bindable_tool_snapshot(
+            tool, source, version, policy, "user-1"
+        ),
+        422,
+    )
+    tool.current_version_id = version.id
+    policy.definition_hash = "drifted"
+    expect_http_error(
+        lambda: build_bindable_tool_snapshot(
+            tool, source, version, policy, "user-1"
+        ),
+        422,
+    )
+
+
 def test_tool_snapshot_is_an_immutable_internal_contract() -> None:
     from app.entities.tools import ToolSnapshot
 
@@ -386,6 +552,238 @@ def test_tool_adapter_contract_is_provider_neutral() -> None:
     result = asyncio.run(adapter.invoke(snapshot, {}, context))
     assert result.ok is True
     assert result.outcome == "confirmed"
+
+
+def test_agent_tool_definition_comes_from_unified_snapshot() -> None:
+    from app.application.agent_tools import build_unified_agent_tool
+    from app.entities.tools import ToolSnapshot
+
+    snapshot = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-1",
+        version_id="version-1",
+        source_id="source-1",
+        kind="python",
+        function_name="calculate_tax",
+        display_name="Calculate tax",
+        description="Calculate one tax amount.",
+        input_schema={
+            "type": "object",
+            "properties": {"amount": {"type": "number"}},
+            "required": ["amount"],
+            "additionalProperties": False,
+        },
+        output_schema=None,
+        definition_hash="hash-1",
+        policy_id="policy-1",
+        policy_revision=1,
+        bound_by_user_id="user-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console",),
+        workflow_callable=True,
+        parallel_safe=False,
+        execution_spec={"code": "result = {'tax': inputs['amount'] * 0.1}"},
+    )
+
+    tool = build_unified_agent_tool(snapshot)
+
+    assert tool.name == "calculate_tax"
+    assert tool.description == "Calculate one tax amount."
+    assert tool.args_schema == snapshot.input_schema
+    assert tool.metadata == {
+        "display_name": "Calculate tax",
+        "kind": "python",
+        "server_name": "",
+        "parallel_safe": False,
+        "policy_mode": "",
+        "server_id": "",
+        "definition_hash": "hash-1",
+        "source_tool_name": "",
+    }
+
+
+def test_agent_tool_runtime_uses_stable_invocation_identity_and_envelope() -> None:
+    import hashlib
+
+    from app.application.agent_tool_runtime import (
+        agent_tool_invocation_identity,
+        tool_runtime_result_to_agent_result,
+    )
+    from app.ports.tool_runtime import ToolRuntimeResult
+
+    invocation_id, idempotency_key = agent_tool_invocation_identity(
+        "run-1",
+        3,
+        "call-7",
+    )
+    assert invocation_id == "3:call-7"
+    assert idempotency_key == hashlib.sha256(
+        b"agent:run-1:3:call-7"
+    ).hexdigest()
+
+    succeeded = tool_runtime_result_to_agent_result(
+        ToolRuntimeResult(
+            ok=True,
+            data={"total": 12},
+            summary="Calculated.",
+            error_code=None,
+            error_message=None,
+            outcome="confirmed",
+            usage={},
+        )
+    )
+    assert succeeded.content == '{"total": 12}'
+    assert succeeded.output == {"total": 12}
+    assert succeeded.is_error is False
+
+    uncertain = tool_runtime_result_to_agent_result(
+        ToolRuntimeResult(
+            ok=False,
+            data=None,
+            summary="Request state is unknown.",
+            error_code="tool_outcome_uncertain",
+            error_message="Request state is unknown.",
+            outcome="uncertain",
+            usage={},
+        )
+    )
+    assert uncertain.content == "Request state is unknown."
+    assert uncertain.is_error is True
+    assert uncertain.outcome_uncertain is True
+
+
+def test_agent_tool_call_migration_preserves_approval_gate() -> None:
+    import importlib.util
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202608160005_agent_publication_versions.py"
+    )
+    spec = importlib.util.spec_from_file_location("agent_publication_versions", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    assert migration._migrated_tool_call_status("pending", "auto") == "queued"
+    assert (
+        migration._migrated_tool_call_status("pending", "each_call")
+        == "awaiting_approval"
+    )
+    assert migration._migrated_tool_call_status("approved", "each_call") == "approved"
+
+    assert migration._permission_backfill_action(None) == "insert"
+    assert migration._permission_backfill_action("view") == "keep"
+    assert migration._permission_backfill_action("use") == "keep"
+
+    configuration = {
+        "name": "Published Agent",
+        "description": "Frozen description",
+        "instructions": "Frozen instructions",
+        "model_id": "model-1",
+        "knowledge_query_mode": "required",
+        "interaction_config": {"prologue": "Hello"},
+    }
+    resources = {
+        "knowledge_base_ids": ["kb-1"],
+        "tools": [
+            {
+                "kind": "mcp",
+                "execution_spec": {
+                    "server_id": "server-1",
+                    "tool_name": "lookup",
+                },
+            }
+        ],
+    }
+    assert migration._legacy_publication_snapshot(configuration, resources) == {
+        **configuration,
+        "knowledge_base_ids": ["kb-1"],
+        "mcp_tools": [{"server_id": "server-1", "tool_name": "lookup"}],
+    }
+
+    now = datetime(2026, 8, 17, tzinfo=UTC)
+    call = {
+        "status": "pending",
+        "approved_by_user_id": None,
+        "approved_at": None,
+        "result_output": None,
+        "result_content": "",
+        "result_summary": "",
+        "result_is_error": False,
+        "last_error": None,
+        "started_at": None,
+        "finished_at": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    expected_state = migration._migrated_invocation_state(call, now, "each_call")
+    assert migration._migrated_invocation_state_matches(
+        expected_state,
+        {**expected_state},
+    )
+    assert not migration._migrated_invocation_state_matches(
+        expected_state,
+        {**expected_state, "status": "succeeded"},
+    )
+
+
+def test_tool_invocation_identity_ignores_refreshable_deadline() -> None:
+    from app.application.tool_runtime import _same_invocation
+    from app.entities.tools import ToolInvocation
+    from app.shareddomain.tools.runtime import exhausted_tool_invocation_terminal_state
+
+    fields = {
+        "workspace_id": "workspace-1",
+        "origin": "agent",
+        "root_run_id": "run-1",
+        "run_id": "run-1",
+        "invocation_id": "2:call-1",
+        "execution_user_id": "user-1",
+        "access_source": "console",
+        "tool_id": "tool-1",
+        "tool_version_id": "version-1",
+        "arguments_hash": "a" * 64,
+        "idempotency_key": "agent:run-1:2:call-1",
+    }
+    original = ToolInvocation(
+        **fields,
+        policy_snapshot={
+            "tool_snapshot": {"tool_id": "tool-1"},
+            "deadline_at": "2026-08-17T00:00:00+00:00",
+        },
+    )
+    resumed = ToolInvocation(
+        **fields,
+        policy_snapshot={
+            "tool_snapshot": {"tool_id": "tool-1"},
+            "deadline_at": "2026-08-17T01:00:00+00:00",
+        },
+    )
+    changed = ToolInvocation(
+        **fields,
+        policy_snapshot={
+            "tool_snapshot": {"tool_id": "tool-2"},
+            "deadline_at": "2026-08-17T01:00:00+00:00",
+        },
+    )
+
+    assert _same_invocation(original, resumed) is True
+    assert _same_invocation(original, changed) is False
+    assert exhausted_tool_invocation_terminal_state(
+        "running",
+        "external_write",
+    )[:2] == ("uncertain", "uncertain")
+    assert exhausted_tool_invocation_terminal_state(
+        "running",
+        "external_read",
+    )[:2] == ("failed", "confirmed")
+    assert exhausted_tool_invocation_terminal_state(
+        "queued",
+        "external_write",
+    )[:2] == ("failed", "confirmed")
 
 
 def test_public_tool_responses_exclude_execution_details() -> None:
@@ -4225,10 +4623,16 @@ def main() -> None:
     test_effective_permission_matrix()
     test_validate_permission_rejects_unknown()
     test_tool_ref_requires_stable_ids()
+    test_agent_publication_snapshot_is_canonical_and_tool_versioned()
+    test_agent_tool_binding_requires_current_available_policy()
     test_tool_snapshot_is_an_immutable_internal_contract()
     test_tool_contracts_deep_freeze_nested_json()
     test_freeze_json_rejects_non_json_values()
     test_tool_adapter_contract_is_provider_neutral()
+    test_agent_tool_definition_comes_from_unified_snapshot()
+    test_agent_tool_runtime_uses_stable_invocation_identity_and_envelope()
+    test_agent_tool_call_migration_preserves_approval_gate()
+    test_tool_invocation_identity_ignores_refreshable_deadline()
     test_public_tool_responses_exclude_execution_details()
     test_builtin_tool_summary_accepts_system_owner()
     test_tool_ref_schema_requires_canonical_ids()

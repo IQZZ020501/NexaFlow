@@ -28,6 +28,7 @@ from app.shareddomain.tools.runtime import (
     TOOL_APPROVAL_DISABLED,
     TOOL_APPROVAL_EACH_CALL,
     TOOL_INVOCATION_AWAITING_APPROVAL,
+    TOOL_INVOCATION_CLAIMABLE_STATUSES,
     TOOL_INVOCATION_FAILED,
     TOOL_INVOCATION_QUEUED,
     TOOL_INVOCATION_RUNNING,
@@ -45,6 +46,10 @@ from app.shareddomain.tools.runtime import (
 
 
 class ToolInvocationBusy(RuntimeError):
+    pass
+
+
+class ToolInvocationConflict(ValueError):
     pass
 
 
@@ -83,7 +88,18 @@ async def queue_tool_invocation(
     )
     invocation = await tool_repository.create_or_get_tool_invocation(db, candidate)
     if not _same_invocation(invocation, candidate):
-        raise ValueError("Tool invocation idempotency key was reused with different data.")
+        raise ToolInvocationConflict(
+            "Tool invocation idempotency key was reused with different data."
+        )
+    if invocation.status in TOOL_INVOCATION_CLAIMABLE_STATUSES:
+        refreshed = await tool_repository.refresh_tool_invocation_deadline(
+            db,
+            invocation.workspace_id,
+            invocation.id,
+            context.deadline_at,
+        )
+        if refreshed is not None:
+            invocation = refreshed
     return invocation
 
 
@@ -421,6 +437,27 @@ async def list_recoverable_tool_test_invocation_ids() -> list[str]:
         return invocation_ids
 
 
+async def preflight_tool_snapshot(
+    db: AsyncSession,
+    snapshot: ToolSnapshot,
+    *,
+    origin: str,
+    workspace_id: str,
+    execution_user_id: str,
+    access_source: str,
+) -> ToolRuntimeResult | None:
+    invocation = ToolInvocation(
+        workspace_id=workspace_id,
+        origin=origin,
+        execution_user_id=execution_user_id,
+        access_source=access_source,
+        tool_id=snapshot.tool_id,
+        tool_version_id=snapshot.version_id,
+    )
+    failure, _server = await _validate_live_state(db, invocation, snapshot)
+    return failure
+
+
 async def _fail_pending(
     db: AsyncSession,
     invocation: ToolInvocation,
@@ -479,7 +516,9 @@ def _validate_context(context: ToolInvocationContext) -> None:
 
 
 def _same_invocation(existing: ToolInvocation, candidate: ToolInvocation) -> bool:
-    return all(
+    return existing.policy_snapshot.get(
+        "tool_snapshot"
+    ) == candidate.policy_snapshot.get("tool_snapshot") and all(
         getattr(existing, field) == getattr(candidate, field)
         for field in (
             "workspace_id",
@@ -491,7 +530,6 @@ def _same_invocation(existing: ToolInvocation, candidate: ToolInvocation) -> boo
             "access_source",
             "tool_id",
             "tool_version_id",
-            "policy_snapshot",
             "arguments_hash",
         )
     )
@@ -550,7 +588,9 @@ def _failure(
 
 __all__ = [
     "ToolInvocationBusy",
+    "ToolInvocationConflict",
     "execute_tool_invocation",
     "list_recoverable_tool_test_invocation_ids",
+    "preflight_tool_snapshot",
     "queue_tool_invocation",
 ]

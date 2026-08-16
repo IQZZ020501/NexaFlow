@@ -113,6 +113,29 @@ def validate_tool_output(snapshot: ToolSnapshot, data: Any) -> None:
         _validate_schema(snapshot.output_schema, data, "Tool output is invalid.")
 
 
+def exhausted_tool_invocation_terminal_state(
+    invocation_status: str,
+    effect: str | None,
+) -> tuple[str, str, str, str]:
+    uncertain = (
+        invocation_status == TOOL_INVOCATION_RUNNING
+        and effect not in TOOL_SAFE_EXTERNAL_EFFECTS
+    )
+    if uncertain:
+        return (
+            TOOL_INVOCATION_UNCERTAIN,
+            "uncertain",
+            "Tool outcome is uncertain.",
+            "Tool execution was interrupted after dispatch; confirm the external state.",
+        )
+    return (
+        TOOL_INVOCATION_FAILED,
+        "confirmed",
+        "Tool execution interrupted.",
+        "Agent run retry limit reached before the tool completed.",
+    )
+
+
 def _encoded_json(value: Any, limit: int) -> bytes:
     try:
         encoded = json.dumps(
@@ -156,6 +179,7 @@ __all__ = [
     "TOOL_SAFE_EXTERNAL_EFFECTS",
     "TOOL_UNCERTAIN_EFFECTS",
     "build_tool_snapshot",
+    "exhausted_tool_invocation_terminal_state",
     "tool_arguments_hash",
     "tool_snapshot_from_payload",
     "tool_snapshot_payload",

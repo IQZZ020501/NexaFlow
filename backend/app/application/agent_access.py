@@ -13,13 +13,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.agent_runs import (
     enqueue_prepared_agent_run,
+    list_canonical_agent_run_tool_calls,
     prepare_agent_run,
     resolve_agent_run_tool_approval,
     stream_agent_run,
     tool_call_to_response,
 )
 from app.application.workspace import WorkspaceContext, build_workspace_context
-from app.entities.agents import Agent, AgentApiCredential, AgentRun
+from app.entities.agents import (
+    Agent,
+    AgentApiCredential,
+    AgentPublicationVersion,
+    AgentRun,
+)
 from app.entities.user import User
 from app.infrastructure.agent_rate_limit import (
     AgentRateLimitExceeded,
@@ -55,7 +61,7 @@ from app.application.workflow_uploads import resolve_public_agent_files
 from app.shareddomain.agents.services import (
     ACTIVE_STATUS,
     AgentPublication,
-    agent_publication,
+    agent_publication_from_version,
     agent_publication_from_snapshot,
     get_agent,
     require_agent_edit,
@@ -71,6 +77,7 @@ class PublishedAgentContext:
     publisher: User
     workspace: WorkspaceContext
     publication: AgentPublication | None = None
+    publication_version: AgentPublicationVersion | None = None
 
 
 def hash_agent_access_token(token: str) -> str:
@@ -450,7 +457,30 @@ async def get_published_application_context(
             status.HTTP_404_NOT_FOUND,
             f"Published {application_type} not found.",
         )
-    publisher = await user_repository.get_user_by_id(db, agent.published_by_user_id)
+    publication_version = None
+    publication = None
+    publisher_id = agent.published_by_user_id
+    if application_type == "agent":
+        if agent.current_published_version_id is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
+        publication_version = await agent_repository.get_agent_publication_version(
+            db,
+            agent.workspace_id,
+            agent.current_published_version_id,
+        )
+        if publication_version is None or publication_version.agent_id != agent.id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
+        try:
+            publication = agent_publication_from_version(publication_version)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "Published agent not found.",
+            ) from exc
+        publisher_id = publication_version.published_by_user_id
+    else:
+        publication = agent_publication_from_snapshot(agent)
+    publisher = await user_repository.get_user_by_id(db, publisher_id)
     if publisher is None or not publisher.is_active:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -463,20 +493,12 @@ async def get_published_application_context(
             status.HTTP_404_NOT_FOUND,
             f"Published {application_type} not found.",
         ) from exc
-    publication = agent_publication_from_snapshot(agent)
-    if application_type == "agent" and publication is None:
-        knowledge_base_ids = (
-            await agent_repository.list_binding_map(db, [agent.id])
-        )[agent.id]
-        mcp_tools = (
-            await agent_repository.list_mcp_binding_map(db, [agent.id])
-        )[agent.id]
-        publication = agent_publication(agent, knowledge_base_ids, mcp_tools)
     return PublishedAgentContext(
         agent=agent,
         publisher=publisher,
         workspace=workspace,
         publication=publication,
+        publication_version=publication_version,
     )
 
 
@@ -797,6 +819,7 @@ async def create_external_agent_run(
         access_source=access_source,
         consumer_id=consumer_id,
         publication=context.publication,
+        publication_version=context.publication_version,
         attachment_context=attachment_context,
     )
     await enqueue_prepared_agent_run(run.id, settings)
@@ -830,7 +853,9 @@ async def list_external_agent_run_tool_calls(
     access_source: ExternalAccessSource,
     consumer_id: str,
 ) -> list[AgentToolCallResponse]:
-    await get_external_agent_run(db, agent_id, run_id, access_source, consumer_id)
+    run = await get_external_agent_run(db, agent_id, run_id, access_source, consumer_id)
+    if run.configuration_source in {"draft", "published"}:
+        return await list_canonical_agent_run_tool_calls(db, run)
     return [
         tool_call_to_response(call)
         for call in await agent_repository.list_agent_tool_calls(db, run_id)

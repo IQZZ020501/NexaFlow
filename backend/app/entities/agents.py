@@ -19,11 +19,26 @@ class Agent:
     status: str = "active"
     published: bool = False
     published_snapshot: dict[str, Any] | None = None
+    current_published_version_id: str | None = None
     published_by_user_id: str | None = None
     published_at: datetime | None = None
     created_by_user_id: str = ""
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class AgentPublicationVersion:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    agent_id: str = ""
+    version_number: int = 1
+    schema_version: int = 1
+    configuration_snapshot: dict[str, Any] = field(default_factory=dict)
+    resource_snapshot: dict[str, Any] = field(default_factory=dict)
+    configuration_hash: str = ""
+    published_by_user_id: str = ""
+    created_at: datetime = field(default_factory=utc_now)
 
 
 @dataclass
@@ -75,6 +90,12 @@ class AgentRun:
     knowledge_base_ids: list[str] = field(default_factory=list)
     knowledge_query_mode: str = "required"
     mcp_tools: list[dict[str, str]] = field(default_factory=list)
+    snapshot_schema_version: int = 1
+    configuration_source: str = "legacy"
+    agent_publication_version_id: str | None = None
+    application_snapshot: dict[str, Any] = field(default_factory=dict)
+    application_snapshot_hash: str = ""
+    tool_snapshots: list[dict[str, Any]] = field(default_factory=list)
     model_id: str = ""
     model_name: str = ""
     status: str = "queued"

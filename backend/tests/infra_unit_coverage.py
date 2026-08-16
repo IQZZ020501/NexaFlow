@@ -3327,12 +3327,21 @@ def test_retained_tool_user_reference_query() -> None:
     invocation_db.scalar.side_effect = [None, "invocation-1"]
     assert run(tools_repo.has_retained_user_audit_references(invocation_db, "u1"))
 
+    snapshot_db = AsyncMock()
+    snapshot_db.scalar.side_effect = [None, None]
+    snapshot_db.scalars.return_value = SimpleNamespace(
+        all=lambda: [{"tool_snapshot": {"bound_by_user_id": "u1"}}]
+    )
+    assert run(tools_repo.has_retained_user_audit_references(snapshot_db, "u1"))
+
     draft_db = AsyncMock()
     draft_db.scalar.side_effect = [None, None, "draft-1"]
+    draft_db.scalars.return_value = SimpleNamespace(all=lambda: [])
     assert run(tools_repo.has_retained_user_audit_references(draft_db, "u1"))
 
     empty_db = AsyncMock()
     empty_db.scalar.side_effect = [None, None, None]
+    empty_db.scalars.return_value = SimpleNamespace(all=lambda: [])
     assert not run(tools_repo.has_retained_user_audit_references(empty_db, "u1"))
 
 

@@ -39,7 +39,13 @@ from tests.support import (  # noqa: F401  (sets required env before app imports
     test_client,
 )
 
-from app.application import agent_executor, agent_memory, agent_runs, agent_tools
+from app.application import (
+    agent_executor,
+    agent_memory,
+    agent_runs,
+    agent_tools,
+    tool_adapters,
+)
 from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.entities.agents import Agent, AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
@@ -51,7 +57,7 @@ from app.infrastructure.repositories import mcp as mcp_repository
 from app.infrastructure.repositories import tools as tool_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.session import get_session_factory
-from app.infrastructure.model_utils import utc_now
+from app.infrastructure.model_utils import new_id, utc_now
 from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
     KnowledgeQueryInspectResponse,
@@ -1880,7 +1886,7 @@ async def assert_mcp_tool_paths(
         resolved = ResolvedMcpTool(server=server, definition=definition)
     tool = build_mcp_agent_tool(resolved, settings, "agent-1", "read_only")
 
-    original_call = agent_tools.call_mcp_tool
+    original_call = tool_adapters.call_mcp_tool
     original_resolve = agent_tools.resolve_mcp_tools
     original_set = agent_tools.set_agent_tool_idempotency_key
     try:
@@ -2361,6 +2367,7 @@ async def assert_approval_paths(
             actor,
             "admin",
         )
+        run.configuration_source = "legacy"
         await agent_repository.save_agent_run(db, run)
         await db.commit()
 
@@ -2554,6 +2561,7 @@ async def assert_approval_paths(
                 actor,
                 "admin",
             )
+            wrapper_run.configuration_source = "legacy"
             await agent_repository.save_agent_run(db, wrapper_run)
             await db.commit()
             call = AgentToolCall(
@@ -2890,6 +2898,61 @@ async def assert_durable_execution_paths(
     assert current.checkpoint.get("final_answer") == "Happy answer."
     assert events[-1].event["type"] == "complete"
 
+    # -- canonical runs keep knowledge calls in the durable legacy ledger --
+    holder.model = RuntimeModelStub(
+        [
+            tool_completion(
+                "search_knowledge",
+                "call-knowledge-1",
+                '{"query": "release notes"}',
+            ),
+            ok_completion("Knowledge answer."),
+        ]
+    )
+    run, _ = await prepare_console_run(
+        workspace_id,
+        agent_id,
+        "Search the knowledge base",
+    )
+    run.mcp_tools = []
+    run.knowledge_base_ids = [knowledge_base_id]
+    run.knowledge_query_mode = "agentic"
+    async with get_session_factory()() as db:
+        await agent_repository.save_agent_run(db, run)
+        await db.commit()
+    original_retrieve = agent_tools.retrieve_knowledge_base
+    agent_tools.retrieve_knowledge_base = fake_retrieve
+    try:
+        outcome = await agent_executor.run_durable_agent_run(
+            run.id,
+            settings,
+            worker_task_id="worker-knowledge-ledger",
+        )
+    finally:
+        agent_tools.retrieve_knowledge_base = original_retrieve
+    assert outcome == agent_executor.RUN_FINISHED
+    async with get_session_factory()() as db:
+        stored_knowledge_call = await agent_repository.get_agent_tool_call(
+            db,
+            run.id,
+            1,
+            "call-knowledge-1",
+        )
+        actor = await get_admin_actor()
+        visible_calls = await agent_runs.list_agent_run_tool_calls(
+            db,
+            workspace_id,
+            agent_id,
+            run.id,
+            actor,
+            "admin",
+        )
+    assert stored_knowledge_call is not None
+    assert stored_knowledge_call.status == "succeeded"
+    assert [(item.call_id, item.tool_kind) for item in visible_calls] == [
+        ("call-knowledge-1", "knowledge")
+    ]
+
     # -- MCP approval cycle --
     mcp_name = "mcp_lookup_release_" + hashlib.sha256(
         f"{mcp_server_id}:lookup_release".encode()
@@ -2916,7 +2979,7 @@ async def assert_durable_execution_paths(
     ):
         return json.dumps({"release": "approved"}), False
 
-    agent_tools.call_mcp_tool = fake_mcp_call
+    tool_adapters.call_mcp_tool = fake_mcp_call
     try:
         outcome = await agent_executor.run_durable_agent_run(
             run.id,
@@ -2926,11 +2989,45 @@ async def assert_durable_execution_paths(
         assert outcome == agent_executor.RUN_AWAITING_APPROVAL
         async with get_session_factory()() as db:
             current = await agent_repository.get_agent_run_by_id(db, run.id)
-            call = await agent_repository.get_agent_tool_call_by_call_id(
-                db, run.id, "call-mcp-1"
+            calls = await tool_repository.list_tool_invocations(
+                db,
+                workspace_id,
+                run.id,
+            )
+            call = next(
+                item
+                for item in calls
+                if item.invocation_id == "1:call-mcp-1"
+            )
+            legacy_call = await agent_repository.get_agent_tool_call_by_call_id(
+                db,
+                run.id,
+                "call-mcp-1",
             )
         assert current is not None and current.status == "awaiting_approval"
-        assert call is not None and call.status == "awaiting_approval"
+        assert call.status == "awaiting_approval"
+        assert legacy_call is None
+
+        async with get_session_factory()() as db:
+            call.policy_snapshot = {
+                **call.policy_snapshot,
+                "deadline_at": (utc_now() - timedelta(seconds=1)).isoformat(),
+            }
+            await tool_repository.save_tool_invocation(db, call)
+            await tool_repository.save_tool_invocation(
+                db,
+                dataclasses.replace(
+                    call,
+                    id=new_id(),
+                    invocation_id="0:call-mcp-1",
+                    idempotency_key="historical-call-mcp-1",
+                    status="succeeded",
+                    outcome="confirmed",
+                    created_at=utc_now() + timedelta(seconds=1),
+                    finished_at=utc_now(),
+                ),
+            )
+            await db.commit()
 
         # approve and requeue (agent_runs path); suppress the eager re-execution
         # so the second durable attempt can be driven explicitly below.
@@ -2952,6 +3049,16 @@ async def assert_durable_execution_paths(
                     approve=True,
                 )
                 assert refreshed.status == "queued"
+                approved = await tool_repository.get_tool_invocation(
+                    db,
+                    workspace_id,
+                    call.id,
+                )
+                assert approved is not None and approved.status == "approved"
+                assert (
+                    approved.policy_snapshot["deadline_at"]
+                    > call.policy_snapshot["deadline_at"]
+                )
         finally:
             agent_runs.enqueue_prepared_agent_run = original_enqueue
 
@@ -2965,14 +3072,16 @@ async def assert_durable_execution_paths(
         assert outcome == agent_executor.RUN_FINISHED
         async with get_session_factory()() as db:
             current = await agent_repository.get_agent_run_by_id(db, run.id)
-            call = await agent_repository.get_agent_tool_call_by_call_id(
-                db, run.id, "call-mcp-1"
+            call = await tool_repository.get_tool_invocation(
+                db,
+                workspace_id,
+                call.id,
             )
         assert current is not None and current.status == "succeeded"
         assert call is not None and call.status == "succeeded"
-        assert call.result_summary == "Runtime Server: lookup_release completed."
+        assert call.result_summary == "MCP Tool completed."
     finally:
-        agent_tools.call_mcp_tool = original_call
+        tool_adapters.call_mcp_tool = original_call
 
     # -- run timeout (781) --
     short_settings = dataclasses.replace(settings, agent_run_timeout_seconds=0.2)
@@ -3102,6 +3211,7 @@ async def assert_durable_execution_paths(
         )
         race_run.knowledge_base_ids = []
         race_run.knowledge_query_mode = "agentic"
+        race_run.configuration_source = "legacy"
         await agent_repository.save_agent_run(db, race_run)
         await db.commit()
         await agent_repository.create_agent_tool_call(

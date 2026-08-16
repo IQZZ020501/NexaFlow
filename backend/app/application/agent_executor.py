@@ -6,10 +6,11 @@ import time
 import traceback
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from langchain_core.tools import StructuredTool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.agent_memory import (
     PreparedConversationMemory,
@@ -18,14 +19,16 @@ from app.application.agent_memory import (
 from app.application.agent_tools import (
     build_knowledge_search_tool,
     build_mcp_agent_tool,
+    build_unified_agent_tool,
     describe_knowledge_sources,
     safe_agent_error,
     set_agent_tool_idempotency_key,
 )
+from app.application.agent_tool_runtime import UnifiedAgentToolRuntime
 from app.application.workspace import build_workspace_context
 from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import McpToolPolicy
+from app.entities.tools import McpToolPolicy, ToolSnapshot
 from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.agent_live_stream import AgentLiveStreamPublisher
@@ -33,6 +36,7 @@ from app.infrastructure.errors import classify_error, log_error
 from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import tools as tool_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.system_log import record_system_log
@@ -64,6 +68,7 @@ from app.shareddomain.tools.services import (
     mcp_tool_definition_hash,
     resolve_mcp_tools,
 )
+from app.shareddomain.tools.runtime import tool_snapshot_from_payload
 
 logger = get_logger(__name__)
 
@@ -80,6 +85,7 @@ class ExecutionScope:
     workspace_role: str | None
     model: RegisteredModel
     knowledge_bases: list[KnowledgeBase]
+    tool_snapshots: list[ToolSnapshot]
     mcp_tools: list[tuple[ResolvedMcpTool, str]]
 
 
@@ -466,12 +472,21 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
             actor,
             context.membership_role,
         )
-        resolved_mcp_tools = await resolve_mcp_tools(
-            db,
-            run.workspace_id,
-            run.mcp_tools,
-            strict=False,
-            application_id=run.agent_id,
+        tool_snapshots = (
+            [tool_snapshot_from_payload(item) for item in run.tool_snapshots]
+            if run.configuration_source in {"draft", "published"}
+            else []
+        )
+        resolved_mcp_tools = (
+            await resolve_mcp_tools(
+                db,
+                run.workspace_id,
+                run.mcp_tools,
+                strict=False,
+                application_id=run.agent_id,
+            )
+            if run.configuration_source == "legacy"
+            else []
         )
         mcp_tools: list[tuple[ResolvedMcpTool, str]] = []
         for tool in resolved_mcp_tools:
@@ -502,6 +517,7 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
         workspace_role=context.membership_role,
         model=model,
         knowledge_bases=knowledge_bases,
+        tool_snapshots=tool_snapshots,
         mcp_tools=mcp_tools,
     )
 
@@ -550,23 +566,39 @@ async def _pause_agent_run_for_tool(
         )
         requeued = False
         if paused:
-            call = await agent_repository.get_agent_tool_call_by_call_id(
-                db,
-                run_id,
-                call_id,
-            )
+            run = await agent_repository.get_agent_run_by_id(db, run_id)
+            assert run is not None
+            if run.configuration_source in {"draft", "published"}:
+                calls = await tool_repository.list_tool_invocations(
+                    db,
+                    run.workspace_id,
+                    run_id,
+                )
+                call = next(
+                    (
+                        item
+                        for item in calls
+                        if item.invocation_id == call_id
+                    ),
+                    None,
+                )
+            else:
+                call = await agent_repository.get_agent_tool_call_by_call_id(
+                    db,
+                    run_id,
+                    call_id,
+                )
             if call is not None and call.status in {"approved", "rejected"}:
                 requeued = await agent_repository.queue_agent_run(db, run_id)
             if not requeued:
-                run = await agent_repository.get_agent_run_by_id(db, run_id)
-                assert run is not None
+                event_call_id = call_id.partition(":")[2] or call_id
                 await agent_repository.append_agent_run_event(
                     db,
                     run.workspace_id,
                     run_id,
                     {
                         "type": "approval_required",
-                        "call_id": call_id,
+                        "call_id": event_call_id,
                         "reason": reason,
                     },
                 )
@@ -678,13 +710,15 @@ async def _execute_claimed_agent_run(
         build_mcp_agent_tool(tool, settings, run.agent_id, policy_mode)
         for tool, policy_mode in scope.mcp_tools
     )
+    tools.extend(build_unified_agent_tool(snapshot) for snapshot in scope.tool_snapshots)
+    has_application_tools = bool(scope.mcp_tools or scope.tool_snapshots)
     from app.application.agent_runs import execution_messages
 
     chat_model = build_chat_model(settings, scope.model)
     base_messages = execution_messages(
         run,
         knowledge_tool is not None and run.knowledge_query_mode == "agentic",
-        bool(scope.mcp_tools),
+        has_application_tools,
         knowledge_scope=(
             describe_knowledge_sources(scope.knowledge_bases)
             if scope.knowledge_bases
@@ -724,7 +758,7 @@ async def _execute_claimed_agent_run(
     messages = execution_messages(
         run,
         knowledge_tool is not None and run.knowledge_query_mode == "agentic",
-        bool(scope.mcp_tools),
+        has_application_tools,
         knowledge_scope=(
             describe_knowledge_sources(scope.knowledge_bases)
             if scope.knowledge_bases
@@ -734,7 +768,44 @@ async def _execute_claimed_agent_run(
         knowledge_context=knowledge_context,
         context_messages=memory.messages,
     )
-    ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
+    if run.configuration_source in {"draft", "published"}:
+        unified_runtime = UnifiedAgentToolRuntime(
+            run,
+            scope.tool_snapshots,
+            worker_task_id,
+            settings,
+            lease_lost,
+        )
+        knowledge_ledger = DurableToolLedger(
+            run,
+            worker_task_id,
+            settings,
+            lease_lost,
+        )
+
+        async def before_tool_call(turn, call, metadata, arguments):
+            if metadata.get("kind") == "knowledge":
+                return await knowledge_ledger.before(
+                    turn,
+                    call,
+                    metadata,
+                    arguments,
+                )
+            return await unified_runtime.before(turn, call, metadata, arguments)
+
+        async def after_tool_call(turn, call, metadata, arguments, result):
+            if metadata.get("kind") == "knowledge":
+                await knowledge_ledger.after(
+                    turn,
+                    call,
+                    metadata,
+                    arguments,
+                    result,
+                )
+    else:
+        legacy_ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
+        before_tool_call = legacy_ledger.before
+        after_tool_call = legacy_ledger.after
     live_stream = AgentLiveStreamPublisher(settings, run.id)
 
     async def record_event(event: dict[str, Any]) -> None:
@@ -775,8 +846,8 @@ async def _execute_claimed_agent_run(
                     tool_timeout_seconds=settings.agent_tool_timeout_seconds,
                     checkpoint=run.checkpoint or None,
                     on_checkpoint=save_checkpoint,
-                    before_tool_call=ledger.before,
-                    after_tool_call=ledger.after,
+                    before_tool_call=before_tool_call,
+                    after_tool_call=after_tool_call,
                     initial_usage=memory.model_usage,
                 )
         except TimeoutError as exc:
@@ -980,7 +1051,7 @@ async def run_durable_agent_run(
         if claimed:
             await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
         else:
-            await agent_repository.fail_exhausted_agent_runs(db, now)
+            await fail_exhausted_agent_runs(db, now)
         await db.commit()
     if not claimed:
         current = await _current_run(run_id)
@@ -1019,7 +1090,20 @@ async def list_recoverable_agent_run_ids(settings: Settings) -> list[str]:
     del settings
     async with get_session_factory()() as db:
         now = utc_now()
-        await agent_repository.fail_exhausted_agent_runs(db, now)
+        await fail_exhausted_agent_runs(db, now)
         run_ids = await agent_repository.list_recoverable_agent_run_ids(db, now)
         await db.commit()
     return run_ids
+
+
+async def fail_exhausted_agent_runs(
+    db: AsyncSession,
+    now: datetime,
+) -> int:
+    run_ids = await agent_repository.fail_exhausted_agent_run_ids(db, now)
+    await tool_repository.settle_exhausted_agent_tool_invocations(
+        db,
+        run_ids,
+        now,
+    )
+    return len(run_ids)

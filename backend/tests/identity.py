@@ -109,7 +109,12 @@ async def assert_owned_mcp_source_tombstoned(
         assert source.created_by_user_id is None
 
 
-async def seed_retained_tool_invocation(workspace_id: str, user_id: str) -> None:
+async def seed_retained_tool_invocation(
+    workspace_id: str,
+    user_id: str,
+    *,
+    bound_by_user_id: str | None = None,
+) -> None:
     from app.entities.tools import ToolInvocation
     from app.infrastructure.repositories import tools as tools_repository
 
@@ -130,10 +135,108 @@ async def seed_retained_tool_invocation(workspace_id: str, user_id: str) -> None
                 access_source="console",
                 tool_id=tool.id,
                 tool_version_id=tool.current_version_id,
-                policy_snapshot={},
+                policy_snapshot={
+                    "tool_snapshot": {"bound_by_user_id": bound_by_user_id}
+                }
+                if bound_by_user_id is not None
+                else {},
                 arguments={},
                 arguments_hash="a" * 64,
                 idempotency_key=f"identity-{user_id}",
+            ),
+        )
+        await db.commit()
+
+
+async def seed_agent_publication_audit(
+    workspace_id: str,
+    published_by_user_id: str,
+    created_by_user_id: str,
+    bound_by_user_id: str | None = None,
+) -> str:
+    from app.capabilities.llm.registry import RegisteredModel
+    from app.entities.agents import Agent, AgentPublicationVersion
+    from app.infrastructure.repositories import agent as agent_repository
+
+    async with get_session_factory()() as db:
+        model_id = await db.scalar(
+            select(RegisteredModel.id).where(
+                RegisteredModel.workspace_id == workspace_id
+            )
+        )
+        if model_id is None:
+            model = RegisteredModel(
+                workspace_id=workspace_id,
+                name="Publication audit model",
+                provider="publication_audit_provider",
+                provider_type="openai_compatible",
+                api_base="",
+                model_type="LLM",
+                model_name="publication-audit-model",
+                status="active",
+                created_by_user_id=created_by_user_id,
+            )
+            db.add(model)
+            await db.flush()
+            model_id = model.id
+        agent = await agent_repository.create_agent(
+            db,
+            Agent(
+                workspace_id=workspace_id,
+                name=f"Publication audit {utc_now().isoformat()}",
+                instructions="Keep this publication immutable.",
+                model_id=model_id,
+                created_by_user_id=created_by_user_id,
+            ),
+        )
+        await agent_repository.create_agent_publication_version(
+            db,
+            AgentPublicationVersion(
+                workspace_id=workspace_id,
+                agent_id=agent.id,
+                configuration_snapshot={},
+                resource_snapshot={
+                    "tools": (
+                        [{"bound_by_user_id": bound_by_user_id}]
+                        if bound_by_user_id is not None
+                        else []
+                    )
+                },
+                configuration_hash="a" * 64,
+                published_by_user_id=published_by_user_id,
+            ),
+        )
+        await db.commit()
+        return agent.id
+
+
+async def seed_agent_run_binder_audit(
+    workspace_id: str,
+    bound_by_user_id: str,
+    created_by_user_id: str,
+) -> None:
+    from app.entities.agents import AgentRun
+    from app.infrastructure.repositories import agent as agent_repository
+
+    agent_id = await seed_agent_publication_audit(
+        workspace_id,
+        created_by_user_id,
+        created_by_user_id,
+    )
+    async with get_session_factory()() as db:
+        agent = await agent_repository.get_agent_by_id(db, agent_id)
+        assert agent is not None and agent.workspace_id == workspace_id
+        await agent_repository.create_agent_run(
+            db,
+            AgentRun(
+                workspace_id=workspace_id,
+                agent_id=agent.id,
+                requested_by_user_id=created_by_user_id,
+                execution_user_id=created_by_user_id,
+                model_id=agent.model_id,
+                configuration_source="legacy",
+                tool_snapshots=[{"bound_by_user_id": bound_by_user_id}],
+                status="succeeded",
             ),
         )
         await db.commit()
@@ -413,6 +516,110 @@ def main() -> None:
         )
         assert retained_delete.status_code == 409, retained_delete.text
         assert "Tool binding or invocation" in retained_delete.json()["detail"]
+
+        publication_user = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "publication-audit-user",
+                "email": "publication-audit-user@example.com",
+                "name": "Publication Audit User",
+            },
+        )
+        assert publication_user.status_code == 201, publication_user.text
+        publication_user_id = publication_user.json()["user"]["id"]
+        asyncio.run(
+            seed_agent_publication_audit(
+                identity_workspace_id,
+                publication_user_id,
+                admin_user_id,
+            )
+        )
+        publication_delete = client.delete(
+            f"/api/v1/admin/users/{publication_user_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert publication_delete.status_code == 409, publication_delete.text
+        assert "Agent publication" in publication_delete.json()["detail"]
+
+        publication_binder = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "publication-binder-user",
+                "email": "publication-binder-user@example.com",
+                "name": "Publication Binder User",
+            },
+        )
+        assert publication_binder.status_code == 201, publication_binder.text
+        publication_binder_id = publication_binder.json()["user"]["id"]
+        asyncio.run(
+            seed_agent_publication_audit(
+                identity_workspace_id,
+                admin_user_id,
+                admin_user_id,
+                publication_binder_id,
+            )
+        )
+        binder_delete = client.delete(
+            f"/api/v1/admin/users/{publication_binder_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert binder_delete.status_code == 409, binder_delete.text
+        assert "Agent publication" in binder_delete.json()["detail"]
+
+        run_binder = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "run-binder-user",
+                "email": "run-binder-user@example.com",
+                "name": "Run Binder User",
+            },
+        )
+        assert run_binder.status_code == 201, run_binder.text
+        run_binder_id = run_binder.json()["user"]["id"]
+        asyncio.run(
+            seed_agent_run_binder_audit(
+                identity_workspace_id,
+                run_binder_id,
+                admin_user_id,
+            )
+        )
+        run_binder_delete = client.delete(
+            f"/api/v1/admin/users/{run_binder_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert run_binder_delete.status_code == 409, run_binder_delete.text
+        assert "Agent publication" in run_binder_delete.json()["detail"]
+
+        invocation_binder = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "invocation-binder-user",
+                "email": "invocation-binder-user@example.com",
+                "name": "Invocation Binder User",
+            },
+        )
+        assert invocation_binder.status_code == 201, invocation_binder.text
+        invocation_binder_id = invocation_binder.json()["user"]["id"]
+        asyncio.run(
+            seed_retained_tool_invocation(
+                identity_workspace_id,
+                admin_user_id,
+                bound_by_user_id=invocation_binder_id,
+            )
+        )
+        invocation_binder_delete = client.delete(
+            f"/api/v1/admin/users/{invocation_binder_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert invocation_binder_delete.status_code == 409, invocation_binder_delete.text
+        assert (
+            "Tool binding or invocation"
+            in invocation_binder_delete.json()["detail"]
+        )
 
         grant_only_user = client.post(
             "/api/v1/admin/users",

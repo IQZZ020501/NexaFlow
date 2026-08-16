@@ -9,6 +9,7 @@ from app.shareddomain.agents.models import (  # noqa: F401
     AgentApiCredential,
     AgentKnowledgeBase,
     AgentMcpTool,
+    AgentPublicationVersion,
     AgentRun,
     AgentRunEvent,
     AgentToolCall,

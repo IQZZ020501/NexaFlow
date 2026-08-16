@@ -17,6 +17,7 @@ from app.infrastructure.agent_rate_limit import (
 from app.infrastructure.validation import normalize_email, normalize_name, normalize_username
 from app.entities.user import RefreshSession, User
 from app.infrastructure.model_utils import utc_now
+from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import tools as tools_repository
 from app.infrastructure.repositories import team as team_repository
@@ -352,6 +353,11 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
     user = await user_repository.lock_user(db, user.id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    if await agent_repository.has_agent_publication_audit_references(db, user.id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "User is retained by Agent publication audit records.",
+        )
     if await tools_repository.has_retained_user_audit_references(db, user.id):
         raise HTTPException(
             status.HTTP_409_CONFLICT,

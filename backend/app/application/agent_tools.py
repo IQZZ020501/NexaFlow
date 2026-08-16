@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.application.knowledge_retrieval import retrieve_knowledge_base
 from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
+from app.entities.tools import ToolSnapshot
 from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_session_factory
@@ -284,6 +285,28 @@ def build_knowledge_search_tool(
         display_name="knowledge",
         kind="knowledge",
         parallel_safe=True,
+    )
+
+
+def build_unified_agent_tool(snapshot: ToolSnapshot) -> StructuredTool:
+    """Expose a frozen Tool contract to the model; the durable hook executes it."""
+
+    async def require_durable_runtime(_arguments: str) -> AgentToolResult:
+        return AgentToolResult(
+            content="Tool execution is unavailable outside its durable Run.",
+            summary="Tool execution is unavailable.",
+            is_error=True,
+        )
+
+    return create_agent_tool(
+        name=snapshot.function_name,
+        description=snapshot.description,
+        parameters=snapshot.input_schema,
+        execute=require_durable_runtime,
+        display_name=snapshot.display_name,
+        kind=snapshot.kind,
+        parallel_safe=snapshot.parallel_safe,
+        definition_hash=snapshot.definition_hash,
     )
 
 

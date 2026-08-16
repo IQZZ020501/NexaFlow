@@ -42,6 +42,15 @@ AGENT_RUN_ACTIVE_STATUSES = (
 class Agent(Base):
     __tablename__ = "agents"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "id", "current_published_version_id"],
+            [
+                "agent_publication_versions.workspace_id",
+                "agent_publication_versions.agent_id",
+                "agent_publication_versions.id",
+            ],
+            name="fk_agents_current_publication_workspace",
+        ),
         UniqueConstraint("workspace_id", "name", name="uq_agents_workspace_name"),
         UniqueConstraint("workspace_id", "id", name="uq_agents_workspace_id"),
         CheckConstraint(
@@ -83,6 +92,9 @@ class Agent(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     published_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    current_published_version_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
     published_by_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", name="fk_agents_published_by_user_id"),
         nullable=True,
@@ -98,6 +110,55 @@ class Agent(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
+
+
+class AgentPublicationVersion(Base):
+    __tablename__ = "agent_publication_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "agent_id"],
+            ["agents.workspace_id", "agents.id"],
+            name="fk_agent_publication_versions_agent_workspace",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "agent_id",
+            "version_number",
+            name="uq_agent_publication_versions_agent_number",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_agent_publication_versions_workspace_id",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "agent_id",
+            "id",
+            name="uq_agent_publication_versions_workspace_agent_id",
+        ),
+        CheckConstraint(
+            "version_number >= 1", name="ck_agent_publication_versions_number"
+        ),
+        CheckConstraint(
+            "schema_version >= 1", name="ck_agent_publication_versions_schema"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    configuration_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    resource_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    configuration_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    published_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class AgentKnowledgeBase(Base):
@@ -208,6 +269,15 @@ class AgentRun(Base):
             name="fk_agent_runs_agent_workspace",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "agent_id", "agent_publication_version_id"],
+            [
+                "agent_publication_versions.workspace_id",
+                "agent_publication_versions.agent_id",
+                "agent_publication_versions.id",
+            ],
+            name="fk_agent_runs_publication_workspace",
+        ),
         CheckConstraint(
             "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'succeeded', 'failed', 'cancelled')",
             name="ck_agent_runs_status",
@@ -224,6 +294,20 @@ class AgentRun(Base):
         CheckConstraint(
             "access_source IN ('console', 'public', 'api')",
             name="ck_agent_runs_access_source",
+        ),
+        CheckConstraint(
+            "configuration_source IN ('draft', 'published', 'legacy')",
+            name="ck_agent_runs_configuration_source",
+        ),
+        CheckConstraint(
+            "snapshot_schema_version >= 1",
+            name="ck_agent_runs_snapshot_schema_version",
+        ),
+        CheckConstraint(
+            "(configuration_source = 'published' AND agent_publication_version_id IS NOT NULL) "
+            "OR (configuration_source IN ('draft', 'legacy') "
+            "AND agent_publication_version_id IS NULL)",
+            name="ck_agent_runs_publication_source",
         ),
         CheckConstraint(
             "(access_source = 'console' AND requested_by_user_id IS NOT NULL "
@@ -279,6 +363,24 @@ class AgentRun(Base):
         String(20), nullable=False, default="required", server_default="required"
     )
     mcp_tools: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
+    snapshot_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    configuration_source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="legacy", server_default="legacy"
+    )
+    agent_publication_version_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    application_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    application_snapshot_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default=""
+    )
+    tool_snapshots: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     model_id: Mapped[str] = mapped_column(String(36), nullable=False)
     model_name: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)

@@ -8,6 +8,9 @@ from sqlalchemy.orm import load_only
 from app.domain.resource_permission import ResourcePermission as ResourcePermissionORM
 from app.entities.agents import Agent as AgentEntity
 from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
+from app.entities.agents import (
+    AgentPublicationVersion as AgentPublicationVersionEntity,
+)
 from app.entities.agents import AgentRun as AgentRunEntity
 from app.entities.agents import AgentRunEvent as AgentRunEventEntity
 from app.entities.agents import AgentToolCall as AgentToolCallEntity
@@ -29,6 +32,7 @@ from app.shareddomain.agents.models import (
     AgentApiCredential,
     AgentKnowledgeBase,
     AgentMcpTool,
+    AgentPublicationVersion,
     AgentRun,
     AgentRunEvent,
     AgentToolCall,
@@ -135,6 +139,76 @@ async def save_agent(db: AsyncSession, entity: AgentEntity) -> AgentEntity:
 
 async def refresh_agent(db: AsyncSession, entity: AgentEntity) -> AgentEntity:
     return await refresh_entity(db, Agent, AgentEntity, entity)
+
+
+async def create_agent_publication_version(
+    db: AsyncSession,
+    entity: AgentPublicationVersionEntity,
+) -> AgentPublicationVersionEntity:
+    if await db.get(AgentPublicationVersion, entity.id) is not None:
+        raise ValueError("Agent publication versions are immutable.")
+    row = to_orm(AgentPublicationVersion, entity)
+    db.add(row)
+    await db.flush()
+    return to_entity(AgentPublicationVersionEntity, row)
+
+
+async def next_agent_publication_version_number(
+    db: AsyncSession,
+    agent_id: str,
+) -> int:
+    value = await db.scalar(
+        select(func.max(AgentPublicationVersion.version_number)).where(
+            AgentPublicationVersion.agent_id == agent_id
+        )
+    )
+    return int(value or 0) + 1
+
+
+async def get_agent_publication_version(
+    db: AsyncSession,
+    workspace_id: str,
+    version_id: str,
+) -> AgentPublicationVersionEntity | None:
+    row = await db.scalar(
+        select(AgentPublicationVersion).where(
+            AgentPublicationVersion.workspace_id == workspace_id,
+            AgentPublicationVersion.id == version_id,
+        )
+    )
+    return (
+        to_entity(AgentPublicationVersionEntity, row) if row is not None else None
+    )
+
+
+async def has_agent_publication_audit_references(
+    db: AsyncSession,
+    user_id: str,
+) -> bool:
+    publisher_reference = await db.scalar(
+        select(AgentPublicationVersion.id)
+        .where(AgentPublicationVersion.published_by_user_id == user_id)
+        .limit(1)
+    )
+    if publisher_reference is not None:
+        return True
+    # ponytail: user deletion is rare; use a portable scan until publication volume warrants JSON indexing.
+    resources = await db.scalars(select(AgentPublicationVersion.resource_snapshot))
+    for resource_snapshot in resources.all():
+        tools = resource_snapshot.get("tools", [])
+        if isinstance(tools, list) and any(
+            isinstance(tool, dict) and tool.get("bound_by_user_id") == user_id
+            for tool in tools
+        ):
+            return True
+    run_snapshots = await db.scalars(select(AgentRun.tool_snapshots))
+    for tool_snapshots in run_snapshots.all():
+        if isinstance(tool_snapshots, list) and any(
+            isinstance(tool, dict) and tool.get("bound_by_user_id") == user_id
+            for tool in tool_snapshots
+        ):
+            return True
+    return False
 
 
 async def list_agent_api_credentials(
@@ -941,7 +1015,10 @@ async def list_recoverable_agent_run_ids(
     return list(rows.all())
 
 
-async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
+async def fail_exhausted_agent_run_ids(
+    db: AsyncSession,
+    now: datetime,
+) -> list[str]:
     updated = await db.scalars(
         update(AgentRun)
         .where(
@@ -969,7 +1046,7 @@ async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
     )
     exhausted_run_ids = list(updated.all())
     if not exhausted_run_ids:
-        return 0
+        return []
     await db.execute(
         update(AgentToolCall)
         .where(
@@ -1027,7 +1104,11 @@ async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
             updated_at=now,
         )
     )
-    return len(exhausted_run_ids)
+    return exhausted_run_ids
+
+
+async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
+    return len(await fail_exhausted_agent_run_ids(db, now))
 
 
 async def append_agent_run_event(
@@ -1358,7 +1439,45 @@ async def delete_agent_graph(
             ResourcePermissionORM.resource_id == agent_id,
         )
     )
+    await db.execute(
+        update(Agent)
+        .where(Agent.id == agent_id)
+        .values(current_published_version_id=None)
+    )
     await db.execute(delete(Agent).where(Agent.id == agent_id))
+
+
+async def has_unsettled_agent_execution(
+    db: AsyncSession,
+    agent_id: str,
+) -> bool:
+    active_run = await db.scalar(
+        select(AgentRun.id)
+        .where(
+            AgentRun.agent_id == agent_id,
+            AgentRun.status.in_(AGENT_RUN_ACTIVE_STATUSES),
+        )
+        .limit(1)
+    )
+    if active_run is not None:
+        return True
+    legacy_call = await db.scalar(
+        select(AgentToolCall.id)
+        .join(AgentRun, AgentRun.id == AgentToolCall.run_id)
+        .where(
+            AgentRun.agent_id == agent_id,
+            AgentToolCall.status.in_(
+                ("pending", "approved", "running", "awaiting_approval")
+            ),
+        )
+        .limit(1)
+    )
+    return legacy_call is not None
+
+
+async def list_agent_run_ids(db: AsyncSession, agent_id: str) -> list[str]:
+    rows = await db.scalars(select(AgentRun.id).where(AgentRun.agent_id == agent_id))
+    return list(rows.all())
 
 
 async def delete_workspace_agent_graph(db: AsyncSession, workspace_id: str) -> None:
@@ -1375,5 +1494,10 @@ async def delete_workspace_agent_graph(db: AsyncSession, workspace_id: str) -> N
         delete(AgentKnowledgeBase).where(
             AgentKnowledgeBase.workspace_id == workspace_id
         )
+    )
+    await db.execute(
+        update(Agent)
+        .where(Agent.workspace_id == workspace_id)
+        .values(current_published_version_id=None)
     )
     await db.execute(delete(Agent).where(Agent.workspace_id == workspace_id))
