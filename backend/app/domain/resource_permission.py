@@ -21,6 +21,7 @@ class ResourcePermission(Base):
             ["workspace_id", "user_id"],
             ["workspace_memberships.workspace_id", "workspace_memberships.user_id"],
             name="fk_resource_permission_workspace_user",
+            ondelete="CASCADE",
         ),
         CheckConstraint(
             "(resource_type = 'knowledge_base' AND permission IN ('view', 'edit')) OR "

@@ -139,6 +139,31 @@ async def seed_retained_tool_invocation(workspace_id: str, user_id: str) -> None
         await db.commit()
 
 
+async def seed_tool_grant(workspace_id: str, user_id: str, actor_id: str) -> None:
+    from app.entities.resource_permission import ResourcePermission
+    from app.infrastructure.repositories import resource_permission as permission_repository
+    from app.infrastructure.repositories import tools as tools_repository
+
+    async with get_session_factory()() as db:
+        tool = next(
+            item
+            for item in await tools_repository.list_tools(db, workspace_id)
+            if item.stable_key == "current_time"
+        )
+        await permission_repository.create_resource_permission(
+            db,
+            ResourcePermission(
+                workspace_id=workspace_id,
+                resource_type="tool",
+                resource_id=tool.id,
+                user_id=user_id,
+                permission="use",
+                created_by_user_id=actor_id,
+            ),
+        )
+        await db.commit()
+
+
 def main() -> None:
     asyncio.run(check_login_rate_limit())
     with test_client() as client:
@@ -388,6 +413,36 @@ def main() -> None:
         )
         assert retained_delete.status_code == 409, retained_delete.text
         assert "Tool binding or invocation" in retained_delete.json()["detail"]
+
+        grant_only_user = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "grant-only-user",
+                "email": "grant-only-user@example.com",
+                "name": "Grant Only User",
+            },
+        )
+        assert grant_only_user.status_code == 201, grant_only_user.text
+        grant_only_user_id = grant_only_user.json()["user"]["id"]
+        membership = client.post(
+            f"/api/v1/workspaces/{identity_workspace_id}/members",
+            headers=auth_headers(admin_token),
+            json={"user_id": grant_only_user_id, "role": "member"},
+        )
+        assert membership.status_code == 201, membership.text
+        asyncio.run(
+            seed_tool_grant(
+                identity_workspace_id,
+                grant_only_user_id,
+                admin_user_id,
+            )
+        )
+        grant_only_delete = client.delete(
+            f"/api/v1/admin/users/{grant_only_user_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert grant_only_delete.status_code == 204, grant_only_delete.text
 
         users = client.get("/api/v1/admin/users", headers=auth_headers(admin_token))
         assert users.status_code == 200, users.text

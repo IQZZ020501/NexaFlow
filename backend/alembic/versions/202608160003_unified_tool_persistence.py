@@ -183,6 +183,17 @@ def _mcp_tool_available(
     )
 
 
+def _legacy_tool_status(
+    server: Mapping[str, Any] | None,
+    policy_mode: str,
+) -> str:
+    if server is None:
+        return "archived"
+    if server["status"] == "disabled" or policy_mode == "disabled":
+        return "disabled"
+    return "active"
+
+
 def _should_backfill_use_grant(
     *,
     bound_by_user_id: str,
@@ -1159,6 +1170,8 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
         )
         created_at = server["created_at"] if server else timestamp
         updated_at = server["updated_at"] if server else timestamp
+        legacy_policy = legacy_policy_by_key.get(key)
+        mode = legacy_policy["mode"] if legacy_policy else "approval_required"
         function_name = next(
             candidate
             for candidate in _mcp_function_name_candidates(server_id, tool_name)
@@ -1173,7 +1186,7 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
             "stable_key": tool_name,
             "function_name": function_name,
             "current_version_id": None,
-            "status": "active" if server else "archived",
+            "status": _legacy_tool_status(server, mode),
             "availability": "available" if available else "unavailable",
             "created_by_user_id": owner_id,
             "created_at": created_at or timestamp,
@@ -1212,8 +1225,6 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
         current_versions[tool_id] = version_id
         tool_refs[key] = (tool_id, version_id, owner_id)
 
-        legacy_policy = legacy_policy_by_key.get(key)
-        mode = legacy_policy["mode"] if legacy_policy else "approval_required"
         if mode == "read_only":
             approval = "auto"
             effect = "external_read"

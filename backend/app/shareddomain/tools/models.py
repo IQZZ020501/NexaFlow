@@ -513,8 +513,8 @@ class McpServer(Base):
     network_policy: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
-        default="deployment",
-        server_default="deployment",
+        default="public_only",
+        server_default="public_only",
     )
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     stdio_command: Mapped[str | None] = mapped_column(Text, nullable=True)

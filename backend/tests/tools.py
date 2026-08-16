@@ -315,6 +315,7 @@ def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
 
 
 def test_mcp_network_policy_migration_is_reversible_and_defaults_legacy() -> None:
+    from app.entities.tools import McpServer as McpServerEntity
     from app.shareddomain.tools.models import McpServer
 
     migration = load_network_policy_migration()
@@ -323,7 +324,8 @@ def test_mcp_network_policy_migration_is_reversible_and_defaults_legacy() -> Non
     column = McpServer.__table__.c.network_policy
     assert column.nullable is False
     assert column.server_default is not None
-    assert column.server_default.arg == "deployment"
+    assert column.server_default.arg == "public_only"
+    assert McpServerEntity().network_policy == "public_only"
     assert "public_only" in constraint_sql(
         McpServer.__table__,
         "ck_mcp_servers_network_policy",
@@ -333,8 +335,14 @@ def test_mcp_network_policy_migration_is_reversible_and_defaults_legacy() -> Non
     migration.op = SimpleNamespace(
         add_column=lambda *args: calls.append(("add_column", *args)),
         create_check_constraint=lambda *args: calls.append(("create_check", *args)),
+        alter_column=lambda *args, **kwargs: calls.append(
+            ("alter_column", *args, kwargs)
+        ),
         drop_constraint=lambda *args, **kwargs: calls.append(
             ("drop_constraint", *args, kwargs)
+        ),
+        create_foreign_key=lambda *args, **kwargs: calls.append(
+            ("create_foreign_key", *args, kwargs)
         ),
         drop_column=lambda *args: calls.append(("drop_column", *args)),
     )
@@ -344,9 +352,34 @@ def test_mcp_network_policy_migration_is_reversible_and_defaults_legacy() -> Non
     assert added.nullable is False
     assert added.server_default.arg == "deployment"
     assert calls[1][0] == "create_check"
+    assert calls[2][0] == "alter_column"
+    assert calls[2][-1]["server_default"] == "public_only"
+    assert calls[3][:3] == (
+        "drop_constraint",
+        "fk_resource_permission_workspace_user",
+        "resource_permissions",
+    )
+    assert calls[4][0] == "create_foreign_key"
+    assert calls[4][-1]["ondelete"] == "CASCADE"
     calls.clear()
     migration.downgrade()
-    assert [call[0] for call in calls] == ["drop_constraint", "drop_column"]
+    assert [call[0] for call in calls] == [
+        "drop_constraint",
+        "create_foreign_key",
+        "drop_constraint",
+        "drop_column",
+    ]
+    assert calls[1][-1].get("ondelete") is None
+
+
+def test_legacy_disabled_tools_remain_disabled_after_backfill() -> None:
+    migration = load_migration()
+    active = {"status": "active"}
+    disabled = {"status": "disabled"}
+    assert migration._legacy_tool_status(active, "disabled") == "disabled"
+    assert migration._legacy_tool_status(disabled, "read_only") == "disabled"
+    assert migration._legacy_tool_status(active, "read_only") == "active"
+    assert migration._legacy_tool_status(None, "read_only") == "archived"
 
 
 def test_mcp_function_name_candidates_extend_stable_digest_on_collision() -> None:
@@ -656,6 +689,9 @@ def test_orm_enforces_tenant_scoped_relations_and_legal_states() -> None:
     )) in foreign_key_columns(ToolInvocation.__table__)
 
     assert ("workspace_id", "id") in unique_columns(ToolSource.__table__)
+    assert ("workspace_id", "kind", "name") in unique_columns(
+        ToolSource.__table__
+    )
     assert ("workspace_id", "function_name") in unique_columns(Tool.__table__)
     assert ("source_id", "stable_key") in unique_columns(Tool.__table__)
     assert ("workspace_id", "tool_id", "id") in unique_columns(
@@ -672,6 +708,13 @@ def test_orm_enforces_tenant_scoped_relations_and_legal_states() -> None:
     assert "kind IN ('builtin', 'python') AND mcp_server_id IS NULL" in (
         source_kind_sql
     )
+    permission_membership_fk = next(
+        constraint
+        for constraint in ResourcePermission.__table__.constraints
+        if constraint.name == "fk_resource_permission_workspace_user"
+    )
+    assert isinstance(permission_membership_fk, ForeignKeyConstraint)
+    assert permission_membership_fk.ondelete == "CASCADE"
 
     permission_sql = constraint_sql(
         ResourcePermission.__table__,
@@ -1766,6 +1809,7 @@ async def assert_mcp_server_deletion_preserves_tool_history(
         assert retained_source is not None
         assert retained_source.status == "archived"
         assert retained_source.mcp_server_id is None
+        assert retained_source.name.startswith(f"archived-mcp-{source.id}-")
         assert retained_tool is not None
         assert retained_tool.status == "archived"
         assert retained_tool.availability == "unavailable"
@@ -1793,6 +1837,28 @@ async def assert_mcp_server_deletion_preserves_tool_history(
         assert retained_invocation is not None
         assert retained_invocation.id == invocation.id
         assert retained_invocation.tool_version_id == version.id
+
+        replacement = await mcp_repository.create_mcp_server(
+            db,
+            McpServer(
+                workspace_id=workspace_id,
+                name=server.name,
+                url="https://replacement.example.com/mcp",
+                created_by_user_id=actor.id,
+            ),
+        )
+        replacement_source = await tool_repository.save_tool_source(
+            db,
+            ToolSource(
+                workspace_id=workspace_id,
+                mcp_server_id=replacement.id,
+                kind="mcp",
+                name=server.name,
+                created_by_user_id=actor.id,
+            ),
+        )
+        await db.commit()
+        assert replacement_source.id != source.id
 
 
 async def assert_mcp_discovery_materializes_first_leaf(
@@ -2018,6 +2084,7 @@ def test_workspace_creation_initializes_system_catalog() -> None:
 def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
     test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()
+    test_legacy_disabled_tools_remain_disabled_after_backfill()
     test_mcp_function_name_candidates_extend_stable_digest_on_collision()
     test_resolved_mcp_tool_preserves_catalog_function_name()
     test_disabled_mcp_policy_wins_over_definition_drift()

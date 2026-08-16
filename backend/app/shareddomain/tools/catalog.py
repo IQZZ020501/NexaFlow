@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-from uuid import UUID, uuid5
+from uuid import UUID, uuid4, uuid5
 
 from fastapi import HTTPException, status
 from mcp.types import Tool as McpTool
@@ -543,6 +543,7 @@ async def _tombstone_mcp_sources(
             await repository.save_tool(db, tool)
         source.status = "archived"
         source.mcp_server_id = None
+        source.name = f"archived-mcp-{source.id}-{uuid4()}"
         source.updated_at = timestamp
         await repository.save_tool_source(db, source)
 
