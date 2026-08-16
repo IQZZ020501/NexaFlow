@@ -26,3 +26,5 @@ services:
   worker:
     env_file:
       - ../backend/.env
+    volumes:
+      - ../backend/storage:/data

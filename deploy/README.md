@@ -35,6 +35,10 @@ Point `backend/.env` at the published endpoints
 (`postgresql+psycopg://nexaflow:nexaflow@localhost:5432/nexaflow`,
 `redis://localhost:6379/0`, `http://127.0.0.1:6333`) and run migrations with
 `cd backend && uv run python -m alembic upgrade head`.
+When the API runs on the host and the Compose worker is enabled, the dev
+override mounts `backend/storage` at the worker's `/data`; keep
+`KNOWLEDGE_STORAGE_DIR=./storage/knowledge` so both processes read the same
+uploaded files.
 
 ## Services
 
