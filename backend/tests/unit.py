@@ -643,6 +643,43 @@ def test_reciprocal_rank_fusion_reports_named_rankings_deterministically() -> No
         raise AssertionError("Ranked hits must be immutable.")
 
 
+def test_keyword_repository_uses_scoped_bm25_query() -> None:
+    from app.infrastructure.repositories import knowledge as knowledge_repository
+
+    class FakeResult:
+        def scalars(self):
+            return ["chunk-2", "chunk-1"]
+
+    class FakeDatabase:
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        async def execute(self, statement, parameters):
+            sql = str(statement)
+            assert "chunk.search_text ||| CAST(:query AS text)" in sql
+            assert "pdb.score(chunk.id) DESC" in sql
+            assert "ts_rank" not in sql
+            assert parameters == {
+                "workspace_id": "ws-1",
+                "knowledge_base_id": "kb-1",
+                "query": "数据库 回滚",
+                "candidate_limit": 10,
+                "document_ids": ["doc-1", "doc-2"],
+            }
+            return FakeResult()
+
+    result = asyncio.run(
+        knowledge_repository.query_keyword_chunk_ids(
+            FakeDatabase(),  # type: ignore[arg-type]
+            KnowledgeBase(id="kb-1", workspace_id="ws-1"),
+            "数据库 回滚",
+            10,
+            {"doc-2", "doc-1"},
+        )
+    )
+    assert result == ["chunk-2", "chunk-1"]
+
+
 def test_detailed_knowledge_query_contract_defaults() -> None:
     from app.schemas.knowledge import (
         KnowledgeQueryHitResponse,
@@ -651,8 +688,15 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
         KnowledgeRetrievalTraceResponse,
     )
 
-    request = KnowledgeQueryRequest(query="private customer question")
+    request = KnowledgeQueryRequest(query="  private customer question  ")
+    assert request.query == "private customer question"
     assert request.include_references is False
+    try:
+        KnowledgeQueryRequest(query="   ")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Whitespace-only retrieval queries must be rejected.")
 
     hit = KnowledgeQueryHitResponse(
         chunk_id="chunk-1",
@@ -3092,6 +3136,7 @@ def main() -> None:
     test_webp_documents_are_normalized_for_pymupdf_ocr()
     test_reciprocal_rank_fusion_merges_and_ranks()
     test_reciprocal_rank_fusion_reports_named_rankings_deterministically()
+    test_keyword_repository_uses_scoped_bm25_query()
     test_detailed_knowledge_query_contract_defaults()
     test_retrieval_evaluation_metrics_are_deterministic()
     test_evaluation_mutations_lock_before_validation_and_require_lease()

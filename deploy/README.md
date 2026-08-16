@@ -40,7 +40,7 @@ Point `backend/.env` at the published endpoints
 
 | Service | Image / build | Command |
 |---|---|---|
-| `db` | postgres:17-alpine | — |
+| `db` | `deploy/dockerfiles/postgres.Dockerfile`（PostgreSQL 17 + `pg_search` 0.25.2） | BM25 keyword search |
 | `redis` | redis:7-alpine | — |
 | `qdrant` | qdrant/qdrant:v1.19.0 | vector database |
 | `api` | `deploy/dockerfiles/backend.Dockerfile` | uvicorn |
@@ -154,6 +154,21 @@ Run migrations before first start or after upgrading:
 ```bash
 docker compose -f deploy/docker-compose.yml run --rm api alembic upgrade head
 ```
+
+Knowledge BM25 migrations require `pg_search` 0.25.2. The bundled database
+image installs the pinned PostgreSQL 17 `pg_search` packages for amd64 and arm64,
+verifies their release checksums, and installs the required `pgvector` package.
+External PostgreSQL deployments must install both extensions and allow the
+migration user to run `CREATE EXTENSION vector` and `CREATE EXTENSION pg_search`.
+They must also add `pg_search` to `shared_preload_libraries` and restart
+PostgreSQL before running Alembic; the bundled image applies that startup option.
+Back up the database before replacing an existing `postgres:17-alpine`
+container, rebuild and start `db`, then run Alembic. Building the first BM25
+index can block writes to the chunk table, so schedule this migration in a
+maintenance window for large knowledge bases. To roll back, restore the prior
+application version and downgrade Alembic so its native GIN query path and index
+match again; the installed extension may remain unused. `pg_search` Community is
+distributed under AGPLv3, so deployments must account for its license.
 
 For this migration, upgrade PostgreSQL first, roll all API and worker instances
 to the new image, and only then create SSE/stdio registrations. Existing stdio

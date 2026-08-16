@@ -1,6 +1,9 @@
 services:
   db:
-    image: postgres:17-alpine
+    image: nexaflow/postgres-pg-search:0.25.2
+    build:
+      context: ..
+      dockerfile: deploy/dockerfiles/postgres.Dockerfile
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
       POSTGRES_USER: ${POSTGRES_USER:-nexaflow}

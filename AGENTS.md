@@ -75,6 +75,13 @@ Correctness, safety, evidence, and validation take priority over speed.
   passwords must come from env values, not Python constants.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
+- Knowledge keyword retrieval uses `pg_search` 0.25.2 BM25 over
+  `knowledge_document_chunks.search_text` with the Jieba tokenizer. The bundled
+  PostgreSQL 17 image installs that pinned extension plus its `pgvector`
+  dependency; external PostgreSQL deployments must install both before running
+  migrations and preload `pg_search` before PostgreSQL starts. Qdrant remains
+  the application vector store. Do not silently fall back to `ts_rank_cd`,
+  because that changes the declared ranking semantics.
 - Regression suites live in `backend/tests/` and run from `backend/` with
   `uv run python -m tests.<suite>`.
 - Knowledge parsing, indexing, and durable deletion cleanup run through Celery
