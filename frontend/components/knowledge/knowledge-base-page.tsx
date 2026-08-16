@@ -25,7 +25,6 @@ import {
   SearchIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
-  TargetIcon,
   Trash2Icon,
   UploadIcon,
   UsersIcon,
@@ -35,6 +34,7 @@ import type { MeResponse } from "@/lib/api/auth"
 import type { AppNotification } from "@/lib/notifications"
 import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import {
   CARD_BATCH_SIZE,
@@ -71,7 +71,6 @@ import {
   listKnowledgeDocuments,
   listKnowledgeTasks,
   parseKnowledgeDocument,
-  queryKnowledgeBase,
   rebuildKnowledgeIndex,
   retryKnowledgeTask,
   revokeKnowledgeBasePermission,
@@ -85,7 +84,6 @@ import type {
   KnowledgeBaseListItem,
   KnowledgeDocument,
   KnowledgeModelTestResult,
-  KnowledgeQueryHit,
   KnowledgeTask,
   ResourcePermission,
 } from "@/lib/api/knowledge"
@@ -104,8 +102,8 @@ import {
   type KnowledgeUploadStep,
 } from "@/lib/knowledge-upload-route"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
-import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
+import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
 import {
   getDocumentFileIcon,
   getDocumentFileIconColor,
@@ -175,6 +173,92 @@ export function paginateDocuments<T>(
 
 export function documentPageCount(total: number, pageSize: number): number {
   return Math.max(1, Math.ceil(total / pageSize))
+}
+
+function PaginationFooter({
+  total,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  total: number
+  page: number
+  pageSize: DocumentPageSize
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: DocumentPageSize) => void
+}) {
+  const { t } = useLanguage()
+  const totalPages = documentPageCount(total, pageSize)
+  const currentPage = Math.min(page, totalPages)
+
+  React.useEffect(() => {
+    if (page > totalPages) onPageChange(totalPages)
+  }, [onPageChange, page, totalPages])
+
+  if (!total) {
+    return null
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground">
+          {t("共 {value} 条", { value: total })}
+        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 justify-between gap-2"
+            >
+              <span>{t("每页 {value} 条", { value: pageSize })}</span>
+              <ChevronDownIcon className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-36">
+            {DOCUMENT_PAGE_SIZES.map((option) => (
+              <DropdownMenuItem
+                key={option}
+                className="justify-between"
+                onSelect={() => onPageSizeChange(option)}
+              >
+                {t("每页 {value} 条", { value: option })}
+                {pageSize === option ? (
+                  <CheckIcon className="size-3.5 text-primary" />
+                ) : null}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={currentPage <= 1}
+          onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+        >
+          {t("上一页")}
+        </Button>
+        <span className="text-muted-foreground">
+          {currentPage} / {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={currentPage >= totalPages}
+          onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+        >
+          {t("下一页")}
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 const SMART_CHUNK_SIZE = 1200
@@ -269,6 +353,7 @@ function KnowledgeBasePageContent({
   const activeKnowledgeBaseId = params.id ?? null
   const Icon = DatabaseIcon
   const { language, t } = useLanguage()
+  const [confirmAction, confirmDialog] = useConfirmDialog()
   const locale = languageLocales[language]
   const [knowledgeBases, setKnowledgeBases] = React.useState<
     KnowledgeBaseListItem[]
@@ -282,9 +367,6 @@ function KnowledgeBasePageContent({
   const [knowledgeTasks, setKnowledgeTasks] = React.useState<KnowledgeTask[]>(
     []
   )
-  const [queryText, setQueryText] = React.useState("")
-  const [queryLimit, setQueryLimit] = React.useState(5)
-  const [queryHits, setQueryHits] = React.useState<KnowledgeQueryHit[]>([])
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<
     string[]
   >([])
@@ -295,6 +377,9 @@ function KnowledgeBasePageContent({
   const [documentSearch, setDocumentSearch] = React.useState("")
   const [documentPage, setDocumentPage] = React.useState(1)
   const [documentPageSize, setDocumentPageSize] =
+    React.useState<DocumentPageSize>(10)
+  const [knowledgeTaskPage, setKnowledgeTaskPage] = React.useState(1)
+  const [knowledgeTaskPageSize, setKnowledgeTaskPageSize] =
     React.useState<DocumentPageSize>(10)
   const [documentSortKey, setDocumentSortKey] =
     React.useState<DocumentSortKey>("created_at")
@@ -338,7 +423,6 @@ function KnowledgeBasePageContent({
     SMART_CLEANING_RULES
   )
   const [isRetryingTask, setIsRetryingTask] = React.useState(false)
-  const [isQuerying, setIsQuerying] = React.useState(false)
   const [isTestingModels, setIsTestingModels] = React.useState(false)
   const [modelTestResult, setModelTestResult] =
     React.useState<KnowledgeModelTestResult | null>(null)
@@ -414,9 +498,10 @@ function KnowledgeBasePageContent({
     documentPage,
     documentPageSize,
   )
-  const documentTotalPages = documentPageCount(
-    filteredDocuments.length,
-    documentPageSize,
+  const visibleKnowledgeTasks = paginateDocuments(
+    knowledgeTasks,
+    knowledgeTaskPage,
+    knowledgeTaskPageSize,
   )
   const isAllFilteredDocumentsSelected =
     visibleDocuments.length > 0 &&
@@ -631,7 +716,8 @@ function KnowledgeBasePageContent({
       const path = knowledgeUploadSegmentPath(
         selectedKnowledgeBaseId,
         routeState.documentIds,
-        routeState.parseSettings
+        routeState.parseSettings,
+        routeState.importMode
       )
       router.replace(path)
     },
@@ -670,10 +756,6 @@ function KnowledgeBasePageContent({
     )
   }
 
-  function formatDistance(distance: number | null) {
-    return distance === null ? "-" : distance.toFixed(4)
-  }
-
   function resetForm() {
     setForm({
       name: "",
@@ -696,8 +778,6 @@ function KnowledgeBasePageContent({
     setDocumentSearch("")
     setSelectedDocumentIds([])
     setKnowledgeTasks([])
-    setQueryHits([])
-    setQueryText("")
     router.push(`/app/knowledge/${knowledgeBase.id}`)
   }
 
@@ -812,9 +892,13 @@ function KnowledgeBasePageContent({
     }
 
     if (
-      !window.confirm(
-        t("永久删除 {name}？此操作不可恢复。", { name: knowledgeBase.name })
-      )
+      !(await confirmAction({
+        description: t("永久删除 {name}？此操作不可恢复。", {
+          name: knowledgeBase.name,
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -957,11 +1041,13 @@ function KnowledgeBasePageContent({
     }
 
     if (
-      !window.confirm(
-        t("永久删除选中的 {value} 个文档？此操作不可恢复。", {
+      !(await confirmAction({
+        description: t("永久删除选中的 {value} 个文档？此操作不可恢复。", {
           value: selectedDocuments.length,
-        })
-      )
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -1038,42 +1124,19 @@ function KnowledgeBasePageContent({
     }
   }
 
-  async function handleQueryKnowledgeBase(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!selectedWorkspaceId || !selectedKnowledgeBase) {
-      return
-    }
-
-    const query = queryText.trim()
-    if (!query) {
-      return
-    }
-
-    setIsQuerying(true)
-    try {
-      setQueryHits(
-        await queryKnowledgeBase(token, selectedWorkspaceId, selectedKnowledgeBase.id, {
-          query,
-          limit: queryLimit,
-        })
-      )
-    } catch (error) {
-      setQueryHits([])
-      reportError(error)
-    } finally {
-      setIsQuerying(false)
-    }
-  }
-
   async function handleDeleteDocument(document: KnowledgeDocument) {
     if (!selectedWorkspaceId || !selectedKnowledgeBase) {
       return
     }
 
     if (
-      !window.confirm(
-        t("永久删除 {name}？此操作不可恢复。", { name: document.filename })
-      )
+      !(await confirmAction({
+        description: t("永久删除 {name}？此操作不可恢复。", {
+          name: document.filename,
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -1188,7 +1251,7 @@ function KnowledgeBasePageContent({
   }> = [
     { key: "documents", label: t("文档"), icon: FileTextIcon },
     { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
-    { key: "hit-test", label: t("命中测试"), icon: TargetIcon },
+    { key: "evaluation", label: t("检索评测"), icon: FlaskConicalIcon },
     { key: "settings", label: t("设置"), icon: SettingsIcon },
   ]
 
@@ -1694,78 +1757,16 @@ function KnowledgeBasePageContent({
                       )}
                     </div>
                   </div>
-                  {filteredDocuments.length > 0 ? (
-                    <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground">
-                          {t("共 {value} 条", { value: filteredDocuments.length })}
-                        </span>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 justify-between gap-2"
-                            >
-                              <span>
-                                {t("每页 {value} 条", {
-                                  value: documentPageSize,
-                                })}
-                              </span>
-                              <ChevronDownIcon className="size-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start" className="w-36">
-                            {DOCUMENT_PAGE_SIZES.map((pageSize) => (
-                              <DropdownMenuItem
-                                key={pageSize}
-                                className="justify-between"
-                                onSelect={() => {
-                                  setDocumentPageSize(pageSize)
-                                  setDocumentPage(1)
-                                }}
-                              >
-                                {t("每页 {value} 条", { value: pageSize })}
-                                {documentPageSize === pageSize ? (
-                                  <CheckIcon className="size-3.5 text-primary" />
-                                ) : null}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={documentPage <= 1}
-                          onClick={() =>
-                            setDocumentPage((current) => Math.max(1, current - 1))
-                          }
-                        >
-                          {t("上一页")}
-                        </Button>
-                        <span className="text-muted-foreground">
-                          {documentPage} / {documentTotalPages}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={documentPage >= documentTotalPages}
-                          onClick={() =>
-                            setDocumentPage((current) =>
-                              Math.min(documentTotalPages, current + 1)
-                            )
-                          }
-                        >
-                          {t("下一页")}
-                        </Button>
-                      </div>
-                    </div>
-                  ) : null}
+                  <PaginationFooter
+                    total={filteredDocuments.length}
+                    page={documentPage}
+                    pageSize={documentPageSize}
+                    onPageChange={setDocumentPage}
+                    onPageSizeChange={(pageSize) => {
+                      setDocumentPageSize(pageSize)
+                      setDocumentPage(1)
+                    }}
+                  />
                 </div>
               </div>
             ) : null}
@@ -2038,8 +2039,8 @@ function KnowledgeBasePageContent({
                       <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
                         <LoaderCircleIcon className="animate-spin" />
                       </div>
-                    ) : knowledgeTasks.length ? (
-                      knowledgeTasks.map((task) => (
+                    ) : visibleKnowledgeTasks.length ? (
+                      visibleKnowledgeTasks.map((task) => (
                         <div
                           key={task.id}
                           className="grid min-h-16 grid-cols-[120px_120px_140px_120px_minmax(220px,1fr)_120px] items-center border-b px-4 py-3 text-sm last:border-b-0"
@@ -2094,94 +2095,29 @@ function KnowledgeBasePageContent({
                       </div>
                     )}
                   </div>
+                  <PaginationFooter
+                    total={knowledgeTasks.length}
+                    page={knowledgeTaskPage}
+                    pageSize={knowledgeTaskPageSize}
+                    onPageChange={setKnowledgeTaskPage}
+                    onPageSizeChange={(pageSize) => {
+                      setKnowledgeTaskPageSize(pageSize)
+                      setKnowledgeTaskPage(1)
+                    }}
+                  />
                 </div>
               </div>
             ) : null}
 
-            {activeDetailTab === "hit-test" ? (
-              <div className="p-4 lg:p-5">
-                <div className="max-w-4xl">
-                  <h1 className="text-xl font-semibold">{t("命中测试")}</h1>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t("使用当前知识库的向量索引和权威切片状态验证召回结果")}
-                  </p>
-
-                  <form
-                    className="mt-4 rounded-lg border bg-background p-4"
-                    onSubmit={(event) => void handleQueryKnowledgeBase(event)}
-                  >
-                    <label className="text-sm font-medium" htmlFor="query-text">
-                      {t("查询内容")}
-                    </label>
-                    <textarea
-                      id="query-text"
-                      value={queryText}
-                      onChange={(event) => setQueryText(event.target.value)}
-                      className="mt-2 min-h-28 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder={t("输入要测试的检索问题")}
-                    />
-                    <div className="mt-3 flex flex-wrap items-end gap-3">
-                      <label className="grid gap-1 text-sm font-medium">
-                        {t("返回数量")}
-                        <Input
-                          type="number"
-                          min={1}
-                          max={20}
-                          value={queryLimit}
-                          onChange={(event) =>
-                            setQueryLimit(
-                              Math.min(
-                                20,
-                                Math.max(1, Number(event.target.value) || 1)
-                              )
-                            )
-                          }
-                          className="w-28"
-                        />
-                      </label>
-                      <Button
-                        type="submit"
-                        disabled={!queryText.trim() || isQuerying}
-                      >
-                        {isQuerying ? (
-                          <LoaderCircleIcon
-                            className="animate-spin"
-                            data-icon="inline-start"
-                          />
-                        ) : (
-                          <TargetIcon data-icon="inline-start" />
-                        )}
-                        {t("测试召回")}
-                      </Button>
-                    </div>
-                  </form>
-
-                  <div className="mt-4 rounded-lg border bg-background">
-                    <div className="border-b px-4 py-3">
-                      <h2 className="text-sm font-semibold">{t("召回结果")}</h2>
-                    </div>
-                    {queryHits.length ? (
-                      <div className="divide-y">
-                        {queryHits.map((hit) => (
-                          <article key={hit.chunk_id} className="p-4">
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                              <span className="font-medium text-foreground">
-                                {hit.document_filename} / #{hit.chunk_index + 1}
-                              </span>
-                              <span>distance {formatDistance(hit.distance)}</span>
-                            </div>
-                            <MarkdownContent content={hit.content} className="mt-3" />
-                          </article>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex min-h-40 items-center justify-center px-4 text-sm text-muted-foreground">
-                        {t("暂无测试结果")}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+            {activeDetailTab === "evaluation" ? (
+              <KnowledgeEvaluation
+                token={token}
+                workspaceId={selectedKnowledgeBase.workspace_id}
+                knowledgeBaseId={selectedKnowledgeBase.id}
+                documents={documents}
+                canEdit={canEditDocuments}
+                reportError={reportError}
+              />
             ) : null}
 
             {activeDetailTab === "settings" ? (
@@ -2348,6 +2284,7 @@ function KnowledgeBasePageContent({
           handleGrantPermission={handleGrantPermission}
           handleRevokePermission={handleRevokePermission}
         />
+        {confirmDialog}
       </>
     )
   }
@@ -2604,6 +2541,7 @@ function KnowledgeBasePageContent({
         handleGrantPermission={handleGrantPermission}
         handleRevokePermission={handleRevokePermission}
       />
+      {confirmDialog}
     </>
   )
 }

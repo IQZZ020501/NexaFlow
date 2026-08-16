@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.schemas.user import UserResponse
 
@@ -78,9 +78,13 @@ class KnowledgeAttachmentResponse(BaseModel):
     updated_at: datetime
 
 
+KnowledgeImportMode = Literal["document", "qa"]
+
+
 class KnowledgeDocumentCreateRequest(BaseModel):
     attachment_ids: list[str] = Field(min_length=1, max_length=30)
     staged: bool = True
+    import_mode: KnowledgeImportMode = "document"
 
 
 class KnowledgeDocumentResponse(BaseModel):
@@ -135,6 +139,10 @@ class KnowledgeDocumentChunkResponse(BaseModel):
     start_offset: int | None = None
     end_offset: int | None = None
     content: str
+    kind: Literal["document", "qa"] = "document"
+    question: str | None = None
+    source: str | None = None
+    row_number: int | None = None
     char_count: int
     token_count: int
     vector_id: str | None = None
@@ -176,11 +184,15 @@ class KnowledgeTaskResponse(BaseModel):
 
 
 class KnowledgeQueryRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=2000)
+    query: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=2000),
+    ]
     limit: int = Field(default=5, ge=1, le=20)
     search_mode: Literal["embedding", "keywords", "blend"] = "blend"
-    # 相似度阈值（余弦距离，0–2，保留距离不超过该值的命中）
-    similarity: float | None = Field(default=None, ge=0, le=2)
+    # 归一化余弦相似度阈值（0–1，保留相似度不低于该值的命中）
+    similarity: float | None = Field(default=None, ge=0, le=1)
+    include_references: bool = False
 
 
 class KnowledgeQueryHitResponse(BaseModel):
@@ -193,3 +205,90 @@ class KnowledgeQueryHitResponse(BaseModel):
     chunk_index: int
     content: str
     distance: float | None = None
+    similarity: float | None = Field(default=None, ge=0, le=1)
+    kind: Literal["document", "qa"] = "document"
+    question: str | None = None
+    source: str | None = None
+    sources: list[str] = Field(default_factory=list, max_length=3)
+    reference_hops: int = Field(default=0, ge=0, le=1)
+    rerank_score: float | None = None
+
+
+class KnowledgeRetrievalTraceResponse(BaseModel):
+    trace_id: str
+    search_mode: Literal["embedding", "keywords", "blend"]
+    limit: int = Field(ge=1, le=20)
+    min_similarity: float | None = Field(default=None, ge=0, le=1)
+    max_distance: float | None = Field(default=None, ge=0, le=2)
+    vector_candidates: int = Field(ge=0)
+    keyword_candidates: int = Field(ge=0)
+    reference_candidates: int = Field(ge=0)
+    fused_candidates: int = Field(ge=0)
+    rerank_status: Literal["not_configured", "applied", "fallback", "skipped"]
+    returned_hits: int = Field(ge=0)
+    duration_ms: float = Field(ge=0)
+    stage_duration_ms: dict[str, float] = Field(max_length=8)
+
+
+class KnowledgeQueryInspectResponse(BaseModel):
+    hits: list[KnowledgeQueryHitResponse]
+    trace: KnowledgeRetrievalTraceResponse
+
+
+KnowledgeEvaluationId = Annotated[str, Field(min_length=1, max_length=36)]
+
+
+class KnowledgeEvaluationCaseCreateRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    expected_document_ids: list[KnowledgeEvaluationId] = Field(
+        min_length=1,
+        max_length=20,
+    )
+
+
+class KnowledgeEvaluationCaseResponse(BaseModel):
+    id: str
+    workspace_id: str
+    knowledge_base_id: str
+    question: str
+    expected_document_ids: list[str]
+    created_by_user_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeEvaluationRunRequest(BaseModel):
+    case_ids: list[KnowledgeEvaluationId] = Field(min_length=1, max_length=200)
+    limit: int = Field(default=5, ge=1, le=20)
+    search_mode: Literal["embedding", "keywords", "blend"] = "blend"
+    similarity: float | None = Field(default=None, ge=0, le=1)
+    include_references: bool = True
+
+
+class KnowledgeEvaluationResultResponse(BaseModel):
+    id: str
+    case_id: str
+    question: str
+    returned_document_ids: list[str]
+    returned_chunk_ids: list[str]
+    hit_at_k: int
+    recall_at_k: float
+    reciprocal_rank: float
+    ndcg_at_k: float
+    latency_ms: float
+    trace: dict[str, Any]
+    error: str | None
+    created_at: datetime
+
+
+class KnowledgeEvaluationSummaryResponse(BaseModel):
+    task: KnowledgeTaskResponse
+    count: int
+    failed_count: int
+    mean_hit_at_k: float
+    mean_recall_at_k: float
+    mean_reciprocal_rank: float
+    mean_ndcg_at_k: float
+    p50_latency_ms: float
+    p95_latency_ms: float
+    results: list[KnowledgeEvaluationResultResponse]

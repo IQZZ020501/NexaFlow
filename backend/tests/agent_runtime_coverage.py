@@ -51,6 +51,11 @@ from app.infrastructure.repositories import mcp as mcp_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.model_utils import utc_now
+from app.schemas.knowledge import (
+    KnowledgeQueryHitResponse,
+    KnowledgeQueryInspectResponse,
+    KnowledgeRetrievalTraceResponse,
+)
 from app.shareddomain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,
@@ -77,6 +82,46 @@ from app.shareddomain.tools.services import (
 from mcp.types import Tool as McpTool
 
 MODEL_BASE_URL = "http://127.0.0.1:9"
+
+
+def knowledge_inspect_result(
+    knowledge_base: KnowledgeBase,
+    payload,
+    hits: list[KnowledgeQueryHitResponse] | None = None,
+    rerank_status: str | None = None,
+) -> KnowledgeQueryInspectResponse:
+    resolved_hits = hits or []
+    resolved_status = rerank_status or (
+        "applied"
+        if knowledge_base.reranker_model_id is not None and resolved_hits
+        else (
+            "skipped"
+            if knowledge_base.reranker_model_id is not None
+            else "not_configured"
+        )
+    )
+    return KnowledgeQueryInspectResponse(
+        hits=resolved_hits,
+        trace=KnowledgeRetrievalTraceResponse(
+            trace_id=f"trace-{knowledge_base.id}",
+            search_mode=payload.search_mode,
+            limit=payload.limit,
+            min_similarity=payload.similarity,
+            max_distance=(
+                2 * (1 - payload.similarity)
+                if payload.similarity is not None
+                else None
+            ),
+            vector_candidates=len(resolved_hits),
+            keyword_candidates=0,
+            reference_candidates=0,
+            fused_candidates=len(resolved_hits),
+            rerank_status=resolved_status,
+            returned_hits=len(resolved_hits),
+            duration_ms=0,
+            stage_duration_ms={},
+        ),
+    )
 
 
 class AgentModelHandler(BaseHTTPRequestHandler):
@@ -1569,8 +1614,6 @@ async def assert_knowledge_tool_paths(
         build_knowledge_search_tool,
         describe_knowledge_sources,
     )
-    from app.schemas.knowledge import KnowledgeQueryHitResponse
-
     actor = await get_admin_actor()
 
     # empty source description (agent_tools.py:73)
@@ -1613,22 +1656,24 @@ async def assert_knowledge_tool_paths(
             distance=0.2,
         )
 
-    async def succeed_query(_db, knowledge_base, _payload, _settings):
-        return [hit_for(knowledge_base.id)]
+    async def succeed_retrieve(_db, knowledge_base, payload, _settings):
+        assert payload.include_references is True
+        return knowledge_inspect_result(
+            knowledge_base,
+            payload,
+            [hit_for(knowledge_base.id)],
+        )
 
-    async def fail_rerank_query(_db, knowledge_base, _payload, _settings):
+    async def fail_retrieve(_db, knowledge_base, _payload, _settings):
         raise HTTPException(status_code=503, detail="source unavailable")
 
-    async def empty_query(_db, _kb, _payload, _settings):
-        return []
+    async def empty_retrieve(_db, knowledge_base, payload, _settings):
+        return knowledge_inspect_result(knowledge_base, payload)
 
-    query_calls: list[str] = []
-    original_query = agent_tools.query_knowledge_base
-    original_build_reranker = agent_tools.build_reranker
-    original_get_knowledge_model = agent_tools.get_knowledge_model
+    original_retrieve = agent_tools.retrieve_knowledge_base
     original_input = agent_tools.KnowledgeSearchInput
     try:
-        agent_tools.query_knowledge_base = succeed_query
+        agent_tools.retrieve_knowledge_base = succeed_retrieve
         tool = build_knowledge_search_tool(
             [base],
             workspace_id,
@@ -1662,18 +1707,7 @@ async def assert_knowledge_tool_paths(
         assert invalid.is_error and invalid.summary == "Invalid search parameters."
         agent_tools.KnowledgeSearchInput = original_input
 
-        # happy path with reranker (172, 216-243, 254, 259-260)
-        reranker_calls = {"count": 0}
-
-        class FakeReranker:
-            def rerank(self, _query: str, _docs: list[str]) -> list[dict]:
-                reranker_calls["count"] += 1
-                return [
-                    {"index": 1, "relevance_score": 0.9},
-                    {"index": 0, "relevance_score": 0.4},
-                ]
-
-        agent_tools.build_reranker = lambda _settings, _model: FakeReranker()
+        # Detailed retrieval owns reranking; Agent consumes the applied status.
         rerank_tool = build_knowledge_search_tool(
             [rerank_base],
             workspace_id,
@@ -1684,45 +1718,38 @@ async def assert_knowledge_tool_paths(
         found = await rerank_tool.ainvoke({"query": "release", "limit": 2})
         assert not found.is_error
         assert found.output["evidence_status"] == "found"
-        assert reranker_calls["count"] == 1
         assert found.output["retrieval_stats"][0]["reranked"] is True
+        assert found.output["retrieval_stats"][0]["rerank_status"] == "applied"
         assert found.evidence_ids == frozenset({f"chunk-{rerank_kb_id}"})
 
-        # reranker provider failure falls back to unreranked hits (238-239)
-        def failing_reranker(_settings, _model):
-            class Exploding:
-                def rerank(self, _query: str, _docs: list[str]) -> list[dict]:
-                    raise agent_tools.ModelProviderError("rerank down")
+        # Provider fallback is reported by detailed retrieval without a second pass.
+        async def fallback_retrieve(_db, knowledge_base, payload, _settings):
+            return knowledge_inspect_result(
+                knowledge_base,
+                payload,
+                [hit_for(knowledge_base.id)],
+                "fallback",
+            )
 
-            return Exploding()
-
-        agent_tools.build_reranker = failing_reranker
+        agent_tools.retrieve_knowledge_base = fallback_retrieve
         fallback = await rerank_tool.ainvoke({"query": "release", "limit": 2})
         assert not fallback.is_error
-        assert fallback.output["retrieval_stats"][0]["reranked"] is True
+        assert fallback.output["retrieval_stats"][0]["reranked"] is False
+        assert fallback.output["retrieval_stats"][0]["rerank_status"] == "fallback"
         assert len(fallback.output["hits"]) == 1
 
-        # reranker model lookup failure (216-217, 223-224)
-        async def missing_reranker_model(_db, _workspace_id, _model_id, _kind):
-            raise HTTPException(status_code=404, detail="model gone")
-
-        agent_tools.get_knowledge_model = missing_reranker_model
-        agent_tools.build_reranker = lambda _settings, _model: FakeReranker()
-        fallback = await rerank_tool.ainvoke({"query": "release", "limit": 2})
-        assert len(fallback.output["hits"]) == 1
-
-        # all sources fail -> unavailable (296-297)
-        agent_tools.query_knowledge_base = fail_rerank_query
+        # all sources fail -> unavailable
+        agent_tools.retrieve_knowledge_base = fail_retrieve
         unavailable = await tool.ainvoke({"query": "release", "limit": 2})
         assert unavailable.is_error
         assert unavailable.output["evidence_status"] == "unavailable"
 
-        # mixed failure -> partial_failure (298-299): one source errors, the
+        # mixed failure -> partial_failure: one source errors, the
         # healthy one returns no hits, so no evidence is available.
-        async def partial_query(_db, knowledge_base, _payload, _settings):
+        async def partial_retrieve(_db, knowledge_base, payload, _settings):
             if knowledge_base.id == rerank_kb_id:
                 raise HTTPException(status_code=503, detail="source unavailable")
-            return []
+            return knowledge_inspect_result(knowledge_base, payload)
 
         mixed_tool = build_knowledge_search_tool(
             [base, rerank_base],
@@ -1731,23 +1758,23 @@ async def assert_knowledge_tool_paths(
             "admin",
             settings,
         )
-        agent_tools.query_knowledge_base = partial_query
+        agent_tools.retrieve_knowledge_base = partial_retrieve
         partial = await mixed_tool.ainvoke({"query": "release", "limit": 2})
         assert partial.output["evidence_status"] == "partial_failure"
         assert partial.is_error
         failed_stats = partial.output["retrieval_stats"]
         assert any(entry["status"] == "unavailable" for entry in failed_stats)
 
-        # no hits at all -> not_found (301)
-        agent_tools.query_knowledge_base = empty_query
+        # no hits at all -> not_found
+        agent_tools.retrieve_knowledge_base = empty_retrieve
         missing = await tool.ainvoke({"query": "nothing", "limit": 2})
         assert not missing.is_error
         assert missing.output["evidence_status"] == "not_found"
         assert missing.output["hits"] == []
 
         # selection stops at the requested limit (269, 271)
-        async def two_hits_query(_db, knowledge_base, _payload, _settings):
-            return [
+        async def two_hits_retrieve(_db, knowledge_base, payload, _settings):
+            hits = [
                 KnowledgeQueryHitResponse(
                     chunk_id=f"chunk-{knowledge_base.id}-0",
                     document_id="d",
@@ -1765,8 +1792,9 @@ async def assert_knowledge_tool_paths(
                     distance=0.2,
                 ),
             ]
+            return knowledge_inspect_result(knowledge_base, payload, hits)
 
-        agent_tools.query_knowledge_base = two_hits_query
+        agent_tools.retrieve_knowledge_base = two_hits_retrieve
         select_tool = build_knowledge_search_tool(
             [base],
             workspace_id,
@@ -1778,9 +1806,7 @@ async def assert_knowledge_tool_paths(
         assert len(selected.output["hits"]) == 2
         assert selected.output["evidence_status"] == "found"
     finally:
-        agent_tools.query_knowledge_base = original_query
-        agent_tools.build_reranker = original_build_reranker
-        agent_tools.get_knowledge_model = original_get_knowledge_model
+        agent_tools.retrieve_knowledge_base = original_retrieve
         agent_tools.KnowledgeSearchInput = original_input
 
     # no accessible knowledge bases (154): member user without KB access
@@ -2681,12 +2707,12 @@ async def assert_create_agent_run_paths(
     holder: SimpleNamespace,
 ) -> None:
     actor = await get_admin_actor()
-    original_query = agent_tools.query_knowledge_base
+    original_retrieve = agent_tools.retrieve_knowledge_base
 
-    async def no_hits_query(_db, _kb, _payload, _settings):
-        return []
+    async def no_hits_retrieve(_db, knowledge_base, payload, _settings):
+        return knowledge_inspect_result(knowledge_base, payload)
 
-    agent_tools.query_knowledge_base = no_hits_query
+    agent_tools.retrieve_knowledge_base = no_hits_retrieve
     try:
         holder.model = RuntimeModelStub([ok_completion("Created answer.")])
         async with get_session_factory()() as db:
@@ -2760,7 +2786,7 @@ async def assert_create_agent_run_paths(
             stored = await agent_repository.get_agent_run_by_id(verify_db, queued.id)
         assert stored is not None and stored.goal == "queued goal"
     finally:
-        agent_tools.query_knowledge_base = original_query
+        agent_tools.retrieve_knowledge_base = original_retrieve
 
 
 async def assert_durable_execution_paths(
@@ -2779,14 +2805,14 @@ async def assert_durable_execution_paths(
         await agent_repository.save_agent_run(db, run)
         await db.commit()
 
-    original_query = agent_tools.query_knowledge_base
+    original_retrieve = agent_tools.retrieve_knowledge_base
     query_calls: list[str] = []
 
-    async def fake_query(_db, _kb, _payload, _settings):
-        query_calls.append(_payload.query)
-        return []
+    async def fake_retrieve(_db, knowledge_base, payload, _settings):
+        query_calls.append(payload.query)
+        return knowledge_inspect_result(knowledge_base, payload)
 
-    agent_tools.query_knowledge_base = fake_query
+    agent_tools.retrieve_knowledge_base = fake_retrieve
     holder.model = RuntimeModelStub([ok_completion("Happy answer.")])
     try:
         outcome = await agent_executor.run_durable_agent_run(
@@ -2795,7 +2821,7 @@ async def assert_durable_execution_paths(
             worker_task_id="worker-happy",
         )
     finally:
-        agent_tools.query_knowledge_base = original_query
+        agent_tools.retrieve_knowledge_base = original_retrieve
     assert outcome == agent_executor.RUN_FINISHED
     assert query_calls == ["Happy durable run"]
     async with get_session_factory()() as db:

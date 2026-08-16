@@ -16,6 +16,8 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { FilterDropdown } from "@/components/app/filter-dropdown"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import {
   Dialog,
   DialogContent,
@@ -187,6 +189,7 @@ export function buildMcpServerCreatePayload(
 export function McpToolsPage() {
   const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
+  const [confirmAction, confirmDialog] = useConfirmDialog()
   const [servers, setServers] = React.useState<McpServer[]>([])
   const [serversHasMore, setServersHasMore] = React.useState(true)
   const [isServersLoadingMore, setIsServersLoadingMore] =
@@ -371,9 +374,13 @@ export function McpToolsPage() {
       !token ||
       !selectedWorkspaceId ||
       busyServerId ||
-      !window.confirm(
-        t("确定删除 MCP Server“{name}”吗？", { name: server.name })
-      )
+      !(await confirmAction({
+        description: t("确定删除 MCP Server“{name}”吗？", {
+          name: server.name,
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -392,31 +399,23 @@ export function McpToolsPage() {
   async function handlePolicyChange(
     server: McpServer,
     toolName: string,
-    mode: McpToolPolicyMode,
-    select: HTMLSelectElement
+    mode: McpToolPolicyMode
   ) {
-    const restore = () => {
-      select.value =
-        server.tools.find((tool) => tool.name === toolName)?.policy_mode ??
-        "read_only"
-    }
     if (!token || !selectedWorkspaceId || busyServerId) {
-      restore()
-      return
-    }
-    if (
-      mode === "read_only" &&
-      !window.confirm(
-        t("确认将工具“{name}”标记为只读并允许自动执行吗？", {
-          name: toolName,
-        })
-      )
-    ) {
-      restore()
       return
     }
     setBusyServerId(server.id)
     try {
+      if (
+        mode === "read_only" &&
+        !(await confirmAction({
+          description: t("确认将工具“{name}”标记为只读并允许自动执行吗？", {
+            name: toolName,
+          }),
+        }))
+      ) {
+        return
+      }
       const policy = await updateMcpToolPolicy(
         token,
         selectedWorkspaceId,
@@ -589,29 +588,30 @@ export function McpToolsPage() {
                             {tool.name}
                           </p>
                           {canManage ? (
-                            <select
+                            <FilterDropdown
                               value={tool.policy_mode}
-                              className="h-8 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                              aria-label={t("工具执行策略")}
+                              className="h-8 min-w-32 px-2 text-xs"
+                              ariaLabel={t("工具执行策略")}
                               disabled={busyServerId !== null}
-                              onChange={(event) =>
+                              options={[
+                                {
+                                  value: "approval_required",
+                                  label: t("每次调用前审批"),
+                                },
+                                {
+                                  value: "read_only",
+                                  label: t("只读自动执行"),
+                                },
+                                { value: "disabled", label: t("禁用") },
+                              ]}
+                              onChange={(value) =>
                                 void handlePolicyChange(
                                   server,
                                   tool.name,
-                                  event.currentTarget
-                                    .value as McpToolPolicyMode,
-                                  event.currentTarget
+                                  value as McpToolPolicyMode,
                                 )
                               }
-                            >
-                              <option value="approval_required">
-                                {t("每次调用前审批")}
-                              </option>
-                              <option value="read_only">
-                                {t("只读自动执行")}
-                              </option>
-                              <option value="disabled">{t("禁用")}</option>
-                            </select>
+                            />
                           ) : (
                             <Badge variant="outline">
                               {t(
@@ -870,6 +870,7 @@ export function McpToolsPage() {
           </form>
         </DialogContent>
       </Dialog>
+      {confirmDialog}
     </>
   )
 }

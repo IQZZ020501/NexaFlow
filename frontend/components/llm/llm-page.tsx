@@ -31,6 +31,8 @@ import { getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
+import { FilterDropdown } from "@/components/app/filter-dropdown"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -189,6 +191,7 @@ const EMPTY_MODEL_FORM: ModelForm = {
 export function LlmPage() {
   const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
+  const [confirmAction, confirmDialog] = useConfirmDialog()
 
   const [providerCatalog, setProviderCatalog] = React.useState<
     ModelProviderCatalog[]
@@ -582,7 +585,13 @@ export function LlmPage() {
     if (!token || !selectedWorkspaceId) {
       return
     }
-    if (!window.confirm(t("删除模型 {value}？", { value: model.name }))) {
+    if (
+      !(await confirmAction({
+        description: t("删除模型 {value}？", { value: model.name }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
+    ) {
       return
     }
 
@@ -840,6 +849,7 @@ export function LlmPage() {
         onModelTypeChange={selectModelType}
         onSubmit={handleModelSubmit}
       />
+      {confirmDialog}
     </>
   )
 }
@@ -1100,22 +1110,50 @@ function ModelDialog({
 
             <Field>
               <FieldLabel htmlFor="base-model">{t("基础模型")}</FieldLabel>
-              <Input
-                id="base-model"
-                value={form.model_name}
-                onChange={(event) =>
-                  onFormChange({ ...form, model_name: event.target.value })
-                }
-                list="base-model-options"
-                placeholder={t("输入模型名")}
-                maxLength={160}
-                required
-              />
-              <datalist id="base-model-options">
-                {baseModels.map((model) => (
-                  <option key={model.name} value={model.name} />
-                ))}
-              </datalist>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                <Input
+                  id="base-model"
+                  value={form.model_name}
+                  onChange={(event) =>
+                    onFormChange({ ...form, model_name: event.target.value })
+                  }
+                  placeholder={t("输入模型名")}
+                  maxLength={160}
+                  required
+                />
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-lg"
+                      aria-label={t("基础模型")}
+                      disabled={!baseModels.length}
+                    >
+                      <ChevronDownIcon />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className="max-h-72 w-72 overflow-y-auto"
+                  >
+                    {baseModels.map((model) => (
+                      <DropdownMenuItem
+                        key={model.name}
+                        className="justify-between"
+                        onSelect={() =>
+                          onFormChange({ ...form, model_name: model.name })
+                        }
+                      >
+                        <span className="truncate">{model.name}</span>
+                        {model.name === form.model_name ? (
+                          <CircleCheckIcon className="text-primary" />
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
               <FieldDescription>
                 {isBaseModelsLoading
                   ? t("正在加载基础模型...")
@@ -1176,17 +1214,20 @@ function ModelDialog({
             {isEditing ? (
               <Field>
                 <FieldLabel htmlFor="model-status">{t("状态")}</FieldLabel>
-                <select
+                <FilterDropdown
                   id="model-status"
-                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  ariaLabel={t("状态")}
+                  className="h-9 px-3"
+                  modal={false}
                   value={form.status}
-                  onChange={(event) =>
-                    onFormChange({ ...form, status: event.target.value })
+                  options={[
+                    { value: "active", label: t("已启用") },
+                    { value: "disabled", label: t("已停用") },
+                  ]}
+                  onChange={(status) =>
+                    onFormChange({ ...form, status })
                   }
-                >
-                  <option value="active">{t("已启用")}</option>
-                  <option value="disabled">{t("已停用")}</option>
-                </select>
+                />
               </Field>
             ) : null}
           </FieldGroup>

@@ -111,6 +111,14 @@ function resetSession() {
   session.me = { user: adminUser, memberships: [{ workspace_id: WS, role: "admin" }] }
 }
 
+async function respondToConfirm(label: string) {
+  const dialog = await screen.findByRole("dialog", { name: "确认操作" })
+  fireEvent.click(within(dialog).getByRole("button", { name: label }))
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull(),
+  )
+}
+
 afterEach(() => {
   cleanup()
   notifications.length = 0
@@ -121,7 +129,6 @@ afterEach(() => {
   fetchHandler = () => jsonResponse([])
   globalThis.fetch = originalFetch
   installFetchStub()
-  window.confirm = () => false
   resetSession()
 })
 
@@ -581,9 +588,9 @@ describe("KnowledgeBasePage list view", () => {
     renderPage(<KnowledgeBasePage />)
     await waitFor(() => expect(screen.getByText("KB Alpha")).toBeTruthy())
 
-    window.confirm = () => true
     openMenu(within(cardElement("KB Alpha")).getByTitle("更多"))
     fireEvent.click(await screen.findByText("永久删除知识库"))
+    await respondToConfirm("删除")
 
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
@@ -769,14 +776,14 @@ describe("KnowledgeBasePage list view", () => {
     renderPage(<KnowledgeBasePage />)
     await waitFor(() => expect(screen.getByText("KB Alpha")).toBeTruthy())
 
-    window.confirm = () => false
     openMenu(within(cardElement("KB Alpha")).getByTitle("更多"))
     fireEvent.click(await screen.findByText("永久删除知识库"))
-    await waitFor(() => expect(deletes.length).toBe(0))
+    await respondToConfirm("取消")
+    expect(deletes).toHaveLength(0)
 
-    window.confirm = () => true
     openMenu(within(cardElement("KB Alpha")).getByTitle("更多"))
     fireEvent.click(await screen.findByText("永久删除知识库"))
+    await respondToConfirm("删除")
 
     await waitFor(() => {
       expect(deletes.length).toBe(1)
@@ -1019,6 +1026,39 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(screen.getByText("1 / 2")).toBeTruthy()
   })
 
+  test("clamps the page after deleting its last document", async () => {
+    const documents = Array.from({ length: 11 }, (_, index) =>
+      makeDocument({
+        id: `doc-${index}`,
+        filename: `file-${String(index).padStart(2, "0")}.md`,
+        created_at: `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+      }),
+    )
+    const deletes: string[] = []
+    fetchHandler = (url, init) => {
+      if (init?.method === "DELETE") deletes.push(url)
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse(documents)
+      if (url.includes("/tasks")) return jsonResponse([])
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    await screen.findByText("共 11 条")
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }))
+    await screen.findByText("file-00.md")
+    openMenu(screen.getByRole("button", { name: "操作 file-00.md" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "删除" }))
+    await respondToConfirm("删除")
+
+    await waitFor(() => expect(deletes).toHaveLength(1))
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeTruthy())
+    expect(screen.getByText("file-10.md")).toBeTruthy()
+    expect(screen.queryByText("2 / 1")).toBeNull()
+  })
+
   test("sorts documents by size and chunk count with direction cycling", async () => {
     const documents = [
       makeDocument({
@@ -1098,8 +1138,8 @@ describe("KnowledgeBasePage documents tab", () => {
     )
     expect(indexCalls).toHaveLength(2)
 
-    window.confirm = () => true
     fireEvent.click(screen.getByText("删除(2)"))
+    await respondToConfirm("删除")
     await waitFor(() => {
       expect(notifications.some(([, msg]) => msg === "已删除 2 个文档")).toBe(true)
     })
@@ -1321,8 +1361,8 @@ describe("KnowledgeBasePage documents tab", () => {
 
     const menuButton = await screen.findByRole("button", { name: "操作 a.md" })
     openMenu(menuButton)
-    window.confirm = () => true
     fireEvent.click(await screen.findByRole("menuitem", { name: "删除" }))
+    await respondToConfirm("删除")
 
     await waitFor(() => {
       expect(deletes).toHaveLength(1)
@@ -1576,9 +1616,9 @@ describe("KnowledgeBasePage documents tab", () => {
 
     await waitFor(() => expect(screen.getByText("a.md")).toBeTruthy())
     fireEvent.click(screen.getByLabelText("选择所有文档"))
-    window.confirm = () => false
     fireEvent.click(screen.getByText("删除(1)"))
-    await waitFor(() => expect(deletes).toHaveLength(0))
+    await respondToConfirm("取消")
+    expect(deletes).toHaveLength(0)
     expect(screen.getByText("a.md")).toBeTruthy()
   })
 
@@ -1600,8 +1640,8 @@ describe("KnowledgeBasePage documents tab", () => {
 
     await waitFor(() => expect(screen.getByText("a.md")).toBeTruthy())
     fireEvent.click(screen.getByLabelText("选择所有文档"))
-    window.confirm = () => true
     fireEvent.click(screen.getByText("删除(1)"))
+    await respondToConfirm("删除")
 
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
@@ -1737,8 +1777,8 @@ describe("KnowledgeBasePage documents tab", () => {
     renderPage(<KnowledgeBasePage />)
 
     openMenu(await screen.findByRole("button", { name: "操作 a.md" }))
-    window.confirm = () => true
     fireEvent.click(await screen.findByRole("menuitem", { name: "删除" }))
+    await respondToConfirm("删除")
 
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
@@ -1838,6 +1878,41 @@ describe("KnowledgeBasePage tasks tab", () => {
     })
     expect(retryCalls[0]).toContain("/tasks/task-1/retry")
     expect(notifications.some(([, msg]) => msg === "已重新提交任务")).toBe(true)
+  })
+
+  test("paginates tasks and changes the page size", async () => {
+    const tasks = Array.from({ length: 12 }, (_, index) =>
+      makeTask({
+        id: `task-${index}`,
+        last_error: `任务记录 ${String(index).padStart(2, "0")}`,
+      }),
+    )
+    fetchHandler = (url) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse([])
+      if (url.includes("/tasks")) return jsonResponse(tasks)
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    fireEvent.click(await screen.findByText("任务"))
+    await screen.findByText("共 12 条")
+    expect(screen.getByText("1 / 2")).toBeTruthy()
+    expect(screen.getByText("任务记录 00")).toBeTruthy()
+    expect(screen.queryByText("任务记录 10")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }))
+    expect(screen.getByText("2 / 2")).toBeTruthy()
+    expect(screen.queryByText("任务记录 00")).toBeNull()
+    expect(screen.getByText("任务记录 10")).toBeTruthy()
+
+    openMenu(screen.getByRole("button", { name: /每页 10 条/ }))
+    fireEvent.click(await screen.findByText("每页 20 条"))
+    expect(screen.getByText("1 / 1")).toBeTruthy()
+    expect(screen.getByText("任务记录 00")).toBeTruthy()
+    expect(screen.getByText("任务记录 11")).toBeTruthy()
   })
 
   test("rebuilds the index from the tasks tab", async () => {
@@ -1947,40 +2022,70 @@ describe("KnowledgeBasePage tasks tab", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Detail view — hit test tab
+// Detail view — retrieval evaluation hit test
 // ---------------------------------------------------------------------------
 
-describe("KnowledgeBasePage hit test tab", () => {
+describe("KnowledgeBasePage retrieval evaluation hit test", () => {
   test("queries the knowledge base and renders hits", async () => {
     const queryCalls: Array<{ body: string }> = []
     fetchHandler = (url, init) => {
       const method = init?.method ?? "GET"
-      if (method === "POST" && url.includes("/query")) {
+      if (method === "POST" && url.includes("/query/inspect")) {
         queryCalls.push({ body: String(init?.body ?? "") })
-        return jsonResponse([
-          {
-            chunk_id: "chunk-1",
-            document_id: "doc-1",
-            document_filename: "guide.md",
-            parent_id: null,
-            parent_title: null,
-            parent_index: null,
-            chunk_index: 0,
-            content: "## 标题\n\n正文内容",
-            distance: 0.123456,
+        return jsonResponse({
+          hits: [
+            {
+              chunk_id: "chunk-1",
+              document_id: "doc-1",
+              document_filename: "guide.md",
+              parent_id: "parent-1",
+              parent_title: "标题",
+              parent_index: 0,
+              chunk_index: 0,
+              content: "## 标题\n\n正文内容",
+              distance: 0.123456,
+              similarity: 0.938272,
+              kind: "document",
+              question: null,
+              source: null,
+              sources: ["vector", "reference"],
+              reference_hops: 1,
+              rerank_score: 0.91,
+            },
+            {
+              chunk_id: "chunk-2",
+              document_id: "doc-1",
+              document_filename: "guide.md",
+              parent_id: null,
+              parent_title: null,
+              parent_index: null,
+              chunk_index: 1,
+              content: "no distance",
+              distance: null,
+              similarity: null,
+              kind: "document",
+              question: null,
+              source: null,
+              sources: ["keywords"],
+              reference_hops: 0,
+              rerank_score: null,
+            },
+          ],
+          trace: {
+            trace_id: "trace-123",
+            search_mode: "keywords",
+            limit: 20,
+            min_similarity: 0.8,
+            max_distance: 0.4,
+            vector_candidates: 4,
+            keyword_candidates: 3,
+            reference_candidates: 2,
+            fused_candidates: 6,
+            rerank_status: "applied",
+            returned_hits: 2,
+            duration_ms: 12.345,
           },
-          {
-            chunk_id: "chunk-2",
-            document_id: "doc-1",
-            document_filename: "guide.md",
-            parent_id: null,
-            parent_title: null,
-            parent_index: null,
-            chunk_index: 1,
-            content: "no distance",
-            distance: null,
-          },
-        ])
+        })
       }
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
@@ -1991,30 +2096,60 @@ describe("KnowledgeBasePage hit test tab", () => {
     routeParams.id = KB_ID
     renderPage(<KnowledgeBasePage />)
 
-    fireEvent.click(await screen.findByText("命中测试"))
+    fireEvent.click(await screen.findByText("检索评测"))
     await waitFor(() => expect(screen.getByText("暂无测试结果")).toBeTruthy())
 
     const textarea = screen.getByLabelText("查询内容") as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "what is alpha" } })
+    fireEvent.pointerDown(screen.getByRole("button", { name: "检索模式" }))
+    const searchModeMenu = await screen.findByRole("menu")
+    fireEvent.click(within(searchModeMenu).getByText("关键词检索"))
+    const similarityInput = screen.getByLabelText("相似度") as HTMLInputElement
+    expect(similarityInput.value).toBe("0.6")
+    fireEvent.change(similarityInput, {
+      target: { value: "0.8" },
+    })
+    const includeReferences = screen.getByLabelText(
+      "扩展文档引用",
+    ) as HTMLInputElement
+    expect(includeReferences.checked).toBe(true)
     expect((screen.getByRole("button", { name: "测试召回" }) as HTMLButtonElement).disabled).toBe(
       false,
     )
+    const limitInput = screen.getByLabelText("返回数量") as HTMLInputElement
+    fireEvent.change(limitInput, { target: { value: "99" } })
+    expect(limitInput.value).toBe("20")
     fireEvent.click(screen.getByRole("button", { name: "测试召回" }))
 
     await waitFor(() => {
       expect(screen.getByText("guide.md / #1")).toBeTruthy()
     })
     expect(screen.getByText("guide.md / #2")).toBeTruthy()
-    expect(screen.getByText("distance 0.1235")).toBeTruthy()
-    expect(screen.getByText("distance -")).toBeTruthy()
+    expect(screen.getByText("相似度：0.9383")).toBeTruthy()
+    expect(screen.getByText("相似度：-")).toBeTruthy()
+    expect(screen.getByText("分段 ID：chunk-1")).toBeTruthy()
+    expect(screen.getByText("父分段 ID：parent-1")).toBeTruthy()
+    expect(screen.getByText("来源：向量检索、文档引用")).toBeTruthy()
+    expect(screen.getByText("引用跳数：1")).toBeTruthy()
+    expect(screen.getByText("追踪 ID：trace-123")).toBeTruthy()
+    expect(screen.getByText("向量候选：4")).toBeTruthy()
+    expect(screen.getByText("关键词候选：3")).toBeTruthy()
+    expect(screen.getByText("引用候选：2")).toBeTruthy()
+    expect(screen.getByText("融合候选：6")).toBeTruthy()
+    expect(screen.getByText("重排状态：已应用")).toBeTruthy()
+    expect(screen.getByText("总耗时：12.345 毫秒")).toBeTruthy()
+    expect(screen.queryByText("候选召回：4.5 毫秒")).toBeNull()
     // Markdown content rendered for the hit body.
     expect(screen.getByText("正文内容")).toBeTruthy()
-    expect(JSON.parse(queryCalls[0].body)).toEqual({ query: "what is alpha", limit: 5 })
+    expect(JSON.parse(queryCalls[0].body)).toEqual({
+      query: "what is alpha",
+      limit: 20,
+      search_mode: "keywords",
+      similarity: 0.8,
+      include_references: true,
+    })
 
     // Query limit clamps to 1..20.
-    const limitInput = screen.getByLabelText("返回数量") as HTMLInputElement
-    fireEvent.change(limitInput, { target: { value: "99" } })
-    expect(limitInput.value).toBe("20")
     fireEvent.change(limitInput, { target: { value: "0" } })
     expect(limitInput.value).toBe("1")
   })
@@ -2022,7 +2157,7 @@ describe("KnowledgeBasePage hit test tab", () => {
   test("does not submit an empty query", async () => {
     let queryCalls = 0
     fetchHandler = (url, init) => {
-      if (init?.method === "POST" && url.includes("/query")) queryCalls += 1
+      if (init?.method === "POST" && url.includes("/query/inspect")) queryCalls += 1
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
@@ -2032,7 +2167,7 @@ describe("KnowledgeBasePage hit test tab", () => {
     routeParams.id = KB_ID
     renderPage(<KnowledgeBasePage />)
 
-    fireEvent.click(await screen.findByText("命中测试"))
+    fireEvent.click(await screen.findByText("检索评测"))
     const submit = screen.getByRole("button", { name: "测试召回" }) as HTMLButtonElement
     expect(submit.disabled).toBe(true)
     fireEvent.click(submit)
@@ -2042,7 +2177,7 @@ describe("KnowledgeBasePage hit test tab", () => {
   test("does not submit a whitespace-only query", async () => {
     let queryCalls = 0
     fetchHandler = (url, init) => {
-      if (init?.method === "POST" && url.includes("/query")) queryCalls += 1
+      if (init?.method === "POST" && url.includes("/query/inspect")) queryCalls += 1
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
@@ -2052,7 +2187,7 @@ describe("KnowledgeBasePage hit test tab", () => {
     routeParams.id = KB_ID
     renderPage(<KnowledgeBasePage />)
 
-    fireEvent.click(await screen.findByText("命中测试"))
+    fireEvent.click(await screen.findByText("检索评测"))
     const textarea = screen.getByLabelText("查询内容") as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "   " } })
     const form = textarea.closest("form")!
@@ -2062,7 +2197,7 @@ describe("KnowledgeBasePage hit test tab", () => {
 
   test("reports errors from the query call", async () => {
     fetchHandler = (url, init) => {
-      if (init?.method === "POST" && url.includes("/query")) {
+      if (init?.method === "POST" && url.includes("/query/inspect")) {
         return jsonResponse({ detail: "query failed" }, 500)
       }
       if (url.includes("/models")) return jsonResponse(models)
@@ -2074,9 +2209,10 @@ describe("KnowledgeBasePage hit test tab", () => {
     routeParams.id = KB_ID
     renderPage(<KnowledgeBasePage />)
 
-    fireEvent.click(await screen.findByText("命中测试"))
-    fireEvent.change(screen.getByLabelText("查询内容"), { target: { value: "hello" } })
-    fireEvent.click(screen.getByRole("button", { name: "测试召回" }))
+    fireEvent.click(await screen.findByText("检索评测"))
+    const textarea = screen.getByLabelText("查询内容") as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "hello" } })
+    fireEvent.submit(textarea.closest("form")!)
 
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)

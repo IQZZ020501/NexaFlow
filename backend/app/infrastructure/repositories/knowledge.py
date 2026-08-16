@@ -39,6 +39,8 @@ from app.shareddomain.knowledge.models import (
     KnowledgeDocument as KnowledgeDocumentORM,
     KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
     KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
+    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
+    KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
     KnowledgeStorageCleanup as KnowledgeStorageCleanupORM,
     KnowledgeTask as KnowledgeTaskORM,
 )
@@ -676,13 +678,44 @@ async def list_active_documents_by_ids(
     return [to_entity(KnowledgeDocument, row) for row in result]
 
 
+async def list_retrievable_document_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_ids: set[str],
+) -> set[str]:
+    active_document_ids = {
+        document.id
+        for document in await list_active_documents_by_ids(
+            db,
+            knowledge_base,
+            document_ids,
+        )
+    }
+    if not active_document_ids:
+        return set()
+    rows = await db.scalars(
+        select(KnowledgeDocumentChunkORM.document_id)
+        .where(
+            KnowledgeDocumentChunkORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentChunkORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocumentChunkORM.status == CHUNK_INDEXED_STATUS,
+            KnowledgeDocumentChunkORM.document_id.in_(active_document_ids),
+        )
+        .distinct()
+    )
+    return set(rows)
+
+
 async def query_keyword_chunk_ids(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     query: str,
     candidate_limit: int,
+    document_ids: set[str] | None = None,
 ) -> list[str]:
-    if db.get_bind().dialect.name != "postgresql":
+    if db.get_bind().dialect.name != "postgresql" or (
+        document_ids is not None and not document_ids
+    ):
         return []
     result = await db.execute(
         _QUERY_KEYWORD_CHUNK_IDS,
@@ -691,9 +724,45 @@ async def query_keyword_chunk_ids(
             "knowledge_base_id": knowledge_base.id,
             "query": query,
             "candidate_limit": candidate_limit,
+            "document_ids": sorted(document_ids) if document_ids is not None else None,
         },
     )
     return list(result.scalars())
+
+
+async def list_indexed_chunk_ids_for_parent_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    parent_ids: list[str],
+) -> list[str]:
+    if not parent_ids:
+        return []
+    rows = list(
+        await db.scalars(
+            select(KnowledgeDocumentChunkORM)
+            .where(
+                KnowledgeDocumentChunkORM.workspace_id
+                == knowledge_base.workspace_id,
+                KnowledgeDocumentChunkORM.knowledge_base_id
+                == knowledge_base.id,
+                KnowledgeDocumentChunkORM.status == CHUNK_INDEXED_STATUS,
+                KnowledgeDocumentChunkORM.parent_id.in_(parent_ids),
+            )
+            .order_by(KnowledgeDocumentChunkORM.chunk_index)
+        )
+    )
+    positions = {parent_id: index for index, parent_id in enumerate(parent_ids)}
+    return [
+        row.id
+        for row in sorted(
+            rows,
+            key=lambda row: (
+                positions.get(row.parent_id, len(positions)),
+                row.chunk_index,
+                row.id,
+            ),
+        )
+    ]
 
 
 async def delete_document_chunks(db: AsyncSession, document_id: str) -> None:
@@ -735,11 +804,29 @@ async def list_knowledge_tasks(
     return [to_entity(KnowledgeTask, row) for row in result]
 
 
-async def list_recoverable_tasks(db: AsyncSession) -> list[KnowledgeTask]:
+async def list_recoverable_tasks(
+    db: AsyncSession,
+    now: datetime,
+    *,
+    limit: int = 200,
+) -> list[KnowledgeTask]:
     result = await db.scalars(
         select(KnowledgeTaskORM)
-        .where(KnowledgeTaskORM.status.in_([TASK_QUEUED_STATUS, TASK_RUNNING_STATUS]))
-        .order_by(KnowledgeTaskORM.created_at)
+        .where(
+            KnowledgeTaskORM.attempts < KnowledgeTaskORM.max_attempts,
+            or_(
+                KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
+                and_(
+                    KnowledgeTaskORM.status == TASK_RUNNING_STATUS,
+                    or_(
+                        KnowledgeTaskORM.lease_expires_at.is_(None),
+                        KnowledgeTaskORM.lease_expires_at <= now,
+                    ),
+                ),
+            )
+        )
+        .order_by(KnowledgeTaskORM.created_at, KnowledgeTaskORM.id)
+        .limit(limit)
     )
     return [to_entity(KnowledgeTask, row) for row in result]
 
@@ -835,6 +922,30 @@ async def renew_knowledge_task_lease(
     return result.rowcount == 1
 
 
+async def update_owned_knowledge_task_progress(
+    db: AsyncSession,
+    task_id: str,
+    worker_task_id: str,
+    total_items: int,
+    processed_items: int,
+    lease_expires_at: datetime,
+) -> bool:
+    result = await db.execute(
+        update(KnowledgeTaskORM)
+        .where(
+            KnowledgeTaskORM.id == task_id,
+            KnowledgeTaskORM.status == TASK_RUNNING_STATUS,
+            KnowledgeTaskORM.worker_task_id == worker_task_id,
+        )
+        .values(
+            total_items=total_items,
+            processed_items=processed_items,
+            lease_expires_at=lease_expires_at,
+        )
+    )
+    return result.rowcount == 1
+
+
 async def get_open_knowledge_task(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
@@ -917,6 +1028,20 @@ async def delete_knowledge_base_graph(
     knowledge_base: KnowledgeBase,
     resource_type: str,
 ) -> None:
+    await db.execute(
+        delete(KnowledgeEvaluationCaseORM).where(
+            KnowledgeEvaluationCaseORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeEvaluationCaseORM.knowledge_base_id == knowledge_base.id,
+        )
+    )
+    await db.execute(
+        delete(KnowledgeDocumentReferenceORM).where(
+            KnowledgeDocumentReferenceORM.workspace_id
+            == knowledge_base.workspace_id,
+            KnowledgeDocumentReferenceORM.knowledge_base_id
+            == knowledge_base.id,
+        )
+    )
     await db.execute(
         delete(KnowledgeTaskORM).where(
             KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,

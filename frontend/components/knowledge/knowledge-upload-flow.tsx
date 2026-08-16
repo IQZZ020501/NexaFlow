@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   CheckCircle2Icon,
   DatabaseIcon,
+  FileSpreadsheetIcon,
   FileTextIcon,
   FilesIcon,
   FolderOpenIcon,
@@ -15,6 +16,7 @@ import {
   XIcon,
 } from "lucide-react"
 import { useLanguage } from "@/contexts/language-provider"
+import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -50,6 +52,7 @@ import type { TFunction, TranslationKey } from "@/i18n"
 import {
   DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS,
   MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
+  type KnowledgeImportMode,
   type KnowledgeUploadParseSettings,
   type KnowledgeUploadRouteState,
   type KnowledgeUploadStep,
@@ -107,6 +110,7 @@ export const SUPPORTED_FILE_TYPES = [
   ".jpeg",
   ".webp",
 ]
+export const QA_FILE_TYPES = [".csv", ".xlsx"]
 const SMART_CHUNK_SIZE = DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.chunkSize
 const SMART_CHUNK_OVERLAP =
   DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.chunkOverlap
@@ -158,6 +162,9 @@ export function KnowledgeUploadFlow({
   const [selectedDocumentId, setSelectedDocumentId] = React.useState<
     string | null
   >(null)
+  const [importMode, setImportMode] = React.useState<KnowledgeImportMode>(
+    routeState?.importMode ?? "document",
+  )
   const [segmentMode, setSegmentMode] = React.useState<SegmentMode>(
     routeState?.parseSettings.segmentMode ?? "smart",
   )
@@ -200,7 +207,9 @@ export function KnowledgeUploadFlow({
     uploadedDocuments[0] ??
     null
   const selectedFileBytes = files.reduce((total, file) => total + file.size, 0)
-  const supportedFileTypesLabel = SUPPORTED_FILE_TYPES.map((extension) =>
+  const supportedFileTypes =
+    importMode === "qa" ? QA_FILE_TYPES : SUPPORTED_FILE_TYPES
+  const supportedFileTypesLabel = supportedFileTypes.map((extension) =>
     extension.slice(1).toUpperCase(),
   ).join(t("列表分隔符"))
   const hasPendingParsing = uploadedDocuments.some((document) =>
@@ -221,7 +230,9 @@ export function KnowledgeUploadFlow({
     isIndexing ||
     deletingDocumentId !== null
   const isSegmentInvalid =
-    segmentMode === "advanced" && chunkOverlap >= chunkSize
+    importMode === "document" &&
+    segmentMode === "advanced" &&
+    chunkOverlap >= chunkSize
 
   const reportError = React.useCallback(
     (error: unknown) => {
@@ -279,7 +290,7 @@ export function KnowledgeUploadFlow({
     }
 
     const supportedFiles = nextFiles.filter((file) =>
-      SUPPORTED_FILE_TYPES.some((extension) =>
+      supportedFileTypes.some((extension) =>
         file.name.toLowerCase().endsWith(extension),
       ),
     )
@@ -302,8 +313,19 @@ export function KnowledgeUploadFlow({
     setFiles((current) => current.filter((_, index) => index !== indexToRemove))
   }
 
+  function changeImportMode(nextMode: KnowledgeImportMode) {
+    setImportMode(nextMode)
+    setFiles([])
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
+    if (folderInputRef.current) {
+      folderInputRef.current.value = ""
+    }
+  }
+
   function currentParseSettings(): KnowledgeUploadParseSettings {
-    return segmentMode === "smart"
+    return importMode === "qa" || segmentMode === "smart"
       ? {
           ...DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS,
           cleaningRules: [...SMART_CLEANING_RULES],
@@ -655,6 +677,7 @@ export function KnowledgeUploadFlow({
           onRouteSegment({
             documentIds: nextDocuments.map((document) => document.id),
             parseSettings: routeState.parseSettings,
+            importMode,
           })
         })
         .catch((error) => {
@@ -724,6 +747,7 @@ export function KnowledgeUploadFlow({
   }, [
     applyPreviewDocuments,
     generatePreviewForDocuments,
+    importMode,
     loadPreviewDocuments,
     onBackToFiles,
     onRouteSegment,
@@ -790,6 +814,7 @@ export function KnowledgeUploadFlow({
         onRouteSegment({
           documentIds: nextDocuments.map((item) => item.id),
           parseSettings: routeState?.parseSettings ?? currentParseSettings(),
+          importMode,
         })
       } else {
         setFiles([])
@@ -825,6 +850,7 @@ export function KnowledgeUploadFlow({
     onRouteSegment({
       documentIds: [],
       parseSettings: currentParseSettings(),
+      importMode,
     })
   }
 
@@ -859,6 +885,7 @@ export function KnowledgeUploadFlow({
         knowledgeBase.id,
         attachments.map((attachment) => attachment.id),
         true,
+        importMode,
       )
       const consumedAttachmentIds = new Set(
         documents
@@ -914,6 +941,7 @@ export function KnowledgeUploadFlow({
     onRouteSegment({
       documentIds: uploadedDocuments.map((document) => document.id),
       parseSettings,
+      importMode,
     })
   }
 
@@ -1008,14 +1036,31 @@ export function KnowledgeUploadFlow({
           <div className="mx-auto w-full max-w-[90rem] px-4 py-5 sm:px-6 lg:px-8">
             <main className="min-w-0 space-y-5">
               <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
-                <div className="border-b px-5 py-4">
+                <div className="flex flex-col gap-4 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                   <SectionTitle
                     icon={UploadIcon}
                     title={t("选择导入文件")}
-                    description={t(
-                      "先确认分段效果，点击开始导入后才会写入知识库。",
-                    )}
+                    description={
+                      importMode === "qa"
+                        ? t("每行问答生成一个检索片段；仅支持 CSV 和 XLSX。")
+                        : t("先确认分段效果，点击开始导入后才会写入知识库。")
+                    }
                   />
+                  <div className="flex shrink-0 items-center gap-2 text-sm font-medium">
+                    <span>{t("导入类型")}</span>
+                    <FilterDropdown
+                      ariaLabel={t("导入类型")}
+                      className="h-9 min-w-28 px-3"
+                      value={importMode}
+                      options={[
+                        { value: "document", label: t("普通文档") },
+                        { value: "qa", label: t("问答表") },
+                      ]}
+                      onChange={(value) =>
+                        changeImportMode(value as KnowledgeImportMode)
+                      }
+                    />
+                  </div>
                 </div>
 
                 <div
@@ -1039,7 +1084,7 @@ export function KnowledgeUploadFlow({
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept={SUPPORTED_FILE_TYPES.join(",")}
+                    accept={supportedFileTypes.join(",")}
                     multiple
                     className="hidden"
                     onChange={(event) =>
@@ -1049,7 +1094,7 @@ export function KnowledgeUploadFlow({
                   <input
                     ref={folderInputRef}
                     type="file"
-                    accept={SUPPORTED_FILE_TYPES.join(",")}
+                    accept={supportedFileTypes.join(",")}
                     multiple
                     className="hidden"
                     onChange={(event) =>
@@ -1061,12 +1106,18 @@ export function KnowledgeUploadFlow({
                   </span>
                   <div className="mt-5 space-y-2">
                     <p className="text-lg font-semibold text-foreground">
-                      {t("拖入文件或文件夹")}
+                      {importMode === "qa"
+                        ? t("拖入 CSV 或 XLSX 文件")
+                        : t("拖入文件或文件夹")}
                     </p>
                     <p className="mx-auto max-w-xl text-sm leading-6 text-muted-foreground">
-                      {t(
-                        "保留文档标题和段落结构，表格会在预览阶段转换为 Markdown。",
-                      )}
+                      {importMode === "qa"
+                        ? t(
+                            "CSV/XLSX 需包含 question/问题、answer/答案，可选 source/来源 列。",
+                          )
+                        : t(
+                            "保留文档标题和段落结构，表格会在预览阶段转换为 Markdown。",
+                          )}
                     </p>
                     <p className="mx-auto max-w-3xl text-xs leading-5 text-muted-foreground">
                       {t("支持格式：{value}", {
@@ -1082,14 +1133,16 @@ export function KnowledgeUploadFlow({
                       <FilesIcon data-icon="inline-start" />
                       {t("选择文件")}
                     </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => folderInputRef.current?.click()}
-                    >
-                      <FolderOpenIcon data-icon="inline-start" />
-                      {t("选择文件夹")}
-                    </Button>
+                    {importMode === "document" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => folderInputRef.current?.click()}
+                      >
+                        <FolderOpenIcon data-icon="inline-start" />
+                        {t("选择文件夹")}
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               </section>
@@ -1137,31 +1190,37 @@ export function KnowledgeUploadFlow({
             <aside className="space-y-4 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
               <section className="rounded-lg border bg-background p-4 shadow-sm">
                 <SectionTitle
-                  icon={ScissorsIcon}
-                  title={t("分段规则")}
-                  description={t("先用智能规则生成预览，需要时再精调。")}
+                  icon={importMode === "qa" ? FileSpreadsheetIcon : ScissorsIcon}
+                  title={importMode === "qa" ? t("问答导入") : t("分段规则")}
+                  description={
+                    importMode === "qa"
+                      ? t("每行按问题、答案和来源生成一个片段，分段规则不适用。")
+                      : t("先用智能规则生成预览，需要时再精调。")
+                  }
                 />
 
-                <div className="mt-4 space-y-3">
-                  <SegmentModeOption
-                    checked={segmentMode === "smart"}
-                    title={t("智能分段")}
-                    description={t(
-                      "按常见文档结构自动设置长度、重叠和清洗规则。",
-                    )}
-                    onSelect={() => setSegmentMode("smart")}
-                  />
-                  <SegmentModeOption
-                    checked={segmentMode === "advanced"}
-                    title={t("高级分段")}
-                    description={t(
-                      "手动控制片段字符数、重叠字符和文本清洗规则。",
-                    )}
-                    onSelect={() => setSegmentMode("advanced")}
-                  />
-                </div>
+                {importMode === "document" ? (
+                  <div className="mt-4 space-y-3">
+                    <SegmentModeOption
+                      checked={segmentMode === "smart"}
+                      title={t("智能分段")}
+                      description={t(
+                        "按常见文档结构自动设置长度、重叠和清洗规则。",
+                      )}
+                      onSelect={() => setSegmentMode("smart")}
+                    />
+                    <SegmentModeOption
+                      checked={segmentMode === "advanced"}
+                      title={t("高级分段")}
+                      description={t(
+                        "手动控制片段字符数、重叠字符和文本清洗规则。",
+                      )}
+                      onSelect={() => setSegmentMode("advanced")}
+                    />
+                  </div>
+                ) : null}
 
-                {segmentMode === "advanced" ? (
+                {importMode === "document" && segmentMode === "advanced" ? (
                   <FieldGroup className="mt-5">
                     <div className="grid grid-cols-2 gap-3">
                       <Field>
@@ -1201,20 +1260,14 @@ export function KnowledgeUploadFlow({
                       <FieldLabel htmlFor="knowledge-split-separator">
                         {t("切分字符")}
                       </FieldLabel>
-                      <select
+                      <FilterDropdown
                         id="knowledge-split-separator"
-                        className="h-9 rounded-md border bg-background px-3 text-sm"
+                        ariaLabel={t("切分字符")}
+                        className="h-9 px-3"
                         value={splitSeparator}
-                        onChange={(event) =>
-                          setSplitSeparator(event.target.value)
-                        }
-                      >
-                        {splitSeparatorOptions.map((separator) => (
-                          <option key={separator.value} value={separator.value}>
-                            {separator.label}
-                          </option>
-                        ))}
-                      </select>
+                        options={splitSeparatorOptions}
+                        onChange={setSplitSeparator}
+                      />
                     </Field>
                     {isSegmentInvalid ? (
                       <FieldDescription className="text-destructive">
@@ -1289,7 +1342,13 @@ export function KnowledgeUploadFlow({
                   <MetricItem label={t("片段")} value={`${totalChunks}`} />
                   <MetricItem
                     label={t("规则")}
-                    value={segmentMode === "smart" ? t("智能") : t("高级")}
+                    value={
+                      importMode === "qa"
+                        ? t("问答表")
+                        : segmentMode === "smart"
+                          ? t("智能")
+                          : t("高级")
+                    }
                   />
                   <MetricItem
                     label={t("状态")}
@@ -1302,9 +1361,13 @@ export function KnowledgeUploadFlow({
             <main className="min-w-0 overflow-hidden rounded-lg border bg-background shadow-sm lg:flex lg:min-h-0 lg:flex-col">
               <div className="flex shrink-0 flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <SectionTitle
-                  icon={FileTextIcon}
-                  title={t("分段预览")}
-                  description={t("按文件查看解析后的片段内容。")}
+                  icon={importMode === "qa" ? FileSpreadsheetIcon : FileTextIcon}
+                  title={importMode === "qa" ? t("问答预览") : t("分段预览")}
+                  description={
+                    importMode === "qa"
+                      ? t("按行查看解析后的问题、答案和来源。")
+                      : t("按文件查看解析后的片段内容。")
+                  }
                 />
                 <Button
                   type="button"

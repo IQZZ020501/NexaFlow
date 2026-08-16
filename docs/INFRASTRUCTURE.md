@@ -35,7 +35,7 @@
 
 ### infrastructure/sql/（手写 SQL）
 
-- `backend/app/infrastructure/sql/knowledge/query_keyword_chunk_ids.sql` — 关键词检索 chunk 的原始 SQL 查询脚本
+- `backend/app/infrastructure/sql/knowledge/query_keyword_chunk_ids.sql` — 使用 `pg_search` Jieba 匹配与 BM25 分数排序的关键词 chunk 查询
 
 ### alembic/（数据库迁移链）
 
@@ -74,6 +74,7 @@
   - `202608100001_agent_conversation_memory.py` — Agent 会话边界、持久摘要和模型用量
   - `202608100002_localize_default_agent_instructions.py` — 本地化默认 Agent 指令
   - `202608100003_agent_public_access.py` — Agent 发布身份、外部来源主体、API 凭据与会话隔离索引；回滚时删除无法还原为登录用户语义的外部 Run
+  - `202608160001_knowledge_bm25_search.py` — 安装 `pg_search` 扩展并将知识关键词索引切换为 Jieba + BM25；回滚恢复原生 GIN 索引
 
 ## backend 根配置
 

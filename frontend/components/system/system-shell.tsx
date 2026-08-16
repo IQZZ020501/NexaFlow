@@ -8,6 +8,7 @@ import {
 import { useRouter } from "next/navigation"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import {
   addTeamMember,
   addWorkspaceMember,
@@ -178,6 +179,7 @@ function SystemPageContent({
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
   const { language, t } = useLanguage()
+  const [confirmAction, confirmDialog] = useConfirmDialog()
   const locale = languageLocales[language]
   const [workspaceForm, setWorkspaceForm] = React.useState<WorkspaceForm>({
     name: "",
@@ -736,12 +738,13 @@ function SystemPageContent({
     const actionLabel = nextStatus === "archived" ? t("归档") : t("恢复")
 
     if (
-      !window.confirm(
-        t("{action} {name}？", {
+      !(await confirmAction({
+        description: t("{action} {name}？", {
           action: actionLabel,
           name: displayWorkspaceName(workspace, t),
-        })
-      )
+        }),
+        confirmLabel: actionLabel,
+      }))
     ) {
       return
     }
@@ -761,11 +764,13 @@ function SystemPageContent({
 
   async function handleDeleteWorkspace(workspace: Workspace) {
     if (
-      !window.confirm(
-        t("永久删除 {name}？此操作不可恢复。", {
+      !(await confirmAction({
+        description: t("永久删除 {name}？此操作不可恢复。", {
           name: displayWorkspaceName(workspace, t),
-        })
-      )
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -825,12 +830,13 @@ function SystemPageContent({
     const actionLabel = nextStatus === "archived" ? t("归档") : t("恢复")
 
     if (
-      !window.confirm(
-        t("{action} {name}？", {
+      !(await confirmAction({
+        description: t("{action} {name}？", {
           action: actionLabel,
           name: displayTeamName(team, t),
-        })
-      )
+        }),
+        confirmLabel: actionLabel,
+      }))
     ) {
       return
     }
@@ -856,11 +862,13 @@ function SystemPageContent({
     }
 
     if (
-      !window.confirm(
-        t("永久删除 {name}？此操作不可恢复。", {
+      !(await confirmAction({
+        description: t("永久删除 {name}？此操作不可恢复。", {
           name: displayTeamName(team, t),
-        })
-      )
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -926,11 +934,13 @@ function SystemPageContent({
     const member = workspaceMembers.find((item) => item.user.id === userId)
     if (
       member &&
-      !window.confirm(
-        t("移除 {name}？", {
+      !(await confirmAction({
+        description: t("移除 {name}？", {
           name: member.user.name,
-        })
-      )
+        }),
+        confirmLabel: t("移除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -1005,11 +1015,13 @@ function SystemPageContent({
     const member = teamMembers.find((item) => item.user.id === userId)
     if (
       member &&
-      !window.confirm(
-        t("移除 {name}？", {
+      !(await confirmAction({
+        description: t("移除 {name}？", {
           name: member.user.name,
-        })
-      )
+        }),
+        confirmLabel: t("移除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -1176,9 +1188,13 @@ function SystemPageContent({
 
   async function handleDeleteUser(user: User) {
     if (
-      !window.confirm(
-        t("永久删除 {name}？此操作不可恢复。", { name: user.name })
-      )
+      !(await confirmAction({
+        description: t("永久删除 {name}？此操作不可恢复。", {
+          name: user.name,
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
     ) {
       return
     }
@@ -1193,7 +1209,8 @@ function SystemPageContent({
   }
 
   return (
-    <SystemPageView
+    <>
+      <SystemPageView
       activeSystemTab={activeTab}
       systemTabs={systemTabs}
       onSystemTabChange={onSystemTabChange}
@@ -1309,6 +1326,8 @@ function SystemPageContent({
         onUpdateMemberRole: handleUpdateTeamMember,
         onRemoveMember: handleRemoveTeamMember,
       }}
-    />
+      />
+      {confirmDialog}
+    </>
   )
 }

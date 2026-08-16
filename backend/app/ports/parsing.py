@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from app.capabilities.embedding.pipeline import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
+    ChildChunkDraft,
     DocumentAssetDraft,
     DocumentChunkDrafts,
     EMBED_BATCH_SIZE,
@@ -26,20 +27,24 @@ from app.capabilities.embedding.pipeline import (
     split_text,
     split_text_spans,
 )
+from app.capabilities.embedding.qa_import import QaRow, extract_qa_rows
 
 __all__ = [
     "CHUNK_OVERLAP",
     "CHUNK_SIZE",
+    "ChildChunkDraft",
     "DocumentAssetDraft",
     "DocumentChunkDrafts",
     "EMBED_BATCH_SIZE",
     "KnowledgePipelineError",
+    "QaRow",
     "SPLIT_SEPARATORS",
     "build_flat_chunks",
     "build_hierarchical_chunks",
     "chunk_token_count",
     "clean_text",
     "extract_document",
+    "extract_qa_rows",
     "has_printable_text",
     "normalize_text",
     "split_text",

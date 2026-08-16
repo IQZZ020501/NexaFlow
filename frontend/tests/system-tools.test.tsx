@@ -133,16 +133,17 @@ function withNotifySpy() {
   return calls
 }
 
-let confirmResult = true
-const confirmCalls: string[] = []
-window.confirm = ((message?: string) => {
-  if (message !== undefined) confirmCalls.push(message)
-  return confirmResult
-}) as typeof window.confirm
+async function chooseDropdownOption(trigger: HTMLElement, label: string) {
+  fireEvent.pointerDown(trigger)
+  fireEvent.click(within(await screen.findByRole("menu")).getByText(label))
+}
+
+async function respondToConfirm(label: string) {
+  const dialog = await screen.findByRole("dialog", { name: "确认操作" })
+  fireEvent.click(within(dialog).getByRole("button", { name: label }))
+}
 
 beforeEach(() => {
-  confirmResult = true
-  confirmCalls.length = 0
   handler = () => jsonResponse([], 200)
 })
 
@@ -408,9 +409,9 @@ describe("McpToolsPage", () => {
     expect(screen.getByText("Search the web")).toBeTruthy()
     const selects = screen.getAllByLabelText("工具执行策略")
     expect(selects).toHaveLength(3)
-    expect((selects[0] as HTMLSelectElement).value).toBe("approval_required")
-    expect((selects[1] as HTMLSelectElement).value).toBe("disabled")
-    expect((selects[2] as HTMLSelectElement).value).toBe("read_only")
+    expect(selects[0].textContent).toContain("每次调用前审批")
+    expect(selects[1].textContent).toContain("禁用")
+    expect(selects[2].textContent).toContain("只读自动执行")
   })
 
   test("renders an empty state and hides actions for non-admins", async () => {
@@ -527,9 +528,8 @@ describe("McpToolsPage", () => {
     expect(screen.queryByText("已加载全部")).toBeNull()
   })
 
-  test("ignores policy changes while another update is pending and keeps other servers intact", async () => {
+  test("disables policy changes while another update is pending and keeps other servers intact", async () => {
     setSession()
-    confirmResult = true
     const notifications = withNotifySpy()
     const calls: Array<{ url: string; init?: RequestInit }> = []
     let resolvePolicy!: (response: Response) => void
@@ -549,17 +549,17 @@ describe("McpToolsPage", () => {
     await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
     fireEvent.click(screen.getAllByText("查看工具列表")[0])
     fireEvent.click(screen.getAllByText("查看工具列表")[1])
-    const serverSelect = screen.getAllByLabelText("工具执行策略")[0] as HTMLSelectElement
-    const otherSelect = screen.getAllByLabelText("工具执行策略")[2] as HTMLSelectElement
+    const serverSelect = screen.getAllByLabelText("工具执行策略")[0]
+    const otherSelect = screen.getAllByLabelText("工具执行策略")[2]
 
     // Start a policy update on the first server (kept pending).
-    fireEvent.change(serverSelect, { target: { value: "read_only" } })
+    await chooseDropdownOption(serverSelect, "只读自动执行")
+    await respondToConfirm("确认")
     await waitFor(() => expect(notifications).toHaveLength(0))
 
-    // While the update is pending, changing the other server's policy is
-    // ignored and its select is restored to the current value.
-    fireEvent.change(otherSelect, { target: { value: "approval_required" } })
-    await waitFor(() => expect(otherSelect.value).toBe("read_only"))
+    expect((serverSelect as HTMLButtonElement).disabled).toBe(true)
+    expect((otherSelect as HTMLButtonElement).disabled).toBe(true)
+    expect(otherSelect.textContent).toContain("只读自动执行")
     const policyCalls = calls.filter((call) => call.url.includes("/policy"))
     expect(policyCalls).toHaveLength(1)
 
@@ -577,8 +577,8 @@ describe("McpToolsPage", () => {
     await waitFor(() =>
       expect(notifications).toEqual([["success", "MCP 工具策略已更新"]])
     )
-    await waitFor(() => expect(serverSelect.value).toBe("read_only"))
-    expect(otherSelect.value).toBe("read_only")
+    await waitFor(() => expect(serverSelect.textContent).toContain("只读自动执行"))
+    expect(otherSelect.textContent).toContain("只读自动执行")
   })
 
   test("creates a streamable_http server through the dialog", async () => {
@@ -776,7 +776,6 @@ describe("McpToolsPage", () => {
 
   test("deletes a server after confirmation", async () => {
     setSession()
-    confirmResult = true
     const notifications = withNotifySpy()
     const calls: Array<{ url: string; init?: RequestInit }> = []
     handler = (url, init) => {
@@ -788,8 +787,10 @@ describe("McpToolsPage", () => {
     renderPage(<McpToolsPage />)
     await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
     fireEvent.click(screen.getByLabelText("删除 MCP Server"))
+    const dialog = await screen.findByRole("dialog", { name: "确认操作" })
+    expect(dialog.textContent).toContain("确定删除 MCP Server“Release tools”吗？")
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }))
     await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    expect(confirmCalls[0]).toContain("确定删除 MCP Server“Release tools”吗？")
     expect(calls.some((c) => c.url.endsWith("/mcp-servers/mcp-1") && c.init?.method === "DELETE")).toBe(true)
     expect(notifications).toEqual([["success", "MCP Server 已删除"]])
   })
@@ -805,14 +806,12 @@ describe("McpToolsPage", () => {
     }
     renderPage(<McpToolsPage />)
     await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    confirmResult = false
     fireEvent.click(screen.getByLabelText("删除 MCP Server"))
-    await waitFor(() => expect(confirmCalls.length).toBe(1))
+    await respondToConfirm("取消")
     expect(calls.some((c) => c.init?.method === "DELETE")).toBe(false)
     expect(screen.getByText("Release tools")).toBeTruthy()
 
     // delete failure reports the error and keeps the server
-    confirmResult = true
     handler = (url, init) => {
       calls.push({ url, init })
       if (init?.method === "DELETE") return jsonResponse({ detail: "gone" }, 500)
@@ -820,13 +819,13 @@ describe("McpToolsPage", () => {
       return jsonResponse(null, 404)
     }
     fireEvent.click(screen.getByLabelText("删除 MCP Server"))
+    await respondToConfirm("删除")
     await waitFor(() => expect(notifications).toEqual([["error", "gone"]]))
     expect(screen.getByText("Release tools")).toBeTruthy()
   })
 
   test("updates a tool policy to read_only after confirmation", async () => {
     setSession()
-    confirmResult = true
     const notifications = withNotifySpy()
     const calls: Array<{ url: string; init?: RequestInit }> = []
     handler = (url, init) => {
@@ -847,19 +846,21 @@ describe("McpToolsPage", () => {
     }
     renderPage(<McpToolsPage />)
     await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    const select = screen.getAllByLabelText("工具执行策略")[0] as HTMLSelectElement
-    fireEvent.change(select, { target: { value: "read_only" } })
+    const select = screen.getAllByLabelText("工具执行策略")[0]
+    await chooseDropdownOption(select, "只读自动执行")
+    const dialog = await screen.findByRole("dialog", { name: "确认操作" })
+    expect(dialog.textContent).toContain("确认将工具“web_search”标记为只读并允许自动执行吗？")
+    expect((select as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认" }))
     await waitFor(() => expect(notifications).toEqual([["success", "MCP 工具策略已更新"]]))
-    expect(confirmCalls[0]).toContain("确认将工具“web_search”标记为只读并允许自动执行吗？")
     const put = calls.find((c) => c.url.includes("/tools/web_search/policy"))
     expect(put?.init?.method).toBe("PUT")
     expect(JSON.parse(put!.init!.body as string)).toEqual({ mode: "read_only" })
-    await waitFor(() => expect(select.value).toBe("read_only"))
+    await waitFor(() => expect(select.textContent).toContain("只读自动执行"))
   })
 
   test("restores the policy when the confirmation is declined", async () => {
     setSession()
-    confirmResult = false
     const calls: Array<{ url: string; init?: RequestInit }> = []
     handler = (url, init) => {
       calls.push({ url, init })
@@ -868,15 +869,15 @@ describe("McpToolsPage", () => {
     }
     renderPage(<McpToolsPage />)
     await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    const select = screen.getAllByLabelText("工具执行策略")[0] as HTMLSelectElement
-    fireEvent.change(select, { target: { value: "read_only" } })
-    await waitFor(() => expect(select.value).toBe("approval_required"))
+    const select = screen.getAllByLabelText("工具执行策略")[0]
+    await chooseDropdownOption(select, "只读自动执行")
+    await respondToConfirm("取消")
+    expect(select.textContent).toContain("每次调用前审批")
     expect(calls.some((c) => c.url.includes("/policy"))).toBe(false)
   })
 
   test("disables a tool without confirmation", async () => {
     setSession()
-    confirmResult = false
     const notifications = withNotifySpy()
     const calls: Array<{ url: string; init?: RequestInit }> = []
     handler = (url, init) => {
@@ -897,11 +898,11 @@ describe("McpToolsPage", () => {
     }
     renderPage(<McpToolsPage />)
     await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    const select = screen.getAllByLabelText("工具执行策略")[1] as HTMLSelectElement
-    expect(select.value).toBe("disabled")
-    fireEvent.change(select, { target: { value: "approval_required" } })
+    const select = screen.getAllByLabelText("工具执行策略")[1]
+    expect(select.textContent).toContain("禁用")
+    await chooseDropdownOption(select, "每次调用前审批")
     await waitFor(() => expect(notifications).toEqual([["success", "MCP 工具策略已更新"]]))
-    expect(confirmCalls).toHaveLength(0)
+    expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull()
     const put = calls.find((c) => c.url.includes("/tools/no_desc/policy"))
     expect(JSON.parse(put!.init!.body as string)).toEqual({ mode: "approval_required" })
   })
@@ -916,10 +917,10 @@ describe("McpToolsPage", () => {
     }
     renderPage(<McpToolsPage />)
     await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    const select = screen.getAllByLabelText("工具执行策略")[0] as HTMLSelectElement
-    fireEvent.change(select, { target: { value: "disabled" } })
+    const select = screen.getAllByLabelText("工具执行策略")[0]
+    await chooseDropdownOption(select, "禁用")
     await waitFor(() => expect(notifications).toEqual([["error", "policy failed"]]))
-    await waitFor(() => expect(select.value).toBe("approval_required"))
+    expect(select.textContent).toContain("每次调用前审批")
   })
 
   test("shows the saving state while connecting", async () => {

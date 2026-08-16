@@ -75,6 +75,13 @@ Correctness, safety, evidence, and validation take priority over speed.
   passwords must come from env values, not Python constants.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
+- Knowledge keyword retrieval uses `pg_search` 0.25.2 BM25 over
+  `knowledge_document_chunks.search_text` with the Jieba tokenizer. The bundled
+  PostgreSQL 17 image installs that pinned extension plus its `pgvector`
+  dependency; external PostgreSQL deployments must install both before running
+  migrations and preload `pg_search` before PostgreSQL starts. Qdrant remains
+  the application vector store. Do not silently fall back to `ts_rank_cd`,
+  because that changes the declared ranking semantics.
 - Regression suites live in `backend/tests/` and run from `backend/` with
   `uv run python -m tests.<suite>`.
 - Knowledge parsing, indexing, and durable deletion cleanup run through Celery
@@ -82,6 +89,10 @@ Correctness, safety, evidence, and validation take priority over speed.
   use the same `QDRANT_URL`. Deletion cleanup intent is persisted in
   `knowledge_storage_cleanups`; Celery Beat redispatches due records, so do not
   replace it with best-effort post-commit cleanup.
+- Knowledge retrieval evaluation also runs through the leased Celery knowledge
+  task runner and reuses the production retrieval path. Evaluation is mutually
+  exclusive with parse/index/rebuild work for the same knowledge base; result
+  and progress writes must remain in one lease-checked transaction.
 - `backend/make dev` automatically follows logs from a running Compose worker
   into the API terminal and stops that follower when Uvicorn exits; it does not
   start or replace the worker.
@@ -93,6 +104,10 @@ Correctness, safety, evidence, and validation take priority over speed.
   fallback. The upload UI and parser accept DOCX, PDF, Markdown, text, PPTX,
   XLSX, XLS, HTML, CSV, JSON, XML, IPYNB, EPUB, ZIP, PNG, JPG, JPEG, and WEBP.
   The backend image must include Tesseract Chinese/English data for OCR fallback.
+- QA-table import is opt-in (`import_mode=qa`) and uses read-only openpyxl for
+  XLSX plus the Python CSV module for UTF-8 CSV. It requires question/answer
+  headers, ignores document segmentation settings, and indexes question plus
+  answer while returning the answer as chunk content.
 - Workflow custom reply nodes render Jinja2 templates in a sandboxed environment;
   undefined variables fail the node, and reference-only replies stringify one
   selected upstream field.

@@ -43,7 +43,7 @@ SUPPORTED_DOCUMENT_EXTENSIONS = frozenset(
     }
 )
 MARKDOWN_HEADING_PATTERN = re.compile(
-    r"^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$"
+    r"^\s{0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$"
 )
 PDF_INLINE_FORMAT_TAG_PATTERN = re.compile(r"</?(?:sub|sup)>", re.IGNORECASE)
 PDF_CJK_SPACE_PATTERN = re.compile(
@@ -126,6 +126,7 @@ class TextSpan:
 class ParentChunkDraft:
     title: str
     content: str
+    section_path: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -135,6 +136,8 @@ class ChildChunkDraft:
     start_offset: int | None = None
     end_offset: int | None = None
     asset_indexes: list[int] = field(default_factory=list)
+    kind: str = "document"
+    meta: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -542,9 +545,11 @@ def split_parent_chunks(
     text: str,
     max_size: int = PARENT_CHUNK_SIZE,
 ) -> list[ParentChunkDraft]:
-    sections: list[tuple[str, str]] = []
+    sections: list[tuple[str, list[str], str]] = []
     section_start = 0
     section_title = ""
+    section_path: list[str] = []
+    heading_stack: list[str] = []
     offset = 0
     fence_marker: str | None = None
 
@@ -565,19 +570,27 @@ def split_parent_chunks(
         if heading is not None:
             content = text[section_start:offset].strip()
             if content:
-                sections.append((section_title, content))
+                sections.append((section_title, section_path, content))
             section_start = offset
-            section_title = heading.group(1).strip()
+            level = len(heading.group(1))
+            section_title = heading.group(2).strip()
+            heading_stack = heading_stack[: level - 1]
+            heading_stack.append(section_title)
+            section_path = list(heading_stack)
         offset += len(line)
 
     content = text[section_start:].strip()
     if content:
-        sections.append((section_title, content))
+        sections.append((section_title, section_path, content))
 
     parents: list[ParentChunkDraft] = []
-    for title, section in sections:
+    for title, path, section in sections:
         parents.extend(
-            ParentChunkDraft(title=title, content=span.content)
+            ParentChunkDraft(
+                title=title,
+                content=span.content,
+                section_path=path,
+            )
             for span in split_text_spans(section, max_size, 0, "\n\n")
         )
     return parents
@@ -598,6 +611,7 @@ def build_hierarchical_chunks(
             ParentChunkDraft(
                 title=raw_parent.title,
                 content=clean_parent.strip(),
+                section_path=raw_parent.section_path,
             )
         )
         parent_leading = len(clean_parent) - len(clean_parent.lstrip())

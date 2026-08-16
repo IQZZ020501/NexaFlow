@@ -1,6 +1,9 @@
 services:
   db:
-    image: postgres:17-alpine
+    image: nexaflow/postgres-pg-search:0.25.2
+    build:
+      context: ..
+      dockerfile: deploy/dockerfiles/postgres.Dockerfile
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
       POSTGRES_USER: ${POSTGRES_USER:-nexaflow}
@@ -87,7 +90,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/dockerfiles/backend.Dockerfile
-    command: celery -A app.infrastructure.celery:celery_app worker --loglevel=INFO
+    command: celery -A app.infrastructure.celery:celery_app worker --beat --loglevel=INFO
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nexaflow}:${POSTGRES_PASSWORD:-nexaflow}@db:5432/${POSTGRES_DB:-nexaflow}
@@ -107,25 +110,6 @@ services:
       qdrant:
         condition: service_healthy
       sandbox:
-        condition: service_healthy
-
-  beat:
-    build:
-      context: ..
-      dockerfile: deploy/dockerfiles/backend.Dockerfile
-    command: celery -A app.infrastructure.celery:celery_app beat --loglevel=INFO
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nexaflow}:${POSTGRES_PASSWORD:-nexaflow}@db:5432/${POSTGRES_DB:-nexaflow}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      KNOWLEDGE_STORAGE_DIR: /data/knowledge
-      QDRANT_URL: http://qdrant:6333
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      qdrant:
         condition: service_healthy
 
   frontend:

@@ -27,6 +27,7 @@ from app.entities.knowledge import (
     DOCUMENT_PARSED_STATUS,
     DOCUMENT_PARSING_STATUS,
     TASK_FAILED_STATUS,
+    TASK_EVALUATE,
     TASK_INDEX,
     TASK_PARSE,
     TASK_QUEUED_STATUS,
@@ -47,6 +48,7 @@ from app.ports.vector_store import (
     upsert_vectors,
 )
 from app.shareddomain.knowledge.orchestration import (
+    chunk_search_text,
     enqueue_index_knowledge_document,
     extract_document_chunk_contents,
     parse_task_options_from_task,
@@ -67,6 +69,18 @@ TASK_LEASE_SECONDS = 300
 TASK_LEASE_RENEW_SECONDS = 30
 TASK_RUN_BUSY = "busy"
 TASK_RUN_FINISHED = "finished"
+
+EvaluationTaskRunner = Callable[
+    [
+        AsyncSession,
+        KnowledgeTask,
+        KnowledgeBase,
+        User,
+        Settings,
+        asyncio.Event,
+    ],
+    Awaitable[None],
+]
 
 
 def batches(items: list[VectorChunk], size: int) -> list[list[VectorChunk]]:
@@ -214,6 +228,22 @@ async def run_index_task(
                 raise KnowledgePipelineError("Knowledge chunk document is missing.")
             documents[chunk.document_id] = loaded
 
+    parents = await knowledge_base_repository.list_parent_chunks_by_ids(
+        db,
+        knowledge_base,
+        {chunk.parent_id for chunk in chunks if chunk.parent_id},
+    )
+    parents_by_id = {parent.id: parent for parent in parents}
+    for chunk in chunks:
+        search_text = chunk_search_text(
+            documents[chunk.document_id],
+            parents_by_id.get(chunk.parent_id) if chunk.parent_id else None,
+            chunk,
+        )
+        if chunk.search_text != search_text:
+            chunk.search_text = search_text
+            await knowledge_base_repository.save_knowledge_document_chunk(db, chunk)
+
     if task.task_type != TASK_REBUILD_INDEX:
         for chunk_document in documents.values():
             chunk_document = (
@@ -243,7 +273,7 @@ async def run_index_task(
             document_id=chunk.document_id,
             document_filename=documents[chunk.document_id].filename,
             chunk_index=chunk.chunk_index,
-            content=chunk.content,
+            content=chunk.search_text or chunk.content,
             document_metadata={
                 **(documents[chunk.document_id].meta or {}),
                 "content_type": documents[chunk.document_id].content_type,
@@ -405,6 +435,7 @@ async def run_knowledge_task(
     settings: Settings,
     enqueue_task: Callable[[str, Settings], Awaitable[None]] | None = None,
     worker_task_id: str | None = None,
+    evaluation_runner: EvaluationTaskRunner | None = None,
 ) -> str:
     chained_task_id: str | None = None
     worker_task_id = worker_task_id or new_id()
@@ -419,14 +450,15 @@ async def run_knowledge_task(
         )
         if not claimed:
             task = await knowledge_base_repository.lock_knowledge_task(db, task_id)
-            if (
-                task is not None
-                and task.status == "running"
-                and (
-                    task.lease_expires_at is None
-                    or task.lease_expires_at <= started_at
+            if task is not None and task.attempts >= task.max_attempts and (
+                task.status == TASK_QUEUED_STATUS
+                or (
+                    task.status == TASK_RUNNING_STATUS
+                    and (
+                        task.lease_expires_at is None
+                        or task.lease_expires_at <= started_at
+                    )
                 )
-                and task.attempts >= task.max_attempts
             ):
                 await mark_knowledge_task_failed(
                     db,
@@ -475,6 +507,15 @@ async def run_knowledge_task(
                     task,
                     knowledge_base,
                     document,
+                    actor,
+                    settings,
+                    lease_lost,
+                )
+            elif task.task_type == TASK_EVALUATE and evaluation_runner is not None:
+                await evaluation_runner(
+                    db,
+                    task,
+                    knowledge_base,
                     actor,
                     settings,
                     lease_lost,
@@ -574,21 +615,33 @@ async def run_knowledge_task(
         if enqueue_task is not None:
             await enqueue_task(chained_task_id, settings)
         else:
-            await run_knowledge_task(chained_task_id, settings)
+            await run_knowledge_task(
+                chained_task_id,
+                settings,
+                evaluation_runner=evaluation_runner,
+            )
     return TASK_RUN_FINISHED
 
 
-async def recover_knowledge_tasks(settings: Settings) -> None:
-    async with get_session_factory()() as db:
-        tasks = await knowledge_base_repository.list_recoverable_tasks(db)
-        for task in tasks:
-            task.status = TASK_QUEUED_STATUS
-            task.started_at = None
-            task.lease_expires_at = None
-            task.worker_task_id = None
-            task.finished_at = None
-            task.processed_items = 0
-            await knowledge_base_repository.save_knowledge_task(db, task)
-        await db.commit()
+async def recover_knowledge_tasks(
+    settings: Settings,
+    evaluation_runner: EvaluationTaskRunner | None = None,
+) -> None:
+    task_ids = await list_recoverable_knowledge_task_ids(settings)
+    await asyncio.gather(
+        *(
+            run_knowledge_task(
+                task_id,
+                settings,
+                evaluation_runner=evaluation_runner,
+            )
+            for task_id in task_ids
+        )
+    )
 
-    await asyncio.gather(*(run_knowledge_task(task.id, settings) for task in tasks))
+
+async def list_recoverable_knowledge_task_ids(settings: Settings) -> list[str]:
+    del settings
+    async with get_session_factory()() as db:
+        tasks = await knowledge_base_repository.list_recoverable_tasks(db, utc_now())
+    return [task.id for task in tasks]

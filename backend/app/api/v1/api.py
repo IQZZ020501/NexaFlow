@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     agents,
     auth,
     knowledge,
+    knowledge_evaluation,
     knowledge_lifecycle,
     knowledge_retrieval,
     mcp_servers,
@@ -27,6 +28,7 @@ api_router.include_router(auth.router)
 api_router.include_router(workspaces.router)
 api_router.include_router(teams.router)
 api_router.include_router(knowledge.router)
+api_router.include_router(knowledge_evaluation.router)
 api_router.include_router(knowledge_lifecycle.router)
 api_router.include_router(knowledge_retrieval.router)
 api_router.include_router(models.router)

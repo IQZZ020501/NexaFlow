@@ -1,8 +1,8 @@
 # NexaFlow container deployment
 
 Runs the full stack with Docker Compose: PostgreSQL, Redis, Qdrant, FastAPI
-(`api`), Celery worker and beat, the isolated Python sandbox, and the Next.js
-frontend.
+(`api`), a Celery worker with embedded Beat, the isolated Python sandbox, and
+the Next.js frontend.
 
 ## Quick start
 
@@ -35,17 +35,20 @@ Point `backend/.env` at the published endpoints
 (`postgresql+psycopg://nexaflow:nexaflow@localhost:5432/nexaflow`,
 `redis://localhost:6379/0`, `http://127.0.0.1:6333`) and run migrations with
 `cd backend && uv run python -m alembic upgrade head`.
+When the API runs on the host and the Compose worker is enabled, the dev
+override mounts `backend/storage` at the worker's `/data`; keep
+`KNOWLEDGE_STORAGE_DIR=./storage/knowledge` so both processes read the same
+uploaded files.
 
 ## Services
 
 | Service | Image / build | Command |
 |---|---|---|
-| `db` | postgres:17-alpine | — |
+| `db` | `deploy/dockerfiles/postgres.Dockerfile`（PostgreSQL 17 + `pg_search` 0.25.2） | BM25 keyword search |
 | `redis` | redis:7-alpine | — |
 | `qdrant` | qdrant/qdrant:v1.19.0 | vector database |
 | `api` | `deploy/dockerfiles/backend.Dockerfile` | uvicorn |
-| `worker` | same backend image | celery worker |
-| `beat` | same backend image | celery beat |
+| `worker` | same backend image | celery worker with embedded Beat |
 | `sandbox` | `deploy/dockerfiles/sandbox.Dockerfile` | isolated Python runner over a Unix socket |
 | `frontend` | `deploy/dockerfiles/frontend.Dockerfile` | Next.js standalone |
 
@@ -68,8 +71,10 @@ network respectively.
 `JWT_EXPIRES_MINUTES` controls access token lifetime;
 `REFRESH_TOKEN_EXPIRES_DAYS` controls persisted refresh sessions.
 `AGENT_EXECUTOR_LEASE_SECONDS` and `AGENT_EXECUTOR_HEARTBEAT_SECONDS` control
-Agent worker takeover; keep the heartbeat below half the lease. Keep exactly
-one `beat` instance running so queued and expired Agent runs are redispatched.
+Agent worker takeover; keep the heartbeat below half the lease. The Compose
+worker embeds Beat, so keep that combined worker at one instance and do not run
+a separate Beat process. It redispatches queued and expired Knowledge tasks and
+Agent runs.
 Celery uses `solo` automatically on macOS (HTTPS trust evaluation is unsafe
 after a multithreaded process fork) and Windows (`prefork` needs `os.fork()`,
 which Windows lacks); Linux containers keep `prefork`.
@@ -154,6 +159,21 @@ Run migrations before first start or after upgrading:
 ```bash
 docker compose -f deploy/docker-compose.yml run --rm api alembic upgrade head
 ```
+
+Knowledge BM25 migrations require `pg_search` 0.25.2. The bundled database
+image installs the pinned PostgreSQL 17 `pg_search` packages for amd64 and arm64,
+verifies their release checksums, and installs the required `pgvector` package.
+External PostgreSQL deployments must install both extensions and allow the
+migration user to run `CREATE EXTENSION vector` and `CREATE EXTENSION pg_search`.
+They must also add `pg_search` to `shared_preload_libraries` and restart
+PostgreSQL before running Alembic; the bundled image applies that startup option.
+Back up the database before replacing an existing `postgres:17-alpine`
+container, rebuild and start `db`, then run Alembic. Building the first BM25
+index can block writes to the chunk table, so schedule this migration in a
+maintenance window for large knowledge bases. To roll back, restore the prior
+application version and downgrade Alembic so its native GIN query path and index
+match again; the installed extension may remain unused. `pg_search` Community is
+distributed under AGPLv3, so deployments must account for its license.
 
 For this migration, upgrade PostgreSQL first, roll all API and worker instances
 to the new image, and only then create SSE/stdio registrations. Existing stdio

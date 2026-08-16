@@ -277,7 +277,7 @@ sequenceDiagram
     UI->>API: "GET node executions"
 ```
 
-Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_runs`，统一任务先检查 `workflow_run_details` 再分派到对应执行器。checkpoint 使接管者跳过已提交节点；MCP 节点额外依赖 `agent_tool_calls` 幂等账本。
+Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_runs`，统一任务先检查 `workflow_run_details` 再分派到对应执行器。checkpoint 使接管者跳过已提交节点；MCP 节点额外依赖 `agent_tool_calls` 幂等账本。
 
 ## 10. 分阶段实施与验收
 
@@ -292,7 +292,7 @@ Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_runs`，统一任�
 
 ## 11. 安全与运维注意事项
 
-- worker、API、Beat 必须使用同一 PostgreSQL/Redis 配置；Beat 必须显式获得容器内 `DATABASE_URL`；
+- 内嵌 Beat 的 worker 与 API 必须使用同一 PostgreSQL/Redis 配置；worker 必须显式获得容器内 `DATABASE_URL`；
 - 只有 worker 挂载 sandbox socket；沙箱不得接入 Compose 网络或业务数据卷；
 - MCP 管理员仍具备项目既有的 worker 进程级 stdio 执行权限，工作流仅允许当前策略为 `read_only` 的工具；
 - Redis 负责队列，不作为审计真源；运行、checkpoint、事件和节点记录均以 PostgreSQL 为准；

@@ -1,6 +1,6 @@
 /* @jsxImportSource react */
 import { afterEach, describe, expect, test } from "bun:test"
-import { act, fireEvent, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 
 import { ChunkPreviewList } from "@/components/knowledge/chunk-preview-list"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
@@ -107,6 +107,10 @@ function makeChunk(
     start_offset: 0,
     end_offset: 24,
     content: "alpha beta gamma-delta-epsilon",
+    kind: "document",
+    question: null,
+    source: null,
+    row_number: null,
     char_count: 24,
     token_count: 5,
     vector_id: null,
@@ -628,6 +632,43 @@ describe("knowledge upload flow: files step", () => {
     expect(callbacks.onRouteSegment.mock.calls.length).toBe(1)
     const state = callbacks.onRouteSegment.mock.calls[0][0] as KnowledgeUploadRouteState
     expect(state.documentIds).toEqual([])
+    expect(state.importMode).toBe("document")
+    expect(state.parseSettings).toEqual(SMART_SETTINGS)
+  })
+
+  test("uses the explicit Q&A mode and only accepts CSV or XLSX", () => {
+    const { container, callbacks } = renderFlow({ step: "files" })
+    const fileInput = container.querySelectorAll('input[type="file"]')[0]
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["notes"], "notes.txt", { type: "text/plain" })],
+      },
+    })
+    expect(screen.getByText("notes.txt")).toBeTruthy()
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "导入类型" }))
+    fireEvent.click(within(screen.getByRole("menu")).getByText("问答表"))
+    expect(screen.queryByText("notes.txt")).toBeNull()
+    expect(screen.queryByRole("button", { name: "选择文件夹" })).toBeNull()
+    expect(screen.getByText("拖入 CSV 或 XLSX 文件")).toBeTruthy()
+    expect((fileInput as HTMLInputElement).accept).toBe(".csv,.xlsx")
+
+    fireEvent.change(fileInput, {
+      target: {
+        files: [
+          new File(["bad"], "guide.md", { type: "text/markdown" }),
+          new File(["question,answer\nQ,A"], "faq.csv", {
+            type: "text/csv",
+          }),
+        ],
+      },
+    })
+    expect(screen.queryByText("guide.md")).toBeNull()
+    expect(screen.getByText("faq.csv")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }))
+
+    const state = callbacks.onRouteSegment.mock.calls[0][0] as KnowledgeUploadRouteState
+    expect(state.importMode).toBe("qa")
     expect(state.parseSettings).toEqual(SMART_SETTINGS)
   })
 })
@@ -1060,6 +1101,46 @@ describe("knowledge upload flow: segment step route restore", () => {
 })
 
 describe("knowledge upload flow: preview generation", () => {
+  test("shows Q&A rows without document segmentation controls", async () => {
+    const api = new KnowledgeApi()
+    api.addDocuments(
+      makeDocument({
+        id: "doc-1",
+        filename: "faq.csv",
+        status: "parsed",
+        meta: { staged: true, import_mode: "qa" },
+      }),
+    )
+    api.setChunks("doc-1", [
+      makeChunk({
+        content: "99.9%",
+        kind: "qa",
+        question: "What is the SLA?",
+        source: "runbook",
+        row_number: 2,
+        char_count: 5,
+      }),
+    ])
+    withFetch(api.handler)
+
+    renderFlow({
+      step: "segment",
+      routeState: {
+        documentIds: ["doc-1"],
+        parseSettings: SMART_SETTINGS,
+        importMode: "qa",
+      },
+    })
+
+    await waitFor(() => screen.getByText("What is the SLA?"))
+    expect(screen.getByText("99.9%")).toBeTruthy()
+    expect(screen.getByText("来源：runbook")).toBeTruthy()
+    expect(screen.getByText("行 2")).toBeTruthy()
+    expect(screen.queryByText("高级分段")).toBeNull()
+    expect(screen.getByText("问答导入")).toBeTruthy()
+    expect(screen.getByText("问答预览")).toBeTruthy()
+  })
+
   test("marks a document parse_failed when its parse task fails", async () => {
     const api = new KnowledgeApi()
     api.addDocuments(makeDocument({ id: "doc-1", filename: "corrupt.pdf" }))
@@ -1311,9 +1392,8 @@ describe("knowledge upload flow: preview generation", () => {
       fireEvent.click(collapseCheckbox)
       fireEvent.click(collapseCheckbox)
       fireEvent.click(collapseCheckbox)
-      fireEvent.change(screen.getByLabelText("切分字符"), {
-        target: { value: "。" },
-      })
+      fireEvent.pointerDown(screen.getByRole("button", { name: "切分字符" }))
+      fireEvent.click(within(screen.getByRole("menu")).getByText("中文句号（。）"))
 
       fireEvent.click(screen.getByRole("button", { name: "重新生成预览" }))
       await waitFor(() =>

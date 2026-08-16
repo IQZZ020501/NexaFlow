@@ -41,7 +41,7 @@ docs/      module documentation — start at docs/INDEX.md
 Knowledge processing and Agent runs are published to Redis through Celery.
 
 ```bash
-uv run celery -A app.infrastructure.celery:celery_app worker --loglevel=INFO
+uv run celery -A app.infrastructure.celery:celery_app worker --beat --loglevel=INFO
 ```
 
 The app selects Celery's `solo` pool on macOS (unsafe HTTPS work after process
@@ -57,13 +57,14 @@ the configured `KNOWLEDGE_STORAGE_DIR` and connect to the same `QDRANT_URL`;
 otherwise workers can miss uploaded files or write vectors to a different
 Qdrant instance.
 
-Run one Celery Beat process for storage-cleanup and Agent lease recovery. Agent
-workers, the API, and Beat must use the same PostgreSQL database and Redis
-broker. Agent answer and reasoning deltas use bounded, short-lived Redis
-Streams while checkpoints, process events, and terminal answers stay in
-PostgreSQL. Closing an Agent event stream only stops observation; it does not
-cancel the durable run. If Redis live reads fail, the client still receives the
-durable terminal answer.
+The worker embeds the single Celery Beat scheduler for storage-cleanup,
+Knowledge task, and Agent lease recovery. Do not run another Beat process or
+scale this combined worker command above one instance. The worker and API must
+use the same PostgreSQL database and Redis broker. Agent answer and reasoning
+deltas use bounded, short-lived Redis Streams while checkpoints, process
+events, and terminal answers stay in PostgreSQL. Closing an Agent event stream
+only stops observation; it does not cancel the durable run. If Redis live reads
+fail, the client still receives the durable terminal answer.
 
 ## MCP transports
 

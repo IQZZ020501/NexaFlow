@@ -117,6 +117,32 @@ test("mobile workflow actions keep accessible names", () => {
   expect(detailSource).toContain('aria-label={t("发布版本")}')
 })
 
+test("confirmed workflow discards restore persisted graph and app settings", () => {
+  const discardChanges = detailSource.slice(
+    detailSource.indexOf("const discardChanges"),
+    detailSource.indexOf("const changeView"),
+  )
+  const changeView = detailSource.slice(
+    detailSource.indexOf("const changeView"),
+    detailSource.indexOf("const renderNavItems"),
+  )
+  const handleBack = detailSource.slice(
+    detailSource.indexOf("async function handleBack"),
+    detailSource.indexOf("async function changeSettingsOpen"),
+  )
+  const changeSettingsOpen = detailSource.slice(
+    detailSource.indexOf("async function changeSettingsOpen"),
+    detailSource.indexOf("if (isLoading || !definition || !graph)"),
+  )
+
+  expect(discardChanges).toContain("setGraph(definition.graph)")
+  expect(discardChanges).toContain("setCanvasGeneration")
+  expect(discardChanges).toContain("onDiscardAppChanges()")
+  expect(changeView).toContain("if (shouldDiscard) discardChanges()")
+  expect(handleBack).toContain("discardChanges()")
+  expect(changeSettingsOpen).toContain("onDiscardAppChanges()")
+})
+
 test("output fields use translated labels and confirm successful copies", () => {
   expect(source).toContain('variable: { value: "变量值" }')
   expect(source).toContain('code: { result: "执行结果", stdout: "标准输出", stderr: "错误输出" }')

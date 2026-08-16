@@ -38,6 +38,7 @@ CHUNK_INDEX_FAILED_STATUS = "index_failed"
 TASK_PARSE = "parse"
 TASK_INDEX = "index"
 TASK_REBUILD_INDEX = "rebuild_index"
+TASK_EVALUATE = "evaluate"
 TASK_QUEUED_STATUS = "queued"
 TASK_RUNNING_STATUS = "running"
 TASK_SUCCEEDED_STATUS = "succeeded"
@@ -136,12 +137,31 @@ class KnowledgeDocumentChunk:
     start_offset: int | None = None
     end_offset: int | None = None
     content: str = ""
+    kind: str = "document"
+    search_text: str = ""
+    meta: dict[str, Any] = field(default_factory=dict)
     char_count: int = 0
     token_count: int = 0
     vector_id: str | None = None
     status: str = "preview"
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class KnowledgeDocumentReference:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    knowledge_base_id: str = ""
+    source_document_id: str = ""
+    source_chunk_id: str = ""
+    target_document_id: str | None = None
+    target_parent_id: str | None = None
+    target_label: str = ""
+    target_section: str = ""
+    reference_type: str = "text"
+    source_ordinal: int = 0
+    created_at: datetime = field(default_factory=utc_now)
 
 
 @dataclass
@@ -177,6 +197,46 @@ class KnowledgeTask:
     finished_at: datetime | None = None
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class KnowledgeEvaluationCase:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    knowledge_base_id: str = ""
+    question: str = ""
+    answer_points: list[str] = field(default_factory=list)
+    created_by_user_id: str = ""
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class KnowledgeEvaluationExpectation:
+    workspace_id: str = ""
+    knowledge_base_id: str = ""
+    case_id: str = ""
+    document_id: str = ""
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class KnowledgeEvaluationResult:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    knowledge_base_id: str = ""
+    task_id: str = ""
+    case_id: str = ""
+    returned_document_ids: list[str] = field(default_factory=list)
+    returned_chunk_ids: list[str] = field(default_factory=list)
+    hit_at_k: int = 0
+    recall_at_k: float = 0.0
+    reciprocal_rank: float = 0.0
+    ndcg_at_k: float = 0.0
+    latency_ms: float = 0.0
+    trace: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
 
 
 @dataclass

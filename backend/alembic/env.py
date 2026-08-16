@@ -24,6 +24,10 @@ from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
+    KnowledgeDocumentReference,
+    KnowledgeEvaluationCase,
+    KnowledgeEvaluationExpectation,
+    KnowledgeEvaluationResult,
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )

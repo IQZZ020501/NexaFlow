@@ -21,6 +21,7 @@ import {
   StatusBadge,
 } from "@/components/knowledge/status-badges"
 import { TopLoadingBar } from "@/components/app/top-progress"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
@@ -350,6 +351,7 @@ export function AgentsPage({
   const selectedAgentId = params.id ?? null
   const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
+  const [confirmAction, confirmDialog] = useConfirmDialog()
   const [agents, setAgents] = React.useState<Agent[]>([])
   const [models, setModels] = React.useState<RegisteredModel[]>([])
   const [knowledgeBases, setKnowledgeBases] = React.useState<KnowledgeBase[]>(
@@ -1014,6 +1016,22 @@ export function AgentsPage({
     router.replace(path)
   }
 
+  async function handleBackFromAgent() {
+    if (!selectedAgent) return
+    if (
+      isDirty &&
+      !(await confirmAction({
+        description: t("放弃未保存的更改？"),
+        confirmLabel: t("放弃更改"),
+        destructive: true,
+      }))
+    ) {
+      return
+    }
+    if (isDirty) setForm(formFromAgent(selectedAgent))
+    router.push("/app/apps")
+  }
+
   async function handleDeleteAgent() {
     if (!token || !selectedWorkspaceId || !deleteAgentTarget) return
 
@@ -1388,6 +1406,7 @@ export function AgentsPage({
             canManagePublishing={canManagePublishing}
             isAppDirty={isDirty}
             isSavingApp={isSaving}
+            onDiscardAppChanges={() => setForm(formFromAgent(selectedAgent))}
             activeView={workflowCanvasMode ? "settings" : activeView}
             standalone={workflowCanvasMode}
             onBack={() =>
@@ -1426,11 +1445,7 @@ export function AgentsPage({
           isSaving={isSaving}
           isAsking={isAsking}
           isRunsLoading={isRunsLoading}
-          onBack={() => {
-            if (!isDirty || window.confirm(t("放弃未保存的更改？"))) {
-              router.push("/app/apps")
-            }
-          }}
+          onBack={() => void handleBackFromAgent()}
           onDelete={() => setDeleteAgentTarget(selectedAgent)}
           onManagePermissions={() =>
             void handleOpenAgentPermissions(selectedAgent)
@@ -1464,6 +1479,7 @@ export function AgentsPage({
           onRevoke={handleRevokeAgentPermission}
         />
         {renderDeleteAgentDialog()}
+        {confirmDialog}
       </>
     )
   }
@@ -1654,6 +1670,7 @@ export function AgentsPage({
         onRevoke={handleRevokeAgentPermission}
       />
       {renderDeleteAgentDialog()}
+      {confirmDialog}
     </>
   )
 
