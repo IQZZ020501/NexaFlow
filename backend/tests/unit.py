@@ -107,6 +107,366 @@ def test_effective_agent_permission_matrix() -> None:
     assert effective_agent_permission(agent, member, "member", grant) == "view"
 
 
+def test_tool_ref_requires_stable_ids() -> None:
+    from app.entities.tools import ToolRef
+
+    reference = ToolRef(tool_id="tool-1", version_id="version-1")
+    assert reference.tool_id == "tool-1"
+    assert reference.version_id == "version-1"
+
+    for fields in (
+        {"tool_id": "", "version_id": "version-1"},
+        {"tool_id": "tool-1", "version_id": "   "},
+    ):
+        try:
+            ToolRef(**fields)
+        except ValueError:
+            continue
+        raise AssertionError(f"Invalid ToolRef accepted: {fields}")
+
+    try:
+        reference.version_id = "version-2"  # type: ignore[misc]
+    except FrozenInstanceError:
+        pass
+    else:
+        raise AssertionError("ToolRef must be immutable.")
+
+
+def test_tool_snapshot_is_an_immutable_internal_contract() -> None:
+    from app.entities.tools import ToolSnapshot
+
+    snapshot = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-1",
+        version_id="version-1",
+        source_id="source-1",
+        kind="python",
+        function_name="lookup_order",
+        display_name="Lookup order",
+        description="Returns one order.",
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "additionalProperties": False},
+        definition_hash="hash-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console", "workflow"),
+        workflow_callable=True,
+        parallel_safe=False,
+        execution_spec={"code": "result = inputs"},
+    )
+
+    assert snapshot.kind == "python"
+    assert snapshot.execution_spec == {"code": "result = inputs"}
+    try:
+        snapshot.definition_hash = "hash-2"  # type: ignore[misc]
+    except FrozenInstanceError:
+        pass
+    else:
+        raise AssertionError("ToolSnapshot must be immutable.")
+
+
+def test_tool_adapter_contract_is_provider_neutral() -> None:
+    from datetime import datetime, timezone
+
+    from app.entities.tools import ToolSnapshot
+    from app.ports.tool_runtime import (
+        ToolAdapter,
+        ToolInvocationContext,
+        ToolRuntimeResult,
+    )
+
+    snapshot = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-1",
+        version_id="version-1",
+        source_id="source-1",
+        kind="builtin",
+        function_name="current_time",
+        display_name="Current time",
+        description="Returns the current time.",
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "additionalProperties": False},
+        definition_hash="hash-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console",),
+        workflow_callable=True,
+        parallel_safe=True,
+        execution_spec={"builtin": "current_time"},
+    )
+    context = ToolInvocationContext(
+        workspace_id="workspace-1",
+        root_run_id="root-1",
+        run_id="run-1",
+        invocation_id="invocation-1",
+        execution_user_id="user-1",
+        access_source="console",
+        deadline_at=datetime(2026, 8, 16, tzinfo=timezone.utc),
+        idempotency_key="key-1",
+    )
+
+    class FakeAdapter:
+        kind = "builtin"
+
+        async def invoke(self, snapshot, arguments, context):
+            assert snapshot.kind == self.kind
+            assert arguments == {}
+            assert context.workspace_id == "workspace-1"
+            return ToolRuntimeResult(
+                ok=True,
+                data={"time": "2026-08-16T00:00:00Z"},
+                summary="Current time returned.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={},
+            )
+
+    adapter = FakeAdapter()
+    assert isinstance(adapter, ToolAdapter)
+    result = asyncio.run(adapter.invoke(snapshot, {}, context))
+    assert result.ok is True
+    assert result.outcome == "confirmed"
+
+
+def test_public_tool_responses_exclude_execution_details() -> None:
+    from app.schemas.tool import ToolDetailResponse, ToolSummaryResponse
+
+    internal_payload = {
+        "id": "tool-1",
+        "workspace_id": "workspace-1",
+        "kind": "mcp",
+        "function_name": "lookup_order",
+        "display_name": "Lookup order",
+        "description": "Returns one order.",
+        "current_version_id": "version-1",
+        "status": "active",
+        "availability": "available",
+        "source": {
+            "id": "source-1",
+            "name": "Orders",
+            "kind": "mcp",
+            "transport": "streamable_http",
+            "connection": {"url": "https://private.example.com/mcp"},
+        },
+        "created_by_user_id": "owner-1",
+        "permission": "use",
+        "can_view": True,
+        "can_use": True,
+        "can_manage": False,
+        "python_code": "result = inputs",
+        "mcp_connection": {"bearer_token": "secret"},
+        "execution_spec": {"server_id": "server-1", "tool_name": "lookup"},
+    }
+
+    summary = ToolSummaryResponse.model_validate(internal_payload).model_dump()
+    detail = ToolDetailResponse.model_validate(
+        {
+            **internal_payload,
+            "version_id": "version-1",
+            "revision": 1,
+            "input_schema": {"type": "object", "additionalProperties": False},
+            "output_schema": {"type": "object", "additionalProperties": False},
+            "approval": "each_call",
+            "effect": "unknown",
+            "workflow_callable": True,
+            "parallel_safe": False,
+        }
+    ).model_dump()
+
+    sensitive_fields = {"python_code", "mcp_connection", "execution_spec"}
+    assert sensitive_fields.isdisjoint(summary)
+    assert sensitive_fields.isdisjoint(detail)
+    assert "connection" not in summary["source"]
+    assert "connection" not in detail["source"]
+
+
+def test_tool_ref_schema_requires_canonical_ids() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.tool import ToolRefSchema
+
+    reference = ToolRefSchema(tool_id=" tool-1 ", version_id=" version-1 ")
+    assert reference.model_dump() == {
+        "tool_id": "tool-1",
+        "version_id": "version-1",
+    }
+
+    for payload in (
+        {"tool_id": "", "version_id": "version-1"},
+        {"tool_id": "tool-1", "version_id": "   "},
+        {"tool_id": "tool-1", "version_id": "version-1", "server_id": "old"},
+    ):
+        try:
+            ToolRefSchema.model_validate(payload)
+        except ValidationError:
+            continue
+        raise AssertionError(f"Invalid HTTP ToolRef accepted: {payload}")
+
+
+def test_effective_tool_access_matrix() -> None:
+    from app.entities.tools import ToolAccess, effective_tool_access
+
+    full_access = ToolAccess(can_view=True, can_use=True, can_manage=True)
+    assert (
+        effective_tool_access(
+            is_owner=True,
+            is_workspace_admin=False,
+            grant=None,
+        )
+        == full_access
+    )
+    assert (
+        effective_tool_access(
+            is_owner=False,
+            is_workspace_admin=True,
+            grant=None,
+        )
+        == full_access
+    )
+    assert effective_tool_access(
+        is_owner=False,
+        is_workspace_admin=False,
+        grant="use",
+    ) == ToolAccess(can_view=True, can_use=True, can_manage=False)
+    assert effective_tool_access(
+        is_owner=False,
+        is_workspace_admin=False,
+        grant="view",
+    ) == ToolAccess(can_view=True, can_use=False, can_manage=False)
+    assert effective_tool_access(
+        is_owner=False,
+        is_workspace_admin=False,
+        grant=None,
+    ) == ToolAccess(can_view=False, can_use=False, can_manage=False)
+
+
+def test_python_tool_schema_validation_closes_objects() -> None:
+    from app.entities.tools import validate_tool_json_schema
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "maxLength": 200},
+            "options": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer"}},
+            },
+        },
+        "required": ["query"],
+    }
+
+    restricted = validate_tool_json_schema(schema)
+
+    assert restricted["additionalProperties"] is False
+    assert restricted["properties"]["options"]["additionalProperties"] is False
+    assert "additionalProperties" not in schema
+
+    for invalid in (
+        {"type": "string", "maxLength": 20},
+        {"type": "object", "additionalProperties": True},
+    ):
+        try:
+            validate_tool_json_schema(invalid)
+        except ValueError:
+            continue
+        raise AssertionError(f"Unsafe Python Tool schema accepted: {invalid}")
+
+
+def test_python_tool_schema_validation_enforces_limits() -> None:
+    from app.entities.tools import (
+        MAX_TOOL_ARRAY_ITEMS,
+        MAX_TOOL_SCHEMA_BYTES,
+        MAX_TOOL_SCHEMA_DEPTH,
+        MAX_TOOL_SCHEMA_PROPERTIES,
+        MAX_TOOL_STRING_LENGTH,
+        validate_tool_json_schema,
+    )
+
+    nested: dict[str, object] = {"type": "integer"}
+    for index in range(MAX_TOOL_SCHEMA_DEPTH):
+        nested = {
+            "type": "object",
+            "properties": {f"level_{index}": nested},
+        }
+
+    invalid_schemas = (
+        {
+            "type": "object",
+            "properties": {"remote": {"$ref": "https://example.com/schema"}},
+        },
+        {
+            "type": "object",
+            "$defs": {"value": {"type": "integer"}},
+            "properties": {"local": {"$ref": "#/$defs/value"}},
+        },
+        {
+            "type": "object",
+            "description": "x" * MAX_TOOL_SCHEMA_BYTES,
+        },
+        {
+            "type": "object",
+            "properties": {
+                f"field_{index}": {"type": "integer"}
+                for index in range(MAX_TOOL_SCHEMA_PROPERTIES + 1)
+            },
+        },
+        nested,
+        {
+            "type": "object",
+            "properties": {
+                "items": {"type": "array", "items": {"type": "integer"}}
+            },
+        },
+        {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "maxItems": MAX_TOOL_ARRAY_ITEMS + 1,
+                }
+            },
+        },
+        {
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+        },
+        {
+            "type": "object",
+            "properties": {
+                "value": {
+                    "type": "string",
+                    "maxLength": MAX_TOOL_STRING_LENGTH + 1,
+                }
+            },
+        },
+    )
+    for schema in invalid_schemas:
+        try:
+            validate_tool_json_schema(schema)
+        except ValueError:
+            continue
+        raise AssertionError(f"Over-broad Python Tool schema accepted: {schema}")
+
+
+def test_python_tool_code_is_limited_to_eight_kibibytes() -> None:
+    from app.entities.tools import (
+        MAX_PYTHON_TOOL_CODE_BYTES,
+        validate_python_tool_code,
+    )
+
+    boundary = "x" * MAX_PYTHON_TOOL_CODE_BYTES
+    assert validate_python_tool_code(boundary) == boundary
+
+    for code in (boundary + "x", "\u754c" * (MAX_PYTHON_TOOL_CODE_BYTES // 3 + 1)):
+        try:
+            validate_python_tool_code(code)
+        except ValueError:
+            continue
+        raise AssertionError("Oversized Python Tool code was accepted.")
+
+
 def test_validate_agent_permission_only_accepts_view() -> None:
     validate_agent_permission("view")
     expect_http_error(lambda: validate_agent_permission("edit"), 422)
@@ -3439,6 +3799,15 @@ def test_mcp_server_create_request_transport_matrix() -> None:
 def main() -> None:
     test_effective_permission_matrix()
     test_validate_permission_rejects_unknown()
+    test_tool_ref_requires_stable_ids()
+    test_tool_snapshot_is_an_immutable_internal_contract()
+    test_tool_adapter_contract_is_provider_neutral()
+    test_public_tool_responses_exclude_execution_details()
+    test_tool_ref_schema_requires_canonical_ids()
+    test_effective_tool_access_matrix()
+    test_python_tool_schema_validation_closes_objects()
+    test_python_tool_schema_validation_enforces_limits()
+    test_python_tool_code_is_limited_to_eight_kibibytes()
     test_knowledge_writes_recheck_locked_owner()
     test_clean_upload_filename_sanitizes_path_and_classification()
     test_parse_task_options_validates_boundaries()
