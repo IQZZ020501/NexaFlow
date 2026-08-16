@@ -26,6 +26,37 @@ _TERMINAL_RUN_STATUSES = {"succeeded", "failed", "cancelled"}
 _MIGRATION_MARKER = "_agent_publication_migration"
 
 
+def _agent_run_requires_drain(run_status: str, app_type: str) -> bool:
+    return app_type == "agent" and run_status not in _TERMINAL_RUN_STATUSES
+
+
+def _assert_agent_runs_drained(bind: sa.Connection) -> None:
+    agents = sa.table(
+        "agents",
+        sa.column("id", sa.String(36)),
+        sa.column("app_type", sa.String(20)),
+    )
+    runs = sa.table(
+        "agent_runs",
+        sa.column("id", sa.String(36)),
+        sa.column("agent_id", sa.String(36)),
+        sa.column("status", sa.String(20)),
+    )
+    active_run_id = bind.execute(
+        sa.select(runs.c.id)
+        .select_from(runs.join(agents, agents.c.id == runs.c.agent_id))
+        .where(
+            agents.c.app_type == "agent",
+            runs.c.status.not_in(sorted(_TERMINAL_RUN_STATUSES)),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if active_run_id is not None:
+        raise RuntimeError(
+            "Agent Runs must be drained before upgrading unified Tool execution."
+        )
+
+
 def _stable_id(key: str) -> str:
     return str(uuid5(_PUBLICATION_NAMESPACE, key))
 
@@ -415,11 +446,32 @@ def _run_tool_snapshots(
     )
 
 
+def _revoked_tool_grants(bind: sa.Connection) -> set[tuple[str, str]]:
+    audit_logs = sa.table(
+        "audit_logs",
+        sa.column("action", sa.String(80)),
+        sa.column("resource_type", sa.String(40)),
+        sa.column("resource_id", sa.String(36)),
+        sa.column("details", sa.JSON()),
+    )
+    revoked: set[tuple[str, str]] = set()
+    for row in bind.execute(
+        sa.select(audit_logs.c.resource_id, audit_logs.c.details).where(
+            audit_logs.c.action == "resource_permission.revoke",
+            audit_logs.c.resource_type == "tool",
+        )
+    ).mappings():
+        details = row["details"]
+        if isinstance(details, Mapping) and isinstance(details.get("user_id"), str):
+            revoked.add((row["resource_id"], details["user_id"]))
+    return revoked
+
+
 def _backfill_snapshot_use_grants(
     bind: sa.Connection,
     fallback_grants: Mapping[tuple[str, str, str], Mapping[str, Any]],
     tool_owners: Mapping[tuple[str, str], str | None],
-) -> dict[str, dict[str, set[str]]]:
+) -> dict[str, dict[str, set[tuple[str, str, datetime, datetime]]]]:
     if not fallback_grants:
         return {}
     permissions = sa.table(
@@ -459,7 +511,8 @@ def _backfill_snapshot_use_grants(
             sa.select(permissions).where(permissions.c.resource_type == "tool")
         ).mappings()
     }
-    markers: dict[str, dict[str, set[str]]] = {}
+    revoked = _revoked_tool_grants(bind)
+    markers: dict[str, dict[str, set[tuple[str, str, datetime, datetime]]]] = {}
     for key, grant in fallback_grants.items():
         workspace_id, tool_id, user_id = key
         timestamp = grant["created_at"]
@@ -479,6 +532,11 @@ def _backfill_snapshot_use_grants(
         )
         if action == "keep":
             continue
+        if (tool_id, user_id) in revoked:
+            # A revoke audit event proves the user's access was explicitly
+            # removed; the missing permission row is revocation state, not
+            # pre-grant history. Re-granting would resurrect revoked access.
+            continue
         permission_id = (
             permission["id"]
             if permission is not None
@@ -486,9 +544,9 @@ def _backfill_snapshot_use_grants(
         )
         for agent_id in agent_ids:
             markers.setdefault(agent_id, {}).setdefault(
-                "inserted_use_grant_ids",
+                "inserted_use_grants",
                 set(),
-            ).add(permission_id)
+            ).add((permission_id, user_id, timestamp, timestamp))
         bind.execute(
             permissions.insert().values(
                 id=permission_id,
@@ -507,7 +565,9 @@ def _backfill_snapshot_use_grants(
 
 def _record_grant_markers(
     bind: sa.Connection,
-    markers: Mapping[str, Mapping[str, set[str]]],
+    markers: Mapping[
+        str, Mapping[str, set[tuple[str, str, datetime, datetime]]]
+    ],
 ) -> None:
     if not markers:
         return
@@ -525,13 +585,29 @@ def _record_grant_markers(
             snapshot = {}
         updated = dict(snapshot)
         updated[_MIGRATION_MARKER] = {
-            key: sorted(ids) for key, ids in values.items()
+            key: [
+                {
+                    "id": item[0],
+                    "user_id": item[1],
+                    "created_at": _marker_datetime(item[2]),
+                    "updated_at": _marker_datetime(item[3]),
+                }
+                for item in sorted(items)
+            ]
+            for key, items in values.items()
         }
         bind.execute(
             agents.update()
             .where(agents.c.id == agent_id)
             .values(published_snapshot=updated)
         )
+
+
+def _marker_datetime(value: Any) -> str:
+    parsed = _json_datetime(value)
+    if parsed is None:
+        raise RuntimeError("Agent publication migration marker has invalid timestamp.")
+    return parsed.isoformat()
 
 
 def _migrated_tool_call_status(status: str, approval: str) -> str:
@@ -1031,6 +1107,17 @@ def _assert_downgrade_safe(bind: sa.Connection) -> None:
             )
 
 
+def _json_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _restore_migration_grants(bind: sa.Connection) -> None:
     agents = sa.table(
         "agents",
@@ -1039,21 +1126,42 @@ def _restore_migration_grants(bind: sa.Connection) -> None:
     permissions = sa.table(
         "resource_permissions",
         sa.column("id", sa.String(36)),
+        sa.column("user_id", sa.String(36)),
+        sa.column("permission", sa.String(20)),
+        sa.column("created_by_user_id", sa.String(36)),
+        sa.column("created_at", sa.DateTime(timezone=True)),
+        sa.column("updated_at", sa.DateTime(timezone=True)),
     )
-    inserted_ids: set[str] = set()
+    grants: dict[str, dict[str, Any]] = {}
     for value in bind.execute(sa.select(agents.c.published_snapshot)).scalars():
         snapshot = _json_value(value, {})
-        marker = snapshot.get(_MIGRATION_MARKER, {}) if isinstance(snapshot, Mapping) else {}
+        marker = (
+            snapshot.get(_MIGRATION_MARKER, {})
+            if isinstance(snapshot, Mapping)
+            else {}
+        )
         if not isinstance(marker, Mapping):
             continue
-        inserted_ids.update(
-            item
-            for item in marker.get("inserted_use_grant_ids", [])
-            if isinstance(item, str)
-        )
-    for offset in range(0, len(inserted_ids), 1000):
-        chunk = list(inserted_ids)[offset : offset + 1000]
-        bind.execute(permissions.delete().where(permissions.c.id.in_(chunk)))
+        for item in marker.get("inserted_use_grants", []):
+            if isinstance(item, Mapping) and isinstance(item.get("id"), str):
+                grants.setdefault(item["id"], item)
+    for permission_id, expected in grants.items():
+        row = bind.execute(
+            sa.select(permissions).where(permissions.c.id == permission_id)
+        ).mappings().first()
+        if row is None:
+            # Already removed by the user after the migration.
+            continue
+        if (
+            row["permission"] != "use"
+            or row["user_id"] != expected.get("user_id")
+            or row["created_by_user_id"] != expected.get("user_id")
+            or row["created_at"] != _json_datetime(expected.get("created_at"))
+            or row["updated_at"] != _json_datetime(expected.get("updated_at"))
+        ):
+            # The grant changed after migration; keep the user's change.
+            continue
+        bind.execute(permissions.delete().where(permissions.c.id == permission_id))
 
 
 def _restore_legacy_agent_published_snapshots(bind: sa.Connection) -> None:
@@ -1398,10 +1506,11 @@ def upgrade() -> None:
             sa.text(
                 "LOCK TABLE agents, agent_runs, agent_tool_calls, tool_invocations, "
                 "application_tool_bindings, agent_mcp_tools, resource_permissions, "
-                "tools, tool_versions, tool_policies, tool_sources, "
+                "audit_logs, tools, tool_versions, tool_policies, tool_sources, "
                 "workspace_memberships, users IN ACCESS EXCLUSIVE MODE"
             )
         )
+    _assert_agent_runs_drained(bind)
     versions = op.create_table(
         "agent_publication_versions",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1542,6 +1651,19 @@ def upgrade() -> None:
         "OR (configuration_source IN ('draft', 'legacy') "
         "AND agent_publication_version_id IS NULL)",
     )
+    for column, column_type in (
+        ("snapshot_schema_version", sa.Integer()),
+        ("configuration_source", sa.String(length=20)),
+        ("application_snapshot", sa.JSON()),
+        ("application_snapshot_hash", sa.String(length=64)),
+        ("tool_snapshots", sa.JSON()),
+    ):
+        op.alter_column(
+            "agent_runs",
+            column,
+            existing_type=column_type,
+            server_default=None,
+        )
 
 
 def downgrade() -> None:
@@ -1551,9 +1673,9 @@ def downgrade() -> None:
             sa.text(
                 "LOCK TABLE agents, agent_runs, agent_tool_calls, tool_invocations, "
                 "agent_publication_versions, application_tool_bindings, "
-                "agent_mcp_tools, resource_permissions, tools, tool_versions, "
-                "tool_policies, tool_sources, workspace_memberships, users "
-                "IN ACCESS EXCLUSIVE MODE"
+                "agent_mcp_tools, resource_permissions, audit_logs, tools, "
+                "tool_versions, tool_policies, tool_sources, workspace_memberships, "
+                "users IN ACCESS EXCLUSIVE MODE"
             )
         )
     _assert_downgrade_safe(bind)
