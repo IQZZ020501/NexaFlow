@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import {
-  FileUpIcon,
   LoaderCircleIcon,
   PlayIcon,
   PlusIcon,
@@ -41,146 +40,6 @@ type KnowledgeEvaluationProps = {
   reportError: (error: unknown) => void
 }
 
-type EvaluationDraft = {
-  rowNumber: number
-  question: string
-  expectedDocumentIds: string[]
-  answerPoints: string[]
-}
-
-type EvaluationCsvError = {
-  rowNumber: number
-  code:
-    | "headers"
-    | "question"
-    | "expected"
-    | "document"
-    | "limit"
-    | "questionLength"
-    | "answerLength"
-}
-
-const CSV_ERROR_KEYS: Record<EvaluationCsvError["code"], TranslationKey> = {
-  headers: "需要 question、expected_document_ids 列，answer_points 可选",
-  question: "问题不能为空",
-  expected: "至少选择一个期望文档",
-  document: "期望文档不存在或未启用",
-  limit: "单行最多 20 个期望文档和 20 个答案要点，单次最多 200 行",
-  questionLength: "问题不能超过 2000 个字符",
-  answerLength: "每个答案要点不能超过 2000 个字符",
-}
-
-function csvRecords(text: string): string[][] | null {
-  const records: string[][] = []
-  let record: string[] = []
-  let cell = ""
-  let quoted = false
-
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index]
-    if (character === '"') {
-      if (quoted && text[index + 1] === '"') {
-        cell += '"'
-        index += 1
-      } else {
-        quoted = !quoted
-      }
-    } else if (character === "," && !quoted) {
-      record.push(cell)
-      cell = ""
-    } else if ((character === "\n" || character === "\r") && !quoted) {
-      record.push(cell)
-      records.push(record)
-      record = []
-      cell = ""
-      if (character === "\r" && text[index + 1] === "\n") index += 1
-    } else {
-      cell += character
-    }
-  }
-
-  if (quoted) return null
-  record.push(cell)
-  records.push(record)
-  return records
-}
-
-export function parseEvaluationCsv(
-  text: string,
-  activeDocumentIds: Set<string>,
-): { drafts: EvaluationDraft[]; errors: EvaluationCsvError[] } {
-  const records = csvRecords(text.replace(/^\uFEFF/, ""))
-  if (!records) return { drafts: [], errors: [{ rowNumber: 1, code: "headers" }] }
-  const headerRow = records.findIndex((row) => row.some((cell) => cell.trim()))
-  if (headerRow < 0) {
-    return { drafts: [], errors: [{ rowNumber: 1, code: "headers" }] }
-  }
-
-  const headers = records[headerRow].map((cell) => cell.trim().toLowerCase())
-  const questionIndexes = headers.flatMap((header, index) =>
-    header === "question" ? [index] : [],
-  )
-  const expectedIndexes = headers.flatMap((header, index) =>
-    header === "expected_document_ids" ? [index] : [],
-  )
-  const answerIndexes = headers.flatMap((header, index) =>
-    header === "answer_points" ? [index] : [],
-  )
-  if (
-    questionIndexes.length !== 1 ||
-    expectedIndexes.length !== 1 ||
-    answerIndexes.length > 1
-  ) {
-    return {
-      drafts: [],
-      errors: [{ rowNumber: headerRow + 1, code: "headers" }],
-    }
-  }
-
-  const drafts: EvaluationDraft[] = []
-  const errors: EvaluationCsvError[] = []
-  for (let index = headerRow + 1; index < records.length; index += 1) {
-    const row = records[index]
-    if (!row.some((cell) => cell.trim())) continue
-    const rowNumber = index + 1
-    const question = (row[questionIndexes[0]] ?? "").trim()
-    const expectedDocumentIds = Array.from(
-      new Set(
-        (row[expectedIndexes[0]] ?? "")
-          .split(/[;|\s]+/)
-          .map((value) => value.trim())
-          .filter(Boolean),
-      ),
-    )
-    const answerPoints = (answerIndexes.length
-      ? (row[answerIndexes[0]] ?? "").split("|")
-      : []
-    )
-      .map((value) => value.trim())
-      .filter(Boolean)
-
-    let code: EvaluationCsvError["code"] | null = null
-    if (!question) code = "question"
-    else if (question.length > 2000) code = "questionLength"
-    else if (!expectedDocumentIds.length) code = "expected"
-    else if (expectedDocumentIds.some((id) => !activeDocumentIds.has(id))) {
-      code = "document"
-    } else if (
-      expectedDocumentIds.length > 20 ||
-      answerPoints.length > 20 ||
-      drafts.length >= 200
-    ) {
-      code = "limit"
-    } else if (answerPoints.some((point) => point.length > 2000)) {
-      code = "answerLength"
-    }
-
-    if (code) errors.push({ rowNumber, code })
-    else drafts.push({ rowNumber, question, expectedDocumentIds, answerPoints })
-  }
-  return { drafts, errors }
-}
-
 function metric(value: number) {
   return Number(value.toFixed(3)).toString()
 }
@@ -215,8 +74,6 @@ export function KnowledgeEvaluation({
   const [includeReferences, setIncludeReferences] = React.useState(true)
   const [activeTask, setActiveTask] = React.useState<KnowledgeTask | null>(null)
   const [summary, setSummary] = React.useState<KnowledgeEvaluationSummary | null>(null)
-  const [csvDrafts, setCsvDrafts] = React.useState<EvaluationDraft[]>([])
-  const [csvErrors, setCsvErrors] = React.useState<EvaluationCsvError[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
 
@@ -334,35 +191,6 @@ export function KnowledgeEvaluation({
     }
   }
 
-  async function handleCsv(file: File | undefined) {
-    if (!file) return
-    const parsed = parseEvaluationCsv(
-      await file.text(),
-      new Set(activeDocuments.map((document) => document.id)),
-    )
-    setCsvDrafts(parsed.drafts)
-    setCsvErrors(parsed.errors)
-  }
-
-  async function handleImport() {
-    if (!csvDrafts.length || csvErrors.length) return
-    setIsSaving(true)
-    try {
-      for (const draft of csvDrafts) {
-        await addCase({
-          question: draft.question,
-          expected_document_ids: draft.expectedDocumentIds,
-          answer_points: draft.answerPoints,
-        })
-      }
-      setCsvDrafts([])
-    } catch (error) {
-      reportError(error)
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
   async function handleDelete(item: KnowledgeEvaluationCase) {
     if (!window.confirm(t("删除评测用例？"))) return
     try {
@@ -441,7 +269,7 @@ export function KnowledgeEvaluation({
         </div>
 
         {canEdit ? (
-          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <div className="mt-4">
             <form className="rounded-lg border p-4" onSubmit={(event) => void handleCreate(event)}>
               <h2 className="text-sm font-semibold">{t("新建评测用例")}</h2>
               <label className="mt-3 grid gap-1 text-sm font-medium" htmlFor="evaluation-question">
@@ -491,48 +319,6 @@ export function KnowledgeEvaluation({
                 {t("添加用例")}
               </Button>
             </form>
-
-            <section className="rounded-lg border p-4">
-              <h2 className="text-sm font-semibold">{t("CSV 导入")}</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t("列：question、expected_document_ids、answer_points；多个文档用分号分隔，答案要点用竖线分隔")}
-              </p>
-              <label className="mt-3 flex cursor-pointer items-center gap-2 rounded-md border border-dashed p-4 text-sm" htmlFor="evaluation-csv">
-                <FileUpIcon className="size-4" />
-                {t("选择评测 CSV")}
-              </label>
-              <input
-                id="evaluation-csv"
-                type="file"
-                accept=".csv,text/csv"
-                className="sr-only"
-                onChange={(event) => void handleCsv(event.target.files?.[0])}
-              />
-              {csvErrors.length ? (
-                <ul className="mt-3 space-y-1 text-sm text-destructive">
-                  {csvErrors.map((error, index) => (
-                    <li key={`${error.rowNumber}-${error.code}-${index}`}>
-                      {t("第 {row} 行：{message}", {
-                        row: error.rowNumber,
-                        message: t(CSV_ERROR_KEYS[error.code]),
-                      })}
-                    </li>
-                  ))}
-                </ul>
-              ) : csvDrafts.length ? (
-                <p className="mt-3 text-sm text-muted-foreground">
-                  {t("已读取 {value} 条有效用例", { value: csvDrafts.length })}
-                </p>
-              ) : null}
-              <Button
-                type="button"
-                className="mt-3"
-                disabled={isSaving || !csvDrafts.length || Boolean(csvErrors.length)}
-                onClick={() => void handleImport()}
-              >
-                {t("导入用例")}
-              </Button>
-            </section>
           </div>
         ) : null}
 

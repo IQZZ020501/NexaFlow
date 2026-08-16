@@ -2,10 +2,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react"
 
-import {
-  KnowledgeEvaluation,
-  parseEvaluationCsv,
-} from "@/components/knowledge/knowledge-evaluation"
+import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
 import type { KnowledgeDocument } from "@/lib/api/knowledge"
 import {
   jsonResponse,
@@ -69,57 +66,7 @@ afterEach(() => {
 })
 
 describe("knowledge evaluation", () => {
-  test("parses quoted CSV and reports scoped document errors", () => {
-    expect(
-      parseEvaluationCsv(
-        'question,expected_document_ids,answer_points\n"如何回滚，服务？",doc-1,"批准|备份"',
-        new Set(["doc-1"]),
-      ),
-    ).toEqual({
-      drafts: [
-        {
-          rowNumber: 2,
-          question: "如何回滚，服务？",
-          expectedDocumentIds: ["doc-1"],
-          answerPoints: ["批准", "备份"],
-        },
-      ],
-      errors: [],
-    })
-    expect(
-      parseEvaluationCsv(
-        "question,expected_document_ids\nunknown,doc-other",
-        new Set(["doc-1"]),
-      ).errors[0],
-    ).toEqual({ rowNumber: 2, code: "document" })
-    expect(
-      parseEvaluationCsv(
-        'question,expected_document_ids\n"如何""回滚？",doc-1',
-        new Set(["doc-1"]),
-      ).drafts[0]?.question,
-    ).toBe('如何"回滚？')
-    expect(parseEvaluationCsv("", new Set()).errors[0]?.code).toBe("headers")
-    expect(
-      parseEvaluationCsv("question,question", new Set()).errors[0]?.code,
-    ).toBe("headers")
-    expect(
-      parseEvaluationCsv(
-        `question,expected_document_ids\n问题,${Array.from(
-          { length: 21 },
-          (_, index) => `doc-${index}`,
-        ).join(";")}`,
-        new Set(Array.from({ length: 21 }, (_, index) => `doc-${index}`)),
-      ).errors[0]?.code,
-    ).toBe("limit")
-    expect(
-      parseEvaluationCsv(
-        `question,expected_document_ids,answer_points\n问题,doc-1,${"答".repeat(2001)}`,
-        new Set(["doc-1"]),
-      ).errors[0]?.code,
-    ).toBe("answerLength")
-  })
-
-  test("creates a case, shows CSV row errors, polls a run, and renders metrics", async () => {
+  test("creates a case, polls a run, and renders metrics", async () => {
     const requestBodies: Array<Record<string, unknown>> = []
     withFetch((url, init) => {
       const method = init?.method ?? "GET"
@@ -191,20 +138,6 @@ describe("knowledge evaluation", () => {
     )
 
     await screen.findByText("暂无评测用例")
-    const csvInput = screen.getByLabelText("选择评测 CSV") as HTMLInputElement
-    fireEvent.change(csvInput, {
-      target: {
-        files: [
-          new File(
-            ["question,expected_document_ids\n无效问题,missing-doc"],
-            "evaluation.csv",
-            { type: "text/csv" },
-          ),
-        ],
-      },
-    })
-    await screen.findByText("第 2 行：期望文档不存在或未启用")
-
     fireEvent.change(screen.getByLabelText("问题"), {
       target: { value: "如何回滚？" },
     })
@@ -237,7 +170,7 @@ describe("knowledge evaluation", () => {
     expect(errors).toEqual([])
   })
 
-  test("loads history, imports CSV, deletes a case, and reopens a run", async () => {
+  test("loads history, deletes a case, and reopens a run", async () => {
     const succeededTask = {
       ...queuedTask,
       status: "succeeded",
@@ -270,17 +203,6 @@ describe("knowledge evaluation", () => {
         summaryRequests += 1
         return jsonResponse(summary)
       }
-      if (method === "POST" && url.endsWith("/evaluations/cases")) {
-        return jsonResponse(
-          {
-            ...evaluationCase,
-            id: "case-2",
-            question: "导入问题",
-            answer_points: ["答案"],
-          },
-          201,
-        )
-      }
       if (method === "DELETE" && url.endsWith("/evaluations/cases/case-1")) {
         deleteRequests += 1
         return new Response(null, { status: 204 })
@@ -310,23 +232,6 @@ describe("knowledge evaluation", () => {
       fireEvent.click(caseCheckbox)
       fireEvent.click(screen.getByText("guide.md"))
       fireEvent.click(screen.getByText("guide.md"))
-
-      fireEvent.change(screen.getByLabelText("选择评测 CSV"), {
-        target: {
-          files: [
-            new File(
-              [
-                "question,expected_document_ids,answer_points\n导入问题,doc-1,答案",
-              ],
-              "evaluation.csv",
-              { type: "text/csv" },
-            ),
-          ],
-        },
-      })
-      await screen.findByText("已读取 1 条有效用例")
-      fireEvent.click(screen.getByRole("button", { name: "导入用例" }))
-      await screen.findByText("导入问题")
 
       fireEvent.click(
         screen.getByRole("button", { name: "删除用例：如何回滚？" }),
