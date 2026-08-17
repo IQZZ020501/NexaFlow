@@ -95,7 +95,9 @@ Correctness, safety, evidence, and validation take priority over speed.
   and progress writes must remain in one lease-checked transaction.
 - `backend/make dev` automatically follows logs from a running Compose worker
   into the API terminal and stops that follower when Uvicorn exits; it does not
-  start or replace the worker.
+  start or replace the worker. The process orchestration lives in
+  `backend/scripts/dev.py` so the Make target does not depend on a POSIX shell
+  and works with GNU Make on Windows.
 - `cd backend && make worker-compose` starts the Compose sandbox and its
   socket-mounted worker for Python Tool and Workflow code execution. The
   host-only `make worker` has no sandbox socket and must not be presented as
@@ -309,8 +311,9 @@ broad. Never claim a check passed unless it completed successfully.
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
 - Coverage gates (do not claim a percentage unless measured):
-  - Backend: `make coverage` / `backend/scripts/coverage.sh` — runs all suites
-    in parallel (each with an isolated `KNOWLEDGE_STORAGE_DIR`), merges with
+  - Backend: `make coverage` / `backend/scripts/coverage.sh` — both use the
+    cross-platform `backend/scripts/coverage.py` runner to execute all suites
+    in parallel (each with an isolated `KNOWLEDGE_STORAGE_DIR`) and merge with
     coverage.py. Backend coverage is at 97%+.
   - Sandbox: `sandbox/run_coverage.sh` — `sandbox/tests.py` extends
     `self_check.py`; `sandbox/child.py` is excluded from measurement because

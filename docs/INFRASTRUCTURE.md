@@ -89,7 +89,10 @@
 - `backend/pyproject.toml` — 项目元数据与依赖声明（FastAPI/Celery/LangChain/LangGraph/MCP/Qdrant/Alembic 等）
 - `backend/.env.example` — 环境变量模板：环境/日志/数据库/JWT/模型密钥/知识存储/Qdrant/Redis/MCP/CORS/Agent 外部请求限流/引导管理员与默认工作区
 - `backend/README.md` — 后台 worker 运行说明（Celery 命令与共享 `KNOWLEDGE_STORAGE_DIR`/`QDRANT_URL` 要求）
-- `backend/Makefile` — `make worker-compose` 启动带 sandbox socket 的 Compose worker；host `make worker` 不支持 Python Tool/Workflow Code 执行
+- `backend/Makefile` — 跨平台开发入口；`make worker-compose` 启动带 sandbox socket 的 Compose worker，host `make worker` 不支持 Python Tool/Workflow Code 执行
+- `backend/scripts/dev.py` — `make dev` 的跨平台 Uvicorn 与 Compose Worker 日志编排
+- `backend/scripts/coverage.py` — `make coverage` 的跨平台并行套件、隔离存储与覆盖率合并
+- `backend/scripts/coverage.sh` — POSIX 环境兼容入口，转发到 Python coverage runner
 - `backend/uv.lock` — uv 依赖锁文件
 
 ## 相关测试

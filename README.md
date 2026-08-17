@@ -148,7 +148,7 @@ docker compose -f deploy/docker-compose.yml down
 
 ## 本地开发
 
-本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/) 和 Bun 1.3+。此模式只在 Docker 中运行 PostgreSQL、Redis、Qdrant、Worker 和沙箱，API 与前端直接在宿主机运行；不需要 `deploy/.env`。
+本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。Windows 需要额外安装 GNU Make；Makefile 目标通过 Python 编排，不依赖 Bash。此模式只在 Docker 中运行 PostgreSQL、Redis、Qdrant、Worker 和沙箱，API 与前端直接在宿主机运行；不需要 `deploy/.env`。
 
 ### 1. 首次初始化
 
@@ -188,6 +188,7 @@ make dev
 ```
 
 `make dev` 会先执行 Alembic 迁移，再在 <http://127.0.0.1:8000> 启动 API，并自动把 Compose Worker 日志同步到同一个终端。
+如果端口已被其他 API 占用，先停止旧进程，或使用 `make dev PORT=8001` 启动到其他端口。
 
 ### 4. 启动前端
 

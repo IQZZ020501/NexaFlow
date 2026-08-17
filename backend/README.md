@@ -52,6 +52,11 @@ On Windows the API and worker also install the `WindowsSelectorEventLoopPolicy`
 so psycopg async connections work (Windows defaults to the Proactor loop,
 which psycopg rejects).
 
+The `dev` and `coverage` Makefile targets delegate process orchestration to
+Python standard-library scripts, so GNU Make can run them from Windows
+PowerShell or Command Prompt without Bash. GNU Make itself must still be
+installed separately on Windows.
+
 Set `CELERY_BROKER_URL` for Redis. The API process and every worker must share
 the configured `KNOWLEDGE_STORAGE_DIR` and connect to the same `QDRANT_URL`;
 otherwise workers can miss uploaded files or write vectors to a different
