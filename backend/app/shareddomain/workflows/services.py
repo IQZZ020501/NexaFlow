@@ -5,13 +5,12 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.agents import Agent
-from app.entities.tools import ApplicationToolBinding
+from app.entities.tools import ToolRef, ToolSnapshot
 from app.entities.user import User
 from app.entities.workflows import WorkflowDefinition, WorkflowVersion
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.infrastructure.repositories import tools as tools_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.ports.model_registry import get_registered_model_by_id
 from app.schemas.workflow import (
@@ -39,11 +38,25 @@ from app.shareddomain.tools.services import (
     get_mcp_tool_policy,
     resolve_mcp_tools,
 )
+from app.shareddomain.tools.bindings import (
+    resolve_application_tool_snapshots,
+    resolve_tool_refs_for_actor,
+    sync_application_tool_bindings,
+)
+from app.shareddomain.tools.catalog import build_inline_python_tool
 from app.shareddomain.workflows.defaults import default_workflow_graph
 from app.shareddomain.workflows.engine import (
     WorkflowValidationError,
     graph_hash,
     validate_graph,
+)
+from app.shareddomain.workflows.resources import (
+    build_workflow_resource_snapshot,
+    canonicalize_workflow_graph,
+    legacy_mcp_references as canonical_legacy_mcp_references,
+    select_tool_snapshots,
+    workflow_resource_hash,
+    workflow_resource_references as canonical_workflow_resource_references,
 )
 
 OUTPUT_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -76,6 +89,119 @@ def version_to_response(version: WorkflowVersion) -> WorkflowVersionResponse:
         graph_hash=version.graph_hash,
         published_by_user_id=version.published_by_user_id,
         created_at=version.created_at,
+    )
+
+
+async def prepare_workflow_resources(
+    db: AsyncSession,
+    agent: Agent,
+    graph: WorkflowGraph | dict[str, Any],
+    actor: User,
+    workspace_role: str | None,
+    *,
+    require_complete_graph: bool = True,
+    binding_application_id: str | None = None,
+) -> tuple[WorkflowGraph, list[ToolSnapshot], dict[str, Any], str]:
+    """Validate and freeze every Workflow Tool before it is persisted or run."""
+    if require_complete_graph:
+        parsed = await validate_workflow_resources(
+            db,
+            agent,
+            graph,
+            actor,
+            workspace_role,
+            binding_application_id=binding_application_id,
+        )
+    else:
+        try:
+            parsed = WorkflowGraph.model_validate(graph)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                str(exc),
+            ) from exc
+    legacy_refs = canonical_legacy_mcp_references(parsed)
+    legacy_tools: dict[tuple[str, str], ToolRef] = {}
+    if legacy_refs:
+        resolved = await resolve_mcp_tools(
+            db,
+            agent.workspace_id,
+            [
+                {"server_id": server_id, "tool_name": tool_name}
+                for server_id, tool_name in legacy_refs
+            ],
+            strict=True,
+            actor=actor if binding_application_id is None else None,
+            workspace_role=workspace_role,
+            application_id=binding_application_id,
+        )
+        legacy_tools = {
+            (item.server.id, item.definition.name): ToolRef(
+                tool_id=item.tool_id,
+                version_id=item.tool_version_id,
+            )
+            for item in resolved
+        }
+
+    inline_tool, inline_version, _inline_policy = build_inline_python_tool(
+        agent.workspace_id
+    )
+    canonical = canonicalize_workflow_graph(
+        parsed,
+        legacy_tools,
+        ToolRef(inline_tool.id, inline_version.id),
+    )
+    _knowledge_base_ids, references = canonical_workflow_resource_references(canonical)
+    if binding_application_id is None:
+        snapshots = await resolve_tool_refs_for_actor(
+            db,
+            agent.workspace_id,
+            references,
+            actor,
+            workspace_role,
+        )
+    else:
+        try:
+            snapshots = select_tool_snapshots(
+                references,
+                await resolve_application_tool_snapshots(
+                    db,
+                    agent.workspace_id,
+                    binding_application_id,
+                ),
+            )
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    for snapshot in snapshots:
+        if snapshot.approval != "auto" or not snapshot.workflow_callable:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Workflow Tools must be automatic and workflow-callable.",
+            )
+    llm_tool_ids = {
+        item.tool_id
+        for node in canonical.nodes
+        if node.data.type == "llm"
+        for item in LlmNodeConfig.model_validate(node.data.config).tools
+    }
+    if any(
+        snapshot.tool_id in llm_tool_ids
+        and snapshot.execution_spec.get("direct_only") is True
+        for snapshot in snapshots
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "This Workflow Tool can only be used as a direct node.",
+        )
+    resource_snapshot = build_workflow_resource_snapshot(
+        _knowledge_base_ids,
+        snapshots,
+    )
+    return (
+        canonical,
+        snapshots,
+        resource_snapshot,
+        workflow_resource_hash(resource_snapshot),
     )
 
 
@@ -266,22 +392,23 @@ async def save_definition(
     actor: User,
     workspace_role: str | None,
 ) -> WorkflowDefinition:
-    _, mcp_references = workflow_resource_references(graph)
-    resolved_mcp_tools = await resolve_mcp_tools(
-        db,
-        agent.workspace_id,
-        mcp_references,
-        strict=True,
-        actor=actor,
-        workspace_role=workspace_role,
+    canonical, snapshots, _resource_snapshot, _resource_hash = (
+        await prepare_workflow_resources(
+            db,
+            agent,
+            graph,
+            actor,
+            workspace_role,
+            require_complete_graph=False,
+        )
     )
-    serialized = graph.model_dump(by_alias=True, mode="json")
+    serialized = canonical.model_dump(by_alias=True, mode="json")
     updated = await workflow_repository.update_definition_graph(
         db,
         definition.id,
         expected_revision,
         serialized,
-        graph_hash(graph),
+        graph_hash(serialized),
         actor.id,
     )
     if updated is None:
@@ -290,20 +417,12 @@ async def save_definition(
             status.HTTP_409_CONFLICT,
             "Workflow draft changed; reload it before saving.",
         )
-    await tools_repository.replace_application_tool_bindings(
+    await sync_application_tool_bindings(
         db,
         agent.workspace_id,
         agent.id,
-        [
-            ApplicationToolBinding(
-                workspace_id=agent.workspace_id,
-                application_id=agent.id,
-                tool_id=item.tool_id,
-                tool_version_id=item.tool_version_id,
-                bound_by_user_id=actor.id,
-            )
-            for item in resolved_mcp_tools
-        ],
+        snapshots,
+        actor.id,
     )
     await db.commit()
     return await workflow_repository.refresh_definition(db, updated)
@@ -320,13 +439,15 @@ async def publish_definition(
     )
     if definition is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow definition not found.")
-    graph = await validate_workflow_resources(
-        db,
-        agent,
-        definition.graph,
-        actor,
-        workspace_role,
-        binding_application_id=agent.id,
+    graph, snapshots, resource_snapshot, resource_hash = (
+        await prepare_workflow_resources(
+            db,
+            agent,
+            definition.graph,
+            actor,
+            workspace_role,
+            binding_application_id=agent.id,
+        )
     )
     serialized = graph.model_dump(by_alias=True, mode="json")
     version = WorkflowVersion(
@@ -338,13 +459,20 @@ async def publish_definition(
         default_model_id=agent.model_id,
         graph=serialized,
         graph_hash=graph_hash(serialized),
+        resource_snapshot=resource_snapshot,
+        resource_hash=resource_hash,
         published_by_user_id=actor.id,
     )
     version = await workflow_repository.create_version(db, version)
+    await sync_application_tool_bindings(
+        db,
+        agent.workspace_id,
+        agent.id,
+        snapshots,
+        actor.id,
+    )
     bindings = (await agent_repository.list_binding_map(db, [agent.id]))[agent.id]
-    mcp_bindings = (await agent_repository.list_mcp_binding_map(db, [agent.id]))[
-        agent.id
-    ]
+    mcp_bindings = (await agent_repository.list_mcp_binding_map(db, [agent.id]))[agent.id]
     agent.published = True
     agent.published_snapshot = agent_publication_snapshot(
         agent, bindings, mcp_bindings

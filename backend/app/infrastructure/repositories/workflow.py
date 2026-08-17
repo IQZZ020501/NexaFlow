@@ -13,7 +13,12 @@ from app.entities.workflows import (
 )
 from app.infrastructure.repositories.mapping import refresh_entity, save, to_entity, to_orm
 from app.infrastructure.model_utils import utc_now
-from app.shareddomain.agents.models import Agent, AgentRun
+from app.shareddomain.agents.models import (
+    AGENT_RUN_AWAITING_INPUT_STATUSES,
+    AGENT_RUN_RUNNING_STATUSES,
+    Agent,
+    AgentRun,
+)
 from app.shareddomain.workflows.models import (
     WorkflowDefinition,
     WorkflowNodeExecution,
@@ -359,7 +364,7 @@ async def save_owned_run_detail(
     owned = await db.scalar(
         select(AgentRun.id).where(
             AgentRun.id == entity.run_id,
-            AgentRun.status == "running",
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
     )
@@ -386,7 +391,7 @@ async def reset_waiting_run_deadline(
     waiting = await db.scalar(
         select(AgentRun.id).where(
             AgentRun.id == run_id,
-            AgentRun.status == "awaiting_input",
+            AgentRun.status.in_(AGENT_RUN_AWAITING_INPUT_STATUSES),
         )
     )
     if waiting is None:
@@ -413,7 +418,7 @@ async def start_node_execution(
     owned = await db.scalar(
         select(AgentRun.id).where(
             AgentRun.id == run_id,
-            AgentRun.status == "running",
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
     )
@@ -463,7 +468,7 @@ async def finish_node_execution(
     owned = await db.scalar(
         select(AgentRun.id).where(
             AgentRun.id == entity.run_id,
-            AgentRun.status == "running",
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
     )

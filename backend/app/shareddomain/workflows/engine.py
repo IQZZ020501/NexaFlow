@@ -26,6 +26,7 @@ from app.schemas.workflow import (
     RerankerNodeConfig,
     StartNodeConfig,
     TemplateNodeConfig,
+    ToolNodeConfig,
     VariableNodeConfig,
     WorkflowGraph,
     WorkflowNode,
@@ -75,6 +76,7 @@ NODE_CONFIG_MODELS: dict[str, type[BaseModel]] = {
     "reply-node": ReplyNodeConfig,
     "template": TemplateNodeConfig,
     "variable": VariableNodeConfig,
+    "tool": ToolNodeConfig,
     "mcp": McpNodeConfig,
     "code": CodeNodeConfig,
 }

@@ -6,6 +6,7 @@ from jinja2 import Environment, TemplateSyntaxError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.agent import AgentInteractionConfig
+from app.schemas.tool import ToolRefSchema
 
 JINJA_ENV = Environment()
 
@@ -23,6 +24,7 @@ WorkflowNodeType = Literal[
     "reply-node",
     "template",
     "variable",
+    "tool",
     "mcp",
     "code",
 ]
@@ -109,7 +111,14 @@ class LlmNodeConfig(BaseModel):
     model_setting: LlmModelSetting = Field(default_factory=LlmModelSetting)
     mcp_enable: bool = False
     mcp_servers: list[LlmMcpServer] = Field(default_factory=list, max_length=20)
+    tools: list[ToolRefSchema] = Field(default_factory=list, max_length=20)
     is_result: bool = True
+
+    @model_validator(mode="after")
+    def validate_tools(self) -> "LlmNodeConfig":
+        if len({item.tool_id for item in self.tools}) != len(self.tools):
+            raise ValueError("LLM Tool references must be unique.")
+        return self
 
 
 class ClassifierClass(BaseModel):
@@ -389,6 +398,11 @@ class ReplyNodeConfig(BaseModel):
 
 class VariableNodeConfig(BaseModel):
     value: Any
+
+
+class ToolNodeConfig(BaseModel):
+    tool: ToolRefSchema
+    arguments: dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
 class McpNodeConfig(BaseModel):

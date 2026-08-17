@@ -24,23 +24,46 @@ from app.shareddomain.tools.services import mcp_server_connection
 class BuiltinToolAdapter:
     kind = "builtin"
 
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+
     async def invoke(
         self,
         snapshot: ToolSnapshot,
         arguments: dict[str, Any],
         context: ToolInvocationContext,
     ) -> ToolRuntimeResult:
-        del arguments, context
-        if snapshot.execution_spec.get("builtin") != "current_time":
+        builtin = snapshot.execution_spec.get("builtin")
+        if builtin == "current_time":
+            return ToolRuntimeResult(
+                ok=True,
+                data={"iso8601": utc_now().isoformat()},
+                summary="Current UTC time returned.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={},
+            )
+        if builtin != "inline_python" or context.origin != "workflow":
             return _failure("unsupported_builtin", "Built-in Tool is unavailable.")
+        try:
+            result = await execute_workflow_code(
+                self.settings,
+                arguments["code"],
+                arguments["inputs"],
+            )
+        except WorkflowSandboxBusyError as exc:
+            raise ToolAdapterBusy("Python sandbox is busy.") from exc
+        except (KeyError, TypeError, WorkflowSandboxError):
+            return _failure("python_execution_failed", "Python Tool execution failed.")
         return ToolRuntimeResult(
             ok=True,
-            data={"iso8601": utc_now().isoformat()},
-            summary="Current UTC time returned.",
+            data={"result": result.result},
+            summary="Python Tool completed.",
             error_code=None,
             error_message=None,
             outcome="confirmed",
-            usage={},
+            usage={"exit_code": result.exit_code},
         )
 
 
@@ -136,7 +159,7 @@ def build_tool_adapter(
     server: McpServer | None = None,
 ) -> ToolAdapter:
     if snapshot.kind == "builtin":
-        return BuiltinToolAdapter()
+        return BuiltinToolAdapter(settings)
     if snapshot.kind == "python":
         return PythonToolAdapter(settings)
     if snapshot.kind == "mcp" and server is not None:

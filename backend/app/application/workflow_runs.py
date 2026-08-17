@@ -8,6 +8,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.tool_runtime import preflight_tool_snapshot
+from app.application.workflow_uploads import resolve_workspace_workflow_files
 from app.entities.agents import AgentRun
 from app.entities.user import User
 from app.entities.workflows import WorkflowRunDetail, WorkflowVersion
@@ -20,7 +22,6 @@ from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.session import get_session_factory
-from app.application.workflow_uploads import resolve_workspace_workflow_files
 from app.schemas.workflow import (
     FormNodeConfig,
     WorkflowFormSubmitRequest,
@@ -32,12 +33,26 @@ from app.schemas.workflow import (
     WorkflowGraph,
 )
 from app.shareddomain.agents.permissions import require_agent_edit, require_agent_view
+from app.shareddomain.agents.models import (
+    agent_run_display_status,
+    agent_run_generation,
+    queued_agent_run_status,
+)
 from app.shareddomain.agents.services import ACTIVE_STATUS, get_agent_model
 from app.shareddomain.workflows.services import (
     get_or_create_definition,
     get_workflow_agent,
+    prepare_workflow_resources,
     validate_workflow_resources,
-    workflow_resource_references,
+)
+from app.shareddomain.tools.runtime import (
+    tool_snapshot_from_payload,
+    tool_snapshot_payload,
+)
+from app.shareddomain.workflows.engine import graph_hash
+from app.shareddomain.workflows.resources import (
+    canonicalize_workflow_snapshot_graph,
+    load_workflow_resource_snapshot,
 )
 from app.tasks.agents import enqueue_agent_run
 
@@ -56,7 +71,7 @@ def workflow_run_to_response(
         workspace_id=run.workspace_id,
         agent_id=run.agent_id,
         requested_by_user_id=run.requested_by_user_id,
-        status=run.status,
+        status=agent_run_display_status(run.status),
         source=detail.source,
         definition_revision=detail.definition_revision,
         version_number=detail.version_number,
@@ -226,15 +241,62 @@ async def create_workflow_run(
     version = await _version_for_run(db, workspace_id, agent_id, payload)
     graph = version.graph if version is not None else definition.graph
     default_model_id = version.default_model_id if version is not None else agent.model_id
-    parsed = await validate_workflow_resources(
-        db,
-        agent,
-        graph,
-        actor,
-        workspace_role,
-        default_model_id=default_model_id,
-        binding_application_id=agent.id,
-    )
+    if version is None:
+        parsed, tool_snapshots, resource_snapshot, resource_hash = (
+            await prepare_workflow_resources(
+                db,
+                agent,
+                graph,
+                actor,
+                workspace_role,
+                binding_application_id=agent.id,
+            )
+        )
+        knowledge_base_ids = resource_snapshot["knowledge_base_ids"]
+    else:
+        try:
+            raw_tools = version.resource_snapshot.get("tools")
+            if not isinstance(raw_tools, list):
+                raise ValueError("Workflow resource snapshot is invalid.")
+            parsed = canonicalize_workflow_snapshot_graph(
+                WorkflowGraph.model_validate(graph),
+                [tool_snapshot_from_payload(item) for item in raw_tools],
+            )
+            parsed = await validate_workflow_resources(
+                db,
+                agent,
+                parsed,
+                actor,
+                workspace_role,
+                default_model_id=default_model_id,
+                binding_application_id=agent.id,
+            )
+            knowledge_base_ids, tool_snapshots = load_workflow_resource_snapshot(
+                parsed,
+                version.resource_snapshot,
+                version.resource_hash,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Workflow version must be republished before it can run.",
+            ) from exc
+        resource_snapshot = version.resource_snapshot
+        resource_hash = version.resource_hash
+    for snapshot in tool_snapshots:
+        failure = await preflight_tool_snapshot(
+            db,
+            snapshot,
+            origin="workflow",
+            workspace_id=workspace_id,
+            execution_user_id=actor.id,
+            access_source=access_source,
+        )
+        if failure is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Workflow Tool configuration is no longer executable.",
+            )
     if access_source == "console":
         files = await resolve_workspace_workflow_files(
             db,
@@ -254,7 +316,6 @@ async def create_workflow_run(
             "External workflow runs cannot use console upload ids.",
         )
     model = await get_agent_model(db, workspace_id, default_model_id)
-    knowledge_base_ids, mcp_tools = workflow_resource_references(parsed)
     now = utc_now()
     run_conversation_id = conversation_id or new_id()
     if conversation_id and await agent_repository.get_active_agent_run(
@@ -280,10 +341,21 @@ async def create_workflow_run(
         instructions=agent.instructions,
         knowledge_base_ids=knowledge_base_ids,
         knowledge_query_mode=agent.knowledge_query_mode,
-        mcp_tools=mcp_tools,
+        mcp_tools=[],
+        application_snapshot={
+            "schema_version": 1,
+            "application_type": "workflow",
+            "source": payload.source,
+            "graph_hash": graph_hash(parsed),
+            "resources": resource_snapshot,
+        },
+        tool_snapshots=[tool_snapshot_payload(item) for item in tool_snapshots],
+        # WorkflowRunDetail carries the draft/published source. The shared Run
+        # field selects the fenced v2 worker generation.
+        configuration_source="draft",
         model_id=model.id,
         model_name=model.name,
-        status="queued",
+        status=queued_agent_run_status(agent_run_generation("draft")),
         checkpoint_phase="workflow",
         trace_id=new_id(),
         model_usage={},
@@ -292,6 +364,7 @@ async def create_workflow_run(
     if files:
         run_inputs["files"] = files
         run_inputs["document"] = files
+    run.application_snapshot_hash = graph_hash(run.application_snapshot)
     detail = WorkflowRunDetail(
         workspace_id=workspace_id,
         definition_id=definition.id,
@@ -303,6 +376,8 @@ async def create_workflow_run(
         source=payload.source,
         graph_hash=(version.graph_hash if version is not None else definition.graph_hash),
         graph_snapshot=parsed.model_dump(by_alias=True, mode="json"),
+        resource_snapshot=resource_snapshot,
+        resource_hash=resource_hash,
         inputs=run_inputs,
         max_steps=WORKFLOW_MAX_STEPS,
         max_model_tokens=WORKFLOW_MAX_MODEL_TOKENS,
@@ -320,7 +395,7 @@ async def create_workflow_run(
             status.HTTP_409_CONFLICT,
             "This workflow conversation already has an active run.",
         ) from exc
-    await enqueue_agent_run(run.id, settings)
+    await enqueue_agent_run(run.id, settings, generation="unified")
     current = await agent_repository.get_agent_run_by_id(db, run.id)
     current_detail = await workflow_repository.get_run_detail(db, run.id)
     assert current is not None and current_detail is not None
@@ -410,7 +485,7 @@ async def resume_workflow_form(
     settings: Settings,
 ) -> WorkflowRunResponse:
     pending = workflow_pending_form(run)
-    if run.status != "awaiting_input" or pending is None:
+    if agent_run_display_status(run.status) != "awaiting_input" or pending is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Workflow is not awaiting form input.")
     if pending.runtime_node_id != payload.runtime_node_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "Workflow form node changed.")
@@ -445,7 +520,7 @@ async def resume_workflow_form(
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Workflow form was already submitted.")
     await db.commit()
-    await enqueue_agent_run(run.id, settings)
+    await enqueue_agent_run(run.id, settings, generation="unified")
     current = await agent_repository.get_agent_run_by_id(db, run.id)
     current_detail = await workflow_repository.get_run_detail(db, run.id)
     if current is None or current_detail is None:
@@ -508,6 +583,7 @@ async def stream_workflow_run(
                     )
                 if run is None or detail is None:
                     return
+                display_status = agent_run_display_status(run.status)
                 if not snapshot_sent:
                     yield {
                         "type": "run",
@@ -531,13 +607,13 @@ async def stream_workflow_run(
                     else:
                         yield event
                 if (
-                    run.status in stopping_statuses
+                    display_status in stopping_statuses
                     and len(rows) == WORKFLOW_EVENT_PAGE_SIZE
                     and terminal_event is None
                 ):
                     next_database_poll = 0.0
                     continue
-                if run.status in stopping_statuses:
+                if display_status in stopping_statuses:
                     while reader.available:
                         live_events = await reader.read(live_cursor, 1)
                         if not live_events:
@@ -549,8 +625,8 @@ async def stream_workflow_run(
                     yield terminal_event or {
                         "type": (
                             "workflow_input_required"
-                            if run.status == "awaiting_input"
-                            else "complete" if run.status == "succeeded" else "error"
+                            if display_status == "awaiting_input"
+                            else "complete" if display_status == "succeeded" else "error"
                         ),
                         "sequence": cursor,
                         "run": workflow_run_to_response(run, detail).model_dump(

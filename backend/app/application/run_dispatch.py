@@ -19,9 +19,12 @@ async def run_durable_application_run(
     async with get_session_factory()() as db:
         workflow = await workflow_repository.get_run_detail(db, run_id)
     if workflow is not None:
-        if generation != "legacy":
-            return RUN_FINISHED
-        return await run_durable_workflow_run(run_id, settings, worker_task_id)
+        return await run_durable_workflow_run(
+            run_id,
+            settings,
+            worker_task_id,
+            generation=generation,
+        )
     runner = (
         run_durable_unified_agent_run
         if generation == "unified"

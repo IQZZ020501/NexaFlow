@@ -2427,6 +2427,7 @@ def test_celery() -> None:
         "recover-knowledge-storage-cleanups",
         "recover-upload-storage-cleanups",
         "recover-agent-runs",
+        "recover-legacy-agent-runs",
         "recover-tool-invocations",
     }
     assert beat["recover-knowledge-tasks"]["schedule"] == 30.0
@@ -2434,6 +2435,11 @@ def test_celery() -> None:
     assert beat["recover-tool-invocations"] == {
         "task": "app.tools.recover",
         "schedule": 30.0,
+    }
+    assert beat["recover-legacy-agent-runs"] == {
+        "task": "app.agents.recover_legacy",
+        "schedule": 30.0,
+        "options": {"queue": "agents-legacy"},
     }
     assert app.conf.accept_content == ["json"]
     assert app.conf.task_acks_late is True

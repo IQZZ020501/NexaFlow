@@ -343,6 +343,8 @@ async def _validate_live_state(
         return _failure("tool_access_source_denied", "Tool access source is denied."), None
     if invocation.origin == "workflow" and not snapshot.workflow_callable:
         return _failure("tool_not_workflow_callable", "Tool cannot run in a Workflow."), None
+    if snapshot.execution_spec.get("workflow_only") is True and invocation.origin != "workflow":
+        return _failure("tool_not_agent_callable", "Tool cannot run in an Agent."), None
 
     actor = await user_repository.get_user_by_id(db, snapshot.bound_by_user_id)
     membership = (

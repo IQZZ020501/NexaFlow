@@ -1567,7 +1567,7 @@ async def assert_exhausted_workflow_closes_running_node(run_id: str) -> None:
     async with get_session_factory()() as db:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
         assert run is not None
-        run.status = "running"
+        run.status = "running_v2"
         run.attempts = run.max_attempts
         run.worker_task_id = "expired-workflow-worker"
         run.lease_expires_at = now - timedelta(seconds=1)
@@ -1587,7 +1587,13 @@ async def assert_exhausted_workflow_closes_running_node(run_id: str) -> None:
         await db.commit()
 
     async with get_session_factory()() as db:
-        assert await agent_repository.fail_exhausted_agent_runs(db, now) == 1
+        assert len(
+            await agent_repository.fail_exhausted_agent_run_ids(
+                db,
+                now,
+                generation="unified",
+            )
+        ) == 1
         await db.commit()
         run = await agent_repository.get_agent_run_by_id(db, run_id)
         nodes = await workflow_repository.list_node_executions(db, run_id)
@@ -1788,7 +1794,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             json={"source": "draft", "question": "release-ready"},
         )
         assert draft_run.status_code == 201, draft_run.text
-        assert draft_run.json()["status"] == "succeeded"
+        assert draft_run.json()["status"] == "succeeded", draft_run.text
         assert draft_run.json()["outputs"] == {"result": "draft-two"}
         assert draft_run.json()["inputs"] == {"question": "release-ready"}
         run_id = draft_run.json()["id"]
@@ -2154,26 +2160,42 @@ class _FakeLlmModel:
         return reply
 
 
-class _FakeLlmTool:
-    name = "mcp_weather"
-    metadata = {}
-    arguments: dict | None = None
-
-    async def ainvoke(self, arguments):
-        self.arguments = arguments
-        return AgentToolResult(content="sunny", summary="ok", output={"weather": "sunny"})
-
-
-class _FakeLlmLedger:
+class _FakeWorkflowToolRuntime:
     def __init__(self) -> None:
-        self.calls: list[tuple] = []
+        self.snapshot = SimpleNamespace(
+            tool_id="tool-1",
+            version_id="version-1",
+            function_name="mcp_weather",
+            display_name="Weather",
+            description="Return weather.",
+            input_schema={
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+                "additionalProperties": False,
+            },
+            kind="mcp",
+            parallel_safe=False,
+            definition_hash="hash-1",
+        )
+        self.calls: list[tuple[str, str, str, dict]] = []
 
-    async def before(self, turn, call, metadata, arguments):
-        self.calls.append(("before", turn, call["id"], dict(arguments)))
-        return None
+    def get_by_reference(self, tool_id: str, version_id: str):
+        if (tool_id, version_id) != ("tool-1", "version-1"):
+            raise ValueError("Workflow Tool snapshot is unavailable.")
+        return self.snapshot
 
-    async def after(self, turn, call, metadata, arguments, result):
-        self.calls.append(("after", turn, call["id"], result.content))
+    def get_by_function(self, function_name: str):
+        return self.snapshot if function_name == self.snapshot.function_name else None
+
+    async def invoke(self, snapshot, node_id, call_id, arguments):
+        assert snapshot is self.snapshot
+        self.calls.append((node_id, call_id, snapshot.function_name, dict(arguments)))
+        return AgentToolResult(
+            content="sunny",
+            summary="ok",
+            output={"weather": "sunny"},
+        )
 
 
 def _llm_scope(**overrides) -> SimpleNamespace:
@@ -2181,10 +2203,8 @@ def _llm_scope(**overrides) -> SimpleNamespace:
         run=SimpleNamespace(agent_id="workflow-1", model_id="model-1"),
         settings=None,
         models={"model-1": SimpleNamespace(provider_type="openai_compatible")},
-        mcp_tools={},
-        node_order={"llm-1": 0},
         node_histories={},
-        ledger=_FakeLlmLedger(),
+        tool_runtime=_FakeWorkflowToolRuntime(),
         output_delta=None,
     )
     for key, value in overrides.items():
@@ -2385,40 +2405,27 @@ def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
                 ),
             ]
         )
-        tool = _FakeLlmTool()
-        ledger = _FakeLlmLedger()
-        scope = _llm_scope(
-            mcp_tools={("srv-1", "tool-1"): ("resolved", "policy")},
-            ledger=ledger,
-        )
+        runtime = _FakeWorkflowToolRuntime()
+        scope = _llm_scope(tool_runtime=runtime)
         node = _llm_node(
             {
                 "prompt": "hello",
-                "mcp_enable": True,
-                "mcp_servers": [{"server_id": "srv-1", "tool_name": "tool-1"}],
+                "tools": [{"tool_id": "tool-1", "version_id": "version-1"}],
                 "model_setting": {"reasoning_content_enable": True},
             }
         )
-        with (
-            patch(
-                "app.application.workflow_nodes.build_chat_model",
-                return_value=fake,
-            ),
-            patch(
-                "app.application.workflow_nodes.build_mcp_agent_tool",
-                return_value=tool,
-            ),
+        with patch(
+            "app.application.workflow_nodes.build_chat_model",
+            return_value=fake,
         ):
             result = await execute_workflow_node(scope, node, _llm_context())
         assert result.outputs["text"] == "final answer"
         assert result.outputs["reasoning_content"] == "thinking..."
         assert result.model_tokens == 35
-        assert ledger.calls == [
-            ("before", 1, "workflow-llm-1-tool-0", {"city": "sh"}),
-            ("after", 1, "workflow-llm-1-tool-0", "sunny"),
+        assert runtime.calls == [
+            ("llm-1", "llm:0:mcp_weather", "mcp_weather", {"city": "sh"}),
         ]
-        assert tool.arguments == {"city": "sh"}
-        assert fake.bound_tools == [tool]
+        assert [tool.name for tool in fake.bound_tools] == ["mcp_weather"]
         # the second model call carries the tool result
         second_messages = fake.calls[1][0]
         tool_messages = [
@@ -2428,7 +2435,7 @@ def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
         assert tool_messages[0].tool_call_id == "call-1"
         assert tool_messages[0].content == "sunny"
 
-        # mcp_enable with an unbound tool fails the node
+        # A canonical reference without a frozen snapshot fails the node.
         scope2 = _llm_scope()
         with patch(
             "app.application.workflow_nodes.build_chat_model",
@@ -2440,18 +2447,17 @@ def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
                     _llm_node(
                         {
                             "prompt": "hello",
-                            "mcp_enable": True,
-                            "mcp_servers": [
-                                {"server_id": "srv-1", "tool_name": "tool-1"}
+                            "tools": [
+                                {"tool_id": "missing", "version_id": "version-1"}
                             ],
                         }
                     ),
                     _llm_context(),
                 )
             except ValueError as exc:
-                assert "unavailable or not read-only" in str(exc)
+                assert "snapshot is unavailable" in str(exc)
             else:
-                raise AssertionError("unbound MCP tool was accepted")
+                raise AssertionError("unbound Workflow Tool was accepted")
 
     asyncio.run(run())
 

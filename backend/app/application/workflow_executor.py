@@ -7,20 +7,19 @@ import traceback
 from typing import Any
 
 from app.application.agent_executor import (
-    DurableToolLedger,
     RUN_BUSY,
     RUN_FINISHED,
     maintain_agent_run_lease,
 )
 from app.application.workflow_nodes import WorkflowNodeScope, execute_workflow_node
+from app.application.workflow_tool_runtime import WorkflowToolRuntime
 from app.application.workspace import build_workspace_context
 from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import McpToolPolicy
+from app.entities.tools import ToolSnapshot
 from app.entities.user import User
 from app.entities.workflows import WorkflowNodeExecution, WorkflowRunDetail
 from app.infrastructure.agent_live_stream import AgentLiveStreamPublisher
-from app.infrastructure.code_sandbox import WorkflowSandboxError
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import classify_error
 from app.infrastructure.model_utils import new_id, utc_now
@@ -39,7 +38,9 @@ from app.schemas.workflow import LlmNodeConfig, RerankerNodeConfig, WorkflowGrap
 from app.shareddomain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
 )
 from app.shareddomain.agents.runtime import (
     empty_usage,
@@ -50,12 +51,7 @@ from app.shareddomain.agents.services import (
     accessible_agent_knowledge_bases,
     get_agent_model,
 )
-from app.shareddomain.tools.services import (
-    ResolvedMcpTool,
-    effective_mcp_tool_policy_mode,
-    get_mcp_tool_policy,
-    resolve_mcp_tools,
-)
+from app.shareddomain.tools.runtime import tool_snapshot_payload
 from app.shareddomain.workflows.engine import (
     NodeTransition,
     WorkflowEngine,
@@ -63,6 +59,7 @@ from app.shareddomain.workflows.engine import (
     WorkflowEngineState,
     WorkflowInputRequired,
 )
+from app.shareddomain.workflows.resources import load_workflow_resource_snapshot
 
 MAX_WORKFLOW_OUTPUT_BYTES = 256 * 1024
 WORKFLOW_HISTORY_LIMIT = 20
@@ -146,14 +143,14 @@ class WorkflowExecutionScope:
     workspace_role: str | None
     models: dict[str, RegisteredModel]
     knowledge_bases: dict[str, KnowledgeBase]
-    mcp_tools: dict[tuple[str, str], tuple[ResolvedMcpTool, McpToolPolicy]]
+    tool_snapshots: list[ToolSnapshot]
 
 
 async def _load_scope(run_id: str) -> WorkflowExecutionScope:
     async with get_session_factory()() as db:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
         detail = await workflow_repository.get_run_detail(db, run_id)
-        if run is None or detail is None or run.status != AGENT_RUN_RUNNING_STATUS:
+        if run is None or detail is None or run.status not in AGENT_RUN_RUNNING_STATUSES:
             raise WorkflowEngineError("Workflow run is not executable.")
         agent = await agent_repository.get_agent_by_id(db, run.agent_id)
         if agent is None or agent.app_type != "workflow" or agent.status != "active":
@@ -163,6 +160,22 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
             raise WorkflowEngineError("Workflow run user is unavailable.")
         context = await build_workspace_context(db, actor, run.workspace_id)
         graph = WorkflowGraph.model_validate(detail.graph_snapshot)
+        try:
+            knowledge_base_ids, tool_snapshots = load_workflow_resource_snapshot(
+                graph,
+                detail.resource_snapshot,
+                detail.resource_hash,
+            )
+        except ValueError as exc:
+            raise WorkflowEngineError(
+                "Workflow resource snapshot is invalid."
+            ) from exc
+        if (
+            knowledge_base_ids != run.knowledge_base_ids
+            or [tool_snapshot_payload(item) for item in tool_snapshots]
+            != run.tool_snapshots
+        ):
+            raise WorkflowEngineError("Workflow run snapshot is inconsistent.")
         model_ids = {run.model_id}
         model_ids.update(
             str(node.data.config["model_id"])
@@ -192,31 +205,10 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
         knowledge_bases = await accessible_agent_knowledge_bases(
             db,
             run.workspace_id,
-            run.knowledge_base_ids,
+            knowledge_base_ids,
             actor,
             context.membership_role,
         )
-        resolved_mcp = await resolve_mcp_tools(
-            db,
-            run.workspace_id,
-            run.mcp_tools,
-            strict=False,
-            application_id=run.agent_id,
-        )
-        mcp_tools = {}
-        for tool in resolved_mcp:
-            policy = await get_mcp_tool_policy(
-                db,
-                run.workspace_id,
-                tool.server.id,
-                tool.definition.name,
-            )
-            if (
-                policy is not None
-                and effective_mcp_tool_policy_mode(tool.definition, policy)
-                == "read_only"
-            ):
-                mcp_tools[(tool.server.id, tool.definition.name)] = (tool, policy)
     return WorkflowExecutionScope(
         run=run,
         detail=detail,
@@ -224,7 +216,7 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
         workspace_role=context.membership_role,
         models=models,
         knowledge_bases={item.id: item for item in knowledge_bases},
-        mcp_tools=mcp_tools,
+        tool_snapshots=tool_snapshots,
     )
 
 
@@ -233,8 +225,6 @@ def _safe_node_error(exc: Exception) -> str:
         return "Workflow model request timed out."
     if isinstance(exc, ModelProviderError):
         return "Workflow model request failed."
-    if isinstance(exc, WorkflowSandboxError):
-        return str(exc)
     if isinstance(exc, (ValueError, RuntimeError)):
         return str(exc)[:1000]
     return "Workflow node execution failed."
@@ -256,8 +246,14 @@ async def _execute_claimed_workflow_run(
     run, detail = scope.run, scope.detail
     graph = WorkflowGraph.model_validate(detail.graph_snapshot)
     workflow_globals, node_histories = await _workflow_context(run, graph)
-    node_order = {node.id: index for index, node in enumerate(graph.nodes)}
-    ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
+    tool_runtime = WorkflowToolRuntime(
+        run,
+        detail,
+        scope.tool_snapshots,
+        worker_task_id,
+        settings,
+        lease_lost,
+    )
     live_stream = AgentLiveStreamPublisher(settings, run.id)
 
     async def output_delta(node_id: str, delta: str) -> None:
@@ -277,9 +273,7 @@ async def _execute_claimed_workflow_run(
         settings=settings,
         models=scope.models,
         knowledge_bases=scope.knowledge_bases,
-        mcp_tools=scope.mcp_tools,
-        ledger=ledger,
-        node_order=node_order,
+        tool_runtime=tool_runtime,
         node_histories=node_histories,
         output_delta=output_delta,
     )
@@ -605,6 +599,8 @@ async def run_durable_workflow_run(
     run_id: str,
     settings: Settings,
     worker_task_id: str | None = None,
+    *,
+    generation: str = "legacy",
 ) -> str:
     worker_task_id = worker_task_id or new_id()
     now = utc_now()
@@ -615,6 +611,7 @@ async def run_durable_workflow_run(
             worker_task_id,
             now,
             now + timedelta(seconds=settings.agent_executor_lease_seconds),
+            generation=generation,
         )
         if claimed:
             await workflow_repository.set_first_run_deadline(
@@ -623,14 +620,21 @@ async def run_durable_workflow_run(
                 worker_task_id,
                 now + timedelta(seconds=settings.agent_run_timeout_seconds),
             )
-            await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
+            if generation == "legacy":
+                await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
         await db.commit()
     if not claimed:
         async with get_session_factory()() as db:
             current = await agent_repository.get_agent_run_by_id(db, run_id)
         return (
             RUN_BUSY
-            if current is not None and current.status == AGENT_RUN_RUNNING_STATUS
+            if current is not None
+            and current.status
+            == (
+                AGENT_RUN_UNIFIED_RUNNING_STATUS
+                if generation == "unified"
+                else AGENT_RUN_RUNNING_STATUS
+            )
             else RUN_FINISHED
         )
 

@@ -1661,7 +1661,7 @@ async def assert_stream_disconnect_keeps_run_durable(
     async with get_session_factory()() as db:
         durable_run = await agent_repository.get_agent_run_by_id(db, run.id)
     assert durable_run is not None
-    assert durable_run.status == "queued"
+    assert durable_run.status == "queued_v2"
 
 
 async def assert_terminal_stream_replays_past_batch_boundary(
@@ -1809,6 +1809,7 @@ async def assert_run_lease_takeover(
             "worker-1",
             now,
             now + timedelta(seconds=30),
+            generation="unified",
         )
         assert await agent_repository.pause_agent_run(
             db,
@@ -1823,6 +1824,7 @@ async def assert_run_lease_takeover(
             "worker-2",
             now,
             now - timedelta(seconds=1),
+            generation="unified",
         )
         assert await agent_repository.claim_agent_run(
             db,
@@ -1830,6 +1832,7 @@ async def assert_run_lease_takeover(
             "worker-3",
             now,
             now + timedelta(seconds=30),
+            generation="unified",
         )
         assert not await agent_repository.save_agent_run_checkpoint(
             db,
@@ -1935,7 +1938,7 @@ async def assert_exhausted_run_closes_tool_ledger(
                 worker_task_id="historical-worker",
             ),
         )
-        run, _ = await agent_runs.prepare_agent_run(
+        legacy_run, _ = await agent_runs.prepare_agent_run(
             db,
             workspace_id,
             agent_id,
@@ -1943,11 +1946,12 @@ async def assert_exhausted_run_closes_tool_ledger(
             actor,
             "admin",
         )
-        run.status = "running"
-        run.attempts = run.max_attempts
-        run.worker_task_id = "dead-worker"
-        run.lease_expires_at = now - timedelta(seconds=1)
-        await agent_repository.save_agent_run(db, run)
+        legacy_run.configuration_source = "legacy"
+        legacy_run.status = "running"
+        legacy_run.attempts = legacy_run.max_attempts
+        legacy_run.worker_task_id = "dead-worker"
+        legacy_run.lease_expires_at = now - timedelta(seconds=1)
+        await agent_repository.save_agent_run(db, legacy_run)
         for call_id, approval_required in (
             ("call-read-only", False),
             ("call-side-effect", True),
@@ -1956,7 +1960,7 @@ async def assert_exhausted_run_closes_tool_ledger(
                 db,
                 AgentToolCall(
                     workspace_id=workspace_id,
-                    run_id=run.id,
+                    run_id=legacy_run.id,
                     turn=1,
                     call_id=call_id,
                     tool_name="mcp_lookup",
@@ -1969,6 +1973,19 @@ async def assert_exhausted_run_closes_tool_ledger(
                     lease_expires_at=now - timedelta(seconds=1),
                 ),
             )
+        run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Verify exhausted unified Tool cleanup",
+            actor,
+            "admin",
+        )
+        run.status = "running_v2"
+        run.attempts = run.max_attempts
+        run.worker_task_id = "dead-worker"
+        run.lease_expires_at = now - timedelta(seconds=1)
+        await agent_repository.save_agent_run(db, run)
         tool = next(
             item
             for item in await tool_repository.list_tools(db, workspace_id)
@@ -2000,10 +2017,26 @@ async def assert_exhausted_run_closes_tool_ledger(
                     lease_expires_at=now - timedelta(seconds=1),
                 ),
             )
-        assert await agent_executor.fail_exhausted_agent_runs(db, now) == 1
+        assert (
+            await agent_executor.fail_exhausted_agent_runs(
+                db,
+                now,
+                generation="legacy",
+            )
+            == 1
+        )
+        assert (
+            await agent_executor.fail_exhausted_agent_runs(
+                db,
+                now,
+                generation="unified",
+            )
+            == 1
+        )
         await db.commit()
         current = await agent_repository.get_agent_run_by_id(db, run.id)
-        calls = await agent_repository.list_agent_tool_calls(db, run.id)
+        legacy_current = await agent_repository.get_agent_run_by_id(db, legacy_run.id)
+        calls = await agent_repository.list_agent_tool_calls(db, legacy_run.id)
         invocations = await tool_repository.list_tool_invocations(
             db,
             workspace_id,
@@ -2016,6 +2049,8 @@ async def assert_exhausted_run_closes_tool_ledger(
 
     assert current is not None
     assert current.status == "failed"
+    assert legacy_current is not None
+    assert legacy_current.status == "failed"
     assert {call.call_id: call.status for call in calls} == {
         "call-read-only": "failed",
         "call-side-effect": "uncertain",
@@ -2089,6 +2124,7 @@ async def assert_approval_before_pause_requeues_run(
             "admin",
         )
         run.configuration_source = "legacy"
+        run.status = "queued"
         await agent_repository.save_agent_run(db, run)
         now = utc_now()
         assert await agent_repository.claim_agent_run(

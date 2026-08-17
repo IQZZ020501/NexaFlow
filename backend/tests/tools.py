@@ -20,6 +20,7 @@ from tests.support import (
     test_client,
 )
 
+import sqlalchemy as sa
 from sqlalchemy import (
     CheckConstraint,
     ForeignKeyConstraint,
@@ -226,6 +227,18 @@ def load_network_policy_migration():
         / "alembic/versions/202608160004_mcp_network_policy.py"
     )
     spec = spec_from_file_location("mcp_network_policy", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_agent_publication_migration():
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202608160005_agent_publication_versions.py"
+    )
+    spec = spec_from_file_location("agent_publication_versions", path)
     assert spec is not None and spec.loader is not None
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -590,6 +603,114 @@ def test_migration_grants_tools_only_to_regular_members() -> None:
     )
 
 
+def test_agent_publication_backfill_does_not_restore_membership_revoked_use() -> None:
+    migration = load_agent_publication_migration()
+    metadata = MetaData()
+    users = Table(
+        "users",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("is_active", sa.Boolean, nullable=False),
+        sa.Column("is_global_admin", sa.Boolean, nullable=False),
+    )
+    memberships = Table(
+        "workspace_memberships",
+        metadata,
+        sa.Column("workspace_id", sa.String, primary_key=True),
+        sa.Column("user_id", sa.String, primary_key=True),
+        sa.Column("role", sa.String, nullable=False),
+    )
+    permissions = Table(
+        "resource_permissions",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("resource_type", sa.String, nullable=False),
+        sa.Column("resource_id", sa.String, nullable=False),
+        sa.Column("user_id", sa.String, nullable=False),
+        sa.Column("permission", sa.String, nullable=False),
+        sa.Column("created_by_user_id", sa.String, nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    audit_logs = Table(
+        "audit_logs",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("workspace_id", sa.String),
+        sa.Column("action", sa.String, nullable=False),
+        sa.Column("resource_type", sa.String, nullable=False),
+        sa.Column("resource_id", sa.String, nullable=False),
+        sa.Column("details", sa.JSON, nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata.create_all(engine)
+    published_at = datetime(2026, 8, 15, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            users.insert(),
+            {"id": "binder", "is_active": True, "is_global_admin": False},
+        )
+        connection.execute(
+            memberships.insert(),
+            {"workspace_id": "workspace", "user_id": "binder", "role": "member"},
+        )
+        connection.execute(
+            audit_logs.insert(),
+            {
+                "id": "member-removed",
+                "workspace_id": "workspace",
+                "action": "workspace.member.remove",
+                "resource_type": "workspace_member",
+                "resource_id": "binder",
+                "details": {"role": "member"},
+                "created_at": published_at,
+            },
+        )
+        markers = migration._backfill_snapshot_use_grants(
+            connection,
+            {
+                ("workspace", "tool", "binder"): {
+                    "created_at": published_at,
+                    "agent_ids": {"agent"},
+                }
+            },
+            {("workspace", "tool"): "tool-owner"},
+        )
+        assert markers == {}
+        assert connection.execute(sa.select(permissions.c.id)).all() == []
+
+        # A new explicit grant after rejoining remains authoritative.
+        connection.execute(
+            permissions.insert(),
+            {
+                "id": "explicit-use",
+                "workspace_id": "workspace",
+                "resource_type": "tool",
+                "resource_id": "tool",
+                "user_id": "binder",
+                "permission": "use",
+                "created_by_user_id": "admin",
+                "created_at": published_at,
+                "updated_at": published_at,
+            },
+        )
+        assert migration._backfill_snapshot_use_grants(
+            connection,
+            {
+                ("workspace", "tool", "binder"): {
+                    "created_at": published_at,
+                    "agent_ids": {"agent"},
+                }
+            },
+            {("workspace", "tool"): "tool-owner"},
+        ) == {}
+        assert connection.execute(sa.select(permissions.c.id)).all() == [
+            ("explicit-use",)
+        ]
+
+
 def test_entities_and_orm_columns_match_exactly() -> None:
     from app.entities import tools as entities
     from app.shareddomain.tools import models
@@ -806,8 +927,8 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             ("python", None),
         ]
         tools = await repository.list_tools(db, workspace_id)
-        assert len(tools) == 1
-        tool = tools[0]
+        assert {tool.stable_key for tool in tools} == {"current_time", "inline_python"}
+        tool = next(tool for tool in tools if tool.stable_key == "current_time")
         assert tool.stable_key == "current_time"
         assert tool.availability == "available"
         assert tool.current_version_id is not None
@@ -2941,6 +3062,7 @@ def main() -> None:
     test_mcp_hash_matches_legacy_annotation_normalization()
     test_migration_collects_policy_only_tools_deterministically()
     test_migration_grants_tools_only_to_regular_members()
+    test_agent_publication_backfill_does_not_restore_membership_revoked_use()
     test_entities_and_orm_columns_match_exactly()
     test_orm_enforces_tenant_scoped_relations_and_legal_states()
     test_tool_versions_are_immutable_at_repository_boundary()

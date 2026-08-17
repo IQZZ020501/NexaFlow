@@ -18,16 +18,14 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import StructuredTool
 
-from app.application.agent_executor import DurableToolLedger
 from app.application.agent_tools import (
     build_knowledge_search_tool,
-    build_mcp_agent_tool,
+    build_unified_agent_tool,
 )
+from app.application.workflow_tool_runtime import WorkflowToolRuntime
 from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import McpToolPolicy
 from app.entities.user import User
-from app.infrastructure.code_sandbox import execute_workflow_code
 from app.infrastructure.config import Settings
 from app.ports.llm import (
     ModelToolCall,
@@ -37,30 +35,23 @@ from app.ports.llm import (
 )
 from app.schemas.workflow import (
     ClassifierNodeConfig,
-    CodeNodeConfig,
     ConditionNodeConfig,
     DocumentExtractNodeConfig,
     EndNodeConfig,
     FormNodeConfig,
     KnowledgeNodeConfig,
     LlmNodeConfig,
-    McpNodeConfig,
     ReplyNodeConfig,
     RerankerNodeConfig,
     StartNodeConfig,
     TemplateNodeConfig,
+    ToolNodeConfig,
     VariableNodeConfig,
     WorkflowNode,
 )
-from app.shareddomain.agents.runtime import AgentExecutionPaused
 from app.shareddomain.agents.runtime.graph import model_completion
-from app.shareddomain.agents.runtime.state import PendingToolCall
-from app.shareddomain.agents.runtime.tools import (
-    AgentToolResult,
-    agent_tool_metadata,
-)
+from app.shareddomain.agents.runtime.tools import AgentToolResult
 from app.shareddomain.agents.runtime.usage import merge_usage, usage_from_message
-from app.shareddomain.tools.services import ResolvedMcpTool
 from app.shareddomain.workflows.engine import NodeExecutionContext, NodeResult
 
 MAX_WORKFLOW_LLM_TOOL_CALLS = 8
@@ -78,9 +69,7 @@ class WorkflowNodeScope:
     settings: Settings
     models: dict[str, RegisteredModel]
     knowledge_bases: dict[str, KnowledgeBase]
-    mcp_tools: dict[tuple[str, str], tuple[ResolvedMcpTool, McpToolPolicy]]
-    ledger: DurableToolLedger
-    node_order: dict[str, int]
+    tool_runtime: WorkflowToolRuntime
     node_histories: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
@@ -318,25 +307,15 @@ async def _llm_tool_call(
             ) from exc
     if not isinstance(arguments, dict):
         raise ValueError("Workflow model returned invalid tool arguments.")
-    pending: PendingToolCall = {
-        "id": f"workflow-{node.id}-tool-{tool_call_count}",
-        "name": tool.name,
-        "arguments": call.arguments or "{}",
-    }
-    metadata = agent_tool_metadata(tool)
-    turn = scope.node_order.get(node.id, 0) + 1 + tool_call_count
-    try:
-        stored = await scope.ledger.before(turn, pending, metadata, arguments)
-        if stored is None:
-            result = await tool.ainvoke(arguments)
-            await scope.ledger.after(turn, pending, metadata, arguments, result)
-        else:
-            result = stored
-    except AgentExecutionPaused as exc:
-        raise RuntimeError(
-            "Workflow LLM MCP tool call is not permitted."
-        ) from exc
-    return result
+    snapshot = scope.tool_runtime.get_by_function(tool.name)
+    if snapshot is None:
+        raise ValueError("Workflow model requested an unavailable tool.")
+    return await scope.tool_runtime.invoke(
+        snapshot,
+        node.id,
+        f"llm:{tool_call_count}:{tool.name}",
+        arguments,
+    )
 
 
 async def _model_tool_loop(
@@ -349,11 +328,7 @@ async def _model_tool_loop(
     tools: list[StructuredTool],
     on_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str, dict[str, Any], str]:
-    """Run the LLM with bound MCP tools until it answers or the call cap hits.
-
-    Tool executions are durably recorded through the run's tool ledger, and
-    every model invocation counts against the run's model token budget.
-    """
+    """Run the LLM with bound Tools until it answers or the call cap hits."""
     bound = build_chat_model(scope.settings, model).bind_tools(tools)
     total_usage: dict[str, Any] = {}
     tool_call_count = 0
@@ -574,24 +549,15 @@ async def execute_workflow_node(
             parsed.model_params_setting,
             context.remaining_model_tokens,
         )
-        tools: list[StructuredTool] = []
-        if parsed.mcp_enable:
-            for reference in parsed.mcp_servers:
-                resolved = scope.mcp_tools.get(
-                    (reference.server_id, reference.tool_name)
+        tools = [
+            build_unified_agent_tool(
+                scope.tool_runtime.get_by_reference(
+                    reference.tool_id,
+                    reference.version_id,
                 )
-                if resolved is None:
-                    raise ValueError(
-                        "Workflow MCP tool is unavailable or not read-only."
-                    )
-                tools.append(
-                    build_mcp_agent_tool(
-                        resolved[0],
-                        scope.settings,
-                        scope.run.agent_id,
-                        "read_only",
-                    )
-                )
+            )
+            for reference in parsed.tools
+        ]
         async def emit_output_delta(delta: str) -> None:
             assert scope.output_delta is not None
             await scope.output_delta(node.id, delta)
@@ -627,7 +593,7 @@ async def execute_workflow_node(
                 "model_id": model_id,
                 "dialogue_type": parsed.dialogue_type,
                 "dialogue_number": parsed.dialogue_number,
-                "mcp_enable": parsed.mcp_enable,
+                "tool_count": len(parsed.tools),
             },
             outputs=outputs,
             model_tokens=int(usage.get("total_tokens") or 0),
@@ -852,46 +818,26 @@ async def execute_workflow_node(
             },
             outputs=outputs,
         )
-    if node_type == "mcp":
-        parsed = McpNodeConfig.model_validate(config)
+    if node_type == "tool":
+        parsed = ToolNodeConfig.model_validate(config)
         arguments = resolve_value(parsed.arguments, context)
-        resolved = scope.mcp_tools.get((parsed.server_id, parsed.tool_name))
-        if resolved is None:
-            raise ValueError("Workflow MCP tool is unavailable or not read-only.")
-        tool = build_mcp_agent_tool(
-            resolved[0],
-            scope.settings,
-            scope.run.agent_id,
-            "read_only",
+        if not isinstance(arguments, dict):
+            raise ValueError("Workflow Tool arguments must be an object.")
+        result = await scope.tool_runtime.invoke(
+            scope.tool_runtime.get_by_reference(
+                parsed.tool.tool_id,
+                parsed.tool.version_id,
+            ),
+            node.id,
+            "direct",
+            arguments,
         )
-        metadata = agent_tool_metadata(tool)
-        call: PendingToolCall = {
-            "id": f"workflow-{node.id}",
-            "name": tool.name,
-            "arguments": json.dumps(arguments, ensure_ascii=False),
-        }
-        turn = scope.node_order[node.id] + 1
-        try:
-            result = await scope.ledger.before(turn, call, metadata, arguments)
-            if result is None:
-                result = await tool.ainvoke(arguments)
-                await scope.ledger.after(turn, call, metadata, arguments, result)
-        except AgentExecutionPaused as exc:
-            raise RuntimeError("Workflow MCP node requires a current read-only policy.") from exc
         if result.is_error:
             raise RuntimeError(result.summary)
-        output = result.output if isinstance(result.output, dict) else {"content": result.content}
-        return NodeResult(inputs=dict(arguments), outputs=dict(output))
-    if node_type == "code":
-        parsed = CodeNodeConfig.model_validate(config)
-        inputs = resolve_value(parsed.inputs, context)
-        result = await execute_workflow_code(scope.settings, parsed.code, inputs)
-        return NodeResult(
-            inputs=dict(inputs),
-            outputs={
-                "result": result.result,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-            },
+        output = (
+            result.output
+            if isinstance(result.output, dict)
+            else {"result": result.output, "content": result.content}
         )
+        return NodeResult(inputs=dict(arguments), outputs=dict(output))
     raise ValueError(f"Unsupported workflow node type: {node_type}.")

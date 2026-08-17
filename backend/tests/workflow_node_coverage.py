@@ -72,16 +72,39 @@ class _FakeLlmModel:
         return reply
 
 
-class _FakeLlmLedger:
-    def __init__(self) -> None:
-        self.calls: list[tuple] = []
+class _FakeWorkflowToolRuntime:
+    def __init__(
+        self,
+        result: AgentToolResult | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.snapshot = SimpleNamespace(
+            tool_id="tool-1",
+            version_id="version-1",
+            function_name="tool-1",
+        )
+        self.result = result or AgentToolResult(
+            content='{"ok":1}', summary="done", output={"ok": 1}
+        )
+        self.error = error
+        self.calls: list[tuple[str, str, str, dict]] = []
 
-    async def before(self, turn, call, metadata, arguments):
-        self.calls.append(("before", turn, call["id"], dict(arguments)))
-        return None
+    def get_by_function(self, function_name: str):
+        return self.snapshot if function_name == self.snapshot.function_name else None
 
-    async def after(self, turn, call, metadata, arguments, result):
-        self.calls.append(("after", turn, call["id"], result.content))
+    def get_by_reference(self, tool_id: str, version_id: str):
+        if (tool_id, version_id) != (
+            self.snapshot.tool_id,
+            self.snapshot.version_id,
+        ):
+            raise ValueError("Workflow Tool snapshot is unavailable.")
+        return self.snapshot
+
+    async def invoke(self, snapshot, node_id, call_id, arguments):
+        self.calls.append((snapshot.function_name, node_id, call_id, dict(arguments)))
+        if self.error is not None:
+            raise self.error
+        return self.result
 
 
 def _node_scope(**overrides) -> SimpleNamespace:
@@ -97,9 +120,7 @@ def _node_scope(**overrides) -> SimpleNamespace:
         settings=None,
         models={"model-1": SimpleNamespace(provider_type="openai_compatible")},
         knowledge_bases={},
-        mcp_tools={},
-        ledger=_FakeLlmLedger(),
-        node_order={"llm-1": 0, "mcp-1": 2, "code-1": 1},
+        tool_runtime=_FakeWorkflowToolRuntime(),
         node_histories={},
         form_submissions={},
         output_delta=None,
@@ -313,7 +334,7 @@ def test_nodes_history_messages_and_invoke() -> None:
     assert [item.content for item in messages] == ["node-q", "node-a"]
 
 
-def test_nodes_llm_tool_call_and_loop_branches() -> None:
+def _legacy_test_nodes_llm_tool_call_and_loop_branches() -> None:
     from unittest.mock import patch
 
     from app.application.workflow_nodes import execute_workflow_node
@@ -618,6 +639,159 @@ def test_nodes_llm_tool_call_and_loop_branches() -> None:
                 assert "tool call limit reached" in str(exc)
             else:
                 raise AssertionError("tool call limit was not enforced")
+
+    asyncio.run(run())
+
+
+def test_nodes_llm_tool_call_and_loop_branches() -> None:
+    from app.application.workflow_nodes import _llm_tool_call, execute_workflow_node
+    from app.ports.llm import ModelToolCall
+
+    async def run() -> None:
+        tool = SimpleNamespace(name="tool-1")
+        for arguments in ("not-json{", "[1,2]"):
+            try:
+                await _llm_tool_call(
+                    _node_scope(),
+                    _node("llm", {"prompt": "p"}),
+                    tool,  # type: ignore[arg-type]
+                    ModelToolCall(id="c1", name="tool-1", arguments=arguments),
+                    0,
+                )
+            except ValueError as exc:
+                assert "invalid tool arguments" in str(exc)
+            else:
+                raise AssertionError("Invalid model Tool arguments were accepted.")
+
+        node = _node(
+            "llm",
+            {
+                "prompt": "p",
+                "tools": [{"tool_id": "tool-1", "version_id": "version-1"}],
+            },
+        )
+        runtime = _FakeWorkflowToolRuntime(
+            AgentToolResult(content="cached", summary="done", output={"ok": 1})
+        )
+        model = _FakeLlmModel(
+            [
+                _FakeLlmMessage(
+                    "",
+                    tool_calls=[{"id": "c1", "name": "tool-1", "args": {"x": 1}}],
+                ),
+                _FakeLlmMessage("done"),
+            ]
+        )
+        with (
+            patch("app.application.workflow_nodes.build_chat_model", return_value=model),
+            patch(
+                "app.application.workflow_nodes.build_unified_agent_tool",
+                return_value=tool,
+            ),
+        ):
+            result = await execute_workflow_node(
+                _node_scope(tool_runtime=runtime), node, _context()
+            )
+        assert result.outputs == {"text": "done"}
+        assert runtime.calls == [("tool-1", "n1", "llm:0:tool-1", {"x": 1})]
+
+        overflowing = _FakeLlmModel(
+            [
+                _FakeLlmMessage(
+                    "",
+                    tool_calls=[{"id": "c1", "name": "tool-1", "args": {}}],
+                    usage={"input_tokens": 60, "output_tokens": 50, "total_tokens": 110},
+                )
+            ]
+        )
+        with (
+            patch(
+                "app.application.workflow_nodes.build_chat_model",
+                return_value=overflowing,
+            ),
+            patch(
+                "app.application.workflow_nodes.build_unified_agent_tool",
+                return_value=tool,
+            ),
+        ):
+            try:
+                await execute_workflow_node(_node_scope(), node, _context())
+            except ValueError as exc:
+                assert "token budget exceeded" in str(exc)
+            else:
+                raise AssertionError("Tool-loop token overflow was accepted.")
+
+        invalid_call = _FakeLlmModel(
+            [_FakeLlmMessage("", tool_calls=[{"id": "", "name": "tool-1", "args": {}}])]
+        )
+        with (
+            patch(
+                "app.application.workflow_nodes.build_chat_model",
+                return_value=invalid_call,
+            ),
+            patch(
+                "app.application.workflow_nodes.build_unified_agent_tool",
+                return_value=tool,
+            ),
+        ):
+            try:
+                await execute_workflow_node(_node_scope(), node, _context())
+            except ValueError as exc:
+                assert "invalid tool call" in str(exc)
+            else:
+                raise AssertionError("Invalid model Tool call was accepted.")
+
+        unavailable = _FakeLlmModel(
+            [
+                _FakeLlmMessage(
+                    "", tool_calls=[{"id": "c1", "name": "ghost", "args": {}}]
+                )
+            ]
+        )
+        with (
+            patch(
+                "app.application.workflow_nodes.build_chat_model",
+                return_value=unavailable,
+            ),
+            patch(
+                "app.application.workflow_nodes.build_unified_agent_tool",
+                return_value=tool,
+            ),
+        ):
+            try:
+                await execute_workflow_node(_node_scope(), node, _context())
+            except ValueError as exc:
+                assert "unavailable tool" in str(exc)
+            else:
+                raise AssertionError("Unavailable model Tool was accepted.")
+
+        repeated = _FakeLlmModel(
+            [
+                _FakeLlmMessage(
+                    "",
+                    tool_calls=[
+                        {"id": f"c{index}", "name": "tool-1", "args": {"x": 1}}
+                    ],
+                )
+                for index in range(9)
+            ]
+        )
+        with (
+            patch(
+                "app.application.workflow_nodes.build_chat_model",
+                return_value=repeated,
+            ),
+            patch(
+                "app.application.workflow_nodes.build_unified_agent_tool",
+                return_value=tool,
+            ),
+        ):
+            try:
+                await execute_workflow_node(_node_scope(), node, _context())
+            except ValueError as exc:
+                assert "tool call limit reached" in str(exc)
+            else:
+                raise AssertionError("Model Tool call limit was not enforced.")
 
     asyncio.run(run())
 
@@ -1072,7 +1246,7 @@ def test_nodes_template_classifier_reranker_document_knowledge() -> None:
     asyncio.run(run())
 
 
-def test_nodes_mcp_and_code_and_unsupported() -> None:
+def _legacy_test_nodes_mcp_and_code_and_unsupported() -> None:
     from unittest.mock import patch
 
     from app.application.workflow_nodes import execute_workflow_node
@@ -1215,6 +1389,90 @@ def test_nodes_mcp_and_code_and_unsupported() -> None:
             assert "Unsupported workflow node type" in str(exc)
         else:
             raise AssertionError("unsupported node type was accepted")
+
+    asyncio.run(run())
+
+
+def test_nodes_tool_and_unsupported() -> None:
+    from app.application.workflow_nodes import execute_workflow_node
+
+    async def run() -> None:
+        node = _node(
+            "tool",
+            {
+                "tool": {"tool_id": "tool-1", "version_id": "version-1"},
+                "arguments": {"query": "{{start.question}}"},
+            },
+            node_id="tool-1",
+        )
+        runtime = _FakeWorkflowToolRuntime(
+            AgentToolResult(content="hits", summary="done", output={"found": 3})
+        )
+        result = await execute_workflow_node(
+            _node_scope(tool_runtime=runtime), node, _context()
+        )
+        assert result.inputs == {"query": "hi"}
+        assert result.outputs == {"found": 3}
+        assert runtime.calls == [
+            ("tool-1", "tool-1", "direct", {"query": "hi"})
+        ]
+
+        error_runtime = _FakeWorkflowToolRuntime(
+            AgentToolResult(
+                content="",
+                summary="denied",
+                output=None,
+                is_error=True,
+            )
+        )
+        try:
+            await execute_workflow_node(
+                _node_scope(tool_runtime=error_runtime), node, _context()
+            )
+        except RuntimeError as exc:
+            assert "denied" in str(exc)
+        else:
+            raise AssertionError("Workflow Tool error was swallowed.")
+
+        inline = _node(
+            "tool",
+            {
+                "tool": {"tool_id": "tool-1", "version_id": "version-1"},
+                "arguments": {
+                    "code": "result = inputs",
+                    "inputs": {"a": 1},
+                },
+            },
+            node_id="python-1",
+        )
+        inline_runtime = _FakeWorkflowToolRuntime(
+            AgentToolResult(
+                content='{"result":{"a":1}}',
+                summary="done",
+                output={"result": {"a": 1}},
+            )
+        )
+        coded = await execute_workflow_node(
+            _node_scope(tool_runtime=inline_runtime), inline, _context()
+        )
+        assert coded.outputs == {"result": {"a": 1}}
+
+        from app.schemas.workflow import WorkflowNode as NodeSchema
+        from app.schemas.workflow import WorkflowNodeData
+
+        bogus = NodeSchema.model_construct(
+            id="bogus",
+            position={"x": 0, "y": 0},
+            data=WorkflowNodeData.model_construct(
+                type="bogus-node", title="bogus", config={}
+            ),
+        )
+        try:
+            await execute_workflow_node(_node_scope(), bogus, _context())
+        except ValueError as exc:
+            assert "Unsupported workflow node type" in str(exc)
+        else:
+            raise AssertionError("Unsupported Workflow node was accepted.")
 
     asyncio.run(run())
 
@@ -1399,6 +1657,10 @@ def test_executor_load_scope_branches() -> None:
         user as user_repository,
         workflow as workflow_repository,
     )
+    from app.shareddomain.workflows.resources import (
+        build_workflow_resource_snapshot,
+        workflow_resource_hash,
+    )
 
     class SessionContext:
         def __init__(self, db):
@@ -1436,10 +1698,13 @@ def test_executor_load_scope_branches() -> None:
         mcp_tools=[],
         model_usage={},
     )
+    resource_snapshot = build_workflow_resource_snapshot([], [])
     detail = WorkflowRunDetail(
         run_id="run-1",
         workspace_id="ws-1",
         graph_snapshot=graph_snapshot(),
+        resource_snapshot=resource_snapshot,
+        resource_hash=workflow_resource_hash(resource_snapshot),
         inputs={"question": "q"},
         max_steps=10,
         max_model_tokens=1000,
@@ -1479,15 +1744,6 @@ def test_executor_load_scope_branches() -> None:
         ), patch(
             "app.application.workflow_executor.accessible_agent_knowledge_bases",
             new=AsyncMock(return_value=[]),
-        ), patch(
-            "app.application.workflow_executor.resolve_mcp_tools",
-            new=AsyncMock(return_value=overrides.get("mcp_tools", [])),
-        ), patch(
-            "app.application.workflow_executor.get_mcp_tool_policy",
-            new=AsyncMock(return_value=SimpleNamespace(mode="read_only")),
-        ), patch(
-            "app.application.workflow_executor.effective_mcp_tool_policy_mode",
-            return_value="read_only",
         ), patch(
             "app.application.workflow_executor.get_registered_model_by_id",
             new=AsyncMock(return_value=overrides.get("reranker_model")),
@@ -1534,7 +1790,14 @@ def test_executor_load_scope_branches() -> None:
                 },
             }
         )
-        reranker_detail = SimpleNamespace(graph_snapshot=reranker_graph)
+        reranker_detail = WorkflowRunDetail(
+            run_id="run-1",
+            workspace_id="ws-1",
+            graph_snapshot=reranker_graph,
+            resource_snapshot=resource_snapshot,
+            resource_hash=workflow_resource_hash(resource_snapshot),
+            deadline_at=detail.deadline_at,
+        )
         try:
             await scope(detail=reranker_detail, reranker_model=None)
         except WorkflowEngineError as exc:
@@ -1555,14 +1818,15 @@ def test_executor_load_scope_branches() -> None:
         )
         assert "rr-1" in loaded.models
 
-        # mcp tools loop with read-only policy
-        tool = SimpleNamespace(
-            server=SimpleNamespace(id="server-1"),
-            definition=SimpleNamespace(name="search"),
-        )
-        loaded = await scope(mcp_tools=[tool])
-        assert ("server-1", "search") in loaded.mcp_tools
-        assert loaded.mcp_tools[("server-1", "search")][0] is tool
+        assert loaded.tool_snapshots == []
+
+        inconsistent = AgentRun(**{**run.__dict__, "tool_snapshots": [{}]})
+        try:
+            await scope(run=inconsistent)
+        except WorkflowEngineError as exc:
+            assert "snapshot is inconsistent" in str(exc)
+        else:
+            raise AssertionError("Inconsistent Workflow Tool snapshot was accepted.")
 
     asyncio.run(check())
 
@@ -2582,6 +2846,10 @@ def _make_running_run(graph: dict) -> str:
     from app.infrastructure.repositories import agent as agent_repository
     from app.infrastructure.repositories import workflow as workflow_repository
     from app.infrastructure.session import get_session_factory
+    from app.shareddomain.workflows.resources import (
+        build_workflow_resource_snapshot,
+        workflow_resource_hash,
+    )
 
     async def create() -> str:
         async with get_session_factory()() as db:
@@ -2603,11 +2871,14 @@ def _make_running_run(graph: dict) -> str:
                 model_usage={},
             )
             run = await agent_repository.create_agent_run(db, run)
+            resource_snapshot = build_workflow_resource_snapshot([], [])
             detail = WorkflowRunDetail(
                 workspace_id=WORKSPACE_ID,
                 definition_id=WORKFLOW_DEFINITION_ID,
                 run_id=run.id,
                 graph_snapshot=graph,
+                resource_snapshot=resource_snapshot,
+                resource_hash=workflow_resource_hash(resource_snapshot),
                 inputs={"question": "manual"},
                 max_steps=20,
                 max_model_tokens=10000,
@@ -2856,6 +3127,10 @@ def test_executor_manual_run_scenarios() -> None:
             from app.infrastructure.repositories import agent as agent_repository
             from app.infrastructure.repositories import workflow as workflow_repository
             from app.infrastructure.session import get_session_factory
+            from app.shareddomain.workflows.resources import (
+                build_workflow_resource_snapshot,
+                workflow_resource_hash,
+            )
 
             async with get_session_factory()() as db:
                 run = AgentRunEntity(
@@ -2877,11 +3152,14 @@ def test_executor_manual_run_scenarios() -> None:
                     model_usage={},
                 )
                 run = await agent_repository.create_agent_run(db, run)
+                resource_snapshot = build_workflow_resource_snapshot([], [])
                 detail = RunDetailEntity(
                     workspace_id=WORKSPACE_ID,
                     definition_id=WORKFLOW_DEFINITION_ID,
                     run_id=run.id,
                     graph_snapshot=checkpoint_graph,
+                    resource_snapshot=resource_snapshot,
+                    resource_hash=workflow_resource_hash(resource_snapshot),
                     inputs={"question": "cp"},
                     max_steps=20,
                     max_model_tokens=10000,
@@ -3788,7 +4066,7 @@ def main() -> None:
     test_nodes_condition_operators()
     test_nodes_condition_node_no_match()
     test_nodes_template_classifier_reranker_document_knowledge()
-    test_nodes_mcp_and_code_and_unsupported()
+    test_nodes_tool_and_unsupported()
     test_nodes_engine_resume_with_form_submission()
     test_executor_safe_errors_and_run_error()
     test_executor_workflow_context_branches()
