@@ -1,6 +1,29 @@
 # 统一 Tool 系统测试计划
 
-> 状态：待执行。本文件只定义测试范围、步骤与验收标准，不代表任何用例已经执行或通过。
+> 状态：待其他工具执行。本文件是统一 Tool 系统唯一的测试与验收入口，只定义范围、步骤、证据和通过标准，不代表任何用例已经执行或通过。
+
+## 0. 执行工具须知
+
+本计划交给独立测试工具、代码审查工具或 QA 执行。执行者必须遵守以下规则：
+
+1. 以执行时的 `feat/unified-tools` 工作树、数据库、容器和实际运行结果为准，不采信聊天记录、历史测试结论或“已有测试文件”作为通过证据。
+2. 先完成第 12 节需求追踪审计和第 13 节源码审计，再按第 7 节顺序执行测试；源码存在 P0/P1 缺口时，不得用测试绕过或缩小验收范围。
+3. 每个结论只能标记为 `PASS`、`FAIL`、`BLOCKED` 或 `NOT RUN`；没有证据时必须是 `NOT RUN`，不得以“未发现问题”代替通过。
+4. 每个 `PASS` 必须关联可复核证据：命令、退出码、测试报告、数据库断言、HTTP 记录、截图、trace/run/invocation ID 或代码文件与行号。
+5. 不得连接生产数据库、生产 Redis/Qdrant、真实外部写 MCP 或包含真实 secret 的环境。
+6. 测试结束无论成功或失败，都必须执行第 11 节清理，并将清理证据写入最终报告。
+7. 执行过程中发现实现缺口时，只记录缺陷和最小复现；是否修复由新的实现任务决定，不在测试报告中把规避方案写成通过。
+
+建议执行前记录：
+
+```bash
+git branch --show-current
+git rev-parse HEAD
+git status --short
+git log --oneline --decorate -20
+```
+
+执行基线必须明确记录 commit SHA；工作树有改动时，报告中必须列出文件并说明是否属于被测构建。
 
 ## 1. 测试目标
 
@@ -426,9 +449,207 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml \
 
 ## 11. 清理清单
 
-- 删除本批次临时 PostgreSQL 数据库并再次查询确认不存在。
-- 停止并移除测试 MCP fixture、sandbox/worker 临时容器和子进程。
-- 删除测试 Redis key、Celery 队列消息和租约。
-- 删除测试 Qdrant collections、上传文件和 sandbox socket 临时目录。
-- 确认没有 invocation/Run 仍处于测试产生的 `running`、`awaiting_approval` 或 `awaiting_child`。
-- 保存脱敏测试报告；不得保存 token、代码 secret、stdio env 或用户密码。
+- [ ] `CLEAN-001` 删除本批次明确命名的临时 PostgreSQL 数据库，并再次查询确认不存在。
+- [ ] `CLEAN-002` 停止并移除本批次创建的 MCP fixture、sandbox/worker 临时容器和子进程。
+- [ ] `CLEAN-003` 删除本批次前缀的 Redis key、Celery 队列消息和租约。
+- [ ] `CLEAN-004` 删除本批次 Qdrant collections、上传文件和 sandbox socket 临时目录。
+- [ ] `CLEAN-005` 确认没有本批次 invocation/Run 仍处于 `queued`、`running`、`awaiting_approval`、`awaiting_input` 或 `awaiting_child`。
+- [ ] `CLEAN-006` 确认没有测试端口、临时进程、匿名 volume 或孤儿网络残留。
+- [ ] `CLEAN-007` 对比测试前后的 `docker ps -a`、`docker volume ls`、`docker network ls`；只能删除本批次创建且目标明确的资源。
+- [ ] `CLEAN-008` 对比测试前后的 `git status --short`；测试不得修改被测源码，报告和截图除外。
+- [ ] `CLEAN-009` 确认测试前已存在的数据库、容器、volume、网络和开发服务未被误删或重建。
+- [ ] `CLEAN-010` 保存脱敏测试报告；不得保存 token、代码 secret、stdio env 或用户密码。
+
+禁止使用不限定目标的破坏性清理命令，例如对共享项目执行 `docker compose down -v`、删除未确认归属的 volume，或使用通配符删除数据库。若无法确定资源归属，应标记 `BLOCKED` 并保留现场。
+
+清理结果必须逐项记录 `PASS/FAIL/BLOCKED`。任何清理项失败时，整个验收不能标记为可交付。
+
+## 12. 需求追踪与完成度审计
+
+执行者必须逐项证明以下需求。表中“最低证据”只是下限，不能用单元测试替代需要真实数据库、运行时或浏览器证明的项目。
+
+| 需求 ID | 交付要求 | 最低证据 | 关联用例 | 结果 |
+| --- | --- | --- | --- | --- |
+| REQ-001 | 工作在独立 `feat/unified-tools` 分支，变更范围可追踪 | branch、HEAD、commit 列表、工作树状态 | PRE-001 | `NOT RUN` |
+| REQ-002 | Tool 默认 owner 私有；同 workspace 支持不可转授的 `view/use`；管理员治理；跨租户不可见 | API/DB/HTTP 证据与权限矩阵 | AUTH-001～015、SEC-001～003、SEC-012～015 | `NOT RUN` |
+| REQ-003 | builtin、Python、MCP 共享 Tool/Version/Policy/Binding/Invocation 身份和运行时 | schema、调用链审计、三类真实 invocation | RUN-001～020、PY、MCP | `NOT RUN` |
+| REQ-004 | Python Tool 支持 draft/test/publish/version/disable/archive，并受 sandbox 限制 | API、DB 版本、sandbox 行为与隔离证据 | PY-001～015、SEC-007～010 | `NOT RUN` |
+| REQ-005 | MCP Source 支持成员公网 HTTP/SSE、管理员 stdio/private、discovery/version/policy/tombstone | transport fixture、DB、权限与网络策略证据 | MCP-001～017 | `NOT RUN` |
+| REQ-006 | Agent 使用 ToolRef、不可变 publication/Run snapshot 和统一 ledger | publication/Run DB、API、执行 trace | AGT-001～018 | `NOT RUN` |
+| REQ-007 | Workflow Tool、LLM Tool、Inline Python 全部通过 canonical Tool Runtime | graph/version snapshot、invocation 与 sandbox trace | WF-001～010 | `NOT RUN` |
+| REQ-008 | Workflow Agent 节点固定 Agent 版本，并以 durable child Run 暂停、恢复、取消和聚合预算 | parent/child DB、Beat 恢复、故障注入 | WF-011～020 | `NOT RUN` |
+| REQ-009 | 前端提供统一工具中心、Agent picker、Workflow 三页签、三语、响应式和无障碍状态 | 自动化 UI + 桌面/移动截图 + 键盘记录 | UI-001～020 | `NOT RUN` |
+| REQ-010 | 存量 MCP/Agent/Workflow/Run 可安全升级；危险 downgrade 和混代 worker 被阻断 | PostgreSQL 17 空库/存量迁移、回滚和代际闸门证据 | MIG-001～015、OPS-005 | `NOT RUN` |
+| REQ-011 | Celery、Beat、sandbox、Compose 与开发启动方式可运行和恢复 | task 注册、Compose config、重启恢复、隔离检查 | OPS-003～011 | `NOT RUN` |
+| REQ-012 | public/API/nested Agent 不得调用 write、unknown 或待审批 Tool | HTTP、模型前 preflight、provider 未调用证据 | RUN-002～004、AGT-008～013、SEC-004、SEC-014 | `NOT RUN` |
+| REQ-013 | 重复投递、崩溃、超时、取消不会重复外部写；未知结果进入 `uncertain` | 故障注入、provider 计数、ledger 终态 | RUN-006～016、RUN-020、AGT-014～016、WF-014～020 | `NOT RUN` |
+| REQ-014 | Skill 本期只有不可用标签，不存在可点击死链或半成品 API | UI 与路由/API 枚举 | UI-002 | `NOT RUN` |
+| REQ-015 | Backend 97%+、Frontend 99%+，定向/全量、类型、Lint、构建全部通过 | 原始退出码、lcov/coverage 报告、构建日志 | GATE-001～009 | `NOT RUN` |
+| REQ-016 | 测试产生的数据库、容器、volume、网络、进程、队列和文件全部清理 | 第 11 节前后对比证据 | CLEAN-001～010 | `NOT RUN` |
+
+最终结论只有在 REQ-001～016 全部 `PASS`，且所有 P0/P1 用例均通过时，才允许写“可交付”。任一项为 `FAIL`、`BLOCKED` 或 `NOT RUN`，结论必须是“未通过验收”。
+
+## 13. 验收审计清单
+
+### 13.1 预检与范围
+
+| ID | 级别 | 审计项 | 必须产出的证据 |
+| --- | --- | --- | --- |
+| PRE-001 | P0 | 分支、HEAD、工作树与基点 | `git branch --show-current`、`git rev-parse HEAD`、`git status --short`、与 `main` 的 commit/diff 摘要 |
+| PRE-002 | P0 | 被测环境不是生产或共享开发数据 | 临时 DB/Redis/Qdrant/fixture 名称与连接目标的脱敏记录 |
+| PRE-003 | P1 | 规划范围与实际变更一致 | REQ-001～016 对应文件、迁移、API、页面和测试的映射 |
+| PRE-004 | P1 | 非目标未被意外实现或暴露 | Skill、递归 Agent、Python 网络/依赖等入口枚举结果 |
+
+### 13.2 架构与代码边界
+
+| ID | 级别 | 审计项 | 通过条件 |
+| --- | --- | --- | --- |
+| AUD-001 | P1 | API 路由依赖方向 | `api/` 只调用 application/schema/deps；无 ORM 或业务规则直连 |
+| AUD-002 | P1 | Tool domain 边界 | 业务状态与策略位于 `shareddomain/tools`；repository 只负责持久化/CAS，不复制 effect 判定 |
+| AUD-003 | P0 | 唯一 Tool Runtime | Agent、Workflow direct/LLM、Python test 均进入同一 application ToolExecution 边界；provider adapter 内才区分 builtin/Python/MCP |
+| AUD-004 | P0 | 统一 ledger | canonical 调用只写 `tool_invocations`；旧 `agent_tool_calls` 仅服务明确的 legacy/knowledge 兼容，不存在同一副作用双账执行 |
+| AUD-005 | P1 | 不可变版本 | ToolVersion、Agent publication、WorkflowVersion 与 Run snapshot append-only；current pointer 更新不改旧版本 |
+| AUD-006 | P0 | tenant 约束 | Tool/Version/Policy/Binding/Invocation、Agent publication/Run、Workflow child 具备 workspace/parent 组合校验或 FK |
+| AUD-007 | P0 | live kill switch | Tool/Source disabled、grant revoke、membership 失效和 policy/hash drift 在每次未执行 dispatch 前重新检查 |
+| AUD-008 | P1 | binder 稳定 | 未变化 binding 保留原 `bound_by_user_id`；管理员普通保存不会接管；历史 binder 删除有 409/保留策略 |
+| AUD-009 | P0 | worker 代际隔离 | legacy 与 canonical Agent task/queue/claim 有明确 fence；滚动部署时旧 worker 不能 claim 新 Run |
+| AUD-010 | P0 | durable child Run | child 唯一键、父 checkpoint/`awaiting_child`、requeue、Beat reconciler、取消/deadline race 均有持久状态而非 inline wait |
+| AUD-011 | P1 | Python sandbox 边界 | API 不执行代码；worker-only socket；network none/read-only/cap drop/非 root/大小与时间限制明确 |
+| AUD-012 | P1 | secret 与不可信输出 | MCP token/stdio env/code/stdout/stderr 不进入公开响应、模型上下文、审计或未截断日志 |
+
+源码审计必须给出文件与行号。只看到类、表或测试名称不能判定实现已接入生产调用链。
+
+### 13.3 API 与前端契约
+
+| ID | 级别 | 审计项 | 通过条件 |
+| --- | --- | --- | --- |
+| API-001 | P1 | canonical Tool API | list/detail/source/Python lifecycle/policy/grant/invocation 路由齐全，响应不暴露 secret |
+| API-002 | P1 | 分页 | Tool、Source、成员、grant、Agent picker 均能遍历全量分页，无固定首页截断 |
+| API-003 | P0 | 防泄露 | 未授权资源统一 404；403 只用于已确认可见但操作被拒绝的资源 |
+| API-004 | P1 | 动态校验错误 | Python arguments/schema、ToolRef、AgentVersion、Workflow graph 错误映射为稳定 4xx，不出现 500 |
+| WEB-001 | P1 | 工具中心 | 卡片与知识库/应用/模型页一致；mine/shared/builtin 平铺；MCP Source 可独立管理 |
+| WEB-002 | P1 | 三语 | 所有用户文案经 `t()`，简中/繁中/英文键同步；缺失键不导致白屏 |
+| WEB-003 | P1 | Agent 与 Workflow 联动 | Agent 统一 Tool picker；Workflow 只有基础节点/工具/Agent 三页签并固定 Tool/Agent version |
+| WEB-004 | P2 | 响应式与无障碍 | 1440×900、390×844、200% zoom、键盘与焦点返回满足 UI-010～018 |
+
+### 13.4 迁移、部署与回滚
+
+| ID | 级别 | 审计项 | 通过条件 |
+| --- | --- | --- | --- |
+| DB-001 | P0 | 迁移链 | 单一 Alembic head；空库和存量 fixture 均可升级 |
+| DB-002 | P0 | backfill 语义 | disabled、missing leaf/server、stale version、publication-only binding、撤权证据均按 MIG 预期处理 |
+| DB-003 | P0 | downgrade 安全 | 新 canonical 写入、活跃 Run、ledger 漂移或副作用风险存在时明确拒绝回滚 |
+| DB-004 | P1 | 历史审计 | Source 删除、用户/Agent/workspace 删除不会级联丢失仍需保留的 Version/Policy/Invocation |
+| DEP-001 | P1 | Compose | worker 订阅正确队列；Beat 单例；sandbox 隔离和 socket 挂载符合设计 |
+| DEP-002 | P1 | 开发启动 | 文档中的 worker/sandbox 命令可执行；host worker 的限制明确 |
+| DEP-003 | P1 | 恢复 | API/worker/Beat/sandbox 分别重启后 queued/leased/awaiting_child 状态可恢复 |
+
+## 14. 自动化门禁与证据
+
+除第 8 节命令外，执行工具还必须记录下列门禁。命令可按仓库实际脚本调整，但不得缩小覆盖范围。
+
+| ID | 门禁 | 通过证据 |
+| --- | --- | --- |
+| GATE-001 | Backend touched packages `compileall` | 命令、退出码 0 |
+| GATE-002 | Backend 定向套件 | 每个套件名称、用例数、退出码 0 |
+| GATE-003 | Backend 全量覆盖率 | 原始报告；总覆盖率 >= 97% |
+| GATE-004 | Alembic PostgreSQL 17 空库升级/降级/再升级 | 临时 DB 名、revision、断言和清理确认 |
+| GATE-005 | Sandbox self-check 与 coverage | 隔离行为结果；覆盖脚本退出码 0 |
+| GATE-006 | Frontend `bun test --parallel` | 文件数、用例数、退出码 0 |
+| GATE-007 | Frontend typecheck/lint/build | 三个命令分别退出码 0；warning 单独列出 |
+| GATE-008 | Frontend coverage | lcov/摘要；总覆盖率 >= 99% |
+| GATE-009 | Playwright/浏览器桌面与移动验收 | 场景清单、截图/录屏、控制台无未解释错误 |
+
+### 14.1 证据目录建议
+
+执行工具可在仓库外或明确忽略的临时目录保存证据，结构建议如下：
+
+```text
+unified-tools-test-<batch>/
+├── baseline.md
+├── source-audit.md
+├── commands/
+├── migration/
+├── api/
+├── browser/
+├── coverage/
+├── defects.md
+├── cleanup.md
+└── final-report.md
+```
+
+报告中的 secret、token、密码、完整 stdio env、Python code 和用户隐私必须脱敏。不得为了提供证据把敏感原文复制到报告。
+
+## 15. 最终验收报告模板
+
+```markdown
+# Unified Tool 验收报告
+
+## 基线
+
+- 分支：
+- Commit：
+- 工作树状态：
+- 测试批次：
+- 执行工具/版本：
+- 开始/结束时间：
+
+## 总结
+
+- 最终结论：PASS / FAIL / BLOCKED
+- P0：通过 / 失败 / 未运行
+- P1：通过 / 失败 / 未运行
+- P2/P3 未关闭项：
+
+## 需求追踪
+
+| 需求 ID | 结果 | 证据 | 缺陷 |
+| --- | --- | --- | --- |
+| REQ-001 | NOT RUN |  |  |
+| ... | ... | ... | ... |
+| REQ-016 | NOT RUN |  |  |
+
+## 自动化门禁
+
+| Gate | 命令 | 退出码 | 结果 | 报告路径 |
+| --- | --- | --- | --- | --- |
+
+## 手工/浏览器验收
+
+| 用例 ID | 视口/角色 | 结果 | 截图或录屏 | 缺陷 |
+| --- | --- | --- | --- | --- |
+
+## 缺陷
+
+按第 10 节模板记录。
+
+## 清理
+
+逐项复制第 11 节清单，填写结果与证据。
+
+## 签署
+
+- 所有 REQ-001～016 是否 PASS：
+- 所有 P0/P1 是否 PASS：
+- 覆盖率门槛是否满足：
+- 临时资源是否全部清理：
+- 是否可交付：是 / 否
+```
+
+## 16. 交给其他工具的执行提示词
+
+可将下面提示词连同本文件路径直接交给执行工具：
+
+```text
+请以当前仓库和运行环境为唯一事实来源，完整执行
+docs/UNIFIED_TOOLS_TEST_PLAN.md。
+
+要求：
+1. 先完成第 12、13 节需求与源码审计，再按第 7 节顺序测试。
+2. 不采信历史聊天、既有“已通过”描述或测试文件名称；每个 PASS 都要有实际证据。
+3. 不连接生产资源，不对真实外部系统执行写操作。
+4. 遇到 P0 立即停止相关批次并记录；不得缩小范围、跳过失败或把 NOT RUN 写成 PASS。
+5. 执行自动化、PostgreSQL 迁移、sandbox、Compose、桌面/移动浏览器和故障注入验收。
+6. 最终按第 15 节生成报告；只有 REQ-001～016、所有 P0/P1 和门禁全部 PASS，才能判定可交付。
+7. 无论成功失败，都执行第 11 节清理；只删除本批次明确创建的资源，并提供清理前后证据。
+```
