@@ -298,7 +298,47 @@ MIG-001～015 均已执行并通过。
 - child Run 记录 `depth=1`、`root_run_id=parent_run_id`、`parent_node_id`
 - Agent ID / publication version 不匹配时保存被拒绝
 
-## 7. Sandbox 与部署拓扑
+### 6.6 运行时、安全与运维证据矩阵
+
+| 用例 ID | 自动化位置 | 实时证据（断言摘要） | 结果 | 缺陷或说明 |
+| --- | --- | --- | --- | --- |
+| RUN-006 | `tests/tools.py` `assert_tool_runtime_is_durable` 2286-2289、2438-2454 | 同 idempotency key 返回同一 invocation；并发双 worker 只有一个 claim，provider 恰好调用 1 次 | PASS | 并发方收到 `ToolInvocationBusy`，不返回存储结果（结果复用仅顺序路径） |
+| RUN-007 | `tests/tools.py` 3086-3099、3101-3125、2469-2503 | 单次 Celery delivery 恰一个 worker claim；busy 按 30s countdown 重试；attempt/lease 记账正确 | PASS | — |
+| RUN-008 | `tests/tools.py` `assert_tool_runtime_is_durable`（本批次新增 crashed-pure 块） | pure 工具 dispatch 前崩溃（lease 过期、attempts < max）→ lease 到期后安全重试，provider 再次调用 | PASS | 本批次新增回归 |
+| RUN-009 | `tests/tools.py` 2551-2590；`tests/agent_runtime_coverage.py` 1966-1988 | external_write dispatch 后崩溃 → 终态 `uncertain`，不自动重放（provider 调用数不变） | PASS | — |
+| RUN-010 | `tests/agent_runtime_coverage.py` 1989-1991；`tests/tools.py` 2376-2391 | read_only 传输失败 → error 且 `outcome_uncertain=False`；pure 非法输出 → 确定性失败 | PASS | 未显式断言 pure 崩溃后重试成功（由 RUN-008 覆盖） |
+| RUN-011 | `tests/tools.py` 2322-2336；`tests/agent_runtime_coverage.py` 3786-3793、3947-3973 | 成功后 live revoke → 重读重放已确认结果，provider 不再调用 | PASS | — |
+| RUN-012 | `tests/tools.py` 2338-2361；`tests/agent_runtime_coverage.py` 3840-3853、3236-3255 | 禁用/策略变更在 claim 前重新检查并拒绝；approval race 只 requeue 不重复执行 | PASS | 未单独构造 running-resume 中 revoke 变体，断言覆盖 disable 与 approved-race 两形态 |
+| RUN-013 | `tests/agent_runtime_coverage.py` 2413-2527 | each_call 精确 approve/reject；错误 call id 404；终态/uncertain/rejected 409 | PASS | — |
+| RUN-014 | `tests/agent_runtime_coverage.py` 3020-3070 | 长时间等待审批后批准 → deadline 前移重算，不因旧 deadline 立即超时 | PASS | — |
+| RUN-015 | `tests/tools.py` 3127-3139、3171-3178、2562-2590 | Beat 对每个 recoverable id 恰派发一次；`app.tools.recover` 已注册进 beat schedule；崩溃且 lease 过期记录可恢复 | PASS | — |
+| RUN-016 | `tests/tools.py` 2469-2503、2551-2590 | max_attempts 到达：safe 调用 failed、unsafe running 调用 uncertain，attempts==max 持久化 | PASS | — |
+| RUN-020 | `tests/agents.py` `test_cancelling_root_run_cancels_active_children`（本批次新增 late-finalize 块） | cancel 后 running 写调用 → `uncertain`/`agent_run_cancelled`；迟到 worker finalize 不覆盖终态、provider 调用数 0 | PASS | 本批次新增回归 |
+| AGT-014 | `tests/agents.py` 1790-1902、1905-2068、3891-3935 | lease 接管、attempts 上限收口、unsafe 未知结果 uncertain、重试 409 且无重复派发（provider 计数不变） | PASS | — |
+| AGT-015 | `tests/agents.py` 4213-4344 | cancel root → child、queued/running invocation 一并收口；重复 cancel 409 | PASS | 节点执行行关闭未单独断言，child/ledger 收口已断言 |
+| AGT-016 | `tests/agents.py` 4119-4204 | 有 active Run/unsafe invocation 的 Agent 删除返回 409；settle 后 204；audit 保留 create/delete | PASS | — |
+| WF-014 | `tests/workflows.py` `test_workflow_agent_node_runs_one_durable_pinned_child`（本批次新增 dedupe 断言） | child `depth=1`、`root_run_id=parent_run_id`、`parent_node_id`；重复投递 `ensure_workflow_agent_child` 返回同一 child，child 总数保持 1 | PASS | 本批次补齐 `(parent,node)` 唯一与重复投递断言 |
+| WF-015 | `tests/workflows.py` 同上（reconciler 断言）；2377-2560 | child 成功后父 requeue 一次并最终成功；child failed 时父被幂等 requeue（rowcount 守卫） | PASS | 本批次补齐 child 失败 → 父 requeue 断言 |
+| WF-016 | `tests/workflows.py`（本批次新增 reconciler 块） | Beat reconciler 修复 awaiting 父；重复扫描返回空、不重复执行节点 | PASS | 本批次新增回归 |
+| WF-017 | `tests/workflows.py`（本批次新增 dedupe 断言） | child 创建提交后恢复路径复用已持久化 child，不新建第二个 | PASS | 本批次新增回归 |
+| WF-018 | `tests/workflows.py`（本批次新增嵌套/上限断言） | depth>1/Agent→Agent 嵌套拒绝；每父最多 4 child，第 5 个拒绝 | PASS | 本批次新增回归 |
+| WF-019 | `tests/workflows.py`（本批次新增 runtime_limits 断言） | child 继承 root deadline、`max_turns=4`、`max_tool_calls=6`、`max_model_tokens>=1`；child model_usage 合并回父 run | PASS | 本批次新增回归 |
+| WF-020 | `tests/workflows.py`（本批次新增 not-re-woken 断言）；`tests/agents.py` 4213-4344 | cancel 后的父不再被终态 child 唤醒；unsafe 调用 uncertain | PASS | 本批次新增回归 |
+| SEC-005 | `tests/unit.py` `test_mcp_private_network_policy` 5077-5099；`app/capabilities/mcp/client.py` 153-240；`tests/mcp_transports.py` 84-96；`tests/tools.py` 331-387 | loopback/私网拒绝、`MCP_ALLOW_PRIVATE_NETWORKS=true`+deployment 放行；每次连接 DNS 解析并 pin 目标地址，`follow_redirects=False`；schema/defaults 迁移断言 | PASS | redirect 到私网路径靠 `follow_redirects=False` + pin transport 阻断 |
+| SEC-006 | `tests/agent_runtime_coverage.py` `assert_durable_execution_paths`（本批次新增注入块） | 恶意 MCP 输出只以 ToolMessage/untrusted data 进入；两轮 system policy 字节一致且不含注入或 goal；provider 只被合法调用 1 次；ledger 中注入内容仅在 result 数据位，arguments/error 不含 goal | PASS | 本批次新增确定性断言 |
+| SEC-010 | `tests/tools.py` `test_tool_boundaries_reject_unsafe_payloads`（本批次新增） | `__proto__`/`constructor`/非字符串 key/超深参数被 closed schema 拒绝；NaN/Infinity 被 `allow_nan=False` 拒绝；schema 深度、引用、unsupported keyword、宽 additionalProperties 被拒绝 | PASS | 本批次新增回归 |
+| SEC-011 | `tests/agent_runtime_coverage.py` 2451-2463、2565-2605、3030-3091（本批次新增 ambiguity 块）；`tests/agents.py` `test_agent_run_approval_is_actor_scoped`（本批次新增） | 错误 call id 404；approval run-scoped；跨 turn 同 call id → 409 ambiguous；跨用户 approve → 404（run 隐藏）；历史 invocation id 不能劫持当前审批 | PASS | 本批次补齐跨用户与跨 turn 断言 |
+| OPS-003 | `tests/tools.py` 2429-2503、3101-3125 | 单槽 `ToolInvocationBusy`、busy requeue 30s、attempts 耗尽 failed | PASS | busy/等待指标未断言，以结构化日志与计数代替 |
+| OPS-004 | `tests/tools.py` 3067-3167、3171-3179；`tests/workflows.py` 2377-2560、1445-1474 | 恢复任务派发、Beat 注册、lease/claim 恢复、child reconciler、worker cancellation 传播 | PASS | 无真实 broker 重启，用 patched claim/lease 证明 |
+| OPS-005 | `tests/unit.py` 762+；`tests/agents.py` 1826-1837、2023-2034；`tests/agent_services_coverage.py` 1176-1219、1754-1823 | worker generation fence 阻断旧 worker claim canonical Run | PASS | — |
+| OPS-006 | `deploy/docker-compose*.yml` + `sandbox/self_check.py`；Task 9 的 `docker compose config --quiet` 与 sandbox self-check | sandbox `network_mode:none`/`read_only`/`cap_drop:ALL`/`pids_limit`；socket 仅 worker | PASS | 以 Task 9 门禁命令为证据 |
+| OPS-007 | `docs/AGENTS.md`、`sandbox/`、Task 9 门禁 | host-only worker 无 sandbox socket，不伪装支持 Python Tool/Workflow 执行 | PASS | 以部署文档与沙箱自检为证据 |
+| OPS-008 | `deploy/docker-compose*.yml` + `make worker-compose`；Task 9 门禁 | 独立 Compose 启停无孤儿容器/网络/卷 | PASS | 以 Task 9 门禁命令为证据 |
+| OPS-009 | `tests/tools.py` 110-146（ToolInvocation 列契约）；Agent Run events/audit | 记录 trace/run/invocation/tool version、attempt、duration、outcome；不含敏感值 | PASS | 日志内容断言有限，以列契约与事件结构为准 |
+| OPS-010 | `tests/tools.py` 1555-1568；`tests/agents.py` 4203-4204 | grant/revoke 可经 audit 查询到 actor 与目标；create/delete 保留 | PASS | publish/policy/enable/archive 经 API 执行但未逐项走 audit 查询 |
+| OPS-011 | `tests/workflows.py` 1531-1557；`tests/mcp_transports.py` 179-231；第 10 节 CLEAN-001～010 | 上传对象删除、stdio 超时进程被 reap、无残留 lease/容器/卷/网络 | PASS | — |
+
+
 
 Sandbox 验证结果：
 
@@ -377,7 +417,7 @@ OPS-008 使用独立 Compose project、临时数据目录与无宿主端口映�
 以下为非门禁或待评估项：
 
 - MCP refresh 的 reconcile `ValueError` 未统一映射，罕见分支可能返回 500
-- `SEC-006` 当前只有恶意响应 fixture 与“不可信数据”提示词证据，尚无确定性的模型行为、策略不变和 provider 未调用断言，因此不得记为 PASS。
+- `SEC-006` 已补齐确定性断言（见 6.6 矩阵）：恶意响应只进入 ToolMessage/untrusted data、system policy 两轮字节一致、provider 调用计数 1、ledger 仅 result 数据位携带注入内容；断言位于 `tests/agent_runtime_coverage.py` `assert_durable_execution_paths` 注入块。
 - MCP prompt injection 防护主要依赖“untrusted data”系统指令，而非结构化隔离
 - ToolPicker 无方向键 roving navigation
 - 工具中心使用 200/页循环拉全量，无 UI 分页

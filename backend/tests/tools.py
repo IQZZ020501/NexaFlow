@@ -2493,6 +2493,34 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
     assert exhausted.ok is False
     assert exhausted.error_code == "tool_attempts_exhausted"
     async with get_session_factory()() as db:
+        # RUN-008: a pure tool whose worker crashed BEFORE provider dispatch
+        # (lease expired, attempts below max) is safely retried after the
+        # lease expires — the provider is invoked again.
+        crashed_context = ToolInvocationContext(
+            **{
+                **context.__dict__,
+                "invocation_id": "crashed-pure-runtime",
+                "idempotency_key": f"crashed-pure-runtime:{workspace_id}",
+            }
+        )
+        crashed_pure = await queue_tool_invocation(db, snapshot, {}, crashed_context)
+        crashed_pure.status = "running"
+        crashed_pure.worker_task_id = "crashed-pure-worker"
+        crashed_pure.lease_expires_at = utc_now() - timedelta(seconds=1)
+        crashed_pure.started_at = crashed_pure.lease_expires_at
+        await tool_repository.save_tool_invocation(db, crashed_pure)
+        await db.commit()
+    calls_before_retry = adapter.calls
+    retried = await execute_tool_invocation(
+        crashed_pure.id,
+        settings,
+        worker_task_id="pure-recovery-worker",
+        adapter=adapter,
+    )
+    assert retried.ok is True
+    assert adapter.calls == calls_before_retry + 1
+
+    async with get_session_factory()() as db:
         stored_busy = await tool_repository.get_tool_invocation(
             db,
             workspace_id,
@@ -3168,6 +3196,125 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
         tool_dispatch.celery_app.conf.task_always_eager = original_eager
 
 
+def test_tool_boundaries_reject_unsafe_payloads() -> None:
+    from app.entities.tools import MAX_TOOL_SCHEMA_DEPTH, validate_tool_json_schema
+    from app.shareddomain.tools.runtime import (
+        build_tool_snapshot,
+        validate_tool_arguments,
+    )
+
+    # SEC-010: prototype-pollution keys, over-deep JSON, NaN/Infinity and
+    # non-string keys are rejected at the schema/JSON boundaries.
+
+    def expect_schema_error(schema: dict, fragment: str) -> None:
+        try:
+            validate_tool_json_schema(schema)
+        except ValueError as exc:
+            assert fragment in str(exc), (fragment, str(exc))
+        else:
+            raise AssertionError(f"schema accepted: {schema!r}")
+
+    expect_schema_error(
+        {
+            "type": "object",
+            "properties": {"v": {"type": "number", "const": float("nan")}},
+        },
+        "must be JSON serializable",
+    )
+    expect_schema_error(
+        {"type": "object", "$ref": "#/definitions/x", "additionalProperties": False},
+        "cannot contain references",
+    )
+    expect_schema_error(
+        {"type": "object", "properties": {}, "additionalProperties": True},
+        "cannot allow additional properties",
+    )
+    expect_schema_error(
+        {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+            "allOf": [],
+        },
+        "unsupported keyword",
+    )
+    deep_schema = {"type": "object", "properties": {}, "additionalProperties": False}
+    node = deep_schema
+    for _ in range(MAX_TOOL_SCHEMA_DEPTH + 2):
+        child = {"type": "object", "properties": {}, "additionalProperties": False}
+        node["properties"] = {"nested": child}
+        node = child
+    expect_schema_error(deep_schema, "too deeply nested")
+
+    with test_client() as client:
+        admin_token, workspace_id = activate_admin(client)
+
+        async def run() -> None:
+            from app.infrastructure.repositories import tools as tool_repository
+            from app.infrastructure.repositories import user as user_repository
+
+            async with get_session_factory()() as db:
+                actor = await user_repository.get_active_user_by_username(
+                    db, "admin"
+                )
+                assert actor is not None
+                tool = next(
+                    item
+                    for item in await tool_repository.list_tools(
+                        db, workspace_id
+                    )
+                    if item.stable_key == "current_time"
+                )
+                source = await tool_repository.get_tool_source(
+                    db, workspace_id, tool.source_id
+                )
+                version = await tool_repository.get_tool_version(
+                    db, workspace_id, tool.current_version_id or ""
+                )
+                policy = await tool_repository.get_tool_policy(
+                    db, workspace_id, tool.id
+                )
+                assert (
+                    source is not None and version is not None and policy is not None
+                )
+                snapshot = build_tool_snapshot(
+                    tool, source, version, policy, actor.id
+                )
+
+                def expect_arguments_error(arguments: object, fragment: str) -> None:
+                    try:
+                        validate_tool_arguments(snapshot, arguments)
+                    except ValueError as exc:
+                        assert fragment in str(exc), (fragment, str(exc))
+                    else:
+                        raise AssertionError(
+                            f"arguments accepted: {arguments!r}"
+                        )
+
+                # NaN / Infinity are not valid JSON.
+                expect_arguments_error(
+                    {"format": float("nan")}, "must be valid JSON"
+                )
+                expect_arguments_error(
+                    {"format": float("inf")}, "must be valid JSON"
+                )
+                # Prototype-pollution and non-string keys fail the closed schema.
+                expect_arguments_error(
+                    {"__proto__": "polluted"}, "Tool arguments are invalid"
+                )
+                expect_arguments_error(
+                    {"constructor": "polluted"}, "Tool arguments are invalid"
+                )
+                expect_arguments_error({1: "value"}, "Tool arguments are invalid")
+                # Over-deep JSON fails the closed schema at the top level.
+                expect_arguments_error(
+                    {"a": {"b": {"c": {"d": {"e": 1}}}}},
+                    "Tool arguments are invalid",
+                )
+
+        asyncio.run(run())
+
+
 def test_tool_tasks_are_registered() -> None:
     from app.infrastructure.celery import celery_app
 
@@ -3203,6 +3350,7 @@ def main() -> None:
     test_canonical_mcp_policy_allows_owner_read_only_attestation()
     test_tool_tasks_never_execute_inline_and_recover_queued_tests()
     test_tool_tasks_are_registered()
+    test_tool_boundaries_reject_unsafe_payloads()
     print("TOOLS_SUITE_OK")
 
 

@@ -4337,6 +4337,47 @@ def test_cancelling_root_run_cancels_active_children() -> None:
                 assert running.outcome == "uncertain"
 
         asyncio.run(assert_child_cancelled())
+
+        # RUN-020: a late worker finalize after cancellation cannot overwrite
+        # the cancelled outcome and never invokes the provider again.
+        from app.application.tool_runtime import execute_tool_invocation
+        from app.infrastructure.config import Settings
+
+        class LateFinalizeAdapter:
+            kind = "mcp"
+            calls = 0
+
+            async def invoke(self, snapshot, arguments, context):
+                self.calls += 1
+                return None
+
+        late_adapter = LateFinalizeAdapter()
+        late = asyncio.run(
+            execute_tool_invocation(
+                running_invocation_id,
+                Settings.from_env(require_bootstrap=False),
+                worker_task_id="late-finalize-worker",
+                adapter=late_adapter,
+            )
+        )
+        assert late.ok is False
+        assert late.outcome == "uncertain"
+        assert late_adapter.calls == 0
+
+        async def assert_late_finalize_noop() -> None:
+            async with get_session_factory()() as db:
+                running = await tool_repository.get_tool_invocation_by_id(
+                    db,
+                    running_invocation_id,
+                )
+                assert running is not None
+                assert running.status == "uncertain"
+                assert running.outcome == "uncertain"
+                assert running.error_code == "agent_run_cancelled"
+                assert running.worker_task_id is None
+                assert running.lease_expires_at is None
+
+        asyncio.run(assert_late_finalize_noop())
         repeated = client.post(
             agents_url(workspace_id, f"/{agent_id}/runs/{root_run_id}/cancel"),
             headers=headers,
@@ -4344,6 +4385,79 @@ def test_cancelling_root_run_cancels_active_children() -> None:
         assert repeated.status_code == 409, repeated.text
 
 
+def test_agent_run_approval_is_actor_scoped() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    with test_client() as client, agent_model_server() as model_base_url:
+        admin_token, workspace_id = activate_admin(client)
+        headers = auth_headers(admin_token)
+        model = client.post(
+            f"/api/v1/workspaces/{workspace_id}/models",
+            headers=headers,
+            json=model_payload(model_base_url, "Approval Scoped Model"),
+        )
+        assert model.status_code == 201, model.text
+        agent = client.post(
+            agents_url(workspace_id),
+            headers=headers,
+            json={
+                "name": "Approval Scoped Agent",
+                "instructions": "Require approval.",
+                "model_id": model.json()["id"],
+            },
+        )
+        assert agent.status_code == 201, agent.text
+        agent_id = agent.json()["id"]
+
+        # SEC-011: only the run owner may approve; other workspace users see
+        # the run as missing (404), and a wrong call id is also 404.
+        member_user_id, temporary_password = create_workspace_user(
+            client, admin_token, workspace_id
+        )
+        member_token = activate_user(
+            client,
+            "agent-member",
+            temporary_password,
+            MEMBER_PASSWORD,
+        )
+        granted = client.put(
+            agents_url(workspace_id, f"/{agent_id}/permissions/{member_user_id}"),
+            headers=headers,
+            json={"permission": "view"},
+        )
+        assert granted.status_code == 200, granted.text
+        with patch(
+            "app.application.agent_runs.enqueue_prepared_agent_run",
+            new=AsyncMock(),
+        ):
+            created = client.post(
+                agents_url(workspace_id, f"/{agent_id}/runs"),
+                headers=headers,
+                json={"goal": "approve this run"},
+            )
+        assert created.status_code == 201, created.text
+        run_id = created.json()["id"]
+
+        cross_user = client.post(
+            agents_url(
+                workspace_id,
+                f"/{agent_id}/runs/{run_id}/tool-calls/call-1/approve",
+            ),
+            headers=auth_headers(member_token),
+        )
+        assert cross_user.status_code == 404, cross_user.text
+        wrong_call = client.post(
+            agents_url(
+                workspace_id,
+                f"/{agent_id}/runs/{run_id}/tool-calls/call-missing/approve",
+            ),
+            headers=headers,
+        )
+        assert wrong_call.status_code == 404, wrong_call.text
+        assert member_user_id  # keep referenced
+
+
 if __name__ == "__main__":
     main()
     test_cancelling_root_run_cancels_active_children()
+    test_agent_run_approval_is_actor_scoped()

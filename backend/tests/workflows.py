@@ -2504,6 +2504,14 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         assert child_node["outputs"]["result"] == "Completed."
 
     async def assert_lineage() -> None:
+        from datetime import datetime, timedelta
+
+        from app.application.agent_child_runs import ensure_workflow_agent_child
+        from app.application.agent_runs import cancel_run_tree, prepare_agent_run
+        from app.infrastructure.model_utils import utc_now
+        from app.infrastructure.repositories import user as user_repository
+        from app.shareddomain.agents.models import AGENT_RUN_UNIFIED_RUNNING_STATUS
+
         async with get_session_factory()() as db:
             children = await agent_repository.list_agent_child_runs(
                 db,
@@ -2518,7 +2526,216 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
             assert child.depth == 1
             assert child.agent_publication_version_id == pinned_version_id
             assert child.goal == "ship this release"
+
+            # WF-019: the child inherits the root deadline and the child
+            # turn/tool-call budgets, and its model usage merges back to the
+            # parent run.
+            limits = (child.application_snapshot or {}).get("runtime_limits")
+            assert isinstance(limits, dict)
+            assert limits.get("max_turns") == 4
+            assert limits.get("max_tool_calls") == 6
+            assert limits.get("max_model_tokens", 0) >= 1
+            deadline = datetime.fromisoformat(limits["deadline_at"])
+            assert deadline.tzinfo is not None
+            parent = await agent_repository.get_agent_run_by_id(db, parent_run_id)
+            assert parent is not None
+            assert isinstance(parent.model_usage, dict)
+            # The child Agent's model usage is merged back into the parent run.
+            assert parent.model_usage.get("model_calls", 0) >= 1
+
+            actor = await user_repository.get_active_user_by_username(db, "admin")
+            assert actor is not None
+            version = await agent_repository.get_agent_publication_version(
+                db,
+                workspace_id,
+                pinned_version_id,
+            )
+            assert version is not None
+            snapshot = {
+                "agent_id": agent_id,
+                "version_id": pinned_version_id,
+                "configuration_hash": version.configuration_hash,
+                "configuration_snapshot": version.configuration_snapshot,
+                "resource_snapshot": version.resource_snapshot,
+                "bound_by_user_id": actor.id,
+            }
+            future_deadline = (utc_now() + timedelta(minutes=5)).isoformat()
+
+            # WF-014/WF-017: a duplicate delivery resolves to the persisted
+            # child instead of creating a second row, so crash-recovery
+            # dispatch can never duplicate the child.
+            again = await ensure_workflow_agent_child(
+                db,
+                parent,
+                "child",
+                "ship this release",
+                snapshot,
+                actor,
+                "admin",
+                deadline_at=future_deadline,
+                remaining_model_tokens=1000,
+            )
+            assert again.id == child.id
+            assert len(
+                await agent_repository.list_agent_child_runs(
+                    db,
+                    workspace_id,
+                    parent_run_id,
+                )
+            ) == 1
+
+            # WF-018: a child cannot spawn a nested Agent run.
+            try:
+                await ensure_workflow_agent_child(
+                    db,
+                    child,
+                    "nested",
+                    "nested goal",
+                    snapshot,
+                    actor,
+                    "admin",
+                    deadline_at=future_deadline,
+                    remaining_model_tokens=1000,
+                )
+            except ValueError as exc:
+                assert "Nested Agent runs are not allowed" in str(exc)
+            else:
+                raise AssertionError("Nested Agent run was accepted.")
+            await db.commit()
+
+            # WF-018: at most MAX_WORKFLOW_CHILDREN children per parent.
+            parent_for_limit, _ = await prepare_agent_run(
+                db,
+                workspace_id,
+                agent_id,
+                "child limit parent",
+                actor,
+                "admin",
+            )
+            for node_index in range(1, 5):
+                await ensure_workflow_agent_child(
+                    db,
+                    parent_for_limit,
+                    f"limit-node-{node_index}",
+                    "limit goal",
+                    snapshot,
+                    actor,
+                    "admin",
+                    deadline_at=future_deadline,
+                    remaining_model_tokens=1000,
+                )
+            try:
+                await ensure_workflow_agent_child(
+                    db,
+                    parent_for_limit,
+                    "limit-node-5",
+                    "limit goal",
+                    snapshot,
+                    actor,
+                    "admin",
+                    deadline_at=future_deadline,
+                    remaining_model_tokens=1000,
+                )
+            except ValueError as exc:
+                assert "Workflow child Agent limit reached" in str(exc)
+            else:
+                raise AssertionError("A fifth child was accepted.")
+            await db.commit()
+
+            # WF-015/WF-016: a terminal child requeues the awaiting parent
+            # exactly once; repeated reconciler scans stay no-ops.
+            parent_for_reconcile, _ = await prepare_agent_run(
+                db,
+                workspace_id,
+                agent_id,
+                "reconcile parent",
+                actor,
+                "admin",
+            )
+            parent_for_reconcile.status = AGENT_RUN_UNIFIED_RUNNING_STATUS
+            parent_for_reconcile.worker_task_id = "reconcile-worker"
+            await agent_repository.save_agent_run(db, parent_for_reconcile)
+            await agent_repository.pause_agent_run_for_child(
+                db,
+                parent_for_reconcile.id,
+                "reconcile-worker",
+            )
+            failed_child = await ensure_workflow_agent_child(
+                db,
+                parent_for_reconcile,
+                "reconcile-node",
+                "reconcile goal",
+                snapshot,
+                actor,
+                "admin",
+                deadline_at=future_deadline,
+                remaining_model_tokens=1000,
+            )
+            from app.shareddomain.agents.models import AGENT_RUN_FAILED_STATUS
+
+            failed_child.status = AGENT_RUN_FAILED_STATUS
+            failed_child.last_error = "boom"
+            failed_child.finished_at = utc_now()
+            await agent_repository.save_agent_run(db, failed_child)
+            await db.commit()
+        resumed = await reconcile_workflow_agent_children()
+        assert resumed == [parent_for_reconcile.id]
+        resumed_again = await reconcile_workflow_agent_children()
+        assert resumed_again == []
+        async with get_session_factory()() as db:
+            requeued = await agent_repository.get_agent_run_by_id(
+                db,
+                parent_for_reconcile.id,
+            )
+            assert requeued is not None
+            from app.shareddomain.agents.models import agent_run_display_status
+
+            assert agent_run_display_status(requeued.status) == "queued"
+
+            # WF-020: a cancelled parent is never re-woken by its terminal
+            # child, and late finalization cannot resurrect it.
+            cancelled_parent, _ = await prepare_agent_run(
+                db,
+                workspace_id,
+                agent_id,
+                "cancelled parent",
+                actor,
+                "admin",
+            )
+            cancelled_parent.status = AGENT_RUN_UNIFIED_RUNNING_STATUS
+            cancelled_parent.worker_task_id = "cancel-worker"
+            await agent_repository.save_agent_run(db, cancelled_parent)
+            await agent_repository.pause_agent_run_for_child(
+                db,
+                cancelled_parent.id,
+                "cancel-worker",
+            )
+            cancelled_child = await ensure_workflow_agent_child(
+                db,
+                cancelled_parent,
+                "cancel-node",
+                "cancel goal",
+                snapshot,
+                actor,
+                "admin",
+                deadline_at=future_deadline,
+                remaining_model_tokens=1000,
+            )
+            cancelled_child.status = AGENT_RUN_FAILED_STATUS
+            cancelled_child.last_error = "cancelled sibling"
+            cancelled_child.finished_at = utc_now()
+            await agent_repository.save_agent_run(db, cancelled_child)
+            await db.commit()
+            assert await cancel_run_tree(db, cancelled_parent.id) is True
+            await db.commit()
         assert await reconcile_workflow_agent_children() == []
+        async with get_session_factory()() as db:
+            still_cancelled = await agent_repository.get_agent_run_by_id(
+                db,
+                cancelled_parent.id,
+            )
+            assert still_cancelled is not None
+            assert still_cancelled.status == "cancelled"
 
     asyncio.run(assert_lineage())
 
