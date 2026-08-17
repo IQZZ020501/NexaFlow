@@ -619,7 +619,7 @@ async def assert_hanging_model_stream_times_out() -> None:
                     [],
                     on_event=emit,
                 ),
-                timeout=0.1,
+                timeout=5,
             )
         except AgentRunnerError as exc:
             assert str(exc) == "Agent model response timed out."

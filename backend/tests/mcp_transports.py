@@ -52,7 +52,7 @@ def start_http_server(transport: str) -> tuple[subprocess.Popen[bytes], str]:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    for _ in range(100):
+    for _ in range(500):
         if process.poll() is not None:
             raise AssertionError(f"MCP test server exited with {process.returncode}")
         try:
