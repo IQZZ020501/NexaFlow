@@ -52,6 +52,7 @@ from app.schemas.agent import (
 )
 from app.shareddomain.agents import permissions as agent_permissions
 from app.shareddomain.agents import services as agent_services
+from app.shareddomain.agents.models import AGENT_RUN_UNIFIED_QUEUED_STATUS
 from app.shareddomain.tools import services as mcp_services
 from app.tasks import agents as agent_tasks
 from app.application.agent_executor import RUN_BUSY
@@ -794,6 +795,7 @@ def _run_entity(
     max_attempts: int = 3,
     worker_task_id: str | None = None,
     lease_expires_at=None,
+    configuration_source: str = "legacy",
 ) -> AgentRun:
     return AgentRun(
         workspace_id=workspace_id,
@@ -810,6 +812,7 @@ def _run_entity(
         model_id="model-1",
         model_name="coverage",
         trace_id=new_id(),
+        configuration_source=configuration_source,
         attempts=attempts,
         max_attempts=max_attempts,
         worker_task_id=worker_task_id,
@@ -1015,6 +1018,23 @@ async def exercise_repository_runs(
             db, agent_id, "console", admin_id, status="succeeded"
         )
         assert len(succeeded) == 3  # r1, r1b, r3
+        queued_unified = await agent_repository.create_agent_run(
+            db,
+            _run_entity(
+                workspace_id,
+                agent_id,
+                admin_id,
+                "conv-filter-unified",
+                status="queued_v2",
+                configuration_source="draft",
+                created_at=t2,
+            ),
+        )
+        await db.commit()
+        queued = await agent_repository.list_agent_runs(
+            db, agent_id, "console", admin_id, status="queued"
+        )
+        assert [run.id for run in queued] == [queued_unified.id]
         conv1 = await agent_repository.list_agent_runs(
             db, agent_id, "console", admin_id, conversation_id="conv-1"
         )
@@ -1030,12 +1050,12 @@ async def exercise_repository_runs(
         assert len(paged) == 1
 
         # count_agent_runs: each optional filter
-        assert await agent_repository.count_agent_runs(db, agent_id) == 5
+        assert await agent_repository.count_agent_runs(db, agent_id) == 6
         assert (
             await agent_repository.count_agent_runs(
                 db, agent_id, access_source="console"
             )
-            == 4
+            == 5
         )
         assert (
             await agent_repository.count_agent_runs(
@@ -1054,7 +1074,7 @@ async def exercise_repository_runs(
         managed = await agent_repository.list_agent_runs_for_management(
             db, workspace_id, agent_id, 10, 0
         )
-        assert len(managed) == 5
+        assert len(managed) == 6
         stats, total = await agent_repository.list_agent_consumer_stats(
             db, workspace_id, agent_id, 10, 0
         )
@@ -1063,7 +1083,7 @@ async def exercise_repository_runs(
         monitoring = await agent_repository.list_agent_monitoring_rows(
             db, workspace_id, agent_id, now - timedelta(hours=1)
         )
-        assert len(monitoring) == 5
+        assert len(monitoring) == 6
         assert (
             await agent_repository.list_agent_monitoring_rows(
                 db, workspace_id, agent_id, now + timedelta(hours=1)
@@ -1073,9 +1093,13 @@ async def exercise_repository_runs(
         conversations = await agent_repository.list_consumer_conversations(
             db, agent_id, "console", admin_id
         )
-        assert len(conversations) == 2
+        assert len(conversations) == 3
         by_conv = {row.conversation_id: row.run_count for row in conversations}
-        assert by_conv == {"conv-1": 3, "conv-2": 1}
+        assert by_conv == {
+            "conv-1": 3,
+            "conv-2": 1,
+            "conv-filter-unified": 1,
+        }
         assert (
             await agent_repository.latest_agent_conversation_id(
                 db, agent_id, "console", admin_id
@@ -1145,6 +1169,51 @@ async def exercise_repository_runs(
         assert (
             await agent_repository.claim_agent_run(
                 db, active.id, "worker-claim", now, now + timedelta(seconds=90)
+            )
+            is False
+        )
+
+        # Worker generations are a durable dispatch fence: an old task must
+        # never claim a unified run, and the unified task must never claim a
+        # legacy run.
+        unified = await agent_repository.create_agent_run(
+            db,
+            _run_entity(
+                workspace_id,
+                agent_id,
+                admin_id,
+                "conv-unified-fence",
+                status=AGENT_RUN_UNIFIED_QUEUED_STATUS,
+                configuration_source="draft",
+                created_at=now,
+            ),
+        )
+        await db.commit()
+        assert (
+            await agent_repository.claim_agent_run(
+                db, unified.id, "legacy-worker", now, now + timedelta(seconds=90)
+            )
+            is False
+        )
+        assert (
+            await agent_repository.claim_agent_run(
+                db,
+                unified.id,
+                "unified-worker",
+                now,
+                now + timedelta(seconds=90),
+                generation="unified",
+            )
+            is True
+        )
+        assert (
+            await agent_repository.claim_agent_run(
+                db,
+                active.id,
+                "unified-worker",
+                now,
+                now + timedelta(seconds=90),
+                generation="unified",
             )
             is False
         )
@@ -1610,10 +1679,11 @@ def exercise_tasks() -> None:
 
     original_configure = agent_tasks.configure_task_worker
     original_run_durable = agent_tasks.run_durable_application_run
-    original_list_recoverable = agent_tasks.list_recoverable_agent_run_ids
+    original_list_unified = agent_tasks.list_recoverable_unified_agent_run_ids
+    original_list_legacy = agent_tasks.list_recoverable_legacy_agent_run_ids
     original_log_error = agent_tasks.log_error
-    original_apply_async = agent_tasks.run_agent_job.apply_async
-    original_retry = agent_tasks.run_agent_job.retry
+    original_legacy_apply_async = agent_tasks.run_agent_job.apply_async
+    original_unified_apply_async = agent_tasks.run_unified_agent_job.apply_async
     original_broker_url = agent_tasks.celery_app.conf.broker_url
     original_eager = agent_tasks.celery_app.conf.task_always_eager
     try:
@@ -1622,7 +1692,9 @@ def exercise_tasks() -> None:
         # bind=True tasks receive the task instance as `self`; invoke the raw
         # body with a synthetic self carrying a deterministic request id.
         real_task = agent_tasks.run_agent_job._get_current_object()
-        run_body = type(real_task).run
+        legacy_run_body = type(real_task).run
+        unified_task = agent_tasks.run_unified_agent_job._get_current_object()
+        unified_run_body = type(unified_task).run
 
         # run_agent_job: happy path
         async def ok_run(_run_id, _settings, **kwargs):
@@ -1633,7 +1705,8 @@ def exercise_tasks() -> None:
             request=SimpleNamespace(id="worker-task-1"),
             retry=lambda **kwargs: None,
         )
-        assert run_body(ok_self, "run-ok") is None
+        assert legacy_run_body(ok_self, "run-ok") is None
+        assert unified_run_body(ok_self, "run-v2-ok") is None
 
         # run_agent_job: RUN_BUSY -> self.retry with heartbeat countdown
         async def busy_run(_run_id, _settings, **kwargs):
@@ -1654,10 +1727,19 @@ def exercise_tasks() -> None:
             retry=fake_retry,
         )
         try:
-            run_body(busy_self, "run-busy")
+            legacy_run_body(busy_self, "run-busy")
             raise AssertionError("expected retry signal")
         except RetrySignal:
             assert retry_kwargs["countdown"] == 30
+            assert retry_kwargs["queue"] == "agents-legacy"
+
+        retry_kwargs.clear()
+        try:
+            unified_run_body(busy_self, "run-v2-busy")
+            raise AssertionError("expected retry signal")
+        except RetrySignal:
+            assert retry_kwargs["countdown"] == 30
+            assert retry_kwargs["queue"] == "agents-v2"
 
         # run_agent_job: crash -> log_error + re-raise
         async def crash_run(_run_id, _settings, **kwargs):
@@ -1665,47 +1747,85 @@ def exercise_tasks() -> None:
 
         agent_tasks.run_durable_application_run = crash_run
         try:
-            run_body(ok_self, "run-crash")
+            legacy_run_body(ok_self, "run-crash")
             raise AssertionError("expected RuntimeError")
         except RuntimeError:
             pass
 
-        # recover_agent_runs_job: lists recoverable ids and dispatches each
-        async def recoverable_ids(_settings):
-            return ["run-recover-1", "run-recover-2"]
+        # Each recovery task only sees and dispatches its own generation.
+        async def unified_ids(_settings):
+            return ["run-unified-1", "run-unified-2"]
 
-        agent_tasks.list_recoverable_agent_run_ids = recoverable_ids
-        dispatched: list[dict] = []
-        agent_tasks.run_agent_job.apply_async = lambda **kwargs: dispatched.append(
-            kwargs
+        async def legacy_ids(_settings):
+            return ["run-legacy-1"]
+
+        agent_tasks.list_recoverable_unified_agent_run_ids = unified_ids
+        agent_tasks.list_recoverable_legacy_agent_run_ids = legacy_ids
+        unified_dispatched: list[dict] = []
+        legacy_dispatched: list[dict] = []
+        agent_tasks.run_unified_agent_job.apply_async = (
+            lambda **kwargs: unified_dispatched.append(kwargs)
+        )
+        agent_tasks.run_agent_job.apply_async = (
+            lambda **kwargs: legacy_dispatched.append(kwargs)
         )
         agent_tasks.recover_agent_runs_job()
-        assert dispatched == [
-            {"args": ("run-recover-1",)},
-            {"args": ("run-recover-2",)},
+        agent_tasks.recover_legacy_agent_runs_job()
+        assert unified_dispatched == [
+            {"args": ("run-unified-1",), "queue": "agents-v2"},
+            {"args": ("run-unified-2",), "queue": "agents-v2"},
+        ]
+        assert legacy_dispatched == [
+            {"args": ("run-legacy-1",), "queue": "agents-legacy"},
         ]
 
         # enqueue_agent_run: eager settings execute the run inline
         eager_settings = test_settings()
         eager_calls: list[tuple] = []
 
-        async def eager_run(run_id, settings):
-            eager_calls.append((run_id, settings))
+        async def eager_run(run_id, settings, **kwargs):
+            eager_calls.append((run_id, settings, kwargs))
 
         agent_tasks.run_durable_application_run = eager_run
         asyncio.run(agent_tasks.enqueue_agent_run("run-eager", eager_settings))
-        assert eager_calls == [("run-eager", eager_settings)]
+        asyncio.run(
+            agent_tasks.enqueue_agent_run(
+                "run-v2-eager",
+                eager_settings,
+                generation="unified",
+            )
+        )
+        assert eager_calls == [
+            ("run-eager", eager_settings, {"generation": "legacy"}),
+            ("run-v2-eager", eager_settings, {"generation": "unified"}),
+        ]
 
         # enqueue_agent_run: non-eager settings dispatch to the broker queue
         non_eager = dataclasses.replace(
             eager_settings, celery_task_always_eager=False
         )
-        queued: list[dict] = []
-        agent_tasks.run_agent_job.apply_async = lambda **kwargs: queued.append(
-            kwargs
+        legacy_queued: list[dict] = []
+        unified_queued: list[dict] = []
+        agent_tasks.run_agent_job.apply_async = (
+            lambda **kwargs: legacy_queued.append(kwargs)
+        )
+        agent_tasks.run_unified_agent_job.apply_async = (
+            lambda **kwargs: unified_queued.append(kwargs)
         )
         asyncio.run(agent_tasks.enqueue_agent_run("run-queued", non_eager))
-        assert queued == [{"args": ("run-queued",)}]
+        asyncio.run(
+            agent_tasks.enqueue_agent_run(
+                "run-v2-queued",
+                non_eager,
+                generation="unified",
+            )
+        )
+        assert legacy_queued == [
+            {"args": ("run-queued",), "queue": "agents-legacy"}
+        ]
+        assert unified_queued == [
+            {"args": ("run-v2-queued",), "queue": "agents-v2"}
+        ]
 
         # enqueue_agent_run: dispatch failure is logged, not raised
         def raise_apply(**kwargs):
@@ -1716,9 +1836,11 @@ def exercise_tasks() -> None:
     finally:
         agent_tasks.configure_task_worker = original_configure
         agent_tasks.run_durable_application_run = original_run_durable
-        agent_tasks.list_recoverable_agent_run_ids = original_list_recoverable
+        agent_tasks.list_recoverable_unified_agent_run_ids = original_list_unified
+        agent_tasks.list_recoverable_legacy_agent_run_ids = original_list_legacy
         agent_tasks.log_error = original_log_error
-        agent_tasks.run_agent_job.apply_async = original_apply_async
+        agent_tasks.run_agent_job.apply_async = original_legacy_apply_async
+        agent_tasks.run_unified_agent_job.apply_async = original_unified_apply_async
         agent_tasks.celery_app.conf.broker_url = original_broker_url
         agent_tasks.celery_app.conf.task_always_eager = original_eager
 

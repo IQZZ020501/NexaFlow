@@ -23,11 +23,21 @@ from app.infrastructure.repositories.mapping import (
 from app.shareddomain.agents.models import (
     AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_AWAITING_APPROVAL_STATUSES,
     AGENT_RUN_AWAITING_INPUT_STATUS,
+    AGENT_RUN_AWAITING_INPUT_STATUSES,
     AGENT_RUN_FAILED_STATUS,
+    AGENT_RUN_LEGACY_CLAIMABLE_STATUSES,
     AGENT_RUN_QUEUED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+    AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES,
+    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
+    agent_run_storage_statuses,
     Agent,
     AgentApiCredential,
     AgentKnowledgeBase,
@@ -421,7 +431,7 @@ async def list_agent_runs(
         .offset(offset)
     )
     if status is not None:
-        statement = statement.where(AgentRun.status == status)
+        statement = statement.where(AgentRun.status.in_(agent_run_storage_statuses(status)))
     if conversation_id is not None:
         statement = statement.where(AgentRun.conversation_id == conversation_id)
     result = await db.scalars(statement)
@@ -754,16 +764,28 @@ async def claim_agent_run(
     worker_task_id: str,
     started_at: datetime,
     lease_expires_at: datetime,
+    *,
+    generation: str = "legacy",
 ) -> bool:
+    claimable_statuses = (
+        AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
+        if generation == "unified"
+        else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
+    )
+    running_status = (
+        AGENT_RUN_UNIFIED_RUNNING_STATUS
+        if generation == "unified"
+        else AGENT_RUN_RUNNING_STATUS
+    )
     result = await db.execute(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
             AgentRun.attempts < AgentRun.max_attempts,
             or_(
-                AgentRun.status == AGENT_RUN_QUEUED_STATUS,
+                AgentRun.status == claimable_statuses[0],
                 and_(
-                    AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+                    AgentRun.status == claimable_statuses[1],
                     or_(
                         AgentRun.lease_expires_at.is_(None),
                         AgentRun.lease_expires_at <= started_at,
@@ -772,7 +794,7 @@ async def claim_agent_run(
             ),
         )
         .values(
-            status=AGENT_RUN_RUNNING_STATUS,
+            status=running_status,
             attempts=AgentRun.attempts + 1,
             worker_task_id=worker_task_id,
             lease_expires_at=lease_expires_at,
@@ -794,7 +816,7 @@ async def renew_agent_run_lease(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(lease_expires_at=lease_expires_at, updated_at=func.now())
@@ -820,7 +842,7 @@ async def save_agent_run_checkpoint(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(**values)
@@ -856,7 +878,7 @@ async def finalize_agent_run(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(**values)
@@ -874,11 +896,17 @@ async def pause_agent_run(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(
-            status=AGENT_RUN_AWAITING_APPROVAL_STATUS,
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+                ),
+                else_=AGENT_RUN_AWAITING_APPROVAL_STATUS,
+            ),
             attempts=case(
                 (AgentRun.attempts > 0, AgentRun.attempts - 1),
                 else_=0,
@@ -901,11 +929,17 @@ async def pause_agent_run_for_input(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(
-            status=AGENT_RUN_AWAITING_INPUT_STATUS,
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+                ),
+                else_=AGENT_RUN_AWAITING_INPUT_STATUS,
+            ),
             attempts=case(
                 (AgentRun.attempts > 0, AgentRun.attempts - 1),
                 else_=0,
@@ -928,11 +962,17 @@ async def requeue_owned_agent_run(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(
-            status=AGENT_RUN_QUEUED_STATUS,
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+                ),
+                else_=AGENT_RUN_QUEUED_STATUS,
+            ),
             attempts=case(
                 (AgentRun.attempts > 0, AgentRun.attempts - 1),
                 else_=0,
@@ -953,10 +993,16 @@ async def queue_agent_run(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_AWAITING_APPROVAL_STATUS,
+            AgentRun.status.in_(AGENT_RUN_AWAITING_APPROVAL_STATUSES),
         )
         .values(
-            status=AGENT_RUN_QUEUED_STATUS,
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+                ),
+                else_=AGENT_RUN_QUEUED_STATUS,
+            ),
             last_error=None,
             worker_task_id=None,
             lease_expires_at=None,
@@ -975,10 +1021,16 @@ async def queue_agent_run_from_input(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_AWAITING_INPUT_STATUS,
+            AgentRun.status.in_(AGENT_RUN_AWAITING_INPUT_STATUSES),
         )
         .values(
-            status=AGENT_RUN_QUEUED_STATUS,
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+                ),
+                else_=AGENT_RUN_QUEUED_STATUS,
+            ),
             checkpoint=checkpoint,
             last_error=None,
             worker_task_id=None,
@@ -993,15 +1045,22 @@ async def list_recoverable_agent_run_ids(
     db: AsyncSession,
     now: datetime,
     limit: int = 200,
+    *,
+    generation: str = "legacy",
 ) -> list[str]:
+    claimable_statuses = (
+        AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
+        if generation == "unified"
+        else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
+    )
     rows = await db.scalars(
         select(AgentRun.id)
         .where(
             AgentRun.attempts < AgentRun.max_attempts,
             or_(
-                AgentRun.status == AGENT_RUN_QUEUED_STATUS,
+                AgentRun.status == claimable_statuses[0],
                 and_(
-                    AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+                    AgentRun.status == claimable_statuses[1],
                     or_(
                         AgentRun.lease_expires_at.is_(None),
                         AgentRun.lease_expires_at <= now,
@@ -1018,15 +1077,22 @@ async def list_recoverable_agent_run_ids(
 async def fail_exhausted_agent_run_ids(
     db: AsyncSession,
     now: datetime,
+    *,
+    generation: str = "legacy",
 ) -> list[str]:
+    claimable_statuses = (
+        AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
+        if generation == "unified"
+        else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
+    )
     updated = await db.scalars(
         update(AgentRun)
         .where(
             AgentRun.attempts >= AgentRun.max_attempts,
             or_(
-                AgentRun.status == AGENT_RUN_QUEUED_STATUS,
+                AgentRun.status == claimable_statuses[0],
                 and_(
-                    AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+                    AgentRun.status == claimable_statuses[1],
                     or_(
                         AgentRun.lease_expires_at.is_(None),
                         AgentRun.lease_expires_at <= now,
@@ -1136,7 +1202,7 @@ async def append_owned_agent_run_event(
         .where(
             AgentRun.workspace_id == workspace_id,
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .with_for_update()

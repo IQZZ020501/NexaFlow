@@ -467,6 +467,51 @@ def _revoked_tool_grants(bind: sa.Connection) -> set[tuple[str, str]]:
     return revoked
 
 
+def _membership_history_revokes_fallback_grant(
+    action: str,
+    details: Any,
+) -> bool:
+    if action == "workspace.member.remove":
+        return True
+    if action != "workspace.member.update" or not isinstance(details, Mapping):
+        return False
+    return details.get("previous_role") == "admin" and details.get("role") == "member"
+
+
+def _revoked_fallback_binder_memberships(
+    bind: sa.Connection,
+) -> set[tuple[str, str]]:
+    audit_logs = sa.table(
+        "audit_logs",
+        sa.column("workspace_id", sa.String(36)),
+        sa.column("action", sa.String(80)),
+        sa.column("resource_type", sa.String(40)),
+        sa.column("resource_id", sa.String(36)),
+        sa.column("details", sa.JSON()),
+        sa.column("created_at", sa.DateTime(timezone=True)),
+    )
+    revoked: set[tuple[str, str]] = set()
+    for row in bind.execute(
+        sa.select(
+            audit_logs.c.workspace_id,
+            audit_logs.c.action,
+            audit_logs.c.resource_id,
+            audit_logs.c.details,
+            audit_logs.c.created_at,
+        ).where(audit_logs.c.resource_type == "workspace_member")
+    ).mappings():
+        workspace_id = row["workspace_id"]
+        if (
+            not isinstance(workspace_id, str)
+            or not _membership_history_revokes_fallback_grant(
+                row["action"], row["details"]
+            )
+        ):
+            continue
+        revoked.add((workspace_id, row["resource_id"]))
+    return revoked
+
+
 def _backfill_snapshot_use_grants(
     bind: sa.Connection,
     fallback_grants: Mapping[tuple[str, str, str], Mapping[str, Any]],
@@ -512,6 +557,7 @@ def _backfill_snapshot_use_grants(
         ).mappings()
     }
     revoked = _revoked_tool_grants(bind)
+    membership_revocations = _revoked_fallback_binder_memberships(bind)
     markers: dict[str, dict[str, set[tuple[str, str, datetime, datetime]]]] = {}
     for key, grant in fallback_grants.items():
         workspace_id, tool_id, user_id = key
@@ -536,6 +582,10 @@ def _backfill_snapshot_use_grants(
             # A revoke audit event proves the user's access was explicitly
             # removed; the missing permission row is revocation state, not
             # pre-grant history. Re-granting would resurrect revoked access.
+            continue
+        if (workspace_id, user_id) in membership_revocations:
+            # A post-publication member removal or privilege reduction must
+            # not become a new explicit Tool grant when the user later rejoins.
             continue
         permission_id = (
             permission["id"]

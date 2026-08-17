@@ -39,6 +39,10 @@ from app.shareddomain.agents.services import (
     get_agent_model,
 )
 from app.shareddomain.agents.permissions import require_agent_view
+from app.shareddomain.agents.models import (
+    agent_run_generation,
+    queued_agent_run_status,
+)
 from app.shareddomain.agents.publications import (
     AGENT_PUBLICATION_SCHEMA_VERSION,
     agent_publication_hash,
@@ -63,10 +67,19 @@ def _require_agent_run_application(agent: Agent) -> None:
         )
 
 
-async def enqueue_prepared_agent_run(run_id: str, settings: Settings) -> None:
+async def enqueue_prepared_agent_run(
+    run_id: str,
+    settings: Settings,
+    *,
+    unified: bool = True,
+) -> None:
     from app.tasks.agents import enqueue_agent_run
 
-    await enqueue_agent_run(run_id, settings)
+    await enqueue_agent_run(
+        run_id,
+        settings,
+        generation="unified" if unified else "legacy",
+    )
 
 
 def execution_messages(
@@ -445,7 +458,11 @@ async def resolve_agent_run_tool_approval(
             )
         await db.commit()
         if queued:
-            await enqueue_prepared_agent_run(run.id, settings)
+            await enqueue_prepared_agent_run(
+                run.id,
+                settings,
+                unified=run.configuration_source in {"draft", "published"},
+            )
         return await agent_repository.refresh_agent_run(db, run)
 
     call = await agent_repository.get_agent_tool_call_by_call_id(db, run.id, call_id)
@@ -522,7 +539,11 @@ async def resolve_agent_run_tool_approval(
         )
     await db.commit()
     if queued:
-        await enqueue_prepared_agent_run(run.id, settings)
+        await enqueue_prepared_agent_run(
+            run.id,
+            settings,
+            unified=run.configuration_source in {"draft", "published"},
+        )
     return await agent_repository.refresh_agent_run(db, run)
 
 
@@ -723,7 +744,7 @@ async def prepare_agent_run(
         tool_snapshots=[tool_snapshot_payload(item) for item in tool_snapshots],
         model_id=model.id,
         model_name=model.name,
-        status="queued",
+        status=queued_agent_run_status(agent_run_generation(configuration_source)),
         trace_id=new_id(),
         plan=[],
         events=[],
@@ -889,6 +910,10 @@ async def create_agent_run(
         conversation_id=conversation_id,
         attachment_context=attachment_context,
     )
-    await enqueue_prepared_agent_run(run.id, settings)
+    await enqueue_prepared_agent_run(
+        run.id,
+        settings,
+        unified=run.configuration_source in {"draft", "published"},
+    )
     current = await agent_repository.refresh_agent_run(db, run)
     return run_to_response(current, trace_id=current.trace_id)

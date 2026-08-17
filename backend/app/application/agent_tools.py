@@ -35,6 +35,7 @@ from app.shareddomain.agents.runtime import (
     create_agent_tool,
 )
 from app.shareddomain.agents.services import accessible_agent_knowledge_bases
+from app.shareddomain.agents.models import agent_run_display_status
 from app.shareddomain.tools.services import (
     ResolvedMcpTool,
     effective_mcp_tool_policy_mode,
@@ -95,7 +96,7 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         model_id=run.model_id,
         model_name=run.model_name,
         knowledge_query_mode=run.knowledge_query_mode,
-        status=run.status,
+        status=agent_run_display_status(run.status),
         plan=run.plan,
         events=run.events,
         result=run.result,

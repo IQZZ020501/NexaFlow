@@ -44,7 +44,9 @@ from app.ports.llm import RegisteredModel, build_chat_model
 from app.shareddomain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
 )
 from app.shareddomain.agents.runtime import (
     AgentExecutionPaused,
@@ -458,7 +460,7 @@ class DurableToolLedger:
 async def _load_execution_scope(run_id: str) -> ExecutionScope:
     async with get_session_factory()() as db:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
-        if run is None or run.status != AGENT_RUN_RUNNING_STATUS:
+        if run is None or run.status not in AGENT_RUN_RUNNING_STATUSES:
             raise AgentRunnerError("Agent run is not executable.")
         actor = await user_repository.get_user_by_id(db, run.execution_user_id)
         if actor is None or not actor.is_active:
@@ -1022,7 +1024,7 @@ async def _fail_unhandled_claimed_run(
         current = await _current_run(run_id)
         return (
             RUN_BUSY
-            if current.status in {"queued", AGENT_RUN_RUNNING_STATUS}
+            if current.status in {"queued", "queued_v2", *AGENT_RUN_RUNNING_STATUSES}
             else RUN_FINISHED
         )
     current = await _current_run(run_id)
@@ -1033,10 +1035,12 @@ async def _fail_unhandled_claimed_run(
     return RUN_FINISHED
 
 
-async def run_durable_agent_run(
+async def _run_durable_agent_run(
     run_id: str,
     settings: Settings,
     worker_task_id: str | None = None,
+    *,
+    generation: str,
 ) -> str:
     worker_task_id = worker_task_id or new_id()
     now = utc_now()
@@ -1047,15 +1051,22 @@ async def run_durable_agent_run(
             worker_task_id,
             now,
             now + timedelta(seconds=settings.agent_executor_lease_seconds),
+            generation=generation,
         )
         if claimed:
-            await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
+            if generation == "legacy":
+                await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
         else:
-            await fail_exhausted_agent_runs(db, now)
+            await fail_exhausted_agent_runs(db, now, generation=generation)
         await db.commit()
     if not claimed:
         current = await _current_run(run_id)
-        return RUN_BUSY if current.status == AGENT_RUN_RUNNING_STATUS else RUN_FINISHED
+        expected_running = (
+            AGENT_RUN_UNIFIED_RUNNING_STATUS
+            if generation == "unified"
+            else AGENT_RUN_RUNNING_STATUS
+        )
+        return RUN_BUSY if current.status == expected_running else RUN_FINISHED
 
     lease_lost = asyncio.Event()
     heartbeat = asyncio.create_task(
@@ -1086,24 +1097,95 @@ async def run_durable_agent_run(
             await heartbeat
 
 
-async def list_recoverable_agent_run_ids(settings: Settings) -> list[str]:
+async def _list_recoverable_agent_run_ids(
+    settings: Settings,
+    *,
+    generation: str,
+) -> list[str]:
     del settings
     async with get_session_factory()() as db:
         now = utc_now()
-        await fail_exhausted_agent_runs(db, now)
-        run_ids = await agent_repository.list_recoverable_agent_run_ids(db, now)
+        await fail_exhausted_agent_runs(db, now, generation=generation)
+        run_ids = await agent_repository.list_recoverable_agent_run_ids(
+            db,
+            now,
+            generation=generation,
+        )
         await db.commit()
     return run_ids
+
+
+async def list_recoverable_agent_run_ids(settings: Settings) -> list[str]:
+    return await _list_recoverable_agent_run_ids(settings, generation="legacy")
+
+
+async def list_recoverable_unified_agent_run_ids(settings: Settings) -> list[str]:
+    return await _list_recoverable_agent_run_ids(settings, generation="unified")
+
+
+async def list_recoverable_legacy_agent_run_ids(settings: Settings) -> list[str]:
+    return await _list_recoverable_agent_run_ids(settings, generation="legacy")
 
 
 async def fail_exhausted_agent_runs(
     db: AsyncSession,
     now: datetime,
+    *,
+    generation: str = "legacy",
 ) -> int:
-    run_ids = await agent_repository.fail_exhausted_agent_run_ids(db, now)
-    await tool_repository.settle_exhausted_agent_tool_invocations(
+    run_ids = await agent_repository.fail_exhausted_agent_run_ids(
         db,
-        run_ids,
         now,
+        generation=generation,
     )
+    if generation == "unified":
+        await tool_repository.settle_exhausted_agent_tool_invocations(
+            db,
+            run_ids,
+            now,
+        )
     return len(run_ids)
+
+
+async def run_durable_agent_run(
+    run_id: str,
+    settings: Settings,
+    worker_task_id: str | None = None,
+) -> str:
+    run = await _current_run(run_id)
+    return await _run_durable_agent_run(
+        run_id,
+        settings,
+        worker_task_id,
+        generation=(
+            "unified"
+            if run.configuration_source in {"draft", "published"}
+            else "legacy"
+        ),
+    )
+
+
+async def run_durable_unified_agent_run(
+    run_id: str,
+    settings: Settings,
+    worker_task_id: str | None = None,
+) -> str:
+    return await _run_durable_agent_run(
+        run_id,
+        settings,
+        worker_task_id,
+        generation="unified",
+    )
+
+
+async def run_durable_legacy_agent_run(
+    run_id: str,
+    settings: Settings,
+    worker_task_id: str | None = None,
+) -> str:
+    return await _run_durable_agent_run(
+        run_id,
+        settings,
+        worker_task_id,
+        generation="legacy",
+    )

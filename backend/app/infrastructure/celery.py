@@ -70,6 +70,12 @@ def create_celery_app() -> Celery:
             "recover-agent-runs": {
                 "task": "app.agents.recover",
                 "schedule": 30.0,
+                "options": {"queue": "agents-v2"},
+            },
+            "recover-legacy-agent-runs": {
+                "task": "app.agents.recover_legacy",
+                "schedule": 30.0,
+                "options": {"queue": "agents-legacy"},
             },
             "recover-tool-invocations": {
                 "task": "app.tools.recover",

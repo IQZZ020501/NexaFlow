@@ -29,6 +29,30 @@ AGENT_RUN_AWAITING_INPUT_STATUS = "awaiting_input"
 AGENT_RUN_SUCCEEDED_STATUS = "succeeded"
 AGENT_RUN_FAILED_STATUS = "failed"
 AGENT_RUN_CANCELLED_STATUS = "cancelled"
+AGENT_RUN_UNIFIED_QUEUED_STATUS = "queued_v2"
+AGENT_RUN_UNIFIED_RUNNING_STATUS = "running_v2"
+AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS = "awaiting_approval_v2"
+AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS = "awaiting_input_v2"
+AGENT_RUN_LEGACY_CLAIMABLE_STATUSES = (
+    AGENT_RUN_QUEUED_STATUS,
+    AGENT_RUN_RUNNING_STATUS,
+)
+AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES = (
+    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
+)
+AGENT_RUN_RUNNING_STATUSES = (
+    AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
+)
+AGENT_RUN_AWAITING_APPROVAL_STATUSES = (
+    AGENT_RUN_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+)
+AGENT_RUN_AWAITING_INPUT_STATUSES = (
+    AGENT_RUN_AWAITING_INPUT_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+)
 AGENT_RUN_ACTIVE_STATUSES = (
     AGENT_RUN_QUEUED_STATUS,
     AGENT_RUN_PLANNING_STATUS,
@@ -36,7 +60,63 @@ AGENT_RUN_ACTIVE_STATUSES = (
     AGENT_RUN_RUNNING_STATUS,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
     AGENT_RUN_AWAITING_INPUT_STATUS,
+    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
 )
+
+
+def is_unified_agent_run_status(value: str) -> bool:
+    return value in {
+        AGENT_RUN_UNIFIED_QUEUED_STATUS,
+        AGENT_RUN_UNIFIED_RUNNING_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+    }
+
+
+def agent_run_display_status(value: str) -> str:
+    return {
+        AGENT_RUN_UNIFIED_QUEUED_STATUS: AGENT_RUN_QUEUED_STATUS,
+        AGENT_RUN_UNIFIED_RUNNING_STATUS: AGENT_RUN_RUNNING_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS: AGENT_RUN_AWAITING_APPROVAL_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS: AGENT_RUN_AWAITING_INPUT_STATUS,
+    }.get(value, value)
+
+
+def agent_run_storage_statuses(value: str) -> tuple[str, ...]:
+    """Return every persisted status represented by one public status."""
+    return {
+        AGENT_RUN_QUEUED_STATUS: (
+            AGENT_RUN_QUEUED_STATUS,
+            AGENT_RUN_UNIFIED_QUEUED_STATUS,
+        ),
+        AGENT_RUN_RUNNING_STATUS: (
+            AGENT_RUN_RUNNING_STATUS,
+            AGENT_RUN_UNIFIED_RUNNING_STATUS,
+        ),
+        AGENT_RUN_AWAITING_APPROVAL_STATUS: (
+            AGENT_RUN_AWAITING_APPROVAL_STATUS,
+            AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+        ),
+        AGENT_RUN_AWAITING_INPUT_STATUS: (
+            AGENT_RUN_AWAITING_INPUT_STATUS,
+            AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+        ),
+    }.get(value, (value,))
+
+
+def agent_run_generation(configuration_source: str) -> str:
+    return "unified" if configuration_source in {"draft", "published"} else "legacy"
+
+
+def queued_agent_run_status(generation: str) -> str:
+    return (
+        AGENT_RUN_UNIFIED_QUEUED_STATUS
+        if generation == "unified"
+        else AGENT_RUN_QUEUED_STATUS
+    )
 
 
 class Agent(Base):
@@ -279,7 +359,7 @@ class AgentRun(Base):
             name="fk_agent_runs_publication_workspace",
         ),
         CheckConstraint(
-            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'succeeded', 'failed', 'cancelled')",
+            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'queued_v2', 'running_v2', 'awaiting_approval_v2', 'awaiting_input_v2', 'succeeded', 'failed', 'cancelled')",
             name="ck_agent_runs_status",
         ),
         UniqueConstraint(
@@ -308,6 +388,15 @@ class AgentRun(Base):
             "OR (configuration_source IN ('draft', 'legacy') "
             "AND agent_publication_version_id IS NULL)",
             name="ck_agent_runs_publication_source",
+        ),
+        CheckConstraint(
+            "(configuration_source IN ('draft', 'published') AND status IN "
+            "('queued_v2', 'running_v2', 'awaiting_approval_v2', "
+            "'awaiting_input_v2', 'succeeded', 'failed', 'cancelled')) OR "
+            "(configuration_source = 'legacy' AND status IN "
+            "('queued', 'planning', 'planned', 'running', 'awaiting_approval', "
+            "'awaiting_input', 'succeeded', 'failed', 'cancelled'))",
+            name="ck_agent_runs_worker_generation",
         ),
         CheckConstraint(
             "(access_source = 'console' AND requested_by_user_id IS NOT NULL "
@@ -364,22 +453,22 @@ class AgentRun(Base):
     )
     mcp_tools: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
     snapshot_schema_version: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, server_default="1"
+        Integer, nullable=False, default=1
     )
     configuration_source: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="legacy", server_default="legacy"
+        String(20), nullable=False, default="legacy"
     )
     agent_publication_version_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, index=True
     )
     application_snapshot: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict, server_default="{}"
+        JSON, nullable=False, default=dict
     )
     application_snapshot_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False, default="", server_default=""
+        String(64), nullable=False, default=""
     )
     tool_snapshots: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSON, nullable=False, default=list, server_default="[]"
+        JSON, nullable=False, default=list
     )
     model_id: Mapped[str] = mapped_column(String(36), nullable=False)
     model_name: Mapped[str] = mapped_column(String(160), nullable=False)

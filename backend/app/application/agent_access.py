@@ -66,6 +66,7 @@ from app.shareddomain.agents.services import (
     get_agent,
     require_agent_edit,
 )
+from app.shareddomain.agents.models import agent_run_display_status
 from app.shareddomain.audit.services import record_audit_log
 
 ExternalAccessSource = Literal["public", "api"]
@@ -341,7 +342,7 @@ def external_progress_events(
 
 def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRunResponse:
     value = run if isinstance(run, dict) else vars(run)
-    run_status = str(value.get("status") or "")
+    run_status = agent_run_display_status(str(value.get("status") or ""))
     generic_error = None
     if run_status == "failed":
         generic_error = "Agent run failed."
@@ -822,7 +823,11 @@ async def create_external_agent_run(
         publication_version=context.publication_version,
         attachment_context=attachment_context,
     )
-    await enqueue_prepared_agent_run(run.id, settings)
+    await enqueue_prepared_agent_run(
+        run.id,
+        settings,
+        unified=run.configuration_source in {"draft", "published"},
+    )
     current = await agent_repository.refresh_agent_run(db, run)
     return external_run_to_response(current)
 

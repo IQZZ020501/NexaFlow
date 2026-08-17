@@ -472,7 +472,11 @@ async def stream_workspace_agent_run(
         conversation_id=payload.conversation_id,
         attachment_context=attachment_context,
     )
-    await enqueue_prepared_agent_run(run.id, settings)
+    await enqueue_prepared_agent_run(
+        run.id,
+        settings,
+        unified=run.configuration_source in {"draft", "published"},
+    )
     await db.rollback()
 
     async def encode_events() -> AsyncIterator[bytes]:

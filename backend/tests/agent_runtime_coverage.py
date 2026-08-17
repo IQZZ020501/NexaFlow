@@ -73,6 +73,10 @@ from app.shareddomain.agents.runtime import (
     run_agent,
     safe_event_value,
 )
+from app.shareddomain.agents.models import (
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
+    agent_run_display_status,
+)
 from app.shareddomain.agents.runtime import graph as graph_module
 from app.shareddomain.agents.runtime import executor as executor_module
 from app.shareddomain.agents.runtime import usage as usage_module
@@ -2367,6 +2371,7 @@ async def assert_approval_paths(
             actor,
             "admin",
         )
+        run.status = agent_run_display_status(run.status)
         run.configuration_source = "legacy"
         await agent_repository.save_agent_run(db, run)
         await db.commit()
@@ -2400,7 +2405,7 @@ async def assert_approval_paths(
         original_enqueue = agent_runs.enqueue_prepared_agent_run
         enqueued: list[str] = []
 
-        async def record_enqueue(run_id: str, _settings) -> None:
+        async def record_enqueue(run_id: str, _settings, **_kwargs) -> None:
             enqueued.append(run_id)
 
         agent_runs.enqueue_prepared_agent_run = record_enqueue
@@ -2547,7 +2552,7 @@ async def assert_approval_paths(
     # wrapper path (381-383, 391)
     original_enqueue = agent_runs.enqueue_prepared_agent_run
 
-    async def noop_enqueue(_run_id, _settings) -> None:
+    async def noop_enqueue(_run_id, _settings, **_kwargs) -> None:
         return None
 
     agent_runs.enqueue_prepared_agent_run = noop_enqueue
@@ -2561,6 +2566,7 @@ async def assert_approval_paths(
                 actor,
                 "admin",
             )
+            wrapper_run.status = agent_run_display_status(wrapper_run.status)
             wrapper_run.configuration_source = "legacy"
             await agent_repository.save_agent_run(db, wrapper_run)
             await db.commit()
@@ -2829,7 +2835,7 @@ async def assert_create_agent_run_paths(
         # the refreshed run (649-650).
         original_enqueue = agent_runs.enqueue_prepared_agent_run
 
-        async def noop_enqueue(_run_id, _settings) -> None:
+        async def noop_enqueue(_run_id, _settings, **_kwargs) -> None:
             return None
 
         agent_runs.enqueue_prepared_agent_run = noop_enqueue
@@ -3004,7 +3010,10 @@ async def assert_durable_execution_paths(
                 run.id,
                 "call-mcp-1",
             )
-        assert current is not None and current.status == "awaiting_approval"
+        assert (
+            current is not None
+            and agent_run_display_status(current.status) == "awaiting_approval"
+        )
         assert call.status == "awaiting_approval"
         assert legacy_call is None
 
@@ -3034,7 +3043,7 @@ async def assert_durable_execution_paths(
         actor = await get_admin_actor()
         original_enqueue = agent_runs.enqueue_prepared_agent_run
 
-        async def noop_enqueue(_run_id, _settings) -> None:
+        async def noop_enqueue(_run_id, _settings, **_kwargs) -> None:
             return None
 
         agent_runs.enqueue_prepared_agent_run = noop_enqueue
@@ -3048,7 +3057,7 @@ async def assert_durable_execution_paths(
                     settings,
                     approve=True,
                 )
-                assert refreshed.status == "queued"
+                assert agent_run_display_status(refreshed.status) == "queued"
                 approved = await tool_repository.get_tool_invocation(
                     db,
                     workspace_id,
@@ -3149,7 +3158,7 @@ async def assert_durable_execution_paths(
         assert outcome == agent_executor.RUN_BUSY
         async with get_session_factory()() as db:
             current = await agent_repository.get_agent_run_by_id(db, run.id)
-        assert current is not None and current.status == "queued"
+        assert current is not None and agent_run_display_status(current.status) == "queued"
     finally:
         agent_repository.finalize_agent_run = original_finalize
 
@@ -3211,6 +3220,7 @@ async def assert_durable_execution_paths(
         )
         race_run.knowledge_base_ids = []
         race_run.knowledge_query_mode = "agentic"
+        race_run.status = agent_run_display_status(race_run.status)
         race_run.configuration_source = "legacy"
         await agent_repository.save_agent_run(db, race_run)
         await db.commit()
@@ -3284,6 +3294,7 @@ async def assert_durable_execution_paths(
             "worker-lost-lease",
             now,
             now + timedelta(seconds=30),
+            generation="unified",
         )
         await db.commit()
     lease_lost = asyncio.Event()
@@ -3304,7 +3315,7 @@ async def assert_durable_execution_paths(
     async with get_session_factory()() as db:
         current = await agent_repository.get_agent_run_by_id(db, run.id)
         assert current is not None
-        current.status = "running"
+        current.status = AGENT_RUN_UNIFIED_RUNNING_STATUS
         current.attempts = current.max_attempts
         current.worker_task_id = "dead-worker"
         current.lease_expires_at = utc_now() - timedelta(seconds=1)
@@ -3332,6 +3343,7 @@ async def assert_durable_execution_paths(
             "worker-owner",
             now,
             now + timedelta(seconds=60),
+            generation="unified",
         )
         await db.commit()
     outcome = await agent_executor.run_durable_agent_run(
@@ -3372,7 +3384,7 @@ async def assert_durable_execution_paths(
         async with get_session_factory()() as db:
             await agent_repository.save_agent_run(db, run)
             await db.commit()
-        outcome = await agent_executor.run_durable_agent_run(
+        outcome = await agent_executor.run_durable_unified_agent_run(
             run.id,
             settings,
             worker_task_id="worker-delete",
@@ -3480,6 +3492,7 @@ async def assert_durable_execution_paths(
             "worker-heartbeat",
             now,
             now + timedelta(seconds=90),
+            generation="unified",
         )
         await db.commit()
     lease_lost = asyncio.Event()
@@ -3514,6 +3527,7 @@ async def assert_durable_execution_paths(
             "worker-heartbeat-1",
             now,
             now + timedelta(seconds=90),
+            generation="unified",
         )
         current = await agent_repository.get_agent_run_by_id(db, run.id)
         assert current is not None
@@ -3525,6 +3539,7 @@ async def assert_durable_execution_paths(
             "worker-heartbeat-2",
             now,
             now + timedelta(seconds=90),
+            generation="unified",
         )
         await db.commit()
     lease_lost = asyncio.Event()
@@ -3551,6 +3566,7 @@ async def assert_durable_execution_paths(
                 "worker-heartbeat-3",
                 now,
                 now + timedelta(seconds=90),
+                generation="unified",
             )
             await db.commit()
         lease_lost = asyncio.Event()
@@ -3593,6 +3609,7 @@ async def assert_durable_execution_paths(
             "worker-scope",
             now,
             now + timedelta(seconds=30),
+            generation="unified",
         )
         await db.commit()
     original_get_user = agent_executor.user_repository.get_user_by_id
@@ -3622,6 +3639,7 @@ async def assert_durable_execution_paths(
             "worker-pause",
             now,
             now + timedelta(seconds=30),
+            generation="unified",
         )
         await db.commit()
     paused, requeued = await agent_executor._pause_agent_run_for_tool(
@@ -3634,7 +3652,10 @@ async def assert_durable_execution_paths(
     async with get_session_factory()() as db:
         events = await agent_repository.list_agent_run_events(db, run.id)
         current = await agent_repository.get_agent_run_by_id(db, run.id)
-    assert current is not None and current.status == "awaiting_approval"
+    assert (
+        current is not None
+        and agent_run_display_status(current.status) == "awaiting_approval"
+    )
     assert any(
         event.event.get("type") == "approval_required" for event in events
     )
@@ -3651,6 +3672,7 @@ async def assert_durable_execution_paths(
             "worker-append-1",
             now,
             now + timedelta(seconds=30),
+            generation="unified",
         )
         current = await agent_repository.get_agent_run_by_id(db, run.id)
         assert current is not None
@@ -3662,6 +3684,7 @@ async def assert_durable_execution_paths(
             "worker-append-2",
             now,
             now + timedelta(seconds=30),
+            generation="unified",
         )
         await db.commit()
     try:
@@ -3690,9 +3713,10 @@ async def assert_durable_execution_paths(
             "worker-recover",
             now - timedelta(minutes=10),
             now - timedelta(minutes=9),
+            generation="unified",
         )
         await db.commit()
-    recoverable = await agent_executor.list_recoverable_agent_run_ids(settings)
+    recoverable = await agent_executor.list_recoverable_unified_agent_run_ids(settings)
     assert run.id in recoverable
 
 
