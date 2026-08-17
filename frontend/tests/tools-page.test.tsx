@@ -184,7 +184,9 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findByText("Empty MCP")
-    expect(screen.getByText("0 个工具")).toBeTruthy()
+    const emptySourceCard = screen.getByText("Empty MCP").closest("article")!
+    expect(within(emptySourceCard).getByText("工具")).toBeTruthy()
+    expect(within(emptySourceCard).getByText("0")).toBeTruthy()
     expect(
       screen.getByRole("button", { name: "管理来源 Empty MCP" })
     ).toBeTruthy()

@@ -534,6 +534,14 @@ async function renderDetail(
   return agent
 }
 
+async function expectWorkflowStub(name = "Weekly Digest") {
+  await waitFor(() =>
+    expect(screen.getByTestId("workflow-stub").textContent).toContain(
+      `WF-STUB:${name}`
+    )
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /* Tests                                                               */
 /* ------------------------------------------------------------------ */
@@ -1471,9 +1479,7 @@ describe("AgentsPage detail view", () => {
     routes = baseRoutes([workflow])
     navState.params.id = "agent-2"
     renderPage(<AgentsPage />)
-    await waitFor(() =>
-      expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy()
-    )
+    await expectWorkflowStub()
     expect(screen.queryByText("应用")).toBeNull()
   })
 
@@ -1504,9 +1510,7 @@ describe("AgentsPage detail view", () => {
     ]
     navState.params.id = "agent-2"
     renderPage(<AgentsPage />)
-    await waitFor(() =>
-      expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy()
-    )
+    await expectWorkflowStub()
 
     fireEvent.click(screen.getByText("stub-save").closest("button")!)
     await waitFor(() =>
@@ -1550,9 +1554,7 @@ describe("AgentsPage detail view", () => {
     ]
     navState.params.id = "agent-2"
     renderPage(<AgentsPage />)
-    await waitFor(() =>
-      expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy()
-    )
+    await expectWorkflowStub()
     fireEvent.click(screen.getByText("stub-perms").closest("button")!)
     await waitFor(() => expect(screen.getByText("资源授权")).toBeTruthy())
   })
@@ -1716,9 +1718,7 @@ describe("AgentsPage detail view", () => {
     routes = baseRoutes([workflow])
     navState.params.id = "agent-2"
     renderPage(<AgentsPage workflowCanvasMode />)
-    await waitFor(() =>
-      expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy()
-    )
+    await expectWorkflowStub()
     fireEvent.click(screen.getByText("stub-back").closest("button")!)
     expect(navState.replaceCalls).toContain("/app/apps/agent-2")
   })
@@ -1728,9 +1728,7 @@ describe("AgentsPage detail view", () => {
     routes = baseRoutes([workflow])
     navState.params.id = "agent-2"
     renderPage(<AgentsPage />)
-    await waitFor(() =>
-      expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy()
-    )
+    await expectWorkflowStub()
     fireEvent.click(screen.getByText("stub-view-settings").closest("button")!)
     await waitFor(() =>
       expect(navState.pushCalls).toContain("/workflow/agent-2")

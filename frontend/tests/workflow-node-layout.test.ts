@@ -2,6 +2,12 @@ import { expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
+function expectStringArray(text: string, values: string[], negated = false) {
+  const members = values.map((value) => JSON.stringify(value)).join(",\\s*")
+  const prefix = negated ? "!" : ""
+  expect(text).toMatch(new RegExp(`${prefix}\\[\\s*${members},?\\s*\\]`))
+}
+
 const source = readFileSync(
   join(import.meta.dir, "../components/workflows/workflow-node.tsx"),
   "utf8"
@@ -182,9 +188,15 @@ test("code, document, and form nodes place outputs after their settings", () => 
   expect(codeConfig.indexOf("-code-inputs")).toBeLessThan(
     codeConfig.indexOf("-code-body")
   )
-  expect(card).toContain(
-    '["knowledge", "llm", "condition", "reply-node", "code", "document-extract-node", "form-node"]'
-  )
+  expectStringArray(card, [
+    "knowledge",
+    "llm",
+    "condition",
+    "reply-node",
+    "code",
+    "document-extract-node",
+    "form-node",
+  ])
   expect(card.indexOf("<NodeConfigFields")).toBeLessThan(
     card.lastIndexOf('node.type === "code"')
   )
@@ -221,7 +233,14 @@ test("Tool and Agent nodes keep pinned bindings while legacy editors remain avai
   expect(nodeConfig).toContain('node.type === "mcp"')
   expect(nodeConfig).toContain('node.type === "code"')
   expect(nodeConfig).toContain('tool.approval === "auto"')
-  expect(card).toContain('"form-node", "agent"')
+  expectStringArray(card, [
+    "llm",
+    "knowledge",
+    "reply-node",
+    "reranker-node",
+    "form-node",
+    "agent",
+  ])
   expect(card).not.toContain('"form-node", "agent", "tool"')
   expect(source).toContain('awaiting_child: "等待执行"')
 })
@@ -354,7 +373,7 @@ test("workflow debugging uses an anchored canvas window", () => {
   )
 
   expect(debugPanel).toMatch(/<aside\s+role="dialog"/)
-  expect(debugPanel).toContain('"absolute z-40')
+  expect(debugPanel).toContain("absolute z-40")
   expect(debugPanel).toContain("sm:w-96")
   expect(debugPanel).toContain("sm:w-2/3 lg:w-1/3")
   expect(debugPanel).not.toContain('? "inset-3"')
@@ -414,9 +433,14 @@ test("LLM advanced parameters live behind the card settings button", () => {
     source.indexOf("export function WorkflowNodeCard")
   )
 
-  expect(source).toContain(
-    '["llm", "knowledge", "reply-node", "reranker-node", "form-node", "agent"].includes(node.type)'
-  )
+  expectStringArray(source, [
+    "llm",
+    "knowledge",
+    "reply-node",
+    "reranker-node",
+    "form-node",
+    "agent",
+  ])
   expect(source).toContain("<SettingsIcon")
   expect(source).toContain("<LlmSettingsDialog")
   expect(source).toContain('placeholder={t("默认 4096")}')
@@ -481,8 +505,18 @@ test("LLM outputs use translated labels at the bottom of its settings", () => {
   expect(nodeConfigFields.indexOf("{LLM_OUTPUT_FIELDS.map")).toBeGreaterThan(
     nodeConfigFields.indexOf('t("返回内容")')
   )
-  expect(source).toContain(
-    '!["knowledge", "llm", "condition", "reply-node", "code", "document-extract-node", "form-node"].includes(node.type)'
+  expectStringArray(
+    source,
+    [
+      "knowledge",
+      "llm",
+      "condition",
+      "reply-node",
+      "code",
+      "document-extract-node",
+      "form-node",
+    ],
+    true
   )
 })
 
@@ -499,9 +533,14 @@ test("knowledge search mode uses the anchored app dropdown", () => {
 })
 
 test("knowledge node presents grouped settings and four documented outputs", () => {
-  expect(source).toContain(
-    '["llm", "knowledge", "reply-node", "reranker-node", "form-node", "agent"].includes(node.type)'
-  )
+  expectStringArray(source, [
+    "llm",
+    "knowledge",
+    "reply-node",
+    "reranker-node",
+    "form-node",
+    "agent",
+  ])
   expect(source).toContain('t("节点设置")')
   expect(source).toContain('t("检索范围")')
   expect(source).toContain('className="mb-1 text-xs font-medium"')
@@ -564,7 +603,7 @@ test("workflow app settings no longer expose resource bindings", () => {
   expect(appConfigSource).toContain("{isToolPickerOpen ? (")
   expect(appConfigSource).toContain('open={form.appType === "agent"}')
   expect(detailSource).toContain(
-    't("配置工作流的默认模型；知识库和只读 MCP 工具由节点选择。")'
+    't("配置工作流的默认模型；知识库、工具和 Agent 由节点选择。")'
   )
   expect(agentsPageSource).toContain(
     'tools: form.appType === "workflow" ? [] : form.tools'
