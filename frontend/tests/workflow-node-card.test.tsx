@@ -246,7 +246,6 @@ function renderNode(
 beforeEach(() => {
   mockUseSession()
 })
-
 afterEach(() => {
   cleanup()
 })
@@ -401,6 +400,55 @@ describe("WorkflowNodeCard", () => {
       })
     )
     expect(screen.getByText("Current Time")).toBeTruthy()
+  })
+
+  test("tool node keeps unavailable bindings visible and offers version upgrades", () => {
+    const updates: WorkflowNodeData[] = []
+    const unavailable = {
+      ...workflowTool("tool-1", "Current Time"),
+      current_version_id: "version-2",
+      status: "disabled",
+      availability: "unavailable",
+      can_use: false,
+    } as ToolDetail
+    const { unmount } = renderNode(
+      nodeData("tool", {
+        tools: [unavailable],
+        config: {
+          tool: { tool_id: "tool-1", version_id: "version-1" },
+          arguments: {},
+        },
+      })
+    )
+    expect(screen.getByText("工具已不可用或授权已撤销")).toBeTruthy()
+    expect(screen.getByText("可从节点菜单移除该工具")).toBeTruthy()
+    expect(
+      screen.queryByRole("button", { name: "升级到当前版本" })
+    ).toBeNull()
+
+    unmount()
+    renderNode(
+      nodeData("tool", {
+        onUpdate: (data) => updates.push(data),
+        tools: [
+          {
+            ...workflowTool("tool-1", "Current Time"),
+            current_version_id: "version-2",
+          } as ToolDetail,
+        ],
+        config: {
+          tool: { tool_id: "tool-1", version_id: "version-1" },
+          arguments: {},
+        },
+      })
+    )
+    fireEvent.click(
+      screen.getByRole("button", { name: "升级到当前版本" })
+    )
+    expect(updates.at(-1)?.config.tool).toEqual({
+      tool_id: "tool-1",
+      version_id: "version-2",
+    })
   })
 
   test("selected card gains the selection ring", () => {

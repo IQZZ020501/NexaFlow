@@ -114,7 +114,6 @@ beforeEach(() => {
     return Promise.resolve(jsonResponse([], 200))
   }) as typeof fetch
 })
-
 describe("ToolsPage", () => {
   test("renders the unified empty state and member-safe add menu", async () => {
     renderPage(<ToolsPage />)
@@ -361,6 +360,10 @@ describe("ToolsPage", () => {
         }) as HTMLButtonElement
       ).disabled
     ).toBe(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(addTrigger))
   })
 
   test("shows governance actions only to managers and keeps view-only code hidden", async () => {

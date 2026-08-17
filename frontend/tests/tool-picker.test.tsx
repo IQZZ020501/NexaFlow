@@ -138,8 +138,11 @@ describe("ToolPicker", () => {
     const option = within(dialog).getByRole("checkbox", {
       name: "Lookup account",
     })
-    fireEvent.keyDown(option, { key: " " })
-    fireEvent.click(option)
+    const search = within(dialog).getByRole("searchbox")
+    search.focus()
+    fireEvent.keyDown(search, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(option)
+    fireEvent.keyDown(option, { key: "Enter" })
     expect(changes.at(-1)).toEqual([
       { tool_id: "tool-use", version_id: "version-2" },
     ])

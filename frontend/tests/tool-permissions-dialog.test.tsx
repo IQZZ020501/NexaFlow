@@ -30,6 +30,14 @@ const alice = {
   teams: [],
 }
 
+const bob = {
+  ...alice,
+  id: "user-3",
+  username: "bob",
+  email: "bob@example.com",
+  name: "Bob",
+}
+
 const tool: ToolSummary = {
   id: "tool-1",
   workspace_id: "ws-1",
@@ -66,6 +74,7 @@ describe("ToolPermissionsDialog", () => {
       if (url.includes("/members")) {
         return jsonResponse([
           { user: alice, role: "member" },
+          { user: bob, role: "member" },
           { user: { ...alice, id: "owner-1", name: "Owner" }, role: "admin" },
         ])
       }
@@ -96,6 +105,14 @@ describe("ToolPermissionsDialog", () => {
       )
     ).toBeTruthy()
     expect(screen.queryByText("Owner")).toBeNull()
+
+    const search = screen.getByRole("searchbox")
+    fireEvent.change(search, { target: { value: "bob@example.com" } })
+    expect(screen.getByText("Bob")).toBeTruthy()
+    expect(screen.queryByText("Alice")).toBeNull()
+    fireEvent.change(search, { target: { value: "missing" } })
+    expect(screen.getByText("没有匹配的成员")).toBeTruthy()
+    fireEvent.change(search, { target: { value: "" } })
 
     const permission = screen.getByLabelText("Alice 的工具权限")
     fireEvent.pointerDown(permission)

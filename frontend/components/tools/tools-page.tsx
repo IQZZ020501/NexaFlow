@@ -129,6 +129,7 @@ export function ToolsPage() {
   const [detailTool, setDetailTool] = React.useState<ToolDetail | null>(null)
   const [isDetailLoading, setIsDetailLoading] = React.useState(false)
   const [detailError, setDetailError] = React.useState<string | null>(null)
+  const addToolTriggerRef = React.useRef<HTMLButtonElement>(null)
   const requestRef = React.useRef(0)
   const message = React.useCallback(
     (kind: "success" | "error", value: string) => notify(kind, value),
@@ -453,7 +454,7 @@ export function ToolsPage() {
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button type="button">
+            <Button ref={addToolTriggerRef} type="button">
               <PlusIcon />
               {t("添加工具")}
             </Button>
@@ -871,6 +872,7 @@ export function ToolsPage() {
         token={accessToken}
         workspaceId={workspaceId}
         canUsePrivileged={canUsePrivilegedMcp}
+        returnFocusRef={addToolTriggerRef}
         onCreated={(source) => {
           setSources((current) => [source, ...current])
           message("success", t("MCP Server 已添加"))

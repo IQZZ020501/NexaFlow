@@ -51,12 +51,14 @@ export function McpConnectionDialog({
   open,
   onOpenChange,
   canUsePrivileged,
+  returnFocusRef,
   onSubmit,
   onError,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   canUsePrivileged: boolean
+  returnFocusRef?: React.RefObject<HTMLElement | null>
   onSubmit: (payload: McpSourceCreatePayload) => Promise<void>
   onError: (message: string) => void
 }) {
@@ -129,7 +131,14 @@ export function McpConnectionDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl">
+      <DialogContent
+        className="max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl"
+        onCloseAutoFocus={(event) => {
+          if (!returnFocusRef?.current) return
+          event.preventDefault()
+          returnFocusRef.current.focus()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t("添加 MCP Server")}</DialogTitle>
           <DialogDescription>
@@ -356,6 +365,7 @@ export function McpSourceDialog({
   token,
   workspaceId,
   canUsePrivileged,
+  returnFocusRef,
   onCreated,
   onError,
 }: {
@@ -364,6 +374,7 @@ export function McpSourceDialog({
   token: string
   workspaceId: string
   canUsePrivileged: boolean
+  returnFocusRef?: React.RefObject<HTMLElement | null>
   onCreated: (source: ToolSourceDetail) => void
   onError: (message: string) => void
 }) {
@@ -372,6 +383,7 @@ export function McpSourceDialog({
       open={open}
       onOpenChange={onOpenChange}
       canUsePrivileged={canUsePrivileged}
+      returnFocusRef={returnFocusRef}
       onSubmit={async (payload) => {
         const source = await createMcpSource(token, workspaceId, payload)
         onCreated(source)

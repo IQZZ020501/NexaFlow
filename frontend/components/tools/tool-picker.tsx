@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import {
-  CheckIcon,
   LoaderCircleIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -60,6 +59,7 @@ export function ToolPicker({
   const [error, setError] = React.useState<string | null>(null)
   const requestRef = React.useRef(0)
   const searchRef = React.useRef<HTMLInputElement>(null)
+  const optionRefs = React.useRef<Array<HTMLInputElement | null>>([])
   const returnFocusRef = React.useRef<HTMLElement | null>(null)
 
   const load = React.useCallback(async () => {
@@ -193,6 +193,11 @@ export function ToolPicker({
               role="searchbox"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowDown" || !usableTools.length) return
+                event.preventDefault()
+                optionRefs.current[0]?.focus()
+              }}
               className="bg-muted/20 pl-9"
               placeholder={t("按名称、描述或来源搜索工具")}
               disabled={Boolean(error)}
@@ -256,7 +261,7 @@ export function ToolPicker({
                 )
               })}
 
-              {usableTools.map((tool) => {
+              {usableTools.map((tool, index) => {
                 const reference = selected.get(tool.id)
                 const checked = Boolean(reference)
                 const hasNewVersion = Boolean(
@@ -266,19 +271,47 @@ export function ToolPicker({
                 return (
                   <label
                     key={tool.id}
-                    className={`group flex items-start gap-3 rounded-xl border p-3.5 transition-[border-color,background-color,box-shadow] ${
+                    className={`group flex items-start gap-3 rounded-xl border p-3.5 transition-[border-color,background-color,box-shadow] focus-within:ring-2 focus-within:ring-ring ${
                       checked
                         ? "border-foreground/20 bg-muted/70 shadow-xs"
                         : "border-border/70 hover:border-foreground/20 hover:bg-muted/35"
                     } ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
                   >
                     <input
+                      ref={(element) => {
+                        optionRefs.current[index] = element
+                      }}
                       type="checkbox"
-                      className="sr-only"
+                      className="mt-1 size-5 shrink-0 accent-foreground"
                       aria-label={toolDisplayName(tool, t)}
                       checked={checked}
                       disabled={disabled}
                       onChange={() => toggle(tool)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault()
+                          toggle(tool)
+                          return
+                        }
+                        if (
+                          !["ArrowDown", "ArrowUp", "Home", "End"].includes(
+                            event.key
+                          )
+                        ) {
+                          return
+                        }
+                        event.preventDefault()
+                        const nextIndex =
+                          event.key === "Home"
+                            ? 0
+                            : event.key === "End"
+                              ? usableTools.length - 1
+                              : event.key === "ArrowDown"
+                                ? (index + 1) % usableTools.length
+                                : (index - 1 + usableTools.length) %
+                                  usableTools.length
+                        optionRefs.current[nextIndex]?.focus()
+                      }}
                     />
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-700 dark:text-sky-400">
                       <WrenchIcon className="size-4" />
@@ -316,16 +349,6 @@ export function ToolPicker({
                           {t("升级到当前版本")}
                         </Button>
                       ) : null}
-                    </span>
-                    <span
-                      className={`mt-1 flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                        checked
-                          ? "border-foreground bg-foreground text-background"
-                          : "border-muted-foreground/30 text-transparent group-hover:border-muted-foreground/60"
-                      }`}
-                      aria-hidden="true"
-                    >
-                      <CheckIcon className="size-3.5" />
                     </span>
                   </label>
                 )

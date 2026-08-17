@@ -769,7 +769,9 @@ describe("KnowledgeBasePage list view", () => {
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
-    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe("没有权限")
+    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
+      "资源不存在或无权访问"
+    )
   })
 
   test("deletes a knowledge base after confirmation", async () => {

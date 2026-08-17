@@ -658,7 +658,7 @@ describe("PythonToolDialog", () => {
     await screen.findByDisplayValue("Formatter")
     fireEvent.click(screen.getByRole("button", { name: "发布" }))
     await waitFor(() =>
-      expect(messages).toContain("publish rejected by policy")
+      expect(messages).toContain("资源不存在或无权访问")
     )
   })
 

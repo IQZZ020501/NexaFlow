@@ -1,7 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { LoaderCircleIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-react"
+import {
+  LoaderCircleIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  ShieldCheckIcon,
+} from "lucide-react"
 
 import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { Badge } from "@/components/ui/badge"
@@ -14,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/contexts/language-provider"
 import {
   listAllToolPermissions,
@@ -46,6 +52,7 @@ export function ToolPermissionsDialog({
   const { t } = useLanguage()
   const [members, setMembers] = React.useState<WorkspaceMember[]>([])
   const [permissions, setPermissions] = React.useState<ToolPermission[]>([])
+  const [search, setSearch] = React.useState("")
   const [isLoading, setIsLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [busyUserId, setBusyUserId] = React.useState<string | null>(null)
@@ -98,6 +105,14 @@ export function ToolPermissionsDialog({
     (member) =>
       member.user.is_active && member.user.id !== tool?.created_by_user_id
   )
+  const query = search.trim().toLowerCase()
+  const filteredTargets = targets.filter(
+    (member) =>
+      !query ||
+      `${member.user.name} ${member.user.username} ${member.user.email}`
+        .toLowerCase()
+        .includes(query)
+  )
 
   async function update(userId: string, value: GrantValue) {
     if (!tool || busyUserId) return
@@ -132,7 +147,11 @@ export function ToolPermissionsDialog({
   return (
     <Dialog
       open={open}
-      onOpenChange={(nextOpen) => !busyUserId && onOpenChange(nextOpen)}
+      onOpenChange={(nextOpen) => {
+        if (busyUserId) return
+        if (!nextOpen) setSearch("")
+        onOpenChange(nextOpen)
+      }}
     >
       <DialogContent className="max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
@@ -173,48 +192,69 @@ export function ToolPermissionsDialog({
             </Button>
           </div>
         ) : targets.length ? (
-          <div className="divide-y rounded-lg border">
-            {targets.map((member) => {
-              const value = permissionByUserId.get(member.user.id) ?? "none"
-              return (
-                <div
-                  key={member.user.id}
-                  className="flex items-center gap-3 p-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {member.user.name}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {member.user.username}
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="hidden sm:inline-flex">
-                    {t(member.role === "admin" ? "管理员" : "成员")}
-                  </Badge>
-                  <FilterDropdown
-                    ariaLabel={t("{name} 的工具权限", {
-                      name: member.user.name,
-                    })}
-                    value={value}
-                    disabled={Boolean(busyUserId)}
-                    modal={false}
-                    className="w-32"
-                    options={[
-                      { value: "none", label: t("无权限") },
-                      { value: "view", label: t("查看") },
-                      { value: "use", label: t("使用") },
-                    ]}
-                    onChange={(nextValue) =>
-                      void update(member.user.id, nextValue as GrantValue)
-                    }
-                  />
-                  {busyUserId === member.user.id ? (
-                    <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
-                  ) : null}
-                </div>
-              )
-            })}
+          <div className="space-y-3">
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                role="searchbox"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="pl-9"
+                placeholder={t("搜索成员")}
+              />
+            </div>
+            {filteredTargets.length ? (
+              <div className="divide-y rounded-lg border">
+                {filteredTargets.map((member) => {
+                  const value = permissionByUserId.get(member.user.id) ?? "none"
+                  return (
+                    <div
+                      key={member.user.id}
+                      className="flex items-center gap-3 p-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">
+                          {member.user.name}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {member.user.username}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className="hidden sm:inline-flex"
+                      >
+                        {t(member.role === "admin" ? "管理员" : "成员")}
+                      </Badge>
+                      <FilterDropdown
+                        ariaLabel={t("{name} 的工具权限", {
+                          name: member.user.name,
+                        })}
+                        value={value}
+                        disabled={Boolean(busyUserId)}
+                        modal={false}
+                        className="w-32"
+                        options={[
+                          { value: "none", label: t("无权限") },
+                          { value: "view", label: t("查看") },
+                          { value: "use", label: t("使用") },
+                        ]}
+                        onChange={(nextValue) =>
+                          void update(member.user.id, nextValue as GrantValue)
+                        }
+                      />
+                      {busyUserId === member.user.id ? (
+                        <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="flex min-h-40 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
+                {t("没有匹配的成员")}
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex min-h-40 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">
@@ -225,7 +265,10 @@ export function ToolPermissionsDialog({
         <DialogFooter>
           <Button
             type="button"
-            onClick={() => onOpenChange(false)}
+            onClick={() => {
+              setSearch("")
+              onOpenChange(false)
+            }}
             disabled={Boolean(busyUserId)}
           >
             {t("完成")}

@@ -1585,6 +1585,18 @@ function NodeConfigFields({
     selectedDirectTool?.version_id === directToolReference?.version_id
       ? selectedDirectTool
       : undefined
+  const directToolUnavailable = Boolean(
+    directToolReference &&
+    (!selectedDirectTool ||
+      !selectedDirectTool.can_use ||
+      selectedDirectTool.status !== "active" ||
+      selectedDirectTool.availability !== "available")
+  )
+  const directToolCurrentVersionId = selectedDirectTool?.current_version_id
+  const directToolHasNewVersion = Boolean(
+    directToolCurrentVersionId &&
+    directToolCurrentVersionId !== directToolReference?.version_id
+  )
   const directToolArguments =
     config.arguments &&
     typeof config.arguments === "object" &&
@@ -2787,6 +2799,32 @@ function NodeConfigFields({
               disabled
             />
           </label>
+          {directToolUnavailable ? (
+            <div
+              role="alert"
+              className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs leading-5 text-amber-900 dark:text-amber-200"
+            >
+              <p className="font-medium">{t("工具已不可用或授权已撤销")}</p>
+              <p>{t("可从节点菜单移除该工具")}</p>
+            </div>
+          ) : !readOnly && directToolHasNewVersion ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (!selectedDirectTool || !directToolCurrentVersionId) return
+                updateConfig({
+                  tool: {
+                    tool_id: selectedDirectTool.id,
+                    version_id: directToolCurrentVersionId,
+                  },
+                })
+              }}
+            >
+              {t("升级到当前版本")}
+            </Button>
+          ) : null}
           <ToolArgumentsFields
             key={`${directToolReference?.tool_id ?? "tool"}:${directToolReference?.version_id ?? "version"}`}
             nodeId={nodeId}
