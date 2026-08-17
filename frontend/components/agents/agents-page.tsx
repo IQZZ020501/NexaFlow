@@ -123,6 +123,20 @@ const EMPTY_FORM: AgentFormState = {
   status: "active",
 }
 
+type ToolCatalogState = {
+  agentId: string | null
+  workspaceId: string | null
+  tools: ToolDetail[]
+  error: string | null
+}
+
+const EMPTY_TOOL_CATALOG: ToolCatalogState = {
+  agentId: null,
+  workspaceId: null,
+  tools: [],
+  error: null,
+}
+
 function formFromAgent(agent: Agent): AgentFormState {
   return {
     id: agent.id,
@@ -366,10 +380,9 @@ export function AgentsPage({
     []
   )
   const [mcpServers, setMcpServers] = React.useState<McpServer[]>([])
-  const [tools, setTools] = React.useState<ToolDetail[]>([])
   const [workflowAgents, setWorkflowAgents] = React.useState<Agent[]>([])
-  const [isToolsLoading, setIsToolsLoading] = React.useState(false)
-  const [toolsError, setToolsError] = React.useState<string | null>(null)
+  const [toolCatalog, setToolCatalog] =
+    React.useState<ToolCatalogState>(EMPTY_TOOL_CATALOG)
   const [runs, setRuns] = React.useState<AgentRun[]>([])
   const [toolCallsByRun, setToolCallsByRun] = React.useState<
     Record<string, AgentToolCall[]>
@@ -426,6 +439,14 @@ export function AgentsPage({
 
   const selectedAgent =
     agents.find((agent) => agent.id === selectedAgentId) ?? null
+  const hasCurrentToolCatalog =
+    toolCatalog.agentId === selectedAgentId &&
+    toolCatalog.workspaceId === selectedWorkspaceId
+  const tools = hasCurrentToolCatalog ? toolCatalog.tools : []
+  const toolsError = hasCurrentToolCatalog ? toolCatalog.error : null
+  const isToolsLoading = Boolean(
+    selectedAgentId && selectedWorkspaceId && token && !hasCurrentToolCatalog
+  )
   const selectedAppType = selectedAgent?.app_type ?? null
   const isDirty = selectedAgent ? isAgentFormDirty(form, selectedAgent) : false
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
@@ -452,15 +473,8 @@ export function AgentsPage({
 
   const loadToolCatalog = React.useCallback(async () => {
     const requestId = ++toolCatalogRequestRef.current
-    if (!token || !selectedWorkspaceId) {
-      setTools([])
-      setToolsError(null)
-      setIsToolsLoading(false)
-      return
-    }
+    if (!token || !selectedWorkspaceId || !selectedAgentId) return
 
-    setIsToolsLoading(true)
-    setToolsError(null)
     try {
       const toolSummaries = await listAllTools(token, selectedWorkspaceId)
       const toolDetails = await Promise.allSettled(
@@ -469,28 +483,33 @@ export function AgentsPage({
           .map((tool) => getTool(token, selectedWorkspaceId, tool.id))
       )
       if (requestId !== toolCatalogRequestRef.current) return
-      setTools(
-        toolDetails.flatMap((result) =>
-          result.status === "fulfilled" ? [result.value] : []
-        )
-      )
       const failedDetail = toolDetails.find(
         (result): result is PromiseRejectedResult =>
           result.status === "rejected"
       )
-      setToolsError(
-        failedDetail ? getErrorMessage(failedDetail.reason, t) : null
-      )
+      setToolCatalog({
+        agentId: selectedAgentId,
+        workspaceId: selectedWorkspaceId,
+        tools: toolDetails.flatMap((result) =>
+          result.status === "fulfilled" ? [result.value] : []
+        ),
+        error: failedDetail ? getErrorMessage(failedDetail.reason, t) : null,
+      })
     } catch (error) {
       if (requestId !== toolCatalogRequestRef.current) return
-      setTools([])
-      setToolsError(getErrorMessage(error, t))
-    } finally {
-      if (requestId === toolCatalogRequestRef.current) {
-        setIsToolsLoading(false)
-      }
+      setToolCatalog({
+        agentId: selectedAgentId,
+        workspaceId: selectedWorkspaceId,
+        tools: [],
+        error: getErrorMessage(error, t),
+      })
     }
-  }, [selectedWorkspaceId, t, token])
+  }, [selectedAgentId, selectedWorkspaceId, t, token])
+
+  const retryToolCatalog = React.useCallback(() => {
+    setToolCatalog(EMPTY_TOOL_CATALOG)
+    void loadToolCatalog()
+  }, [loadToolCatalog])
 
   const loadWorkflowAgents = React.useCallback(async () => {
     const requestId = ++workflowAgentsRequestRef.current
@@ -594,9 +613,7 @@ export function AgentsPage({
       setModels([])
       setKnowledgeBases([])
       setMcpServers([])
-      setTools([])
-      setToolsError(null)
-      setIsToolsLoading(false)
+      setToolCatalog(EMPTY_TOOL_CATALOG)
       setWorkflowAgents([])
       setListedAgentsCount(0)
       setHasLoadedWorkspaceData(false)
@@ -689,6 +706,7 @@ export function AgentsPage({
       toolCatalogRequestRef.current += 1
       return
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadToolCatalog()
     return () => {
       toolCatalogRequestRef.current += 1
@@ -1520,7 +1538,7 @@ export function AgentsPage({
             agents={workflowAgents}
             isToolsLoading={isToolsLoading}
             toolsError={toolsError}
-            onRetryTools={() => void loadToolCatalog()}
+            onRetryTools={retryToolCatalog}
             token={token}
             workspaceId={selectedWorkspaceId}
             canManagePublishing={canManagePublishing}
