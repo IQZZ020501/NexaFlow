@@ -8,17 +8,26 @@ SUITES=(unit logger identity workspaces teams knowledge llm agents workflows too
 
 if [[ "${1:-}" != "--report-only" ]]; then
   rm -f .coverage .coverage.*
-  pids=()
-  for suite in "${SUITES[@]}"; do
-    KNOWLEDGE_STORAGE_DIR="/tmp/app-test-knowledge-storage-$suite" \
-      uv run coverage run --source=app --data-file=".coverage.$suite" -m "tests.$suite" &
-    pids+=("$!")
-  done
-  failed=0
-  for pid in "${pids[@]}"; do
-    wait "$pid" || failed=1
-  done
-  if [[ "$failed" -ne 0 ]]; then
+  COVERAGE_RUN_ID="$$"
+  export COVERAGE_RUN_ID
+  run_coverage_suite() {
+    local suite="$1"
+    local log_path="/tmp/nexaflow-coverage-${COVERAGE_RUN_ID}-${suite}.log"
+    if KNOWLEDGE_STORAGE_DIR="/tmp/app-test-knowledge-storage-$suite" \
+      uv run coverage run --source=app --data-file=".coverage.$suite" -m "tests.$suite" \
+      >"$log_path" 2>&1; then
+      echo "$suite tests passed"
+      rm -f "$log_path"
+      return 0
+    fi
+    cat "$log_path" >&2
+    rm -f "$log_path"
+    return 1
+  }
+  export -f run_coverage_suite
+  # ponytail: four workers avoid local service starvation; override after measuring CI capacity.
+  if ! printf '%s\n' "${SUITES[@]}" | xargs -P "${COVERAGE_JOBS:-4}" -n 1 \
+    bash -c 'run_coverage_suite "$1"' _; then
     echo "one or more suites failed" >&2
     exit 1
   fi
