@@ -30,6 +30,5 @@ export function toolSourceDisplayName(
   t: TFunction
 ) {
   if (source.kind === "builtin") return t("内置")
-  if (source.kind === "python") return t("Python")
   return source.name
 }
