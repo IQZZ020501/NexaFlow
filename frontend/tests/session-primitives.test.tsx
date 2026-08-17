@@ -470,7 +470,7 @@ describe("SessionProvider", () => {
     }
     renderSession()
     await waitFor(() => expect(screen.getByTestId("token").textContent).toBe("renewed-token"))
-    expect(screen.getByTestId("me").textContent).toBe("admin")
+    await waitFor(() => expect(screen.getByTestId("me").textContent).toBe("admin"))
     expect(refreshCalls).toBe(2)
   })
 
