@@ -3,6 +3,7 @@ from app.application.agent_executor import (
     run_durable_legacy_agent_run,
     run_durable_unified_agent_run,
 )
+from app.application.agent_child_runs import reconcile_workflow_agent_children
 from app.application.workflow_executor import run_durable_workflow_run
 from app.infrastructure.config import Settings
 from app.infrastructure.repositories import workflow as workflow_repository
@@ -30,4 +31,9 @@ async def run_durable_application_run(
         if generation == "unified"
         else run_durable_legacy_agent_run
     )
-    return await runner(run_id, settings, worker_task_id)
+    outcome = await runner(run_id, settings, worker_task_id)
+    await reconcile_workflow_agent_children(
+        settings,
+        child_run_id=run_id,
+    )
+    return outcome

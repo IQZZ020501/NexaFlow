@@ -48,7 +48,9 @@ from app.schemas.workflow import (
     ToolNodeConfig,
     VariableNodeConfig,
     WorkflowNode,
+    WorkflowAgentNodeConfig,
 )
+from app.shareddomain.agents.models import AGENT_RUN_SUCCEEDED_STATUS
 from app.shareddomain.agents.runtime.graph import model_completion
 from app.shareddomain.agents.runtime.tools import AgentToolResult
 from app.shareddomain.agents.runtime.usage import merge_usage, usage_from_message
@@ -74,6 +76,7 @@ class WorkflowNodeScope:
         default_factory=dict
     )
     form_submissions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    child_runs: dict[str, AgentRun] = field(default_factory=dict)
     output_delta: Callable[[str, str], Awaitable[None]] | None = None
 
 
@@ -700,6 +703,31 @@ async def execute_workflow_node(
         return NodeResult(
             inputs={"form_data": submitted},
             outputs={**submitted, "form_data": submitted, "result": result},
+        )
+    if node_type == "agent":
+        parsed = WorkflowAgentNodeConfig.model_validate(config)
+        input_value = resolve_value(parsed.input, context)
+        child = scope.child_runs.get(node.id)
+        if child is None or child.status != AGENT_RUN_SUCCEEDED_STATUS:
+            if child is not None and child.status in {"failed", "cancelled"}:
+                raise ValueError(child.last_error or "Workflow Agent run failed.")
+            request = {
+                "runtime_node_id": node.id,
+                "agent_version_id": parsed.agent_version_id,
+                "input": input_value,
+                "remaining_model_tokens": context.remaining_model_tokens,
+            }
+            return NodeResult(inputs={"input": input_value}, child_request=request)
+        usage = dict(child.model_usage or {})
+        return NodeResult(
+            inputs={"input": input_value, "child_run_id": child.id},
+            outputs={
+                "result": child.result,
+                "text": child.result,
+                "child_run_id": child.id,
+            },
+            model_tokens=int(usage.get("total_tokens") or 0),
+            model_usage=usage,
         )
     if node_type == "document-extract-node":
         parsed = DocumentExtractNodeConfig.model_validate(config)

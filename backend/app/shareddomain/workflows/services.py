@@ -28,6 +28,7 @@ from app.shareddomain.agents.services import (
     get_agent,
     get_agent_model,
 )
+from app.shareddomain.agents.publications import agent_publication_hash
 from app.shareddomain.knowledge.services import (
     ACTIVE_STATUS as KNOWLEDGE_ACTIVE_STATUS,
     RESOURCE_TYPE as KNOWLEDGE_RESOURCE_TYPE,
@@ -44,6 +45,7 @@ from app.shareddomain.tools.bindings import (
     sync_application_tool_bindings,
 )
 from app.shareddomain.tools.catalog import build_inline_python_tool
+from app.shareddomain.tools.runtime import tool_snapshot_from_payload
 from app.shareddomain.workflows.defaults import default_workflow_graph
 from app.shareddomain.workflows.engine import (
     WorkflowValidationError,
@@ -56,10 +58,81 @@ from app.shareddomain.workflows.resources import (
     legacy_mcp_references as canonical_legacy_mcp_references,
     select_tool_snapshots,
     workflow_resource_hash,
+    workflow_agent_version_references,
     workflow_resource_references as canonical_workflow_resource_references,
 )
 
 OUTPUT_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+async def _workflow_agent_snapshots(
+    db: AsyncSession,
+    workspace_id: str,
+    graph: WorkflowGraph,
+    actor: User,
+    workspace_role: str | None,
+) -> list[dict[str, Any]]:
+    snapshots: list[dict[str, Any]] = []
+    for version_id in workflow_agent_version_references(graph):
+        version = await agent_repository.get_agent_publication_version(
+            db,
+            workspace_id,
+            version_id,
+        )
+        if version is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "Agent publication version not found.",
+            )
+        target = await get_agent(db, workspace_id, version.agent_id)
+        await require_agent_view(db, target, actor, workspace_role)
+        if (
+            target.app_type != "agent"
+            or target.status != "active"
+            or not target.published
+            or target.current_published_version_id is None
+            or version.schema_version != 1
+            or agent_publication_hash(
+                version.configuration_snapshot,
+                version.resource_snapshot,
+            )
+            != version.configuration_hash
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Workflow Agent publication is unavailable.",
+            )
+        try:
+            tools = [
+                tool_snapshot_from_payload(item)
+                for item in version.resource_snapshot.get("tools", [])
+            ]
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Workflow Agent publication is invalid.",
+            ) from exc
+        if any(
+            tool.approval != "auto"
+            or tool.effect not in {"pure", "external_read"}
+            for tool in tools
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Workflow Agent Tools must be automatic and read-only.",
+            )
+        snapshots.append(
+            {
+                "agent_id": target.id,
+                "version_id": version.id,
+                "version_number": version.version_number,
+                "configuration_hash": version.configuration_hash,
+                "configuration_snapshot": version.configuration_snapshot,
+                "resource_snapshot": version.resource_snapshot,
+                "bound_by_user_id": actor.id,
+            }
+        )
+    return snapshots
 
 
 def definition_to_response(definition: WorkflowDefinition) -> WorkflowDefinitionResponse:
@@ -193,9 +266,17 @@ async def prepare_workflow_resources(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "This Workflow Tool can only be used as a direct node.",
         )
+    agent_snapshots = await _workflow_agent_snapshots(
+        db,
+        agent.workspace_id,
+        canonical,
+        actor,
+        workspace_role,
+    )
     resource_snapshot = build_workflow_resource_snapshot(
         _knowledge_base_ids,
         snapshots,
+        agent_snapshots,
     )
     return (
         canonical,

@@ -84,6 +84,10 @@ class AgentRun:
     access_source: str = "console"
     consumer_id: str = ""
     conversation_id: str = field(default_factory=new_id)
+    root_run_id: str = ""
+    parent_run_id: str | None = None
+    parent_node_id: str | None = None
+    depth: int = 0
     goal: str = ""
     attachment_context: str = ""
     instructions: str = ""
@@ -119,6 +123,7 @@ class AgentRun:
     updated_at: datetime = field(default_factory=utc_now)
 
     def __post_init__(self) -> None:
+        self.root_run_id = self.root_run_id or self.id
         if self.access_source == "console" and self.requested_by_user_id:
             self.execution_user_id = self.execution_user_id or self.requested_by_user_id
             self.consumer_id = self.consumer_id or self.requested_by_user_id

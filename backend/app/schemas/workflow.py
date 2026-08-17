@@ -25,6 +25,7 @@ WorkflowNodeType = Literal[
     "template",
     "variable",
     "tool",
+    "agent",
     "mcp",
     "code",
 ]
@@ -405,6 +406,11 @@ class ToolNodeConfig(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
+class WorkflowAgentNodeConfig(BaseModel):
+    agent_version_id: str = Field(min_length=1, max_length=36)
+    input: Any
+
+
 class McpNodeConfig(BaseModel):
     server_id: str = Field(min_length=1, max_length=36)
     tool_name: str = Field(min_length=1, max_length=255)
@@ -491,7 +497,14 @@ class WorkflowNodeExecutionResponse(BaseModel):
     run_id: str
     node_id: str
     node_type: WorkflowNodeType
-    status: Literal["running", "awaiting_input", "succeeded", "failed", "skipped"]
+    status: Literal[
+        "running",
+        "awaiting_input",
+        "awaiting_child",
+        "succeeded",
+        "failed",
+        "skipped",
+    ]
     sequence: int
     inputs: dict[str, Any]
     outputs: dict[str, Any]
@@ -573,7 +586,14 @@ class ExternalWorkflowProgressEventResponse(BaseModel):
     id: str
     node_id: str
     node_type: WorkflowNodeType
-    status: Literal["running", "awaiting_input", "succeeded", "failed", "skipped"]
+    status: Literal[
+        "running",
+        "awaiting_input",
+        "awaiting_child",
+        "succeeded",
+        "failed",
+        "skipped",
+    ]
     error: str | None = None
     duration_ms: int | None = None
 

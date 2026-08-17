@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.application.tool_runtime import (
@@ -20,6 +20,7 @@ from app.infrastructure.session import get_session_factory
 from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
 from app.shareddomain.agents.runtime import (
     AgentExecutionPaused,
+    AgentRunnerError,
     AgentToolBusy,
     AgentToolResult,
     AgentToolUncertain,
@@ -97,13 +98,12 @@ class UnifiedAgentToolRuntime:
         context = ToolInvocationContext(
             workspace_id=self.run.workspace_id,
             origin="agent",
-            root_run_id=self.run.id,
+            root_run_id=self.run.root_run_id,
             run_id=self.run.id,
             invocation_id=invocation_id,
             execution_user_id=self.run.execution_user_id,
             access_source=self.run.access_source,
-            deadline_at=utc_now()
-            + timedelta(seconds=self.settings.agent_tool_timeout_seconds),
+            deadline_at=self._tool_deadline(),
             idempotency_key=idempotency_key,
         )
         try:
@@ -125,6 +125,10 @@ class UnifiedAgentToolRuntime:
             )
 
         if invocation.status == TOOL_INVOCATION_AWAITING_APPROVAL:
+            if self.run.depth == 1:
+                raise AgentRunnerError(
+                    "Nested Agent Tool approval is not allowed."
+                )
             raise AgentExecutionPaused(
                 invocation_id,
                 "Tool call requires user approval.",
@@ -139,16 +143,38 @@ class UnifiedAgentToolRuntime:
             raise AgentToolBusy(call["id"], str(exc)) from exc
         mapped = tool_runtime_result_to_agent_result(result)
         if mapped.outcome_uncertain:
+            if self.run.depth == 1:
+                raise AgentRunnerError("Nested Agent Tool outcome is uncertain.")
             raise AgentToolUncertain(
                 invocation_id,
                 result.error_message or result.summary or "Tool outcome is uncertain.",
             )
         if result.error_code == "approval_required":
+            if self.run.depth == 1:
+                raise AgentRunnerError(
+                    "Nested Agent Tool approval is not allowed."
+                )
             raise AgentExecutionPaused(
                 invocation_id,
                 "Tool call requires user approval.",
             )
         return mapped
+
+    def _tool_deadline(self) -> datetime:
+        deadline = utc_now() + timedelta(
+            seconds=self.settings.agent_tool_timeout_seconds
+        )
+        if self.run.depth != 1:
+            return deadline
+        limits = self.run.application_snapshot.get("runtime_limits")
+        if not isinstance(limits, dict):
+            return deadline
+        value = limits.get("deadline_at")
+        try:
+            root_deadline = datetime.fromisoformat(str(value))
+        except ValueError:
+            return deadline
+        return min(deadline, root_deadline) if root_deadline.tzinfo else deadline
 
 
 __all__ = [

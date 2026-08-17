@@ -26,6 +26,7 @@ AGENT_RUN_PLANNED_STATUS = "planned"
 AGENT_RUN_RUNNING_STATUS = "running"
 AGENT_RUN_AWAITING_APPROVAL_STATUS = "awaiting_approval"
 AGENT_RUN_AWAITING_INPUT_STATUS = "awaiting_input"
+AGENT_RUN_AWAITING_CHILD_STATUS = "awaiting_child"
 AGENT_RUN_SUCCEEDED_STATUS = "succeeded"
 AGENT_RUN_FAILED_STATUS = "failed"
 AGENT_RUN_CANCELLED_STATUS = "cancelled"
@@ -33,6 +34,7 @@ AGENT_RUN_UNIFIED_QUEUED_STATUS = "queued_v2"
 AGENT_RUN_UNIFIED_RUNNING_STATUS = "running_v2"
 AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS = "awaiting_approval_v2"
 AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS = "awaiting_input_v2"
+AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS = "awaiting_child_v2"
 AGENT_RUN_LEGACY_CLAIMABLE_STATUSES = (
     AGENT_RUN_QUEUED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
@@ -53,6 +55,10 @@ AGENT_RUN_AWAITING_INPUT_STATUSES = (
     AGENT_RUN_AWAITING_INPUT_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
 )
+AGENT_RUN_AWAITING_CHILD_STATUSES = (
+    AGENT_RUN_AWAITING_CHILD_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
+)
 AGENT_RUN_ACTIVE_STATUSES = (
     AGENT_RUN_QUEUED_STATUS,
     AGENT_RUN_PLANNING_STATUS,
@@ -60,10 +66,12 @@ AGENT_RUN_ACTIVE_STATUSES = (
     AGENT_RUN_RUNNING_STATUS,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
     AGENT_RUN_AWAITING_INPUT_STATUS,
+    AGENT_RUN_AWAITING_CHILD_STATUS,
     AGENT_RUN_UNIFIED_QUEUED_STATUS,
     AGENT_RUN_UNIFIED_RUNNING_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
 )
 
 
@@ -73,6 +81,7 @@ def is_unified_agent_run_status(value: str) -> bool:
         AGENT_RUN_UNIFIED_RUNNING_STATUS,
         AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
         AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
     }
 
 
@@ -82,6 +91,7 @@ def agent_run_display_status(value: str) -> str:
         AGENT_RUN_UNIFIED_RUNNING_STATUS: AGENT_RUN_RUNNING_STATUS,
         AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS: AGENT_RUN_AWAITING_APPROVAL_STATUS,
         AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS: AGENT_RUN_AWAITING_INPUT_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS: AGENT_RUN_AWAITING_CHILD_STATUS,
     }.get(value, value)
 
 
@@ -103,6 +113,10 @@ def agent_run_storage_statuses(value: str) -> tuple[str, ...]:
         AGENT_RUN_AWAITING_INPUT_STATUS: (
             AGENT_RUN_AWAITING_INPUT_STATUS,
             AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+        ),
+        AGENT_RUN_AWAITING_CHILD_STATUS: (
+            AGENT_RUN_AWAITING_CHILD_STATUS,
+            AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
         ),
     }.get(value, (value,))
 
@@ -358,14 +372,38 @@ class AgentRun(Base):
             ],
             name="fk_agent_runs_publication_workspace",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "root_run_id"],
+            ["agent_runs.workspace_id", "agent_runs.id"],
+            name="fk_agent_runs_root_workspace",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "parent_run_id"],
+            ["agent_runs.workspace_id", "agent_runs.id"],
+            name="fk_agent_runs_parent_workspace",
+            ondelete="CASCADE",
+        ),
         CheckConstraint(
-            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'queued_v2', 'running_v2', 'awaiting_approval_v2', 'awaiting_input_v2', 'succeeded', 'failed', 'cancelled')",
+            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'awaiting_child', 'queued_v2', 'running_v2', 'awaiting_approval_v2', 'awaiting_input_v2', 'awaiting_child_v2', 'succeeded', 'failed', 'cancelled')",
             name="ck_agent_runs_status",
         ),
         UniqueConstraint(
             "workspace_id",
             "id",
             name="uq_agent_runs_workspace_id",
+        ),
+        UniqueConstraint(
+            "parent_run_id",
+            "parent_node_id",
+            name="uq_agent_runs_parent_node",
+        ),
+        CheckConstraint(
+            "(depth = 0 AND parent_run_id IS NULL AND parent_node_id IS NULL "
+            "AND root_run_id = id) OR "
+            "(depth = 1 AND parent_run_id IS NOT NULL AND parent_node_id IS NOT NULL "
+            "AND root_run_id = parent_run_id)",
+            name="ck_agent_runs_parent_depth",
         ),
         CheckConstraint(
             "knowledge_query_mode IN ('required', 'agentic')",
@@ -392,10 +430,10 @@ class AgentRun(Base):
         CheckConstraint(
             "(configuration_source IN ('draft', 'published') AND status IN "
             "('queued_v2', 'running_v2', 'awaiting_approval_v2', "
-            "'awaiting_input_v2', 'succeeded', 'failed', 'cancelled')) OR "
+            "'awaiting_input_v2', 'awaiting_child_v2', 'succeeded', 'failed', 'cancelled')) OR "
             "(configuration_source = 'legacy' AND status IN "
             "('queued', 'planning', 'planned', 'running', 'awaiting_approval', "
-            "'awaiting_input', 'succeeded', 'failed', 'cancelled'))",
+            "'awaiting_input', 'awaiting_child', 'succeeded', 'failed', 'cancelled'))",
             name="ck_agent_runs_worker_generation",
         ),
         CheckConstraint(
@@ -442,6 +480,12 @@ class AgentRun(Base):
     conversation_id: Mapped[str] = mapped_column(
         String(36), nullable=False, default=new_id
     )
+    root_run_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    parent_run_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    parent_node_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     goal: Mapped[str] = mapped_column(Text, nullable=False)
     attachment_context: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=""

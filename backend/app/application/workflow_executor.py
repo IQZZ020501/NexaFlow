@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass, replace as dataclass_replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import json
 import traceback
 from typing import Any
@@ -10,6 +10,10 @@ from app.application.agent_executor import (
     RUN_BUSY,
     RUN_FINISHED,
     maintain_agent_run_lease,
+)
+from app.application.agent_child_runs import (
+    ensure_workflow_agent_child,
+    preflight_workflow_agent_snapshots,
 )
 from app.application.workflow_nodes import WorkflowNodeScope, execute_workflow_node
 from app.application.workflow_tool_runtime import WorkflowToolRuntime
@@ -58,8 +62,12 @@ from app.shareddomain.workflows.engine import (
     WorkflowEngineError,
     WorkflowEngineState,
     WorkflowInputRequired,
+    WorkflowChildRequired,
 )
-from app.shareddomain.workflows.resources import load_workflow_resource_snapshot
+from app.shareddomain.workflows.resources import (
+    load_workflow_agent_snapshots,
+    load_workflow_resource_snapshot,
+)
 
 MAX_WORKFLOW_OUTPUT_BYTES = 256 * 1024
 WORKFLOW_HISTORY_LIMIT = 20
@@ -144,6 +152,8 @@ class WorkflowExecutionScope:
     models: dict[str, RegisteredModel]
     knowledge_bases: dict[str, KnowledgeBase]
     tool_snapshots: list[ToolSnapshot]
+    agent_snapshots: list[dict[str, Any]]
+    child_runs: dict[str, AgentRun]
 
 
 async def _load_scope(run_id: str) -> WorkflowExecutionScope:
@@ -165,6 +175,18 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
                 graph,
                 detail.resource_snapshot,
                 detail.resource_hash,
+            )
+            agent_snapshots = load_workflow_agent_snapshots(
+                graph,
+                detail.resource_snapshot,
+                detail.resource_hash,
+            )
+            await preflight_workflow_agent_snapshots(
+                db,
+                run.workspace_id,
+                agent_snapshots,
+                execution_user_id=run.execution_user_id,
+                access_source=run.access_source,
             )
         except ValueError as exc:
             raise WorkflowEngineError(
@@ -209,6 +231,17 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
             actor,
             context.membership_role,
         )
+        child_runs = {}
+        if agent_snapshots:
+            child_runs = {
+                child.parent_node_id: child
+                for child in await agent_repository.list_agent_child_runs(
+                    db,
+                    run.workspace_id,
+                    run.id,
+                )
+                if child.parent_node_id is not None
+            }
     return WorkflowExecutionScope(
         run=run,
         detail=detail,
@@ -217,6 +250,8 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
         models=models,
         knowledge_bases={item.id: item for item in knowledge_bases},
         tool_snapshots=tool_snapshots,
+        agent_snapshots=agent_snapshots,
+        child_runs=child_runs,
     )
 
 
@@ -275,6 +310,7 @@ async def _execute_claimed_workflow_run(
         knowledge_bases=scope.knowledge_bases,
         tool_runtime=tool_runtime,
         node_histories=node_histories,
+        child_runs=scope.child_runs,
         output_delta=output_delta,
     )
     engine = WorkflowEngine(
@@ -306,6 +342,7 @@ async def _execute_claimed_workflow_run(
         form_submissions=form_submissions,
     )
     node_errors: dict[str, Exception] = {}
+    pending_child_ids: dict[str, str] = {}
 
     async def execute(node, context):
         if lease_lost.is_set():
@@ -410,6 +447,44 @@ async def _execute_claimed_workflow_run(
                     checkpoint_payload["workflow_form_submissions"] = form_submissions
                 if transition.result.interrupt is not None:
                     checkpoint_payload["workflow_form"] = transition.result.interrupt
+                if transition.result.child_request is not None:
+                    request = transition.result.child_request
+                    version_id = request.get("agent_version_id")
+                    agent_snapshot = next(
+                        (
+                            item
+                            for item in scope.agent_snapshots
+                            if item.get("version_id") == version_id
+                        ),
+                        None,
+                    )
+                    if agent_snapshot is None:
+                        raise WorkflowEngineError(
+                            "Workflow Agent snapshot is missing.",
+                            node_id=transition.node.id,
+                        )
+                    child = await ensure_workflow_agent_child(
+                        db,
+                        run,
+                        transition.node.id,
+                        request.get("input"),
+                        agent_snapshot,
+                        scope.actor,
+                        scope.workspace_role,
+                        deadline_at=(
+                            detail.deadline_at
+                            if detail.deadline_at.tzinfo is not None
+                            else detail.deadline_at.replace(tzinfo=UTC)
+                        ).isoformat(),
+                        remaining_model_tokens=int(
+                            request.get("remaining_model_tokens") or 0
+                        ),
+                    )
+                    pending_child_ids[transition.node.id] = child.id
+                    checkpoint_payload["workflow_child"] = {
+                        "runtime_node_id": transition.node.id,
+                        "child_run_id": child.id,
+                    }
                 saved = await workflow_repository.finish_node_execution(
                     db, item, worker_task_id
                 )
@@ -444,6 +519,15 @@ async def _execute_claimed_workflow_run(
                 if not (saved and checkpoint_saved and detail_saved) or event is None:
                     lease_lost.set()
                     raise WorkflowEngineError("Workflow run lease was lost.")
+                if transition.result.child_request is not None:
+                    paused = await agent_repository.pause_agent_run_for_child(
+                        db,
+                        run.id,
+                        worker_task_id,
+                    )
+                    if not paused:
+                        lease_lost.set()
+                        raise WorkflowEngineError("Workflow run lease was lost.")
                 node_executions[transition.node.id] = item
                 await db.commit()
 
@@ -479,6 +563,24 @@ async def _execute_claimed_workflow_run(
                 )
             await db.commit()
         return RUN_FINISHED if paused else RUN_BUSY
+    except WorkflowChildRequired as exc:
+        node_id = str(exc.request.get("runtime_node_id") or "")
+        child_id = pending_child_ids.get(node_id)
+        if child_id is None:
+            async with get_session_factory()() as db:
+                child = await agent_repository.get_agent_child_run(
+                    db,
+                    run.workspace_id,
+                    run.id,
+                    node_id,
+                )
+            child_id = child.id if child is not None else None
+        if child_id is None:
+            raise WorkflowEngineError("Workflow Agent child was not persisted.")
+        from app.application.agent_runs import enqueue_prepared_agent_run
+
+        await enqueue_prepared_agent_run(child_id, settings, unified=True)
+        return RUN_FINISHED
     except WorkflowEngineError as exc:
         original = node_errors.get(exc.node_id or "")
         if original is not None:

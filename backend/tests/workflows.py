@@ -2374,6 +2374,154 @@ def test_workflow_llm_node_dialogue_history_and_params() -> None:
     asyncio.run(run())
 
 
+def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
+    from app.application.agent_child_runs import reconcile_workflow_agent_children
+    from app.infrastructure.repositories import agent as agent_repository
+    from app.infrastructure.session import get_session_factory
+    from tests.agents import agent_model_server, model_payload
+
+    with test_client() as client, agent_model_server() as model_base_url:
+        token, workspace_id = activate_admin(client)
+        headers = auth_headers(token)
+        model = client.post(
+            f"/api/v1/workspaces/{workspace_id}/models",
+            headers=headers,
+            json=model_payload(model_base_url, "Child Agent Model"),
+        )
+        assert model.status_code == 201, model.text
+        agent = client.post(
+            f"/api/v1/workspaces/{workspace_id}/agents",
+            headers=headers,
+            json={
+                "name": "Pinned child Agent",
+                "app_type": "agent",
+                "instructions": "Answer the explicit workflow input.",
+                "model_id": model.json()["id"],
+            },
+        )
+        assert agent.status_code == 201, agent.text
+        agent_id = agent.json()["id"]
+        published = client.patch(
+            f"/api/v1/workspaces/{workspace_id}/agents/{agent_id}",
+            headers=headers,
+            json={"published": True},
+        )
+        assert published.status_code == 200, published.text
+        pinned_version_id = published.json()["current_published_version_id"]
+
+        workflow = client.post(
+            f"/api/v1/workspaces/{workspace_id}/agents",
+            headers=headers,
+            json={
+                "name": "Agent child Workflow",
+                "app_type": "workflow",
+                "model_id": model.json()["id"],
+            },
+        )
+        assert workflow.status_code == 201, workflow.text
+        workflow_id = workflow.json()["id"]
+        base = f"/api/v1/workspaces/{workspace_id}/workflows/{workflow_id}"
+        definition = client.get(f"{base}/definition", headers=headers)
+        assert definition.status_code == 200, definition.text
+        agent_graph = {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "workflow",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"type": "start", "title": "Start", "config": {}},
+                },
+                {
+                    "id": "child",
+                    "type": "workflow",
+                    "position": {"x": 220, "y": 0},
+                    "data": {
+                        "type": "agent",
+                        "title": "Pinned Agent",
+                        "config": {
+                            "agent_version_id": pinned_version_id,
+                            "input": "{{start.question}}",
+                        },
+                    },
+                },
+                {
+                    "id": "end",
+                    "type": "workflow",
+                    "position": {"x": 440, "y": 0},
+                    "data": {
+                        "type": "end",
+                        "title": "End",
+                        "config": {"outputs": {"result": "{{child.result}}"}},
+                    },
+                },
+            ],
+            "edges": [
+                {"id": "e1", "source": "start", "target": "child"},
+                {"id": "e2", "source": "child", "target": "end"},
+            ],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+        }
+        saved = client.put(
+            f"{base}/definition",
+            headers=headers,
+            json={
+                "expected_revision": definition.json()["revision"],
+                "graph": agent_graph,
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        version = client.post(f"{base}/publish", headers=headers)
+        assert version.status_code == 201, version.text
+
+        republished = client.patch(
+            f"/api/v1/workspaces/{workspace_id}/agents/{agent_id}",
+            headers=headers,
+            json={"instructions": "New draft instructions", "published": True},
+        )
+        assert republished.status_code == 200, republished.text
+        assert republished.json()["current_published_version_id"] != pinned_version_id
+
+        run = client.post(
+            f"{base}/runs",
+            headers=headers,
+            json={
+                "source": "published",
+                "version_number": version.json()["version_number"],
+                "question": "ship this release",
+            },
+        )
+        assert run.status_code == 201, run.text
+        assert run.json()["status"] == "succeeded", run.text
+        assert run.json()["outputs"] == {"result": "Completed."}
+        parent_run_id = run.json()["id"]
+        nodes = client.get(f"{base}/runs/{parent_run_id}/nodes", headers=headers)
+        assert nodes.status_code == 200, nodes.text
+        child_node = next(
+            item for item in nodes.json()["items"] if item["node_id"] == "child"
+        )
+        assert child_node["status"] == "succeeded"
+        assert child_node["outputs"]["result"] == "Completed."
+
+    async def assert_lineage() -> None:
+        async with get_session_factory()() as db:
+            children = await agent_repository.list_agent_child_runs(
+                db,
+                workspace_id,
+                parent_run_id,
+            )
+            assert len(children) == 1
+            child = children[0]
+            assert child.root_run_id == parent_run_id
+            assert child.parent_run_id == parent_run_id
+            assert child.parent_node_id == "child"
+            assert child.depth == 1
+            assert child.agent_publication_version_id == pinned_version_id
+            assert child.goal == "ship this release"
+        assert await reconcile_workflow_agent_children() == []
+
+    asyncio.run(assert_lineage())
+
+
 def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
     from unittest.mock import patch
 
@@ -2535,6 +2683,7 @@ def main() -> None:
     test_upload_cleanup_tasks_are_registered()
     test_interaction_config_migration_upgrades_prerequisites()
     test_workflow_api_definition_publish_run_and_audit()
+    test_workflow_agent_node_runs_one_durable_pinned_child()
     print("WORKFLOW_SUITE_OK")
 
 

@@ -8,6 +8,7 @@ from app.application.agent_executor import (
     list_recoverable_unified_agent_run_ids,
 )
 from app.application.run_dispatch import run_durable_application_run
+from app.application.agent_child_runs import reconcile_workflow_agent_children
 from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
@@ -75,6 +76,7 @@ def run_unified_agent_job(self, run_id: str) -> None:
 def recover_agent_runs_job() -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
+    asyncio.run(reconcile_workflow_agent_children())
     run_ids = asyncio.run(list_recoverable_unified_agent_run_ids(settings))
     for run_id in run_ids:
         run_unified_agent_job.apply_async(args=(run_id,), queue="agents-v2")

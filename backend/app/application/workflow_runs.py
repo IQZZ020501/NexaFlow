@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.tool_runtime import preflight_tool_snapshot
+from app.application.agent_child_runs import preflight_workflow_agent_snapshots
 from app.application.workflow_uploads import resolve_workspace_workflow_files
 from app.entities.agents import AgentRun
 from app.entities.user import User
@@ -52,6 +53,7 @@ from app.shareddomain.tools.runtime import (
 from app.shareddomain.workflows.engine import graph_hash
 from app.shareddomain.workflows.resources import (
     canonicalize_workflow_snapshot_graph,
+    load_workflow_agent_snapshots,
     load_workflow_resource_snapshot,
 )
 from app.tasks.agents import enqueue_agent_run
@@ -275,6 +277,18 @@ async def create_workflow_run(
                 parsed,
                 version.resource_snapshot,
                 version.resource_hash,
+            )
+            agent_snapshots = load_workflow_agent_snapshots(
+                parsed,
+                version.resource_snapshot,
+                version.resource_hash,
+            )
+            await preflight_workflow_agent_snapshots(
+                db,
+                workspace_id,
+                agent_snapshots,
+                execution_user_id=actor.id,
+                access_source=access_source,
             )
         except ValueError as exc:
             raise HTTPException(

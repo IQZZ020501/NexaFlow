@@ -59,6 +59,10 @@ from app.shareddomain.agents.runtime import (
     safe_event_value,
 )
 from app.shareddomain.agents.runtime.state import PendingToolCall
+from app.shareddomain.agents.runtime.graph import (
+    MAX_AGENT_TOOL_CALLS,
+    MAX_AGENT_TURNS,
+)
 from app.shareddomain.agents.services import (
     accessible_agent_knowledge_bases,
     get_agent_model,
@@ -78,6 +82,47 @@ RUN_FINISHED = "finished"
 RUN_BUSY = "busy"
 RUN_AWAITING_APPROVAL = "awaiting_approval"
 AGENT_EVENT_REPLAY_PAGE_SIZE = 500
+
+
+def _run_limits(
+    run: AgentRun,
+    settings: Settings,
+) -> tuple[float, int, int, int | None]:
+    if run.depth == 0:
+        return (
+            float(settings.agent_run_timeout_seconds),
+            MAX_AGENT_TURNS,
+            MAX_AGENT_TOOL_CALLS,
+            None,
+        )
+    limits = run.application_snapshot.get("runtime_limits")
+    if run.depth != 1 or not isinstance(limits, dict):
+        raise AgentRunnerError("Nested Agent runtime limits are invalid.")
+    deadline_value = limits.get("deadline_at")
+    try:
+        deadline = datetime.fromisoformat(str(deadline_value))
+    except ValueError as exc:
+        raise AgentRunnerError("Nested Agent deadline is invalid.") from exc
+    if deadline.tzinfo is None:
+        raise AgentRunnerError("Nested Agent deadline is invalid.")
+    timeout_seconds = min(
+        float(settings.agent_run_timeout_seconds),
+        (deadline - utc_now()).total_seconds(),
+    )
+    if timeout_seconds <= 0:
+        raise AgentRunnerError("Nested Agent deadline exceeded.")
+    values = (
+        limits.get("max_turns"),
+        limits.get("max_tool_calls"),
+        limits.get("max_model_tokens"),
+    )
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value <= 0
+        for value in values
+    ):
+        raise AgentRunnerError("Nested Agent runtime limits are invalid.")
+    max_turns, max_tool_calls, max_model_tokens = values
+    return timeout_seconds, max_turns, max_tool_calls, max_model_tokens
 
 
 @dataclass(frozen=True)
@@ -642,6 +687,18 @@ async def _execute_claimed_agent_run(
 ) -> str:
     scope = await _load_execution_scope(run_id)
     run = scope.run
+    run_timeout, max_turns, max_tool_calls, max_model_tokens = _run_limits(
+        run,
+        settings,
+    )
+    if run.depth == 1 and any(
+        snapshot.approval != "auto"
+        or snapshot.effect not in {"pure", "external_read"}
+        for snapshot in scope.tool_snapshots
+    ):
+        raise AgentRunnerError(
+            "Nested Agent Tools must be automatic and read-only."
+        )
     process_events = list(run.events)
     started_at = time.perf_counter()
     knowledge_tool = (
@@ -742,7 +799,7 @@ async def _execute_claimed_agent_run(
                     tools,
                     timeout_seconds=min(
                         60.0,
-                        float(settings.agent_run_timeout_seconds),
+                        run_timeout,
                     ),
                 )
                 await memory_db.commit()
@@ -839,7 +896,7 @@ async def _execute_claimed_agent_run(
 
     try:
         try:
-            async with asyncio.timeout(settings.agent_run_timeout_seconds):
+            async with asyncio.timeout(run_timeout):
                 result = await run_agent(
                     chat_model,
                     messages,
@@ -851,6 +908,9 @@ async def _execute_claimed_agent_run(
                     before_tool_call=before_tool_call,
                     after_tool_call=after_tool_call,
                     initial_usage=memory.model_usage,
+                    max_turns=max_turns,
+                    max_tool_calls=max_tool_calls,
+                    max_model_tokens=max_model_tokens,
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc

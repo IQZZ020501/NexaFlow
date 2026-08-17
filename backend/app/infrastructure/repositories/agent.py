@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import load_only
+from sqlalchemy.orm import aliased, load_only
 
 from app.domain.resource_permission import ResourcePermission as ResourcePermissionORM
 from app.entities.agents import Agent as AgentEntity
@@ -24,6 +24,8 @@ from app.shareddomain.agents.models import (
     AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
     AGENT_RUN_AWAITING_APPROVAL_STATUSES,
+    AGENT_RUN_AWAITING_CHILD_STATUS,
+    AGENT_RUN_AWAITING_CHILD_STATUSES,
     AGENT_RUN_AWAITING_INPUT_STATUS,
     AGENT_RUN_AWAITING_INPUT_STATUSES,
     AGENT_RUN_FAILED_STATUS,
@@ -32,7 +34,9 @@ from app.shareddomain.agents.models import (
     AGENT_RUN_RUNNING_STATUS,
     AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
+    AGENT_RUN_CANCELLED_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
     AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES,
     AGENT_RUN_UNIFIED_QUEUED_STATUS,
@@ -749,6 +753,68 @@ async def create_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRun
     return to_entity(AgentRunEntity, orm)
 
 
+async def get_agent_child_run(
+    db: AsyncSession,
+    workspace_id: str,
+    parent_run_id: str,
+    parent_node_id: str,
+) -> AgentRunEntity | None:
+    row = await db.scalar(
+        select(AgentRun).where(
+            AgentRun.workspace_id == workspace_id,
+            AgentRun.parent_run_id == parent_run_id,
+            AgentRun.parent_node_id == parent_node_id,
+        )
+    )
+    return to_entity(AgentRunEntity, row) if row is not None else None
+
+
+async def list_agent_child_runs(
+    db: AsyncSession,
+    workspace_id: str,
+    parent_run_id: str,
+) -> list[AgentRunEntity]:
+    rows = await db.scalars(
+        select(AgentRun)
+        .where(
+            AgentRun.workspace_id == workspace_id,
+            AgentRun.parent_run_id == parent_run_id,
+        )
+        .order_by(AgentRun.created_at, AgentRun.id)
+    )
+    return [to_entity(AgentRunEntity, row) for row in rows.all()]
+
+
+async def list_terminal_children_for_waiting_parents(
+    db: AsyncSession,
+    limit: int = 200,
+) -> list[AgentRunEntity]:
+    parent = aliased(AgentRun)
+    rows = await db.scalars(
+        select(AgentRun)
+        .join(
+            parent,
+            and_(
+                parent.workspace_id == AgentRun.workspace_id,
+                parent.id == AgentRun.parent_run_id,
+            ),
+        )
+        .where(
+            AgentRun.status.in_(
+                (
+                    AGENT_RUN_SUCCEEDED_STATUS,
+                    AGENT_RUN_FAILED_STATUS,
+                    AGENT_RUN_CANCELLED_STATUS,
+                )
+            ),
+            parent.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
+        )
+        .order_by(AgentRun.finished_at, AgentRun.id)
+        .limit(limit)
+    )
+    return [to_entity(AgentRunEntity, row) for row in rows.all()]
+
+
 async def save_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
     orm = await save(db, AgentRun, entity)
     return to_entity(AgentRunEntity, orm)
@@ -953,6 +1019,39 @@ async def pause_agent_run_for_input(
     return bool(updated.rowcount)
 
 
+async def pause_agent_run_for_child(
+    db: AsyncSession,
+    run_id: str,
+    worker_task_id: str,
+) -> bool:
+    updated = await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.id == run_id,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRun.worker_task_id == worker_task_id,
+        )
+        .values(
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
+                ),
+                else_=AGENT_RUN_AWAITING_CHILD_STATUS,
+            ),
+            attempts=case(
+                (AgentRun.attempts > 0, AgentRun.attempts - 1),
+                else_=0,
+            ),
+            last_error=None,
+            worker_task_id=None,
+            lease_expires_at=None,
+            updated_at=func.now(),
+        )
+    )
+    return bool(updated.rowcount)
+
+
 async def requeue_owned_agent_run(
     db: AsyncSession,
     run_id: str,
@@ -1036,6 +1135,57 @@ async def queue_agent_run_from_input(
             worker_task_id=None,
             lease_expires_at=None,
             updated_at=func.now(),
+        )
+    )
+    return bool(updated.rowcount)
+
+
+async def queue_agent_run_from_child(
+    db: AsyncSession,
+    run_id: str,
+) -> bool:
+    updated = await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.id == run_id,
+            AgentRun.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
+        )
+        .values(
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+                ),
+                else_=AGENT_RUN_QUEUED_STATUS,
+            ),
+            last_error=None,
+            worker_task_id=None,
+            lease_expires_at=None,
+            updated_at=func.now(),
+        )
+    )
+    return bool(updated.rowcount)
+
+
+async def fail_agent_run_waiting_for_child(
+    db: AsyncSession,
+    run_id: str,
+    error: str,
+    finished_at: datetime,
+) -> bool:
+    updated = await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.id == run_id,
+            AgentRun.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
+        )
+        .values(
+            status=AGENT_RUN_FAILED_STATUS,
+            last_error=error,
+            worker_task_id=None,
+            lease_expires_at=None,
+            finished_at=finished_at,
+            updated_at=finished_at,
         )
     )
     return bool(updated.rowcount)

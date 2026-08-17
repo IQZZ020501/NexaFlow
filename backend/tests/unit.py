@@ -1181,6 +1181,96 @@ def test_workflow_resource_snapshot_must_match_the_canonical_graph() -> None:
         raise AssertionError("Invalid Workflow resource snapshot was accepted.")
 
 
+def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
+    from app.shareddomain.workflows.engine import (
+        WorkflowValidationError,
+        validate_graph,
+    )
+    from app.shareddomain.workflows.resources import (
+        build_workflow_resource_snapshot,
+        load_workflow_agent_snapshots,
+        workflow_resource_hash,
+    )
+
+    def node(node_id: str, node_type: str, config: dict | None = None) -> dict:
+        return {
+            "id": node_id,
+            "type": "workflow",
+            "position": {"x": 0, "y": 0},
+            "data": {
+                "type": node_type,
+                "title": node_id,
+                "config": config or {},
+            },
+        }
+
+    graph = validate_graph(
+        {
+            "nodes": [
+                node("start", "start"),
+                node(
+                    "agent",
+                    "agent",
+                    {"agent_version_id": "version-1", "input": "{{start.question}}"},
+                ),
+                node("end", "end", {"outputs": {"result": "{{agent.result}}"}}),
+            ],
+            "edges": [
+                {"id": "e1", "source": "start", "target": "agent"},
+                {"id": "e2", "source": "agent", "target": "end"},
+            ],
+        }
+    )
+    agent_snapshot = {
+        "agent_id": "agent-1",
+        "version_id": "version-1",
+        "version_number": 1,
+        "configuration_hash": "hash-1",
+        "configuration_snapshot": {"name": "Helper"},
+        "resource_snapshot": {"knowledge_base_ids": [], "tools": []},
+        "bound_by_user_id": "binder-1",
+    }
+    snapshot = build_workflow_resource_snapshot([], [], [agent_snapshot])
+    assert load_workflow_agent_snapshots(
+        graph,
+        snapshot,
+        workflow_resource_hash(snapshot),
+    ) == [agent_snapshot]
+
+    invalid = build_workflow_resource_snapshot([], [], [])
+    try:
+        load_workflow_agent_snapshots(
+            graph,
+            invalid,
+            workflow_resource_hash(invalid),
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Workflow Agent version missing from snapshot was accepted.")
+
+    parallel_graph = {
+        "nodes": [
+            node("start", "start"),
+            node("agent_a", "agent", {"agent_version_id": "v1", "input": "a"}),
+            node("agent_b", "agent", {"agent_version_id": "v2", "input": "b"}),
+            node("end", "end", {"outputs": {}}),
+        ],
+        "edges": [
+            {"id": "a1", "source": "start", "target": "agent_a"},
+            {"id": "a2", "source": "agent_a", "target": "end"},
+            {"id": "b1", "source": "start", "target": "agent_b"},
+            {"id": "b2", "source": "agent_b", "target": "end"},
+        ],
+    }
+    try:
+        validate_graph(parallel_graph)
+    except WorkflowValidationError:
+        pass
+    else:
+        raise AssertionError("Parallel Workflow Agent nodes were accepted.")
+
+
 def test_workflow_tool_invocation_identity_is_stable_and_bounded() -> None:
     from app.application.workflow_tool_runtime import workflow_tool_invocation_identity
 
@@ -5092,6 +5182,7 @@ def main() -> None:
     test_workflow_legacy_tools_normalize_to_one_canonical_node_contract()
     test_workflow_selects_only_exact_bound_tool_versions()
     test_workflow_resource_snapshot_must_match_the_canonical_graph()
+    test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel()
     test_workflow_tool_invocation_identity_is_stable_and_bounded()
     test_workflow_tool_runtime_serializes_unsafe_tools_and_blocks_direct_only_llm()
     test_workflow_tool_migration_matches_runtime_catalog()

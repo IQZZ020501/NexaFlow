@@ -22,6 +22,7 @@ from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import tools as tools_repository
 from app.infrastructure.repositories import team as team_repository
 from app.infrastructure.repositories import workspace as workspace_repository
+from app.infrastructure.repositories import workflow as workflow_repository
 from app.schemas.user import (
     MembershipResponse,
     MeResponse,
@@ -357,6 +358,14 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "User is retained by Agent publication audit records.",
+        )
+    if await workflow_repository.has_workflow_agent_binder_audit_references(
+        db,
+        user.id,
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "User is retained by Workflow Agent binding audit records.",
         )
     if await tools_repository.has_retained_user_audit_references(db, user.id):
         raise HTTPException(

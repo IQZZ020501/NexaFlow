@@ -19,6 +19,7 @@ from app.shareddomain.agents.runtime.callbacks import (
     NexaFlowCallback,
 )
 from app.shareddomain.agents.runtime.graph import (
+    MAX_AGENT_TOOL_CALLS,
     MAX_AGENT_TURNS,
     AgentRuntimeContext,
     agent_graph,
@@ -82,6 +83,9 @@ async def run_agent(
     before_tool_call: BeforeToolCall | None = None,
     after_tool_call: AfterToolCall | None = None,
     initial_usage: dict[str, Any] | None = None,
+    max_turns: int = MAX_AGENT_TURNS,
+    max_tool_calls: int = MAX_AGENT_TOOL_CALLS,
+    max_model_tokens: int | None = None,
 ) -> AgentExecutionResult:
     initial_state: AgentState = (
         deserialize_agent_state(checkpoint)
@@ -111,7 +115,7 @@ async def run_agent(
     state = initial_state
     async for value in agent_graph.astream(
         initial_state,
-        config={"recursion_limit": MAX_AGENT_TURNS * 2 + 1},
+        config={"recursion_limit": max_turns * 2 + 1},
         context=AgentRuntimeContext(
             model=model,
             tools=tools,
@@ -121,6 +125,9 @@ async def run_agent(
             tool_timeout_seconds=tool_timeout_seconds,
             before_tool_call=before_tool_call,
             after_tool_call=after_tool_call,
+            max_turns=max_turns,
+            max_tool_calls=max_tool_calls,
+            max_model_tokens=max_model_tokens,
         ),
         stream_mode="values",
     ):

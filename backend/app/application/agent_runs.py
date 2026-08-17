@@ -595,6 +595,8 @@ async def prepare_agent_run(
     publication: AgentPublication | None = None,
     publication_version: AgentPublicationVersion | None = None,
     attachment_context: str = "",
+    allow_pinned_publication: bool = False,
+    authorized_by_parent: bool = False,
 ) -> tuple[AgentRun, Any]:
     if access_source not in {"console", "public", "api"}:
         raise ValueError("Invalid Agent run access source.")
@@ -605,7 +607,7 @@ async def prepare_agent_run(
     agent = await agent_repository.lock_agent(db, agent_id)
     if agent is None or agent.workspace_id != workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent not found.")
-    if access_source == "console":
+    if access_source == "console" and not authorized_by_parent:
         await require_agent_view(db, agent, actor, workspace_role)
     _require_agent_run_application(agent)
     if agent.status != ACTIVE_STATUS:
@@ -620,7 +622,10 @@ async def prepare_agent_run(
             not agent.published
             or not agent.published_by_user_id
             or agent.published_at is None
-            or agent.current_published_version_id != publication_version.id
+            or (
+                not allow_pinned_publication
+                and agent.current_published_version_id != publication_version.id
+            )
         ):
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
