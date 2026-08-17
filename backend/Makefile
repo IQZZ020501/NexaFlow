@@ -1,4 +1,4 @@
-.PHONY: dev migrate worker coverage
+.PHONY: dev migrate worker worker-compose coverage
 
 HOST ?= 127.0.0.1
 PORT ?= 8000
@@ -19,6 +19,9 @@ migrate:
 
 worker:
 	uv run celery -A app.infrastructure.celery:celery_app worker --beat --queues=celery,agents-legacy,agents-v2 --loglevel=INFO
+
+worker-compose:
+	$(COMPOSE) up --build sandbox worker
 
 coverage:
 	scripts/coverage.sh

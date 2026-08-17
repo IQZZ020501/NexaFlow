@@ -3146,6 +3146,17 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
         tool_dispatch.celery_app.conf.task_always_eager = original_eager
 
 
+def test_tool_tasks_are_registered() -> None:
+    from app.infrastructure.celery import celery_app
+
+    assert "app.tools.run" in celery_app.tasks
+    assert "app.tools.recover" in celery_app.tasks
+    assert (
+        celery_app.conf.beat_schedule["recover-tool-invocations"]["task"]
+        == "app.tools.recover"
+    )
+
+
 def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
     test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()
@@ -3169,6 +3180,7 @@ def main() -> None:
     test_python_tool_http_lifecycle_and_private_grants()
     test_canonical_mcp_policy_allows_owner_read_only_attestation()
     test_tool_tasks_never_execute_inline_and_recover_queued_tests()
+    test_tool_tasks_are_registered()
     print("TOOLS_SUITE_OK")
 
 

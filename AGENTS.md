@@ -96,6 +96,10 @@ Correctness, safety, evidence, and validation take priority over speed.
 - `backend/make dev` automatically follows logs from a running Compose worker
   into the API terminal and stops that follower when Uvicorn exits; it does not
   start or replace the worker.
+- `cd backend && make worker-compose` starts the Compose sandbox and its
+  socket-mounted worker for Python Tool and Workflow code execution. The
+  host-only `make worker` has no sandbox socket and must not be presented as
+  supporting those executions.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
   intent is persisted in `workflow_upload_storage_cleanups` and recovered by
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.

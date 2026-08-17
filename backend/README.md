@@ -66,6 +66,18 @@ events, and terminal answers stay in PostgreSQL. Closing an Agent event stream
 only stops observation; it does not cancel the durable run. If Redis live reads
 fail, the client still receives the durable terminal answer.
 
+Python Tools and Workflow code nodes require the network-disabled sandbox Unix
+socket, which is mounted only into the Compose worker. For local development,
+start the sandbox-capable worker from `backend/`:
+
+```bash
+make worker-compose
+```
+
+The host-only `make worker` command remains useful for tasks that do not execute
+Python code, but it cannot run Python Tools or Workflow code nodes because the
+sandbox socket is intentionally unavailable on the host.
+
 ## MCP transports
 
 Streamable HTTP and legacy SSE registrations accept an HTTP(S) URL and an

@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SUITES=(unit logger identity workspaces teams knowledge llm agents workflows mcp_transports test_main agent_access workflow_run_coverage workflow_node_coverage workspace_admin_coverage knowledge_domain_coverage knowledge_api_coverage agent_services_coverage agent_runtime_coverage infra_unit_coverage)
+SUITES=(unit logger identity workspaces teams knowledge llm agents workflows tools mcp_transports test_main agent_access workflow_run_coverage workflow_node_coverage workspace_admin_coverage knowledge_domain_coverage knowledge_api_coverage agent_services_coverage agent_runtime_coverage infra_unit_coverage)
 
 if [[ "${1:-}" != "--report-only" ]]; then
   rm -f .coverage .coverage.*
