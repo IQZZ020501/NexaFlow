@@ -119,6 +119,8 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 `db` 镜像内置 PostgreSQL 17、`pg_search` 0.25.2 及 `pgvector`，并在数据库启动时预加载 `pg_search`。使用外部 PostgreSQL 时必须先安装 `pg_search` 与 `pgvector`，将 `pg_search` 加入 `shared_preload_libraries` 并重启数据库，再执行 Alembic 迁移。
 
+最后一条命令会启动 API、前端、Worker 和无网络沙箱；Python Tool 与 Workflow Python 需要 Worker 和沙箱同时运行。
+
 启动完成后访问：
 
 - Web：<http://localhost:3000>
@@ -146,49 +148,51 @@ docker compose -f deploy/docker-compose.yml down
 
 ## 本地开发
 
-本地开发需要 Python 3.11+、[uv](https://docs.astral.sh/uv/) 和 Bun 1.3+。
+本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/) 和 Bun 1.3+。此模式只在 Docker 中运行 PostgreSQL、Redis、Qdrant、Worker 和沙箱，API 与前端直接在宿主机运行；不需要 `deploy/.env`。
 
-### 基础服务
+### 1. 首次初始化
 
 ```bash
+test -f backend/.env || cp backend/.env.example backend/.env
 docker compose \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.dev.yml \
   up -d --build db redis qdrant
-```
 
-### 后端
-
-```bash
-cp backend/.env.example backend/.env
 cd backend
 uv sync --dev --frozen
-make dev
+uv run python -m alembic upgrade head
+
+cd ../frontend
+bun install --frozen-lockfile
 ```
 
-在另一个终端启动合并后的 Worker 与 Beat：
+默认配置使用本机端口 `5432`、`6379` 和 `6333`。如果修改数据库账号或端口，需要同时更新 `backend/.env`。
 
-```bash
-cd backend
-make worker
-```
-
-API 默认运行在 <http://127.0.0.1:8000>。需要测试 Python Code 节点时，可以改用 Compose Worker（不要同时运行 `make worker`）：
+### 2. 启动容器服务
 
 ```bash
 docker compose \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.dev.yml \
-  up -d --build sandbox worker
+  up -d --build db redis qdrant sandbox worker
 ```
 
-开发覆盖会把 `backend/storage` 挂载到 Worker 的 `/data`，与宿主 API 共享上传文件。当 Compose Worker 已运行时，`make dev` 会自动把带 `worker-1 |` 前缀的 Worker 日志同步到同一个终端；退出 API 时日志跟随进程也会一起结束。
+这条命令会一起启动全部开发容器。Compose Worker 内嵌唯一的 Celery Beat，并挂载沙箱 socket 和 `backend/storage`。不要同时运行宿主 `make worker`；宿主 Worker 没有沙箱 socket，不能执行 Python Tool 或 Workflow Python。
 
-### 前端
+### 3. 启动 API
+
+```bash
+cd backend
+make dev
+```
+
+`make dev` 会先执行 Alembic 迁移，再在 <http://127.0.0.1:8000> 启动 API，并自动把 Compose Worker 日志同步到同一个终端。
+
+### 4. 启动前端
 
 ```bash
 cd frontend
-bun install --frozen-lockfile
 bun run dev
 ```
 
