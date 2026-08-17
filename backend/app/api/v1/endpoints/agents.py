@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import WorkspaceContext, get_settings, get_workspace_context_from_path
 from app.application.agents import (
+    cancel_agent_run,
     create_agent,
     create_agent_api_credential,
     create_agent_run,
@@ -415,6 +416,23 @@ async def get_workspace_agent_run(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AgentRunResponse:
     return await get_agent_run_response(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        context.user,
+        context.membership_role,
+    )
+
+
+@router.post("/{agent_id}/runs/{run_id}/cancel", response_model=AgentRunResponse)
+async def cancel_workspace_agent_run(
+    agent_id: str,
+    run_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentRunResponse:
+    return await cancel_agent_run(
         db,
         context.workspace.id,
         agent_id,

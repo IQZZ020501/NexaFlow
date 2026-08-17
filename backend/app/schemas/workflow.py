@@ -407,6 +407,7 @@ class ToolNodeConfig(BaseModel):
 
 
 class WorkflowAgentNodeConfig(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=36)
     agent_version_id: str = Field(min_length=1, max_length=36)
     input: Any
 

@@ -14,6 +14,7 @@ from app.api.deps import (
     get_workspace_context_from_path,
 )
 from app.application.workflows import (
+    cancel_workflow_run,
     create_workflow_run,
     get_workflow_definition,
     get_workflow_run,
@@ -230,6 +231,26 @@ async def get_run(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkflowRunResponse:
     return await get_workflow_run(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        context.user,
+        context.membership_role,
+    )
+
+
+@router.post(
+    "/{agent_id}/runs/{run_id}/cancel",
+    response_model=WorkflowRunResponse,
+)
+async def cancel_run(
+    agent_id: str,
+    run_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkflowRunResponse:
+    return await cancel_workflow_run(
         db,
         context.workspace.id,
         agent_id,

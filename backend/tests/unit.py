@@ -1211,7 +1211,11 @@ def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
                 node(
                     "agent",
                     "agent",
-                    {"agent_version_id": "version-1", "input": "{{start.question}}"},
+                    {
+                        "agent_id": "agent-1",
+                        "agent_version_id": "version-1",
+                        "input": "{{start.question}}",
+                    },
                 ),
                 node("end", "end", {"outputs": {"result": "{{agent.result}}"}}),
             ],
@@ -1237,6 +1241,22 @@ def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
         workflow_resource_hash(snapshot),
     ) == [agent_snapshot]
 
+    wrong_agent = build_workflow_resource_snapshot(
+        [],
+        [],
+        [{**agent_snapshot, "agent_id": "agent-2"}],
+    )
+    try:
+        load_workflow_agent_snapshots(
+            graph,
+            wrong_agent,
+            workflow_resource_hash(wrong_agent),
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Workflow Agent identity mismatch was accepted.")
+
     invalid = build_workflow_resource_snapshot([], [], [])
     try:
         load_workflow_agent_snapshots(
@@ -1252,8 +1272,16 @@ def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
     parallel_graph = {
         "nodes": [
             node("start", "start"),
-            node("agent_a", "agent", {"agent_version_id": "v1", "input": "a"}),
-            node("agent_b", "agent", {"agent_version_id": "v2", "input": "b"}),
+            node(
+                "agent_a",
+                "agent",
+                {"agent_id": "a1", "agent_version_id": "v1", "input": "a"},
+            ),
+            node(
+                "agent_b",
+                "agent",
+                {"agent_id": "a2", "agent_version_id": "v2", "input": "b"},
+            ),
             node("end", "end", {"outputs": {}}),
         ],
         "edges": [

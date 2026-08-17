@@ -2439,6 +2439,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
                         "type": "agent",
                         "title": "Pinned Agent",
                         "config": {
+                            "agent_id": agent_id,
                             "agent_version_id": pinned_version_id,
                             "input": "{{start.question}}",
                         },
@@ -2659,6 +2660,63 @@ def test_workflow_llm_result_streams_markdown_deltas() -> None:
     asyncio.run(run())
 
 
+def test_cancelling_queued_workflow_run_is_idempotent() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from tests.agents import agent_model_server, model_payload
+
+    with test_client() as client, agent_model_server() as model_base_url:
+        token, workspace_id = activate_admin(client)
+        headers = auth_headers(token)
+        model = client.post(
+            f"/api/v1/workspaces/{workspace_id}/models",
+            headers=headers,
+            json=model_payload(model_base_url, "Cancel Workflow Model"),
+        )
+        assert model.status_code == 201, model.text
+        workflow = client.post(
+            f"/api/v1/workspaces/{workspace_id}/agents",
+            headers=headers,
+            json={
+                "name": "Cancelable Workflow",
+                "app_type": "workflow",
+                "model_id": model.json()["id"],
+            },
+        )
+        assert workflow.status_code == 201, workflow.text
+        base = (
+            f"/api/v1/workspaces/{workspace_id}/workflows/"
+            f"{workflow.json()['id']}"
+        )
+        definition = client.get(f"{base}/definition", headers=headers)
+        assert definition.status_code == 200, definition.text
+        saved = client.put(
+            f"{base}/definition",
+            headers=headers,
+            json={
+                "expected_revision": definition.json()["revision"],
+                "graph": graph(),
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        with patch(
+            "app.application.workflow_runs.enqueue_agent_run",
+            new=AsyncMock(),
+        ):
+            run = client.post(
+                f"{base}/runs",
+                headers=headers,
+                json={"source": "draft", "question": "cancel me"},
+            )
+        assert run.status_code == 201, run.text
+        run_id = run.json()["id"]
+        cancelled = client.post(f"{base}/runs/{run_id}/cancel", headers=headers)
+        assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["status"] == "cancelled"
+        repeated = client.post(f"{base}/runs/{run_id}/cancel", headers=headers)
+        assert repeated.status_code == 409, repeated.text
+
+
 def main() -> None:
     test_default_workflow_only_contains_start()
     test_workflow_interaction_config_rejects_audio_uploads()
@@ -2684,6 +2742,7 @@ def main() -> None:
     test_interaction_config_migration_upgrades_prerequisites()
     test_workflow_api_definition_publish_run_and_audit()
     test_workflow_agent_node_runs_one_durable_pinned_child()
+    test_cancelling_queued_workflow_run_is_idempotent()
     print("WORKFLOW_SUITE_OK")
 
 

@@ -236,6 +236,39 @@ async def get_agent_run_response(
     return run_to_response(run, trace_id=run.trace_id)
 
 
+async def cancel_agent_run(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    run_id: str,
+    actor: User,
+    workspace_role: str | None,
+) -> AgentRunResponse:
+    run = await get_agent_run_entity(
+        db,
+        workspace_id,
+        agent_id,
+        run_id,
+        actor,
+        workspace_role,
+    )
+    if not await cancel_run_tree(db, run.id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Agent run is already finished.")
+    await db.commit()
+    current = await agent_repository.get_agent_run_by_id(db, run.id)
+    assert current is not None
+    return run_to_response(current, trace_id=current.trace_id)
+
+
+async def cancel_run_tree(db: AsyncSession, run_id: str) -> bool:
+    now = utc_now()
+    run_ids = await agent_repository.cancel_agent_run_tree(db, run_id, now)
+    if not run_ids:
+        return False
+    await tool_repository.settle_cancelled_agent_tool_invocations(db, run_ids, now)
+    return True
+
+
 async def get_agent_run_entity(
     db: AsyncSession,
     workspace_id: str,

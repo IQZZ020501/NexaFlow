@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.tool_runtime import preflight_tool_snapshot
 from app.application.agent_child_runs import preflight_workflow_agent_snapshots
+from app.application.agent_runs import cancel_run_tree
 from app.application.workflow_uploads import resolve_workspace_workflow_files
 from app.entities.agents import AgentRun
 from app.entities.user import User
@@ -438,6 +439,34 @@ async def get_workflow_run(
         or run.requested_by_user_id != actor.id
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
+    return workflow_run_to_response(run, detail)
+
+
+async def cancel_workflow_run(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    run_id: str,
+    actor: User,
+    workspace_role: str | None,
+) -> WorkflowRunResponse:
+    await get_workflow_run(
+        db,
+        workspace_id,
+        agent_id,
+        run_id,
+        actor,
+        workspace_role,
+    )
+    if not await cancel_run_tree(db, run_id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Workflow run is already finished.",
+        )
+    await db.commit()
+    run = await agent_repository.get_agent_run_by_id(db, run_id)
+    detail = await workflow_repository.get_run_detail(db, run_id)
+    assert run is not None and detail is not None
     return workflow_run_to_response(run, detail)
 
 

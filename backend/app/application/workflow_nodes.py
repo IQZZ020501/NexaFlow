@@ -713,6 +713,7 @@ async def execute_workflow_node(
                 raise ValueError(child.last_error or "Workflow Agent run failed.")
             request = {
                 "runtime_node_id": node.id,
+                "agent_id": parsed.agent_id,
                 "agent_version_id": parsed.agent_version_id,
                 "input": input_value,
                 "remaining_model_tokens": context.remaining_model_tokens,

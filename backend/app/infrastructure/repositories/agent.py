@@ -1191,6 +1191,86 @@ async def fail_agent_run_waiting_for_child(
     return bool(updated.rowcount)
 
 
+async def cancel_agent_run_tree(
+    db: AsyncSession,
+    run_id: str,
+    finished_at: datetime,
+) -> list[str]:
+    cancelled = list(
+        await db.scalars(
+            update(AgentRun)
+            .where(
+                or_(AgentRun.id == run_id, AgentRun.root_run_id == run_id),
+                AgentRun.status.in_(AGENT_RUN_ACTIVE_STATUSES),
+            )
+            .values(
+                status=AGENT_RUN_CANCELLED_STATUS,
+                last_error="Cancelled by user.",
+                worker_task_id=None,
+                lease_expires_at=None,
+                finished_at=finished_at,
+                updated_at=finished_at,
+            )
+            .returning(AgentRun.id)
+        )
+    )
+    if not cancelled:
+        return []
+    await db.execute(
+        update(AgentToolCall)
+        .where(
+            AgentToolCall.run_id.in_(cancelled),
+            AgentToolCall.status == "running",
+            AgentToolCall.approval_required.is_(True),
+        )
+        .values(
+            status="uncertain",
+            last_error=(
+                "Tool execution was interrupted by cancellation; confirm the "
+                "external state."
+            ),
+            worker_task_id=None,
+            lease_expires_at=None,
+            finished_at=finished_at,
+            updated_at=finished_at,
+        )
+    )
+    await db.execute(
+        update(AgentToolCall)
+        .where(
+            AgentToolCall.run_id.in_(cancelled),
+            AgentToolCall.status.in_(("pending", "approved", "running")),
+        )
+        .values(
+            status="failed",
+            result_content="Tool invocation was cancelled before completion.",
+            result_summary="Tool invocation cancelled.",
+            result_is_error=True,
+            last_error="Agent run was cancelled.",
+            worker_task_id=None,
+            lease_expires_at=None,
+            finished_at=finished_at,
+            updated_at=finished_at,
+        )
+    )
+    await db.execute(
+        update(WorkflowNodeExecution)
+        .where(
+            WorkflowNodeExecution.run_id.in_(cancelled),
+            WorkflowNodeExecution.status.in_(
+                ("running", "awaiting_input", "awaiting_child")
+            ),
+        )
+        .values(
+            status="failed",
+            error="Workflow run was cancelled.",
+            finished_at=finished_at,
+            updated_at=finished_at,
+        )
+    )
+    return cancelled
+
+
 async def list_recoverable_agent_run_ids(
     db: AsyncSession,
     now: datetime,

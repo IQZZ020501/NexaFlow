@@ -1050,6 +1050,48 @@ async def settle_exhausted_agent_tool_invocations(
     return len(invocations)
 
 
+async def settle_cancelled_agent_tool_invocations(
+    db: AsyncSession,
+    run_ids: list[str],
+    now: datetime,
+) -> int:
+    if not run_ids:
+        return 0
+    rows = await db.scalars(
+        select(ToolInvocationOrm)
+        .where(
+            ToolInvocationOrm.run_id.in_(run_ids),
+            ToolInvocationOrm.status.in_(
+                ("queued", "awaiting_approval", "approved", "running")
+            ),
+        )
+        .with_for_update()
+    )
+    invocations = list(rows.all())
+    for invocation in invocations:
+        snapshot = invocation.policy_snapshot.get("tool_snapshot", {})
+        effect = snapshot.get("effect") if isinstance(snapshot, dict) else None
+        status, outcome, summary, _message = exhausted_tool_invocation_terminal_state(
+            invocation.status,
+            effect,
+        )
+        invocation.status = status
+        invocation.outcome = outcome
+        invocation.result_summary = summary
+        invocation.error_code = "agent_run_cancelled"
+        invocation.error_message = (
+            "Tool execution was interrupted by cancellation; confirm the external state."
+            if outcome == "uncertain"
+            else "Tool invocation was cancelled before completion."
+        )
+        invocation.worker_task_id = None
+        invocation.lease_expires_at = None
+        invocation.finished_at = now
+        invocation.updated_at = now
+    await db.flush()
+    return len(invocations)
+
+
 async def has_unsettled_agent_tool_invocations(
     db: AsyncSession,
     workspace_id: str,

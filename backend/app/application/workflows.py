@@ -23,6 +23,7 @@ from app.shareddomain.workflows.services import (
     version_to_response,
 )
 from app.application.workflow_runs import (
+    cancel_workflow_run,
     create_workflow_run,
     get_workflow_run,
     list_workflow_node_executions,
@@ -46,6 +47,7 @@ from app.application.workflow_uploads import (
 )
 
 __all__ = [
+    "cancel_workflow_run",
     "create_external_workflow_run",
     "create_workflow_run",
     "get_external_workflow_run",

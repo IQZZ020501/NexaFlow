@@ -4210,5 +4210,140 @@ def main() -> None:
         agent_executor.run_agent = original_run_agent
 
 
+def test_cancelling_root_run_cancels_active_children() -> None:
+    from dataclasses import replace
+    import hashlib
+    from unittest.mock import AsyncMock, patch
+
+    from app.infrastructure.model_utils import new_id, utc_now
+    from app.infrastructure.session import get_session_factory
+
+    with test_client() as client, agent_model_server() as model_base_url:
+        token, workspace_id = activate_admin(client)
+        headers = auth_headers(token)
+        model = client.post(
+            f"/api/v1/workspaces/{workspace_id}/models",
+            headers=headers,
+            json=model_payload(model_base_url, "Cancel Tree Model"),
+        )
+        assert model.status_code == 201, model.text
+        agent = client.post(
+            agents_url(workspace_id),
+            headers=headers,
+            json={
+                "name": "Cancel Tree Agent",
+                "instructions": "Wait for cancellation.",
+                "model_id": model.json()["id"],
+            },
+        )
+        assert agent.status_code == 201, agent.text
+        agent_id = agent.json()["id"]
+        with patch(
+            "app.application.agent_runs.enqueue_prepared_agent_run",
+            new=AsyncMock(),
+        ):
+            response = client.post(
+                agents_url(workspace_id, f"/{agent_id}/runs"),
+                headers=headers,
+                json={"goal": "cancel this tree"},
+            )
+        assert response.status_code == 201, response.text
+        root_run_id = response.json()["id"]
+
+        async def add_child() -> tuple[str, str, str]:
+            async with get_session_factory()() as db:
+                root = await agent_repository.get_agent_run_by_id(db, root_run_id)
+                assert root is not None
+                child = replace(
+                    root,
+                    id=new_id(),
+                    root_run_id=root.id,
+                    parent_run_id=root.id,
+                    parent_node_id="agent-node",
+                    depth=1,
+                    conversation_id=new_id(),
+                    trace_id=new_id(),
+                    started_at=None,
+                    finished_at=None,
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
+                )
+                child = await agent_repository.create_agent_run(db, child)
+                tool = next(
+                    item
+                    for item in await tool_repository.list_tools(db, workspace_id)
+                    if item.current_version_id is not None
+                )
+                invocation_ids = []
+                for status_value, effect in (
+                    ("queued", "pure"),
+                    ("running", "external_write"),
+                ):
+                    invocation = await tool_repository.create_or_get_tool_invocation(
+                        db,
+                        ToolInvocation(
+                            workspace_id=workspace_id,
+                            origin="agent",
+                            root_run_id=root.id,
+                            run_id=child.id,
+                            invocation_id=f"cancel-{status_value}",
+                            execution_user_id=root.execution_user_id,
+                            access_source="console",
+                            tool_id=tool.id,
+                            tool_version_id=tool.current_version_id or "",
+                            policy_snapshot={"tool_snapshot": {"effect": effect}},
+                            arguments={},
+                            arguments_hash=hashlib.sha256(b"{}").hexdigest(),
+                            idempotency_key=hashlib.sha256(
+                                f"{child.id}:{status_value}".encode()
+                            ).hexdigest(),
+                            status=status_value,
+                            worker_task_id=(
+                                "tool-worker" if status_value == "running" else None
+                            ),
+                        ),
+                    )
+                    invocation_ids.append(invocation.id)
+                await db.commit()
+                return child.id, invocation_ids[0], invocation_ids[1]
+
+        child_run_id, queued_invocation_id, running_invocation_id = asyncio.run(
+            add_child()
+        )
+        cancelled = client.post(
+            agents_url(workspace_id, f"/{agent_id}/runs/{root_run_id}/cancel"),
+            headers=headers,
+        )
+        assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["status"] == "cancelled"
+
+        async def assert_child_cancelled() -> None:
+            async with get_session_factory()() as db:
+                child = await agent_repository.get_agent_run_by_id(db, child_run_id)
+                assert child is not None
+                assert child.status == "cancelled"
+                assert child.finished_at is not None
+                queued = await tool_repository.get_tool_invocation_by_id(
+                    db,
+                    queued_invocation_id,
+                )
+                running = await tool_repository.get_tool_invocation_by_id(
+                    db,
+                    running_invocation_id,
+                )
+                assert queued is not None and queued.status == "failed"
+                assert queued.error_code == "agent_run_cancelled"
+                assert running is not None and running.status == "uncertain"
+                assert running.outcome == "uncertain"
+
+        asyncio.run(assert_child_cancelled())
+        repeated = client.post(
+            agents_url(workspace_id, f"/{agent_id}/runs/{root_run_id}/cancel"),
+            headers=headers,
+        )
+        assert repeated.status_code == 409, repeated.text
+
+
 if __name__ == "__main__":
     main()
+    test_cancelling_root_run_cancels_active_children()

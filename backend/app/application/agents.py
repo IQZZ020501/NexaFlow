@@ -6,6 +6,7 @@ plus run orchestration and tool construction split into
 """
 
 from app.application.agent_runs import (
+    cancel_agent_run,
     create_agent_run,
     enqueue_prepared_agent_run,
     execution_messages,
@@ -78,6 +79,7 @@ __all__ = [
     "build_knowledge_search_tool",
     "build_mcp_agent_tool",
     "can_edit_agent",
+    "cancel_agent_run",
     "create_agent",
     "create_agent_api_credential",
     "create_agent_run",

@@ -58,7 +58,7 @@ from app.shareddomain.workflows.resources import (
     legacy_mcp_references as canonical_legacy_mcp_references,
     select_tool_snapshots,
     workflow_resource_hash,
-    workflow_agent_version_references,
+    workflow_agent_references,
     workflow_resource_references as canonical_workflow_resource_references,
 )
 
@@ -73,7 +73,7 @@ async def _workflow_agent_snapshots(
     workspace_role: str | None,
 ) -> list[dict[str, Any]]:
     snapshots: list[dict[str, Any]] = []
-    for version_id in workflow_agent_version_references(graph):
+    for expected_agent_id, version_id in workflow_agent_references(graph):
         version = await agent_repository.get_agent_publication_version(
             db,
             workspace_id,
@@ -87,7 +87,9 @@ async def _workflow_agent_snapshots(
         target = await get_agent(db, workspace_id, version.agent_id)
         await require_agent_view(db, target, actor, workspace_role)
         if (
-            target.app_type != "agent"
+            target.id != expected_agent_id
+            or version.agent_id != expected_agent_id
+            or target.app_type != "agent"
             or target.status != "active"
             or not target.published
             or target.current_published_version_id is None

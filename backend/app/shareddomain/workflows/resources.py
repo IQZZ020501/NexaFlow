@@ -153,13 +153,23 @@ def workflow_resource_references(
     )
 
 
-def workflow_agent_version_references(graph: WorkflowGraph) -> list[str]:
+def workflow_agent_references(graph: WorkflowGraph) -> list[tuple[str, str]]:
     return list(
         dict.fromkeys(
-            WorkflowAgentNodeConfig.model_validate(node.data.config).agent_version_id
+            (
+                parsed.agent_id,
+                parsed.agent_version_id,
+            )
             for node in graph.nodes
             if node.data.type == "agent"
+            for parsed in [WorkflowAgentNodeConfig.model_validate(node.data.config)]
         )
+    )
+
+
+def workflow_agent_version_references(graph: WorkflowGraph) -> list[str]:
+    return list(
+        dict.fromkeys(version_id for _, version_id in workflow_agent_references(graph))
     )
 
 
@@ -251,9 +261,18 @@ def load_workflow_agent_snapshots(
         not isinstance(item, dict) for item in raw_agents
     ):
         raise ValueError("Workflow Agent snapshot is invalid.")
-    references = sorted(workflow_agent_version_references(graph))
-    version_ids = sorted(str(item.get("version_id") or "") for item in raw_agents)
-    if version_ids != references or len(version_ids) != len(set(version_ids)):
+    references = sorted(workflow_agent_references(graph))
+    snapshot_references = sorted(
+        (
+            str(item.get("agent_id") or ""),
+            str(item.get("version_id") or ""),
+        )
+        for item in raw_agents
+    )
+    if (
+        snapshot_references != references
+        or len(snapshot_references) != len(set(snapshot_references))
+    ):
         raise ValueError("Workflow Agent snapshot does not match its graph.")
     return [dict(item) for item in raw_agents]
 
@@ -269,5 +288,6 @@ __all__ = [
     "select_tool_snapshots",
     "workflow_resource_hash",
     "workflow_resource_references",
+    "workflow_agent_references",
     "workflow_agent_version_references",
 ]

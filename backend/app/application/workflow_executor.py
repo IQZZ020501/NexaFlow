@@ -449,12 +449,14 @@ async def _execute_claimed_workflow_run(
                     checkpoint_payload["workflow_form"] = transition.result.interrupt
                 if transition.result.child_request is not None:
                     request = transition.result.child_request
+                    agent_id = request.get("agent_id")
                     version_id = request.get("agent_version_id")
                     agent_snapshot = next(
                         (
                             item
                             for item in scope.agent_snapshots
-                            if item.get("version_id") == version_id
+                            if item.get("agent_id") == agent_id
+                            and item.get("version_id") == version_id
                         ),
                         None,
                     )
