@@ -95,7 +95,7 @@ async def build_workspace_context(
             user_id=user.id,
             workspace_id=workspace_id,
         )
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace access denied.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
 
     return WorkspaceContext(
         workspace=workspace,

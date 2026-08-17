@@ -313,12 +313,12 @@ def run_workspace_block() -> None:
             headers=auth_headers(admin_token),
         )
         assert super_members.status_code == 200, super_members.text
-        # Non-member, non-admin -> 403 "access denied".
+        # Non-member, non-admin -> 404 to avoid revealing workspace existence.
         denied_members = client.get(
             members_url(default_workspace_id),
             headers=auth_headers(research_token),
         )
-        assert denied_members.status_code == 403, denied_members.text
+        assert denied_members.status_code == 404, denied_members.text
         # Workspace member with membership -> context builds (teams list only
         # requires a context, not an admin role).
         member_context = client.get(

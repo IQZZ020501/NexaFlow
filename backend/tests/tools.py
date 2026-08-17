@@ -2774,7 +2774,29 @@ def test_python_tool_http_lifecycle_and_private_grants() -> None:
         for user_id in (owner_id, viewer_id, stranger_id, draft_owner_id):
             add_workspace_member(client, admin_token, workspace_id, user_id)
 
+        # A user who only belongs to a different workspace must not see this
+        # workspace's tool catalog (404, not 403).
+        cross_tenant_id, cross_tenant_token = create_active_user(
+            client,
+            admin_token,
+            "python-tool-cross-tenant",
+        )
+        cross_workspace = client.post(
+            "/api/v1/workspaces",
+            headers=auth_headers(admin_token),
+            json={
+                "name": "Python Tool Cross Tenant",
+                "admin_user_id": cross_tenant_id,
+            },
+        )
+        assert cross_workspace.status_code == 201, cross_workspace.text
+
         tools_url = f"/api/v1/workspaces/{workspace_id}/tools"
+        cross_tenant_catalog = client.get(
+            tools_url,
+            headers=auth_headers(cross_tenant_token),
+        )
+        assert cross_tenant_catalog.status_code == 404, cross_tenant_catalog.text
         draft_only = client.post(
             f"{tools_url}/python",
             headers=auth_headers(draft_owner_token),
