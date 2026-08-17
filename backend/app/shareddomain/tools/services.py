@@ -678,16 +678,6 @@ async def set_mcp_tool_policy(
             "Workspace admin disabled this MCP Tool.",
         )
 
-    definition = mcp_catalog_leaf_definition(leaf)
-    read_only_allowed = bool(
-        definition.annotations is not None
-        and definition.annotations.read_only_hint is True
-    )
-    if mode == "read_only" and not read_only_allowed:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "MCP Tool must declare readOnlyHint=true for read-only policy.",
-        )
     effective_mode = mode
     if effective_mode == "read_only":
         approval = "auto"

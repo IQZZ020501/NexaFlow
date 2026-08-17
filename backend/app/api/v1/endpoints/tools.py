@@ -21,6 +21,7 @@ from app.application.tools import (
     queue_python_test,
     revoke_permission,
     set_python_enabled,
+    update_policy,
     update_python_draft,
     upsert_permission,
 )
@@ -32,6 +33,7 @@ from app.schemas.tool import (
     ToolInvocationResponse,
     ToolPermissionResponse,
     ToolPermissionUpsertRequest,
+    ToolPolicyUpdateRequest,
     ToolSummaryResponse,
     ToolTestRequest,
 )
@@ -195,6 +197,23 @@ async def enable_workspace_python_tool(
         context.workspace.id,
         tool_id,
         True,
+        context.user,
+        context.membership_role,
+    )
+
+
+@router.put("/{tool_id}/policy", response_model=ToolDetailResponse)
+async def update_workspace_tool_policy(
+    tool_id: str,
+    payload: ToolPolicyUpdateRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[Any, Depends(get_db)],
+) -> ToolDetailResponse:
+    return await update_policy(
+        db,
+        context.workspace.id,
+        tool_id,
+        payload.mode,
         context.user,
         context.membership_role,
     )

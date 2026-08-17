@@ -3276,6 +3276,7 @@ def test_mcp_tool_policy_services() -> None:
 
     owner = User(id="u1", username="alice")
     unannotated = _mcp_catalog_leaf()
+    owner_cas = AsyncMock(side_effect=lambda _db, entity, _revision: entity)
     with patch.object(
         tools_services,
         "_require_mcp_source_manager",
@@ -3284,19 +3285,31 @@ def test_mcp_tool_policy_services() -> None:
         tools_services,
         "get_mcp_catalog_leaf",
         new=AsyncMock(return_value=unannotated),
+    ), patch.object(
+        tools_services.tools_repository,
+        "update_tool_policy_if_revision",
+        new=owner_cas,
+    ), patch.object(
+        tools_services.tools_repository,
+        "save_tool",
+        new=AsyncMock(side_effect=lambda _db, entity: entity),
+    ), patch.object(
+        tools_services,
+        "record_audit_log",
+        return_value=None,
     ):
-        expect_http_error(
-            lambda: run(
-                tools_services.set_mcp_tool_policy(
-                    db,
-                    server,
-                    "echo",
-                    "read_only",
-                    owner,
-                )
-            ),
-            422,
+        owner_policy = run(
+            tools_services.set_mcp_tool_policy(
+                db,
+                server,
+                "echo",
+                "read_only",
+                owner,
+            )
         )
+        assert owner_policy.mode == "read_only"
+        assert owner_policy.definition_hash == unannotated.version.definition_hash
+        assert owner_cas.await_count == 1
 
     with patch.object(
         tools_services,

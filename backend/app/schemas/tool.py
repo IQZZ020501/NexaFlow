@@ -33,6 +33,20 @@ class ToolSourceSummaryResponse(_PublicToolResponse):
     transport: Literal["streamable_http", "sse", "stdio"] | None = None
 
 
+class ToolSourceDetailResponse(ToolSourceSummaryResponse):
+    workspace_id: str
+    status: str
+    url: str | None
+    stdio_command: str | None
+    has_bearer_token: bool
+    bearer_token_hint: str | None
+    last_error: str | None
+    created_by_user_id: str
+    created_at: datetime
+    updated_at: datetime
+    tool_count: int
+
+
 class ToolSummaryResponse(_PublicToolResponse):
     id: str
     workspace_id: str
@@ -126,6 +140,12 @@ class ToolPermissionUpsertRequest(BaseModel):
     permission: Literal["view", "use"]
 
 
+class ToolPolicyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["approval_required", "read_only", "disabled"]
+
+
 class ToolPermissionResponse(_PublicToolResponse):
     user: UserResponse
     permission: Literal["view", "use"]
@@ -137,7 +157,9 @@ __all__ = [
     "ToolInvocationResponse",
     "ToolPermissionResponse",
     "ToolPermissionUpsertRequest",
+    "ToolPolicyUpdateRequest",
     "ToolRefSchema",
+    "ToolSourceDetailResponse",
     "ToolSourceSummaryResponse",
     "ToolSummaryResponse",
     "ToolTestRequest",

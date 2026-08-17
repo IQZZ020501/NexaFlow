@@ -7,13 +7,14 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.tool_runtime import queue_tool_invocation
-from app.entities.tools import ToolDraft, ToolInvocation
+from app.entities.tools import McpServer, ToolDraft, ToolInvocation, ToolSource
 from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import tools as tool_repository
 from app.infrastructure.tool_dispatch import enqueue_tool_invocation
 from app.ports.tool_runtime import ToolInvocationContext
+from app.schemas.mcp import McpServerCreateRequest, McpServerResponse
 from app.schemas.tool import (
     PythonToolCreateRequest,
     PythonToolDraftUpdateRequest,
@@ -21,6 +22,7 @@ from app.schemas.tool import (
     ToolDraftResponse,
     ToolInvocationResponse,
     ToolPermissionResponse,
+    ToolSourceDetailResponse,
     ToolSummaryResponse,
 )
 from app.schemas.user import user_to_response
@@ -33,6 +35,7 @@ from app.shareddomain.tools.catalog import (
 from app.shareddomain.tools.permissions import (
     list_tool_permissions,
     require_managed_tool,
+    require_tool_manage,
     revoke_tool_permission,
     upsert_tool_permission,
 )
@@ -43,6 +46,15 @@ from app.shareddomain.tools.python_tools import (
     publish_python_tool,
     set_python_tool_enabled,
     update_python_tool_draft,
+)
+from app.shareddomain.tools.services import (
+    create_mcp_server,
+    delete_mcp_server,
+    get_mcp_server,
+    list_mcp_servers,
+    refresh_mcp_server,
+    set_mcp_server_enabled,
+    set_mcp_tool_policy,
 )
 from app.shareddomain.tools.runtime import validate_tool_arguments
 
@@ -81,6 +93,151 @@ async def get_tool(
         workspace_role,
     )
     return _detail_response(detail)
+
+
+def _source_response(
+    source: ToolSource,
+    server: McpServerResponse,
+) -> ToolSourceDetailResponse:
+    return ToolSourceDetailResponse(
+        id=source.id,
+        workspace_id=source.workspace_id,
+        name=source.name,
+        kind="mcp",
+        transport=server.transport,
+        status=source.status,
+        url=server.url,
+        stdio_command=server.stdio_command,
+        has_bearer_token=server.has_bearer_token,
+        bearer_token_hint=server.bearer_token_hint,
+        last_error=server.last_error,
+        created_by_user_id=source.created_by_user_id,
+        created_at=source.created_at,
+        updated_at=source.updated_at,
+        tool_count=len(server.tools),
+    )
+
+
+async def _mcp_source(
+    db: AsyncSession,
+    workspace_id: str,
+    source_id: str,
+    actor: User,
+    workspace_role: str | None,
+) -> tuple[ToolSource, McpServer]:
+    source = await tool_repository.get_tool_source(db, workspace_id, source_id)
+    if source is None or source.kind != "mcp" or not source.mcp_server_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tool source not found.")
+    server = await get_mcp_server(
+        db,
+        workspace_id,
+        source.mcp_server_id,
+        actor,
+        workspace_role,
+    )
+    return source, server
+
+
+async def list_sources(
+    db: AsyncSession,
+    workspace_id: str,
+    actor: User,
+    workspace_role: str | None,
+    limit: int,
+    offset: int,
+) -> list[ToolSourceDetailResponse]:
+    servers = await list_mcp_servers(
+        db,
+        workspace_id,
+        actor,
+        workspace_role,
+        limit,
+        offset,
+    )
+    sources = {
+        source.mcp_server_id: source
+        for source in await tool_repository.list_mcp_tool_sources(db, workspace_id)
+    }
+    return [
+        _source_response(sources[server.id], server)
+        for server in servers
+        if server.id in sources
+    ]
+
+
+async def create_mcp_source(
+    db: AsyncSession,
+    workspace_id: str,
+    payload: McpServerCreateRequest,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+) -> ToolSourceDetailResponse:
+    server = await create_mcp_server(
+        db,
+        workspace_id,
+        payload,
+        actor,
+        settings,
+        workspace_role,
+    )
+    sources = await tool_repository.list_mcp_tool_sources(db, workspace_id, server.id)
+    if not sources:  # pragma: no cover - source and server are committed together
+        raise RuntimeError("Created MCP source is missing.")
+    return _source_response(sources[0], server)
+
+
+async def refresh_source(
+    db: AsyncSession,
+    workspace_id: str,
+    source_id: str,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+) -> ToolSourceDetailResponse:
+    source, server = await _mcp_source(
+        db, workspace_id, source_id, actor, workspace_role
+    )
+    response = await refresh_mcp_server(
+        db, server, actor, settings, workspace_role
+    )
+    source = await tool_repository.get_tool_source(db, workspace_id, source.id)
+    if source is None:  # pragma: no cover - refresh does not delete its source
+        raise RuntimeError("Refreshed MCP source is missing.")
+    return _source_response(source, response)
+
+
+async def set_source_enabled(
+    db: AsyncSession,
+    workspace_id: str,
+    source_id: str,
+    enabled: bool,
+    actor: User,
+    workspace_role: str | None,
+) -> ToolSourceDetailResponse:
+    source, server = await _mcp_source(
+        db, workspace_id, source_id, actor, workspace_role
+    )
+    response = await set_mcp_server_enabled(
+        db, server, enabled, actor, workspace_role
+    )
+    source = await tool_repository.get_tool_source(db, workspace_id, source.id)
+    if source is None:  # pragma: no cover - enable does not delete its source
+        raise RuntimeError("Updated MCP source is missing.")
+    return _source_response(source, response)
+
+
+async def delete_source(
+    db: AsyncSession,
+    workspace_id: str,
+    source_id: str,
+    actor: User,
+    workspace_role: str | None,
+) -> None:
+    _source, server = await _mcp_source(
+        db, workspace_id, source_id, actor, workspace_role
+    )
+    await delete_mcp_server(db, server, actor, workspace_role)
 
 
 async def create_python(
@@ -169,6 +326,46 @@ async def delete_python(
         actor,
         workspace_role,
     )
+
+
+async def update_policy(
+    db: AsyncSession,
+    workspace_id: str,
+    tool_id: str,
+    mode: str,
+    actor: User,
+    workspace_role: str | None,
+) -> ToolDetailResponse:
+    detail = await get_tool_catalog_detail(
+        db,
+        workspace_id,
+        tool_id,
+        actor,
+        workspace_role,
+    )
+    require_tool_manage(detail.authorization)
+    if detail.tool.kind != "mcp" or not detail.source.mcp_server_id:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Only MCP Tool policy can be changed.",
+        )
+    server = await get_mcp_server(
+        db,
+        workspace_id,
+        detail.source.mcp_server_id,
+        actor,
+        workspace_role,
+    )
+    await set_mcp_tool_policy(
+        db,
+        server,
+        detail.tool.stable_key,
+        mode,
+        actor,
+        workspace_role,
+    )
+    await db.commit()
+    return await get_tool(db, workspace_id, tool_id, actor, workspace_role)
 
 
 async def queue_python_test(

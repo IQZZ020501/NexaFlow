@@ -2948,6 +2948,100 @@ def test_python_tool_http_lifecycle_and_private_grants() -> None:
         assert archived_publish.status_code == 409, archived_publish.text
 
 
+def test_canonical_mcp_policy_allows_owner_read_only_attestation() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    with test_client() as client:
+        admin_token, workspace_id = activate_admin(client)
+        owner_id, owner_token = create_active_user(
+            client,
+            admin_token,
+            "mcp-policy-owner",
+        )
+        add_workspace_member(client, admin_token, workspace_id, owner_id)
+        discovery = SimpleNamespace(
+            tools=[
+                {
+                    "name": "lookup",
+                    "description": "Lookup a record.",
+                    "input_schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                    },
+                }
+            ]
+        )
+        source_url = f"/api/v1/workspaces/{workspace_id}/tool-sources"
+        with patch(
+            "app.shareddomain.tools.services.discover_mcp_tools",
+            new=AsyncMock(return_value=discovery),
+        ):
+            created = client.post(
+                f"{source_url}/mcp",
+                headers=auth_headers(owner_token),
+                json={
+                    "name": "Owner MCP",
+                    "transport": "streamable_http",
+                    "url": "https://tools.example.com/mcp",
+                },
+            )
+        assert created.status_code == 201, created.text
+        source = created.json()
+        assert source["kind"] == "mcp"
+        listed_sources = client.get(
+            source_url,
+            headers=auth_headers(owner_token),
+        )
+        assert listed_sources.status_code == 200, listed_sources.text
+        assert [item["id"] for item in listed_sources.json()] == [source["id"]]
+
+        tools = client.get(
+            f"/api/v1/workspaces/{workspace_id}/tools",
+            headers=auth_headers(owner_token),
+        )
+        assert tools.status_code == 200, tools.text
+        tool = next(item for item in tools.json() if item["kind"] == "mcp")
+
+        response = client.put(
+            f"/api/v1/workspaces/{workspace_id}/tools/{tool['id']}/policy",
+            headers=auth_headers(owner_token),
+            json={"mode": "read_only"},
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["id"] == tool["id"]
+        assert payload["approval"] == "auto"
+        assert payload["effect"] == "external_read"
+        assert payload["workflow_callable"] is True
+
+        with patch(
+            "app.shareddomain.tools.services.discover_mcp_tools",
+            new=AsyncMock(return_value=discovery),
+        ):
+            refreshed = client.post(
+                f"{source_url}/{source['id']}/refresh",
+                headers=auth_headers(owner_token),
+            )
+        assert refreshed.status_code == 200, refreshed.text
+        disabled = client.post(
+            f"{source_url}/{source['id']}/disable",
+            headers=auth_headers(owner_token),
+        )
+        assert disabled.status_code == 200, disabled.text
+        assert disabled.json()["status"] == "disabled"
+        enabled = client.post(
+            f"{source_url}/{source['id']}/enable",
+            headers=auth_headers(owner_token),
+        )
+        assert enabled.status_code == 200, enabled.text
+        assert enabled.json()["status"] == "active"
+        deleted = client.delete(
+            f"{source_url}/{source['id']}",
+            headers=auth_headers(owner_token),
+        )
+        assert deleted.status_code == 204, deleted.text
+
+
 def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
     from app.application.tool_runtime import ToolInvocationBusy
     from app.infrastructure import tool_dispatch
@@ -3073,6 +3167,7 @@ def main() -> None:
     test_mcp_resolution_rejects_missing_authorization_context()
     test_workspace_creation_initializes_system_catalog()
     test_python_tool_http_lifecycle_and_private_grants()
+    test_canonical_mcp_policy_allows_owner_read_only_attestation()
     test_tool_tasks_never_execute_inline_and_recover_queued_tests()
     print("TOOLS_SUITE_OK")
 
