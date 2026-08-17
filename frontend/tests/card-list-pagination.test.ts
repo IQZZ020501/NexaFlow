@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { listAgents } from "../lib/api/agents"
+import { listAgents, listAllAgents } from "../lib/api/agents"
 import { listKnowledgeBases } from "../lib/api/knowledge"
 import { listRegisteredModels } from "../lib/api/llm"
 import { listMcpServers } from "../lib/api/mcp"
@@ -17,6 +17,28 @@ describe("card list batch loading", () => {
     expect(CARD_BATCH_SIZE).toBe(50)
   })
 
+  test("loads every Agent page for selection surfaces", async () => {
+    const requestedOffsets: string[] = []
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost")
+      const offset = url.searchParams.get("offset") ?? "0"
+      requestedOffsets.push(offset)
+      const items =
+        offset === "0"
+          ? Array.from({ length: 200 }, (_, index) => ({
+              id: `agent-${index}`,
+            }))
+          : [{ id: "agent-200" }]
+      return Response.json(items)
+    }) as typeof fetch
+
+    const agents = await listAllAgents("token", "ws")
+
+    expect(agents).toHaveLength(201)
+    expect(agents.at(-1)?.id).toBe("agent-200")
+    expect(requestedOffsets).toEqual(["0", "200"])
+  })
+
   const listCalls: Array<{
     name: string
     firstCall: () => Promise<unknown>
@@ -26,8 +48,7 @@ describe("card list batch loading", () => {
     {
       name: "agents",
       firstCall: () => listAgents("token", "ws"),
-      call: (limit, offset) =>
-        listAgents("token", "ws", { limit, offset }),
+      call: (limit, offset) => listAgents("token", "ws", { limit, offset }),
       basePath: "/api/v1/workspaces/ws/agents",
     },
     {

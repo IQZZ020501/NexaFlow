@@ -210,6 +210,28 @@ export function listWorkspaceMembers(
   )
 }
 
+const WORKSPACE_MEMBER_PAGE_SIZE = 200
+
+export async function listAllWorkspaceMembers(
+  token: string,
+  workspaceId: string
+) {
+  const members: WorkspaceMember[] = []
+  let offset = 0
+
+  while (true) {
+    const page = await listWorkspaceMembers(
+      token,
+      workspaceId,
+      WORKSPACE_MEMBER_PAGE_SIZE,
+      offset
+    )
+    members.push(...page)
+    if (page.length < WORKSPACE_MEMBER_PAGE_SIZE) return members
+    offset += page.length
+  }
+}
+
 export function addWorkspaceMember(
   token: string,
   workspaceId: string,

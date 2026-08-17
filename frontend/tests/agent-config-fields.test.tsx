@@ -16,10 +16,11 @@ import type { AgentFormState } from "@/components/agents/agents-page"
 import type { AgentInteractionConfig } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
-import type { McpServer } from "@/lib/api/mcp"
+import type { ToolSummary } from "@/lib/api/tools"
 
 import {
   makeSession,
+  jsonResponse,
   mockNextImage,
   mockUseSession,
   renderPage,
@@ -48,7 +49,12 @@ function model(id: string, name: string, status = "active"): RegisteredModel {
   }
 }
 
-function knowledgeBase(id: string, name: string, description = "知识库描述", status = "active"): KnowledgeBase {
+function knowledgeBase(
+  id: string,
+  name: string,
+  description = "知识库描述",
+  status = "active"
+): KnowledgeBase {
   return {
     id,
     workspace_id: WS,
@@ -64,25 +70,28 @@ function knowledgeBase(id: string, name: string, description = "知识库描述"
   }
 }
 
-function mcpServer(overrides: Partial<McpServer> = {}): McpServer {
+function tool(overrides: Partial<ToolSummary> = {}): ToolSummary {
   return {
-    id: "server-1",
+    id: "tool-search",
     workspace_id: WS,
-    name: "Database",
-    transport: "streamable_http",
-    url: "https://mcp.example.com/mcp",
-    stdio_command: null,
-    tools: [
-      { name: "search", description: "Search the catalog", input_schema: {}, annotations: null, definition_hash: "h1", policy_mode: "read_only" },
-      { name: "execute_sql", description: "Run SQL", input_schema: {}, annotations: null, definition_hash: "h2", policy_mode: "approval_required" },
-    ],
+    kind: "mcp",
+    function_name: "search",
+    display_name: "Catalog search",
+    description: "Search the catalog",
+    current_version_id: "version-1",
     status: "active",
-    has_bearer_token: false,
-    bearer_token_hint: null,
-    last_error: null,
+    availability: "available",
+    source: {
+      id: "source-1",
+      name: "Database",
+      kind: "mcp",
+      transport: "streamable_http",
+    },
     created_by_user_id: "u-1",
-    created_at: "",
-    updated_at: "",
+    permission: "owner",
+    can_view: true,
+    can_use: true,
+    can_manage: true,
     ...overrides,
   }
 }
@@ -105,7 +114,8 @@ mockUseSession(
       },
       memberships: [{ workspace_id: WS, role: "admin" }],
     },
-    notify: (kind: "success" | "error", message: string) => notifyCalls.push({ kind, message }),
+    notify: (kind: "success" | "error", message: string) =>
+      notifyCalls.push({ kind, message }),
   })
 )
 const stableRouter = {
@@ -124,13 +134,25 @@ mock.module("next/navigation", () => ({
 }))
 mockNextImage()
 
-const models = [model("model-1", "DeepSeek Chat"), model("model-2", "Legacy Model", "disabled")]
+const models = [
+  model("model-1", "DeepSeek Chat"),
+  model("model-2", "Legacy Model", "disabled"),
+]
 const knowledgeBases = [
   knowledgeBase("knowledge-1", "产品文档"),
   knowledgeBase("knowledge-2", "研发纪要"),
   knowledgeBase("knowledge-3", "旧知识库", "", "disabled"),
 ]
-const mcpServers = [mcpServer()]
+const tools = [
+  tool(),
+  tool({
+    id: "tool-sql",
+    function_name: "execute_sql",
+    display_name: "Execute SQL",
+    description: "Run SQL",
+    current_version_id: "version-2",
+  }),
+]
 
 function initialForm(overrides: Partial<AgentFormState> = {}): AgentFormState {
   return {
@@ -149,7 +171,7 @@ function initialForm(overrides: Partial<AgentFormState> = {}): AgentFormState {
     instructions: "Be concise.",
     knowledgeQueryMode: "required",
     knowledgeBaseIds: ["knowledge-1"],
-    mcpTools: [{ server_id: "server-1", tool_name: "search" }],
+    tools: [{ tool_id: "tool-search", version_id: "version-1" }],
     status: "active",
     ...overrides,
   }
@@ -158,9 +180,11 @@ function initialForm(overrides: Partial<AgentFormState> = {}): AgentFormState {
 function FieldsHarness({
   form: initial,
   readOnly = false,
+  hasLegacyToolBindings = false,
 }: {
   form: AgentFormState
   readOnly?: boolean
+  hasLegacyToolBindings?: boolean
 }) {
   const { t } = useLanguage()
   const [form, setForm] = useState(initial)
@@ -170,7 +194,10 @@ function FieldsHarness({
       setForm={setForm}
       models={models}
       knowledgeBases={knowledgeBases}
-      mcpServers={mcpServers}
+      tools={tools}
+      token="token"
+      workspaceId={WS}
+      hasLegacyToolBindings={hasLegacyToolBindings}
       readOnly={readOnly}
       t={t}
     />
@@ -190,7 +217,9 @@ afterEach(() => {
 
 describe("AgentConfigFields", () => {
   test("edits basic fields in create mode without advanced sections", async () => {
-    renderPage(<FieldsHarness form={initialForm({ id: null, name: "", modelId: "" })} />)
+    renderPage(
+      <FieldsHarness form={initialForm({ id: null, name: "", modelId: "" })} />
+    )
     const name = screen.getByLabelText("Agent 名称") as HTMLInputElement
     fireEvent.change(name, { target: { value: "New Agent" } })
     expect(name.value).toBe("New Agent")
@@ -201,17 +230,21 @@ describe("AgentConfigFields", () => {
 
     expect(screen.queryByText("系统提示词")).toBeNull()
     expect(screen.queryByText("关联知识库")).toBeNull()
-    expect(screen.queryByText("MCP 工具")).toBeNull()
+    expect(screen.queryByText("工具")).toBeNull()
     expect(screen.queryByText("状态")).toBeNull()
 
     openModelMenu()
-    fireEvent.click(await screen.findByRole("menuitem", { name: /DeepSeek Chat/ }))
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /DeepSeek Chat/ })
+    )
     expect(screen.getByText("DeepSeek Chat")).toBeTruthy()
   })
 
-  test("edits instructions and expands knowledge and MCP sections", () => {
+  test("edits instructions and expands knowledge and tool sections", () => {
     renderPage(<FieldsHarness form={initialForm()} />)
-    const instructions = screen.getByLabelText("系统提示词") as HTMLTextAreaElement
+    const instructions = screen.getByLabelText(
+      "系统提示词"
+    ) as HTMLTextAreaElement
     fireEvent.change(instructions, { target: { value: "New instructions" } })
     expect(instructions.value).toBe("New instructions")
 
@@ -219,14 +252,22 @@ describe("AgentConfigFields", () => {
     expect(screen.getByText("每次先检索（推荐）")).toBeTruthy()
     expect(screen.getByText("产品文档")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Agent 按需检索" }))
-    expect(screen.getByRole("button", { name: "Agent 按需检索" }).getAttribute("aria-pressed")).toBe("true")
+    expect(
+      screen
+        .getByRole("button", { name: "Agent 按需检索" })
+        .getAttribute("aria-pressed")
+    ).toBe("true")
 
-    fireEvent.click(screen.getByText("MCP 工具").closest("button")!)
-    expect(screen.getByText("Database / search")).toBeTruthy()
+    fireEvent.click(screen.getByText("工具").closest("button")!)
+    expect(screen.getByText("Catalog search")).toBeTruthy()
   })
 
   test("selects and removes knowledge bases from the picker", async () => {
-    renderPage(<FieldsHarness form={initialForm({ knowledgeBaseIds: ["knowledge-1"] })} />)
+    renderPage(
+      <FieldsHarness
+        form={initialForm({ knowledgeBaseIds: ["knowledge-1"] })}
+      />
+    )
     fireEvent.click(screen.getByText("关联知识库"))
     fireEvent.click(screen.getByLabelText("关联知识库"))
 
@@ -246,14 +287,18 @@ describe("AgentConfigFields", () => {
 
     fireEvent.click(within(dialog).getByText("产品文档").closest("label")!)
     fireEvent.click(within(dialog).getByText("研发纪要").closest("label")!)
-    await waitFor(() => expect(screen.getByText("关联的知识库展示在这里")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("关联的知识库展示在这里")).toBeTruthy()
+    )
     fireEvent.click(within(dialog).getByRole("button", { name: "完成" }))
     expect(screen.queryByRole("dialog")).toBeNull()
   })
 
   test("disables the fifth knowledge base selection", () => {
     renderPage(
-      <FieldsHarness form={initialForm({ knowledgeBaseIds: ["k1", "k2", "k3", "k4"] })} />
+      <FieldsHarness
+        form={initialForm({ knowledgeBaseIds: ["k1", "k2", "k3", "k4"] })}
+      />
     )
     fireEvent.click(screen.getByLabelText("关联知识库"))
     const dialog = screen.getByRole("dialog")
@@ -264,24 +309,44 @@ describe("AgentConfigFields", () => {
     expect(checkbox.disabled).toBe(true)
   })
 
-  test("selects and removes MCP tools from the picker", async () => {
-    renderPage(<FieldsHarness form={initialForm({ mcpTools: [{ server_id: "server-1", tool_name: "search" }] })} />)
-    fireEvent.click(screen.getByText("MCP 工具"))
-    fireEvent.click(screen.getByLabelText("MCP 工具"))
+  test("selects and removes unified tools from the picker", async () => {
+    globalThis.fetch = (() =>
+      Promise.resolve(jsonResponse(tools))) as unknown as typeof fetch
+    renderPage(<FieldsHarness form={initialForm()} />)
+    fireEvent.click(screen.getByText("工具"))
+    fireEvent.click(screen.getByLabelText("工具"))
 
     const dialog = screen.getByRole("dialog")
-    expect(within(dialog).getByText("Database")).toBeTruthy()
-    expect(within(dialog).getByText("execute_sql")).toBeTruthy()
+    expect(
+      (await within(dialog).findAllByText("Database")).length
+    ).toBeGreaterThan(0)
+    expect(within(dialog).getByText("Execute SQL")).toBeTruthy()
 
-    fireEvent.click(within(dialog).getByText("execute_sql").closest("label")!)
+    fireEvent.click(within(dialog).getByText("Execute SQL").closest("label")!)
     await waitFor(() =>
-      expect(screen.getAllByText("2 个 MCP 工具").length).toBeGreaterThan(0)
+      expect(screen.getAllByText("2 个工具").length).toBeGreaterThan(0)
     )
 
-    fireEvent.click(within(dialog).getByText("search").closest("label")!)
-    fireEvent.click(within(dialog).getByText("execute_sql").closest("label")!)
-    await waitFor(() => expect(screen.getByText("选择的 MCP 工具展示在这里")).toBeTruthy())
+    fireEvent.click(
+      within(dialog).getByText("Catalog search").closest("label")!
+    )
+    fireEvent.click(within(dialog).getByText("Execute SQL").closest("label")!)
+    await waitFor(() =>
+      expect(screen.getByText("选择的工具展示在这里")).toBeTruthy()
+    )
     fireEvent.click(within(dialog).getByRole("button", { name: "完成" }))
+  })
+
+  test("shows legacy MCP bindings as a read-only migration notice", () => {
+    renderPage(
+      <FieldsHarness form={initialForm({ tools: [] })} hasLegacyToolBindings />
+    )
+    fireEvent.click(screen.getByText("工具"))
+    expect(
+      screen.getByText(
+        "此 Agent 仍绑定旧版 MCP 工具；旧绑定不会继续写入，请重新选择需要保留的工具。"
+      )
+    ).toBeTruthy()
   })
 
   test("changes the agent status through the dropdown", () => {
@@ -295,20 +360,33 @@ describe("AgentConfigFields", () => {
 
   test("readOnly disables the editable fields", () => {
     renderPage(<FieldsHarness form={initialForm()} readOnly />)
-    expect((screen.getByLabelText("Agent 名称") as HTMLInputElement).disabled).toBe(true)
-    expect((screen.getByLabelText("描述") as HTMLTextAreaElement).disabled).toBe(true)
-    expect((screen.getByLabelText("系统提示词") as HTMLTextAreaElement).disabled).toBe(true)
-    expect((screen.getByLabelText("选择模型") as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (screen.getByLabelText("Agent 名称") as HTMLInputElement).disabled
+    ).toBe(true)
+    expect(
+      (screen.getByLabelText("描述") as HTMLTextAreaElement).disabled
+    ).toBe(true)
+    expect(
+      (screen.getByLabelText("系统提示词") as HTMLTextAreaElement).disabled
+    ).toBe(true)
+    expect(
+      (screen.getByLabelText("选择模型") as HTMLButtonElement).disabled
+    ).toBe(true)
   })
 
-  test("workflow app type hides knowledge and MCP sections", () => {
+  test("workflow app type hides knowledge and tool sections", () => {
     renderPage(
       <FieldsHarness
-        form={initialForm({ appType: "workflow", id: "wf-1", knowledgeBaseIds: [], mcpTools: [] })}
+        form={initialForm({
+          appType: "workflow",
+          id: "wf-1",
+          knowledgeBaseIds: [],
+          tools: [],
+        })}
       />
     )
     expect(screen.queryByText("关联知识库")).toBeNull()
-    expect(screen.queryByText("MCP 工具")).toBeNull()
+    expect(screen.queryByText("工具")).toBeNull()
   })
 })
 
@@ -322,7 +400,9 @@ describe("AgentConfigFields empty resource states", () => {
         setForm={setState}
         models={[]}
         knowledgeBases={[]}
-        mcpServers={[]}
+        tools={[]}
+        token="token"
+        workspaceId={WS}
         readOnly={false}
         t={t}
       />
@@ -330,15 +410,17 @@ describe("AgentConfigFields empty resource states", () => {
   }
 
   test("knowledge picker reports no available bases", () => {
-    renderPage(<EmptyHarness form={initialForm()} />)
+    renderPage(<EmptyHarness form={initialForm({ tools: [] })} />)
     fireEvent.click(screen.getByLabelText("关联知识库"))
     expect(screen.getByText("暂无可用知识库")).toBeTruthy()
   })
 
-  test("MCP picker reports no available tools", () => {
-    renderPage(<EmptyHarness form={initialForm()} />)
-    fireEvent.click(screen.getByLabelText("MCP 工具"))
-    expect(screen.getByText("暂无可用 MCP 工具")).toBeTruthy()
+  test("tool picker reports no available tools", async () => {
+    globalThis.fetch = (() =>
+      Promise.resolve(jsonResponse([]))) as unknown as typeof fetch
+    renderPage(<EmptyHarness form={initialForm({ tools: [] })} />)
+    fireEvent.click(screen.getByLabelText("工具"))
+    expect(await screen.findByText("暂无可用工具")).toBeTruthy()
   })
 
   test("closes the knowledge picker with Escape", async () => {
@@ -400,10 +482,14 @@ describe("InteractionConfigFields", () => {
     expect(title.value).toBe("Your question")
 
     fireEvent.click(screen.getByLabelText("文字转语音"))
-    expect(screen.getByLabelText("文字转语音").getAttribute("aria-checked")).toBe("false")
+    expect(
+      screen.getByLabelText("文字转语音").getAttribute("aria-checked")
+    ).toBe("false")
 
     fireEvent.click(screen.getByLabelText("文件上传"))
-    expect(screen.getByLabelText("文件上传").getAttribute("aria-checked")).toBe("true")
+    expect(screen.getByLabelText("文件上传").getAttribute("aria-checked")).toBe(
+      "true"
+    )
   })
 
   test("opens upload settings and toggles file types", () => {
@@ -432,9 +518,15 @@ describe("InteractionConfigFields", () => {
 
   test("readOnly disables the fields", () => {
     renderPage(<InteractionHarness readOnly />)
-    expect((screen.getByLabelText("开场白") as HTMLTextAreaElement).disabled).toBe(true)
-    expect((screen.getByLabelText("用户输入标题") as HTMLInputElement).disabled).toBe(true)
-    expect((screen.getByLabelText("文字转语音") as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (screen.getByLabelText("开场白") as HTMLTextAreaElement).disabled
+    ).toBe(true)
+    expect(
+      (screen.getByLabelText("用户输入标题") as HTMLInputElement).disabled
+    ).toBe(true)
+    expect(
+      (screen.getByLabelText("文字转语音") as HTMLButtonElement).disabled
+    ).toBe(true)
   })
 })
 
@@ -459,8 +551,17 @@ describe("AgentPermissionsDialog", () => {
     const grant: Array<{ userId: string }> = []
     renderPage(
       <AgentPermissionsDialog
-        agent={{ id: "agent-1", name: "Research Assistant", created_by_user_id: "owner-1" } as never}
-        members={[member("u-2", "Alice", "alice"), member("owner-1", "Owner", "owner")]}
+        agent={
+          {
+            id: "agent-1",
+            name: "Research Assistant",
+            created_by_user_id: "owner-1",
+          } as never
+        }
+        members={[
+          member("u-2", "Alice", "alice"),
+          member("owner-1", "Owner", "owner"),
+        ]}
         permissions={[]}
         isLoading={false}
         isSaving={false}
@@ -501,9 +602,17 @@ describe("AgentPermissionsDialog", () => {
     const revoked: string[] = []
     renderPage(
       <AgentPermissionsDialog
-        agent={{ id: "agent-1", name: "Agent", created_by_user_id: "owner-1" } as never}
+        agent={
+          {
+            id: "agent-1",
+            name: "Agent",
+            created_by_user_id: "owner-1",
+          } as never
+        }
         members={[]}
-        permissions={[{ user: member("u-3", "Bob", "bob").user, permission: "view" }]}
+        permissions={[
+          { user: member("u-3", "Bob", "bob").user, permission: "view" },
+        ]}
         isLoading={false}
         isSaving={false}
         onClose={() => undefined}
@@ -521,7 +630,13 @@ describe("AgentPermissionsDialog", () => {
   test("shows the empty grant list and disabled submit without targets", () => {
     renderPage(
       <AgentPermissionsDialog
-        agent={{ id: "agent-1", name: "Agent", created_by_user_id: "owner-1" } as never}
+        agent={
+          {
+            id: "agent-1",
+            name: "Agent",
+            created_by_user_id: "owner-1",
+          } as never
+        }
         members={[]}
         permissions={[]}
         isLoading={false}
@@ -533,14 +648,23 @@ describe("AgentPermissionsDialog", () => {
     )
     expect(screen.getByText("暂无授权")).toBeTruthy()
     expect(screen.getByText("选择用户")).toBeTruthy()
-    expect((screen.getByText("保存授权").closest("button") as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (screen.getByText("保存授权").closest("button") as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
   })
 
   test("closes via the dialog close event", () => {
     let closeCalls = 0
     const view = renderPage(
       <AgentPermissionsDialog
-        agent={{ id: "agent-1", name: "Agent", created_by_user_id: "owner-1" } as never}
+        agent={
+          {
+            id: "agent-1",
+            name: "Agent",
+            created_by_user_id: "owner-1",
+          } as never
+        }
         members={[]}
         permissions={[]}
         isLoading={false}

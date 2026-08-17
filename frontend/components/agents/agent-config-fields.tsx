@@ -15,6 +15,7 @@ import {
   WrenchIcon,
 } from "lucide-react"
 
+import { ToolPicker } from "@/components/tools/tool-picker"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -35,10 +36,10 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import type { TFunction } from "@/i18n"
-import type { AgentMcpToolRef } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
-import type { McpServer } from "@/lib/api/mcp"
+import type { ToolSummary } from "@/lib/api/tools"
+import { toolDisplayName } from "@/lib/tool-display"
 
 import type { AgentFormState } from "./agents-page"
 
@@ -47,17 +48,12 @@ type AgentConfigFieldsProps = {
   setForm: React.Dispatch<React.SetStateAction<AgentFormState>>
   models: RegisteredModel[]
   knowledgeBases: KnowledgeBase[]
-  mcpServers: McpServer[]
+  tools: ToolSummary[]
+  token: string
+  workspaceId: string
+  hasLegacyToolBindings?: boolean
   readOnly: boolean
   t: TFunction
-}
-
-function hasMcpTool(items: AgentMcpToolRef[], item: AgentMcpToolRef) {
-  return items.some(
-    (candidate) =>
-      candidate.server_id === item.server_id &&
-      candidate.tool_name === item.tool_name
-  )
 }
 
 export function AgentConfigFields({
@@ -65,15 +61,19 @@ export function AgentConfigFields({
   setForm,
   models,
   knowledgeBases,
-  mcpServers,
+  tools,
+  token,
+  workspaceId,
+  hasLegacyToolBindings = false,
   readOnly,
   t,
 }: AgentConfigFieldsProps) {
   const [resourcePicker, setResourcePicker] = React.useState<
-    "knowledge" | "mcp" | null
+    "knowledge" | null
   >(null)
   const [isKnowledgeOpen, setIsKnowledgeOpen] = React.useState(false)
-  const [isMcpOpen, setIsMcpOpen] = React.useState(false)
+  const [isToolsOpen, setIsToolsOpen] = React.useState(false)
+  const [isToolPickerOpen, setIsToolPickerOpen] = React.useState(false)
   const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
 
   const configurableModels = models.filter(
@@ -93,45 +93,16 @@ export function AgentConfigFields({
         .includes(query)
     )
   }, [activeKnowledgeBases, knowledgeSearch])
-  const activeMcpServers = React.useMemo(
-    () =>
-      mcpServers
-        .filter((server) => server.status === "active")
-        .map((server) => ({
-          ...server,
-          tools:
-            form.appType === "workflow"
-              ? server.tools.filter((tool) => tool.policy_mode === "read_only")
-              : server.tools,
-        })),
-    [form.appType, mcpServers]
-  )
-  const selectableMcpTools = React.useMemo(
-    () =>
-      new Set(
-        activeMcpServers.flatMap((server) =>
-          server.tools.map((tool) => `${server.id}:${tool.name}`)
-        )
-      ),
-    [activeMcpServers]
-  )
-  const selectedMcpTools = form.mcpTools.filter(
-    (reference) =>
-      form.appType !== "workflow" ||
-      selectableMcpTools.has(`${reference.server_id}:${reference.tool_name}`)
-  )
   const selectedModel = configurableModels.find(
     (model) => model.id === form.modelId
   )
   const selectedKnowledgeBaseNames = form.knowledgeBaseIds
     .map((id) => knowledgeBases.find((item) => item.id === id)?.name)
     .filter((name): name is string => Boolean(name))
-  const selectedMcpToolNames = selectedMcpTools.map((reference) => {
-    const server = mcpServers.find((item) => item.id === reference.server_id)
-    return server
-      ? `${server.name} / ${reference.tool_name}`
-      : reference.tool_name
-    })
+  const selectedToolNames = form.tools.map((reference) => {
+    const tool = tools.find((item) => item.id === reference.tool_id)
+    return tool ? toolDisplayName(tool, t) : reference.tool_id
+  })
 
   function toggleKnowledgeBase(id: string) {
     setForm((current) => {
@@ -142,23 +113,6 @@ export function AgentConfigFields({
         knowledgeBaseIds: selected
           ? current.knowledgeBaseIds.filter((item) => item !== id)
           : [...current.knowledgeBaseIds, id],
-      }
-    })
-  }
-
-  function toggleMcpTool(item: AgentMcpToolRef) {
-    setForm((current) => {
-      const selected = hasMcpTool(current.mcpTools, item)
-      if (!selected && current.mcpTools.length >= 12) return current
-      return {
-        ...current,
-        mcpTools: selected
-          ? current.mcpTools.filter(
-              (candidate) =>
-                candidate.server_id !== item.server_id ||
-                candidate.tool_name !== item.tool_name
-            )
-          : [...current.mcpTools, item],
       }
     })
   }
@@ -182,8 +136,8 @@ export function AgentConfigFields({
                   !form.id
                     ? "填写应用名称、描述和模型。"
                     : form.appType === "workflow"
-                    ? "配置工作流的默认模型。"
-                    : "配置 Agent 使用的模型、知识库和 MCP 工具。"
+                      ? "配置工作流的默认模型。"
+                      : "配置 Agent 使用的模型、知识库和工具。"
                 )}
               </p>
             </div>
@@ -323,161 +277,166 @@ export function AgentConfigFields({
 
         {form.id && form.appType === "agent" ? (
           <section className="rounded-xl border bg-background shadow-xs">
-          <div className="flex items-center gap-2 px-4 py-3">
-            <button
-              type="button"
-              className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-expanded={isKnowledgeOpen}
-              onClick={() => setIsKnowledgeOpen((current) => !current)}
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
-                <DatabaseIcon className="size-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">
-                  {t("关联知识库")}
+            <div className="flex items-center gap-2 px-4 py-3">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-expanded={isKnowledgeOpen}
+                onClick={() => setIsKnowledgeOpen((current) => !current)}
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                  <DatabaseIcon className="size-4" />
                 </span>
-                <span className="block text-xs text-muted-foreground">
-                  {t("{value} 个知识库", {
-                    value: form.knowledgeBaseIds.length,
-                  })}
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">
+                    {t("关联知识库")}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {t("{value} 个知识库", {
+                      value: form.knowledgeBaseIds.length,
+                    })}
+                  </span>
                 </span>
-              </span>
-              <ChevronRightIcon
-                className={`size-4 text-muted-foreground transition-transform ${isKnowledgeOpen ? "rotate-90" : ""}`}
-              />
-            </button>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              aria-label={t("关联知识库")}
-              title={t("关联知识库")}
-              disabled={readOnly}
-              onClick={() => {
-                setKnowledgeSearch("")
-                setResourcePicker("knowledge")
-              }}
-            >
-              <PlusIcon />
-            </Button>
-          </div>
-          {isKnowledgeOpen ? (
-            <div className="grid gap-3 border-t px-4 py-3">
-              {form.appType === "agent" ? (
-                <fieldset
-                  disabled={readOnly || form.knowledgeBaseIds.length === 0}
-                >
-                <legend className="mb-2 text-xs font-medium text-muted-foreground">
-                  {t("知识检索策略")}
-                </legend>
-                <div className="grid grid-cols-2 rounded-lg bg-muted p-1">
-                  {(["required", "agentic"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`min-h-9 rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                        form.knowledgeQueryMode === mode
-                          ? "bg-background text-foreground shadow-xs"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                      aria-pressed={form.knowledgeQueryMode === mode}
-                      onClick={() =>
-                        setForm((current) => ({
-                          ...current,
-                          knowledgeQueryMode: mode,
-                        }))
-                      }
-                    >
-                      {t(
-                        mode === "required"
-                          ? "每次先检索（推荐）"
-                          : "Agent 按需检索"
-                      )}
-                    </button>
-                  ))}
-                </div>
-                </fieldset>
-              ) : null}
-              {selectedKnowledgeBaseNames.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedKnowledgeBaseNames.map((name) => (
-                    <Badge
-                      key={name}
-                      variant="secondary"
-                      className="font-normal"
-                    >
-                      {name}
-                    </Badge>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {t("关联的知识库展示在这里")}
-                </p>
-              )}
+                <ChevronRightIcon
+                  className={`size-4 text-muted-foreground transition-transform ${isKnowledgeOpen ? "rotate-90" : ""}`}
+                />
+              </button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                aria-label={t("关联知识库")}
+                title={t("关联知识库")}
+                disabled={readOnly}
+                onClick={() => {
+                  setKnowledgeSearch("")
+                  setResourcePicker("knowledge")
+                }}
+              >
+                <PlusIcon />
+              </Button>
             </div>
-          ) : null}
+            {isKnowledgeOpen ? (
+              <div className="grid gap-3 border-t px-4 py-3">
+                {form.appType === "agent" ? (
+                  <fieldset
+                    disabled={readOnly || form.knowledgeBaseIds.length === 0}
+                  >
+                    <legend className="mb-2 text-xs font-medium text-muted-foreground">
+                      {t("知识检索策略")}
+                    </legend>
+                    <div className="grid grid-cols-2 rounded-lg bg-muted p-1">
+                      {(["required", "agentic"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`min-h-9 rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                            form.knowledgeQueryMode === mode
+                              ? "bg-background text-foreground shadow-xs"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                          aria-pressed={form.knowledgeQueryMode === mode}
+                          onClick={() =>
+                            setForm((current) => ({
+                              ...current,
+                              knowledgeQueryMode: mode,
+                            }))
+                          }
+                        >
+                          {t(
+                            mode === "required"
+                              ? "每次先检索（推荐）"
+                              : "Agent 按需检索"
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
+                {selectedKnowledgeBaseNames.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedKnowledgeBaseNames.map((name) => (
+                      <Badge
+                        key={name}
+                        variant="secondary"
+                        className="font-normal"
+                      >
+                        {name}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("关联的知识库展示在这里")}
+                  </p>
+                )}
+              </div>
+            ) : null}
           </section>
         ) : null}
 
         {form.id && form.appType === "agent" ? (
           <section className="rounded-xl border bg-background shadow-xs">
-          <div className="flex items-center gap-2 px-4 py-3">
-            <button
-              type="button"
-              className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-expanded={isMcpOpen}
-              onClick={() => setIsMcpOpen((current) => !current)}
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-700 dark:text-sky-400">
-                <WrenchIcon className="size-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">
-                  {t("MCP 工具")}
+            <div className="flex items-center gap-2 px-4 py-3">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-expanded={isToolsOpen}
+                onClick={() => setIsToolsOpen((current) => !current)}
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-700 dark:text-sky-400">
+                  <WrenchIcon className="size-4" />
                 </span>
-                <span className="block text-xs text-muted-foreground">
-                  {t("{value} 个 MCP 工具", { value: selectedMcpTools.length })}
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">{t("工具")}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {t("{value} 个工具", { value: form.tools.length })}
+                  </span>
                 </span>
-              </span>
-              <ChevronRightIcon
-                className={`size-4 text-muted-foreground transition-transform ${isMcpOpen ? "rotate-90" : ""}`}
-              />
-            </button>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              aria-label={t("MCP 工具")}
-              title={t("MCP 工具")}
-              disabled={readOnly}
-              onClick={() => setResourcePicker("mcp")}
-            >
-              <PlusIcon />
-            </Button>
-          </div>
-          {isMcpOpen ? (
-            <div className="border-t px-4 py-3">
-              {selectedMcpToolNames.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedMcpToolNames.map((name) => (
-                    <Badge
-                      key={name}
-                      variant="secondary"
-                      className="font-normal"
-                    >
-                      {name}
-                    </Badge>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {t("选择的 MCP 工具展示在这里")}
-                </p>
-              )}
+                <ChevronRightIcon
+                  className={`size-4 text-muted-foreground transition-transform ${isToolsOpen ? "rotate-90" : ""}`}
+                />
+              </button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                aria-label={t("工具")}
+                title={t("工具")}
+                disabled={readOnly}
+                onClick={() => setIsToolPickerOpen(true)}
+              >
+                <PlusIcon />
+              </Button>
             </div>
-          ) : null}
+            {isToolsOpen ? (
+              <div className="border-t px-4 py-3">
+                {hasLegacyToolBindings && form.tools.length === 0 ? (
+                  <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs leading-5 text-amber-800 dark:text-amber-300">
+                    {t(
+                      "此 Agent 仍绑定旧版 MCP 工具；旧绑定不会继续写入，请重新选择需要保留的工具。"
+                    )}
+                  </p>
+                ) : null}
+                {selectedToolNames.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedToolNames.map((name, index) => (
+                      <Badge
+                        key={`${form.tools[index]?.tool_id}:${form.tools[index]?.version_id}`}
+                        variant="secondary"
+                        className="font-normal"
+                      >
+                        {name}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("选择的工具展示在这里")}
+                  </p>
+                )}
+              </div>
+            ) : null}
           </section>
         ) : null}
 
@@ -652,124 +611,21 @@ export function AgentConfigFields({
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={form.appType === "agent" && resourcePicker === "mcp"}
-        onOpenChange={(open) => setResourcePicker(open ? "mcp" : null)}
-      >
-        <DialogContent className="max-h-[calc(100svh-2rem)] max-w-xl gap-0 overflow-hidden p-0">
-          <DialogHeader className="border-b bg-muted/25 px-5 py-5 sm:px-6">
-            <div className="flex items-start gap-3">
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-700 dark:text-sky-400">
-                <WrenchIcon className="size-5" />
-              </span>
-              <div className="min-w-0 pt-0.5">
-                <DialogTitle>{t("MCP 工具")}</DialogTitle>
-                <DialogDescription className="mt-1.5 leading-5">
-                  {t(
-                    form.appType === "workflow"
-                      ? "选择工作流可自动执行的只读 MCP 工具，最多 {value} 个。"
-                      : "按需选择 MCP 工具，最多 {value} 个。",
-                    { value: 12 }
-                  )}
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-          <div className="max-h-[52svh] overflow-y-auto p-3 sm:p-4">
-            {activeMcpServers.every((server) => server.tools.length === 0) ? (
-              <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 p-6 text-center">
-                <span className="flex size-10 items-center justify-center rounded-xl bg-muted">
-                  <WrenchIcon className="size-4 text-muted-foreground" />
-                </span>
-                <p className="text-sm text-muted-foreground">
-                  {t("暂无可用 MCP 工具")}
-                </p>
-              </div>
-            ) : (
-              <fieldset className="space-y-5" disabled={readOnly}>
-                {activeMcpServers.map((server) =>
-                  server.tools.length > 0 ? (
-                    <section key={server.id}>
-                      <div className="mb-2 flex items-center justify-between gap-3 px-1">
-                        <p className="truncate text-xs font-medium text-muted-foreground">
-                          {server.name}
-                        </p>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {t("{value} 个工具", { value: server.tools.length })}
-                        </span>
-                      </div>
-                      <div className="space-y-2">
-                        {server.tools.map((tool) => {
-                          const reference = {
-                            server_id: server.id,
-                            tool_name: tool.name,
-                          }
-                          const checked = hasMcpTool(selectedMcpTools, reference)
-                          const disabled =
-                            !checked && selectedMcpTools.length >= 12
-                          return (
-                            <label
-                              key={tool.name}
-                              className={`group flex items-start gap-3 rounded-xl border p-3.5 transition-[border-color,background-color,box-shadow] ${
-                                checked
-                                  ? "border-foreground/20 bg-muted/70 shadow-xs"
-                                  : "border-border/70 hover:border-foreground/20 hover:bg-muted/35"
-                              } ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
-                            >
-                              <input
-                                type="checkbox"
-                                className="sr-only"
-                                checked={checked}
-                                disabled={disabled}
-                                onChange={() => toggleMcpTool(reference)}
-                              />
-                              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-700 dark:text-sky-400">
-                                <WrenchIcon className="size-4" />
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm font-medium">
-                                  {tool.name}
-                                </span>
-                                {tool.description ? (
-                                  <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-foreground">
-                                    {tool.description}
-                                  </span>
-                                ) : null}
-                              </span>
-                              <span
-                                className={`mt-1 flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                                  checked
-                                    ? "border-foreground bg-foreground text-background"
-                                    : "border-muted-foreground/30 text-transparent group-hover:border-muted-foreground/60"
-                                }`}
-                                aria-hidden="true"
-                              >
-                                <CheckIcon className="size-3.5" />
-                              </span>
-                            </label>
-                          )
-                        })}
-                      </div>
-                    </section>
-                  ) : null
-                )}
-              </fieldset>
-            )}
-          </div>
-          <DialogFooter className="flex-col border-t bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <p className="text-xs text-muted-foreground">
-              {t("{value} 个 MCP 工具", { value: selectedMcpTools.length })}
-            </p>
-            <Button
-              type="button"
-              className="w-full sm:w-auto sm:min-w-20"
-              onClick={() => setResourcePicker(null)}
-            >
-              {t("完成")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {isToolPickerOpen ? (
+        <ToolPicker
+          open={form.appType === "agent"}
+          onOpenChange={setIsToolPickerOpen}
+          token={token}
+          workspaceId={workspaceId}
+          value={form.tools}
+          onChange={(nextTools) =>
+            setForm((current) => ({
+              ...current,
+              tools: nextTools,
+            }))
+          }
+        />
+      ) : null}
     </>
   )
 }

@@ -1,6 +1,7 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
 import type { User } from "@/lib/api/auth"
+import type { ToolRef } from "@/lib/api/tools"
 
 export type KnowledgeQueryMode = "required" | "agentic"
 
@@ -27,12 +28,15 @@ export type Agent = {
   model_id: string
   knowledge_query_mode: KnowledgeQueryMode
   knowledge_base_ids: string[]
-  mcp_tools: AgentMcpToolRef[]
+  tools?: ToolRef[]
+  /** @deprecated Read-only compatibility for responses created before ToolRef. */
+  mcp_tools?: AgentMcpToolRef[]
   status: "active" | "disabled"
   published: boolean
   has_unpublished_changes: boolean
   published_by_user_id: string | null
   published_at: string | null
+  current_published_version_id?: string | null
   created_by_user_id: string
   can_edit: boolean
   created_at: string
@@ -55,7 +59,7 @@ export type AgentPayload = {
   model_id: string
   knowledge_query_mode: KnowledgeQueryMode
   knowledge_base_ids: string[]
-  mcp_tools: AgentMcpToolRef[]
+  tools: ToolRef[]
   description?: string
   interaction_config?: AgentInteractionConfig
   instructions?: string
@@ -268,11 +272,28 @@ function agentsPath(workspaceId: string, suffix = "") {
 export function listAgents(
   token: string,
   workspaceId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number } = {}
 ) {
   return request<Agent[]>(`${agentsPath(workspaceId)}${listQuery(options)}`, {
     token,
   })
+}
+
+const AGENT_SELECTION_PAGE_SIZE = 200
+
+export async function listAllAgents(token: string, workspaceId: string) {
+  const agents: Agent[] = []
+  let offset = 0
+
+  while (true) {
+    const page = await listAgents(token, workspaceId, {
+      limit: AGENT_SELECTION_PAGE_SIZE,
+      offset,
+    })
+    agents.push(...page)
+    if (page.length < AGENT_SELECTION_PAGE_SIZE) return agents
+    offset += page.length
+  }
 }
 
 export function getAgent(token: string, workspaceId: string, agentId: string) {
@@ -463,7 +484,7 @@ export function listAgentRuns(
     agentsPath(workspaceId, `/${agentId}/runs${query}`),
     {
       token,
-    },
+    }
   )
 }
 
@@ -496,11 +517,14 @@ export function uploadAgentFiles(
 ) {
   const body = new FormData()
   files.forEach((file) => body.append("files", file))
-  return request<AgentUpload[]>(agentsPath(workspaceId, `/${agentId}/uploads`), {
-    method: "POST",
-    token,
-    body,
-  })
+  return request<AgentUpload[]>(
+    agentsPath(workspaceId, `/${agentId}/uploads`),
+    {
+      method: "POST",
+      token,
+      body,
+    }
+  )
 }
 
 export function getAgentRun(
@@ -578,10 +602,10 @@ export async function observeAgentRun(
           headers: { Authorization: `Bearer ${token}` },
           credentials: "include",
           signal: streamSignal,
-        },
+        }
       ),
     onEvent,
-    { signal, after, liveAfter, errorLabel: "Agent stream" },
+    { signal, after, liveAfter, errorLabel: "Agent stream" }
   )
 }
 

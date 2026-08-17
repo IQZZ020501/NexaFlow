@@ -18,20 +18,8 @@ import {
   type NodeChange,
   type OnSelectionChangeParams,
 } from "@xyflow/react"
-import {
-  ChevronDownIcon,
-  ChevronUpIcon,
-  FileTextIcon,
-  PlusIcon,
-} from "lucide-react"
+import { ChevronDownIcon, ChevronUpIcon, FileTextIcon } from "lucide-react"
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { IconButton } from "@/components/ui/icon-button"
 import { Input } from "@/components/ui/input"
 import type { TFunction } from "@/i18n"
@@ -41,6 +29,7 @@ import { InteractionConfigFields } from "@/components/agents/interaction-config-
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
+import type { ToolDetail } from "@/lib/api/tools"
 import type {
   WorkflowEdge,
   WorkflowGraph,
@@ -50,8 +39,7 @@ import type {
   WorkflowNodeType,
 } from "@/lib/api/workflows"
 import {
-  WORKFLOW_NODE_PRESETS,
-  WORKFLOW_NODE_TYPES,
+  WORKFLOW_BASIC_NODE_TYPES,
   createWorkflowEdge,
   createWorkflowNode,
   ensureConditionElseIfBranches,
@@ -70,10 +58,7 @@ import {
   workflowNodeRects,
 } from "@/lib/workflows/canvas"
 
-import {
-  NODE_ICONS,
-  WorkflowNodeCard,
-} from "./workflow-node"
+import { WorkflowNodeCard } from "./workflow-node"
 import { WorkflowEdgeCard } from "./workflow-edge"
 
 const nodeTypes = { workflow: WorkflowNodeCard }
@@ -83,23 +68,31 @@ const reactFlowProOptions = { hideAttribution: true }
 type WorkflowCanvasProps = {
   agent: Agent
   graph: WorkflowGraph
+  graphRevision: number
   models: RegisteredModel[]
   knowledgeBases: KnowledgeBase[]
   mcpServers: McpServer[]
+  tools: ToolDetail[]
+  agents: Agent[]
   runtimeStatuses: Record<string, WorkflowNodeExecution["status"]>
   readOnly: boolean
-  paletteOpen: boolean
-  onClosePalette: () => void
   form: AgentFormState
   setForm: React.Dispatch<React.SetStateAction<AgentFormState>>
+  onAddNodeReady?: (handler: WorkflowNodeAddHandler | null) => void
   onChange: (graph: WorkflowGraph) => void
   t: TFunction
 }
 
+export type WorkflowNodeAddHandler = (
+  type: WorkflowNodeType,
+  title?: string,
+  config?: Record<string, unknown>
+) => void
+
 function CanvasInner(props: WorkflowCanvasProps) {
   const { screenToFlowPosition, setViewport: setFlowViewport } = useReactFlow()
   const flowStore = useStoreApi<WorkflowNode, WorkflowEdge>()
-  const { t } = props
+  const { onAddNodeReady, t } = props
   const [initialGraph] = React.useState(() =>
     props.readOnly ? props.graph : ensureConditionElseIfBranches(props.graph)
   )
@@ -108,7 +101,9 @@ function CanvasInner(props: WorkflowCanvasProps) {
   const startNodeId =
     nodes.find((node) => node.data.type === "start")?.id ?? "start"
   const [viewport, setViewport] = React.useState(props.graph.viewport)
-  const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(
+    null
+  )
   const [infoOpen, setInfoOpen] = React.useState(true)
   const [infoPosition, setInfoPosition] = React.useState({ x: 16, y: 16 })
   const infoCardRef = React.useRef<HTMLDivElement | null>(null)
@@ -132,6 +127,20 @@ function CanvasInner(props: WorkflowCanvasProps) {
     onChangeRef.current(serializeWorkflowGraph(nodes, edges, viewport))
   }, [edges, nodes, viewport])
 
+  const graphRevisionRef = React.useRef(props.graphRevision)
+  React.useEffect(() => {
+    if (graphRevisionRef.current === props.graphRevision) return
+    graphRevisionRef.current = props.graphRevision
+    const nextGraph = props.readOnly
+      ? props.graph
+      : ensureConditionElseIfBranches(props.graph)
+    skipInitialChangeRef.current = true
+    setNodes(nextGraph.nodes)
+    setEdges(nextGraph.edges)
+    setViewport(nextGraph.viewport)
+    setSelectedEdgeId(null)
+  }, [props.graph, props.graphRevision, props.readOnly])
+
   const addNode = React.useCallback(
     (
       type: WorkflowNodeType,
@@ -140,7 +149,10 @@ function CanvasInner(props: WorkflowCanvasProps) {
       config?: Record<string, unknown>
     ) => {
       if (props.readOnly) return
-      if (["start", "end"].includes(type) && nodes.some((node) => node.data.type === type)) {
+      if (
+        ["start", "end"].includes(type) &&
+        nodes.some((node) => node.data.type === type)
+      ) {
         return
       }
       const node = createWorkflowNode(
@@ -162,8 +174,6 @@ function CanvasInner(props: WorkflowCanvasProps) {
     pointer: { x: number; y: number }
     position: { x: number; y: number }
   } | null>(null)
-  const { onClosePalette } = props
-
   const clearInfoCardPosition = React.useCallback(
     (position: { x: number; y: number }) => {
       const card = infoCardRef.current
@@ -182,7 +192,8 @@ function CanvasInner(props: WorkflowCanvasProps) {
     const card = infoCardRef.current
     if (!card) return
     const nodeRects = workflowNodeRects(nodes)
-    const startNode = nodeRects[nodes.findIndex((node) => node.data.type === "start")]
+    const startNode =
+      nodeRects[nodes.findIndex((node) => node.data.type === "start")]
     if (!startNode) return
     const next = nonOverlappingCanvasPosition(
       canvasPositionLeftOf(startNode, {
@@ -204,7 +215,10 @@ function CanvasInner(props: WorkflowCanvasProps) {
       return
     }
     infoViewportAdjustedRef.current = true
-    const top = Math.min(infoPosition.y, ...nodes.map((node) => node.position.y))
+    const top = Math.min(
+      infoPosition.y,
+      ...nodes.map((node) => node.position.y)
+    )
     const next = viewportIncludingCanvasY(
       viewportIncludingCanvasX(viewport, infoPosition.x),
       top
@@ -312,10 +326,14 @@ function CanvasInner(props: WorkflowCanvasProps) {
       } else {
         addNode(type, undefined, title, config)
       }
-      onClosePalette()
     },
-    [addNode, onClosePalette, screenToFlowPosition]
+    [addNode, screenToFlowPosition]
   )
+
+  React.useEffect(() => {
+    onAddNodeReady?.(addNodeAtCenter)
+    return () => onAddNodeReady?.(null)
+  }, [addNodeAtCenter, onAddNodeReady])
 
   const deleteEdge = React.useCallback((edgeId: string) => {
     setEdges((current) => current.filter((edge) => edge.id !== edgeId))
@@ -336,71 +354,111 @@ function CanvasInner(props: WorkflowCanvasProps) {
     [flowStore]
   )
 
-  const copyNode = React.useCallback((nodeId: string) => {
-    if (props.readOnly) return
-    const source = nodes.find((node) => node.id === nodeId)
-    if (!source) return
-    const copy = createWorkflowNode(source.data.type, `${source.data.title} ${t("副本")}`, nodes.length)
-    copy.position = { x: source.position.x + 300, y: source.position.y + 80 }
-    copy.data.config = structuredClone(source.data.config)
-    setNodes((current) => [...current, copy])
-  }, [nodes, props.readOnly, t])
+  const copyNode = React.useCallback(
+    (nodeId: string) => {
+      if (props.readOnly) return
+      const source = nodes.find((node) => node.id === nodeId)
+      if (!source) return
+      const copy = createWorkflowNode(
+        source.data.type,
+        `${source.data.title} ${t("副本")}`,
+        nodes.length
+      )
+      copy.position = { x: source.position.x + 300, y: source.position.y + 80 }
+      copy.data.config = structuredClone(source.data.config)
+      setNodes((current) => [...current, copy])
+    },
+    [nodes, props.readOnly, t]
+  )
 
-  const deleteNode = React.useCallback((nodeId: string) => {
-    if (props.readOnly || ["start", "end"].some((type) => nodes.find((node) => node.id === nodeId)?.data.type === type)) return
-    setNodes((current) => current.filter((node) => node.id !== nodeId))
-    setEdges((current) => current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId))
-  }, [nodes, props.readOnly])
+  const deleteNode = React.useCallback(
+    (nodeId: string) => {
+      if (
+        props.readOnly ||
+        ["start", "end"].some(
+          (type) => nodes.find((node) => node.id === nodeId)?.data.type === type
+        )
+      )
+        return
+      setNodes((current) => current.filter((node) => node.id !== nodeId))
+      setEdges((current) =>
+        current.filter(
+          (edge) => edge.source !== nodeId && edge.target !== nodeId
+        )
+      )
+    },
+    [nodes, props.readOnly]
+  )
 
-  const renameNode = React.useCallback((nodeId: string, title: string) => {
-    if (props.readOnly) return
-    updateNode(nodeId, (node) => ({ ...node, data: { ...node.data, title } }))
-  }, [props.readOnly, updateNode])
+  const renameNode = React.useCallback(
+    (nodeId: string, title: string) => {
+      if (props.readOnly) return
+      updateNode(nodeId, (node) => ({ ...node, data: { ...node.data, title } }))
+    },
+    [props.readOnly, updateNode]
+  )
 
   const renderedNodes = React.useMemo(
     () =>
       nodes.map((node) => ({
-          ...node,
-          type: "workflow",
-          data: {
-            ...node.data,
-            runtimeStatus: props.runtimeStatuses[node.id],
-            readOnly: props.readOnly,
-            onCopy: copyNode,
-            onDelete: deleteNode,
-            onRename: renameNode,
-            onUpdate: (nextData: WorkflowNodeData) => {
-              if (node.data.type === "condition") {
-                const nextHandles = new Set(
-                  Array.isArray(nextData.config.branch)
-                    ? nextData.config.branch.flatMap((branch) =>
-                        branch &&
-                        typeof branch === "object" &&
-                        typeof (branch as Record<string, unknown>).id === "string"
-                          ? [String((branch as Record<string, unknown>).id)]
-                          : []
-                      )
-                    : []
+        ...node,
+        type: "workflow",
+        data: {
+          ...node.data,
+          runtimeStatus: props.runtimeStatuses[node.id],
+          readOnly: props.readOnly,
+          onCopy: copyNode,
+          onDelete: deleteNode,
+          onRename: renameNode,
+          onUpdate: (nextData: WorkflowNodeData) => {
+            if (node.data.type === "condition") {
+              const nextHandles = new Set(
+                Array.isArray(nextData.config.branch)
+                  ? nextData.config.branch.flatMap((branch) =>
+                      branch &&
+                      typeof branch === "object" &&
+                      typeof (branch as Record<string, unknown>).id === "string"
+                        ? [String((branch as Record<string, unknown>).id)]
+                        : []
+                    )
+                  : []
+              )
+              setEdges((current) =>
+                current.filter(
+                  (edge) =>
+                    edge.source !== node.id ||
+                    nextHandles.has(String(edge.sourceHandle ?? ""))
                 )
-                setEdges((current) =>
-                  current.filter(
-                    (edge) =>
-                      edge.source !== node.id ||
-                      nextHandles.has(String(edge.sourceHandle ?? ""))
-                  )
-                )
-              }
-              updateNode(node.id, (item) => ({ ...item, data: nextData }))
-            },
-            agent: props.agent,
-            models: props.models,
-            knowledgeBases: props.knowledgeBases,
-            mcpServers: props.mcpServers,
-            nodes,
-            edges,
+              )
+            }
+            updateNode(node.id, (item) => ({ ...item, data: nextData }))
           },
+          agent: props.agent,
+          models: props.models,
+          knowledgeBases: props.knowledgeBases,
+          mcpServers: props.mcpServers,
+          tools: props.tools,
+          agents: props.agents,
+          nodes,
+          edges,
+        },
       })),
-    [copyNode, deleteNode, edges, nodes, props.agent, props.knowledgeBases, props.mcpServers, props.models, props.readOnly, props.runtimeStatuses, renameNode, updateNode]
+    [
+      copyNode,
+      deleteNode,
+      edges,
+      nodes,
+      props.agent,
+      props.agents,
+      props.knowledgeBases,
+      props.mcpServers,
+      props.models,
+      props.readOnly,
+      props.runtimeStatuses,
+      props.tools,
+      renameNode,
+      updateNode,
+    ]
   )
   const renderedEdges = React.useMemo(
     () =>
@@ -561,8 +619,11 @@ function CanvasInner(props: WorkflowCanvasProps) {
               const type = event.dataTransfer.getData(
                 "application/nexaflow-node"
               ) as WorkflowNodeType
-              if (!WORKFLOW_NODE_TYPES.includes(type)) return
-              addNode(type, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+              if (!WORKFLOW_BASIC_NODE_TYPES.includes(type)) return
+              addNode(
+                type,
+                screenToFlowPosition({ x: event.clientX, y: event.clientY })
+              )
             }}
           >
             {!props.readOnly ? (
@@ -572,13 +633,13 @@ function CanvasInner(props: WorkflowCanvasProps) {
                   style={{
                     transform: `translate(${infoPosition.x}px, ${infoPosition.y}px)`,
                   }}
-                  className="nodrag nopan nowheel pointer-events-auto absolute z-10 w-[25rem] max-w-[calc(100vw-2rem)] select-text rounded-lg border bg-card/95 p-3 shadow-md backdrop-blur"
+                  className="nodrag nopan nowheel pointer-events-auto absolute z-10 w-[25rem] max-w-[calc(100vw-2rem)] rounded-lg border bg-card/95 p-3 shadow-md backdrop-blur select-text"
                 >
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       aria-label={t("拖动基本信息")}
-                      className="flex min-w-0 flex-1 cursor-grab touch-none select-none items-center gap-2 rounded-md text-left outline-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex min-w-0 flex-1 cursor-grab touch-none items-center gap-2 rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
                       onPointerDown={handleInfoDragStart}
                       onPointerMove={handleInfoDragMove}
                       onPointerUp={handleInfoDragEnd}
@@ -610,7 +671,10 @@ function CanvasInner(props: WorkflowCanvasProps) {
                   </div>
                   {infoOpen ? (
                     <div className="mt-3 grid max-h-[70vh] gap-4 overflow-y-auto pr-1">
-                      <label className="grid gap-1.5 text-xs font-medium" htmlFor="basic-info-name">
+                      <label
+                        className="grid gap-1.5 text-xs font-medium"
+                        htmlFor="basic-info-name"
+                      >
                         <span>{t("名称")}</span>
                         <Input
                           id="basic-info-name"
@@ -628,7 +692,10 @@ function CanvasInner(props: WorkflowCanvasProps) {
                           {props.form.name.length} / 120
                         </span>
                       </label>
-                      <label className="grid gap-1.5 text-xs font-medium" htmlFor="basic-info-description">
+                      <label
+                        className="grid gap-1.5 text-xs font-medium"
+                        htmlFor="basic-info-description"
+                      >
                         <span>{t("描述")}</span>
                         <textarea
                           id="basic-info-description"
@@ -681,67 +748,6 @@ function CanvasInner(props: WorkflowCanvasProps) {
           </ReactFlow>
         </div>
       </div>
-      <Dialog
-        open={props.paletteOpen}
-        onOpenChange={(open) => {
-          if (!open) props.onClosePalette()
-        }}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{props.t("节点库")}</DialogTitle>
-            <DialogDescription>
-              {props.t("点击添加节点到画布中央")}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-2">
-            {WORKFLOW_NODE_TYPES.map((type) => {
-              const Icon = NODE_ICONS[type]
-              const disabled =
-                props.readOnly ||
-                (["start", "end"].includes(type) &&
-                  nodes.some((node) => node.data.type === type))
-              return (
-                <button
-                  key={type}
-                  type="button"
-                  disabled={disabled}
-                  className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-2 text-left text-xs font-medium shadow-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                  onClick={() => addNodeAtCenter(type)}
-                >
-                  <Icon className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate">
-                    {workflowNodeLabel(type, props.t)}
-                  </span>
-                  <PlusIcon className="ml-auto size-3.5 text-muted-foreground" />
-                </button>
-              )
-            })}
-            {WORKFLOW_NODE_PRESETS.map((preset) => {
-              const Icon = NODE_ICONS[preset.type]
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  disabled={props.readOnly}
-                  className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-2 text-left text-xs font-medium shadow-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                  onClick={() =>
-                    addNodeAtCenter(
-                      preset.type,
-                      props.t(preset.label),
-                      preset.config(props.t, startNodeId)
-                    )
-                  }
-                >
-                  <Icon className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{props.t(preset.label)}</span>
-                  <PlusIcon className="ml-auto size-3.5 text-muted-foreground" />
-                </button>
-              )
-            })}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

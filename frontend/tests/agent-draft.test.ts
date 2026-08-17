@@ -38,10 +38,7 @@ describe("Agent conversation async guards", () => {
     let question = ""
     const completion = Promise.reject(new Error("aborted")).catch(() => {
       if (
-        isCurrentAgentConversation(
-          activeConversationId,
-          actionConversationId
-        )
+        isCurrentAgentConversation(activeConversationId, actionConversationId)
       ) {
         question = "old question"
       }
@@ -59,10 +56,7 @@ describe("Agent conversation async guards", () => {
     let runIds = ["new-conversation-run"]
     const completion = Promise.resolve("old-conversation-run").then((runId) => {
       if (
-        isCurrentAgentConversation(
-          activeConversationId,
-          actionConversationId
-        )
+        isCurrentAgentConversation(activeConversationId, actionConversationId)
       ) {
         runIds = [runId, ...runIds]
       }
@@ -147,7 +141,7 @@ const agent: Agent = {
   model_id: "model-1",
   knowledge_query_mode: "required",
   knowledge_base_ids: ["knowledge-1", "knowledge-2"],
-  mcp_tools: [{ server_id: "server-1", tool_name: "search" }],
+  tools: [{ tool_id: "tool-1", version_id: "version-1" }],
   status: "active",
   published: false,
   has_unpublished_changes: false,
@@ -169,7 +163,7 @@ const form: AgentFormState = {
   instructions: agent.instructions,
   knowledgeQueryMode: agent.knowledge_query_mode,
   knowledgeBaseIds: [...agent.knowledge_base_ids],
-  mcpTools: [...agent.mcp_tools],
+  tools: [...(agent.tools ?? [])],
   status: agent.status,
 }
 
@@ -208,10 +202,8 @@ describe("Agent form state", () => {
       ).file_upload_setting.file_upload_type
     ).toEqual(["document", "image"])
     expect(
-      normalizeInteractionConfigForAppType(
-        agent.interaction_config,
-        "workflow"
-      ).file_upload_setting.file_upload_type
+      normalizeInteractionConfigForAppType(agent.interaction_config, "workflow")
+        .file_upload_setting.file_upload_type
     ).toEqual(["document", "image"])
   })
   test("publishes drafts, republishes changed releases, and unpublishes current releases", () => {
@@ -220,7 +212,10 @@ describe("Agent form state", () => {
       agentPublicationAction({ published: true, has_unpublished_changes: true })
     ).toBe("republish")
     expect(
-      agentPublicationAction({ published: true, has_unpublished_changes: false })
+      agentPublicationAction({
+        published: true,
+        has_unpublished_changes: false,
+      })
     ).toBe("unpublish")
   })
 
@@ -257,7 +252,9 @@ describe("Agent form state", () => {
           setForm: () => undefined,
           models: [],
           knowledgeBases: [],
-          mcpServers: [],
+          tools: [],
+          token: "token",
+          workspaceId: "workspace-1",
           readOnly: false,
           t: (key) => key,
         })
@@ -267,13 +264,13 @@ describe("Agent form state", () => {
     expect(creationMarkup).not.toContain("对话设置")
     expect(creationMarkup).not.toContain("系统提示词")
     expect(creationMarkup).not.toContain("关联知识库")
-    expect(creationMarkup).not.toContain("MCP 工具")
+    expect(creationMarkup).not.toContain("工具")
 
     const editMarkup = renderForm(form)
     expect(editMarkup).not.toContain("对话设置")
     expect(editMarkup).toContain("系统提示词")
     expect(editMarkup).toContain("关联知识库")
-    expect(editMarkup).toContain("MCP 工具")
+    expect(editMarkup).toContain("工具")
   })
 
   test("moves workflow upload types behind settings without limits or audio", () => {
@@ -372,10 +369,12 @@ describe("Agent preview state", () => {
   })
 
   test("keeps tool progress visible when the process panel is collapsed", () => {
-    expect(collapsedProcessStatusKey("awaiting_approval", true, true)).toBeNull()
     expect(
-      collapsedProcessStatusKey("awaiting_approval", true, false)
-    ).toBe("等待工具调用确认")
+      collapsedProcessStatusKey("awaiting_approval", true, true)
+    ).toBeNull()
+    expect(collapsedProcessStatusKey("awaiting_approval", true, false)).toBe(
+      "等待工具调用确认"
+    )
     expect(collapsedProcessStatusKey("running", true, false)).toBe("执行过程")
   })
 
@@ -427,11 +426,11 @@ describe("Agent preview state", () => {
       result: "Hello",
       live_stream_epoch: "worker-1",
     } as unknown as AgentRun
-    const reconnected = mergeAgentRunStreamEvent(
-      [running],
-      running.id,
-      { type: "run", sequence: 2, run: { ...running, result: "" } }
-    )[0]
+    const reconnected = mergeAgentRunStreamEvent([running], running.id, {
+      type: "run",
+      sequence: 2,
+      run: { ...running, result: "" },
+    })[0]
     expect(reconnected.result).toBe("Hello")
 
     const reasoningResumed = mergeAgentRunStreamEvent(
@@ -447,16 +446,12 @@ describe("Agent preview state", () => {
     )[0]
     expect(reasoningResumed.result).toBe("")
 
-    const resumed = mergeAgentRunStreamEvent(
-      [reasoningResumed],
-      running.id,
-      {
-        type: "answer_delta",
-        live_sequence: "1700000000002-0",
-        stream_epoch: "worker-2",
-        delta: "Restarted",
-      }
-    )[0]
+    const resumed = mergeAgentRunStreamEvent([reasoningResumed], running.id, {
+      type: "answer_delta",
+      live_sequence: "1700000000002-0",
+      stream_epoch: "worker-2",
+      delta: "Restarted",
+    })[0]
     expect(resumed.result).toBe("Restarted")
   })
 
