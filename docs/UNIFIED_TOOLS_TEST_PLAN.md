@@ -1,6 +1,6 @@
 # 统一 Tool 系统测试计划
 
-> 状态：待其他工具执行。本文件是统一 Tool 系统唯一的测试与验收入口，只定义范围、步骤、证据和通过标准，不代表任何用例已经执行或通过。
+> 状态：有效测试规范。本文件只定义范围、步骤、证据和通过标准，不保存执行结论；验收报告与原始证据按项目约定保存在本地忽略目录，不进入版本控制。
 
 ## 0. 执行工具须知
 
@@ -25,30 +25,14 @@ git log --oneline --decorate -20
 
 执行基线必须明确记录 commit SHA；工作树有改动时，报告中必须列出文件并说明是否属于被测构建。
 
-### 0.1 当前交接基线（2026-08-17）
+### 0.1 执行基线与结果存放
 
-以下内容只说明当前分支中已经出现对应实现提交，不代表功能已通过验收：
+本计划不固定分支、HEAD、工作树或环境状态。每次执行都必须现场记录实际基线，
+不得沿用历史提交号或上一次报告结论。
 
-| 模块 | 当前代码交接状态 | 主要提交 | 验收状态 |
-| --- | --- | --- | --- |
-| Tool 契约、持久化、owner 私有与 `view/use` | 已有实现提交 | `6b07b35`～`1591ae6` | `NOT RUN` |
-| MCP Source、discovery、policy、grant 与 tombstone | 已有实现提交 | `d321b66`～`5830367` | `NOT RUN` |
-| 统一 Tool Runtime、Python Tool、sandbox 调用 | 已有实现提交 | `7781f7a`、`14d5d98` | `NOT RUN` |
-| Agent ToolRef、不可变 publication/Run snapshot、worker 代际隔离 | 已有实现提交 | `21f50b6`～`6f6e92d` | `NOT RUN` |
-| Workflow Tool、Inline Python、durable Agent child Run | 已有实现提交 | `14d5d98`、`5b0d3d4`、`11613d3` | `NOT RUN` |
-| Compose sandbox worker 开发入口 | 已有实现提交 | `a1281ff` | `NOT RUN` |
-| 工具中心、Agent picker、Workflow 三页签、三语与卡片样式 | 已有实现提交 | `294bcca` | `NOT RUN` |
-| 测试与验收计划 | 已提交本文档 | `628b0e0`、`64b9851` | 待其他工具执行 |
-
-当前记录的分支为 `feat/unified-tools`，本文档更新前 HEAD 为 `64b9851`。执行工具必须重新读取实际 HEAD，不能把该 SHA 当作固定值。
-
-当前工作树不是干净的，记录到的未提交项为：
-
-- `backend/scripts/coverage.sh`：已修改但未提交；执行者必须确认它是否属于被测候选，不能默认为已交付代码。
-- `docs/PLUGIN_SYSTEM.md`：未跟踪规划文档。
-- `docs/superpowers/plans/2026-08-16-unified-tool-system.md`：未跟踪实施规划。
-
-截至本次交接，REQ-001～016 均未由独立验收工具填写 `PASS`。尤其尚无最终版本对应的全量后端/前端回归、覆盖率、PostgreSQL 迁移演练、Compose/sandbox、桌面与移动浏览器、故障注入和清理证据。因此当前只能表述为“主要实现已落到分支，等待验收”，不能表述为“全部功能已完成并可交付”。
+执行结果、截图、日志和最终报告统一放在仓库外，或放在项目已忽略的
+`docs/local/`；不要把带运行环境、账号、资源 ID 或临时数据的验收材料提交到仓库。
+计划中的 `NOT RUN` 是报告模板初始值，不表示当前产品状态。
 
 本期明确非目标不是缺陷：Skill 仅保留禁用标签；不支持 Agent -> Agent、Agent -> Workflow、Workflow -> Workflow；Python Tool 不开放网络、secret、pip 或持久文件；Workflow 不支持 `each_call` 人工审批。
 

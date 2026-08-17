@@ -1,7 +1,7 @@
 <div align="center">
   <img src="frontend/public/NexaFlow-logo.png" width="96" alt="NexaFlow logo" />
   <h1>NexaFlow</h1>
-  <p>面向团队的 AI 应用编排平台，将知识库、模型、Agent、工作流与 MCP 工具统一在工作空间中。</p>
+  <p>面向团队的 AI 应用编排平台，将知识库、模型、Agent、工作流与统一工具能力组织在同一工作空间中。</p>
 
   <p>
     <a href="https://github.com/IQZZ020501/NexaFlow/actions/workflows/ci.yml"><img src="https://github.com/IQZZ020501/NexaFlow/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
@@ -13,7 +13,7 @@
 
 ## 项目简介
 
-NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队可以管理模型和知识库，创建可发布的 Agent，使用可视化画布编排工作流，并在服务端权限、审批、预算和运行恢复机制约束下调用 MCP 工具。
+NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队可以管理模型和知识库，创建可发布的 Agent，使用可视化画布编排工作流，并在服务端权限、审批、预算和运行恢复机制约束下调用内置、Python 与 MCP 工具。
 
 ## 核心能力
 
@@ -22,14 +22,14 @@ NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队�
 - **Agent 运行时**：基于 Celery 的耐久执行、运行租约、checkpoint、可重放事件、对话记忆和模型用量记录。
 - **可视化工作流**：React Flow 画布、不可变发布版本、节点审计，以及隔离的 Python Code 节点沙箱。
 - **模型管理**：支持 OpenAI-compatible、Anthropic、Amazon Bedrock、Azure OpenAI、DeepSeek、Gemini 和 Ollama。
-- **MCP 工具**：支持 Streamable HTTP、SSE 和 stdio，提供加密凭据、工具审批和定义变更失效策略。
+- **统一工具系统**：内置、Python 与 MCP 工具共享目录、不可变版本、`view/use` 授权、应用绑定和调用账本；MCP 支持 Streamable HTTP、SSE、stdio、加密凭据与定义变更失效策略。
 - **团队治理**：工作空间与团队分级管理、资源级权限、审计日志和简体中文、繁体中文、英文界面。
 
 ## 产品界面
 
 ### Agent 构建与调试
 
-在同一工作区配置模型、知识库、MCP 工具和系统提示词，并在右侧调试区直接验证 Agent。发布后可继续维护草稿，再通过重新发布更新公开版本。
+在同一工作区配置模型、知识库、统一工具和系统提示词，并在右侧调试区直接验证 Agent。工具绑定固定版本，发布后可继续维护草稿，再通过重新发布更新公开版本。
 
 ![NexaFlow Agent 构建与调试界面](docs/assets/agent-builder.png)
 
@@ -73,7 +73,9 @@ flowchart LR
     Worker --> Storage[(Shared upload storage)]
     Worker --> Sandbox[Isolated Python sandbox]
     Worker --> Models[LLM providers]
-    Worker --> MCP[MCP servers]
+    Worker --> ToolRuntime[Unified Tool Runtime]
+    ToolRuntime --> Sandbox
+    ToolRuntime --> MCP[MCP servers]
 ```
 
 | 层级 | 技术 |
@@ -81,6 +83,7 @@ flowchart LR
 | 前端 | Next.js 15、React 19、TypeScript、Bun、shadcn/ui、Tailwind CSS、React Flow |
 | API | Python 3.11+、FastAPI、SQLAlchemy Async、Alembic |
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
+| 工具 | builtin / Python / MCP 统一目录、不可变版本、授权、策略、绑定与 ToolInvocation |
 | 检索 | Qdrant、PostgreSQL `pg_search` 0.25.2（Jieba/BM25）、RRF、显式引用一跳扩展、可选 reranker |
 | 部署 | PostgreSQL 17 + `pg_search`、Docker Compose、Nginx、独立无网络 Python 沙箱 |
 
@@ -242,7 +245,7 @@ python3 -m sandbox.self_check
 - API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL、Redis、Qdrant，并共享上传存储和加密密钥；不要同时运行第二个 Beat。
 - 远程 MCP 默认拒绝私网与回环地址；只有明确可信的部署才应启用 `MCP_ALLOW_PRIVATE_NETWORKS`。
 - stdio MCP 配置允许工作空间管理员启动后端进程，因此只应向可信管理员开放管理权限。
-- Python Code 节点必须运行在独立沙箱服务中；不要把沙箱 socket 暴露给 API 或宿主外部网络。
+- Python Tool 与 Python Code 节点必须运行在独立沙箱服务中；不要把沙箱 socket 暴露给 API 或宿主外部网络。
 - 不要提交 `backend/.env`、`deploy/.env`、模型凭据或其他真实密钥。
 
 ## 贡献

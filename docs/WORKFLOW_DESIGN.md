@@ -7,11 +7,11 @@
 - React Flow 画布编辑、后端强校验、乐观并发草稿保存；
 - 草稿调试、节点状态回显、运行与节点审计；
 - 不可变发布版本、版本列表、恢复为新草稿、指定版本运行；
-- Start、End、LLM、Reply、Classifier、Knowledge、Condition、Variable、MCP、Code 十类可新增节点；
+- “基础节点 / 工具 / Agent”三页签节点库：基础节点包含 Start、End、LLM、Reply、Classifier、Knowledge、Reranker、Form、Document Extract、Condition、Variable；工具页提供固定版本 Tool 与 Inline Python；Agent 页提供固定发布版本 Agent；
 - Code 节点的独立、无网络、受资源限制的 Python 生产沙箱；
 - Celery 持久执行、租约接管、deadline、步数与模型 token 预算、NDJSON 事件重放。
 
-HITL 暂停/恢复、循环、迭代、子工作流、HTTP 请求和失败分支属于第二批。第一批节点失败的默认且唯一语义是立即中止整个运行；不提供隐式重试、兜底值或部分成功。
+Form 已使用 durable `awaiting_input` checkpoint 暂停/恢复，Agent 节点已使用 durable child Run；通用 HITL、循环、迭代、子工作流、HTTP 请求和失败分支仍属于后续批次。节点失败默认立即中止整个运行；不提供隐式重试、兜底值或部分成功。
 
 ## 2. 三家对照与取舍
 
@@ -48,7 +48,10 @@ flowchart LR
     ENGINE --> NODES["节点执行器"]
     NODES --> LLM["LLM port"]
     NODES --> KB["知识检索"]
-    NODES --> MCP["MCP + agent_tool_calls"]
+    NODES --> TOOL["Workflow Tool Runtime"]
+    TOOL --> LEDGER["tool_invocations"]
+    TOOL --> MCP["MCP servers"]
+    NODES --> CHILD["durable Agent child Run"]
     NODES --> SOCKET["worker-only Unix socket"]
     SOCKET --> SANDBOX["无网络 Python sandbox"]
     ENGINE -->|"checkpoint、节点审计、事件"| PG
@@ -64,7 +67,7 @@ flowchart LR
 - 所有节点从 Start 可达且都可到达 End；禁止环；最多 200 节点、500 边；
 - Condition 每个分支 ID 必须各有一条出边；Classifier 每个 class 和 default 各一条出边；
 - 每个节点配置用对应 Pydantic schema 强校验；变量引用只能指向拓扑上游；
-- Knowledge 直接引用当前用户可访问的工作区知识库；MCP 直接引用工作区工具且必须有当前 `read_only` 策略；节点指定模型必须存在且启用。
+- Knowledge 直接引用当前用户可访问的工作区知识库；Tool/LLM Tool 固定 `ToolRef(tool_id, version_id)`，必须可用、允许 Workflow 调用且不需要逐次审批；Agent 节点固定已发布 Agent 版本；节点指定模型必须存在且启用。
 
 调度器维护节点状态 `PENDING/SUCCEEDED/SKIPPED/FAILED` 和边状态 `UNKNOWN/TAKEN/SKIPPED`：
 
@@ -86,8 +89,9 @@ flowchart LR
 | `agents` | 应用目录；`app_type='workflow'`；模型为 LLM/Classifier 默认模型；类型创建后不可变 |
 | `agent_runs` | 运行主记录、状态、执行用户、租约、attempt、worker、checkpoint、trace、模型 usage、时间戳 |
 | `agent_run_events` | 有序持久事件与断线重放游标 |
-| `agent_tool_calls` | MCP 节点的参数/定义 hash、幂等键、租约与结果账本；不替代节点审计 |
-| 工作流图节点配置 | 工作流直接引用的知识库和 MCP 工具；发布和运行时重新校验权限、状态与只读策略 |
+| `tool_invocations` | Tool/LLM Tool/Inline Python 的统一参数、幂等键、租约、结果与 uncertain 账本；不替代节点审计 |
+| `agent_tool_calls` | 仅保留 legacy MCP/旧运行兼容，不参与 canonical Tool 的重复记账 |
+| 工作流图节点配置 | 直接引用知识库、固定 Tool/Version 和固定 Agent 发布版本；发布与运行保存资源快照并重新校验 live kill switch |
 
 工作流不复用 Agent 的 LangGraph `agent -> tool -> agent` 业务图，只复用它的持久执行外壳。
 
@@ -179,14 +183,15 @@ erDiagram
 | --- | --- | --- |
 | Start | 固定节点：`question/files` + 全局 `time/history_context/chat_id/start_time` | 三家共同入口 |
 | End | 把上游引用映射为运行最终输出 | 三家共同出口 |
-| LLM | prompt/system/model -> text + usage；多轮对话（`dialogue_number` 最近 N 轮，`dialogue_type` NODE 仅本节点历史 / WORKFLOW 整条流程历史）、模型参数（temperature/top_p/max_tokens）、可选 MCP 工具循环、`reasoning_content_enable` 思考过程输出；开启 `is_result` 的节点文本按画布顺序汇总为运行结果，同时保留 `text` 供下游引用 | 三家核心生成节点；字段与 MaxKB ai-chat-node 对齐 |
+| LLM | prompt/system/model -> text + usage；多轮对话（`dialogue_number` 最近 N 轮，`dialogue_type` NODE 仅本节点历史 / WORKFLOW 整条流程历史）、模型参数（temperature/top_p/max_tokens）、可选固定版本 Tool 循环、`reasoning_content_enable` 思考过程输出；开启 `is_result` 的节点文本按画布顺序汇总为运行结果，同时保留 `text` 供下游引用 | 三家核心生成节点；字段与 MaxKB ai-chat-node 对齐 |
 | Reply | `custom` 使用沙箱化 Jinja2 模板生成回复，`referencing` 将单个上游字段转为字符串；输出 `answer`，开启 `is_result` 时按画布顺序汇总到运行结果 | 节点库置顶的指定回复节点；字段与 MaxKB reply-node 对齐 |
 | Classifier | 输入/classes/default -> 选中 handle | Dify question classifier、Coze intent detector |
 | Knowledge | query + 至少 1 个可访问知识库（暂不限制数量）+ 引用分段数（1–8）+ 相似度（0–1，默认 0.6）+ 检索模式（embedding/keywords/blend）+ 最大引用字符数（默认 5000） -> `content/hits/paragraph_list/is_hit_handling_method_list/data/directly_return/retrieval_stats/evidence_status` | 复用 NexaFlow RAG；字段与 MaxKB search-dataset-node 对齐（`directly_return` 以节点相似度阈值为直接回答门槛，MaxKB 的分段级 hit_handling_method 元数据在 NexaFlow 中不存在）；兼容旧单知识库草稿 |
 | Condition | 有序 `IF / ELSE IF N / ELSE` 分支 + `and/or` 条件组 + 上游字段引用 + 16 种比较符 -> 首个命中分支 handle + `branch_name` | 三家分支基础；对齐 MaxKB 常用确定性判断与分支结构 |
 | Variable | 任意 JSON/引用 -> `value` | 三家变量能力 |
-| MCP | 参数 + 工作区只读工具 -> 工具输出 | 复用 MCP 策略与 durable ledger |
-| Code | Python + JSON 输入 -> result/stdout/stderr | 三家均有代码/函数节点；使用独立沙箱 |
+| Tool | 固定 Tool/Version + 参数 -> 结构化工具输出 | builtin/Python/MCP 共用 WorkflowToolRuntime 与 `tool_invocations` |
+| Inline Python | Python + JSON 输入 -> result/stdout/stderr | 节点 UI 保留 Code 形态，发布/运行时绑定内置 `inline_python` Tool 并使用独立沙箱 |
+| Agent | 固定已发布 AgentVersion + 输入 -> child Run 结果 | 父运行进入 `awaiting_child`，由 child Run 终态恢复；预算、取消和 deadline 向下传播 |
 
 变量语法为 `{{node_id.path}}`。完整字符串引用保留原 JSON 类型，嵌入字符串时对象和数组序列化为紧凑 JSON。Start 固定输出本次运行的问题（`question`）、上传文件（`files`）以及全局变量：当前时间（`time`，`%Y-%m-%d %H:%M:%S`）、同会话历史（`history_context`，`[{question, answer}]`）、会话 ID（`chat_id`）与运行开始时间戳（`start_time`，epoch 秒）。全局变量可通过 `{{global.<field>}}` 命名空间在任何节点引用（兼容裸引用 `{{time}}` 等）。节点输入框提供「插入变量」选择器：全局变量组 + 沿入边可达的上游节点输出字段（对齐 MaxKB 的 NodeCascader），避免手写错误引用。
 
@@ -194,7 +199,7 @@ erDiagram
 
 旧版 Template 节点不再允许新增；后端与前端仍保留读取、编辑和执行兼容，避免已有草稿及发布版本失效。
 
-第二批再增加 Loop、Iteration、HITL、HTTP、Subworkflow。表单收集、文档/图片/音频处理和子应用调用也要等暂停恢复、类型化上传、模型能力与子工作流边界落地后再增加；这些能力不能仅添加一个卡片即宣称完成。
+后续再增加 Loop、Iteration、通用 HITL、HTTP、Subworkflow。Form、文档内容提取和单层 Agent 子运行已经落地；图片/音频专用处理、多层 Agent 嵌套和子工作流仍不能仅添加一个卡片即宣称完成。
 
 ## 7. Code 生产沙箱
 
@@ -263,8 +268,10 @@ sequenceDiagram
     W->>DB: "CAS claim lease + attempt"
     loop "每个就绪波次"
       W->>DB: "workflow_node_started"
-      alt "普通/模型/检索/MCP 节点"
+      alt "普通/模型/检索/Tool 节点"
         W->>W: "执行节点"
+      else "Agent 节点"
+        W->>DB: "创建/观察 durable child Run"
       else "Code 节点"
         W->>S: "Unix socket JSON request"
         S-->>W: "bounded JSON result"
@@ -277,7 +284,7 @@ sequenceDiagram
     UI->>API: "GET node executions"
 ```
 
-Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_runs`，统一任务先检查 `workflow_run_details` 再分派到对应执行器。checkpoint 使接管者跳过已提交节点；MCP 节点额外依赖 `agent_tool_calls` 幂等账本。
+Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_runs`，统一任务先检查 `workflow_run_details` 再分派到对应执行器。checkpoint 使接管者跳过已提交节点；Tool/Inline Python 依赖 `tool_invocations` 幂等账本，Agent 节点依赖持久 child Run 与 `awaiting_child` checkpoint 恢复。
 
 ## 10. 分阶段实施与验收
 
@@ -285,7 +292,7 @@ Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_r
 | --- | --- | --- | --- | --- |
 | 0 基础隔离 | 类型不可变、运行分派、Code 沙箱、部署依赖 | Agent 路由拒绝 workflow；沙箱无网络且资源自检通过；Beat 有 DB | 旧 worker 误接 workflow；沙箱权限不足 | 停止创建/运行 workflow；保留类型保护；停用 sandbox 服务 |
 | 1 引擎与存储 | 图校验、三态调度、审计、租约/checkpoint | 引擎分支/汇聚/预算测试；迁移 fresh upgrade/downgrade/upgrade；API 运行落库 | checkpoint 重放、并行写顺序、历史图漂移 | 新表为加法迁移；无生产 workflow 数据时可 downgrade；已有数据时保留表和类型保护 |
-| 2 画布与发布 | 10 节点编辑、草稿调试、状态回显、版本发布/恢复 | 三语 typecheck/test/build；发布快照与新草稿隔离；真实 API 冒烟 | React Flow 状态序列化、多人保存冲突 | 下线 workflow UI；API 与表保留只读，避免历史运行不可查 |
+| 2 画布与发布 | 三页签节点库、草稿调试、状态回显、版本发布/恢复 | 三语 typecheck/test/build；Tool/Agent 固定版本快照与新草稿隔离；真实 API 冒烟 | React Flow 状态序列化、多人保存冲突 | 下线 workflow UI；API 与表保留只读，避免历史运行不可查 |
 | 3 高级能力 | HITL、Loop/Iteration、失败分支/兜底、子流 | 暂停跨进程恢复；迭代帧审计；恢复 CAS；独立限额与测试 | 状态空间和副作用重放显著增加 | 每项用独立 schema/feature gate 发布，不改变第一批 DAG 语义 |
 
 迁移回滚只能在确认没有需要保留的工作流定义、版本、运行审计和临时上传后执行，因为 downgrade 会删除六张 workflow 表。回滚前必须先处理上传表及仍待清理的存储对象。生产已有数据时，正确回滚是退回 UI/运行入口并保留 additive schema 与类型隔离，而不是直接丢表。
@@ -294,7 +301,7 @@ Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_r
 
 - 内嵌 Beat 的 worker 与 API 必须使用同一 PostgreSQL/Redis 配置；worker 必须显式获得容器内 `DATABASE_URL`；
 - 只有 worker 挂载 sandbox socket；沙箱不得接入 Compose 网络或业务数据卷；
-- MCP 管理员仍具备项目既有的 worker 进程级 stdio 执行权限，工作流仅允许当前策略为 `read_only` 的工具；
+- MCP 管理员仍具备项目既有的 worker 进程级 stdio 执行权限；Workflow 只接受当前可用、允许调用且不需要逐次审批的固定 ToolSnapshot；
 - Redis 负责队列，不作为审计真源；运行、checkpoint、事件和节点记录均以 PostgreSQL 为准；
 - 事件协议是 `application/x-ndjson`，不是 SSE。客户端用 `after` 游标重放，不依赖进程内内存；
 - 当前 Alembic metadata 与历史数据库存在既有漂移，交付迁移以独立 PostgreSQL fresh upgrade/downgrade/upgrade 为准，不把无关全库漂移混入本功能。
