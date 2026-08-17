@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.capabilities.llm.models import RegisteredModel
 from app.domain.resource_permission import ResourcePermission
 from app.infrastructure import object_storage as object_storage_module
+from app.infrastructure.model_utils import new_id
 from app.infrastructure.session import get_session_factory
 from app.shareddomain.agents.models import (
     Agent,
@@ -117,13 +118,16 @@ async def seed_workspace_dependencies(
         db.add(agent)
         await db.flush()
 
+        agent_run_id = new_id()
         agent_run = AgentRun(
+            id=agent_run_id,
             workspace_id=workspace_id,
             agent_id=agent.id,
             requested_by_user_id=actor_id,
             execution_user_id=actor_id,
             access_source="console",
             consumer_id=actor_id,
+            root_run_id=agent_run_id,
             goal="Verify cascade",
             instructions=agent.instructions,
             knowledge_base_ids=[knowledge_base_id],
