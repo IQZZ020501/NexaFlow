@@ -38,7 +38,10 @@ for path in glob.glob(f"{cov_dir}/**/*lcov*", recursive=True):
                 files[cur] = (lf, lh)
                 tot_lf += lf
                 tot_lh += lh
-print(f"FRONTEND TOTAL LINES: {tot_lh}/{tot_lf} = {100 * tot_lh / tot_lf:.2f}%")
+if tot_lf == 0:
+    raise SystemExit("frontend coverage did not contain executable lines")
+percentage = 100 * tot_lh / tot_lf
+print(f"FRONTEND TOTAL LINES: {tot_lh}/{tot_lf} = {percentage:.2f}%")
 below = sorted(
     ((k, v) for k, v in files.items() if v[0] > 0 and v[1] / v[0] < 0.95),
     key=lambda kv: kv[1][0] - kv[1][1],
@@ -48,4 +51,7 @@ print(f"files below 95%: {len(below)}")
 if detail:
     for k, (lf, lh) in below:
         print(f"  {100 * lh / lf:5.1f}% miss={lf - lh:4d} {k}")
+if percentage < 99:
+    print(f"frontend coverage {percentage:.2f}% is below 99%", file=sys.stderr)
+    raise SystemExit(1)
 EOF

@@ -2745,15 +2745,1822 @@ async def assert_python_tool_lifecycle(workspace_id: str) -> None:
 
 
 
+async def assert_tool_runtime_edge_branches(
+    workspace_id: str,
+    stranger_id: str,
+) -> None:
+    import dataclasses
+    from datetime import timedelta
+    from unittest.mock import patch
+
+    from app.application.tool_runtime import (
+        ToolInvocationBusy,
+        ToolInvocationConflict,
+        execute_tool_invocation,
+        preflight_tool_snapshot,
+        queue_tool_invocation,
+    )
+    from app.entities.tools import McpServer, Tool, ToolPolicy, ToolSource, ToolVersion
+    from app.infrastructure.config import Settings
+    from app.infrastructure.model_utils import utc_now
+    from app.infrastructure.repositories import mcp as mcp_repository
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+    from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
+    from app.shareddomain.tools.models import ToolInvocation as ToolInvocationOrm
+    from app.shareddomain.tools.runtime import (
+        TOOL_APPROVAL_EACH_CALL,
+        build_tool_snapshot,
+        tool_snapshot_payload,
+    )
+
+    settings = Settings.from_env(require_bootstrap=False)
+
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        tool = next(
+            item
+            for item in await tool_repository.list_tools(db, workspace_id)
+            if item.stable_key == "current_time"
+        )
+        source = await tool_repository.get_tool_source(db, workspace_id, tool.source_id)
+        version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            tool.current_version_id or "",
+        )
+        policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
+        assert source is not None and version is not None and policy is not None
+        expected = policy.revision
+        policy.revision += 1
+        policy.approval = "auto"
+        policy.effect = "pure"
+        policy.allowed_access_sources = ["console", "public", "api"]
+        policy.workflow_callable = True
+        policy.parallel_safe = True
+        policy.updated_at = utc_now()
+        assert (
+            await tool_repository.update_tool_policy_if_revision(
+                db,
+                policy,
+                expected,
+            )
+            is not None
+        )
+        snapshot = build_tool_snapshot(tool, source, version, policy, actor.id)
+        tool_id = tool.id
+        source_id = source.id
+        actor_id = actor.id
+        await db.commit()
+
+    def make_context(invocation_id: str, **overrides) -> ToolInvocationContext:
+        fields = {
+            "workspace_id": workspace_id,
+            "origin": "test",
+            "root_run_id": None,
+            "run_id": None,
+            "invocation_id": invocation_id,
+            "execution_user_id": actor_id,
+            "access_source": "console",
+            "deadline_at": utc_now() + timedelta(seconds=30),
+            "idempotency_key": invocation_id,
+        }
+        fields.update(overrides)
+        return ToolInvocationContext(**fields)
+
+    async def queue_invocation(
+        context: ToolInvocationContext,
+        snap=snapshot,
+    ) -> object:
+        async with get_session_factory()() as db:
+            invocation = await queue_tool_invocation(db, snap, {}, context)
+            await db.commit()
+            return invocation
+
+    # Unknown invocation id (tool_runtime.py:116).
+    try:
+        await execute_tool_invocation("missing-invocation-id", settings, "edge-unknown")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Unknown invocation id must raise ValueError.")
+
+    # Context contract rejections (tool_runtime.py:511, 513, 515, 517).
+    async with get_session_factory()() as db:
+        async def expect_context_error(
+            context: ToolInvocationContext,
+            fragment: str,
+        ) -> None:
+            try:
+                await queue_tool_invocation(db, snapshot, {}, context)
+            except ValueError as exc:
+                assert fragment in str(exc), (fragment, str(exc))
+            else:
+                raise AssertionError(f"Context accepted: {context!r}")
+
+        await expect_context_error(
+            make_context("ctx-run", origin="test", root_run_id="r", run_id="r"),
+            "cannot belong to a Run",
+        )
+        await expect_context_error(
+            make_context("ctx-runless", origin="agent", root_run_id=None, run_id=None),
+            "require Run IDs",
+        )
+        await expect_context_error(
+            make_context("ctx-source", access_source="ssh"),
+            "access source is invalid",
+        )
+        await expect_context_error(
+            make_context("ctx-key", idempotency_key=""),
+            "identity is invalid",
+        )
+        await db.rollback()
+
+    # Idempotency reuse with different data (tool_runtime.py:91).
+    async with get_session_factory()() as db:
+        conflict_context = make_context(
+            "conflict-1",
+            idempotency_key="conflict-key-1",
+        )
+        await queue_tool_invocation(db, snapshot, {}, conflict_context)
+        drifted = ToolInvocationContext(
+            **{
+                **conflict_context.__dict__,
+                "execution_user_id": "another-user",
+            }
+        )
+        try:
+            await queue_tool_invocation(db, snapshot, {}, drifted)
+        except ToolInvocationConflict:
+            pass
+        else:
+            raise AssertionError(
+                "Reused idempotency key with different data must conflict."
+            )
+        await db.commit()
+
+    # Awaiting approval short-circuits (tool_runtime.py:120).
+    approval_snapshot = dataclasses.replace(snapshot, approval=TOOL_APPROVAL_EACH_CALL)
+    approval_invocation = await queue_invocation(
+        make_context("edge-approval"),
+        snap=approval_snapshot,
+    )
+    approval_result = await execute_tool_invocation(
+        approval_invocation.id,
+        settings,
+        "edge-approval-worker",
+    )
+    assert approval_result.error_code == "approval_required"
+
+    # Invalid snapshot payload (tool_runtime.py:124-125, 489).
+    async with get_session_factory()() as db:
+        invocation = await queue_tool_invocation(
+            db,
+            snapshot,
+            {},
+            make_context("edge-bad-snapshot"),
+        )
+        invocation.policy_snapshot = {
+            "tool_snapshot": tool_snapshot_payload(snapshot),
+            "deadline_at": 12345,
+        }
+        await tool_repository.save_tool_invocation(db, invocation)
+        await db.commit()
+        invocation_id = invocation.id
+    bad_snapshot = await execute_tool_invocation(
+        invocation_id,
+        settings,
+        "edge-bad-snapshot-worker",
+    )
+    assert bad_snapshot.error_code == "invalid_tool_snapshot"
+
+    # Naive stored deadline (tool_runtime.py:124-125, 492).
+    async with get_session_factory()() as db:
+        invocation = await queue_tool_invocation(
+            db,
+            snapshot,
+            {},
+            make_context("edge-naive-deadline"),
+        )
+        invocation.policy_snapshot = {
+            "tool_snapshot": tool_snapshot_payload(snapshot),
+            "deadline_at": "2026-08-17T00:00:00",
+        }
+        await tool_repository.save_tool_invocation(db, invocation)
+        await db.commit()
+        invocation_id = invocation.id
+    naive_deadline = await execute_tool_invocation(
+        invocation_id,
+        settings,
+        "edge-naive-deadline-worker",
+    )
+    assert naive_deadline.error_code == "invalid_tool_snapshot"
+
+    # Invalid stored arguments (tool_runtime.py:161-162).
+    async with get_session_factory()() as db:
+        invocation = await queue_tool_invocation(
+            db,
+            snapshot,
+            {},
+            make_context("edge-bad-args"),
+        )
+        invocation.arguments = {"unexpected": 1}
+        await tool_repository.save_tool_invocation(db, invocation)
+        await db.commit()
+        invocation_id = invocation.id
+    bad_args = await execute_tool_invocation(
+        invocation_id,
+        settings,
+        "edge-bad-args-worker",
+    )
+    assert bad_args.error_code == "invalid_tool_arguments"
+
+    # Deadline already expired (tool_runtime.py:169).
+    deadline_invocation = await queue_invocation(
+        make_context(
+            "edge-deadline",
+            deadline_at=utc_now() - timedelta(seconds=5),
+        )
+    )
+    expired = await execute_tool_invocation(
+        deadline_invocation.id,
+        settings,
+        "edge-deadline-worker",
+    )
+    assert expired.error_code == "tool_deadline_exceeded"
+
+    # Crashed pure Tool whose attempts are exhausted (tool_runtime.py:148).
+    async with get_session_factory()() as db:
+        invocation = await queue_tool_invocation(
+            db,
+            snapshot,
+            {},
+            make_context("edge-crashed-safe"),
+        )
+        invocation.status = "running"
+        invocation.attempts = invocation.max_attempts
+        invocation.worker_task_id = "edge-crashed-safe-worker"
+        invocation.lease_expires_at = utc_now() - timedelta(seconds=1)
+        invocation.started_at = invocation.lease_expires_at
+        await tool_repository.save_tool_invocation(db, invocation)
+        await db.commit()
+        invocation_id = invocation.id
+    exhausted = await execute_tool_invocation(
+        invocation_id,
+        settings,
+        "edge-crashed-safe-worker-2",
+    )
+    assert exhausted.error_code == "tool_attempts_exhausted"
+
+    # Claim conflict with a live row (tool_runtime.py:184-188, 194).
+    async with get_session_factory()() as db:
+        invocation = await queue_tool_invocation(
+            db,
+            snapshot,
+            {},
+            make_context("edge-claim-conflict"),
+        )
+        invocation.status = "approved"
+        invocation.attempts = invocation.max_attempts
+        await tool_repository.save_tool_invocation(db, invocation)
+        await db.commit()
+        invocation_id = invocation.id
+    try:
+        await execute_tool_invocation(
+            invocation_id,
+            settings,
+            "edge-claim-conflict-worker",
+        )
+    except ToolInvocationBusy:
+        pass
+    else:
+        raise AssertionError(
+            "A non-claimable exhausted invocation must raise ToolInvocationBusy."
+        )
+
+    # Claim conflict where the row becomes terminal in between
+    # (tool_runtime.py:189-193).
+    terminal_invocation = await queue_invocation(make_context("edge-claim-terminal"))
+
+    async def fake_claim(
+        db,
+        workspace_id,
+        invocation_id,
+        worker_task_id,
+        now,
+        lease_expires_at,
+    ):
+        row = await tool_repository.get_tool_invocation(db, workspace_id, invocation_id)
+        assert row is not None
+        row.status = "succeeded"
+        row.result_data = {"iso8601": "2026-08-17T00:00:00+00:00"}
+        row.result_summary = "Done."
+        row.outcome = "confirmed"
+        row.error_code = None
+        row.error_message = None
+        row.usage = {}
+        row.finished_at = utc_now()
+        await tool_repository.save_tool_invocation(db, row)
+        return False
+
+    with patch(
+        "app.infrastructure.repositories.tools.claim_tool_invocation",
+        new=fake_claim,
+    ):
+        replay = await execute_tool_invocation(
+            terminal_invocation.id,
+            settings,
+            "edge-claim-terminal-worker",
+        )
+    assert replay.ok is True
+    assert replay.summary == "Done."
+
+    # Adapter kind mismatch (tool_runtime.py:198).
+    mismatch_invocation = await queue_invocation(make_context("edge-mismatch"))
+
+    class MismatchAdapter:
+        kind = "python"
+
+        async def invoke(self, snapshot, arguments, context):
+            raise AssertionError("A mismatched adapter must not run.")
+
+    mismatch = await execute_tool_invocation(
+        mismatch_invocation.id,
+        settings,
+        "edge-mismatch-worker",
+        adapter=MismatchAdapter(),
+    )
+    assert mismatch.error_code == "tool_adapter_mismatch"
+
+    # Provider timeout (tool_runtime.py:226-231).
+    timeout_invocation = await queue_invocation(make_context("edge-timeout"))
+
+    class TimeoutAdapter:
+        kind = "builtin"
+
+        async def invoke(self, snapshot, arguments, context):
+            raise TimeoutError("timed out")
+
+    timed_out = await execute_tool_invocation(
+        timeout_invocation.id,
+        settings,
+        "edge-timeout-worker",
+        adapter=TimeoutAdapter(),
+    )
+    assert timed_out.error_code == "tool_deadline_exceeded"
+
+    # Provider exception (tool_runtime.py:232-237).
+    boom_invocation = await queue_invocation(make_context("edge-boom"))
+
+    class ExplodingAdapter:
+        kind = "builtin"
+
+        async def invoke(self, snapshot, arguments, context):
+            raise RuntimeError("boom")
+
+    exploded = await execute_tool_invocation(
+        boom_invocation.id,
+        settings,
+        "edge-boom-worker",
+        adapter=ExplodingAdapter(),
+    )
+    assert exploded.error_code == "tool_execution_failed"
+
+    # Result cannot be stored because the row vanished (tool_runtime.py:252).
+    deleted_invocation = await queue_invocation(make_context("edge-deleted"))
+
+    class DeletingAdapter:
+        kind = "builtin"
+
+        async def invoke(self, snapshot, arguments, context):
+            async with get_session_factory()() as other:
+                row = await other.get(ToolInvocationOrm, deleted_invocation.id)
+                assert row is not None
+                await other.delete(row)
+                await other.commit()
+            return ToolRuntimeResult(
+                ok=True,
+                data={"iso8601": "2026-08-17T00:00:00+00:00"},
+                summary="Done.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={},
+            )
+
+    vanished = await execute_tool_invocation(
+        deleted_invocation.id,
+        settings,
+        "edge-deleted-worker",
+        adapter=DeletingAdapter(),
+    )
+    assert vanished.error_code == "tool_result_not_persisted"
+
+    # Finalize cannot save because the row is no longer running
+    # (tool_runtime.py:267).
+    mutated_invocation = await queue_invocation(make_context("edge-mutated"))
+
+    class MutatingAdapter:
+        kind = "builtin"
+
+        async def invoke(self, snapshot, arguments, context):
+            async with get_session_factory()() as other:
+                row = await other.get(ToolInvocationOrm, mutated_invocation.id)
+                assert row is not None
+                row.status = "queued"
+                row.worker_task_id = None
+                row.lease_expires_at = None
+                await other.commit()
+            return ToolRuntimeResult(
+                ok=True,
+                data={"iso8601": "2026-08-17T00:00:00+00:00"},
+                summary="Done.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={},
+            )
+
+    lost = await execute_tool_invocation(
+        mutated_invocation.id,
+        settings,
+        "edge-mutated-worker",
+        adapter=MutatingAdapter(),
+    )
+    assert lost.error_code == "tool_result_not_persisted"
+
+    # Live-state helpers (tool_runtime.py:451-460).
+    async def set_policy(**fields) -> object:
+        async with get_session_factory()() as db:
+            policy = await tool_repository.get_tool_policy(db, workspace_id, tool_id)
+            assert policy is not None
+            expected = policy.revision
+            policy.revision += 1
+            for key, value in fields.items():
+                setattr(policy, key, value)
+            policy.updated_at = utc_now()
+            assert (
+                await tool_repository.update_tool_policy_if_revision(
+                    db,
+                    policy,
+                    expected,
+                )
+                is not None
+            )
+            current_tool = await tool_repository.get_tool(db, workspace_id, tool_id)
+            current_source = await tool_repository.get_tool_source(
+                db,
+                workspace_id,
+                source_id,
+            )
+            current_version = await tool_repository.get_tool_version(
+                db,
+                workspace_id,
+                current_tool.current_version_id or "",
+            )
+            assert (
+                current_tool is not None
+                and current_source is not None
+                and current_version is not None
+            )
+            built = build_tool_snapshot(
+                current_tool,
+                current_source,
+                current_version,
+                policy,
+                actor_id,
+            )
+            await db.commit()
+            return built
+
+    async def preflight(
+        snap,
+        *,
+        origin="test",
+        execution_user_id=None,
+        access_source="console",
+    ) -> ToolRuntimeResult | None:
+        async with get_session_factory()() as db:
+            return await preflight_tool_snapshot(
+                db,
+                snap,
+                origin=origin,
+                workspace_id=workspace_id,
+                execution_user_id=execution_user_id or actor_id,
+                access_source=access_source,
+            )
+
+    # Live-state happy path (tool_runtime.py:451-460).
+    assert await preflight(snapshot) is None
+
+    # Live-state: unavailable tool (tool_runtime.py:289).
+    async with get_session_factory()() as db:
+        current_tool = await tool_repository.get_tool(db, workspace_id, tool_id)
+        assert current_tool is not None
+        current_tool.availability = "unavailable"
+        await tool_repository.save_tool(db, current_tool)
+        await db.commit()
+    failure = await preflight(snapshot)
+    assert failure is not None and failure.error_code == "tool_unavailable"
+    async with get_session_factory()() as db:
+        current_tool = await tool_repository.get_tool(db, workspace_id, tool_id)
+        assert current_tool is not None
+        current_tool.availability = "available"
+        await tool_repository.save_tool(db, current_tool)
+        await db.commit()
+
+    # Live-state: definition drift (tool_runtime.py:310).
+    async with get_session_factory()() as db:
+        current_tool = await tool_repository.get_tool(db, workspace_id, tool_id)
+        assert current_tool is not None
+        current_tool.function_name = "renamed_current_time"
+        await tool_repository.save_tool(db, current_tool)
+        await db.commit()
+    failure = await preflight(snapshot)
+    assert failure is not None and failure.error_code == "tool_definition_changed"
+    async with get_session_factory()() as db:
+        current_tool = await tool_repository.get_tool(db, workspace_id, tool_id)
+        assert current_tool is not None
+        current_tool.function_name = "current_time"
+        await tool_repository.save_tool(db, current_tool)
+        await db.commit()
+
+    # Live-state: disabled policy approval (tool_runtime.py:336).
+    disabled_snapshot = await set_policy(
+        approval="disabled",
+        effect="pure",
+        allowed_access_sources=["console", "public", "api"],
+        workflow_callable=True,
+        parallel_safe=True,
+    )
+    failure = await preflight(disabled_snapshot)
+    assert failure is not None and failure.error_code == "tool_disabled"
+
+    # Live-state: console outside allowed sources (tool_runtime.py:338).
+    console_denied = await set_policy(
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=["api"],
+        workflow_callable=True,
+        parallel_safe=True,
+    )
+    failure = await preflight(console_denied)
+    assert failure is not None and failure.error_code == "tool_access_source_denied"
+
+    # Live-state: unsafe effect through a public source (tool_runtime.py:343).
+    public_denied = await set_policy(
+        approval="auto",
+        effect="external_write",
+        allowed_access_sources=["console", "public"],
+        workflow_callable=True,
+        parallel_safe=True,
+    )
+    failure = await preflight(public_denied, access_source="public")
+    assert failure is not None and failure.error_code == "tool_access_source_denied"
+
+    # Live-state: not workflow callable (tool_runtime.py:345).
+    agent_only = await set_policy(
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=["console", "public", "api"],
+        workflow_callable=False,
+        parallel_safe=True,
+    )
+    failure = await preflight(agent_only, origin="workflow", access_source="api")
+    assert failure is not None and failure.error_code == "tool_not_workflow_callable"
+
+    # Live-state: workflow-only Tool from an Agent (tool_runtime.py:347).
+    async with get_session_factory()() as db:
+        inline_tool = next(
+            item
+            for item in await tool_repository.list_tools(db, workspace_id)
+            if item.stable_key == "inline_python"
+        )
+        inline_source = await tool_repository.get_tool_source(
+            db,
+            workspace_id,
+            inline_tool.source_id,
+        )
+        inline_version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            inline_tool.current_version_id or "",
+        )
+        inline_policy = await tool_repository.get_tool_policy(
+            db,
+            workspace_id,
+            inline_tool.id,
+        )
+        assert (
+            inline_source is not None
+            and inline_version is not None
+            and inline_policy is not None
+        )
+        inline_snapshot = build_tool_snapshot(
+            inline_tool,
+            inline_source,
+            inline_version,
+            inline_policy,
+            actor_id,
+        )
+        await db.commit()
+    failure = await preflight(inline_snapshot)
+    assert failure is not None and failure.error_code == "tool_not_agent_callable"
+
+    # Restore the known-good policy for the remaining branches.
+    snapshot = await set_policy(
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=["console", "public", "api"],
+        workflow_callable=True,
+        parallel_safe=True,
+    )
+
+    # Live-state: revoked binding access (tool_runtime.py:389).
+    async with get_session_factory()() as db:
+        current_tool = await tool_repository.get_tool(db, workspace_id, tool_id)
+        current_source = await tool_repository.get_tool_source(
+            db,
+            workspace_id,
+            source_id,
+        )
+        current_version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            current_tool.current_version_id or "",
+        )
+        current_policy = await tool_repository.get_tool_policy(
+            db,
+            workspace_id,
+            tool_id,
+        )
+        assert (
+            current_source is not None
+            and current_version is not None
+            and current_policy is not None
+        )
+        stranger_snapshot = build_tool_snapshot(
+            current_tool,
+            current_source,
+            current_version,
+            current_policy,
+            stranger_id,
+        )
+        await db.commit()
+    failure = await preflight(stranger_snapshot)
+    assert failure is not None and failure.error_code == "tool_access_revoked"
+
+    # Live-state: revoked execution access (tool_runtime.py:410).
+    failure = await preflight(snapshot, execution_user_id=stranger_id)
+    assert (
+        failure is not None
+        and failure.error_code == "tool_execution_access_revoked"
+    )
+
+    # Live-state: MCP server unavailable (tool_runtime.py:417-427).
+    async with get_session_factory()() as db:
+        mcp_server = await mcp_repository.create_mcp_server(
+            db,
+            McpServer(
+                workspace_id=workspace_id,
+                name="Edge MCP",
+                url="https://tools.example.com/mcp",
+                tools=[],
+                status="active",
+                created_by_user_id=actor_id,
+            ),
+        )
+        mcp_source = await tool_repository.save_tool_source(
+            db,
+            ToolSource(
+                workspace_id=workspace_id,
+                mcp_server_id=mcp_server.id,
+                kind="mcp",
+                name="Edge MCP",
+                status="active",
+                created_by_user_id=actor_id,
+            ),
+        )
+        mcp_tool = await tool_repository.save_tool(
+            db,
+            Tool(
+                workspace_id=workspace_id,
+                source_id=mcp_source.id,
+                kind="mcp",
+                stable_key="edge-lookup",
+                function_name="edge_lookup",
+                status="active",
+                availability="available",
+                created_by_user_id=actor_id,
+            ),
+        )
+        mcp_version = await tool_repository.save_tool_version(
+            db,
+            ToolVersion(
+                workspace_id=workspace_id,
+                tool_id=mcp_tool.id,
+                revision=1,
+                display_name="Edge lookup",
+                input_schema={"type": "object"},
+                execution_spec={
+                    "server_id": mcp_server.id,
+                    "tool_name": "edge_lookup",
+                },
+                definition_hash="b" * 64,
+                created_by_user_id=actor_id,
+            ),
+        )
+        mcp_tool.current_version_id = mcp_version.id
+        await tool_repository.save_tool(db, mcp_tool)
+        mcp_policy = await tool_repository.save_tool_policy(
+            db,
+            ToolPolicy(
+                workspace_id=workspace_id,
+                tool_id=mcp_tool.id,
+                tool_version_id=mcp_version.id,
+                definition_hash="b" * 64,
+                approval="auto",
+                effect="external_read",
+                allowed_access_sources=["console"],
+                reviewed_by_user_id=actor_id,
+            ),
+        )
+        mcp_snapshot = build_tool_snapshot(
+            mcp_tool,
+            mcp_source,
+            mcp_version,
+            mcp_policy,
+            actor_id,
+        )
+        mcp_server_id = mcp_server.id
+        mcp_source_id = mcp_source.id
+        await db.commit()
+    async with get_session_factory()() as db:
+        mcp_server = await mcp_repository.get_mcp_server_by_id(db, mcp_server_id)
+        assert mcp_server is not None
+        mcp_server.status = "disabled"
+        await mcp_repository.save_mcp_server(db, mcp_server)
+        await db.commit()
+    failure = await preflight(mcp_snapshot)
+    assert failure is not None and failure.error_code == "tool_unavailable"
+    # Live-state: MCP snapshot bound to a source without an MCP server
+    # (tool_runtime.py:419-420, 422-427).
+    async with get_session_factory()() as db:
+        ghost_source = next(
+            source
+            for source in await tool_repository.list_tool_sources(db, workspace_id)
+            if source.kind == "python"
+        )
+        ghost_tool = await tool_repository.save_tool(
+            db,
+            Tool(
+                workspace_id=workspace_id,
+                source_id=ghost_source.id,
+                kind="mcp",
+                stable_key="ghost-lookup",
+                function_name="ghost_lookup",
+                status="active",
+                availability="available",
+                created_by_user_id=actor_id,
+            ),
+        )
+        ghost_version = await tool_repository.save_tool_version(
+            db,
+            ToolVersion(
+                workspace_id=workspace_id,
+                tool_id=ghost_tool.id,
+                revision=1,
+                display_name="Ghost lookup",
+                input_schema={"type": "object"},
+                execution_spec={"tool_name": "ghost_lookup"},
+                definition_hash="c" * 64,
+                created_by_user_id=actor_id,
+            ),
+        )
+        ghost_tool.current_version_id = ghost_version.id
+        await tool_repository.save_tool(db, ghost_tool)
+        ghost_policy = await tool_repository.save_tool_policy(
+            db,
+            ToolPolicy(
+                workspace_id=workspace_id,
+                tool_id=ghost_tool.id,
+                tool_version_id=ghost_version.id,
+                definition_hash="c" * 64,
+                approval="auto",
+                effect="external_read",
+                allowed_access_sources=["console"],
+                reviewed_by_user_id=actor_id,
+            ),
+        )
+        ghost_snapshot = build_tool_snapshot(
+            ghost_tool,
+            ghost_source,
+            ghost_version,
+            ghost_policy,
+            actor_id,
+        )
+        await db.commit()
+    failure = await preflight(ghost_snapshot)
+    assert failure is not None and failure.error_code == "tool_unavailable"
+
+
+async def assert_mcp_source_management(workspace_id: str) -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi import HTTPException
+
+    from app.application.tool_management import (
+        create_mcp_source,
+        delete_source,
+        list_sources,
+        refresh_source,
+        set_source_enabled,
+        update_policy,
+    )
+    from app.infrastructure.config import Settings
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+    from app.schemas.mcp import McpServerCreateRequest
+
+    settings = Settings.from_env(require_bootstrap=False)
+    discovery = SimpleNamespace(
+        tools=[
+            {
+                "name": "lookup",
+                "description": "Lookup a record.",
+                "input_schema": {"type": "object", "additionalProperties": False},
+            }
+        ]
+    )
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        with patch(
+            "app.shareddomain.tools.services.discover_mcp_tools",
+            new=AsyncMock(return_value=discovery),
+        ):
+            created = await create_mcp_source(
+                db,
+                workspace_id,
+                McpServerCreateRequest(
+                    name="Runtime MCP",
+                    transport="streamable_http",
+                    url="https://tools.example.com/mcp",
+                ),
+                actor,
+                "admin",
+                settings,
+            )
+        assert created.kind == "mcp"
+        source_id = created.id
+        assert created.tool_count == 1
+        listed = await list_sources(db, workspace_id, actor, "admin", 10, 0)
+        assert source_id in {item.id for item in listed}
+        with patch(
+            "app.shareddomain.tools.services.discover_mcp_tools",
+            new=AsyncMock(return_value=discovery),
+        ):
+            refreshed = await refresh_source(
+                db,
+                workspace_id,
+                source_id,
+                actor,
+                "admin",
+                settings,
+            )
+        assert refreshed.status == "active"
+        disabled = await set_source_enabled(
+            db,
+            workspace_id,
+            source_id,
+            False,
+            actor,
+            "admin",
+        )
+        assert disabled.status == "disabled"
+        enabled = await set_source_enabled(
+            db,
+            workspace_id,
+            source_id,
+            True,
+            actor,
+            "admin",
+        )
+        assert enabled.status == "active"
+        try:
+            await refresh_source(
+                db,
+                workspace_id,
+                "missing-source",
+                actor,
+                "admin",
+                settings,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("A missing MCP source must 404.")
+        tools = await tool_repository.list_tools(db, workspace_id)
+        mcp_tool = next(
+            item
+            for item in tools
+            if item.kind == "mcp" and item.source_id == source_id
+        )
+        updated = await update_policy(
+            db,
+            workspace_id,
+            mcp_tool.id,
+            "read_only",
+            actor,
+            "admin",
+        )
+        assert updated.approval == "auto"
+        assert updated.effect == "external_read"
+        builtin = next(item for item in tools if item.stable_key == "current_time")
+        try:
+            await update_policy(
+                db,
+                workspace_id,
+                builtin.id,
+                "read_only",
+                actor,
+                "admin",
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 422
+        else:
+            raise AssertionError("Non-MCP Tool policy changes must 422.")
+        await delete_source(db, workspace_id, source_id, actor, "admin")
+        remaining = await tool_repository.list_tool_sources(db, workspace_id)
+        assert source_id not in {
+            item.id
+            for item in remaining
+            if item.kind == "mcp" and item.status == "active"
+        }
+
+
+async def assert_tool_management_branches(
+    workspace_id: str,
+    member_id: str,
+) -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi import HTTPException
+
+    from app.application.tool_management import (
+        create_python,
+        delete_python,
+        get_python_test,
+        publish_python,
+        queue_python_test,
+        set_python_enabled,
+        update_python_draft,
+        upsert_permission,
+    )
+    from app.infrastructure.config import Settings
+    from app.infrastructure.repositories import user as user_repository
+    from app.schemas.tool import PythonToolCreateRequest, PythonToolDraftUpdateRequest
+
+    settings = Settings.from_env(require_bootstrap=False)
+    input_schema = {
+        "type": "object",
+        "properties": {"value": {"type": "string", "maxLength": 64}},
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {"value": {"type": "string", "maxLength": 64}},
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        created = await create_python(
+            db,
+            workspace_id,
+            PythonToolCreateRequest(
+                display_name="Branch tool",
+                description="Branch coverage.",
+                input_schema=input_schema,
+                output_schema=output_schema,
+                code="result = {'value': inputs['value']}",
+            ),
+            actor,
+            "admin",
+        )
+        tool_id = created.id
+        assert created.kind == "python"
+        updated = await update_python_draft(
+            db,
+            workspace_id,
+            tool_id,
+            PythonToolDraftUpdateRequest(
+                expected_revision=1,
+                display_name="Branch tool",
+                description="Branch coverage safely.",
+                input_schema=input_schema,
+                output_schema=output_schema,
+                code="result = {'value': inputs['value'].upper()}",
+            ),
+            actor,
+            "admin",
+        )
+        assert updated.revision == 2
+        with patch(
+            "app.application.tool_management.enqueue_tool_invocation",
+            new_callable=AsyncMock,
+        ) as dispatch:
+            queued = await queue_python_test(
+                db,
+                workspace_id,
+                tool_id,
+                {"value": "nexa"},
+                actor,
+                "admin",
+                settings,
+            )
+        assert queued.status == "queued"
+        assert dispatch.await_count == 1
+        assert dispatch.await_args.args[0] == queued.id
+        try:
+            await queue_python_test(
+                db,
+                workspace_id,
+                tool_id,
+                {},
+                actor,
+                "admin",
+                settings,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 422
+        else:
+            raise AssertionError("Invalid Tool test arguments must 422.")
+        await db.commit()
+        found = await get_python_test(
+            db,
+            workspace_id,
+            tool_id,
+            queued.id,
+            actor,
+            "admin",
+        )
+        assert found.id == queued.id
+        try:
+            await get_python_test(
+                db,
+                workspace_id,
+                tool_id,
+                "missing-invocation",
+                actor,
+                "admin",
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("A missing Tool test must 404.")
+        published = await publish_python(
+            db,
+            workspace_id,
+            tool_id,
+            actor,
+            "admin",
+        )
+        assert published.current_version_id
+        disabled = await set_python_enabled(
+            db,
+            workspace_id,
+            tool_id,
+            False,
+            actor,
+            "admin",
+        )
+        assert disabled.status == "disabled"
+        enabled = await set_python_enabled(
+            db,
+            workspace_id,
+            tool_id,
+            True,
+            actor,
+            "admin",
+        )
+        assert enabled.status == "active"
+        granted = await upsert_permission(
+            db,
+            workspace_id,
+            tool_id,
+            member_id,
+            "view",
+            actor,
+            "admin",
+        )
+        assert granted.permission == "view"
+        assert granted.user.id == member_id
+        await delete_python(db, workspace_id, tool_id, actor, "admin")
+        await db.commit()
+
+
+async def assert_workflow_tool_runtime(workspace_id: str) -> None:
+    import dataclasses
+    from datetime import datetime, timedelta
+    from unittest.mock import patch
+
+    from app.application.tool_runtime import ToolInvocationBusy
+    from app.application.workflow_tool_runtime import (
+        WorkflowToolRuntime,
+        workflow_tool_invocation_identity,
+    )
+    from app.capabilities.llm.models import RegisteredModel
+    from app.entities.agents import Agent as AgentEntity
+    from app.entities.agents import AgentRun
+    from app.entities.workflows import WorkflowRunDetail
+    from app.infrastructure.config import Settings
+    from app.infrastructure.model_utils import utc_now
+    from app.infrastructure.repositories import agent as agent_repository
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+    from app.ports.tool_runtime import ToolRuntimeResult
+    from app.shareddomain.tools.runtime import (
+        TOOL_APPROVAL_EACH_CALL,
+        build_tool_snapshot,
+    )
+
+    settings = Settings.from_env(require_bootstrap=False)
+
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        tool = next(
+            item
+            for item in await tool_repository.list_tools(db, workspace_id)
+            if item.stable_key == "current_time"
+        )
+        source = await tool_repository.get_tool_source(db, workspace_id, tool.source_id)
+        version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            tool.current_version_id or "",
+        )
+        policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
+        assert source is not None and version is not None and policy is not None
+        expected = policy.revision
+        policy.revision += 1
+        policy.approval = "auto"
+        policy.effect = "pure"
+        policy.allowed_access_sources = ["console", "public", "api"]
+        policy.workflow_callable = True
+        policy.parallel_safe = True
+        policy.updated_at = utc_now()
+        assert (
+            await tool_repository.update_tool_policy_if_revision(
+                db,
+                policy,
+                expected,
+            )
+            is not None
+        )
+        snapshot = build_tool_snapshot(tool, source, version, policy, actor.id)
+        inline_tool = next(
+            item
+            for item in await tool_repository.list_tools(db, workspace_id)
+            if item.stable_key == "inline_python"
+        )
+        inline_source = await tool_repository.get_tool_source(
+            db,
+            workspace_id,
+            inline_tool.source_id,
+        )
+        inline_version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            inline_tool.current_version_id or "",
+        )
+        inline_policy = await tool_repository.get_tool_policy(
+            db,
+            workspace_id,
+            inline_tool.id,
+        )
+        assert (
+            inline_source is not None
+            and inline_version is not None
+            and inline_policy is not None
+        )
+        inline_snapshot = build_tool_snapshot(
+            inline_tool,
+            inline_source,
+            inline_version,
+            inline_policy,
+            actor.id,
+        )
+        actor_id = actor.id
+        tool_id = tool.id
+        source_id = source.id
+        await db.commit()
+
+    run = AgentRun(
+        id="wf-edge-run",
+        workspace_id=workspace_id,
+        agent_id="wf-edge-agent",
+        execution_user_id=actor_id,
+        access_source="api",
+    )
+    async with get_session_factory()() as db:
+        model = RegisteredModel(
+            workspace_id=workspace_id,
+            name="Edge Workflow Model",
+            provider="model_custom_provider",
+            provider_type="openai_compatible",
+            api_base="",
+            model_type="LLM",
+            model_name="edge-model",
+            status="active",
+            created_by_user_id=actor_id,
+        )
+        db.add(model)
+        await db.flush()
+        await agent_repository.save_agent(
+            db,
+            AgentEntity(
+                id="wf-edge-agent",
+                workspace_id=workspace_id,
+                name="Edge Agent",
+                model_id=model.id,
+                created_by_user_id=actor_id,
+            ),
+        )
+        await agent_repository.save_agent_run(db, run)
+        await db.commit()
+    detail = WorkflowRunDetail(
+        id="wf-edge-detail",
+        run_id=run.id,
+        deadline_at=datetime.now() + timedelta(seconds=30),
+    )
+    lease_lost = asyncio.Event()
+    runtime = WorkflowToolRuntime(
+        run,
+        detail,
+        [snapshot, inline_snapshot],
+        "wf-edge-worker",
+        settings,
+        lease_lost,
+    )
+
+# Identity helper (workflow_tool_runtime.py:31-35).
+    invocation_id, idempotency_key = workflow_tool_invocation_identity(
+        run.id,
+        "node-1",
+        "call-1",
+    )
+    assert invocation_id == "node-1:call-1"
+    assert len(idempotency_key) == 64
+    try:
+        workflow_tool_invocation_identity(run.id, "x" * 300, "c")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Oversized Workflow identity must raise.")
+
+# Lookup helpers (workflow_tool_runtime.py:61-68).
+    assert runtime.get_by_function("current_time") is snapshot
+    assert runtime.get_by_function("missing") is None
+    assert runtime.get_by_reference(snapshot.tool_id, snapshot.version_id) is snapshot
+    try:
+        runtime.get_by_reference("missing-tool", "missing-version")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Missing Workflow snapshot must raise.")
+
+# Duplicate function names (workflow_tool_runtime.py:57-58).
+    try:
+        WorkflowToolRuntime(
+            run,
+            detail,
+            [snapshot, snapshot],
+            "wf-edge-worker",
+            settings,
+            lease_lost,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Duplicate Workflow Tool function names must raise.")
+
+# LLM calls to direct-only Tools (workflow_tool_runtime.py:77-81).
+    try:
+        await runtime.invoke(
+            inline_snapshot,
+            "node-llm",
+            "llm:1",
+            {"code": "x = 1", "inputs": {}},
+        )
+    except RuntimeError as exc:
+        assert "direct node" in str(exc)
+    else:
+        raise AssertionError("An LLM call to a direct-only Tool must raise.")
+
+# Invalid parameters (workflow_tool_runtime.py:126-131).
+    invalid = await runtime.invoke(snapshot, "node-bad", "call-bad", {"nope": 1})
+    assert invalid.is_error is True
+    assert "Tool parameters are invalid" in invalid.content
+
+# Happy path through the real runtime (workflow_tool_runtime.py:94-154).
+    completed = await runtime.invoke(snapshot, "node-ok", "call-ok", {})
+    assert completed.is_error is False
+    assert "iso8601" in completed.content
+
+# Reused identity with drifted stored data conflicts
+    # (workflow_tool_runtime.py:124-125).
+    _node_id, drifted_key = workflow_tool_invocation_identity(
+        run.id,
+        "node-replay",
+        "call-replay",
+    )
+    await runtime.invoke(snapshot, "node-replay", "call-replay", {})
+    async with get_session_factory()() as db:
+        stored = await tool_repository.get_tool_invocation_by_idempotency_key(
+            db,
+            workspace_id,
+            drifted_key,
+        )
+        assert stored is not None
+        stored.arguments_hash = "d" * 64
+        await tool_repository.save_tool_invocation(db, stored)
+        await db.commit()
+    try:
+        await runtime.invoke(snapshot, "node-replay", "call-replay", {})
+    except RuntimeError as exc:
+        assert "idempotency" in str(exc)
+    else:
+        raise AssertionError("A drifted Workflow identity must conflict.")
+
+# Approval-required Tools cannot run in Workflows
+    # (workflow_tool_runtime.py:132-133).
+    approval_snapshot = dataclasses.replace(snapshot, approval=TOOL_APPROVAL_EACH_CALL)
+    try:
+        await runtime.invoke(
+            approval_snapshot,
+            "node-approval",
+            "call-approval",
+            {},
+        )
+    except RuntimeError as exc:
+        assert "approval" in str(exc)
+    else:
+        raise AssertionError("An approval-required Workflow Tool must raise.")
+
+# Lost lease (workflow_tool_runtime.py:94-95).
+    lost = asyncio.Event()
+    lost.set()
+    lost_runtime = WorkflowToolRuntime(
+        run,
+        detail,
+        [snapshot],
+        "wf-edge-worker",
+        settings,
+        lost,
+    )
+    try:
+        await lost_runtime.invoke(snapshot, "node-lost", "call-lost", {})
+    except RuntimeError as exc:
+        assert "lease" in str(exc)
+    else:
+        raise AssertionError("A lost Workflow lease must raise.")
+
+# Busy provider is retried until success (workflow_tool_runtime.py:134-146).
+    busy_sequence = [
+        ToolInvocationBusy("provider busy"),
+        ToolRuntimeResult(
+            ok=True,
+            data={"iso8601": "2026-08-17T00:00:00+00:00"},
+            summary="Done.",
+            error_code=None,
+            error_message=None,
+            outcome="confirmed",
+            usage={},
+        ),
+    ]
+
+    async def flaky_execute(*_args, **_kwargs):
+        item = busy_sequence.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    with patch(
+        "app.application.workflow_tool_runtime.execute_tool_invocation",
+        new=flaky_execute,
+    ):
+        retried = await runtime.invoke(snapshot, "node-busy", "call-busy", {})
+    assert retried.is_error is False
+
+# Busy provider with an expired deadline fails fast
+    # (workflow_tool_runtime.py:143-145).
+    past_detail = WorkflowRunDetail(
+        id="wf-edge-detail-past",
+        run_id=run.id,
+        deadline_at=utc_now() - timedelta(seconds=5),
+    )
+    past_runtime = WorkflowToolRuntime(
+        run,
+        past_detail,
+        [snapshot],
+        "wf-edge-worker",
+        settings,
+        asyncio.Event(),
+    )
+
+    async def always_busy(*_args, **_kwargs):
+        raise ToolInvocationBusy("provider busy")
+
+    with patch(
+        "app.application.workflow_tool_runtime.execute_tool_invocation",
+        new=always_busy,
+    ):
+        try:
+            await past_runtime.invoke(snapshot, "node-past", "call-past", {})
+        except RuntimeError as exc:
+            assert "provider busy" in str(exc)
+        else:
+            raise AssertionError("An expired busy retry must raise.")
+
+# Uncertain outcome raises (workflow_tool_runtime.py:148-151).
+    async def uncertain_execute(*_args, **_kwargs):
+        return ToolRuntimeResult(
+            ok=False,
+            data=None,
+            summary="Uncertain.",
+            error_code="tool_outcome_uncertain",
+            error_message="outcome unknown",
+            outcome="uncertain",
+            usage={},
+        )
+
+    with patch(
+        "app.application.workflow_tool_runtime.execute_tool_invocation",
+        new=uncertain_execute,
+    ):
+        try:
+            await runtime.invoke(snapshot, "node-uncertain", "call-uncertain", {})
+        except RuntimeError as exc:
+            assert "outcome unknown" in str(exc)
+        else:
+            raise AssertionError("An uncertain Workflow Tool outcome must raise.")
+
+# Approval-required result raises (workflow_tool_runtime.py:152-153).
+    async def approval_execute(*_args, **_kwargs):
+        return ToolRuntimeResult(
+            ok=False,
+            data=None,
+            summary="Approval required.",
+            error_code="approval_required",
+            error_message="Tool invocation requires approval.",
+            outcome="confirmed",
+            usage={},
+        )
+
+    with patch(
+        "app.application.workflow_tool_runtime.execute_tool_invocation",
+        new=approval_execute,
+    ):
+        try:
+            await runtime.invoke(snapshot, "node-approval-2", "call-approval-2", {})
+        except RuntimeError as exc:
+            assert "approval" in str(exc)
+        else:
+            raise AssertionError("An approval-required Workflow result must raise.")
+
+    # Serialized (non-parallel-safe) invocation (workflow_tool_runtime.py:84-85).
+    async with get_session_factory()() as db:
+        serial_policy = await tool_repository.get_tool_policy(
+            db,
+            workspace_id,
+            tool_id,
+        )
+        assert serial_policy is not None
+        expected = serial_policy.revision
+        serial_policy.revision += 1
+        serial_policy.parallel_safe = False
+        serial_policy.updated_at = utc_now()
+        assert (
+            await tool_repository.update_tool_policy_if_revision(
+                db,
+                serial_policy,
+                expected,
+            )
+            is not None
+        )
+        current_tool = await tool_repository.get_tool(db, workspace_id, tool_id)
+        current_source = await tool_repository.get_tool_source(
+            db,
+            workspace_id,
+            source_id,
+        )
+        current_version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            current_tool.current_version_id or "",
+        )
+        assert (
+            current_tool is not None
+            and current_source is not None
+            and current_version is not None
+        )
+        serial_snapshot = build_tool_snapshot(
+            current_tool,
+            current_source,
+            current_version,
+            serial_policy,
+            actor_id,
+        )
+        await db.commit()
+    serialized = await runtime.invoke(
+        serial_snapshot,
+        "node-serial",
+        "call-serial",
+        {},
+    )
+    assert serialized.is_error is False
+
+
+async def assert_tool_adapters(workspace_id: str) -> None:
+    import dataclasses
+    import json
+    from datetime import timedelta
+    from unittest.mock import AsyncMock, patch
+
+    from app.application.tool_adapters import (
+        BuiltinToolAdapter,
+        McpToolAdapter,
+        PythonToolAdapter,
+        build_tool_adapter,
+    )
+    from app.entities.tools import McpServer
+    from app.infrastructure.code_sandbox import (
+        WorkflowSandboxBusyError,
+        WorkflowSandboxError,
+        WorkflowSandboxResult,
+    )
+    from app.infrastructure.config import Settings
+    from app.infrastructure.model_utils import utc_now
+    from app.infrastructure.repositories import tools as tool_repository
+    from app.infrastructure.repositories import user as user_repository
+    from app.ports.mcp import McpClientError
+    from app.ports.tool_runtime import ToolAdapterBusy, ToolInvocationContext
+    from app.shareddomain.tools.runtime import build_tool_snapshot
+
+    settings = Settings.from_env(require_bootstrap=False)
+    context = ToolInvocationContext(
+        workspace_id=workspace_id,
+        origin="workflow",
+        root_run_id="r",
+        run_id="r",
+        invocation_id="adapter-inv",
+        execution_user_id="admin",
+        access_source="console",
+        deadline_at=utc_now() + timedelta(seconds=30),
+        idempotency_key="adapter-inv",
+    )
+
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        tool = next(
+            item
+            for item in await tool_repository.list_tools(db, workspace_id)
+            if item.stable_key == "current_time"
+        )
+        source = await tool_repository.get_tool_source(db, workspace_id, tool.source_id)
+        version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            tool.current_version_id or "",
+        )
+        policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
+        assert source is not None and version is not None and policy is not None
+        snapshot = build_tool_snapshot(tool, source, version, policy, actor.id)
+        actor_id = actor.id
+        await db.commit()
+
+    mcp_server = McpServer(
+        workspace_id=workspace_id,
+        name="Adapter MCP",
+        transport="streamable_http",
+        url="https://tools.example.com/mcp",
+        tools=[],
+        status="active",
+        created_by_user_id=actor_id,
+    )
+
+    # Factory selection (tool_adapters.py:161-167).
+    assert isinstance(build_tool_adapter(snapshot, settings), BuiltinToolAdapter)
+    python_snapshot = dataclasses.replace(
+        snapshot,
+        kind="python",
+        execution_spec={"code": "result = {'value': 1}"},
+    )
+    assert isinstance(build_tool_adapter(python_snapshot, settings), PythonToolAdapter)
+    mcp_snapshot = dataclasses.replace(
+        snapshot,
+        kind="mcp",
+        execution_spec={"tool_name": "lookup"},
+    )
+    assert isinstance(
+        build_tool_adapter(mcp_snapshot, settings, mcp_server),
+        McpToolAdapter,
+    )
+    try:
+        build_tool_adapter(dataclasses.replace(snapshot, kind="unknown"), settings)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("An unknown Tool kind must raise.")
+
+    # Builtin current_time (tool_adapters.py:36-46).
+    builtin = BuiltinToolAdapter(settings)
+    result = await builtin.invoke(snapshot, {}, context)
+    assert result.ok is True
+    assert "iso8601" in result.data
+    # Unsupported builtin (tool_adapters.py:47-48).
+    result = await builtin.invoke(
+        dataclasses.replace(snapshot, execution_spec={"builtin": "other"}),
+        {},
+        context,
+    )
+    assert result.ok is False
+    assert result.error_code == "unsupported_builtin"
+    # Inline Python (tool_adapters.py:49-54, 59-67).
+    inline_snapshot = dataclasses.replace(
+        snapshot,
+        execution_spec={"builtin": "inline_python"},
+    )
+    with patch(
+        "app.application.tool_adapters.execute_workflow_code",
+        new=AsyncMock(
+            return_value=WorkflowSandboxResult(
+                result={"result": 42},
+                stdout="",
+                stderr="",
+                exit_code=0,
+            )
+        ),
+    ) as sandbox:
+        result = await builtin.invoke(
+            inline_snapshot,
+            {"code": "result = {'result': 42}", "inputs": {}},
+            context,
+        )
+    assert result.ok is True
+    assert result.data == {"result": {"result": 42}}
+    assert result.usage == {"exit_code": 0}
+    assert sandbox.await_count == 1
+    # Inline Python busy (tool_adapters.py:55-56).
+    with patch(
+        "app.application.tool_adapters.execute_workflow_code",
+        new=AsyncMock(side_effect=WorkflowSandboxBusyError("busy")),
+    ):
+        try:
+            await builtin.invoke(
+                inline_snapshot,
+                {"code": "result = 1", "inputs": {}},
+                context,
+            )
+        except ToolAdapterBusy:
+            pass
+        else:
+            raise AssertionError("A busy sandbox must raise ToolAdapterBusy.")
+    # Inline Python failure (tool_adapters.py:57-58).
+    with patch(
+        "app.application.tool_adapters.execute_workflow_code",
+        new=AsyncMock(side_effect=WorkflowSandboxError("failed")),
+    ):
+        result = await builtin.invoke(
+            inline_snapshot,
+            {"code": "result = 1", "inputs": {}},
+            context,
+        )
+    assert result.ok is False
+    assert result.error_code == "python_execution_failed"
+    # Python adapter invalid code (tool_adapters.py:83-85).
+    python = PythonToolAdapter(settings)
+    result = await python.invoke(
+        dataclasses.replace(snapshot, kind="python", execution_spec={}),
+        {},
+        context,
+    )
+    assert result.ok is False
+    assert result.error_code == "invalid_python_tool"
+    # Python adapter happy path (tool_adapters.py:86-87, 95-103).
+    with patch(
+        "app.application.tool_adapters.execute_workflow_code",
+        new=AsyncMock(
+            return_value=WorkflowSandboxResult(
+                result={"value": "NEXA"},
+                stdout="",
+                stderr="",
+                exit_code=0,
+            )
+        ),
+    ):
+        result = await python.invoke(python_snapshot, {"value": "nexa"}, context)
+    assert result.ok is True
+    assert result.data == {"value": "NEXA"}
+    assert result.usage == {"exit_code": 0}
+    # Python adapter busy (tool_adapters.py:88-89).
+    with patch(
+        "app.application.tool_adapters.execute_workflow_code",
+        new=AsyncMock(side_effect=WorkflowSandboxBusyError("busy")),
+    ):
+        try:
+            await python.invoke(python_snapshot, {"value": "nexa"}, context)
+        except ToolAdapterBusy:
+            pass
+        else:
+            raise AssertionError("A busy sandbox must raise ToolAdapterBusy.")
+    # Python adapter failure (tool_adapters.py:90-94).
+    with patch(
+        "app.application.tool_adapters.execute_workflow_code",
+        new=AsyncMock(side_effect=WorkflowSandboxError("failed")),
+    ):
+        result = await python.invoke(python_snapshot, {"value": "nexa"}, context)
+    assert result.ok is False
+    assert result.error_code == "python_execution_failed"
+    # MCP adapter missing tool name (tool_adapters.py:119-121).
+    mcp = McpToolAdapter(settings, mcp_server)
+    result = await mcp.invoke(
+        dataclasses.replace(snapshot, kind="mcp", execution_spec={}),
+        {},
+        context,
+    )
+    assert result.ok is False
+    assert result.error_code == "invalid_mcp_tool"
+    # MCP adapter happy path (tool_adapters.py:123-129, 141-145, 145-153).
+    with patch(
+        "app.application.tool_adapters.call_mcp_tool",
+        new=AsyncMock(return_value=('{"ok": true}', False)),
+    ) as call:
+        result = await mcp.invoke(mcp_snapshot, {}, context)
+    assert result.ok is True
+    assert result.data == {"ok": True}
+    assert call.await_count == 1
+    # MCP adapter non-JSON error content (tool_adapters.py:142-144, 147-150).
+    with patch(
+        "app.application.tool_adapters.call_mcp_tool",
+        new=AsyncMock(return_value=("plain failure", True)),
+    ):
+        result = await mcp.invoke(mcp_snapshot, {}, context)
+    assert result.ok is False
+    assert result.error_code == "mcp_tool_error"
+    assert result.data == "plain failure"
+    # MCP adapter client error, confirmed outcome (tool_adapters.py:130-140).
+    with patch(
+        "app.application.tool_adapters.call_mcp_tool",
+        new=AsyncMock(side_effect=McpClientError("boom")),
+    ):
+        result = await mcp.invoke(mcp_snapshot, {}, context)
+    assert result.ok is False
+    assert result.error_code == "mcp_request_failed"
+    assert result.outcome == "confirmed"
+    # MCP adapter client error, uncertain outcome (tool_adapters.py:131, 138).
+    uncertain_mcp = dataclasses.replace(mcp_snapshot, effect="external_write")
+    with patch(
+        "app.application.tool_adapters.call_mcp_tool",
+        new=AsyncMock(side_effect=McpClientError("boom")),
+    ):
+        result = await mcp.invoke(uncertain_mcp, {}, context)
+    assert result.ok is False
+    assert result.error_code == "mcp_request_failed"
+    assert result.outcome == "uncertain"
+
+
 def test_workspace_creation_initializes_system_catalog() -> None:
     with test_client() as client:
-        _token, workspace_id = activate_admin(client)
+        admin_token, workspace_id = activate_admin(client)
+        stranger_id, _stranger_token = create_active_user(
+            client,
+            admin_token,
+            "tool-edge-stranger",
+        )
+        member_id, _member_token = create_active_user(
+            client,
+            admin_token,
+            "tool-edge-member",
+        )
+        add_workspace_member(client, admin_token, workspace_id, member_id)
         run(assert_workspace_system_catalog(workspace_id))
         run(assert_tool_policy_revision_compare_and_swap(workspace_id))
         run(assert_mcp_discovery_materializes_first_leaf(workspace_id))
         run(assert_mcp_server_deletion_preserves_tool_history(workspace_id))
         run(assert_tool_runtime_is_durable(workspace_id))
         run(assert_python_tool_lifecycle(workspace_id))
+        run(assert_tool_runtime_edge_branches(workspace_id, stranger_id))
+        run(assert_mcp_source_management(workspace_id))
+        run(assert_tool_management_branches(workspace_id, member_id))
+        run(assert_workflow_tool_runtime(workspace_id))
+        run(assert_tool_adapters(workspace_id))
 
 
 def test_python_tool_http_lifecycle_and_private_grants() -> None:

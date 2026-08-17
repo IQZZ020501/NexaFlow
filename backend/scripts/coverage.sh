@@ -34,4 +34,4 @@ if [[ "${1:-}" != "--report-only" ]]; then
 fi
 
 uv run coverage combine .coverage.*
-uv run coverage report -m
+uv run coverage report --fail-under=97 -m

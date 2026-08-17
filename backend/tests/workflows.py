@@ -2737,6 +2737,836 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
             assert still_cancelled is not None
             assert still_cancelled.status == "cancelled"
 
+        # ------------------------------------------------------------------
+        # preflight_workflow_agent_snapshots / _require_snapshot_binder /
+        # ensure_workflow_agent_child failure branches and the expired-parent
+        # reconciler path (app/application/agent_child_runs.py). All client
+        # interactions for this section were performed synchronously in the
+        # test body (ids arrive via the closure: outside_binder_id,
+        # member_binder_id, retired_agent_id, retired_version_id,
+        # extra_runs).
+        # ------------------------------------------------------------------
+        from app.application import agent_child_runs as acr
+        from app.application import agent_runs as app_agent_runs
+        from app.application import workflow_executor
+        from app.application.agent_child_runs import (
+            _child_goal,
+            _fail_expired_waiting_parent,
+        )
+        from app.application.workflow_executor import run_durable_workflow_run
+        from app.entities.agents import AgentPublicationVersion
+        from app.infrastructure.model_utils import new_id
+        from app.infrastructure.repositories import workflow as workflow_repository
+        from app.shareddomain.agents.models import (
+            AGENT_RUN_FAILED_STATUS,
+            AGENT_RUN_SUCCEEDED_STATUS,
+            agent_run_display_status,
+        )
+        from app.shareddomain.agents.publications import agent_publication_hash
+        from app.shareddomain.workflows.engine import WorkflowChildRequired
+        from app.shareddomain.workflows.models import WorkflowRunDetail as DetailORM
+        from tests.support import settings as make_settings
+
+        runner_settings = make_settings()
+
+        async def pause_run(run_id: str, node_id: str) -> None:
+            async with get_session_factory()() as db:
+                run = await agent_repository.get_agent_run_by_id(db, run_id)
+                assert run is not None
+                run.status = AGENT_RUN_UNIFIED_RUNNING_STATUS
+                run.worker_task_id = f"worker-{node_id}"
+                await agent_repository.save_agent_run(db, run)
+                await agent_repository.pause_agent_run_for_child(
+                    db,
+                    run_id,
+                    f"worker-{node_id}",
+                )
+                await db.commit()
+
+        async def reset_to_running(run_id: str, worker: str) -> None:
+            async with get_session_factory()() as db:
+                run = await agent_repository.get_agent_run_by_id(db, run_id)
+                assert run is not None
+                run.status = AGENT_RUN_UNIFIED_RUNNING_STATUS
+                run.worker_task_id = worker
+                await agent_repository.save_agent_run(db, run)
+                await db.commit()
+
+        async with get_session_factory()() as db:
+            def make_snapshot(**overrides):
+                base = {
+                    "agent_id": agent_id,
+                    "version_id": pinned_version_id,
+                    "configuration_hash": version.configuration_hash,
+                    "configuration_snapshot": version.configuration_snapshot,
+                    "resource_snapshot": version.resource_snapshot,
+                    "bound_by_user_id": actor.id,
+                }
+                base.update(overrides)
+                return base
+
+            # _child_goal (line 41): empty and over-length goals are rejected.
+            try:
+                _child_goal("   ")
+            except ValueError as exc:
+                assert "1 to 4000 characters" in str(exc)
+            else:
+                raise AssertionError("Empty child goal was accepted.")
+            try:
+                _child_goal("x" * 4001)
+            except ValueError as exc:
+                assert "1 to 4000 characters" in str(exc)
+            else:
+                raise AssertionError("Oversized child goal was accepted.")
+            assert _child_goal("  ok goal ") == "ok goal"
+
+            # preflight: invalid snapshot shape (87)
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [{"version_id": 7, "agent_id": None}],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "snapshot is invalid" in str(exc)
+            else:
+                raise AssertionError("Invalid snapshot shape was accepted.")
+
+            # preflight: unknown publication version (93-105)
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [make_snapshot(version_id=new_id())],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "publication changed or is invalid" in str(exc)
+            else:
+                raise AssertionError("Unknown publication version was accepted.")
+
+            # preflight: stale configuration hash (93-105)
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [make_snapshot(configuration_hash="stale-hash")],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "publication changed or is invalid" in str(exc)
+            else:
+                raise AssertionError("Stale configuration hash was accepted.")
+
+            # preflight happy path (93-107, 108-128 with an empty tool list)
+            await acr.preflight_workflow_agent_snapshots(
+                db,
+                workspace_id,
+                [snapshot],
+                execution_user_id=actor.id,
+                access_source="console",
+            )
+
+            # binder branches (52, 55, 58-59, 71-72)
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [make_snapshot(bound_by_user_id=None)],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "binder is missing" in str(exc)
+            else:
+                raise AssertionError("Missing binder was accepted.")
+
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [make_snapshot(bound_by_user_id="ghost-user")],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "binder is unavailable" in str(exc)
+            else:
+                raise AssertionError("Unknown binder was accepted.")
+
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [make_snapshot(bound_by_user_id=outside_binder_id)],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "binder is unavailable" in str(exc)
+            else:
+                raise AssertionError("Non-member binder was accepted.")
+
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [make_snapshot(bound_by_user_id=member_binder_id)],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "access was revoked" in str(exc)
+            else:
+                raise AssertionError(
+                    "Member binder without view access was accepted."
+                )
+
+            # unavailable target agent (68): an agent that was published and
+            # then unpublished (created synchronously in the test body).
+            version2 = await agent_repository.get_agent_publication_version(
+                db,
+                workspace_id,
+                retired_version_id,
+            )
+            assert version2 is not None
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [
+                        make_snapshot(
+                            agent_id=retired_agent_id,
+                            version_id=retired_version_id,
+                            configuration_hash=version2.configuration_hash,
+                            configuration_snapshot=version2.configuration_snapshot,
+                            resource_snapshot=version2.resource_snapshot,
+                        )
+                    ],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "Workflow Agent is unavailable" in str(exc)
+            else:
+                raise AssertionError("Unpublished agent snapshot was accepted.")
+
+            # tool payload branches (112-113, 118, 119-128): craft immutable
+            # publication rows whose resource snapshots carry tool payloads.
+            tool_payload = {
+                "schema_version": 1,
+                "tool_id": "ghost-tool",
+                "version_id": "ghost-version",
+                "source_id": "ghost-source",
+                "kind": "mcp",
+                "function_name": "mcp_lookup",
+                "display_name": "Lookup",
+                "description": "",
+                "input_schema": {},
+                "output_schema": None,
+                "definition_hash": "def-hash",
+                "policy_id": "policy-1",
+                "policy_revision": 1,
+                "bound_by_user_id": actor.id,
+                "approval": "each_call",
+                "effect": "unknown",
+                "allowed_access_sources": ["console"],
+                "workflow_callable": False,
+                "parallel_safe": False,
+                "execution_spec": {"server_id": "srv", "tool_name": "lookup"},
+            }
+
+            async def craft_version(
+                version_number: int,
+                tools: list,
+            ) -> AgentPublicationVersion:
+                crafted = AgentPublicationVersion(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    version_number=version_number,
+                    configuration_snapshot=version.configuration_snapshot,
+                    resource_snapshot={
+                        "schema_version": 1,
+                        "knowledge_base_ids": [],
+                        "tools": tools,
+                        "agents": [],
+                    },
+                    published_by_user_id=actor.id,
+                )
+                crafted.configuration_hash = agent_publication_hash(
+                    crafted.configuration_snapshot,
+                    crafted.resource_snapshot,
+                )
+                crafted = await agent_repository.create_agent_publication_version(
+                    db,
+                    crafted,
+                )
+                await db.commit()
+                return crafted
+
+            invalid_tools_version = await craft_version(10, [{"nope": 1}])
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [
+                        make_snapshot(
+                            version_id=invalid_tools_version.id,
+                            configuration_hash=(
+                                invalid_tools_version.configuration_hash
+                            ),
+                            configuration_snapshot=(
+                                invalid_tools_version.configuration_snapshot
+                            ),
+                            resource_snapshot=(
+                                invalid_tools_version.resource_snapshot
+                            ),
+                        )
+                    ],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "Tool snapshot is invalid" in str(exc)
+            else:
+                raise AssertionError("Invalid tool snapshot was accepted.")
+
+            each_call_version = await craft_version(11, [tool_payload])
+            each_call_snapshot = make_snapshot(
+                version_id=each_call_version.id,
+                configuration_hash=each_call_version.configuration_hash,
+                configuration_snapshot=each_call_version.configuration_snapshot,
+                resource_snapshot=each_call_version.resource_snapshot,
+            )
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [each_call_snapshot],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "must be automatic and read-only" in str(exc)
+            else:
+                raise AssertionError("Write tool was accepted for a child.")
+
+            auto_tool_payload = {
+                **tool_payload,
+                "approval": "auto",
+                "effect": "external_read",
+                "allowed_access_sources": ["console", "public", "api"],
+                "workflow_callable": True,
+                "parallel_safe": True,
+            }
+            revoked_version = await craft_version(12, [auto_tool_payload])
+            try:
+                await acr.preflight_workflow_agent_snapshots(
+                    db,
+                    workspace_id,
+                    [
+                        make_snapshot(
+                            version_id=revoked_version.id,
+                            configuration_hash=revoked_version.configuration_hash,
+                            configuration_snapshot=(
+                                revoked_version.configuration_snapshot
+                            ),
+                            resource_snapshot=revoked_version.resource_snapshot,
+                        )
+                    ],
+                    execution_user_id=actor.id,
+                    access_source="console",
+                )
+            except ValueError as exc:
+                assert "Tool access was revoked" in str(exc)
+            else:
+                raise AssertionError("Revoked tool access was accepted.")
+
+            # ensure_workflow_agent_child branches (165, 183, 190-191, 196, 41)
+            branch_parent, _ = await prepare_agent_run(
+                db,
+                workspace_id,
+                agent_id,
+                "branch parent",
+                actor,
+                "admin",
+            )
+            try:
+                await ensure_workflow_agent_child(
+                    db,
+                    branch_parent,
+                    "branch-invalid",
+                    "goal",
+                    {"version_id": None, "agent_id": agent_id},
+                    actor,
+                    "admin",
+                    deadline_at=future_deadline,
+                    remaining_model_tokens=10,
+                )
+            except ValueError as exc:
+                assert "snapshot is invalid" in str(exc)
+            else:
+                raise AssertionError("Invalid ensure snapshot was accepted.")
+
+            try:
+                await ensure_workflow_agent_child(
+                    db,
+                    branch_parent,
+                    "branch-stale",
+                    "goal",
+                    make_snapshot(configuration_hash="stale-hash"),
+                    actor,
+                    "admin",
+                    deadline_at=future_deadline,
+                    remaining_model_tokens=10,
+                )
+            except ValueError as exc:
+                assert "publication changed or is invalid" in str(exc)
+            else:
+                raise AssertionError("Stale ensure snapshot was accepted.")
+
+            try:
+                await ensure_workflow_agent_child(
+                    db,
+                    branch_parent,
+                    "branch-tools",
+                    "goal",
+                    make_snapshot(
+                        version_id=invalid_tools_version.id,
+                        configuration_hash=invalid_tools_version.configuration_hash,
+                        configuration_snapshot=(
+                            invalid_tools_version.configuration_snapshot
+                        ),
+                        resource_snapshot=(
+                            invalid_tools_version.resource_snapshot
+                        ),
+                    ),
+                    actor,
+                    "admin",
+                    deadline_at=future_deadline,
+                    remaining_model_tokens=10,
+                )
+            except ValueError as exc:
+                assert "Tool snapshot is invalid" in str(exc)
+            else:
+                raise AssertionError("Invalid ensure tool snapshot was accepted.")
+
+            try:
+                await ensure_workflow_agent_child(
+                    db,
+                    branch_parent,
+                    "branch-write",
+                    "goal",
+                    each_call_snapshot,
+                    actor,
+                    "admin",
+                    deadline_at=future_deadline,
+                    remaining_model_tokens=10,
+                )
+            except ValueError as exc:
+                assert "must be automatic and read-only" in str(exc)
+            else:
+                raise AssertionError("Write tool ensure snapshot was accepted.")
+
+            try:
+                await ensure_workflow_agent_child(
+                    db,
+                    branch_parent,
+                    "branch-empty-goal",
+                    "",
+                    snapshot,
+                    actor,
+                    "admin",
+                    deadline_at=future_deadline,
+                    remaining_model_tokens=10,
+                )
+            except ValueError as exc:
+                assert "1 to 4000 characters" in str(exc)
+            else:
+                raise AssertionError("Empty ensure goal was accepted.")
+            await db.commit()
+
+            # _fail_expired_waiting_parent (236-241) against a real workflow
+            # run with a persisted WorkflowRunDetail.
+            expiry_parent_id = extra_runs["expiry"]
+            await pause_run(expiry_parent_id, "expiry-node")
+            expiry_parent = await agent_repository.get_agent_run_by_id(
+                db,
+                expiry_parent_id,
+            )
+            assert expiry_parent is not None
+            detail = await workflow_repository.get_run_detail(db, expiry_parent_id)
+            assert detail is not None
+            detail_row = await db.get(DetailORM, detail.id)
+            assert detail_row is not None
+            # future deadline -> not expired (239-240)
+            detail_row.deadline_at = utc_now() + timedelta(hours=1)
+            await db.commit()
+            assert await _fail_expired_waiting_parent(db, expiry_parent) is False
+            # naive deadline is normalized to UTC (237-238), still future
+            detail_row.deadline_at = (utc_now() + timedelta(hours=1)).replace(
+                tzinfo=None
+            )
+            await db.commit()
+            assert await _fail_expired_waiting_parent(db, expiry_parent) is False
+            # expired deadline fails the waiting parent (236, 241)
+            detail_row.deadline_at = utc_now() - timedelta(hours=1)
+            await db.commit()
+            assert await _fail_expired_waiting_parent(db, expiry_parent) is True
+            expired = await agent_repository.get_agent_run_by_id(
+                db,
+                expiry_parent_id,
+            )
+            assert expired is not None
+            assert expired.status == AGENT_RUN_FAILED_STATUS
+            assert "deadline exceeded" in (expired.last_error or "")
+
+        # reconcile_workflow_agent_children child_run_id branches
+        # (262, 273, 279, 281)
+        assert await reconcile_workflow_agent_children(
+            child_run_id="missing-child-id"
+        ) == []
+        async with get_session_factory()() as db:
+            limit_children = await agent_repository.list_agent_child_runs(
+                db,
+                workspace_id,
+                parent_for_limit.id,
+            )
+            assert limit_children
+        assert await reconcile_workflow_agent_children(
+            child_run_id=limit_children[0].id
+        ) == []  # non-terminal child skipped (273)
+        assert await reconcile_workflow_agent_children(
+            child_run_id=failed_child.id
+        ) == []  # parent no longer awaiting (279)
+        expired_child_parent = extra_runs["expiry-reconcile"]
+        await pause_run(expired_child_parent, "expiry-reconcile-node")
+        async with get_session_factory()() as db:
+            expired_child_parent_run = await agent_repository.get_agent_run_by_id(
+                db,
+                expired_child_parent,
+            )
+            assert expired_child_parent_run is not None
+            expire_child = await ensure_workflow_agent_child(
+                db,
+                expired_child_parent_run,
+                "expiry-reconcile-node",
+                "expiry goal",
+                snapshot,
+                actor,
+                "admin",
+                deadline_at=future_deadline,
+                remaining_model_tokens=10,
+            )
+            expire_child.status = AGENT_RUN_FAILED_STATUS
+            expire_child.last_error = "expired sibling"
+            expire_child.finished_at = utc_now()
+            await agent_repository.save_agent_run(db, expire_child)
+            detail = await workflow_repository.get_run_detail(
+                db,
+                expired_child_parent,
+            )
+            assert detail is not None
+            detail_row = await db.get(DetailORM, detail.id)
+            assert detail_row is not None
+            detail_row.deadline_at = utc_now() - timedelta(hours=1)
+            await db.commit()
+        assert await reconcile_workflow_agent_children(
+            child_run_id=expire_child.id
+        ) == []  # expired parent failed instead of resuming (281)
+        async with get_session_factory()() as db:
+            expired_parent_after = await agent_repository.get_agent_run_by_id(
+                db,
+                expired_child_parent,
+            )
+            assert expired_parent_after is not None
+            assert expired_parent_after.status == AGENT_RUN_FAILED_STATUS
+
+        # ------------------------------------------------------------------
+        # workflow_executor child-request recovery paths via DIRECT
+        # execution (coverage only records non-request code).
+        # ------------------------------------------------------------------
+        original_maintain = workflow_executor.maintain_agent_run_lease
+
+        async def noop_maintain(run_id, worker_task_id, settings, lease_lost):
+            return None
+
+        workflow_executor.maintain_agent_run_lease = noop_maintain
+        original_run_enqueue = app_agent_runs.enqueue_prepared_agent_run
+        enqueued_children: list[str] = []
+
+        async def record_enqueue(run_id, _settings, **_kwargs) -> None:
+            enqueued_children.append(run_id)
+
+        try:
+            # Scenario A: the child was persisted by ensure, but the engine
+            # never saw the pending-child bookkeeping (simulated by raising
+            # WorkflowChildRequired from ensure); the fallback child lookup
+            # (572-579) finds the row and enqueues it (584-585).
+            real_ensure = workflow_executor.ensure_workflow_agent_child
+
+            async def ensure_then_raise(
+                db,
+                parent,
+                parent_node_id,
+                input_value,
+                snapshot,
+                actor,
+                workspace_role,
+                **kwargs,
+            ):
+                child = await real_ensure(
+                    db,
+                    parent,
+                    parent_node_id,
+                    input_value,
+                    snapshot,
+                    actor,
+                    workspace_role,
+                    **kwargs,
+                )
+                await db.commit()
+                raise WorkflowChildRequired({"runtime_node_id": parent_node_id})
+
+            fallback_run_id = extra_runs["fallback"]
+            await reset_to_running(fallback_run_id, "worker-child-a")
+            workflow_executor.ensure_workflow_agent_child = ensure_then_raise
+            app_agent_runs.enqueue_prepared_agent_run = record_enqueue
+            try:
+                outcome = await run_durable_workflow_run(
+                    fallback_run_id,
+                    runner_settings,
+                    worker_task_id="worker-child-a",
+                    generation="unified",
+                )
+            finally:
+                workflow_executor.ensure_workflow_agent_child = real_ensure
+                app_agent_runs.enqueue_prepared_agent_run = original_run_enqueue
+            assert outcome == "finished"
+            if len(enqueued_children) != 1:
+                async with get_session_factory()() as db:
+                    diag = await agent_repository.get_agent_run_by_id(
+                        db,
+                        fallback_run_id,
+                    )
+                raise AssertionError(
+                    f"scenario A enqueue mismatch: enqueued={enqueued_children!r} "
+                    f"run_status={diag.status if diag else None} "
+                    f"last_error={diag.last_error if diag else None}"
+                )
+            assert len(enqueued_children) == 1
+            async with get_session_factory()() as db:
+                fallback_children = await agent_repository.list_agent_child_runs(
+                    db,
+                    workspace_id,
+                    fallback_run_id,
+                )
+                assert len(fallback_children) == 1
+
+            # Scenario B: no child row exists -> 581 error and the run fails.
+            async def ensure_raises(
+                db,
+                parent,
+                parent_node_id,
+                input_value,
+                snapshot,
+                actor,
+                workspace_role,
+                **kwargs,
+            ):
+                raise WorkflowChildRequired({"runtime_node_id": parent_node_id})
+
+            missing_run_id = extra_runs["missing"]
+            await reset_to_running(missing_run_id, "worker-child-b")
+            workflow_executor.ensure_workflow_agent_child = ensure_raises
+            try:
+                outcome = await run_durable_workflow_run(
+                    missing_run_id,
+                    runner_settings,
+                    worker_task_id="worker-child-b",
+                    generation="unified",
+                )
+            finally:
+                workflow_executor.ensure_workflow_agent_child = real_ensure
+            assert outcome == "finished"
+            async with get_session_factory()() as db:
+                missing_run = await agent_repository.get_agent_run_by_id(
+                    db,
+                    missing_run_id,
+                )
+                assert missing_run is not None
+                assert missing_run.status == AGENT_RUN_FAILED_STATUS
+                assert "child was not persisted" in (missing_run.last_error or "")
+
+            # Scenario C: pause-for-child loses the lease -> 530-532.
+            real_pause = agent_repository.pause_agent_run_for_child
+
+            async def false_pause(db, run_id, worker_task_id):
+                return False
+
+            lease_run_id = extra_runs["lease"]
+            await reset_to_running(lease_run_id, "worker-child-c")
+            agent_repository.pause_agent_run_for_child = false_pause
+            try:
+                outcome = await run_durable_workflow_run(
+                    lease_run_id,
+                    runner_settings,
+                    worker_task_id="worker-child-c",
+                    generation="unified",
+                )
+            finally:
+                agent_repository.pause_agent_run_for_child = real_pause
+            assert outcome == "finished"
+            async with get_session_factory()() as db:
+                lease_run = await agent_repository.get_agent_run_by_id(
+                    db,
+                    lease_run_id,
+                )
+                assert lease_run is not None
+                assert lease_run.status == AGENT_RUN_FAILED_STATUS
+                assert "lease was lost" in (lease_run.last_error or "")
+
+            # Scenario D: the real child-request path (485-486, 524-529,
+            # 568-571, 584-585): the child is persisted, paused for, and
+            # enqueued. The enqueue is recorded (not executed) so the child
+            # never needs a live provider.
+            real_run_id = extra_runs["real"]
+            await reset_to_running(real_run_id, "worker-child-d")
+            enqueued_children.clear()
+            app_agent_runs.enqueue_prepared_agent_run = record_enqueue
+            try:
+                outcome = await run_durable_workflow_run(
+                    real_run_id,
+                    runner_settings,
+                    worker_task_id="worker-child-d",
+                    generation="unified",
+                )
+            finally:
+                app_agent_runs.enqueue_prepared_agent_run = original_run_enqueue
+            assert outcome == "finished"
+            async with get_session_factory()() as db:
+                real_children = await agent_repository.list_agent_child_runs(
+                    db,
+                    workspace_id,
+                    real_run_id,
+                )
+                assert len(real_children) == 1
+                real_child_id = real_children[0].id
+                assert enqueued_children == [real_child_id]
+                real_parent = await agent_repository.get_agent_run_by_id(
+                    db,
+                    real_run_id,
+                )
+                assert real_parent is not None
+                assert (
+                    agent_run_display_status(real_parent.status)
+                    == "awaiting_child"
+                )
+        finally:
+            workflow_executor.maintain_agent_run_lease = original_maintain
+            app_agent_runs.enqueue_prepared_agent_run = original_run_enqueue
+
+        # Tidy up leftover active runs so later suites never observe them.
+        async with get_session_factory()() as db:
+            for leftover in (
+                fallback_run_id,
+                real_run_id,
+                branch_parent.id,
+            ):
+                await cancel_run_tree(db, leftover)
+            await db.commit()
+
+    # Synchronous setup for the coverage additions: client calls cannot run
+    # inside the async lineage block after an eager workflow run (stale
+    # loop-bound state, including the login rate-limit redis singleton), so
+    # the binder users, the retired agent, and the extra runs are prepared
+    # here and consumed via the closure.
+    from unittest.mock import AsyncMock, patch
+
+    async def create_direct_user(username: str, member: bool) -> str:
+        from app.entities.user import User
+        from app.entities.workspace import WorkspaceMembership
+        from app.infrastructure.repositories import user as user_repository
+
+        async with get_session_factory()() as db:
+            user = await user_repository.create_user(
+                db,
+                User(
+                    username=username,
+                    email=f"{username}@example.com",
+                    name=username,
+                    password_hash="unused-hash",
+                    must_change_password=False,
+                    is_active=True,
+                ),
+            )
+            if member:
+                await user_repository.create_workspace_membership(
+                    db,
+                    WorkspaceMembership(
+                        workspace_id=workspace_id,
+                        user_id=user.id,
+                        role="member",
+                    ),
+                )
+            await db.commit()
+            return user.id
+
+    outside_binder_id = asyncio.run(
+        create_direct_user("child-outside-binder", member=False)
+    )
+    member_binder_id = asyncio.run(
+        create_direct_user("child-member-binder", member=True)
+    )
+
+    retired_agent = client.post(
+        f"/api/v1/workspaces/{workspace_id}/agents",
+        headers=headers,
+        json={
+            "name": "Retired child Agent",
+            "app_type": "agent",
+            "instructions": "x",
+            "model_id": model.json()["id"],
+        },
+    )
+    assert retired_agent.status_code == 201, retired_agent.text
+    retired_agent_id = retired_agent.json()["id"]
+    retired_publish = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/agents/{retired_agent_id}",
+        headers=headers,
+        json={"published": True},
+    )
+    assert retired_publish.status_code == 200, retired_publish.text
+    retired_version_id = retired_publish.json()["current_published_version_id"]
+    retired_unpublish = client.patch(
+        f"/api/v1/workspaces/{workspace_id}/agents/{retired_agent_id}",
+        headers=headers,
+        json={"published": False},
+    )
+    assert retired_unpublish.status_code == 200, retired_unpublish.text
+
+    extra_runs = {}
+    with patch("app.application.workflow_runs.enqueue_agent_run", new=AsyncMock()):
+        for key, question in (
+            ("expiry", "expiry parent"),
+            ("expiry-reconcile", "expiry reconcile parent"),
+            ("fallback", "child fallback parent"),
+            ("missing", "child missing parent"),
+            ("lease", "child lease parent"),
+            ("real", "child real parent"),
+        ):
+            created = client.post(
+                f"{base}/runs",
+                headers=headers,
+                json={"source": "draft", "question": question},
+            )
+            assert created.status_code == 201, created.text
+            extra_runs[key] = created.json()["id"]
+
     asyncio.run(assert_lineage())
 
 
@@ -2934,6 +3764,291 @@ def test_cancelling_queued_workflow_run_is_idempotent() -> None:
         assert repeated.status_code == 409, repeated.text
 
 
+def test_workflow_executor_recovery_paths() -> None:
+    """Direct-execution recovery branches of workflow_executor.py.
+
+    Runs are created through the API with the queue dispatch suppressed and
+    then executed by calling ``run_durable_workflow_run`` directly, because
+    coverage only records code reached outside request handling.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from tests.agents import agent_model_server, model_payload
+    from tests.support import settings as make_settings
+
+    with test_client() as client, agent_model_server() as model_base_url:
+        token, workspace_id = activate_admin(client)
+        headers = auth_headers(token)
+        model = client.post(
+            f"/api/v1/workspaces/{workspace_id}/models",
+            headers=headers,
+            json=model_payload(model_base_url, "Recovery Workflow Model"),
+        )
+        assert model.status_code == 201, model.text
+        model_id = model.json()["id"]
+
+        def make_workflow(name: str, workflow_graph: dict) -> tuple[str, str]:
+            created = client.post(
+                f"/api/v1/workspaces/{workspace_id}/agents",
+                headers=headers,
+                json={
+                    "name": name,
+                    "app_type": "workflow",
+                    "model_id": model_id,
+                },
+            )
+            assert created.status_code == 201, created.text
+            agent_id = created.json()["id"]
+            base = f"/api/v1/workspaces/{workspace_id}/workflows/{agent_id}"
+            definition = client.get(f"{base}/definition", headers=headers)
+            assert definition.status_code == 200, definition.text
+            saved = client.put(
+                f"{base}/definition",
+                headers=headers,
+                json={
+                    "expected_revision": definition.json()["revision"],
+                    "graph": workflow_graph,
+                },
+            )
+            assert saved.status_code == 200, saved.text
+            version = client.post(f"{base}/publish", headers=headers)
+            assert version.status_code == 201, version.text
+            return agent_id, base
+
+        simple_base = make_workflow(
+            "Simple Recovery Workflow",
+            graph(),
+        )[1]
+        form_graph = {
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "workflow",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"type": "start", "title": "Start", "config": {}},
+                },
+                {
+                    "id": "form",
+                    "type": "workflow",
+                    "position": {"x": 200, "y": 0},
+                    "data": {
+                        "type": "form-node",
+                        "title": "Form",
+                        "config": {
+                            "form_field_list": [
+                                {
+                                    "variable": "name",
+                                    "name": "Name",
+                                    "type": "input",
+                                }
+                            ],
+                            "form_content_format": "Please fill: {{ form }}",
+                        },
+                    },
+                },
+                {
+                    "id": "end",
+                    "type": "workflow",
+                    "position": {"x": 400, "y": 0},
+                    "data": {
+                        "type": "end",
+                        "title": "End",
+                        "config": {"outputs": {"result": "done"}},
+                    },
+                },
+            ],
+            "edges": [
+                {"id": "e1", "source": "start", "target": "form"},
+                {"id": "e2", "source": "form", "target": "end"},
+            ],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+        }
+        form_base = make_workflow("Form Recovery Workflow", form_graph)[1]
+
+        def create_run(base: str, question: str) -> str:
+            with patch(
+                "app.application.workflow_runs.enqueue_agent_run",
+                new=AsyncMock(),
+            ):
+                created = client.post(
+                    f"{base}/runs",
+                    headers=headers,
+                    json={"source": "published", "question": question},
+                )
+            assert created.status_code == 201, created.text
+            return created.json()["id"]
+
+        async def run_scenarios() -> None:
+            from app.application import workflow_executor
+            from app.application.workflow_executor import run_durable_workflow_run
+            from app.infrastructure.model_utils import utc_now
+            from app.infrastructure.repositories import agent as agent_repository
+            from app.infrastructure.repositories import workflow as workflow_repository
+            from app.infrastructure.session import get_session_factory
+            from app.shareddomain.agents.models import (
+                AGENT_RUN_FAILED_STATUS,
+                agent_run_display_status,
+            )
+            from app.shareddomain.workflows.models import (
+                WorkflowRunDetail as DetailORM,
+            )
+
+            runner_settings = make_settings()
+            original_maintain = workflow_executor.maintain_agent_run_lease
+
+            async def noop_maintain(run_id, worker_task_id, settings, lease_lost):
+                return None
+
+            workflow_executor.maintain_agent_run_lease = noop_maintain
+            try:
+                # 1) form node without a submission pauses the run for input
+                # (WorkflowInputRequired branch, 552-566).
+                form_run_id = create_run(form_base, "fill the form")
+                outcome = await run_durable_workflow_run(
+                    form_run_id,
+                    runner_settings,
+                    worker_task_id="worker-input-required",
+                    generation="unified",
+                )
+                assert outcome == "finished"
+                async with get_session_factory()() as db:
+                    paused = await agent_repository.get_agent_run_by_id(
+                        db,
+                        form_run_id,
+                    )
+                    assert paused is not None
+                    assert (
+                        agent_run_display_status(paused.status)
+                        == "awaiting_input"
+                    )
+                    events = await agent_repository.list_agent_run_events(
+                        db,
+                        form_run_id,
+                    )
+                    assert any(
+                        event.event.get("type") == "workflow_input_required"
+                        for event in events
+                    )
+
+                # 2) a corrupted resource snapshot fails the run during
+                # scope loading (192) and drives the failure finalizer
+                # (660-675, 698).
+                snapshot_run_id = create_run(simple_base, "corrupt snapshot")
+                async with get_session_factory()() as db:
+                    detail = await workflow_repository.get_run_detail(
+                        db,
+                        snapshot_run_id,
+                    )
+                    assert detail is not None
+                    detail_row = await db.get(DetailORM, detail.id)
+                    assert detail_row is not None
+                    detail_row.resource_snapshot = {
+                        **detail_row.resource_snapshot,
+                        "schema_version": 99,
+                    }
+                    await db.commit()
+                outcome = await run_durable_workflow_run(
+                    snapshot_run_id,
+                    runner_settings,
+                    worker_task_id="worker-invalid-snapshot",
+                    generation="unified",
+                )
+                assert outcome == "finished"
+                async with get_session_factory()() as db:
+                    failed = await agent_repository.get_agent_run_by_id(
+                        db,
+                        snapshot_run_id,
+                    )
+                    assert failed is not None
+                    assert failed.status == AGENT_RUN_FAILED_STATUS
+                    assert (
+                        failed.last_error
+                        == "Workflow resource snapshot is invalid."
+                    )
+
+                # 3) an oversized node output fails the run through the
+                # node-error mapping (586-590) and the failure finalizer.
+                huge_run_id = create_run(simple_base, "huge output")
+                original_execute = workflow_executor.execute_workflow_node
+
+                async def huge_output(scope, node, context):
+                    from app.shareddomain.workflows.engine import NodeResult
+
+                    return NodeResult(
+                        outputs={"result": "x" * 300000},
+                        model_tokens=1,
+                    )
+
+                workflow_executor.execute_workflow_node = huge_output
+                try:
+                    outcome = await run_durable_workflow_run(
+                        huge_run_id,
+                        runner_settings,
+                        worker_task_id="worker-huge-output",
+                        generation="unified",
+                    )
+                finally:
+                    workflow_executor.execute_workflow_node = original_execute
+                assert outcome == "finished"
+                async with get_session_factory()() as db:
+                    huge_failed = await agent_repository.get_agent_run_by_id(
+                        db,
+                        huge_run_id,
+                    )
+                    assert huge_failed is not None
+                    assert huge_failed.status == AGENT_RUN_FAILED_STATUS
+                    if "256 KiB" not in (huge_failed.last_error or ""):
+                        raise AssertionError(
+                            f"huge output last_error={huge_failed.last_error!r}"
+                        )
+                    assert "256 KiB" in (huge_failed.last_error or "")
+
+                # 4) a legacy-generation claim marks expired tool calls (728)
+                # and completes the run.
+                legacy_run_id = create_run(simple_base, "legacy claim")
+                async with get_session_factory()() as db:
+                    legacy = await agent_repository.get_agent_run_by_id(
+                        db,
+                        legacy_run_id,
+                    )
+                    assert legacy is not None
+                    legacy.status = "queued"
+                    legacy.configuration_source = "legacy"
+                    await agent_repository.save_agent_run(db, legacy)
+                    await db.commit()
+                outcome = await run_durable_workflow_run(
+                    legacy_run_id,
+                    runner_settings,
+                    worker_task_id="worker-legacy-claim",
+                    generation="legacy",
+                )
+                assert outcome == "finished"
+                async with get_session_factory()() as db:
+                    legacy_done = await agent_repository.get_agent_run_by_id(
+                        db,
+                        legacy_run_id,
+                    )
+                    assert legacy_done is not None
+                    assert legacy_done.status == "succeeded"
+            finally:
+                workflow_executor.maintain_agent_run_lease = original_maintain
+                async with get_session_factory()() as db:
+                    for leftover in (
+                        form_run_id,
+                        snapshot_run_id,
+                        huge_run_id,
+                        legacy_run_id,
+                    ):
+                        await agent_repository.cancel_agent_run_tree(
+                            db,
+                            leftover,
+                            utc_now(),
+                        )
+                    await db.commit()
+
+        asyncio.run(run_scenarios())
+
+
 def main() -> None:
     test_default_workflow_only_contains_start()
     test_workflow_interaction_config_rejects_audio_uploads()
@@ -2960,6 +4075,7 @@ def main() -> None:
     test_workflow_api_definition_publish_run_and_audit()
     test_workflow_agent_node_runs_one_durable_pinned_child()
     test_cancelling_queued_workflow_run_is_idempotent()
+    test_workflow_executor_recovery_paths()
     print("WORKFLOW_SUITE_OK")
 
 
