@@ -1,0 +1,1 @@
+"""Workspace analytics domain."""

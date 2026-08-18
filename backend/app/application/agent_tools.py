@@ -45,9 +45,11 @@ from app.shareddomain.tools.services import (
 )
 
 MAX_KNOWLEDGE_HITS_PER_CALL = 8
-MAX_KNOWLEDGE_CONTENT_CHARS = 2000
+MAX_KNOWLEDGE_CONTENT_CHARS = 12_000
+MAX_KNOWLEDGE_CONTEXT_CHARS = 48_000
 MAX_KNOWLEDGE_SOURCE_METADATA_CHARS = 240
 MAX_KNOWLEDGE_TOOL_DESCRIPTION_CHARS = 1800
+KNOWLEDGE_TRUNCATION_MARKER = "\n[… evidence truncated …]"
 
 _tool_idempotency_key: ContextVar[str | None] = ContextVar(
     "agent_tool_idempotency_key", default=None
@@ -63,6 +65,112 @@ class KnowledgeSearchInput(BaseModel):
     limit: int = Field(default=3, ge=1, le=MAX_KNOWLEDGE_HITS_PER_CALL)
     search_mode: Literal["embedding", "keywords", "blend"] = "blend"
     similarity: float | None = Field(default=None, ge=0, le=1)
+
+
+def bounded_knowledge_output(
+    payload: dict[str, Any],
+    max_chars: int = MAX_KNOWLEDGE_CONTEXT_CHARS,
+) -> dict[str, Any]:
+    """Keep complete hit objects within a model/context budget.
+
+    Retrieval already returns bounded logical evidence packets. This second
+    bound protects the agent context when several knowledge bases contribute
+    hits, and records truncation explicitly instead of silently slicing JSON.
+    """
+    hits = payload.get("hits")
+    if not isinstance(hits, list):
+        return payload
+    result = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"hits", "context_truncated"}
+    }
+    selected: list[dict[str, Any]] = []
+    truncated = bool(payload.get("context_truncated"))
+    for raw_hit in hits:
+        if not isinstance(raw_hit, dict):
+            truncated = True
+            continue
+        candidate = {**result, "hits": [*selected, raw_hit]}
+        if len(json.dumps(candidate, ensure_ascii=False)) <= max_chars:
+            selected.append(raw_hit)
+            continue
+        truncated = True
+        if not selected:
+            reduced = dict(raw_hit)
+            content = reduced.get("content")
+            if isinstance(content, str):
+                reduced["content"] = ""
+                reduced["content_truncated"] = True
+                fixed_size = len(
+                    json.dumps(
+                        {
+                            **result,
+                            "hits": [reduced],
+                            "context_truncated": True,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                budget = max(
+                    0,
+                    max_chars - fixed_size - len(KNOWLEDGE_TRUNCATION_MARKER),
+                )
+                reduced["content"] = content[:budget] + KNOWLEDGE_TRUNCATION_MARKER
+                candidate = {
+                    **result,
+                    "hits": [reduced],
+                    "context_truncated": True,
+                }
+                if len(json.dumps(candidate, ensure_ascii=False)) <= max_chars:
+                    selected.append(reduced)
+        break
+    result["hits"] = selected
+    result["context_truncated"] = truncated or len(selected) < len(hits)
+    return result
+
+
+def bounded_knowledge_context(
+    payload: dict[str, Any],
+    max_chars: int = MAX_KNOWLEDGE_CONTEXT_CHARS,
+) -> str:
+    return json.dumps(
+        bounded_knowledge_output(payload, max_chars),
+        ensure_ascii=False,
+    )
+
+
+def knowledge_packets_from_output(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, dict) or not isinstance(value.get("hits"), list):
+        return []
+    packets: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for hit in value["hits"]:
+        if not isinstance(hit, dict):
+            continue
+        chunk_id = hit.get("chunk_id")
+        if not isinstance(chunk_id, str) or not chunk_id or chunk_id in seen:
+            continue
+        seen.add(chunk_id)
+        packets.append(
+            {
+                key: hit[key]
+                for key in (
+                    "knowledge_base",
+                    "document",
+                    "document_id",
+                    "chunk_id",
+                    "parent_id",
+                    "parent_title",
+                    "section_path",
+                    "content",
+                    "content_truncated",
+                    "contributing_chunk_ids",
+                )
+                if key in hit
+            }
+        )
+    return packets
 
 
 def describe_knowledge_sources(knowledge_bases: list[KnowledgeBase]) -> str:
@@ -101,6 +209,8 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         events=run.events,
         result=run.result,
         model_usage=run.model_usage,
+        grounding_status=run.grounding_status,
+        grounding_meta=run.grounding_meta,
         last_error=run.last_error,
         planned_at=run.planned_at,
         started_at=run.started_at,
@@ -234,7 +344,13 @@ def build_knowledge_search_tool(
                         "document": hit.document_filename,
                         "chunk_id": hit.chunk_id,
                         "document_id": hit.document_id,
-                        "content": hit.content[:MAX_KNOWLEDGE_CONTENT_CHARS],
+                        "parent_id": hit.parent_id,
+                        "parent_title": hit.parent_title,
+                        "section_path": hit.section_path,
+                        "content": hit.content,
+                        "content_truncated": hit.content_truncated,
+                        "contributing_chunk_ids": hit.contributing_chunk_ids
+                        or [hit.chunk_id],
                         "distance": hit.distance,
                         "similarity": hit.similarity,
                         "trace_id": str(stats_entry["trace_id"])[:64],
@@ -252,24 +368,24 @@ def build_knowledge_search_tool(
                 evidence_status = "partial_failure"
             else:
                 evidence_status = "not_found"
-            output = {
+            output = bounded_knowledge_output({
                 "query": payload.query,
                 "hits": tool_hits,
                 "retrieval_stats": retrieval_stats,
                 "evidence_status": evidence_status,
-            }
+            })
             return AgentToolResult(
-                content=json.dumps(
-                    {
-                        "hits": tool_hits,
-                        "evidence_status": evidence_status,
-                    },
-                    ensure_ascii=False,
-                ),
+                content=bounded_knowledge_context(output),
                 summary=f"agent.knowledge_chunks_returned:{len(tool_hits)}",
                 output=output,
                 is_error=evidence_status in {"unavailable", "partial_failure"},
-                evidence_ids=frozenset(hit.chunk_id for _, hit in selected_hits),
+                evidence_ids=frozenset(
+                    evidence_id
+                    for _, hit in selected_hits
+                    for evidence_id in (
+                        hit.contributing_chunk_ids or [hit.chunk_id]
+                    )
+                ),
             )
 
     return create_agent_tool(

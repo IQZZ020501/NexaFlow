@@ -25,6 +25,8 @@ from app.capabilities.llm.registry import (
 from app.capabilities.rag.retrieval import (
     MAX_PARENT_CONTEXT_CHARS,
     RankedHit,
+    bounded_text_chunks,
+    parent_evidence,
     parent_context,
     reciprocal_rank_fusion,
 )
@@ -2064,6 +2066,158 @@ def test_markdown_table_rules_apply_to_parent_and_child_chunks() -> None:
     )
 
 
+def test_plain_legal_headings_keep_chapters_in_separate_parents() -> None:
+    from app.capabilities.embedding.pipeline import split_parent_chunks
+
+    text = (
+        "第一章 总则\n第一条 说明。\n"
+        "第二章 校外培训处罚\n第十五条 处罚十五。\n第十六条 处罚十六。\n"
+        "第三章 法律责任\n第十七条 责任。"
+    )
+    parents = split_parent_chunks(text, max_size=5000)
+
+    assert [parent.title for parent in parents] == [
+        "第一章 总则",
+        "第二章 校外培训处罚",
+        "第三章 法律责任",
+    ]
+    chapter_two = parents[1].content
+    assert "第十六条" in chapter_two
+    assert "第三章" not in chapter_two
+    numbered = split_parent_chunks(
+        "第二章 总则\n（一）适用范围。\n1、说明。\n第二节 细则\n第二条 内容。",
+        max_size=5000,
+    )
+    assert len(numbered) == 2
+    assert numbered[0].section_path == ["第二章 总则"]
+    assert numbered[1].section_path == ["第二章 总则", "第二节 细则"]
+
+
+def test_evidence_windows_mark_truncation_and_preserve_article_boundary() -> None:
+    from types import SimpleNamespace
+
+    content = (
+        "第一章\n"
+        + "第十五条 "
+        + "x" * 60
+        + "\n"
+        + "第十六条 "
+        + "y" * 60
+        + "\n第三章\n"
+    )
+    chunk = SimpleNamespace(
+        start_offset=content.index("第十六条"),
+        end_offset=content.index("第十六条") + len("第十六条"),
+    )
+    window = parent_evidence(
+        SimpleNamespace(content=content),
+        chunk,
+        max_chars=100,
+    )
+    assert window.truncated is True
+    assert "第十六条" in window.content
+    assert "[… evidence truncated …]" in window.content
+
+    cjk_content = "甲" * 1_000
+    cjk_chunk = SimpleNamespace(start_offset=900, end_offset=950)
+    cjk_window = parent_evidence(
+        SimpleNamespace(content=cjk_content),
+        cjk_chunk,
+        max_chars=100,
+    )
+    assert cjk_window.start_offset <= cjk_chunk.start_offset
+    assert cjk_chunk.end_offset <= cjk_window.end_offset
+    assert len(cjk_window.content) <= 100
+
+    joined, truncated, ids = bounded_text_chunks(
+        [("chunk-1", "a" * 60), ("chunk-2", "b" * 60)],
+        max_chars=100,
+    )
+    assert truncated is True
+    assert ids == ["chunk-1"]
+    assert joined.endswith("[… evidence truncated …]")
+
+    import json
+
+    from app.application.agent_tools import bounded_knowledge_context
+
+    context = bounded_knowledge_context(
+        {
+            "query": "q",
+            "hits": [{"chunk_id": "chunk-1", "content": "x" * 500}],
+            "evidence_status": "found",
+        },
+        max_chars=180,
+    )
+    assert len(context) <= 180
+    assert json.loads(context)["context_truncated"] is True
+
+
+def test_grounding_verifier_revises_and_fails_closed() -> None:
+    from langchain_core.messages import AIMessage
+
+    from app.application.agent_grounding import (
+        GROUNDING_FALLBACK_ANSWER,
+        verify_grounding,
+    )
+
+    class FakeModel:
+        def __init__(self, content: str) -> None:
+            self.content = content
+            self.messages = None
+
+        async def ainvoke(self, messages):
+            self.messages = messages
+            return AIMessage(
+                content=self.content,
+                usage_metadata={
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                },
+            )
+
+    model = FakeModel(
+        '{"status":"revised","answer":"第十六条。",'
+        '"evidence_ids":["chunk-16"],"reason_codes":["article_boundary"]}'
+    )
+    result = asyncio.run(
+        verify_grounding(
+            model,
+            question="第二章有多少条？",
+            draft="第二章有十条。",
+            evidence_packets=[
+                {
+                    "chunk_id": "chunk-16",
+                    "section_path": ["第二章"],
+                    "content": "第二章\n第十六条。",
+                }
+            ],
+            attachment_context="",
+            required=True,
+        )
+    )
+    assert result.status == "revised"
+    assert result.answer == "第十六条。"
+    assert result.meta["evidence_ids"] == ["chunk-16"]
+    assert result.model_usage["total_tokens"] == 15
+    assert "第二章有多少条？" in model.messages[1]["content"]
+
+    invalid = FakeModel("not-json")
+    failed = asyncio.run(
+        verify_grounding(
+            invalid,
+            question="question",
+            draft="unsafe draft",
+            evidence_packets=[],
+            attachment_context="",
+            required=True,
+        )
+    )
+    assert failed.status == "unavailable"
+    assert failed.answer == GROUNDING_FALLBACK_ANSWER
+
+
 def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
     from io import BytesIO
     from pathlib import Path
@@ -2508,8 +2662,13 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
         "parent_id": None,
         "parent_title": None,
         "parent_index": None,
+        "section_path": [],
         "chunk_index": 0,
         "content": "answer",
+        "content_truncated": False,
+        "evidence_start_offset": None,
+        "evidence_end_offset": None,
+        "contributing_chunk_ids": [],
         "distance": None,
         "similarity": None,
         "kind": "document",
@@ -4422,6 +4581,34 @@ def test_external_progress_events_knowledge_failure_has_no_hits() -> None:
     assert event.hits == []
 
 
+def test_external_progress_events_include_grounding_stage() -> None:
+    from app.application.agent_access import external_progress_events
+
+    progress = external_progress_events(
+        [
+            {
+                "type": "thought",
+                "turn": 1,
+                "status": "running",
+                "summary": "agent.grounding_check",
+                "call_id": "grounding-1",
+            },
+            {
+                "type": "thought",
+                "turn": 1,
+                "status": "succeeded",
+                "summary": "agent.grounding_revised",
+                "call_id": "grounding-1",
+            },
+        ],
+        "succeeded",
+    )
+    assert len(progress) == 1
+    assert progress[0].type == "analysis"
+    assert progress[0].status == "succeeded"
+    assert progress[0].stage == "completed"
+
+
 def test_mcp_policy_concurrent_first_write_reloads_existing() -> None:
     from sqlalchemy.exc import IntegrityError
 
@@ -5364,6 +5551,9 @@ def main() -> None:
     test_markdown_tables_split_only_between_rows_and_repeat_headers()
     test_markdown_table_keeps_single_overlong_row_intact()
     test_markdown_table_rules_apply_to_parent_and_child_chunks()
+    test_plain_legal_headings_keep_chapters_in_separate_parents()
+    test_evidence_windows_mark_truncation_and_preserve_article_boundary()
+    test_grounding_verifier_revises_and_fails_closed()
     test_docx_images_without_alt_text_do_not_add_placeholder_content()
     test_docx_image_mime_cannot_shape_asset_paths()
     test_archive_limits_run_before_document_conversion()
@@ -5399,6 +5589,7 @@ def main() -> None:
     test_external_stream_epoch_is_stable_and_sanitized()
     test_external_progress_events_carry_mcp_tool_details()
     test_external_progress_events_bound_tool_inputs_and_pass_output()
+    test_external_progress_events_include_grounding_stage()
     test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()

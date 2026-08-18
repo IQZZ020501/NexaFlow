@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
-import { canManageTeamMembers } from "../components/system/system-utils"
+import {
+  canAccessWorkspaceAnalytics,
+  canManageTeamMembers,
+} from "../components/system/system-utils"
 import type { MeResponse } from "../lib/api/auth"
 import type { Team } from "../lib/api/system"
 import { getMembershipRole, hasWorkspaceMembership } from "../lib/display"
@@ -78,5 +81,35 @@ describe("system hierarchy permissions", () => {
     expect(canManageTeamMembers(workspaceAdmin, team)).toBe(true)
     expect(canManageTeamMembers(teamAdmin, team)).toBe(true)
     expect(canManageTeamMembers(me(), team)).toBe(false)
+  })
+
+  test("limits workspace analytics to global and workspace administrators", () => {
+    const globalAdmin = me({ is_global_admin: true })
+    const workspaceAdmin = me({
+      workspaces: [
+        {
+          id: "workspace-1",
+          name: "Workspace 1",
+          is_default: false,
+          role: "admin",
+        },
+      ],
+    })
+    const teamAdmin = me({
+      teams: [
+        {
+          id: "team-1",
+          workspace_id: "workspace-1",
+          name: "Team 1",
+          is_default: false,
+          role: "admin",
+        },
+      ],
+    })
+
+    expect(canAccessWorkspaceAnalytics(globalAdmin)).toBe(true)
+    expect(canAccessWorkspaceAnalytics(workspaceAdmin)).toBe(true)
+    expect(canAccessWorkspaceAnalytics(teamAdmin)).toBe(false)
+    expect(canAccessWorkspaceAnalytics(me())).toBe(false)
   })
 })

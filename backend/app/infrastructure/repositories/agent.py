@@ -921,6 +921,10 @@ async def save_agent_run_checkpoint(
     }
     if "model_usage" in checkpoint:
         values["model_usage"] = checkpoint["model_usage"]
+    if "grounding_status" in checkpoint:
+        values["grounding_status"] = checkpoint["grounding_status"]
+    if "grounding_meta" in checkpoint:
+        values["grounding_meta"] = checkpoint["grounding_meta"] or {}
     result = await db.execute(
         update(AgentRun)
         .where(
@@ -944,6 +948,8 @@ async def finalize_agent_run(
     last_error: str | None,
     finished_at: datetime,
     model_usage: dict | None = None,
+    grounding_status: str | None = None,
+    grounding_meta: dict | None = None,
 ) -> bool:
     values = {
         "status": status,
@@ -957,6 +963,10 @@ async def finalize_agent_run(
     }
     if model_usage is not None:
         values["model_usage"] = model_usage
+    if grounding_status is not None:
+        values["grounding_status"] = grounding_status
+    if grounding_meta is not None:
+        values["grounding_meta"] = grounding_meta
     updated = await db.execute(
         update(AgentRun)
         .where(

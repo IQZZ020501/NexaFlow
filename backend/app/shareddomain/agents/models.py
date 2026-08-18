@@ -522,6 +522,12 @@ class AgentRun(Base):
     checkpoint_phase: Mapped[str] = mapped_column(
         String(20), nullable=False, default="agent", server_default="agent"
     )
+    grounding_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="not_started", server_default="not_started"
+    )
+    grounding_meta: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     trace_id: Mapped[str] = mapped_column(
         String(36), nullable=False, default="", server_default=""
     )

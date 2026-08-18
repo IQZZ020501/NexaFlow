@@ -1,5 +1,6 @@
 import asyncio
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
@@ -13,6 +14,9 @@ QUERY_OVERFETCH_FACTOR = 5
 RRF_K = 60
 MAX_RERANK_CHILDREN = 10
 MAX_PARENT_CONTEXT_CHARS = 2000
+MAX_EVIDENCE_CONTENT_CHARS = 12_000
+EVIDENCE_TRUNCATION_MARKER = "\n[… evidence truncated …]"
+ARTICLE_LINE_PATTERN = re.compile(r"(?m)^\s*第[〇零一二三四五六七八九十百千万两\d]+条")
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,14 @@ class RankedHit:
     reference_rank: int | None
     sources: tuple[str, ...]
     rerank_score: float | None = None
+
+
+@dataclass(frozen=True)
+class EvidenceWindow:
+    content: str
+    truncated: bool
+    start_offset: int | None
+    end_offset: int | None
 
 
 class ParentChunk(Protocol):
@@ -100,6 +112,114 @@ def parent_context(
         ),
     )
     return parent.content[start : start + MAX_PARENT_CONTEXT_CHARS]
+
+
+def parent_evidence(
+    parent: ParentChunk,
+    chunk: ChildChunk,
+    max_chars: int = MAX_EVIDENCE_CONTENT_CHARS,
+) -> EvidenceWindow:
+    """Return a bounded, boundary-aware evidence window.
+
+    Hierarchical parents are normally returned whole. Oversized parents are
+    sliced only on line/article boundaries and carry an explicit truncation
+    marker so downstream answer verification can fail closed instead of
+    treating an incomplete section as authoritative.
+    """
+    content = parent.content
+    if len(content) <= max_chars:
+        return EvidenceWindow(content, False, 0, len(content))
+    if max_chars <= len(EVIDENCE_TRUNCATION_MARKER):
+        return EvidenceWindow(
+            EVIDENCE_TRUNCATION_MARKER[:max_chars],
+            True,
+            None,
+            None,
+        )
+    if chunk.start_offset is None or chunk.end_offset is None:
+        end = max_chars - len(EVIDENCE_TRUNCATION_MARKER)
+        return EvidenceWindow(
+            content[:end] + EVIDENCE_TRUNCATION_MARKER,
+            True,
+            0,
+            end,
+        )
+
+    center = max(0, min(len(content), (chunk.start_offset + chunk.end_offset) // 2))
+    half = (max_chars - len(EVIDENCE_TRUNCATION_MARKER)) // 2
+    start = max(0, min(center - half, len(content) - (max_chars - len(EVIDENCE_TRUNCATION_MARKER))))
+    end = start + max_chars - len(EVIDENCE_TRUNCATION_MARKER)
+    raw_start, raw_end = start, end
+    while start > 0 and not content[start - 1].isspace():
+        start -= 1
+    while end < len(content) and not content[end].isspace():
+        end += 1
+    if (
+        end - start > max_chars - len(EVIDENCE_TRUNCATION_MARKER)
+        or not start <= center < end
+    ):
+        start, end = raw_start, raw_end
+
+    # Prefer including the complete article containing the retrieved child
+    # when it fits; this avoids cutting between ``第十五条`` and its body.
+    article_starts = [match.start() for match in ARTICLE_LINE_PATTERN.finditer(content)]
+    if article_starts:
+        article_start = max(
+            (offset for offset in article_starts if offset <= chunk.start_offset),
+            default=0,
+        )
+        article_end = next(
+            (offset for offset in article_starts if offset > article_start),
+            len(content),
+        )
+        if article_end - article_start <= max_chars - len(EVIDENCE_TRUNCATION_MARKER):
+            start, end = article_start, article_end
+
+    return EvidenceWindow(
+        content[start:end] + EVIDENCE_TRUNCATION_MARKER,
+        True,
+        start,
+        end,
+    )
+
+
+def bounded_text_chunks(
+    chunks: Sequence[tuple[str, str]],
+    max_chars: int = MAX_EVIDENCE_CONTENT_CHARS,
+) -> tuple[str, bool, list[str]]:
+    """Join complete evidence chunks within a deterministic character budget."""
+    if max_chars <= len(EVIDENCE_TRUNCATION_MARKER):
+        return EVIDENCE_TRUNCATION_MARKER[:max_chars], bool(chunks), []
+    output: list[str] = []
+    included_ids: list[str] = []
+    used = 0
+    truncated = False
+    for chunk_id, content in chunks:
+        candidate_size = (2 if output else 0) + len(content)
+        if used + candidate_size > max_chars:
+            truncated = True
+            break
+        output.append(content)
+        included_ids.append(chunk_id)
+        used += candidate_size
+    if truncated:
+        joined = "\n\n".join(output)
+        while output and len(joined) + len(EVIDENCE_TRUNCATION_MARKER) > max_chars:
+            output.pop()
+            included_ids.pop()
+            joined = "\n\n".join(output)
+        if not output:
+            first_id, first_content = chunks[0]
+            available = max_chars - len(EVIDENCE_TRUNCATION_MARKER)
+            return (
+                first_content[:available].rstrip() + EVIDENCE_TRUNCATION_MARKER,
+                True,
+                [first_id],
+            )
+        joined += EVIDENCE_TRUNCATION_MARKER
+    else:
+        joined = "\n\n".join(output)
+    return joined, truncated, included_ids
 
 
 async def rerank_child_hits(

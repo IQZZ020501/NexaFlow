@@ -123,6 +123,8 @@ export type AgentRun = {
   events: AgentRunEvent[]
   result: string
   model_usage: Record<string, unknown>
+  grounding_status?: "not_started" | "pending" | "verified" | "revised" | "insufficient" | "unavailable" | "skipped"
+  grounding_meta?: Record<string, unknown>
   last_error: string | null
   planned_at: string | null
   started_at: string | null

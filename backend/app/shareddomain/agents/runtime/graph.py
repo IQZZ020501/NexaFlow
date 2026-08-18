@@ -60,6 +60,7 @@ class AgentRuntimeContext:
     max_turns: int = MAX_AGENT_TURNS
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS
     max_model_tokens: int | None = None
+    defer_answer: bool = False
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,7 @@ async def agent_node(
     thought = callback.thought(turn)
     await callback.process(thought)
     answer_started = False
+    answer_deltas: list[str] = []
     reasoning = ""
 
     async def emit_reasoning_delta(delta: str) -> None:
@@ -178,7 +180,8 @@ async def agent_node(
                             "Agent model returned an invalid stream message."
                         )
                     await emit_reasoning_delta(reasoning_content(chunk))
-                    await emit_answer_delta(chunk.text)
+                    if chunk.text:
+                        answer_deltas.append(chunk.text)
                     aggregate = chunk if aggregate is None else aggregate + chunk
                 message = message_chunk_to_message(
                     aggregate or AIMessageChunk(content="")
@@ -222,12 +225,19 @@ async def agent_node(
         raise AgentRunnerError("Agent response was truncated.")
     if not completion.content.strip():
         raise AgentRunnerError("Agent returned an empty response.")
+    # ponytail: buffer one model turn; add provisional deltas only if token-level
+    # answer latency matters more than keeping tool preambles out of the answer.
+    if not runtime.context.defer_answer:
+        for delta in answer_deltas:
+            await emit_answer_delta(delta)
+    draft_answer = completion.content
     return {
         "messages": messages,
         "turn": turn,
         "pending_tool_calls": [],
         "finish_reason": completion.finish_reason,
-        "final_answer": completion.content,
+        "draft_answer": draft_answer,
+        "final_answer": draft_answer,
         "model_usage": model_usage,
     }
 
@@ -458,6 +468,7 @@ async def tool_node(
     messages = list(state["messages"])
     events = list(state["events"])
     seen_evidence_ids = set(state["seen_evidence_ids"])
+    evidence_packets = list(state["evidence_packets"])
     round_evidence_ids: set[str] = set()
     has_retrieval_attempt = False
     no_new_evidence_rounds = state["no_new_evidence_rounds"]
@@ -469,6 +480,20 @@ async def tool_node(
             has_retrieval_attempt = True
             if not result.is_error:
                 round_evidence_ids.update(result.evidence_ids)
+                output = result.output
+                if isinstance(output, dict) and isinstance(output.get("hits"), list):
+                    for packet in output["hits"]:
+                        if not isinstance(packet, dict):
+                            continue
+                        packet_id = packet.get("chunk_id")
+                        if not isinstance(packet_id, str) or not packet_id:
+                            continue
+                        if any(
+                            existing.get("chunk_id") == packet_id
+                            for existing in evidence_packets
+                        ):
+                            continue
+                        evidence_packets.append(packet)
 
     if has_retrieval_attempt:
         new_evidence_ids = round_evidence_ids - seen_evidence_ids
@@ -493,6 +518,7 @@ async def tool_node(
         "events": events,
         "tool_call_count": tool_call_count,
         "seen_evidence_ids": sorted(seen_evidence_ids),
+        "evidence_packets": evidence_packets[:32],
         "no_new_evidence_rounds": no_new_evidence_rounds,
         "pending_tool_calls": [],
     }

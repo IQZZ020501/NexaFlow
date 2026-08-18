@@ -109,6 +109,8 @@ class AgentRun:
     lease_expires_at: datetime | None = None
     checkpoint: dict[str, Any] = field(default_factory=dict)
     checkpoint_phase: str = "agent"
+    grounding_status: str = "not_started"
+    grounding_meta: dict[str, Any] = field(default_factory=dict)
     trace_id: str = ""
     plan: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)

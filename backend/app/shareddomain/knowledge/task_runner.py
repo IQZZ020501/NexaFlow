@@ -41,6 +41,7 @@ from app.entities.knowledge import (
 from app.ports.parsing import (
     EMBED_BATCH_SIZE,
     KnowledgePipelineError,
+    SEGMENTATION_VERSION,
 )
 from app.ports.vector_store import (
     VectorChunk,
@@ -149,6 +150,15 @@ async def run_parse_task(
     task.total_items = len(chunks.children)
     task.processed_items = len(chunks.children)
     document.status = DOCUMENT_PARSED_STATUS
+    document.meta = {
+        **(document.meta or {}),
+        "segmentation_version": (
+            SEGMENTATION_VERSION
+            if options["strategy"] == "hierarchical"
+            else "flat-v1"
+        ),
+        "segmentation_strategy": options["strategy"],
+    }
     document.last_error = None
     await knowledge_base_repository.save_knowledge_task(db, task)
     await knowledge_base_repository.save_knowledge_document(db, document)

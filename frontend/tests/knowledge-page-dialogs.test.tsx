@@ -1,6 +1,6 @@
 /* @jsxImportSource react */
 import { afterEach, describe, expect, test } from "bun:test"
-import { cleanup, fireEvent, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react"
 
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
@@ -512,6 +512,171 @@ describe("MarkdownContent", () => {
     expect(screen.getByRole("columnheader", { name: "Value" })).toBeTruthy()
     expect(screen.getByRole("cell", { name: "a" })).toBeTruthy()
     expect(screen.getByRole("cell", { name: "2" })).toBeTruthy()
+  })
+
+  test("renders emphasis next to CJK text", () => {
+    renderPage(
+      <MarkdownContent content="试用期按 **80%**发放，正式员工按 *标准*执行。" />,
+    )
+
+    expect(screen.getByText("80%").tagName).toBe("STRONG")
+    expect(screen.getByText("标准").tagName).toBe("EM")
+  })
+
+  test("highlights and copies fenced code without copying controls", async () => {
+    const originalClipboard = navigator.clipboard
+    const written: string[] = []
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async (value: string) => void written.push(value),
+      },
+      configurable: true,
+    })
+    try {
+      renderPage(
+        <MarkdownContent
+          content={[
+            "```python",
+            "def greet(name):",
+            '    return f"Hello {name}"',
+            "```",
+          ].join("\n")}
+        />,
+      )
+
+      await waitFor(() => expect(document.querySelector(".shiki")).toBeTruthy())
+      fireEvent.click(screen.getByRole("button", { name: "复制代码" }))
+      await waitFor(() =>
+        expect(written).toEqual([
+          'def greet(name):\n    return f"Hello {name}"',
+        ]),
+      )
+      expect(screen.getByText("已复制")).toBeTruthy()
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        value: originalClipboard,
+        configurable: true,
+      })
+    }
+  })
+
+  test("falls back to source and reports clipboard failures", async () => {
+    const originalClipboard = navigator.clipboard
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async () => {
+          throw new Error("denied")
+        },
+      },
+      configurable: true,
+    })
+    try {
+      renderPage(
+        <MarkdownContent
+          content={["```made-up-language", "plain <code>", "```"].join(
+            "\n",
+          )}
+        />,
+      )
+
+      expect(screen.getByText("plain <code>")).toBeTruthy()
+      fireEvent.click(screen.getByRole("button", { name: "复制代码" }))
+      await screen.findByText("复制失败")
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        value: originalClipboard,
+        configurable: true,
+      })
+    }
+  })
+
+  test("renders Mermaid, switches to source, and copies both forms", async () => {
+    const originalClipboard = navigator.clipboard
+    const originalClipboardItem = globalThis.ClipboardItem
+    const writtenText: string[] = []
+    const writtenItems: ClipboardItems[] = []
+    class TestClipboardItem {
+      constructor(readonly data: Record<string, Blob>) {}
+    }
+    Object.defineProperty(globalThis, "ClipboardItem", {
+      value: TestClipboardItem,
+      configurable: true,
+    })
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async (value: string) => void writtenText.push(value),
+        write: async (items: ClipboardItems[]) => void writtenItems.push(...items),
+      },
+      configurable: true,
+    })
+    try {
+      const source = "graph TD\n  A[Start] --> B[Done]"
+      renderPage(
+        <MarkdownContent
+          content={["```mermaid", source, "```"].join("\n")}
+        />,
+      )
+
+      const diagram = (await screen.findByRole("img", {
+        name: "Mermaid 图表",
+      })) as HTMLImageElement
+      const lightDiagram = diagram.src
+      act(() => document.documentElement.classList.add("dark"))
+      await waitFor(() =>
+        expect(
+          (screen.getByRole("img", {
+            name: "Mermaid 图表",
+          }) as HTMLImageElement).src,
+        ).not.toBe(lightDiagram),
+      )
+      fireEvent.click(screen.getByRole("button", { name: "复制图表" }))
+      await waitFor(() => expect(writtenItems.length).toBe(1))
+      fireEvent.click(screen.getByRole("button", { name: "显示源码" }))
+      expect(screen.getByText((text) => text.includes("A[Start]"))).toBeTruthy()
+      fireEvent.click(screen.getByRole("button", { name: "复制源码" }))
+      await waitFor(() => expect(writtenText).toEqual([source]))
+    } finally {
+      act(() => document.documentElement.classList.remove("dark"))
+      Object.defineProperty(navigator, "clipboard", {
+        value: originalClipboard,
+        configurable: true,
+      })
+      Object.defineProperty(globalThis, "ClipboardItem", {
+        value: originalClipboardItem,
+        configurable: true,
+      })
+    }
+  })
+
+  test("keeps invalid Mermaid source visible and reports copy failures", async () => {
+    const originalClipboard = navigator.clipboard
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async () => {
+          throw new Error("denied")
+        },
+      },
+      configurable: true,
+    })
+    try {
+      renderPage(
+        <MarkdownContent
+          content={["```mermaid", "this is not a diagram", "```"].join("\n")}
+        />,
+      )
+
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "图表渲染失败",
+      )
+      expect(screen.getByText("this is not a diagram")).toBeTruthy()
+      fireEvent.click(screen.getByRole("button", { name: "复制源码" }))
+      await screen.findByText("复制失败")
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        value: originalClipboard,
+        configurable: true,
+      })
+    }
   })
 
   test("renders external images and placeholders for embedded or missing ones", () => {

@@ -1,9 +1,12 @@
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.audit import list_workspace_audit_logs
+from app.application.analytics import get_workspace_analytics
+from app.schemas.analytics import WorkspaceAnalyticsResponse
 from app.schemas.audit import AuditLogResponse
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
@@ -70,6 +73,25 @@ async def get_workspace(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceResponse:
     return workspace_to_response(await get_workspace_for_user(db, workspace_id, user))
+
+
+@router.get("/{workspace_id}/analytics", response_model=WorkspaceAnalyticsResponse)
+async def read_workspace_analytics(
+    context: Annotated[
+        WorkspaceContext,
+        Depends(require_workspace_path_role({"admin"})),
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    from_date: Annotated[date | None, Query(alias="from")] = None,
+    to_date: Annotated[date | None, Query(alias="to")] = None,
+) -> WorkspaceAnalyticsResponse:
+    return await get_workspace_analytics(
+        db,
+        context.workspace,
+        context.user,
+        from_date,
+        to_date,
+    )
 
 
 @router.patch("/{workspace_id}", response_model=WorkspaceResponse)

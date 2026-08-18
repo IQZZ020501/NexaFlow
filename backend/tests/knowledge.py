@@ -1237,10 +1237,13 @@ async def assert_hierarchical_retrieval(
     assert hits[0].chunk_id == second_children[0].id
     assert hits[1].chunk_id == first_children[1].id
     assert len({hit.parent_id for hit in hits}) == len(hits)
-    assert all(len(hit.content) <= 2000 for hit in hits)
+    assert all(
+        len(hit.content) <= knowledge_retrieval.MAX_EVIDENCE_CONTENT_CHARS
+        for hit in hits
+    )
     assert "SECOND" in hits[0].content and "FIRST" not in hits[0].content
     assert "FIRST" in hits[1].content and "SECOND" not in hits[1].content
-    assert len(hits[1].content) == 2000
+    assert len(hits[1].content) > 2000
 
 
 async def assert_one_hop_reference_retrieval(

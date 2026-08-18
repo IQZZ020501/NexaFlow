@@ -2389,6 +2389,31 @@ def test_session_configuration() -> None:
         assert isinstance(session_mod._engine.pool, NullPool)
         Path("/tmp/nexaflow-session-worker-test.db").unlink(missing_ok=True)
 
+        postgres_url = "postgresql+psycopg://user:password@db/app"
+        with (
+            patch.object(session_mod, "create_async_engine") as create_engine,
+            patch.object(session_mod, "async_sessionmaker"),
+        ):
+            session_mod.configure_database(
+                replace(settings(), database_url=postgres_url)
+            )
+            create_engine.assert_called_once_with(
+                postgres_url,
+                connect_args={"application_name": "nexaflow-api"},
+                pool_pre_ping=True,
+            )
+
+            create_engine.reset_mock()
+            session_mod.configure_database(
+                replace(settings(), database_url=postgres_url),
+                worker_process=True,
+            )
+            create_engine.assert_called_once_with(
+                postgres_url,
+                connect_args={"application_name": "nexaflow-worker"},
+                poolclass=NullPool,
+            )
+
         # lazy configuration paths
         session_mod._engine = None
         session_mod._session_factory = None

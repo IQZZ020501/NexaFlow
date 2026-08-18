@@ -552,7 +552,11 @@ async def checkpoint_state(**overrides: Any) -> dict[str, Any]:
         "no_new_evidence_rounds": 0,
         "pending_tool_calls": [],
         "finish_reason": "",
+        "draft_answer": "",
         "final_answer": "",
+        "grounding_status": "not_started",
+        "grounding_meta": {},
+        "evidence_packets": [],
         "model_usage": {},
     }
     state.update(overrides)
@@ -807,6 +811,42 @@ def assert_executor_checkpoint_paths() -> None:
 
     asyncio.run(run_resumed())
 
+    # A crash after drafting but before verification must resume the verifier
+    # without calling the primary Agent model a second time.
+    async def run_grounding_resume() -> None:
+        provider = SequenceProvider([ok_completion()])
+        calls: list[tuple[str, list[dict[str, Any]]]] = []
+
+        async def ground(draft: str, evidence: list[dict[str, Any]]):
+            calls.append((draft, evidence))
+            return executor_module.AgentGroundingResult(
+                status="revised",
+                answer="verified answer",
+                meta={"evidence_ids": ["chunk-1"]},
+                model_usage={"model_calls": 1, "total_tokens": 3},
+            )
+
+        result = await run_agent(
+            provider,
+            [{"role": "user", "content": "hi"}],
+            [],
+            checkpoint=await checkpoint_state(
+                draft_answer="draft answer",
+                final_answer="draft answer",
+                grounding_status="pending",
+                evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
+            ),
+            grounding_handler=ground,
+        )
+        assert result.content == "verified answer"
+        assert result.grounding_status == "revised"
+        assert calls == [
+            ("draft answer", [{"chunk_id": "chunk-1", "content": "evidence"}])
+        ]
+        assert provider.requests == []
+
+    asyncio.run(run_grounding_resume())
+
     # serialize/deserialize round-trip and initial checkpoint callback
     async def run_with_checkpoints() -> None:
         phases: list[str] = []
@@ -828,6 +868,7 @@ def assert_executor_checkpoint_paths() -> None:
         assert saved[0]["turn"] == 0
         restored = executor_module.deserialize_agent_state(saved[-1])
         assert restored["final_answer"] == "final"
+        assert restored["grounding_status"] == "skipped"
 
     asyncio.run(run_with_checkpoints())
 
@@ -3327,9 +3368,11 @@ async def assert_durable_execution_paths(
         events = await agent_repository.list_agent_run_events(db, run.id)
     assert current is not None
     assert current.status == "succeeded"
-    assert current.result == "Happy answer."
+    from app.application.agent_grounding import GROUNDING_FALLBACK_ANSWER
+
+    assert current.result == GROUNDING_FALLBACK_ANSWER
     assert current.checkpoint_phase == "done"
-    assert current.checkpoint.get("final_answer") == "Happy answer."
+    assert current.checkpoint.get("final_answer") == GROUNDING_FALLBACK_ANSWER
     assert events[-1].event["type"] == "complete"
 
     # -- canonical runs keep knowledge calls in the durable legacy ledger --

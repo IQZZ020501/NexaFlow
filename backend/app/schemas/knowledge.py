@@ -202,8 +202,13 @@ class KnowledgeQueryHitResponse(BaseModel):
     parent_id: str | None = None
     parent_title: str | None = None
     parent_index: int | None = None
+    section_path: list[str] = Field(default_factory=list, max_length=12)
     chunk_index: int
     content: str
+    content_truncated: bool = False
+    evidence_start_offset: int | None = Field(default=None, ge=0)
+    evidence_end_offset: int | None = Field(default=None, ge=0)
+    contributing_chunk_ids: list[str] = Field(default_factory=list, max_length=20)
     distance: float | None = None
     similarity: float | None = Field(default=None, ge=0, le=1)
     kind: Literal["document", "qa"] = "document"
@@ -226,6 +231,7 @@ class KnowledgeRetrievalTraceResponse(BaseModel):
     fused_candidates: int = Field(ge=0)
     rerank_status: Literal["not_configured", "applied", "fallback", "skipped"]
     returned_hits: int = Field(ge=0)
+    truncated_hits: int = Field(default=0, ge=0)
     duration_ms: float = Field(ge=0)
     stage_duration_ms: dict[str, float] = Field(max_length=8)
 

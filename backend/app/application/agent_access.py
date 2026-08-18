@@ -282,6 +282,30 @@ def external_progress_events(
                         reasoning=str(event.get("reasoning") or ""),
                     )
                 )
+            elif summary in {
+                "agent.grounding_check",
+                "agent.grounding_verified",
+                "agent.grounding_revised",
+                "agent.grounding_insufficient",
+                "agent.grounding_unavailable",
+            }:
+                grounding_stage = (
+                    "reviewing"
+                    if summary == "agent.grounding_check"
+                    else "completed"
+                    if summary in {"agent.grounding_verified", "agent.grounding_revised"}
+                    else "failed"
+                )
+                upsert(
+                    ExternalAgentProgressEventResponse(
+                        id=_external_progress_id(event, "grounding"),
+                        type="analysis",
+                        status=event_status,
+                        stage=grounding_stage,
+                        turn=turn,
+                        reasoning=str(event.get("reasoning") or ""),
+                    )
+                )
             continue
 
         if event_type != "tool":
