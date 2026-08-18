@@ -100,11 +100,18 @@ async def _validated_snapshot_tools(
         != version.configuration_hash
     ):
         raise ValueError("Workflow Agent publication changed or is invalid.")
+    tool_payloads = (
+        version.resource_snapshot.get("tools", [])
+        if isinstance(version.resource_snapshot, dict)
+        else None
+    )
+    if not isinstance(tool_payloads, list):
+        raise ValueError("Workflow Agent Tool snapshot is invalid.")
     await _require_snapshot_binder(db, workspace_id, snapshot)
     try:
         tools = [
             tool_snapshot_from_payload(item)
-            for item in version.resource_snapshot.get("tools", [])
+            for item in tool_payloads
         ]
     except ValueError as exc:
         raise ValueError("Workflow Agent Tool snapshot is invalid.") from exc

@@ -3035,6 +3035,43 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
             else:
                 raise AssertionError("Invalid tool snapshot was accepted.")
 
+            for malformed_resource_snapshot in (None, {"tools": None}):
+                malformed_hash = agent_publication_hash(
+                    version.configuration_snapshot,
+                    malformed_resource_snapshot,
+                )
+                malformed_version_id = new_id()
+                with patch.object(
+                    acr.agent_repository,
+                    "get_agent_publication_version",
+                    return_value=SimpleNamespace(
+                        agent_id=agent_id,
+                        configuration_hash=malformed_hash,
+                        configuration_snapshot=version.configuration_snapshot,
+                        resource_snapshot=malformed_resource_snapshot,
+                    ),
+                ):
+                    try:
+                        await acr.preflight_workflow_agent_snapshots(
+                            db,
+                            workspace_id,
+                            [
+                                make_snapshot(
+                                    version_id=malformed_version_id,
+                                    configuration_hash=malformed_hash,
+                                    resource_snapshot=malformed_resource_snapshot,
+                                )
+                            ],
+                            execution_user_id=actor.id,
+                            access_source="console",
+                        )
+                    except ValueError as exc:
+                        assert str(exc) == "Workflow Agent Tool snapshot is invalid."
+                    else:
+                        raise AssertionError(
+                            "Malformed Tool snapshot container was accepted."
+                        )
+
             each_call_version = await craft_version(11, [tool_payload])
             each_call_snapshot = make_snapshot(
                 version_id=each_call_version.id,

@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test"
 
 import {
   buildMcpServerCreatePayload,
+  isPrivateMcpUrl,
   type McpForm,
-} from "@/components/tools/mcp-tools-page"
+} from "@/components/tools/mcp-form"
 
 function form(overrides: Partial<McpForm> = {}): McpForm {
   return {
@@ -17,6 +18,11 @@ function form(overrides: Partial<McpForm> = {}): McpForm {
 }
 
 describe("MCP registration payloads", () => {
+  test("applies IPv4 private-network rules to mapped IPv6 addresses", () => {
+    expect(isPrivateMcpUrl("http://[::ffff:127.0.0.1]/mcp")).toBe(true)
+    expect(isPrivateMcpUrl("http://[::ffff:8.8.8.8]/mcp")).toBe(false)
+  })
+
   test("keeps remote credentials only for HTTP transports", () => {
     expect(buildMcpServerCreatePayload(form())).toEqual({
       name: "Release tools",

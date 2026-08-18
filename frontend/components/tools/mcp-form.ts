@@ -25,6 +25,25 @@ const STDIO_CONFIG_FIELDS = new Set([
   "transport",
 ])
 
+function isPrivateIpv4(hostname: string) {
+  const octets = hostname.split(".").map(Number)
+  if (
+    octets.length !== 4 ||
+    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
+  ) {
+    return false
+  }
+  const [first, second] = octets
+  return (
+    first === 10 ||
+    first === 127 ||
+    first === 0 ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  )
+}
+
 export const STDIO_CONFIG_EXAMPLE = `{
   "command": "/usr/local/bin/node",
   "args": ["server.js"],
@@ -40,6 +59,16 @@ export function isPrivateMcpUrl(value: string) {
     hostname = new URL(value).hostname.toLowerCase().replace(/^\[|\]$/g, "")
   } catch {
     return false
+  }
+  const mappedIpv4 = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(
+    hostname
+  )
+  if (mappedIpv4) {
+    const high = Number.parseInt(mappedIpv4[1], 16)
+    const low = Number.parseInt(mappedIpv4[2], 16)
+    return isPrivateIpv4(
+      `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`
+    )
   }
   const isIpv6 = hostname.includes(":")
 
@@ -58,22 +87,7 @@ export function isPrivateMcpUrl(value: string) {
     return true
   }
 
-  const octets = hostname.split(".").map(Number)
-  if (
-    octets.length !== 4 ||
-    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
-  ) {
-    return false
-  }
-  const [first, second] = octets
-  return (
-    first === 10 ||
-    first === 127 ||
-    first === 0 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  )
+  return isPrivateIpv4(hostname)
 }
 
 export function parseStdioConfig(
