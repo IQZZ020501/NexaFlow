@@ -92,6 +92,8 @@ class WorkflowVersion(Base):
     )
     graph: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     graph_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    resource_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     published_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True
     )
@@ -144,6 +146,8 @@ class WorkflowRunDetail(Base):
     source: Mapped[str] = mapped_column(String(20), nullable=False)
     graph_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     graph_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    resource_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    resource_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     inputs: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     outputs: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     max_steps: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -170,7 +174,7 @@ class WorkflowNodeExecution(Base):
             "run_id", "node_id", name="uq_workflow_node_executions_run_node"
         ),
         CheckConstraint(
-            "status IN ('running', 'awaiting_input', 'succeeded', 'failed', 'skipped')",
+            "status IN ('running', 'awaiting_input', 'awaiting_child', 'succeeded', 'failed', 'skipped')",
             name="ck_workflow_node_executions_status",
         ),
     )

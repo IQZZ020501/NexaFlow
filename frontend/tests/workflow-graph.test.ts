@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  WORKFLOW_BASIC_NODE_TYPES,
   WORKFLOW_NODE_PRESETS,
   WORKFLOW_NODE_TYPES,
   createWorkflowEdge,
@@ -48,9 +49,7 @@ describe("workflow graph", () => {
     expect(
       workflowExecutionNodeLabel("missing", "reranker-node", graph, t)
     ).toBe("多路召回")
-    expect(workflowNodeLabel("document-extract-node", t)).toBe(
-      "文档内容提取"
-    )
+    expect(workflowNodeLabel("document-extract-node", t)).toBe("文档内容提取")
     expect(
       workflowErrorMessage(
         "Workflow reranker content must contain non-empty text.",
@@ -131,6 +130,12 @@ describe("workflow graph", () => {
     })
     expect(WORKFLOW_NODE_TYPES[0]).toBe("reply-node")
     expect(WORKFLOW_NODE_TYPES).not.toContain("template")
+    expect(WORKFLOW_NODE_TYPES).toContain("tool")
+    expect(WORKFLOW_NODE_TYPES).toContain("agent")
+    expect(WORKFLOW_BASIC_NODE_TYPES).not.toContain("tool")
+    expect(WORKFLOW_BASIC_NODE_TYPES).not.toContain("agent")
+    expect(WORKFLOW_BASIC_NODE_TYPES).not.toContain("mcp")
+    expect(WORKFLOW_BASIC_NODE_TYPES).not.toContain("code")
     expect(defaultNodeConfig("template")).toEqual({
       template: "{{start.question}}",
     })
@@ -151,6 +156,16 @@ describe("workflow graph", () => {
     expect(defaultNodeConfig("start")).toEqual({})
     expect(defaultNodeConfig("end")).toEqual({
       outputs: { result: "{{start.question}}" },
+    })
+    expect(defaultNodeConfig("llm")).toMatchObject({ tools: [] })
+    expect(defaultNodeConfig("tool")).toEqual({
+      tool: { tool_id: "", version_id: "" },
+      arguments: {},
+    })
+    expect(defaultNodeConfig("agent", "start-custom")).toEqual({
+      agent_id: "",
+      agent_version_id: "",
+      input: "{{start-custom.question}}",
     })
     const condition = defaultNodeConfig("condition") as {
       branch: Array<Record<string, unknown>>
@@ -176,8 +191,8 @@ describe("workflow graph", () => {
       "question",
     ])
     expect(
-      createWorkflowNode("llm", "LLM", 1, undefined, "start-custom").data
-        .config.prompt
+      createWorkflowNode("llm", "LLM", 1, undefined, "start-custom").data.config
+        .prompt
     ).toBe("{{start-custom.question}}")
   })
 
@@ -264,7 +279,11 @@ describe("workflow graph", () => {
           id: "start",
           type: "workflow",
           position: { x: 10, y: 20 },
-          data: { type: "start", title: "Start", config: defaultNodeConfig("start") },
+          data: {
+            type: "start",
+            title: "Start",
+            config: defaultNodeConfig("start"),
+          },
           selected: true,
         } as never,
       ],
@@ -374,9 +393,11 @@ describe("workflow graph", () => {
       edges: [],
       viewport: { x: 4, y: 0, zoom: 1 },
     }
-    const target = selectWorkflowRunTarget(true, [
-      { version_number: 4, graph: published },
-    ] as never, 4)
+    const target = selectWorkflowRunTarget(
+      true,
+      [{ version_number: 4, graph: published }] as never,
+      4
+    )
 
     expect(target).toEqual({
       source: "published",

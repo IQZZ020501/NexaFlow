@@ -32,6 +32,7 @@ import {
   deleteUser,
   deleteWorkspace,
   listAuditLogs,
+  listAllWorkspaceMembers,
   listTeams,
   listTeamMembers,
   listUsers,
@@ -1074,6 +1075,28 @@ describe("system API client", () => {
     expect(calls.map((c) => c.url)).toEqual([
       "/api/v1/workspaces/w-1/members?limit=10&offset=5",
       "/api/v1/workspaces/w-1/teams/t-1/members?limit=20&offset=0",
+    ])
+  })
+
+  test("loads every workspace member page", async () => {
+    const calls = recordRequests((url) => {
+      const offset = new URL(url, "http://localhost").searchParams.get("offset")
+      return jsonResponse(
+        offset === "0"
+          ? Array.from({ length: 200 }, (_, index) => ({
+              user: { ...user, id: `u-${index}` },
+              role: "member",
+            }))
+          : [{ user, role: "admin" }]
+      )
+    })
+
+    await expect(listAllWorkspaceMembers("tok", "w-1")).resolves.toHaveLength(
+      201
+    )
+    expect(calls.map((call) => call.url)).toEqual([
+      "/api/v1/workspaces/w-1/members?limit=200&offset=0",
+      "/api/v1/workspaces/w-1/members?limit=200&offset=200",
     ])
   })
 

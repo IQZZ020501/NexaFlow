@@ -27,9 +27,17 @@ from tests.support import (  # noqa: F401  (sets required env before app imports
     test_client,
 )
 
-from app.application import agent_access, agent_executor, agent_memory, agent_runs, agent_tools
+from app.application import (
+    agent_access,
+    agent_executor,
+    agent_memory,
+    agent_runs,
+    agent_tools,
+    tool_adapters,
+)
 from app.application import agents as agent_application
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import tools as tool_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.repositories import user as user_repository
 from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
@@ -49,6 +57,7 @@ from app.schemas.knowledge import (
 )
 from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
+from app.entities.tools import ToolInvocation
 from app.entities.workflows import WorkflowUpload
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.model_utils import utc_now
@@ -91,6 +100,162 @@ async def create_pending_upload_for_user(
 async def assert_upload_cleanup_queued(object_key: str) -> None:
     async with get_session_factory()() as db:
         assert await workflow_repository.has_upload_cleanup_for_object(db, object_key)
+
+
+async def create_agent_delete_guard_execution(
+    workspace_id: str,
+    agent_id: str,
+) -> tuple[str, str]:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_active_user_by_username(db, "admin")
+        assert actor is not None
+        run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Keep the execution ledger while deleting",
+            actor,
+            "admin",
+        )
+        tool = next(
+            item
+            for item in await tool_repository.list_tools(db, workspace_id)
+            if item.current_version_id is not None
+        )
+        invocation = await tool_repository.save_tool_invocation(
+            db,
+            ToolInvocation(
+                workspace_id=workspace_id,
+                origin="agent",
+                root_run_id=run.id,
+                run_id=run.id,
+                invocation_id="1:delete-guard",
+                execution_user_id=actor.id,
+                access_source="console",
+                tool_id=tool.id,
+                tool_version_id=tool.current_version_id,
+                policy_snapshot={"tool_snapshot": {"effect": "external_write"}},
+                arguments={},
+                arguments_hash="0" * 64,
+                idempotency_key=f"delete-guard:{run.id}",
+                status="running",
+                attempts=1,
+                worker_task_id="delete-guard-worker",
+                lease_expires_at=utc_now() + timedelta(minutes=1),
+            ),
+        )
+        await agent_repository.create_agent_tool_call(
+            db,
+            AgentToolCall(
+                workspace_id=workspace_id,
+                run_id=run.id,
+                turn=1,
+                call_id="legacy-delete-guard",
+                tool_name="search_knowledge",
+                tool_kind="knowledge",
+                arguments_hash="legacy-delete-guard",
+                idempotency_key=f"legacy-delete-guard:{run.id}",
+                status="running",
+                approval_required=False,
+                worker_task_id="legacy-delete-guard-worker",
+                lease_expires_at=utc_now() + timedelta(minutes=1),
+            ),
+        )
+        await db.commit()
+        return run.id, invocation.id
+
+
+async def settle_agent_delete_guard_execution(
+    run_id: str,
+    invocation_id: str,
+    *,
+    settle_invocation: bool,
+    settle_legacy_call: bool = False,
+) -> None:
+    async with get_session_factory()() as db:
+        run = await agent_repository.get_agent_run_by_id(db, run_id)
+        assert run is not None
+        run.status = "failed"
+        run.finished_at = utc_now()
+        await agent_repository.save_agent_run(db, run)
+        if settle_invocation:
+            invocation = await tool_repository.get_tool_invocation(
+                db,
+                run.workspace_id,
+                invocation_id,
+            )
+            assert invocation is not None
+            invocation.status = "failed"
+            invocation.outcome = "confirmed"
+            invocation.worker_task_id = None
+            invocation.lease_expires_at = None
+            invocation.finished_at = utc_now()
+            await tool_repository.save_tool_invocation(db, invocation)
+        if settle_legacy_call:
+            now = utc_now() + timedelta(minutes=2)
+            await agent_repository.mark_expired_agent_tool_calls(
+                db,
+                run.id,
+                now,
+            )
+            call = await agent_repository.get_agent_tool_call(
+                db,
+                run.id,
+                1,
+                "legacy-delete-guard",
+            )
+            assert call is not None
+            assert await agent_repository.claim_agent_tool_call(
+                db,
+                call.id,
+                "legacy-delete-settler",
+                now,
+                now + timedelta(minutes=1),
+            )
+            call.status = "failed"
+            call.result_is_error = True
+            call.result_summary = "Settled for deletion."
+            call.finished_at = now
+            call.updated_at = now
+            assert await agent_repository.save_agent_tool_call_result(
+                db,
+                call.id,
+                "legacy-delete-settler",
+                call,
+            )
+        await db.commit()
+
+
+async def grant_mcp_tool_use(
+    workspace_id: str,
+    server_id: str,
+    user_id: str,
+) -> None:
+    from app.entities.resource_permission import ResourcePermission
+    from app.infrastructure.repositories import resource_permission as permission_repository
+    from app.shareddomain.tools.catalog import get_mcp_catalog_leaf
+
+    async with get_session_factory()() as db:
+        leaf = await get_mcp_catalog_leaf(
+            db,
+            workspace_id,
+            server_id,
+            "lookup_release",
+        )
+        assert leaf is not None
+        assert leaf.source.created_by_user_id is not None
+        await permission_repository.create_resource_permission(
+            db,
+            ResourcePermission(
+                workspace_id=workspace_id,
+                resource_type="tool",
+                resource_id=leaf.tool.id,
+                user_id=user_id,
+                permission="use",
+                created_by_user_id=leaf.source.created_by_user_id,
+            ),
+        )
+        await db.commit()
 
 
 class AgentModelHandler(BaseHTTPRequestHandler):
@@ -454,7 +619,7 @@ async def assert_hanging_model_stream_times_out() -> None:
                     [],
                     on_event=emit,
                 ),
-                timeout=0.1,
+                timeout=5,
             )
         except AgentRunnerError as exc:
             assert str(exc) == "Agent model response timed out."
@@ -1496,7 +1661,7 @@ async def assert_stream_disconnect_keeps_run_durable(
     async with get_session_factory()() as db:
         durable_run = await agent_repository.get_agent_run_by_id(db, run.id)
     assert durable_run is not None
-    assert durable_run.status == "queued"
+    assert durable_run.status == "queued_v2"
 
 
 async def assert_terminal_stream_replays_past_batch_boundary(
@@ -1644,6 +1809,7 @@ async def assert_run_lease_takeover(
             "worker-1",
             now,
             now + timedelta(seconds=30),
+            generation="unified",
         )
         assert await agent_repository.pause_agent_run(
             db,
@@ -1658,6 +1824,7 @@ async def assert_run_lease_takeover(
             "worker-2",
             now,
             now - timedelta(seconds=1),
+            generation="unified",
         )
         assert await agent_repository.claim_agent_run(
             db,
@@ -1665,6 +1832,7 @@ async def assert_run_lease_takeover(
             "worker-3",
             now,
             now + timedelta(seconds=30),
+            generation="unified",
         )
         assert not await agent_repository.save_agent_run_checkpoint(
             db,
@@ -1770,7 +1938,7 @@ async def assert_exhausted_run_closes_tool_ledger(
                 worker_task_id="historical-worker",
             ),
         )
-        run, _ = await agent_runs.prepare_agent_run(
+        legacy_run, _ = await agent_runs.prepare_agent_run(
             db,
             workspace_id,
             agent_id,
@@ -1778,11 +1946,12 @@ async def assert_exhausted_run_closes_tool_ledger(
             actor,
             "admin",
         )
-        run.status = "running"
-        run.attempts = run.max_attempts
-        run.worker_task_id = "dead-worker"
-        run.lease_expires_at = now - timedelta(seconds=1)
-        await agent_repository.save_agent_run(db, run)
+        legacy_run.configuration_source = "legacy"
+        legacy_run.status = "running"
+        legacy_run.attempts = legacy_run.max_attempts
+        legacy_run.worker_task_id = "dead-worker"
+        legacy_run.lease_expires_at = now - timedelta(seconds=1)
+        await agent_repository.save_agent_run(db, legacy_run)
         for call_id, approval_required in (
             ("call-read-only", False),
             ("call-side-effect", True),
@@ -1791,7 +1960,7 @@ async def assert_exhausted_run_closes_tool_ledger(
                 db,
                 AgentToolCall(
                     workspace_id=workspace_id,
-                    run_id=run.id,
+                    run_id=legacy_run.id,
                     turn=1,
                     call_id=call_id,
                     tool_name="mcp_lookup",
@@ -1804,10 +1973,75 @@ async def assert_exhausted_run_closes_tool_ledger(
                     lease_expires_at=now - timedelta(seconds=1),
                 ),
             )
-        assert await agent_repository.fail_exhausted_agent_runs(db, now) == 1
+        run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Verify exhausted unified Tool cleanup",
+            actor,
+            "admin",
+        )
+        run.status = "running_v2"
+        run.attempts = run.max_attempts
+        run.worker_task_id = "dead-worker"
+        run.lease_expires_at = now - timedelta(seconds=1)
+        await agent_repository.save_agent_run(db, run)
+        tool = next(
+            item
+            for item in await tool_repository.list_tools(db, workspace_id)
+            if item.current_version_id is not None
+        )
+        for invocation_id, effect in (
+            ("1:unified-read", "external_read"),
+            ("1:unified-write", "external_write"),
+        ):
+            await tool_repository.save_tool_invocation(
+                db,
+                ToolInvocation(
+                    workspace_id=workspace_id,
+                    origin="agent",
+                    root_run_id=run.id,
+                    run_id=run.id,
+                    invocation_id=invocation_id,
+                    execution_user_id=actor.id,
+                    access_source="console",
+                    tool_id=tool.id,
+                    tool_version_id=tool.current_version_id,
+                    policy_snapshot={"tool_snapshot": {"effect": effect}},
+                    arguments={},
+                    arguments_hash="0" * 64,
+                    idempotency_key=invocation_id,
+                    status="running",
+                    attempts=1,
+                    worker_task_id="dead-worker",
+                    lease_expires_at=now - timedelta(seconds=1),
+                ),
+            )
+        assert (
+            await agent_executor.fail_exhausted_agent_runs(
+                db,
+                now,
+                generation="legacy",
+            )
+            == 1
+        )
+        assert (
+            await agent_executor.fail_exhausted_agent_runs(
+                db,
+                now,
+                generation="unified",
+            )
+            == 1
+        )
         await db.commit()
         current = await agent_repository.get_agent_run_by_id(db, run.id)
-        calls = await agent_repository.list_agent_tool_calls(db, run.id)
+        legacy_current = await agent_repository.get_agent_run_by_id(db, legacy_run.id)
+        calls = await agent_repository.list_agent_tool_calls(db, legacy_run.id)
+        invocations = await tool_repository.list_tool_invocations(
+            db,
+            workspace_id,
+            run.id,
+        )
         historical_calls = await agent_repository.list_agent_tool_calls(
             db,
             historical_run.id,
@@ -1815,12 +2049,20 @@ async def assert_exhausted_run_closes_tool_ledger(
 
     assert current is not None
     assert current.status == "failed"
+    assert legacy_current is not None
+    assert legacy_current.status == "failed"
     assert {call.call_id: call.status for call in calls} == {
         "call-read-only": "failed",
         "call-side-effect": "uncertain",
     }
     assert all(call.worker_task_id is None for call in calls)
     assert all(call.lease_expires_at is None for call in calls)
+    assert {item.invocation_id: (item.status, item.outcome) for item in invocations} == {
+        "1:unified-read": ("failed", "confirmed"),
+        "1:unified-write": ("uncertain", "uncertain"),
+    }
+    assert all(item.worker_task_id is None for item in invocations)
+    assert all(item.lease_expires_at is None for item in invocations)
     assert historical_calls[0].status == "running"
     assert historical_calls[0].worker_task_id == "historical-worker"
 
@@ -1881,6 +2123,9 @@ async def assert_approval_before_pause_requeues_run(
             actor,
             "admin",
         )
+        run.configuration_source = "legacy"
+        run.status = "queued"
+        await agent_repository.save_agent_run(db, run)
         now = utc_now()
         assert await agent_repository.claim_agent_run(
             db,
@@ -2836,6 +3081,7 @@ def main() -> None:
     original_retrieve = agent_tools.retrieve_knowledge_base
     original_discover = mcp_services.discover_mcp_tools
     original_call_mcp_tool = agent_tools.call_mcp_tool
+    original_adapter_call_mcp_tool = tool_adapters.call_mcp_tool
     original_run_agent = agent_executor.run_agent
     query_calls: list[tuple[str, str]] = []
     mcp_calls: list[tuple[str, str, dict, str | None]] = []
@@ -2906,6 +3152,14 @@ def main() -> None:
                 }
             )
         else:
+            if (
+                connection.network_policy == "public_only"
+                and connection.url is not None
+                and "127.0.0.1" in connection.url
+            ):
+                raise McpClientError(
+                    "Private MCP server addresses are not allowed."
+                )
             assert connection.bearer_token == "mcp-secret-token"
         return McpDiscovery(
             tools=[
@@ -2943,6 +3197,7 @@ def main() -> None:
     agent_tools.retrieve_knowledge_base = fake_retrieve_knowledge_base
     mcp_services.discover_mcp_tools = fake_discover_mcp_tools
     agent_tools.call_mcp_tool = fake_call_mcp_tool
+    tool_adapters.call_mcp_tool = fake_call_mcp_tool
     try:
         with test_client() as client, agent_model_server() as model_base_url:
             admin_token, workspace_id = activate_admin(client)
@@ -3294,11 +3549,111 @@ def main() -> None:
                 mcp_url(workspace_id),
                 headers=auth_headers(member_token),
                 json={
-                    "name": "Release MCP",
+                    "name": "Member private MCP",
                     "url": "http://127.0.0.1:9999/mcp",
+                    "bearer_token": "mcp-secret-token",
                 },
             )
-            assert member_mcp_create.status_code == 403, member_mcp_create.text
+            assert member_mcp_create.status_code == 400, member_mcp_create.text
+
+            member_stdio_create = client.post(
+                mcp_url(workspace_id),
+                headers=auth_headers(member_token),
+                json={
+                    "name": "Member stdio MCP",
+                    "transport": "stdio",
+                    "stdio_config": {"command": sys.executable},
+                },
+            )
+            assert member_stdio_create.status_code == 403, member_stdio_create.text
+
+            member_public_mcp = client.post(
+                mcp_url(workspace_id),
+                headers=auth_headers(member_token),
+                json={
+                    "name": "Member public MCP",
+                    "url": "https://public-tools.example.com/mcp",
+                    "bearer_token": "mcp-secret-token",
+                },
+            )
+            assert member_public_mcp.status_code == 201, member_public_mcp.text
+            member_public_data = member_public_mcp.json()
+            member_sources = client.get(
+                mcp_url(workspace_id),
+                headers=auth_headers(member_token),
+            )
+            assert member_sources.status_code == 200, member_sources.text
+            assert [item["id"] for item in member_sources.json()] == [
+                member_public_data["id"]
+            ]
+            admin_sources = client.get(
+                mcp_url(workspace_id),
+                headers=auth_headers(admin_token),
+            )
+            assert admin_sources.status_code == 200, admin_sources.text
+            assert member_public_data["id"] in {
+                item["id"] for item in admin_sources.json()
+            }
+
+            owner_read_only_policy = client.put(
+                mcp_url(
+                    workspace_id,
+                    f"/{member_public_data['id']}/tools/lookup_release/policy",
+                ),
+                headers=auth_headers(member_token),
+                json={"mode": "read_only"},
+            )
+            assert owner_read_only_policy.status_code == 200, (
+                owner_read_only_policy.text
+            )
+            assert owner_read_only_policy.json()["mode"] == "read_only"
+            owner_disabled_policy = client.put(
+                mcp_url(
+                    workspace_id,
+                    f"/{member_public_data['id']}/tools/lookup_release/policy",
+                ),
+                headers=auth_headers(member_token),
+                json={"mode": "disabled"},
+            )
+            assert owner_disabled_policy.status_code == 403, (
+                owner_disabled_policy.text
+            )
+
+            disabled_member_source = client.post(
+                mcp_url(workspace_id, f"/{member_public_data['id']}/disable"),
+                headers=auth_headers(member_token),
+            )
+            assert disabled_member_source.status_code == 200, (
+                disabled_member_source.text
+            )
+            assert disabled_member_source.json()["status"] == "disabled"
+            assert disabled_member_source.json()["tools"][0]["policy_mode"] == (
+                "disabled"
+            )
+            refreshed_disabled_source = client.post(
+                mcp_url(workspace_id, f"/{member_public_data['id']}/refresh"),
+                headers=auth_headers(member_token),
+            )
+            assert refreshed_disabled_source.status_code == 200, (
+                refreshed_disabled_source.text
+            )
+            assert refreshed_disabled_source.json()["status"] == "disabled"
+            assert refreshed_disabled_source.json()["tools"][0]["policy_mode"] == (
+                "disabled"
+            )
+            enabled_member_source = client.post(
+                mcp_url(workspace_id, f"/{member_public_data['id']}/enable"),
+                headers=auth_headers(member_token),
+            )
+            assert enabled_member_source.status_code == 200, (
+                enabled_member_source.text
+            )
+            assert enabled_member_source.json()["status"] == "active"
+            removed_member_source = client.delete(
+                mcp_url(workspace_id, f"/{member_public_data['id']}"),
+                headers=auth_headers(member_token),
+            )
+            assert removed_member_source.status_code == 204, removed_member_source.text
 
             legacy_stdio = client.post(
                 mcp_url(workspace_id),
@@ -3360,6 +3715,19 @@ def main() -> None:
             assert "bearer_token" not in mcp_server_data
             assert mcp_server_data["tools"][0]["policy_mode"] == "approval_required"
             assert len(mcp_server_data["tools"][0]["definition_hash"]) == 64
+            asyncio.run(
+                grant_mcp_tool_use(
+                    workspace_id,
+                    mcp_server_data["id"],
+                    member_id,
+                )
+            )
+            member_sources = client.get(
+                mcp_url(workspace_id),
+                headers=auth_headers(member_token),
+            )
+            assert member_sources.status_code == 200, member_sources.text
+            assert member_sources.json() == []
 
             sse_server = client.post(
                 mcp_url(workspace_id),
@@ -3418,7 +3786,9 @@ def main() -> None:
                 headers=auth_headers(admin_token),
             )
             assert unconfigured_approval.status_code == 200, unconfigured_approval.text
-            assert unconfigured_approval.json()["status"] == "succeeded"
+            assert (
+                unconfigured_approval.json()["status"] == "succeeded"
+            ), unconfigured_approval.text
             assert len(mcp_calls) == 1
 
             initial_approval_policy = client.put(
@@ -3467,7 +3837,7 @@ def main() -> None:
             assert mcp_event["call_id"] == "call-mcp"
             assert mcp_event["tool_label"] == "lookup_release"
             assert mcp_event["tool_kind"] == "mcp"
-            assert mcp_event["server_name"] == "Release MCP"
+            assert mcp_event["server_name"] == ""
             assert mcp_event["input"] == {"topic": "release"}
             assert mcp_event["output"] == {"release": "approved"}
             assert len(mcp_calls) == 2
@@ -3603,9 +3973,8 @@ def main() -> None:
             assert member_approval.json()["status"] == "succeeded"
             assert len(mcp_calls) == 5
 
-            # Public link runs (published agent, authenticated visitor) must
-            # follow the tool policy: approval-required tools pause the run
-            # for the visitor's approval; read-only tools execute directly.
+            # Public/API runs fail closed before creation when a frozen Tool
+            # is no longer automatic and externally safe.
             published_agent = client.patch(
                 agents_url(workspace_id, f"/{mcp_agent_data['id']}"),
                 headers=auth_headers(admin_token),
@@ -3621,23 +3990,8 @@ def main() -> None:
                 headers=auth_headers(member_token),
                 json={"goal": "Check the release"},
             )
-            assert public_run.status_code == 201, public_run.text
-            public_run_data = public_run.json()
-            assert public_run_data["status"] == "awaiting_approval"
-            public_tool_calls = client.get(
-                f"{public_base}/runs/{public_run_data['id']}/tool-calls",
-                headers=auth_headers(member_token),
-            )
-            assert public_tool_calls.status_code == 200, public_tool_calls.text
-            assert public_tool_calls.json()[0]["status"] == "awaiting_approval"
+            assert public_run.status_code == 409, public_run.text
             assert len(mcp_calls) == calls_before_public
-            public_approval = client.post(
-                f"{public_base}/runs/{public_run_data['id']}/tool-calls/call-mcp/approve",
-                headers=auth_headers(member_token),
-            )
-            assert public_approval.status_code == 200, public_approval.text
-            assert public_approval.json()["status"] == "succeeded"
-            assert len(mcp_calls) == calls_before_public + 1
 
             read_only_public_policy = client.put(
                 mcp_url(
@@ -3649,6 +4003,16 @@ def main() -> None:
             )
             assert read_only_public_policy.status_code == 200, (
                 read_only_public_policy.text
+            )
+            republished_agent = client.patch(
+                agents_url(workspace_id, f"/{mcp_agent_data['id']}"),
+                headers=auth_headers(admin_token),
+                json={"published": True},
+            )
+            assert republished_agent.status_code == 200, republished_agent.text
+            assert (
+                republished_agent.json()["current_published_version_id"]
+                != published_agent.json()["current_published_version_id"]
             )
             calls_before_read_only = len(mcp_calls)
             read_only_public_run = client.post(
@@ -3753,6 +4117,24 @@ def main() -> None:
             )
             assert cross_workspace_model.status_code == 422, cross_workspace_model.text
 
+            delete_guard_agent = client.post(
+                agents_url(workspace_id),
+                headers=auth_headers(admin_token),
+                json={
+                    "name": "Delete Guard Agent",
+                    "instructions": "Protect active execution state.",
+                    "model_id": model_id,
+                },
+            )
+            assert delete_guard_agent.status_code == 201, delete_guard_agent.text
+            delete_guard_agent_id = delete_guard_agent.json()["id"]
+            delete_run_id, delete_invocation_id = asyncio.run(
+                create_agent_delete_guard_execution(
+                    workspace_id,
+                    delete_guard_agent_id,
+                )
+            )
+
             disabled_model = client.patch(
                 f"/api/v1/workspaces/{workspace_id}/models/{model_id}",
                 headers=auth_headers(admin_token),
@@ -3768,8 +4150,47 @@ def main() -> None:
             assert disabled.status_code == 200, disabled.text
             assert disabled.json()["status"] == "disabled"
 
+            active_delete = client.delete(
+                agents_url(workspace_id, f"/{delete_guard_agent_id}"),
+                headers=auth_headers(admin_token),
+            )
+            assert active_delete.status_code == 409, active_delete.text
+            asyncio.run(
+                settle_agent_delete_guard_execution(
+                    delete_run_id,
+                    delete_invocation_id,
+                    settle_invocation=False,
+                )
+            )
+            running_tool_delete = client.delete(
+                agents_url(workspace_id, f"/{delete_guard_agent_id}"),
+                headers=auth_headers(admin_token),
+            )
+            assert running_tool_delete.status_code == 409, running_tool_delete.text
+            asyncio.run(
+                settle_agent_delete_guard_execution(
+                    delete_run_id,
+                    delete_invocation_id,
+                    settle_invocation=True,
+                )
+            )
+
+            legacy_tool_delete = client.delete(
+                agents_url(workspace_id, f"/{delete_guard_agent_id}"),
+                headers=auth_headers(admin_token),
+            )
+            assert legacy_tool_delete.status_code == 409, legacy_tool_delete.text
+            asyncio.run(
+                settle_agent_delete_guard_execution(
+                    delete_run_id,
+                    delete_invocation_id,
+                    settle_invocation=False,
+                    settle_legacy_call=True,
+                )
+            )
+
             deleted = client.delete(
-                agents_url(workspace_id, f"/{agent_id}"),
+                agents_url(workspace_id, f"/{delete_guard_agent_id}"),
                 headers=auth_headers(admin_token),
             )
             assert deleted.status_code == 204, deleted.text
@@ -3785,8 +4206,256 @@ def main() -> None:
         agent_tools.retrieve_knowledge_base = original_retrieve
         mcp_services.discover_mcp_tools = original_discover
         agent_tools.call_mcp_tool = original_call_mcp_tool
+        tool_adapters.call_mcp_tool = original_adapter_call_mcp_tool
         agent_executor.run_agent = original_run_agent
+
+
+def test_cancelling_root_run_cancels_active_children() -> None:
+    from dataclasses import replace
+    import hashlib
+    from unittest.mock import AsyncMock, patch
+
+    from app.infrastructure.model_utils import new_id, utc_now
+    from app.infrastructure.session import get_session_factory
+
+    with test_client() as client, agent_model_server() as model_base_url:
+        token, workspace_id = activate_admin(client)
+        headers = auth_headers(token)
+        model = client.post(
+            f"/api/v1/workspaces/{workspace_id}/models",
+            headers=headers,
+            json=model_payload(model_base_url, "Cancel Tree Model"),
+        )
+        assert model.status_code == 201, model.text
+        agent = client.post(
+            agents_url(workspace_id),
+            headers=headers,
+            json={
+                "name": "Cancel Tree Agent",
+                "instructions": "Wait for cancellation.",
+                "model_id": model.json()["id"],
+            },
+        )
+        assert agent.status_code == 201, agent.text
+        agent_id = agent.json()["id"]
+        with patch(
+            "app.application.agent_runs.enqueue_prepared_agent_run",
+            new=AsyncMock(),
+        ):
+            response = client.post(
+                agents_url(workspace_id, f"/{agent_id}/runs"),
+                headers=headers,
+                json={"goal": "cancel this tree"},
+            )
+        assert response.status_code == 201, response.text
+        root_run_id = response.json()["id"]
+
+        async def add_child() -> tuple[str, str, str]:
+            async with get_session_factory()() as db:
+                root = await agent_repository.get_agent_run_by_id(db, root_run_id)
+                assert root is not None
+                child = replace(
+                    root,
+                    id=new_id(),
+                    root_run_id=root.id,
+                    parent_run_id=root.id,
+                    parent_node_id="agent-node",
+                    depth=1,
+                    conversation_id=new_id(),
+                    trace_id=new_id(),
+                    started_at=None,
+                    finished_at=None,
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
+                )
+                child = await agent_repository.create_agent_run(db, child)
+                tool = next(
+                    item
+                    for item in await tool_repository.list_tools(db, workspace_id)
+                    if item.current_version_id is not None
+                )
+                invocation_ids = []
+                for status_value, effect in (
+                    ("queued", "pure"),
+                    ("running", "external_write"),
+                ):
+                    invocation = await tool_repository.create_or_get_tool_invocation(
+                        db,
+                        ToolInvocation(
+                            workspace_id=workspace_id,
+                            origin="agent",
+                            root_run_id=root.id,
+                            run_id=child.id,
+                            invocation_id=f"cancel-{status_value}",
+                            execution_user_id=root.execution_user_id,
+                            access_source="console",
+                            tool_id=tool.id,
+                            tool_version_id=tool.current_version_id or "",
+                            policy_snapshot={"tool_snapshot": {"effect": effect}},
+                            arguments={},
+                            arguments_hash=hashlib.sha256(b"{}").hexdigest(),
+                            idempotency_key=hashlib.sha256(
+                                f"{child.id}:{status_value}".encode()
+                            ).hexdigest(),
+                            status=status_value,
+                            worker_task_id=(
+                                "tool-worker" if status_value == "running" else None
+                            ),
+                        ),
+                    )
+                    invocation_ids.append(invocation.id)
+                await db.commit()
+                return child.id, invocation_ids[0], invocation_ids[1]
+
+        child_run_id, queued_invocation_id, running_invocation_id = asyncio.run(
+            add_child()
+        )
+        cancelled = client.post(
+            agents_url(workspace_id, f"/{agent_id}/runs/{root_run_id}/cancel"),
+            headers=headers,
+        )
+        assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["status"] == "cancelled"
+
+        async def assert_child_cancelled() -> None:
+            async with get_session_factory()() as db:
+                child = await agent_repository.get_agent_run_by_id(db, child_run_id)
+                assert child is not None
+                assert child.status == "cancelled"
+                assert child.finished_at is not None
+                queued = await tool_repository.get_tool_invocation_by_id(
+                    db,
+                    queued_invocation_id,
+                )
+                running = await tool_repository.get_tool_invocation_by_id(
+                    db,
+                    running_invocation_id,
+                )
+                assert queued is not None and queued.status == "failed"
+                assert queued.error_code == "agent_run_cancelled"
+                assert running is not None and running.status == "uncertain"
+                assert running.outcome == "uncertain"
+
+        asyncio.run(assert_child_cancelled())
+
+        # RUN-020: a late worker finalize after cancellation cannot overwrite
+        # the cancelled outcome and never invokes the provider again.
+        from app.application.tool_runtime import execute_tool_invocation
+        class LateFinalizeAdapter:
+            kind = "mcp"
+            calls = 0
+
+            async def invoke(self, snapshot, arguments, context):
+                self.calls += 1
+                return None
+
+        late_adapter = LateFinalizeAdapter()
+        late = asyncio.run(
+            execute_tool_invocation(
+                running_invocation_id,
+                test_settings(),
+                worker_task_id="late-finalize-worker",
+                adapter=late_adapter,
+            )
+        )
+        assert late.ok is False
+        assert late.outcome == "uncertain"
+        assert late_adapter.calls == 0
+
+        async def assert_late_finalize_noop() -> None:
+            async with get_session_factory()() as db:
+                running = await tool_repository.get_tool_invocation_by_id(
+                    db,
+                    running_invocation_id,
+                )
+                assert running is not None
+                assert running.status == "uncertain"
+                assert running.outcome == "uncertain"
+                assert running.error_code == "agent_run_cancelled"
+                assert running.worker_task_id is None
+                assert running.lease_expires_at is None
+
+        asyncio.run(assert_late_finalize_noop())
+        repeated = client.post(
+            agents_url(workspace_id, f"/{agent_id}/runs/{root_run_id}/cancel"),
+            headers=headers,
+        )
+        assert repeated.status_code == 409, repeated.text
+
+
+def test_agent_run_approval_is_actor_scoped() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    with test_client() as client, agent_model_server() as model_base_url:
+        admin_token, workspace_id = activate_admin(client)
+        headers = auth_headers(admin_token)
+        model = client.post(
+            f"/api/v1/workspaces/{workspace_id}/models",
+            headers=headers,
+            json=model_payload(model_base_url, "Approval Scoped Model"),
+        )
+        assert model.status_code == 201, model.text
+        agent = client.post(
+            agents_url(workspace_id),
+            headers=headers,
+            json={
+                "name": "Approval Scoped Agent",
+                "instructions": "Require approval.",
+                "model_id": model.json()["id"],
+            },
+        )
+        assert agent.status_code == 201, agent.text
+        agent_id = agent.json()["id"]
+
+        # SEC-011: only the run owner may approve; other workspace users see
+        # the run as missing (404), and a wrong call id is also 404.
+        member_user_id, temporary_password = create_workspace_user(
+            client, admin_token, workspace_id
+        )
+        member_token = activate_user(
+            client,
+            "agent-member",
+            temporary_password,
+            MEMBER_PASSWORD,
+        )
+        granted = client.put(
+            agents_url(workspace_id, f"/{agent_id}/permissions/{member_user_id}"),
+            headers=headers,
+            json={"permission": "view"},
+        )
+        assert granted.status_code == 200, granted.text
+        with patch(
+            "app.application.agent_runs.enqueue_prepared_agent_run",
+            new=AsyncMock(),
+        ):
+            created = client.post(
+                agents_url(workspace_id, f"/{agent_id}/runs"),
+                headers=headers,
+                json={"goal": "approve this run"},
+            )
+        assert created.status_code == 201, created.text
+        run_id = created.json()["id"]
+
+        cross_user = client.post(
+            agents_url(
+                workspace_id,
+                f"/{agent_id}/runs/{run_id}/tool-calls/call-1/approve",
+            ),
+            headers=auth_headers(member_token),
+        )
+        assert cross_user.status_code == 404, cross_user.text
+        wrong_call = client.post(
+            agents_url(
+                workspace_id,
+                f"/{agent_id}/runs/{run_id}/tool-calls/call-missing/approve",
+            ),
+            headers=headers,
+        )
+        assert wrong_call.status_code == 404, wrong_call.text
+        assert member_user_id  # keep referenced
 
 
 if __name__ == "__main__":
     main()
+    test_cancelling_root_run_cancels_active_children()
+    test_agent_run_approval_is_actor_scoped()

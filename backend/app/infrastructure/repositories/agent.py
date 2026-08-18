@@ -3,11 +3,14 @@ from datetime import datetime
 from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import load_only
+from sqlalchemy.orm import aliased, load_only
 
 from app.domain.resource_permission import ResourcePermission as ResourcePermissionORM
 from app.entities.agents import Agent as AgentEntity
 from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
+from app.entities.agents import (
+    AgentPublicationVersion as AgentPublicationVersionEntity,
+)
 from app.entities.agents import AgentRun as AgentRunEntity
 from app.entities.agents import AgentRunEvent as AgentRunEventEntity
 from app.entities.agents import AgentToolCall as AgentToolCallEntity
@@ -20,15 +23,30 @@ from app.infrastructure.repositories.mapping import (
 from app.shareddomain.agents.models import (
     AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_AWAITING_APPROVAL_STATUSES,
+    AGENT_RUN_AWAITING_CHILD_STATUS,
+    AGENT_RUN_AWAITING_CHILD_STATUSES,
     AGENT_RUN_AWAITING_INPUT_STATUS,
+    AGENT_RUN_AWAITING_INPUT_STATUSES,
     AGENT_RUN_FAILED_STATUS,
+    AGENT_RUN_LEGACY_CLAIMABLE_STATUSES,
     AGENT_RUN_QUEUED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
+    AGENT_RUN_CANCELLED_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+    AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES,
+    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
+    agent_run_storage_statuses,
     Agent,
     AgentApiCredential,
     AgentKnowledgeBase,
     AgentMcpTool,
+    AgentPublicationVersion,
     AgentRun,
     AgentRunEvent,
     AgentToolCall,
@@ -135,6 +153,93 @@ async def save_agent(db: AsyncSession, entity: AgentEntity) -> AgentEntity:
 
 async def refresh_agent(db: AsyncSession, entity: AgentEntity) -> AgentEntity:
     return await refresh_entity(db, Agent, AgentEntity, entity)
+
+
+async def create_agent_publication_version(
+    db: AsyncSession,
+    entity: AgentPublicationVersionEntity,
+) -> AgentPublicationVersionEntity:
+    if await db.get(AgentPublicationVersion, entity.id) is not None:
+        raise ValueError("Agent publication versions are immutable.")
+    row = to_orm(AgentPublicationVersion, entity)
+    db.add(row)
+    await db.flush()
+    return to_entity(AgentPublicationVersionEntity, row)
+
+
+async def next_agent_publication_version_number(
+    db: AsyncSession,
+    agent_id: str,
+) -> int:
+    value = await db.scalar(
+        select(func.max(AgentPublicationVersion.version_number)).where(
+            AgentPublicationVersion.agent_id == agent_id
+        )
+    )
+    return int(value or 0) + 1
+
+
+async def get_agent_publication_version(
+    db: AsyncSession,
+    workspace_id: str,
+    version_id: str,
+) -> AgentPublicationVersionEntity | None:
+    row = await db.scalar(
+        select(AgentPublicationVersion).where(
+            AgentPublicationVersion.workspace_id == workspace_id,
+            AgentPublicationVersion.id == version_id,
+        )
+    )
+    return (
+        to_entity(AgentPublicationVersionEntity, row) if row is not None else None
+    )
+
+
+async def list_agent_publication_version_map(
+    db: AsyncSession,
+    workspace_id: str,
+    version_ids: list[str],
+) -> dict[str, AgentPublicationVersionEntity]:
+    if not version_ids:
+        return {}
+    rows = await db.scalars(
+        select(AgentPublicationVersion).where(
+            AgentPublicationVersion.workspace_id == workspace_id,
+            AgentPublicationVersion.id.in_(version_ids),
+        )
+    )
+    versions = [to_entity(AgentPublicationVersionEntity, row) for row in rows.all()]
+    return {version.id: version for version in versions}
+
+
+async def has_agent_publication_audit_references(
+    db: AsyncSession,
+    user_id: str,
+) -> bool:
+    publisher_reference = await db.scalar(
+        select(AgentPublicationVersion.id)
+        .where(AgentPublicationVersion.published_by_user_id == user_id)
+        .limit(1)
+    )
+    if publisher_reference is not None:
+        return True
+    # ponytail: user deletion is rare; use a portable scan until publication volume warrants JSON indexing.
+    resources = await db.scalars(select(AgentPublicationVersion.resource_snapshot))
+    for resource_snapshot in resources.all():
+        tools = resource_snapshot.get("tools", [])
+        if isinstance(tools, list) and any(
+            isinstance(tool, dict) and tool.get("bound_by_user_id") == user_id
+            for tool in tools
+        ):
+            return True
+    run_snapshots = await db.scalars(select(AgentRun.tool_snapshots))
+    for tool_snapshots in run_snapshots.all():
+        if isinstance(tool_snapshots, list) and any(
+            isinstance(tool, dict) and tool.get("bound_by_user_id") == user_id
+            for tool in tool_snapshots
+        ):
+            return True
+    return False
 
 
 async def list_agent_api_credentials(
@@ -347,7 +452,7 @@ async def list_agent_runs(
         .offset(offset)
     )
     if status is not None:
-        statement = statement.where(AgentRun.status == status)
+        statement = statement.where(AgentRun.status.in_(agent_run_storage_statuses(status)))
     if conversation_id is not None:
         statement = statement.where(AgentRun.conversation_id == conversation_id)
     result = await db.scalars(statement)
@@ -665,6 +770,68 @@ async def create_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRun
     return to_entity(AgentRunEntity, orm)
 
 
+async def get_agent_child_run(
+    db: AsyncSession,
+    workspace_id: str,
+    parent_run_id: str,
+    parent_node_id: str,
+) -> AgentRunEntity | None:
+    row = await db.scalar(
+        select(AgentRun).where(
+            AgentRun.workspace_id == workspace_id,
+            AgentRun.parent_run_id == parent_run_id,
+            AgentRun.parent_node_id == parent_node_id,
+        )
+    )
+    return to_entity(AgentRunEntity, row) if row is not None else None
+
+
+async def list_agent_child_runs(
+    db: AsyncSession,
+    workspace_id: str,
+    parent_run_id: str,
+) -> list[AgentRunEntity]:
+    rows = await db.scalars(
+        select(AgentRun)
+        .where(
+            AgentRun.workspace_id == workspace_id,
+            AgentRun.parent_run_id == parent_run_id,
+        )
+        .order_by(AgentRun.created_at, AgentRun.id)
+    )
+    return [to_entity(AgentRunEntity, row) for row in rows.all()]
+
+
+async def list_terminal_children_for_waiting_parents(
+    db: AsyncSession,
+    limit: int = 200,
+) -> list[AgentRunEntity]:
+    parent = aliased(AgentRun)
+    rows = await db.scalars(
+        select(AgentRun)
+        .join(
+            parent,
+            and_(
+                parent.workspace_id == AgentRun.workspace_id,
+                parent.id == AgentRun.parent_run_id,
+            ),
+        )
+        .where(
+            AgentRun.status.in_(
+                (
+                    AGENT_RUN_SUCCEEDED_STATUS,
+                    AGENT_RUN_FAILED_STATUS,
+                    AGENT_RUN_CANCELLED_STATUS,
+                )
+            ),
+            parent.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
+        )
+        .order_by(AgentRun.finished_at, AgentRun.id)
+        .limit(limit)
+    )
+    return [to_entity(AgentRunEntity, row) for row in rows.all()]
+
+
 async def save_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
     orm = await save(db, AgentRun, entity)
     return to_entity(AgentRunEntity, orm)
@@ -680,16 +847,28 @@ async def claim_agent_run(
     worker_task_id: str,
     started_at: datetime,
     lease_expires_at: datetime,
+    *,
+    generation: str = "legacy",
 ) -> bool:
+    claimable_statuses = (
+        AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
+        if generation == "unified"
+        else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
+    )
+    running_status = (
+        AGENT_RUN_UNIFIED_RUNNING_STATUS
+        if generation == "unified"
+        else AGENT_RUN_RUNNING_STATUS
+    )
     result = await db.execute(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
             AgentRun.attempts < AgentRun.max_attempts,
             or_(
-                AgentRun.status == AGENT_RUN_QUEUED_STATUS,
+                AgentRun.status == claimable_statuses[0],
                 and_(
-                    AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+                    AgentRun.status == claimable_statuses[1],
                     or_(
                         AgentRun.lease_expires_at.is_(None),
                         AgentRun.lease_expires_at <= started_at,
@@ -698,7 +877,7 @@ async def claim_agent_run(
             ),
         )
         .values(
-            status=AGENT_RUN_RUNNING_STATUS,
+            status=running_status,
             attempts=AgentRun.attempts + 1,
             worker_task_id=worker_task_id,
             lease_expires_at=lease_expires_at,
@@ -720,7 +899,7 @@ async def renew_agent_run_lease(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(lease_expires_at=lease_expires_at, updated_at=func.now())
@@ -746,7 +925,7 @@ async def save_agent_run_checkpoint(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(**values)
@@ -782,7 +961,7 @@ async def finalize_agent_run(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(**values)
@@ -800,11 +979,17 @@ async def pause_agent_run(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(
-            status=AGENT_RUN_AWAITING_APPROVAL_STATUS,
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+                ),
+                else_=AGENT_RUN_AWAITING_APPROVAL_STATUS,
+            ),
             attempts=case(
                 (AgentRun.attempts > 0, AgentRun.attempts - 1),
                 else_=0,
@@ -827,11 +1012,50 @@ async def pause_agent_run_for_input(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(
-            status=AGENT_RUN_AWAITING_INPUT_STATUS,
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+                ),
+                else_=AGENT_RUN_AWAITING_INPUT_STATUS,
+            ),
+            attempts=case(
+                (AgentRun.attempts > 0, AgentRun.attempts - 1),
+                else_=0,
+            ),
+            last_error=None,
+            worker_task_id=None,
+            lease_expires_at=None,
+            updated_at=func.now(),
+        )
+    )
+    return bool(updated.rowcount)
+
+
+async def pause_agent_run_for_child(
+    db: AsyncSession,
+    run_id: str,
+    worker_task_id: str,
+) -> bool:
+    updated = await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.id == run_id,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRun.worker_task_id == worker_task_id,
+        )
+        .values(
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
+                ),
+                else_=AGENT_RUN_AWAITING_CHILD_STATUS,
+            ),
             attempts=case(
                 (AgentRun.attempts > 0, AgentRun.attempts - 1),
                 else_=0,
@@ -854,11 +1078,17 @@ async def requeue_owned_agent_run(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .values(
-            status=AGENT_RUN_QUEUED_STATUS,
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+                ),
+                else_=AGENT_RUN_QUEUED_STATUS,
+            ),
             attempts=case(
                 (AgentRun.attempts > 0, AgentRun.attempts - 1),
                 else_=0,
@@ -879,10 +1109,16 @@ async def queue_agent_run(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_AWAITING_APPROVAL_STATUS,
+            AgentRun.status.in_(AGENT_RUN_AWAITING_APPROVAL_STATUSES),
         )
         .values(
-            status=AGENT_RUN_QUEUED_STATUS,
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+                ),
+                else_=AGENT_RUN_QUEUED_STATUS,
+            ),
             last_error=None,
             worker_task_id=None,
             lease_expires_at=None,
@@ -901,10 +1137,16 @@ async def queue_agent_run_from_input(
         update(AgentRun)
         .where(
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_AWAITING_INPUT_STATUS,
+            AgentRun.status.in_(AGENT_RUN_AWAITING_INPUT_STATUSES),
         )
         .values(
-            status=AGENT_RUN_QUEUED_STATUS,
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+                ),
+                else_=AGENT_RUN_QUEUED_STATUS,
+            ),
             checkpoint=checkpoint,
             last_error=None,
             worker_task_id=None,
@@ -915,19 +1157,157 @@ async def queue_agent_run_from_input(
     return bool(updated.rowcount)
 
 
+async def queue_agent_run_from_child(
+    db: AsyncSession,
+    run_id: str,
+) -> bool:
+    updated = await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.id == run_id,
+            AgentRun.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
+        )
+        .values(
+            status=case(
+                (
+                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+                ),
+                else_=AGENT_RUN_QUEUED_STATUS,
+            ),
+            last_error=None,
+            worker_task_id=None,
+            lease_expires_at=None,
+            updated_at=func.now(),
+        )
+    )
+    return bool(updated.rowcount)
+
+
+async def fail_agent_run_waiting_for_child(
+    db: AsyncSession,
+    run_id: str,
+    error: str,
+    finished_at: datetime,
+) -> bool:
+    updated = await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.id == run_id,
+            AgentRun.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
+        )
+        .values(
+            status=AGENT_RUN_FAILED_STATUS,
+            last_error=error,
+            worker_task_id=None,
+            lease_expires_at=None,
+            finished_at=finished_at,
+            updated_at=finished_at,
+        )
+    )
+    return bool(updated.rowcount)
+
+
+async def cancel_agent_run_tree(
+    db: AsyncSession,
+    run_id: str,
+    finished_at: datetime,
+) -> list[str]:
+    cancelled = list(
+        await db.scalars(
+            update(AgentRun)
+            .where(
+                or_(AgentRun.id == run_id, AgentRun.root_run_id == run_id),
+                AgentRun.status.in_(AGENT_RUN_ACTIVE_STATUSES),
+            )
+            .values(
+                status=AGENT_RUN_CANCELLED_STATUS,
+                last_error="Cancelled by user.",
+                worker_task_id=None,
+                lease_expires_at=None,
+                finished_at=finished_at,
+                updated_at=finished_at,
+            )
+            .returning(AgentRun.id)
+        )
+    )
+    if not cancelled:
+        return []
+    await db.execute(
+        update(AgentToolCall)
+        .where(
+            AgentToolCall.run_id.in_(cancelled),
+            AgentToolCall.status == "running",
+            AgentToolCall.approval_required.is_(True),
+        )
+        .values(
+            status="uncertain",
+            last_error=(
+                "Tool execution was interrupted by cancellation; confirm the "
+                "external state."
+            ),
+            worker_task_id=None,
+            lease_expires_at=None,
+            finished_at=finished_at,
+            updated_at=finished_at,
+        )
+    )
+    await db.execute(
+        update(AgentToolCall)
+        .where(
+            AgentToolCall.run_id.in_(cancelled),
+            AgentToolCall.status.in_(("pending", "approved", "running")),
+        )
+        .values(
+            status="failed",
+            result_content="Tool invocation was cancelled before completion.",
+            result_summary="Tool invocation cancelled.",
+            result_is_error=True,
+            last_error="Agent run was cancelled.",
+            worker_task_id=None,
+            lease_expires_at=None,
+            finished_at=finished_at,
+            updated_at=finished_at,
+        )
+    )
+    await db.execute(
+        update(WorkflowNodeExecution)
+        .where(
+            WorkflowNodeExecution.run_id.in_(cancelled),
+            WorkflowNodeExecution.status.in_(
+                ("running", "awaiting_input", "awaiting_child")
+            ),
+        )
+        .values(
+            status="failed",
+            error="Workflow run was cancelled.",
+            finished_at=finished_at,
+            updated_at=finished_at,
+        )
+    )
+    return cancelled
+
+
 async def list_recoverable_agent_run_ids(
     db: AsyncSession,
     now: datetime,
     limit: int = 200,
+    *,
+    generation: str = "legacy",
 ) -> list[str]:
+    claimable_statuses = (
+        AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
+        if generation == "unified"
+        else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
+    )
     rows = await db.scalars(
         select(AgentRun.id)
         .where(
             AgentRun.attempts < AgentRun.max_attempts,
             or_(
-                AgentRun.status == AGENT_RUN_QUEUED_STATUS,
+                AgentRun.status == claimable_statuses[0],
                 and_(
-                    AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+                    AgentRun.status == claimable_statuses[1],
                     or_(
                         AgentRun.lease_expires_at.is_(None),
                         AgentRun.lease_expires_at <= now,
@@ -941,15 +1321,25 @@ async def list_recoverable_agent_run_ids(
     return list(rows.all())
 
 
-async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
+async def fail_exhausted_agent_run_ids(
+    db: AsyncSession,
+    now: datetime,
+    *,
+    generation: str = "legacy",
+) -> list[str]:
+    claimable_statuses = (
+        AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
+        if generation == "unified"
+        else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
+    )
     updated = await db.scalars(
         update(AgentRun)
         .where(
             AgentRun.attempts >= AgentRun.max_attempts,
             or_(
-                AgentRun.status == AGENT_RUN_QUEUED_STATUS,
+                AgentRun.status == claimable_statuses[0],
                 and_(
-                    AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+                    AgentRun.status == claimable_statuses[1],
                     or_(
                         AgentRun.lease_expires_at.is_(None),
                         AgentRun.lease_expires_at <= now,
@@ -969,7 +1359,7 @@ async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
     )
     exhausted_run_ids = list(updated.all())
     if not exhausted_run_ids:
-        return 0
+        return []
     await db.execute(
         update(AgentToolCall)
         .where(
@@ -1027,7 +1417,11 @@ async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
             updated_at=now,
         )
     )
-    return len(exhausted_run_ids)
+    return exhausted_run_ids
+
+
+async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
+    return len(await fail_exhausted_agent_run_ids(db, now))
 
 
 async def append_agent_run_event(
@@ -1055,7 +1449,7 @@ async def append_owned_agent_run_event(
         .where(
             AgentRun.workspace_id == workspace_id,
             AgentRun.id == run_id,
-            AgentRun.status == AGENT_RUN_RUNNING_STATUS,
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
         .with_for_update()
@@ -1358,7 +1752,45 @@ async def delete_agent_graph(
             ResourcePermissionORM.resource_id == agent_id,
         )
     )
+    await db.execute(
+        update(Agent)
+        .where(Agent.id == agent_id)
+        .values(current_published_version_id=None)
+    )
     await db.execute(delete(Agent).where(Agent.id == agent_id))
+
+
+async def has_unsettled_agent_execution(
+    db: AsyncSession,
+    agent_id: str,
+) -> bool:
+    active_run = await db.scalar(
+        select(AgentRun.id)
+        .where(
+            AgentRun.agent_id == agent_id,
+            AgentRun.status.in_(AGENT_RUN_ACTIVE_STATUSES),
+        )
+        .limit(1)
+    )
+    if active_run is not None:
+        return True
+    legacy_call = await db.scalar(
+        select(AgentToolCall.id)
+        .join(AgentRun, AgentRun.id == AgentToolCall.run_id)
+        .where(
+            AgentRun.agent_id == agent_id,
+            AgentToolCall.status.in_(
+                ("pending", "approved", "running", "awaiting_approval")
+            ),
+        )
+        .limit(1)
+    )
+    return legacy_call is not None
+
+
+async def list_agent_run_ids(db: AsyncSession, agent_id: str) -> list[str]:
+    rows = await db.scalars(select(AgentRun.id).where(AgentRun.agent_id == agent_id))
+    return list(rows.all())
 
 
 async def delete_workspace_agent_graph(db: AsyncSession, workspace_id: str) -> None:
@@ -1375,5 +1807,10 @@ async def delete_workspace_agent_graph(db: AsyncSession, workspace_id: str) -> N
         delete(AgentKnowledgeBase).where(
             AgentKnowledgeBase.workspace_id == workspace_id
         )
+    )
+    await db.execute(
+        update(Agent)
+        .where(Agent.workspace_id == workspace_id)
+        .values(current_published_version_id=None)
     )
     await db.execute(delete(Agent).where(Agent.workspace_id == workspace_id))

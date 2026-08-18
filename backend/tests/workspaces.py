@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.capabilities.llm.models import RegisteredModel
 from app.domain.resource_permission import ResourcePermission
 from app.infrastructure import object_storage as object_storage_module
+from app.infrastructure.model_utils import new_id
 from app.infrastructure.session import get_session_factory
 from app.shareddomain.agents.models import (
     Agent,
@@ -19,7 +20,7 @@ from app.shareddomain.knowledge.models import (
     KnowledgeTask,
 )
 from app.shareddomain.knowledge.services import knowledge_object_storage
-from app.shareddomain.tools.models import McpServer
+from app.shareddomain.tools.models import McpServer, ToolSource
 from tests.support import (
     activate_admin,
     auth_headers,
@@ -51,7 +52,7 @@ async def assert_workspace_cascade_deleted(
         assert await db.get(Agent, agent_id) is None
         assert await db.get(AgentRun, agent_run_id) is None
         assert await db.get(McpServer, mcp_server_id) is None
-        for model in (AgentKnowledgeBase, AgentMcpTool):
+        for model in (AgentKnowledgeBase, AgentMcpTool, ToolSource):
             rows = await db.scalars(
                 select(model).where(model.workspace_id == workspace_id)
             )
@@ -94,6 +95,16 @@ async def seed_workspace_dependencies(
         )
         db.add_all([model, mcp_server])
         await db.flush()
+        db.add(
+            ToolSource(
+                workspace_id=workspace_id,
+                mcp_server_id=mcp_server.id,
+                kind="mcp",
+                name=mcp_server.name,
+                status="active",
+                created_by_user_id=actor_id,
+            )
+        )
 
         agent = Agent(
             workspace_id=workspace_id,
@@ -107,13 +118,16 @@ async def seed_workspace_dependencies(
         db.add(agent)
         await db.flush()
 
+        agent_run_id = new_id()
         agent_run = AgentRun(
+            id=agent_run_id,
             workspace_id=workspace_id,
             agent_id=agent.id,
             requested_by_user_id=actor_id,
             execution_user_id=actor_id,
             access_source="console",
             consumer_id=actor_id,
+            root_run_id=agent_run_id,
             goal="Verify cascade",
             instructions=agent.instructions,
             knowledge_base_ids=[knowledge_base_id],
@@ -260,7 +274,7 @@ def main() -> None:
             f"/api/v1/workspaces/{default_workspace_id}",
             headers=auth_headers(research_token),
         )
-        assert denied_default.status_code == 403, denied_default.text
+        assert denied_default.status_code == 404, denied_default.text
 
         research_workspace = client.get(
             f"/api/v1/workspaces/{research_workspace_id}",

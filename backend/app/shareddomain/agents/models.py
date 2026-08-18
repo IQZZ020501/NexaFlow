@@ -26,9 +26,39 @@ AGENT_RUN_PLANNED_STATUS = "planned"
 AGENT_RUN_RUNNING_STATUS = "running"
 AGENT_RUN_AWAITING_APPROVAL_STATUS = "awaiting_approval"
 AGENT_RUN_AWAITING_INPUT_STATUS = "awaiting_input"
+AGENT_RUN_AWAITING_CHILD_STATUS = "awaiting_child"
 AGENT_RUN_SUCCEEDED_STATUS = "succeeded"
 AGENT_RUN_FAILED_STATUS = "failed"
 AGENT_RUN_CANCELLED_STATUS = "cancelled"
+AGENT_RUN_UNIFIED_QUEUED_STATUS = "queued_v2"
+AGENT_RUN_UNIFIED_RUNNING_STATUS = "running_v2"
+AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS = "awaiting_approval_v2"
+AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS = "awaiting_input_v2"
+AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS = "awaiting_child_v2"
+AGENT_RUN_LEGACY_CLAIMABLE_STATUSES = (
+    AGENT_RUN_QUEUED_STATUS,
+    AGENT_RUN_RUNNING_STATUS,
+)
+AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES = (
+    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
+)
+AGENT_RUN_RUNNING_STATUSES = (
+    AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
+)
+AGENT_RUN_AWAITING_APPROVAL_STATUSES = (
+    AGENT_RUN_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+)
+AGENT_RUN_AWAITING_INPUT_STATUSES = (
+    AGENT_RUN_AWAITING_INPUT_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+)
+AGENT_RUN_AWAITING_CHILD_STATUSES = (
+    AGENT_RUN_AWAITING_CHILD_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
+)
 AGENT_RUN_ACTIVE_STATUSES = (
     AGENT_RUN_QUEUED_STATUS,
     AGENT_RUN_PLANNING_STATUS,
@@ -36,7 +66,71 @@ AGENT_RUN_ACTIVE_STATUSES = (
     AGENT_RUN_RUNNING_STATUS,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
     AGENT_RUN_AWAITING_INPUT_STATUS,
+    AGENT_RUN_AWAITING_CHILD_STATUS,
+    AGENT_RUN_UNIFIED_QUEUED_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+    AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
 )
+
+
+def is_unified_agent_run_status(value: str) -> bool:
+    return value in {
+        AGENT_RUN_UNIFIED_QUEUED_STATUS,
+        AGENT_RUN_UNIFIED_RUNNING_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
+    }
+
+
+def agent_run_display_status(value: str) -> str:
+    return {
+        AGENT_RUN_UNIFIED_QUEUED_STATUS: AGENT_RUN_QUEUED_STATUS,
+        AGENT_RUN_UNIFIED_RUNNING_STATUS: AGENT_RUN_RUNNING_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS: AGENT_RUN_AWAITING_APPROVAL_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS: AGENT_RUN_AWAITING_INPUT_STATUS,
+        AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS: AGENT_RUN_AWAITING_CHILD_STATUS,
+    }.get(value, value)
+
+
+def agent_run_storage_statuses(value: str) -> tuple[str, ...]:
+    """Return every persisted status represented by one public status."""
+    return {
+        AGENT_RUN_QUEUED_STATUS: (
+            AGENT_RUN_QUEUED_STATUS,
+            AGENT_RUN_UNIFIED_QUEUED_STATUS,
+        ),
+        AGENT_RUN_RUNNING_STATUS: (
+            AGENT_RUN_RUNNING_STATUS,
+            AGENT_RUN_UNIFIED_RUNNING_STATUS,
+        ),
+        AGENT_RUN_AWAITING_APPROVAL_STATUS: (
+            AGENT_RUN_AWAITING_APPROVAL_STATUS,
+            AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+        ),
+        AGENT_RUN_AWAITING_INPUT_STATUS: (
+            AGENT_RUN_AWAITING_INPUT_STATUS,
+            AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
+        ),
+        AGENT_RUN_AWAITING_CHILD_STATUS: (
+            AGENT_RUN_AWAITING_CHILD_STATUS,
+            AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
+        ),
+    }.get(value, (value,))
+
+
+def agent_run_generation(configuration_source: str) -> str:
+    return "unified" if configuration_source in {"draft", "published"} else "legacy"
+
+
+def queued_agent_run_status(generation: str) -> str:
+    return (
+        AGENT_RUN_UNIFIED_QUEUED_STATUS
+        if generation == "unified"
+        else AGENT_RUN_QUEUED_STATUS
+    )
 
 
 class Agent(Base):
@@ -83,6 +177,9 @@ class Agent(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     published_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    current_published_version_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
     published_by_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", name="fk_agents_published_by_user_id"),
         nullable=True,
@@ -98,6 +195,55 @@ class Agent(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
+
+
+class AgentPublicationVersion(Base):
+    __tablename__ = "agent_publication_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "agent_id"],
+            ["agents.workspace_id", "agents.id"],
+            name="fk_agent_publication_versions_agent_workspace",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "agent_id",
+            "version_number",
+            name="uq_agent_publication_versions_agent_number",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_agent_publication_versions_workspace_id",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "agent_id",
+            "id",
+            name="uq_agent_publication_versions_workspace_agent_id",
+        ),
+        CheckConstraint(
+            "version_number >= 1", name="ck_agent_publication_versions_number"
+        ),
+        CheckConstraint(
+            "schema_version >= 1", name="ck_agent_publication_versions_schema"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    configuration_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    resource_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    configuration_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    published_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class AgentKnowledgeBase(Base):
@@ -208,14 +354,47 @@ class AgentRun(Base):
             name="fk_agent_runs_agent_workspace",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "agent_id", "agent_publication_version_id"],
+            [
+                "agent_publication_versions.workspace_id",
+                "agent_publication_versions.agent_id",
+                "agent_publication_versions.id",
+            ],
+            name="fk_agent_runs_publication_workspace",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "root_run_id"],
+            ["agent_runs.workspace_id", "agent_runs.id"],
+            name="fk_agent_runs_root_workspace",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "parent_run_id"],
+            ["agent_runs.workspace_id", "agent_runs.id"],
+            name="fk_agent_runs_parent_workspace",
+            ondelete="CASCADE",
+        ),
         CheckConstraint(
-            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'succeeded', 'failed', 'cancelled')",
+            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'awaiting_child', 'queued_v2', 'running_v2', 'awaiting_approval_v2', 'awaiting_input_v2', 'awaiting_child_v2', 'succeeded', 'failed', 'cancelled')",
             name="ck_agent_runs_status",
         ),
         UniqueConstraint(
             "workspace_id",
             "id",
             name="uq_agent_runs_workspace_id",
+        ),
+        UniqueConstraint(
+            "parent_run_id",
+            "parent_node_id",
+            name="uq_agent_runs_parent_node",
+        ),
+        CheckConstraint(
+            "(depth = 0 AND parent_run_id IS NULL AND parent_node_id IS NULL "
+            "AND root_run_id = id) OR "
+            "(depth = 1 AND parent_run_id IS NOT NULL AND parent_node_id IS NOT NULL "
+            "AND root_run_id = parent_run_id)",
+            name="ck_agent_runs_parent_depth",
         ),
         CheckConstraint(
             "knowledge_query_mode IN ('required', 'agentic')",
@@ -224,6 +403,29 @@ class AgentRun(Base):
         CheckConstraint(
             "access_source IN ('console', 'public', 'api')",
             name="ck_agent_runs_access_source",
+        ),
+        CheckConstraint(
+            "configuration_source IN ('draft', 'published', 'legacy')",
+            name="ck_agent_runs_configuration_source",
+        ),
+        CheckConstraint(
+            "snapshot_schema_version >= 1",
+            name="ck_agent_runs_snapshot_schema_version",
+        ),
+        CheckConstraint(
+            "(configuration_source = 'published' AND agent_publication_version_id IS NOT NULL) "
+            "OR (configuration_source IN ('draft', 'legacy') "
+            "AND agent_publication_version_id IS NULL)",
+            name="ck_agent_runs_publication_source",
+        ),
+        CheckConstraint(
+            "(configuration_source IN ('draft', 'published') AND status IN "
+            "('queued_v2', 'running_v2', 'awaiting_approval_v2', "
+            "'awaiting_input_v2', 'awaiting_child_v2', 'succeeded', 'failed', 'cancelled')) OR "
+            "(configuration_source = 'legacy' AND status IN "
+            "('queued', 'planning', 'planned', 'running', 'awaiting_approval', "
+            "'awaiting_input', 'awaiting_child', 'succeeded', 'failed', 'cancelled'))",
+            name="ck_agent_runs_worker_generation",
         ),
         CheckConstraint(
             "(access_source = 'console' AND requested_by_user_id IS NOT NULL "
@@ -269,6 +471,12 @@ class AgentRun(Base):
     conversation_id: Mapped[str] = mapped_column(
         String(36), nullable=False, default=new_id
     )
+    root_run_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    parent_run_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    parent_node_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     goal: Mapped[str] = mapped_column(Text, nullable=False)
     attachment_context: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=""
@@ -279,6 +487,24 @@ class AgentRun(Base):
         String(20), nullable=False, default="required", server_default="required"
     )
     mcp_tools: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
+    snapshot_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )
+    configuration_source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="legacy"
+    )
+    agent_publication_version_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    application_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    application_snapshot_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, default=""
+    )
+    tool_snapshots: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     model_id: Mapped[str] = mapped_column(String(36), nullable=False)
     model_name: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)

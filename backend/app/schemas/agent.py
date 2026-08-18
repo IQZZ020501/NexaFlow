@@ -3,6 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.tool import ToolRefSchema
 from app.schemas.user import UserResponse
 
 
@@ -67,9 +68,11 @@ class AgentResponse(BaseModel):
     model_id: str
     knowledge_query_mode: KnowledgeQueryMode
     knowledge_base_ids: list[str]
-    mcp_tools: list[AgentMcpToolRef]
+    tools: list[ToolRefSchema] = Field(default_factory=list)
+    mcp_tools: list[AgentMcpToolRef] = Field(default_factory=list, deprecated=True)
     status: str
     published: bool
+    current_published_version_id: str | None = None
     has_unpublished_changes: bool
     published_by_user_id: str | None
     published_at: datetime | None
@@ -90,11 +93,18 @@ class AgentCreateRequest(BaseModel):
     model_id: str = Field(min_length=1, max_length=36)
     knowledge_query_mode: KnowledgeQueryMode = "required"
     knowledge_base_ids: list[str] = Field(default_factory=list, max_length=4)
-    mcp_tools: list[AgentMcpToolRef] = Field(default_factory=list, max_length=12)
+    tools: list[ToolRefSchema] = Field(default_factory=list, max_length=12)
+    mcp_tools: list[AgentMcpToolRef] = Field(
+        default_factory=list,
+        max_length=12,
+        deprecated=True,
+    )
 
     @model_validator(mode="after")
     def validate_interaction_config(self) -> "AgentCreateRequest":
         validate_agent_interaction_config(self.interaction_config, self.app_type)
+        if "tools" in self.model_fields_set and "mcp_tools" in self.model_fields_set:
+            raise ValueError("Use tools or legacy mcp_tools, not both.")
         return self
 
 
@@ -107,9 +117,20 @@ class AgentUpdateRequest(BaseModel):
     model_id: str | None = Field(default=None, min_length=1, max_length=36)
     knowledge_query_mode: KnowledgeQueryMode | None = None
     knowledge_base_ids: list[str] | None = Field(default=None, max_length=4)
-    mcp_tools: list[AgentMcpToolRef] | None = Field(default=None, max_length=12)
+    tools: list[ToolRefSchema] | None = Field(default=None, max_length=12)
+    mcp_tools: list[AgentMcpToolRef] | None = Field(
+        default=None,
+        max_length=12,
+        deprecated=True,
+    )
     status: str | None = Field(default=None, min_length=1, max_length=20)
     published: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_tool_fields(self) -> "AgentUpdateRequest":
+        if self.tools is not None and self.mcp_tools is not None:
+            raise ValueError("Use tools or legacy mcp_tools, not both.")
+        return self
 
 
 class AgentPermissionResponse(BaseModel):
@@ -161,7 +182,9 @@ class AgentRunEventResponse(BaseModel):
     summary: str
     call_id: str = ""
     tool_label: str = ""
-    tool_kind: Literal["knowledge", "mcp", "unknown"] = "unknown"
+    tool_kind: Literal["knowledge", "builtin", "python", "mcp", "unknown"] = (
+        "unknown"
+    )
     server_name: str = ""
     input: dict[str, Any] = Field(default_factory=dict)
     output: Any = None
@@ -197,7 +220,7 @@ class AgentToolCallResponse(BaseModel):
     call_id: str
     turn: int
     tool_name: str
-    tool_kind: Literal["knowledge", "mcp", "unknown"]
+    tool_kind: Literal["knowledge", "builtin", "python", "mcp", "unknown"]
     server_name: str
     arguments: dict[str, Any]
     status: Literal[

@@ -1,11 +1,13 @@
-from datetime import datetime
+import json
 import re
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from jinja2 import Environment, TemplateSyntaxError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.agent import AgentInteractionConfig
+from app.schemas.tool import ToolRefSchema
 
 JINJA_ENV = Environment()
 
@@ -23,6 +25,8 @@ WorkflowNodeType = Literal[
     "reply-node",
     "template",
     "variable",
+    "tool",
+    "agent",
     "mcp",
     "code",
 ]
@@ -109,7 +113,14 @@ class LlmNodeConfig(BaseModel):
     model_setting: LlmModelSetting = Field(default_factory=LlmModelSetting)
     mcp_enable: bool = False
     mcp_servers: list[LlmMcpServer] = Field(default_factory=list, max_length=20)
+    tools: list[ToolRefSchema] = Field(default_factory=list, max_length=20)
     is_result: bool = True
+
+    @model_validator(mode="after")
+    def validate_tools(self) -> "LlmNodeConfig":
+        if len({item.tool_id for item in self.tools}) != len(self.tools):
+            raise ValueError("LLM Tool references must be unique.")
+        return self
 
 
 class ClassifierClass(BaseModel):
@@ -391,6 +402,33 @@ class VariableNodeConfig(BaseModel):
     value: Any
 
 
+class ToolNodeConfig(BaseModel):
+    tool: ToolRefSchema
+    arguments: dict[str, Any] = Field(default_factory=dict, max_length=100)
+
+
+class WorkflowAgentNodeConfig(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=36)
+    agent_version_id: str = Field(min_length=1, max_length=36)
+    input: Any
+
+    @field_validator("input")
+    @classmethod
+    def validate_input_size(cls, value: Any) -> Any:
+        try:
+            encoded = json.dumps(
+                value,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError, UnicodeEncodeError) as exc:
+            raise ValueError("Workflow Agent input must be valid JSON.") from exc
+        if len(encoded) > 128 * 1024:
+            raise ValueError("Workflow Agent input exceeds 128 KiB.")
+        return value
+
+
 class McpNodeConfig(BaseModel):
     server_id: str = Field(min_length=1, max_length=36)
     tool_name: str = Field(min_length=1, max_length=255)
@@ -477,7 +515,14 @@ class WorkflowNodeExecutionResponse(BaseModel):
     run_id: str
     node_id: str
     node_type: WorkflowNodeType
-    status: Literal["running", "awaiting_input", "succeeded", "failed", "skipped"]
+    status: Literal[
+        "running",
+        "awaiting_input",
+        "awaiting_child",
+        "succeeded",
+        "failed",
+        "skipped",
+    ]
     sequence: int
     inputs: dict[str, Any]
     outputs: dict[str, Any]
@@ -559,7 +604,14 @@ class ExternalWorkflowProgressEventResponse(BaseModel):
     id: str
     node_id: str
     node_type: WorkflowNodeType
-    status: Literal["running", "awaiting_input", "succeeded", "failed", "skipped"]
+    status: Literal[
+        "running",
+        "awaiting_input",
+        "awaiting_child",
+        "succeeded",
+        "failed",
+        "skipped",
+    ]
     error: str | None = None
     duration_ms: int | None = None
 

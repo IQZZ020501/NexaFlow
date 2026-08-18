@@ -1,19 +1,20 @@
 <div align="center">
   <img src="frontend/public/NexaFlow-logo.png" width="96" alt="NexaFlow logo" />
   <h1>NexaFlow</h1>
-  <p>面向团队的 AI 应用编排平台，将知识库、模型、Agent、工作流与 MCP 工具统一在工作空间中。</p>
+  <p>面向团队的 AI 应用编排平台，将知识库、模型、Agent、工作流与统一工具能力组织在同一工作空间中。</p>
 
   <p>
     <a href="https://github.com/IQZZ020501/NexaFlow/actions/workflows/ci.yml"><img src="https://github.com/IQZZ020501/NexaFlow/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
     <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB" alt="Python 3.11+" />
     <img src="https://img.shields.io/badge/Next.js-15-000000" alt="Next.js 15" />
+    <a href="https://coderabbit.ai"><img src="https://img.shields.io/coderabbit/prs/github/IQZZ020501/NexaFlow?utm_source=oss&amp;utm_medium=github&amp;utm_campaign=IQZZ020501%2FNexaFlow&amp;labelColor=171717&amp;color=FF570A&amp;link=https%3A%2F%2Fcoderabbit.ai&amp;label=CodeRabbit+Reviews" alt="CodeRabbit Pull Request Reviews" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue" alt="GPLv3 license" /></a>
   </p>
 </div>
 
 ## 项目简介
 
-NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队可以管理模型和知识库，创建可发布的 Agent，使用可视化画布编排工作流，并在服务端权限、审批、预算和运行恢复机制约束下调用 MCP 工具。
+NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队可以管理模型和知识库，创建可发布的 Agent，使用可视化画布编排工作流，并在服务端权限、审批、预算和运行恢复机制约束下调用内置、Python 与 MCP 工具。
 
 ## 核心能力
 
@@ -22,14 +23,14 @@ NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队�
 - **Agent 运行时**：基于 Celery 的耐久执行、运行租约、checkpoint、可重放事件、对话记忆和模型用量记录。
 - **可视化工作流**：React Flow 画布、不可变发布版本、节点审计，以及隔离的 Python Code 节点沙箱。
 - **模型管理**：支持 OpenAI-compatible、Anthropic、Amazon Bedrock、Azure OpenAI、DeepSeek、Gemini 和 Ollama。
-- **MCP 工具**：支持 Streamable HTTP、SSE 和 stdio，提供加密凭据、工具审批和定义变更失效策略。
+- **统一工具系统**：内置、Python 与 MCP 工具共享目录、不可变版本、`view/use` 授权、应用绑定和调用账本；MCP 支持 Streamable HTTP、SSE、stdio、加密凭据与定义变更失效策略。
 - **团队治理**：工作空间与团队分级管理、资源级权限、审计日志和简体中文、繁体中文、英文界面。
 
 ## 产品界面
 
 ### Agent 构建与调试
 
-在同一工作区配置模型、知识库、MCP 工具和系统提示词，并在右侧调试区直接验证 Agent。发布后可继续维护草稿，再通过重新发布更新公开版本。
+在同一工作区配置模型、知识库、统一工具和系统提示词，并在右侧调试区直接验证 Agent。工具绑定固定版本，发布后可继续维护草稿，再通过重新发布更新公开版本。
 
 ![NexaFlow Agent 构建与调试界面](docs/assets/agent-builder.png)
 
@@ -73,7 +74,9 @@ flowchart LR
     Worker --> Storage[(Shared upload storage)]
     Worker --> Sandbox[Isolated Python sandbox]
     Worker --> Models[LLM providers]
-    Worker --> MCP[MCP servers]
+    Worker --> ToolRuntime[Unified Tool Runtime]
+    ToolRuntime --> Sandbox
+    ToolRuntime --> MCP[MCP servers]
 ```
 
 | 层级 | 技术 |
@@ -81,6 +84,7 @@ flowchart LR
 | 前端 | Next.js 15、React 19、TypeScript、Bun、shadcn/ui、Tailwind CSS、React Flow |
 | API | Python 3.11+、FastAPI、SQLAlchemy Async、Alembic |
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
+| 工具 | builtin / Python / MCP 统一目录、不可变版本、授权、策略、绑定与 ToolInvocation |
 | 检索 | Qdrant、PostgreSQL `pg_search` 0.25.2（Jieba/BM25）、RRF、显式引用一跳扩展、可选 reranker |
 | 部署 | PostgreSQL 17 + `pg_search`、Docker Compose、Nginx、独立无网络 Python 沙箱 |
 
@@ -116,6 +120,8 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 `db` 镜像内置 PostgreSQL 17、`pg_search` 0.25.2 及 `pgvector`，并在数据库启动时预加载 `pg_search`。使用外部 PostgreSQL 时必须先安装 `pg_search` 与 `pgvector`，将 `pg_search` 加入 `shared_preload_libraries` 并重启数据库，再执行 Alembic 迁移。
 
+最后一条命令会启动 API、前端、Worker 和无网络沙箱；Python Tool 与 Workflow Python 需要 Worker 和沙箱同时运行。
+
 启动完成后访问：
 
 - Web：<http://localhost:3000>
@@ -143,49 +149,52 @@ docker compose -f deploy/docker-compose.yml down
 
 ## 本地开发
 
-本地开发需要 Python 3.11+、[uv](https://docs.astral.sh/uv/) 和 Bun 1.3+。
+本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。Windows 需要额外安装 GNU Make；Makefile 目标通过 Python 编排，不依赖 Bash。此模式只在 Docker 中运行 PostgreSQL、Redis、Qdrant、Worker 和沙箱，API 与前端直接在宿主机运行；不需要 `deploy/.env`。
 
-### 基础服务
+### 1. 首次初始化
 
 ```bash
+test -f backend/.env || cp backend/.env.example backend/.env
 docker compose \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.dev.yml \
   up -d --build db redis qdrant
-```
 
-### 后端
-
-```bash
-cp backend/.env.example backend/.env
 cd backend
 uv sync --dev --frozen
-make dev
+uv run python -m alembic upgrade head
+
+cd ../frontend
+bun install --frozen-lockfile
 ```
 
-在另一个终端启动合并后的 Worker 与 Beat：
+默认配置使用本机端口 `5432`、`6379` 和 `6333`。如果修改数据库账号或端口，需要同时更新 `backend/.env`。
 
-```bash
-cd backend
-make worker
-```
-
-API 默认运行在 <http://127.0.0.1:8000>。需要测试 Python Code 节点时，可以改用 Compose Worker（不要同时运行 `make worker`）：
+### 2. 启动容器服务
 
 ```bash
 docker compose \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.dev.yml \
-  up -d --build sandbox worker
+  up -d --build db redis qdrant sandbox worker
 ```
 
-开发覆盖会把 `backend/storage` 挂载到 Worker 的 `/data`，与宿主 API 共享上传文件。当 Compose Worker 已运行时，`make dev` 会自动把带 `worker-1 |` 前缀的 Worker 日志同步到同一个终端；退出 API 时日志跟随进程也会一起结束。
+这条命令会一起启动全部开发容器。Compose Worker 内嵌唯一的 Celery Beat，并挂载沙箱 socket 和 `backend/storage`。不要同时运行宿主 `make worker`；宿主 Worker 没有沙箱 socket，不能执行 Python Tool 或 Workflow Python。
 
-### 前端
+### 3. 启动 API
+
+```bash
+cd backend
+make dev
+```
+
+`make dev` 会先执行 Alembic 迁移，再在 <http://127.0.0.1:8000> 启动 API，并自动把 Compose Worker 日志同步到同一个终端。
+如果端口已被其他 API 占用，先停止旧进程，或使用 `make dev PORT=8001` 启动到其他端口。
+
+### 4. 启动前端
 
 ```bash
 cd frontend
-bun install --frozen-lockfile
 bun run dev
 ```
 
@@ -242,7 +251,7 @@ python3 -m sandbox.self_check
 - API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL、Redis、Qdrant，并共享上传存储和加密密钥；不要同时运行第二个 Beat。
 - 远程 MCP 默认拒绝私网与回环地址；只有明确可信的部署才应启用 `MCP_ALLOW_PRIVATE_NETWORKS`。
 - stdio MCP 配置允许工作空间管理员启动后端进程，因此只应向可信管理员开放管理权限。
-- Python Code 节点必须运行在独立沙箱服务中；不要把沙箱 socket 暴露给 API 或宿主外部网络。
+- Python Tool 与 Python Code 节点必须运行在独立沙箱服务中；不要把沙箱 socket 暴露给 API 或宿主外部网络。
 - 不要提交 `backend/.env`、`deploy/.env`、模型凭据或其他真实密钥。
 
 ## 贡献

@@ -60,6 +60,213 @@ async def check_login_rate_limit() -> None:
     assert "rate-limited-user" not in repr(redis.args)
 
 
+async def seed_owned_mcp_source(
+    workspace_id: str,
+    user_id: str,
+) -> tuple[str, str]:
+    from app.entities.tools import McpServer, ToolSource
+    from app.infrastructure.repositories import mcp as mcp_repository
+    from app.infrastructure.repositories import tools as tools_repository
+
+    async with get_session_factory()() as db:
+        server = await mcp_repository.create_mcp_server(
+            db,
+            McpServer(
+                workspace_id=workspace_id,
+                name="Analyst MCP",
+                url="https://analyst.example.com/mcp",
+                created_by_user_id=user_id,
+            ),
+        )
+        source = await tools_repository.save_tool_source(
+            db,
+            ToolSource(
+                workspace_id=workspace_id,
+                mcp_server_id=server.id,
+                kind="mcp",
+                name=server.name,
+                created_by_user_id=user_id,
+            ),
+        )
+        await db.commit()
+        return server.id, source.id
+
+
+async def assert_owned_mcp_source_tombstoned(
+    workspace_id: str,
+    server_id: str,
+    source_id: str,
+) -> None:
+    from app.infrastructure.repositories import mcp as mcp_repository
+    from app.infrastructure.repositories import tools as tools_repository
+
+    async with get_session_factory()() as db:
+        assert await mcp_repository.get_mcp_server_by_id(db, server_id) is None
+        source = await tools_repository.get_tool_source(db, workspace_id, source_id)
+        assert source is not None
+        assert source.status == "archived"
+        assert source.mcp_server_id is None
+        assert source.created_by_user_id is None
+
+
+async def seed_retained_tool_invocation(
+    workspace_id: str,
+    user_id: str,
+    *,
+    bound_by_user_id: str | None = None,
+) -> None:
+    from app.entities.tools import ToolInvocation
+    from app.infrastructure.repositories import tools as tools_repository
+
+    async with get_session_factory()() as db:
+        tool = next(
+            item
+            for item in await tools_repository.list_tools(db, workspace_id)
+            if item.stable_key == "current_time"
+        )
+        assert tool.current_version_id is not None
+        await tools_repository.save_tool_invocation(
+            db,
+            ToolInvocation(
+                workspace_id=workspace_id,
+                origin="test",
+                invocation_id=f"identity-{user_id}",
+                execution_user_id=user_id,
+                access_source="console",
+                tool_id=tool.id,
+                tool_version_id=tool.current_version_id,
+                policy_snapshot={
+                    "tool_snapshot": {"bound_by_user_id": bound_by_user_id}
+                }
+                if bound_by_user_id is not None
+                else {},
+                arguments={},
+                arguments_hash="a" * 64,
+                idempotency_key=f"identity-{user_id}",
+            ),
+        )
+        await db.commit()
+
+
+async def seed_agent_publication_audit(
+    workspace_id: str,
+    published_by_user_id: str,
+    created_by_user_id: str,
+    bound_by_user_id: str | None = None,
+) -> str:
+    from app.capabilities.llm.registry import RegisteredModel
+    from app.entities.agents import Agent, AgentPublicationVersion
+    from app.infrastructure.repositories import agent as agent_repository
+
+    async with get_session_factory()() as db:
+        model_id = await db.scalar(
+            select(RegisteredModel.id).where(
+                RegisteredModel.workspace_id == workspace_id
+            )
+        )
+        if model_id is None:
+            model = RegisteredModel(
+                workspace_id=workspace_id,
+                name="Publication audit model",
+                provider="publication_audit_provider",
+                provider_type="openai_compatible",
+                api_base="",
+                model_type="LLM",
+                model_name="publication-audit-model",
+                status="active",
+                created_by_user_id=created_by_user_id,
+            )
+            db.add(model)
+            await db.flush()
+            model_id = model.id
+        agent = await agent_repository.create_agent(
+            db,
+            Agent(
+                workspace_id=workspace_id,
+                name=f"Publication audit {utc_now().isoformat()}",
+                instructions="Keep this publication immutable.",
+                model_id=model_id,
+                created_by_user_id=created_by_user_id,
+            ),
+        )
+        await agent_repository.create_agent_publication_version(
+            db,
+            AgentPublicationVersion(
+                workspace_id=workspace_id,
+                agent_id=agent.id,
+                configuration_snapshot={},
+                resource_snapshot={
+                    "tools": (
+                        [{"bound_by_user_id": bound_by_user_id}]
+                        if bound_by_user_id is not None
+                        else []
+                    )
+                },
+                configuration_hash="a" * 64,
+                published_by_user_id=published_by_user_id,
+            ),
+        )
+        await db.commit()
+        return agent.id
+
+
+async def seed_agent_run_binder_audit(
+    workspace_id: str,
+    bound_by_user_id: str,
+    created_by_user_id: str,
+) -> None:
+    from app.entities.agents import AgentRun
+    from app.infrastructure.repositories import agent as agent_repository
+
+    agent_id = await seed_agent_publication_audit(
+        workspace_id,
+        created_by_user_id,
+        created_by_user_id,
+    )
+    async with get_session_factory()() as db:
+        agent = await agent_repository.get_agent_by_id(db, agent_id)
+        assert agent is not None and agent.workspace_id == workspace_id
+        await agent_repository.create_agent_run(
+            db,
+            AgentRun(
+                workspace_id=workspace_id,
+                agent_id=agent.id,
+                requested_by_user_id=created_by_user_id,
+                execution_user_id=created_by_user_id,
+                model_id=agent.model_id,
+                configuration_source="legacy",
+                tool_snapshots=[{"bound_by_user_id": bound_by_user_id}],
+                status="succeeded",
+            ),
+        )
+        await db.commit()
+
+
+async def seed_tool_grant(workspace_id: str, user_id: str, actor_id: str) -> None:
+    from app.entities.resource_permission import ResourcePermission
+    from app.infrastructure.repositories import resource_permission as permission_repository
+    from app.infrastructure.repositories import tools as tools_repository
+
+    async with get_session_factory()() as db:
+        tool = next(
+            item
+            for item in await tools_repository.list_tools(db, workspace_id)
+            if item.stable_key == "current_time"
+        )
+        await permission_repository.create_resource_permission(
+            db,
+            ResourcePermission(
+                workspace_id=workspace_id,
+                resource_type="tool",
+                resource_id=tool.id,
+                user_id=user_id,
+                permission="use",
+                created_by_user_id=actor_id,
+            ),
+        )
+        await db.commit()
+
+
 def main() -> None:
     asyncio.run(check_login_rate_limit())
     with test_client() as client:
@@ -180,6 +387,16 @@ def main() -> None:
         assert admin_user["is_active"] is True
         assert admin_user["created_at"]
         admin_user_id = admin_user["id"]
+        identity_workspace = client.post(
+            "/api/v1/workspaces",
+            headers=auth_headers(admin_token),
+            json={
+                "name": "Identity Tool Lifecycle",
+                "admin_user_id": admin_user_id,
+            },
+        )
+        assert identity_workspace.status_code == 201, identity_workspace.text
+        identity_workspace_id = identity_workspace.json()["workspace"]["id"]
 
         created_user = client.post(
             "/api/v1/admin/users",
@@ -262,11 +479,177 @@ def main() -> None:
         )
         assert self_delete.status_code == 400, self_delete.text
 
+        server_id, source_id = asyncio.run(
+            seed_owned_mcp_source(identity_workspace_id, analyst_id)
+        )
+
         deleted_user = client.delete(
             f"/api/v1/admin/users/{analyst_id}",
             headers=auth_headers(admin_token),
         )
         assert deleted_user.status_code == 204, deleted_user.text
+        asyncio.run(
+            assert_owned_mcp_source_tombstoned(
+                identity_workspace_id,
+                server_id,
+                source_id,
+            )
+        )
+
+        retained_user = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "retained-tool-user",
+                "email": "retained-tool-user@example.com",
+                "name": "Retained Tool User",
+            },
+        )
+        assert retained_user.status_code == 201, retained_user.text
+        retained_user_id = retained_user.json()["user"]["id"]
+        asyncio.run(
+            seed_retained_tool_invocation(identity_workspace_id, retained_user_id)
+        )
+        retained_delete = client.delete(
+            f"/api/v1/admin/users/{retained_user_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert retained_delete.status_code == 409, retained_delete.text
+        assert "Tool binding or invocation" in retained_delete.json()["detail"]
+
+        publication_user = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "publication-audit-user",
+                "email": "publication-audit-user@example.com",
+                "name": "Publication Audit User",
+            },
+        )
+        assert publication_user.status_code == 201, publication_user.text
+        publication_user_id = publication_user.json()["user"]["id"]
+        asyncio.run(
+            seed_agent_publication_audit(
+                identity_workspace_id,
+                publication_user_id,
+                admin_user_id,
+            )
+        )
+        publication_delete = client.delete(
+            f"/api/v1/admin/users/{publication_user_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert publication_delete.status_code == 409, publication_delete.text
+        assert "Agent publication" in publication_delete.json()["detail"]
+
+        publication_binder = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "publication-binder-user",
+                "email": "publication-binder-user@example.com",
+                "name": "Publication Binder User",
+            },
+        )
+        assert publication_binder.status_code == 201, publication_binder.text
+        publication_binder_id = publication_binder.json()["user"]["id"]
+        asyncio.run(
+            seed_agent_publication_audit(
+                identity_workspace_id,
+                admin_user_id,
+                admin_user_id,
+                publication_binder_id,
+            )
+        )
+        binder_delete = client.delete(
+            f"/api/v1/admin/users/{publication_binder_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert binder_delete.status_code == 409, binder_delete.text
+        assert "Agent publication" in binder_delete.json()["detail"]
+
+        run_binder = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "run-binder-user",
+                "email": "run-binder-user@example.com",
+                "name": "Run Binder User",
+            },
+        )
+        assert run_binder.status_code == 201, run_binder.text
+        run_binder_id = run_binder.json()["user"]["id"]
+        asyncio.run(
+            seed_agent_run_binder_audit(
+                identity_workspace_id,
+                run_binder_id,
+                admin_user_id,
+            )
+        )
+        run_binder_delete = client.delete(
+            f"/api/v1/admin/users/{run_binder_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert run_binder_delete.status_code == 409, run_binder_delete.text
+        assert "Agent publication" in run_binder_delete.json()["detail"]
+
+        invocation_binder = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "invocation-binder-user",
+                "email": "invocation-binder-user@example.com",
+                "name": "Invocation Binder User",
+            },
+        )
+        assert invocation_binder.status_code == 201, invocation_binder.text
+        invocation_binder_id = invocation_binder.json()["user"]["id"]
+        asyncio.run(
+            seed_retained_tool_invocation(
+                identity_workspace_id,
+                admin_user_id,
+                bound_by_user_id=invocation_binder_id,
+            )
+        )
+        invocation_binder_delete = client.delete(
+            f"/api/v1/admin/users/{invocation_binder_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert invocation_binder_delete.status_code == 409, invocation_binder_delete.text
+        assert (
+            "Tool binding or invocation"
+            in invocation_binder_delete.json()["detail"]
+        )
+
+        grant_only_user = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={
+                "username": "grant-only-user",
+                "email": "grant-only-user@example.com",
+                "name": "Grant Only User",
+            },
+        )
+        assert grant_only_user.status_code == 201, grant_only_user.text
+        grant_only_user_id = grant_only_user.json()["user"]["id"]
+        membership = client.post(
+            f"/api/v1/workspaces/{identity_workspace_id}/members",
+            headers=auth_headers(admin_token),
+            json={"user_id": grant_only_user_id, "role": "member"},
+        )
+        assert membership.status_code == 201, membership.text
+        asyncio.run(
+            seed_tool_grant(
+                identity_workspace_id,
+                grant_only_user_id,
+                admin_user_id,
+            )
+        )
+        grant_only_delete = client.delete(
+            f"/api/v1/admin/users/{grant_only_user_id}",
+            headers=auth_headers(admin_token),
+        )
+        assert grant_only_delete.status_code == 204, grant_only_delete.text
 
         users = client.get("/api/v1/admin/users", headers=auth_headers(admin_token))
         assert users.status_code == 200, users.text

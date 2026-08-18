@@ -26,7 +26,9 @@ from app.schemas.workflow import (
     RerankerNodeConfig,
     StartNodeConfig,
     TemplateNodeConfig,
+    ToolNodeConfig,
     VariableNodeConfig,
+    WorkflowAgentNodeConfig,
     WorkflowGraph,
     WorkflowNode,
 )
@@ -48,6 +50,12 @@ class WorkflowInputRequired(RuntimeError):
         self.form = form
 
 
+class WorkflowChildRequired(RuntimeError):
+    def __init__(self, request: dict[str, Any]):
+        super().__init__("Workflow Agent child is required.")
+        self.request = request
+
+
 class EdgeState(StrEnum):
     UNKNOWN = "unknown"
     TAKEN = "taken"
@@ -57,6 +65,7 @@ class EdgeState(StrEnum):
 class NodeState(StrEnum):
     PENDING = "pending"
     AWAITING_INPUT = "awaiting_input"
+    AWAITING_CHILD = "awaiting_child"
     SUCCEEDED = "succeeded"
     SKIPPED = "skipped"
     FAILED = "failed"
@@ -75,6 +84,8 @@ NODE_CONFIG_MODELS: dict[str, type[BaseModel]] = {
     "reply-node": ReplyNodeConfig,
     "template": TemplateNodeConfig,
     "variable": VariableNodeConfig,
+    "tool": ToolNodeConfig,
+    "agent": WorkflowAgentNodeConfig,
     "mcp": McpNodeConfig,
     "code": CodeNodeConfig,
 }
@@ -105,6 +116,7 @@ class NodeResult:
     model_tokens: int = 0
     model_usage: dict[str, Any] = field(default_factory=dict)
     interrupt: dict[str, Any] | None = None
+    child_request: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -335,6 +347,24 @@ def validate_graph(graph: WorkflowGraph | Mapping[str, Any]) -> WorkflowGraph:
         for other_id in form_ids[index + 1 :]:
             if node_id not in ancestors[other_id] and other_id not in ancestors[node_id]:
                 raise WorkflowValidationError("Form nodes must not run in parallel.")
+    agent_ids = [node.id for node in parsed.nodes if node.data.type == "agent"]
+    if len(agent_ids) > 4:
+        raise WorkflowValidationError("Workflows support at most four Agent nodes.")
+    for index, node_id in enumerate(agent_ids):
+        for other_id in agent_ids[index + 1 :]:
+            if node_id not in ancestors[other_id] and other_id not in ancestors[node_id]:
+                raise WorkflowValidationError("Agent nodes must not run in parallel.")
+    interrupt_ids = [
+        node.id
+        for node in parsed.nodes
+        if node.data.type in {"form-node", "agent"}
+    ]
+    for index, node_id in enumerate(interrupt_ids):
+        for other_id in interrupt_ids[index + 1 :]:
+            if node_id not in ancestors[other_id] and other_id not in ancestors[node_id]:
+                raise WorkflowValidationError(
+                    "Interactive and Agent nodes must not run in parallel."
+                )
     return parsed
 
 
@@ -450,6 +480,7 @@ class WorkflowEngine:
             results = await asyncio.gather(*(execute(node) for node in ready))
             first_error: WorkflowEngineError | None = None
             pending_form: dict[str, Any] | None = None
+            pending_child: dict[str, Any] | None = None
             for node, result in zip(ready, results, strict=True):
                 sequence = current.step_count + 1
                 if isinstance(result, BaseException):
@@ -486,6 +517,19 @@ class WorkflowEngine:
                         current,
                     )
                     pending_form = pending_form or result.interrupt
+                    continue
+
+                if result.child_request is not None:
+                    await on_node_finished(
+                        NodeTransition(
+                            node=node,
+                            status=NodeState.AWAITING_CHILD,
+                            sequence=sequence,
+                            result=result,
+                        ),
+                        current,
+                    )
+                    pending_child = pending_child or result.child_request
                     continue
 
                 if result.model_tokens < 0:
@@ -549,6 +593,8 @@ class WorkflowEngine:
                 raise first_error
             if pending_form is not None:
                 raise WorkflowInputRequired(pending_form)
+            if pending_child is not None:
+                raise WorkflowChildRequired(pending_child)
 
         end = next(node for node in self.graph.nodes if node.data.type == "end")
         if current.node_states[end.id] != NodeState.SUCCEEDED:

@@ -6,10 +6,11 @@ import time
 import traceback
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from langchain_core.tools import StructuredTool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.agent_memory import (
     PreparedConversationMemory,
@@ -18,14 +19,16 @@ from app.application.agent_memory import (
 from app.application.agent_tools import (
     build_knowledge_search_tool,
     build_mcp_agent_tool,
+    build_unified_agent_tool,
     describe_knowledge_sources,
     safe_agent_error,
     set_agent_tool_idempotency_key,
 )
+from app.application.agent_tool_runtime import UnifiedAgentToolRuntime
 from app.application.workspace import build_workspace_context
 from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import McpToolPolicy
+from app.entities.tools import McpToolPolicy, ToolSnapshot
 from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.agent_live_stream import AgentLiveStreamPublisher
@@ -33,6 +36,7 @@ from app.infrastructure.errors import classify_error, log_error
 from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import tools as tool_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.session import get_session_factory
 from app.infrastructure.system_log import record_system_log
@@ -40,7 +44,9 @@ from app.ports.llm import RegisteredModel, build_chat_model
 from app.shareddomain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
 )
 from app.shareddomain.agents.runtime import (
     AgentExecutionPaused,
@@ -53,6 +59,10 @@ from app.shareddomain.agents.runtime import (
     safe_event_value,
 )
 from app.shareddomain.agents.runtime.state import PendingToolCall
+from app.shareddomain.agents.runtime.graph import (
+    MAX_AGENT_TOOL_CALLS,
+    MAX_AGENT_TURNS,
+)
 from app.shareddomain.agents.services import (
     accessible_agent_knowledge_bases,
     get_agent_model,
@@ -64,6 +74,7 @@ from app.shareddomain.tools.services import (
     mcp_tool_definition_hash,
     resolve_mcp_tools,
 )
+from app.shareddomain.tools.runtime import tool_snapshot_from_payload
 
 logger = get_logger(__name__)
 
@@ -73,6 +84,47 @@ RUN_AWAITING_APPROVAL = "awaiting_approval"
 AGENT_EVENT_REPLAY_PAGE_SIZE = 500
 
 
+def _run_limits(
+    run: AgentRun,
+    settings: Settings,
+) -> tuple[float, int, int, int | None]:
+    if run.depth == 0:
+        return (
+            float(settings.agent_run_timeout_seconds),
+            MAX_AGENT_TURNS,
+            MAX_AGENT_TOOL_CALLS,
+            None,
+        )
+    limits = run.application_snapshot.get("runtime_limits")
+    if run.depth != 1 or not isinstance(limits, dict):
+        raise AgentRunnerError("Nested Agent runtime limits are invalid.")
+    deadline_value = limits.get("deadline_at")
+    try:
+        deadline = datetime.fromisoformat(str(deadline_value))
+    except ValueError as exc:
+        raise AgentRunnerError("Nested Agent deadline is invalid.") from exc
+    if deadline.tzinfo is None:
+        raise AgentRunnerError("Nested Agent deadline is invalid.")
+    timeout_seconds = min(
+        float(settings.agent_run_timeout_seconds),
+        (deadline - utc_now()).total_seconds(),
+    )
+    if timeout_seconds <= 0:
+        raise AgentRunnerError("Nested Agent deadline exceeded.")
+    values = (
+        limits.get("max_turns"),
+        limits.get("max_tool_calls"),
+        limits.get("max_model_tokens"),
+    )
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value <= 0
+        for value in values
+    ):
+        raise AgentRunnerError("Nested Agent runtime limits are invalid.")
+    max_turns, max_tool_calls, max_model_tokens = values
+    return timeout_seconds, max_turns, max_tool_calls, max_model_tokens
+
+
 @dataclass(frozen=True)
 class ExecutionScope:
     run: AgentRun
@@ -80,6 +132,7 @@ class ExecutionScope:
     workspace_role: str | None
     model: RegisteredModel
     knowledge_bases: list[KnowledgeBase]
+    tool_snapshots: list[ToolSnapshot]
     mcp_tools: list[tuple[ResolvedMcpTool, str]]
 
 
@@ -265,6 +318,7 @@ class DurableToolLedger:
                             }
                         ],
                         strict=False,
+                        application_id=self.run.agent_id,
                     )
                     if resolved_tools:
                         current_definition_hash = mcp_tool_definition_hash(
@@ -451,7 +505,7 @@ class DurableToolLedger:
 async def _load_execution_scope(run_id: str) -> ExecutionScope:
     async with get_session_factory()() as db:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
-        if run is None or run.status != AGENT_RUN_RUNNING_STATUS:
+        if run is None or run.status not in AGENT_RUN_RUNNING_STATUSES:
             raise AgentRunnerError("Agent run is not executable.")
         actor = await user_repository.get_user_by_id(db, run.execution_user_id)
         if actor is None or not actor.is_active:
@@ -465,11 +519,21 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
             actor,
             context.membership_role,
         )
-        resolved_mcp_tools = await resolve_mcp_tools(
-            db,
-            run.workspace_id,
-            run.mcp_tools,
-            strict=False,
+        tool_snapshots = (
+            [tool_snapshot_from_payload(item) for item in run.tool_snapshots]
+            if run.configuration_source in {"draft", "published"}
+            else []
+        )
+        resolved_mcp_tools = (
+            await resolve_mcp_tools(
+                db,
+                run.workspace_id,
+                run.mcp_tools,
+                strict=False,
+                application_id=run.agent_id,
+            )
+            if run.configuration_source == "legacy"
+            else []
         )
         mcp_tools: list[tuple[ResolvedMcpTool, str]] = []
         for tool in resolved_mcp_tools:
@@ -500,6 +564,7 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
         workspace_role=context.membership_role,
         model=model,
         knowledge_bases=knowledge_bases,
+        tool_snapshots=tool_snapshots,
         mcp_tools=mcp_tools,
     )
 
@@ -548,23 +613,39 @@ async def _pause_agent_run_for_tool(
         )
         requeued = False
         if paused:
-            call = await agent_repository.get_agent_tool_call_by_call_id(
-                db,
-                run_id,
-                call_id,
-            )
+            run = await agent_repository.get_agent_run_by_id(db, run_id)
+            assert run is not None
+            if run.configuration_source in {"draft", "published"}:
+                calls = await tool_repository.list_tool_invocations(
+                    db,
+                    run.workspace_id,
+                    run_id,
+                )
+                call = next(
+                    (
+                        item
+                        for item in calls
+                        if item.invocation_id == call_id
+                    ),
+                    None,
+                )
+            else:
+                call = await agent_repository.get_agent_tool_call_by_call_id(
+                    db,
+                    run_id,
+                    call_id,
+                )
             if call is not None and call.status in {"approved", "rejected"}:
                 requeued = await agent_repository.queue_agent_run(db, run_id)
             if not requeued:
-                run = await agent_repository.get_agent_run_by_id(db, run_id)
-                assert run is not None
+                event_call_id = call_id.partition(":")[2] or call_id
                 await agent_repository.append_agent_run_event(
                     db,
                     run.workspace_id,
                     run_id,
                     {
                         "type": "approval_required",
-                        "call_id": call_id,
+                        "call_id": event_call_id,
                         "reason": reason,
                     },
                 )
@@ -606,6 +687,18 @@ async def _execute_claimed_agent_run(
 ) -> str:
     scope = await _load_execution_scope(run_id)
     run = scope.run
+    run_timeout, max_turns, max_tool_calls, max_model_tokens = _run_limits(
+        run,
+        settings,
+    )
+    if run.depth == 1 and any(
+        snapshot.approval != "auto"
+        or snapshot.effect not in {"pure", "external_read"}
+        for snapshot in scope.tool_snapshots
+    ):
+        raise AgentRunnerError(
+            "Nested Agent Tools must be automatic and read-only."
+        )
     process_events = list(run.events)
     started_at = time.perf_counter()
     knowledge_tool = (
@@ -673,16 +766,18 @@ async def _execute_claimed_agent_run(
     if knowledge_tool is not None and run.knowledge_query_mode == "agentic":
         tools.append(knowledge_tool)
     tools.extend(
-        build_mcp_agent_tool(tool, settings, policy_mode)
+        build_mcp_agent_tool(tool, settings, run.agent_id, policy_mode)
         for tool, policy_mode in scope.mcp_tools
     )
+    tools.extend(build_unified_agent_tool(snapshot) for snapshot in scope.tool_snapshots)
+    has_application_tools = bool(scope.mcp_tools or scope.tool_snapshots)
     from app.application.agent_runs import execution_messages
 
     chat_model = build_chat_model(settings, scope.model)
     base_messages = execution_messages(
         run,
         knowledge_tool is not None and run.knowledge_query_mode == "agentic",
-        bool(scope.mcp_tools),
+        has_application_tools,
         knowledge_scope=(
             describe_knowledge_sources(scope.knowledge_bases)
             if scope.knowledge_bases
@@ -704,7 +799,7 @@ async def _execute_claimed_agent_run(
                     tools,
                     timeout_seconds=min(
                         60.0,
-                        float(settings.agent_run_timeout_seconds),
+                        run_timeout,
                     ),
                 )
                 await memory_db.commit()
@@ -722,7 +817,7 @@ async def _execute_claimed_agent_run(
     messages = execution_messages(
         run,
         knowledge_tool is not None and run.knowledge_query_mode == "agentic",
-        bool(scope.mcp_tools),
+        has_application_tools,
         knowledge_scope=(
             describe_knowledge_sources(scope.knowledge_bases)
             if scope.knowledge_bases
@@ -732,7 +827,44 @@ async def _execute_claimed_agent_run(
         knowledge_context=knowledge_context,
         context_messages=memory.messages,
     )
-    ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
+    if run.configuration_source in {"draft", "published"}:
+        unified_runtime = UnifiedAgentToolRuntime(
+            run,
+            scope.tool_snapshots,
+            worker_task_id,
+            settings,
+            lease_lost,
+        )
+        knowledge_ledger = DurableToolLedger(
+            run,
+            worker_task_id,
+            settings,
+            lease_lost,
+        )
+
+        async def before_tool_call(turn, call, metadata, arguments):
+            if metadata.get("kind") == "knowledge":
+                return await knowledge_ledger.before(
+                    turn,
+                    call,
+                    metadata,
+                    arguments,
+                )
+            return await unified_runtime.before(turn, call, metadata, arguments)
+
+        async def after_tool_call(turn, call, metadata, arguments, result):
+            if metadata.get("kind") == "knowledge":
+                await knowledge_ledger.after(
+                    turn,
+                    call,
+                    metadata,
+                    arguments,
+                    result,
+                )
+    else:
+        legacy_ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
+        before_tool_call = legacy_ledger.before
+        after_tool_call = legacy_ledger.after
     live_stream = AgentLiveStreamPublisher(settings, run.id)
 
     async def record_event(event: dict[str, Any]) -> None:
@@ -764,7 +896,7 @@ async def _execute_claimed_agent_run(
 
     try:
         try:
-            async with asyncio.timeout(settings.agent_run_timeout_seconds):
+            async with asyncio.timeout(run_timeout):
                 result = await run_agent(
                     chat_model,
                     messages,
@@ -773,9 +905,12 @@ async def _execute_claimed_agent_run(
                     tool_timeout_seconds=settings.agent_tool_timeout_seconds,
                     checkpoint=run.checkpoint or None,
                     on_checkpoint=save_checkpoint,
-                    before_tool_call=ledger.before,
-                    after_tool_call=ledger.after,
+                    before_tool_call=before_tool_call,
+                    after_tool_call=after_tool_call,
                     initial_usage=memory.model_usage,
+                    max_turns=max_turns,
+                    max_tool_calls=max_tool_calls,
+                    max_model_tokens=max_model_tokens,
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc
@@ -949,7 +1084,7 @@ async def _fail_unhandled_claimed_run(
         current = await _current_run(run_id)
         return (
             RUN_BUSY
-            if current.status in {"queued", AGENT_RUN_RUNNING_STATUS}
+            if current.status in {"queued", "queued_v2", *AGENT_RUN_RUNNING_STATUSES}
             else RUN_FINISHED
         )
     current = await _current_run(run_id)
@@ -960,10 +1095,12 @@ async def _fail_unhandled_claimed_run(
     return RUN_FINISHED
 
 
-async def run_durable_agent_run(
+async def _run_durable_agent_run(
     run_id: str,
     settings: Settings,
     worker_task_id: str | None = None,
+    *,
+    generation: str,
 ) -> str:
     worker_task_id = worker_task_id or new_id()
     now = utc_now()
@@ -974,15 +1111,22 @@ async def run_durable_agent_run(
             worker_task_id,
             now,
             now + timedelta(seconds=settings.agent_executor_lease_seconds),
+            generation=generation,
         )
         if claimed:
-            await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
+            if generation == "legacy":
+                await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
         else:
-            await agent_repository.fail_exhausted_agent_runs(db, now)
+            await fail_exhausted_agent_runs(db, now, generation=generation)
         await db.commit()
     if not claimed:
         current = await _current_run(run_id)
-        return RUN_BUSY if current.status == AGENT_RUN_RUNNING_STATUS else RUN_FINISHED
+        expected_running = (
+            AGENT_RUN_UNIFIED_RUNNING_STATUS
+            if generation == "unified"
+            else AGENT_RUN_RUNNING_STATUS
+        )
+        return RUN_BUSY if current.status == expected_running else RUN_FINISHED
 
     lease_lost = asyncio.Event()
     heartbeat = asyncio.create_task(
@@ -1013,11 +1157,95 @@ async def run_durable_agent_run(
             await heartbeat
 
 
-async def list_recoverable_agent_run_ids(settings: Settings) -> list[str]:
+async def _list_recoverable_agent_run_ids(
+    settings: Settings,
+    *,
+    generation: str,
+) -> list[str]:
     del settings
     async with get_session_factory()() as db:
         now = utc_now()
-        await agent_repository.fail_exhausted_agent_runs(db, now)
-        run_ids = await agent_repository.list_recoverable_agent_run_ids(db, now)
+        await fail_exhausted_agent_runs(db, now, generation=generation)
+        run_ids = await agent_repository.list_recoverable_agent_run_ids(
+            db,
+            now,
+            generation=generation,
+        )
         await db.commit()
     return run_ids
+
+
+async def list_recoverable_agent_run_ids(settings: Settings) -> list[str]:
+    return await _list_recoverable_agent_run_ids(settings, generation="legacy")
+
+
+async def list_recoverable_unified_agent_run_ids(settings: Settings) -> list[str]:
+    return await _list_recoverable_agent_run_ids(settings, generation="unified")
+
+
+async def list_recoverable_legacy_agent_run_ids(settings: Settings) -> list[str]:
+    return await _list_recoverable_agent_run_ids(settings, generation="legacy")
+
+
+async def fail_exhausted_agent_runs(
+    db: AsyncSession,
+    now: datetime,
+    *,
+    generation: str = "legacy",
+) -> int:
+    run_ids = await agent_repository.fail_exhausted_agent_run_ids(
+        db,
+        now,
+        generation=generation,
+    )
+    if generation == "unified":
+        await tool_repository.settle_exhausted_agent_tool_invocations(
+            db,
+            run_ids,
+            now,
+        )
+    return len(run_ids)
+
+
+async def run_durable_agent_run(
+    run_id: str,
+    settings: Settings,
+    worker_task_id: str | None = None,
+) -> str:
+    run = await _current_run(run_id)
+    return await _run_durable_agent_run(
+        run_id,
+        settings,
+        worker_task_id,
+        generation=(
+            "unified"
+            if run.configuration_source in {"draft", "published"}
+            else "legacy"
+        ),
+    )
+
+
+async def run_durable_unified_agent_run(
+    run_id: str,
+    settings: Settings,
+    worker_task_id: str | None = None,
+) -> str:
+    return await _run_durable_agent_run(
+        run_id,
+        settings,
+        worker_task_id,
+        generation="unified",
+    )
+
+
+async def run_durable_legacy_agent_run(
+    run_id: str,
+    settings: Settings,
+    worker_task_id: str | None = None,
+) -> str:
+    return await _run_durable_agent_run(
+        run_id,
+        settings,
+        worker_task_id,
+        generation="legacy",
+    )

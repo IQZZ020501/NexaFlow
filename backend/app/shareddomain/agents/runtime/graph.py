@@ -57,6 +57,9 @@ class AgentRuntimeContext:
         [int, PendingToolCall, dict[str, str], dict[str, Any], AgentToolResult],
         Awaitable[None],
     ] | None = None
+    max_turns: int = MAX_AGENT_TURNS
+    max_tool_calls: int = MAX_AGENT_TOOL_CALLS
+    max_model_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -118,7 +121,7 @@ async def agent_node(
     state: AgentState,
     runtime: Runtime[AgentRuntimeContext],
 ) -> dict[str, Any]:
-    if state["turn"] > MAX_AGENT_TURNS:
+    if state["turn"] >= runtime.context.max_turns:
         raise AgentRunnerError("Agent turn limit reached.")
 
     turn = state["turn"] + 1
@@ -154,7 +157,7 @@ async def agent_node(
         await callback.answer_delta(delta)
 
     model = runtime.context.model
-    allow_tools = turn < MAX_AGENT_TURNS
+    allow_tools = turn < runtime.context.max_turns
     available_tools = runtime.context.tools
     if state["no_new_evidence_rounds"] >= 2:
         available_tools = [
@@ -192,6 +195,12 @@ async def agent_node(
     messages = [*state["messages"], message]
     tool_calls = [pending_tool_call(call) for call in completion.tool_calls]
     model_usage = merge_usage(state["model_usage"], usage_from_message(message))
+    if (
+        runtime.context.max_model_tokens is not None
+        and int(model_usage.get("total_tokens") or 0)
+        > runtime.context.max_model_tokens
+    ):
+        raise AgentRunnerError("Agent model token limit reached.")
     if tool_calls:
         call_ids = [call["id"] for call in tool_calls]
         if any(not call_id for call_id in call_ids) or len(set(call_ids)) != len(
@@ -337,7 +346,7 @@ async def tool_node(
 ) -> dict[str, Any]:
     calls = state["pending_tool_calls"]
     tool_call_count = state["tool_call_count"] + len(calls)
-    if tool_call_count > MAX_AGENT_TOOL_CALLS:
+    if tool_call_count > runtime.context.max_tool_calls:
         raise AgentRunnerError("Agent tool call limit reached.")
 
     tools = {tool.name: tool for tool in runtime.context.tools}

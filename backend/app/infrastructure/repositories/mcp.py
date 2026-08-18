@@ -13,6 +13,7 @@ from app.infrastructure.repositories.mapping import (
 from app.shareddomain.agents.models import AgentMcpTool
 from app.shareddomain.tools.models import McpServer as McpServerOrm
 from app.shareddomain.tools.models import McpToolPolicy as McpToolPolicyOrm
+from app.shareddomain.tools.models import ToolSource as ToolSourceOrm
 
 
 async def list_mcp_servers(
@@ -31,6 +32,37 @@ async def list_mcp_servers(
     return [to_entity(McpServer, row) for row in result.all()]
 
 
+async def list_manageable_mcp_servers(
+    db: AsyncSession,
+    workspace_id: str,
+    actor_id: str,
+    is_workspace_admin: bool,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[McpServer]:
+    statement = (
+        select(McpServerOrm)
+        .join(
+            ToolSourceOrm,
+            (ToolSourceOrm.workspace_id == McpServerOrm.workspace_id)
+            & (ToolSourceOrm.mcp_server_id == McpServerOrm.id),
+        )
+        .where(
+            McpServerOrm.workspace_id == workspace_id,
+            ToolSourceOrm.kind == "mcp",
+        )
+    )
+    if not is_workspace_admin:
+        statement = statement.where(ToolSourceOrm.created_by_user_id == actor_id)
+    rows = await db.scalars(
+        statement
+        .order_by(McpServerOrm.created_at.desc(), McpServerOrm.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return [to_entity(McpServer, row) for row in rows.all()]
+
+
 async def list_mcp_servers_by_ids(
     db: AsyncSession,
     workspace_id: str,
@@ -45,6 +77,18 @@ async def list_mcp_servers_by_ids(
         )
     )
     return [to_entity(McpServer, row) for row in result.all()]
+
+
+async def list_mcp_servers_by_creator(
+    db: AsyncSession,
+    user_id: str,
+) -> list[McpServer]:
+    rows = await db.scalars(
+        select(McpServerOrm)
+        .where(McpServerOrm.created_by_user_id == user_id)
+        .order_by(McpServerOrm.workspace_id, McpServerOrm.created_at, McpServerOrm.id)
+    )
+    return [to_entity(McpServer, row) for row in rows.all()]
 
 
 async def get_mcp_server_by_id(db: AsyncSession, server_id: str) -> McpServer | None:
@@ -78,6 +122,7 @@ async def delete_mcp_server(db: AsyncSession, entity: McpServer) -> None:
     row = await db.get(McpServerOrm, entity.id)
     if row is not None:
         await db.delete(row)
+        await db.flush()
 
 
 async def delete_workspace_mcp_servers(db: AsyncSession, workspace_id: str) -> None:

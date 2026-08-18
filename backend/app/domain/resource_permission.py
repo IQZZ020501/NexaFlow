@@ -21,14 +21,13 @@ class ResourcePermission(Base):
             ["workspace_id", "user_id"],
             ["workspace_memberships.workspace_id", "workspace_memberships.user_id"],
             name="fk_resource_permission_workspace_user",
+            ondelete="CASCADE",
         ),
         CheckConstraint(
-            "resource_type IN ('knowledge_base', 'agent')",
-            name="ck_resource_permissions_resource_type",
-        ),
-        CheckConstraint(
-            "permission IN ('view', 'edit')",
-            name="ck_resource_permissions_permission",
+            "(resource_type = 'knowledge_base' AND permission IN ('view', 'edit')) OR "
+            "(resource_type = 'agent' AND permission = 'view') OR "
+            "(resource_type = 'tool' AND permission IN ('view', 'use'))",
+            name="ck_resource_permissions_type_permission",
         ),
     )
 

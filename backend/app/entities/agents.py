@@ -19,11 +19,26 @@ class Agent:
     status: str = "active"
     published: bool = False
     published_snapshot: dict[str, Any] | None = None
+    current_published_version_id: str | None = None
     published_by_user_id: str | None = None
     published_at: datetime | None = None
     created_by_user_id: str = ""
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class AgentPublicationVersion:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    agent_id: str = ""
+    version_number: int = 1
+    schema_version: int = 1
+    configuration_snapshot: dict[str, Any] = field(default_factory=dict)
+    resource_snapshot: dict[str, Any] = field(default_factory=dict)
+    configuration_hash: str = ""
+    published_by_user_id: str = ""
+    created_at: datetime = field(default_factory=utc_now)
 
 
 @dataclass
@@ -69,12 +84,22 @@ class AgentRun:
     access_source: str = "console"
     consumer_id: str = ""
     conversation_id: str = field(default_factory=new_id)
+    root_run_id: str = ""
+    parent_run_id: str | None = None
+    parent_node_id: str | None = None
+    depth: int = 0
     goal: str = ""
     attachment_context: str = ""
     instructions: str = ""
     knowledge_base_ids: list[str] = field(default_factory=list)
     knowledge_query_mode: str = "required"
     mcp_tools: list[dict[str, str]] = field(default_factory=list)
+    snapshot_schema_version: int = 1
+    configuration_source: str = "legacy"
+    agent_publication_version_id: str | None = None
+    application_snapshot: dict[str, Any] = field(default_factory=dict)
+    application_snapshot_hash: str = ""
+    tool_snapshots: list[dict[str, Any]] = field(default_factory=list)
     model_id: str = ""
     model_name: str = ""
     status: str = "queued"
@@ -98,6 +123,7 @@ class AgentRun:
     updated_at: datetime = field(default_factory=utc_now)
 
     def __post_init__(self) -> None:
+        self.root_run_id = self.root_run_id or self.parent_run_id or self.id
         if self.access_source == "console" and self.requested_by_user_id:
             self.execution_user_id = self.execution_user_id or self.requested_by_user_id
             self.consumer_id = self.consumer_id or self.requested_by_user_id

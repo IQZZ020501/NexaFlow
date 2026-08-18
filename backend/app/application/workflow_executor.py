@@ -1,26 +1,29 @@
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass, replace as dataclass_replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import json
 import traceback
 from typing import Any
 
 from app.application.agent_executor import (
-    DurableToolLedger,
     RUN_BUSY,
     RUN_FINISHED,
     maintain_agent_run_lease,
 )
+from app.application.agent_child_runs import (
+    ensure_workflow_agent_child,
+    preflight_workflow_agent_snapshots,
+)
 from app.application.workflow_nodes import WorkflowNodeScope, execute_workflow_node
+from app.application.workflow_tool_runtime import WorkflowToolRuntime
 from app.application.workspace import build_workspace_context
 from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import McpToolPolicy
+from app.entities.tools import ToolSnapshot
 from app.entities.user import User
 from app.entities.workflows import WorkflowNodeExecution, WorkflowRunDetail
 from app.infrastructure.agent_live_stream import AgentLiveStreamPublisher
-from app.infrastructure.code_sandbox import WorkflowSandboxError
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import classify_error
 from app.infrastructure.model_utils import new_id, utc_now
@@ -39,7 +42,9 @@ from app.schemas.workflow import LlmNodeConfig, RerankerNodeConfig, WorkflowGrap
 from app.shareddomain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
+    AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
 )
 from app.shareddomain.agents.runtime import (
     empty_usage,
@@ -50,18 +55,18 @@ from app.shareddomain.agents.services import (
     accessible_agent_knowledge_bases,
     get_agent_model,
 )
-from app.shareddomain.tools.services import (
-    ResolvedMcpTool,
-    effective_mcp_tool_policy_mode,
-    get_mcp_tool_policy,
-    resolve_mcp_tools,
-)
+from app.shareddomain.tools.runtime import tool_snapshot_payload
 from app.shareddomain.workflows.engine import (
     NodeTransition,
     WorkflowEngine,
     WorkflowEngineError,
     WorkflowEngineState,
     WorkflowInputRequired,
+    WorkflowChildRequired,
+)
+from app.shareddomain.workflows.resources import (
+    load_workflow_agent_snapshots,
+    load_workflow_resource_snapshot,
 )
 
 MAX_WORKFLOW_OUTPUT_BYTES = 256 * 1024
@@ -146,14 +151,16 @@ class WorkflowExecutionScope:
     workspace_role: str | None
     models: dict[str, RegisteredModel]
     knowledge_bases: dict[str, KnowledgeBase]
-    mcp_tools: dict[tuple[str, str], tuple[ResolvedMcpTool, McpToolPolicy]]
+    tool_snapshots: list[ToolSnapshot]
+    agent_snapshots: list[dict[str, Any]]
+    child_runs: dict[str, AgentRun]
 
 
 async def _load_scope(run_id: str) -> WorkflowExecutionScope:
     async with get_session_factory()() as db:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
         detail = await workflow_repository.get_run_detail(db, run_id)
-        if run is None or detail is None or run.status != AGENT_RUN_RUNNING_STATUS:
+        if run is None or detail is None or run.status not in AGENT_RUN_RUNNING_STATUSES:
             raise WorkflowEngineError("Workflow run is not executable.")
         agent = await agent_repository.get_agent_by_id(db, run.agent_id)
         if agent is None or agent.app_type != "workflow" or agent.status != "active":
@@ -163,6 +170,34 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
             raise WorkflowEngineError("Workflow run user is unavailable.")
         context = await build_workspace_context(db, actor, run.workspace_id)
         graph = WorkflowGraph.model_validate(detail.graph_snapshot)
+        try:
+            knowledge_base_ids, tool_snapshots = load_workflow_resource_snapshot(
+                graph,
+                detail.resource_snapshot,
+                detail.resource_hash,
+            )
+            agent_snapshots = load_workflow_agent_snapshots(
+                graph,
+                detail.resource_snapshot,
+                detail.resource_hash,
+            )
+            await preflight_workflow_agent_snapshots(
+                db,
+                run.workspace_id,
+                agent_snapshots,
+                execution_user_id=run.execution_user_id,
+                access_source=run.access_source,
+            )
+        except ValueError as exc:
+            raise WorkflowEngineError(
+                "Workflow resource snapshot is invalid."
+            ) from exc
+        if (
+            knowledge_base_ids != run.knowledge_base_ids
+            or [tool_snapshot_payload(item) for item in tool_snapshots]
+            != run.tool_snapshots
+        ):
+            raise WorkflowEngineError("Workflow run snapshot is inconsistent.")
         model_ids = {run.model_id}
         model_ids.update(
             str(node.data.config["model_id"])
@@ -192,30 +227,21 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
         knowledge_bases = await accessible_agent_knowledge_bases(
             db,
             run.workspace_id,
-            run.knowledge_base_ids,
+            knowledge_base_ids,
             actor,
             context.membership_role,
         )
-        resolved_mcp = await resolve_mcp_tools(
-            db,
-            run.workspace_id,
-            run.mcp_tools,
-            strict=False,
-        )
-        mcp_tools = {}
-        for tool in resolved_mcp:
-            policy = await get_mcp_tool_policy(
-                db,
-                run.workspace_id,
-                tool.server.id,
-                tool.definition.name,
-            )
-            if (
-                policy is not None
-                and effective_mcp_tool_policy_mode(tool.definition, policy)
-                == "read_only"
-            ):
-                mcp_tools[(tool.server.id, tool.definition.name)] = (tool, policy)
+        child_runs = {}
+        if agent_snapshots:
+            child_runs = {
+                child.parent_node_id: child
+                for child in await agent_repository.list_agent_child_runs(
+                    db,
+                    run.workspace_id,
+                    run.id,
+                )
+                if child.parent_node_id is not None
+            }
     return WorkflowExecutionScope(
         run=run,
         detail=detail,
@@ -223,7 +249,9 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
         workspace_role=context.membership_role,
         models=models,
         knowledge_bases={item.id: item for item in knowledge_bases},
-        mcp_tools=mcp_tools,
+        tool_snapshots=tool_snapshots,
+        agent_snapshots=agent_snapshots,
+        child_runs=child_runs,
     )
 
 
@@ -232,8 +260,6 @@ def _safe_node_error(exc: Exception) -> str:
         return "Workflow model request timed out."
     if isinstance(exc, ModelProviderError):
         return "Workflow model request failed."
-    if isinstance(exc, WorkflowSandboxError):
-        return str(exc)
     if isinstance(exc, (ValueError, RuntimeError)):
         return str(exc)[:1000]
     return "Workflow node execution failed."
@@ -255,8 +281,14 @@ async def _execute_claimed_workflow_run(
     run, detail = scope.run, scope.detail
     graph = WorkflowGraph.model_validate(detail.graph_snapshot)
     workflow_globals, node_histories = await _workflow_context(run, graph)
-    node_order = {node.id: index for index, node in enumerate(graph.nodes)}
-    ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
+    tool_runtime = WorkflowToolRuntime(
+        run,
+        detail,
+        scope.tool_snapshots,
+        worker_task_id,
+        settings,
+        lease_lost,
+    )
     live_stream = AgentLiveStreamPublisher(settings, run.id)
 
     async def output_delta(node_id: str, delta: str) -> None:
@@ -276,10 +308,9 @@ async def _execute_claimed_workflow_run(
         settings=settings,
         models=scope.models,
         knowledge_bases=scope.knowledge_bases,
-        mcp_tools=scope.mcp_tools,
-        ledger=ledger,
-        node_order=node_order,
+        tool_runtime=tool_runtime,
         node_histories=node_histories,
+        child_runs=scope.child_runs,
         output_delta=output_delta,
     )
     engine = WorkflowEngine(
@@ -311,6 +342,7 @@ async def _execute_claimed_workflow_run(
         form_submissions=form_submissions,
     )
     node_errors: dict[str, Exception] = {}
+    pending_child_ids: dict[str, str] = {}
 
     async def execute(node, context):
         if lease_lost.is_set():
@@ -415,6 +447,46 @@ async def _execute_claimed_workflow_run(
                     checkpoint_payload["workflow_form_submissions"] = form_submissions
                 if transition.result.interrupt is not None:
                     checkpoint_payload["workflow_form"] = transition.result.interrupt
+                if transition.result.child_request is not None:
+                    request = transition.result.child_request
+                    agent_id = request.get("agent_id")
+                    version_id = request.get("agent_version_id")
+                    agent_snapshot = next(
+                        (
+                            item
+                            for item in scope.agent_snapshots
+                            if item.get("agent_id") == agent_id
+                            and item.get("version_id") == version_id
+                        ),
+                        None,
+                    )
+                    if agent_snapshot is None:
+                        raise WorkflowEngineError(
+                            "Workflow Agent snapshot is missing.",
+                            node_id=transition.node.id,
+                        )
+                    child = await ensure_workflow_agent_child(
+                        db,
+                        run,
+                        transition.node.id,
+                        request.get("input"),
+                        agent_snapshot,
+                        scope.actor,
+                        scope.workspace_role,
+                        deadline_at=(
+                            detail.deadline_at
+                            if detail.deadline_at.tzinfo is not None
+                            else detail.deadline_at.replace(tzinfo=UTC)
+                        ).isoformat(),
+                        remaining_model_tokens=int(
+                            request.get("remaining_model_tokens") or 0
+                        ),
+                    )
+                    pending_child_ids[transition.node.id] = child.id
+                    checkpoint_payload["workflow_child"] = {
+                        "runtime_node_id": transition.node.id,
+                        "child_run_id": child.id,
+                    }
                 saved = await workflow_repository.finish_node_execution(
                     db, item, worker_task_id
                 )
@@ -449,6 +521,15 @@ async def _execute_claimed_workflow_run(
                 if not (saved and checkpoint_saved and detail_saved) or event is None:
                     lease_lost.set()
                     raise WorkflowEngineError("Workflow run lease was lost.")
+                if transition.result.child_request is not None:
+                    paused = await agent_repository.pause_agent_run_for_child(
+                        db,
+                        run.id,
+                        worker_task_id,
+                    )
+                    if not paused:
+                        lease_lost.set()
+                        raise WorkflowEngineError("Workflow run lease was lost.")
                 node_executions[transition.node.id] = item
                 await db.commit()
 
@@ -484,6 +565,24 @@ async def _execute_claimed_workflow_run(
                 )
             await db.commit()
         return RUN_FINISHED if paused else RUN_BUSY
+    except WorkflowChildRequired as exc:
+        node_id = str(exc.request.get("runtime_node_id") or "")
+        child_id = pending_child_ids.get(node_id)
+        if child_id is None:
+            async with get_session_factory()() as db:
+                child = await agent_repository.get_agent_child_run(
+                    db,
+                    run.workspace_id,
+                    run.id,
+                    node_id,
+                )
+            child_id = child.id if child is not None else None
+        if child_id is None:
+            raise WorkflowEngineError("Workflow Agent child was not persisted.")
+        from app.application.agent_runs import enqueue_prepared_agent_run
+
+        await enqueue_prepared_agent_run(child_id, settings, unified=True)
+        return RUN_FINISHED
     except WorkflowEngineError as exc:
         original = node_errors.get(exc.node_id or "")
         if original is not None:
@@ -604,6 +703,8 @@ async def run_durable_workflow_run(
     run_id: str,
     settings: Settings,
     worker_task_id: str | None = None,
+    *,
+    generation: str = "legacy",
 ) -> str:
     worker_task_id = worker_task_id or new_id()
     now = utc_now()
@@ -614,6 +715,7 @@ async def run_durable_workflow_run(
             worker_task_id,
             now,
             now + timedelta(seconds=settings.agent_executor_lease_seconds),
+            generation=generation,
         )
         if claimed:
             await workflow_repository.set_first_run_deadline(
@@ -622,14 +724,21 @@ async def run_durable_workflow_run(
                 worker_task_id,
                 now + timedelta(seconds=settings.agent_run_timeout_seconds),
             )
-            await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
+            if generation == "legacy":
+                await agent_repository.mark_expired_agent_tool_calls(db, run_id, now)
         await db.commit()
     if not claimed:
         async with get_session_factory()() as db:
             current = await agent_repository.get_agent_run_by_id(db, run_id)
         return (
             RUN_BUSY
-            if current is not None and current.status == AGENT_RUN_RUNNING_STATUS
+            if current is not None
+            and current.status
+            == (
+                AGENT_RUN_UNIFIED_RUNNING_STATUS
+                if generation == "unified"
+                else AGENT_RUN_RUNNING_STATUS
+            )
             else RUN_FINISHED
         )
 

@@ -44,7 +44,7 @@ def create_celery_app() -> Celery:
     app = Celery(
         "app",
         broker=settings.celery_broker_url,
-        include=["app.tasks.knowledge", "app.tasks.agents"],
+        include=["app.tasks.knowledge", "app.tasks.agents", "app.tasks.tools"],
     )
     app.conf.update(
         accept_content=["json"],
@@ -69,6 +69,16 @@ def create_celery_app() -> Celery:
             },
             "recover-agent-runs": {
                 "task": "app.agents.recover",
+                "schedule": 30.0,
+                "options": {"queue": "agents-v2"},
+            },
+            "recover-legacy-agent-runs": {
+                "task": "app.agents.recover_legacy",
+                "schedule": 30.0,
+                "options": {"queue": "agents-legacy"},
+            },
+            "recover-tool-invocations": {
+                "task": "app.tools.recover",
                 "schedule": 30.0,
             },
         },

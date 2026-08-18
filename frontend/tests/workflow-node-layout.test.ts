@@ -2,6 +2,13 @@ import { expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
+function expectStringArray(text: string, values: string[], negated = false) {
+  const members = values.map((value) => JSON.stringify(value)).join(",\\s*")
+  const pattern = new RegExp(`\\[\\s*${members},?\\s*\\]`)
+  if (negated) expect(text).not.toMatch(pattern)
+  else expect(text).toMatch(pattern)
+}
+
 const source = readFileSync(
   join(import.meta.dir, "../components/workflows/workflow-node.tsx"),
   "utf8"
@@ -14,8 +21,15 @@ const canvasSource = readFileSync(
   join(import.meta.dir, "../components/workflows/workflow-canvas.tsx"),
   "utf8"
 )
+const paletteSource = readFileSync(
+  join(import.meta.dir, "../components/workflows/workflow-node-palette.tsx"),
+  "utf8"
+)
 const detailSource = readFileSync(
-  join(import.meta.dir, "../components/workflows/workflow-detail-workspace.tsx"),
+  join(
+    import.meta.dir,
+    "../components/workflows/workflow-detail-workspace.tsx"
+  ),
   "utf8"
 )
 const publicChatSource = readFileSync(
@@ -32,12 +46,16 @@ const agentsPageSource = readFileSync(
 )
 
 test("basic info placement does not follow Start card changes", () => {
-  expect(canvasSource).toContain("if (infoPositionInitializedRef.current) return")
+  expect(canvasSource).toContain(
+    "if (infoPositionInitializedRef.current) return"
+  )
   expect(canvasSource).not.toContain("new ResizeObserver(placeLeftOfStart)")
 })
 
 test("workflow nodes default to expanded when the canvas mounts", () => {
-  expect(source).toContain("const [expanded, setExpanded] = React.useState(true)")
+  expect(source).toContain(
+    "const [expanded, setExpanded] = React.useState(true)"
+  )
   expect(source).not.toContain(
     'React.useState(node.type === "start" || node.type === "end")'
   )
@@ -60,9 +78,9 @@ test("reply node is pinned and exposes both reply modes", () => {
   expect(graphSource).toContain('"reply-node": "指定回复"')
   expect(source).toContain('node.type === "reply-node"')
   expect(source).toContain('config.reply_type ?? "custom"')
-  expect(source).toContain('updateConfig({ fields: [path, description] })')
-  expect(source).toContain('reference={`{{${nodeId}.answer}}`}')
-  expect(canvasSource).toContain("WORKFLOW_NODE_TYPES.map")
+  expect(source).toContain("updateConfig({ fields: [path, description] })")
+  expect(source).toContain("reference={`{{${nodeId}.answer}}`}")
+  expect(paletteSource).toContain("WORKFLOW_BASIC_NODE_TYPES.map")
 })
 
 test("variable picker shows translated names without changing references", () => {
@@ -72,10 +90,12 @@ test("variable picker shows translated names without changing references", () =>
   )
 
   expect(variablePicker.match(/\{t\(field\.label\)\}/g)).toHaveLength(2)
-  expect(variablePicker).toContain('`{{global.${field.value}}}`')
-  expect(variablePicker).toContain('`{{${startNodeId}.${field.value}}}`')
+  expect(variablePicker).toContain("`{{global.${field.value}}}`")
+  expect(variablePicker).toContain("`{{${startNodeId}.${field.value}}}`")
   expect(variablePicker).toContain("[startNodeId, field.value]")
-  expect(variablePicker).toContain("outputFieldLabel(source.data.type, field, t)")
+  expect(variablePicker).toContain(
+    "outputFieldLabel(source.data.type, field, t)"
+  )
   expect(variablePicker).toContain("{displayLabel}")
   expect(variablePicker).not.toContain("<BracesIcon")
   expect(source).toContain("function workflowVariableReferenceLabel")
@@ -101,7 +121,7 @@ test("localized variable previews do not replace the editable textarea value", (
 test("form select options preserve the editing draft", () => {
   expect(source).toContain("function FormOptionsInput")
   expect(source).toContain(
-    "const displayValue = editing ? draft : value.join(\", \")"
+    'const displayValue = editing ? draft : value.join(", ")'
   )
   expect(source).toContain("value={displayValue}")
   expect(source).toContain("<FormOptionsInput")
@@ -110,7 +130,7 @@ test("form select options preserve the editing draft", () => {
 
 test("mobile workflow actions keep accessible names", () => {
   expect(detailSource).toContain('aria-label={t("保存")}')
-  expect(detailSource).toContain('aria-label={t("添加节点")}')
+  expect(paletteSource).toContain('aria-label={t("添加节点")}')
   expect(detailSource).toContain(
     'aria-label={agent.can_edit ? t("调试运行") : t("运行已发布版本")}'
   )
@@ -120,19 +140,19 @@ test("mobile workflow actions keep accessible names", () => {
 test("confirmed workflow discards restore persisted graph and app settings", () => {
   const discardChanges = detailSource.slice(
     detailSource.indexOf("const discardChanges"),
-    detailSource.indexOf("const changeView"),
+    detailSource.indexOf("const changeView")
   )
   const changeView = detailSource.slice(
     detailSource.indexOf("const changeView"),
-    detailSource.indexOf("const renderNavItems"),
+    detailSource.indexOf("const renderNavItems")
   )
   const handleBack = detailSource.slice(
     detailSource.indexOf("async function handleBack"),
-    detailSource.indexOf("async function changeSettingsOpen"),
+    detailSource.indexOf("async function changeSettingsOpen")
   )
   const changeSettingsOpen = detailSource.slice(
     detailSource.indexOf("async function changeSettingsOpen"),
-    detailSource.indexOf("if (isLoading || !definition || !graph)"),
+    detailSource.indexOf("if (isLoading || !definition || !graph)")
   )
 
   expect(discardChanges).toContain("setGraph(definition.graph)")
@@ -145,8 +165,12 @@ test("confirmed workflow discards restore persisted graph and app settings", () 
 
 test("output fields use translated labels and confirm successful copies", () => {
   expect(source).toContain('variable: { value: "变量值" }')
-  expect(source).toContain('code: { result: "执行结果", stdout: "标准输出", stderr: "错误输出" }')
-  expect(source).toContain('displayValue={outputFieldLabel(node.type, field, t)}')
+  expect(source).toContain(
+    'code: { result: "执行结果", stdout: "标准输出", stderr: "错误输出" }'
+  )
+  expect(source).toContain(
+    "displayValue={outputFieldLabel(node.type, field, t)}"
+  )
   expect(source).toContain("reference={`{{${id}.${field}}}`}")
   expect(source).toContain("void copyText(reference)")
   expect(source).toContain('notify("success", t("已复制"))')
@@ -165,9 +189,15 @@ test("code, document, and form nodes place outputs after their settings", () => 
   expect(codeConfig.indexOf("-code-inputs")).toBeLessThan(
     codeConfig.indexOf("-code-body")
   )
-  expect(card).toContain(
-    '["knowledge", "llm", "condition", "reply-node", "code", "document-extract-node", "form-node"]'
-  )
+  expectStringArray(card, [
+    "knowledge",
+    "llm",
+    "condition",
+    "reply-node",
+    "code",
+    "document-extract-node",
+    "form-node",
+  ])
   expect(card.indexOf("<NodeConfigFields")).toBeLessThan(
     card.lastIndexOf('node.type === "code"')
   )
@@ -177,6 +207,52 @@ test("code, document, and form nodes place outputs after their settings", () => 
   expect(card.indexOf("<NodeConfigFields")).toBeLessThan(
     card.lastIndexOf('node.type === "form-node"')
   )
+})
+
+test("Tool and Agent nodes keep pinned bindings while legacy editors remain available", () => {
+  const toolConfig = source.slice(
+    source.indexOf("function ToolArgumentsFields"),
+    source.indexOf("function NodeConfigFields")
+  )
+  const nodeConfig = source.slice(
+    source.indexOf("function NodeConfigFields"),
+    source.indexOf("export function WorkflowNodeCard")
+  )
+  const card = source.slice(
+    source.indexOf("export function WorkflowNodeCard"),
+    source.indexOf("function OutputFieldRow")
+  )
+
+  expect(toolConfig).toContain("schema?.properties")
+  expect(toolConfig).toContain("schema?.required")
+  expect(toolConfig).toContain("-tool-argument-${name}")
+  expect(nodeConfig).toContain("directToolWithMatchingSchema")
+  expect(nodeConfig).toContain('node.type === "tool"')
+  expect(nodeConfig).toContain('node.type === "agent"')
+  expect(nodeConfig).toContain("id={`${nodeId}-agent-input`}")
+  expect(nodeConfig).toContain("agent_version_id")
+  expect(nodeConfig).toContain('node.type === "mcp"')
+  expect(nodeConfig).toContain('node.type === "code"')
+  expect(nodeConfig).toContain('tool.approval === "auto"')
+  expectStringArray(card, [
+    "llm",
+    "knowledge",
+    "reply-node",
+    "reranker-node",
+    "form-node",
+    "agent",
+  ])
+  expect(card).not.toContain('"form-node", "agent", "tool"')
+  expect(source).toContain('awaiting_child: "等待执行"')
+})
+
+test("the node palette stays anchored, viewport-bounded, and hidden when read-only", () => {
+  expect(paletteSource).toContain("PopoverPrimitive.Content")
+  expect(paletteSource).toContain("h-[32rem]")
+  expect(paletteSource).toContain("max-h-[calc(100svh-2rem)]")
+  expect(paletteSource).toContain("if (readOnly) return null")
+  expect(paletteSource).toContain("disabled={disabled}")
+  expect(detailSource).toContain("disabled={!isCanvasReady}")
 })
 
 test("reranker settings stay inside the fixed-width node card", () => {
@@ -214,24 +290,22 @@ test("condition node uses ordered branches and stable branch handles", () => {
   expect(source).toContain('value: "is_not_true"')
   expect(conditionEditor).toContain('t("添加条件")')
   expect(conditionEditor).toContain('t("添加分支")')
-  expect(conditionEditor).toContain('reference={`{{${nodeId}.branch_name}}`}')
+  expect(conditionEditor).toContain("reference={`{{${nodeId}.branch_name}}`}")
   expect(conditionEditor).toContain("id={branch.id}")
   expect(conditionEditor).toContain("title={displayType}")
-  expect(conditionEditor).toContain('!right-[-1.375rem]')
-  expect(conditionEditor).toContain('border-input')
+  expect(conditionEditor).toContain("!right-[-1.375rem]")
+  expect(conditionEditor).toContain("border-input")
   expect(source).toContain('node.type === "condition" && expanded')
   expect(source).toContain('handle && node.type !== "condition"')
-  expect(canvasSource).toContain("nextHandles.has(String(edge.sourceHandle ?? \"\"))")
+  expect(canvasSource).toContain(
+    'nextHandles.has(String(edge.sourceHandle ?? ""))'
+  )
   expect(source).toMatch(/node\.type === "condition"\s*\?\s*"w-80"/)
   expect(conditionEditor).toContain(
-    'rounded-lg border border-border/70 bg-muted/20 p-2'
+    "rounded-lg border border-border/70 bg-muted/20 p-2"
   )
-  expect(conditionEditor).toContain(
-    'grid-cols-[7rem_minmax(0,1fr)_1.75rem]'
-  )
-  expect(conditionEditor).toContain(
-    'grid-cols-[minmax(0,1fr)_1.75rem]'
-  )
+  expect(conditionEditor).toContain("grid-cols-[7rem_minmax(0,1fr)_1.75rem]")
+  expect(conditionEditor).toContain("grid-cols-[minmax(0,1fr)_1.75rem]")
   expect(conditionEditor).toContain('placeholder={t("比较值")}')
   expect(conditionEditor).toContain('t("未命中以上条件时执行")')
   expect(conditionEditor).toMatch(
@@ -245,7 +319,7 @@ test("condition node uses ordered branches and stable branch handles", () => {
   )
 })
 
-test("saving does not remount or recenter the workflow canvas", () => {
+test("saving synchronizes a canonical graph without remounting the workflow canvas", () => {
   const saveDraft = detailSource.slice(
     detailSource.indexOf("async function saveDraft"),
     detailSource.indexOf("async function handleSaveAll")
@@ -255,13 +329,16 @@ test("saving does not remount or recenter the workflow canvas", () => {
     detailSource.indexOf("if (isLoading")
   )
 
-  expect(detailSource).toContain(
-    'key={`${definition.id}:${canvasGeneration}`}'
-  )
+  expect(detailSource).toContain("key={`${definition.id}:${canvasGeneration}`}")
   expect(detailSource).not.toContain(
-    'key={`${definition.id}:${definition.revision}`}'
+    "key={`${definition.id}:${definition.revision}`}"
   )
   expect(saveDraft).not.toContain("setCanvasGeneration")
+  expect(canvasSource).toContain(
+    "if (graphRevisionRef.current === props.graphRevision) return"
+  )
+  expect(canvasSource).toContain("setNodes(nextGraph.nodes)")
+  expect(canvasSource).toContain("setEdges(nextGraph.edges)")
   expect(restoreVersion).toContain(
     "setCanvasGeneration((current) => current + 1)"
   )
@@ -271,9 +348,7 @@ test("React Flow selection changes use a stable state callback", () => {
   expect(canvasSource).toContain(
     "const handleSelectionChange = React.useCallback"
   )
-  expect(canvasSource).toContain(
-    "onSelectionChange={handleSelectionChange}"
-  )
+  expect(canvasSource).toContain("onSelectionChange={handleSelectionChange}")
   expect(canvasSource).not.toContain(
     "onSelectionChange={({ edges: selectedEdges }) =>"
   )
@@ -297,13 +372,13 @@ test("node form updates reach React Flow before controlled input restoration", (
 test("workflow debugging uses an anchored canvas window", () => {
   const debugPanel = detailSource.slice(
     detailSource.indexOf("{runOpen ? ("),
-    detailSource.indexOf('<Dialog open={historyOpen}')
+    detailSource.indexOf("<Dialog open={historyOpen}")
   )
 
   expect(debugPanel).toMatch(/<aside\s+role="dialog"/)
-  expect(debugPanel).toContain('"absolute z-40')
-  expect(debugPanel).toContain('sm:w-96')
-  expect(debugPanel).toContain('sm:w-2/3 lg:w-1/3')
+  expect(debugPanel).toContain("absolute z-40")
+  expect(debugPanel).toContain("sm:w-96")
+  expect(debugPanel).toContain("sm:w-2/3 lg:w-1/3")
   expect(debugPanel).not.toContain('? "inset-3"')
   expect(debugPanel).toContain("runExpanded")
   expect(debugPanel).toContain("<Maximize2Icon")
@@ -335,8 +410,8 @@ test("workflow debugging uses an anchored canvas window", () => {
 
 test("workflow reply opens node execution details in a floating dialog", () => {
   const executionDialog = detailSource.slice(
-    detailSource.indexOf('<Dialog open={runDetailsOpen}'),
-    detailSource.indexOf('<Dialog open={historyOpen}')
+    detailSource.indexOf("<Dialog open={runDetailsOpen}"),
+    detailSource.indexOf("<Dialog open={historyOpen}")
   )
 
   expect(executionDialog).toContain("<DialogContent")
@@ -354,16 +429,21 @@ test("workflow reply opens node execution details in a floating dialog", () => {
 test("LLM advanced parameters live behind the card settings button", () => {
   const advancedDialog = source.slice(
     source.indexOf("function LlmSettingsDialog"),
-    source.indexOf("function NodeConfigFields")
+    source.indexOf("function ConditionEditor")
   )
   const nodeConfigFields = source.slice(
     source.indexOf("function NodeConfigFields"),
     source.indexOf("export function WorkflowNodeCard")
   )
 
-  expect(source).toContain(
-    '["llm", "knowledge", "reply-node", "reranker-node", "form-node"].includes(node.type)'
-  )
+  expectStringArray(source, [
+    "llm",
+    "knowledge",
+    "reply-node",
+    "reranker-node",
+    "form-node",
+    "agent",
+  ])
   expect(source).toContain("<SettingsIcon")
   expect(source).toContain("<LlmSettingsDialog")
   expect(source).toContain('placeholder={t("默认 4096")}')
@@ -382,11 +462,15 @@ test("LLM advanced parameters live behind the card settings button", () => {
 })
 
 test("LLM model selector shows the effective model and icon", () => {
-  expect(source).toContain('import ModelIcon from "@lobehub/icons/es/features/ModelIcon"')
-  expect(source).toContain("const selectedModelId = String(config.model_id ?? agent.model_id ?? \"\")")
+  expect(source).toContain(
+    'import ModelIcon from "@lobehub/icons/es/features/ModelIcon"'
+  )
+  expect(source).toContain(
+    'const selectedModelId = String(config.model_id ?? agent.model_id ?? "")'
+  )
   expect(source).toContain("selectedModel?.name")
   expect(source).toContain("<ModelIcon")
-  expect(source).toContain('<DropdownMenu modal={false}>')
+  expect(source).toContain("<DropdownMenu modal={false}>")
   expect(source).not.toMatch(
     /<select\s+id=\{`\$\{nodeId\}-llm-model`\}\s+className="h-9 rounded-md border bg-background px-2 text-sm"/
   )
@@ -394,8 +478,11 @@ test("LLM model selector shows the effective model and icon", () => {
 
 test("LLM dialogue history uses the anchored app dropdown", () => {
   const dialogueMenu = source.slice(
-    source.indexOf('id={`${nodeId}-llm-dialogue-type`}'),
-    source.indexOf('id={`${nodeId}-llm-dialogue`}', source.indexOf('id={`${nodeId}-llm-dialogue-type`}'))
+    source.indexOf("id={`${nodeId}-llm-dialogue-type`}"),
+    source.indexOf(
+      "id={`${nodeId}-llm-dialogue`}",
+      source.indexOf("id={`${nodeId}-llm-dialogue-type`}")
+    )
   )
 
   expect(dialogueMenu).toContain('className="h-7 w-40 justify-between')
@@ -412,42 +499,50 @@ test("LLM outputs use translated labels at the bottom of its settings", () => {
   )
 
   expect(source).toContain('{ field: "text", label: "模型回复" }')
-  expect(source).toContain(
-    '{ field: "reasoning_content", label: "思考过程" }'
-  )
+  expect(source).toContain('{ field: "reasoning_content", label: "思考过程" }')
   expect(nodeConfigFields).toContain('t("输出参数")')
-  expect(nodeConfigFields).toContain('displayValue={t(item.label)}')
+  expect(nodeConfigFields).toContain("displayValue={t(item.label)}")
   expect(nodeConfigFields).toContain(
-    'reference={`{{${nodeId}.${item.field}}}`}'
+    "reference={`{{${nodeId}.${item.field}}}`}"
   )
   expect(nodeConfigFields.indexOf("{LLM_OUTPUT_FIELDS.map")).toBeGreaterThan(
     nodeConfigFields.indexOf('t("返回内容")')
   )
-  expect(source).toContain(
-    '!["knowledge", "llm", "condition", "reply-node", "code", "document-extract-node", "form-node"].includes(node.type)'
+  expectStringArray(
+    source,
+    [
+      "knowledge",
+      "llm",
+      "condition",
+      "reply-node",
+      "code",
+      "document-extract-node",
+      "form-node",
+    ]
   )
 })
 
 test("knowledge search mode uses the anchored app dropdown", () => {
-  expect(source).toContain('id={`${nodeId}-knowledge-mode-label`}')
-  expect(source).toContain('aria-labelledby={`${nodeId}-knowledge-mode-label`}')
+  expect(source).toContain("id={`${nodeId}-knowledge-mode-label`}")
+  expect(source).toContain("aria-labelledby={`${nodeId}-knowledge-mode-label`}")
   expect(source).toContain('side="bottom"')
   expect(source).toContain('align="end"')
-  expect(source).toContain(
-    "[&_[data-slot=dropdown-menu-item]]:text-[11px]"
-  )
+  expect(source).toContain("[&_[data-slot=dropdown-menu-item]]:text-[11px]")
   expect(source).toContain(
     'className="w-(--radix-dropdown-menu-trigger-width) min-w-24"'
   )
-  expect(source).not.toMatch(
-    /<select\s+id=\{`\$\{nodeId\}-knowledge-mode`\}/
-  )
+  expect(source).not.toMatch(/<select\s+id=\{`\$\{nodeId\}-knowledge-mode`\}/)
 })
 
 test("knowledge node presents grouped settings and four documented outputs", () => {
-  expect(source).toContain(
-    '["llm", "knowledge", "reply-node", "reranker-node", "form-node"].includes(node.type)'
-  )
+  expectStringArray(source, [
+    "llm",
+    "knowledge",
+    "reply-node",
+    "reranker-node",
+    "form-node",
+    "agent",
+  ])
   expect(source).toContain('t("节点设置")')
   expect(source).toContain('t("检索范围")')
   expect(source).toContain('className="mb-1 text-xs font-medium"')
@@ -456,22 +551,28 @@ test("knowledge node presents grouped settings and four documented outputs", () 
   )
   expect(source).toContain('t("检索参数")')
   expect(source).toContain('t("输出参数")')
-  expect(source).toContain('{ field: "paragraph_list", label: "检索结果的分段列表" }')
+  expect(source).toContain(
+    '{ field: "paragraph_list", label: "检索结果的分段列表" }'
+  )
   expect(source).toContain('field: "is_hit_handling_method_list"')
   expect(source).toContain('{ field: "data", label: "检索结果" }')
-  expect(source).toContain('{ field: "directly_return", label: "满足直接回答的分段内容" }')
-  expect(source).toContain('displayValue={t(item.label)}')
-  expect(source).toContain('reference={`{{${nodeId}.${item.field}}}`}')
-  expect(source).toContain('<OutputFieldRow')
+  expect(source).toContain(
+    '{ field: "directly_return", label: "满足直接回答的分段内容" }'
+  )
+  expect(source).toContain("displayValue={t(item.label)}")
+  expect(source).toContain("reference={`{{${nodeId}.${item.field}}}`}")
+  expect(source).toContain("<OutputFieldRow")
   expect(source.match(/<NumberStepper/g)?.length).toBe(4)
-  expect(source).toContain('grid h-8 w-20 grid-cols-[minmax(0,1fr)_1.25rem]')
-  expect(source).toContain('px-1 text-center text-xs')
+  expect(source).toContain("grid h-8 w-20 grid-cols-[minmax(0,1fr)_1.25rem]")
+  expect(source).toContain("px-1 text-center text-xs")
   expect(source).toContain('aria-label={t("增加数值")}')
   expect(source).toContain('aria-label={t("减少数值")}')
-  expect(source).toContain('max={1}')
-  expect(source).toContain('grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5')
-  expect(source).toContain('flex w-full min-w-0 items-center gap-2 overflow-hidden')
-  expect(source).toContain('w-full min-w-0 resize-y rounded-md border')
+  expect(source).toContain("max={1}")
+  expect(source).toContain("grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5")
+  expect(source).toContain(
+    "flex w-full min-w-0 items-center gap-2 overflow-hidden"
+  )
+  expect(source).toContain("w-full min-w-0 resize-y rounded-md border")
   expect(source).not.toContain('knowledge: [\n      "content",\n      "hits"')
 })
 
@@ -482,31 +583,32 @@ test("workflow nodes select workspace resources directly", () => {
   expect(source).toContain('tool.policy_mode === "read_only"')
   expect(source).not.toContain("agent.knowledge_base_ids.includes")
   expect(source).not.toContain("const boundMcp = agent.mcp_tools")
-  expect(source).not.toContain('<select\n              id={`${nodeId}-mcp-tool`}')
+  expect(source).not.toContain(
+    "<select\n              id={`${nodeId}-mcp-tool`}"
+  )
 })
 
 test("workflow app settings no longer expose resource bindings", () => {
   const knowledgeSection = appConfigSource.slice(
-    appConfigSource.indexOf('aria-expanded={isKnowledgeOpen}') - 800,
-    appConfigSource.indexOf('aria-expanded={isMcpOpen}')
+    appConfigSource.indexOf("aria-expanded={isKnowledgeOpen}") - 800,
+    appConfigSource.indexOf("aria-expanded={isToolsOpen}")
   )
-  const mcpSection = appConfigSource.slice(
-    appConfigSource.indexOf('aria-expanded={isMcpOpen}') - 800,
+  const toolSection = appConfigSource.slice(
+    appConfigSource.indexOf("aria-expanded={isToolsOpen}") - 800,
     appConfigSource.indexOf('htmlFor="agent-status"')
   )
   expect(knowledgeSection).toContain('form.id && form.appType === "agent"')
-  expect(mcpSection).toContain('form.id && form.appType === "agent"')
+  expect(toolSection).toContain('form.id && form.appType === "agent"')
   expect(appConfigSource).toContain(
     'open={form.appType === "agent" && resourcePicker === "knowledge"}'
   )
-  expect(appConfigSource).toContain(
-    'open={form.appType === "agent" && resourcePicker === "mcp"}'
-  )
+  expect(appConfigSource).toContain("{isToolPickerOpen ? (")
+  expect(appConfigSource).toContain('open={form.appType === "agent"}')
   expect(detailSource).toContain(
-    't("配置工作流的默认模型；知识库和只读 MCP 工具由节点选择。")'
+    't("配置工作流的默认模型；知识库、工具和 Agent 由节点选择。")'
   )
   expect(agentsPageSource).toContain(
-    'form.appType === "workflow" ? [] : form.mcpTools'
+    'tools: form.appType === "workflow" ? [] : form.tools'
   )
   expect(agentsPageSource).toContain(
     'form.appType === "workflow" ? [] : form.knowledgeBaseIds'

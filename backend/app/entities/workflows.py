@@ -33,6 +33,8 @@ class WorkflowVersion:
     default_model_id: str = ""
     graph: dict[str, Any] = field(default_factory=dict)
     graph_hash: str = ""
+    resource_snapshot: dict[str, Any] = field(default_factory=dict)
+    resource_hash: str = ""
     published_by_user_id: str = ""
     created_at: datetime = field(default_factory=utc_now)
 
@@ -49,6 +51,8 @@ class WorkflowRunDetail:
     source: str = "draft"
     graph_hash: str = ""
     graph_snapshot: dict[str, Any] = field(default_factory=dict)
+    resource_snapshot: dict[str, Any] = field(default_factory=dict)
+    resource_hash: str = ""
     inputs: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)
     max_steps: int = 100

@@ -13,7 +13,6 @@ import {
   Minimize2Icon,
   PaperclipIcon,
   PlayIcon,
-  PlusIcon,
   SaveIcon,
   ScrollTextIcon,
   SendIcon,
@@ -63,6 +62,7 @@ import { compareLiveStreamIds, type Agent } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
+import type { ToolDetail } from "@/lib/api/tools"
 import {
   createWorkflowRun,
   getWorkflowDefinition,
@@ -94,11 +94,14 @@ import {
 } from "@/lib/workflows/graph"
 import { cn } from "@/lib/utils"
 
+import type { WorkflowNodeAddHandler } from "./workflow-canvas"
+import { WorkflowNodePalette } from "./workflow-node-palette"
+
 const WorkflowCanvas = dynamic(() => import("./workflow-canvas"), {
   ssr: false,
   loading: () => (
     <div className="flex min-h-[520px] items-center justify-center">
-      <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
+      <LoaderCircleIcon className="text-muted-foreground size-5 animate-spin" />
     </div>
   ),
 })
@@ -110,6 +113,11 @@ type WorkflowDetailWorkspaceProps = {
   models: RegisteredModel[]
   knowledgeBases: KnowledgeBase[]
   mcpServers: McpServer[]
+  tools?: ToolDetail[]
+  agents?: Agent[]
+  isToolsLoading?: boolean
+  toolsError?: string | null
+  onRetryTools?: () => void
   token: string
   workspaceId: string
   canManagePublishing: boolean
@@ -133,6 +141,7 @@ function runStatusLabel(run: WorkflowRun, t: TFunction) {
   if (run.status === "queued") return t("等待执行")
   if (run.status === "running") return t("运行中")
   if (run.status === "awaiting_input") return t("等待填写表单")
+  if (run.status === "awaiting_child") return t("等待执行")
   if (run.status === "succeeded") return t("运行成功")
   if (run.status === "cancelled") return t("运行已取消")
   return t("运行失败")
@@ -140,7 +149,7 @@ function runStatusLabel(run: WorkflowRun, t: TFunction) {
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
-    <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 font-mono text-xs leading-5">
+    <pre className="bg-muted max-h-64 overflow-auto rounded-md p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
       {JSON.stringify(value, null, 2)}
     </pre>
   )
@@ -153,6 +162,11 @@ export function WorkflowDetailWorkspace({
   models,
   knowledgeBases,
   mcpServers,
+  tools = [],
+  agents = [],
+  isToolsLoading = false,
+  toolsError = null,
+  onRetryTools,
   token,
   workspaceId,
   canManagePublishing,
@@ -192,8 +206,8 @@ export function WorkflowDetailWorkspace({
   const [runOpen, setRunOpen] = React.useState(false)
   const [runDetailsOpen, setRunDetailsOpen] = React.useState(false)
   const [runExpanded, setRunExpanded] = React.useState(false)
-  const [paletteOpen, setPaletteOpen] = React.useState(false)
   const [canvasGeneration, setCanvasGeneration] = React.useState(0)
+  const [isCanvasReady, setIsCanvasReady] = React.useState(false)
   const [runQuestion, setRunQuestion] = React.useState("")
   const [runFiles, setRunFiles] = React.useState<File[]>([])
   const [runQuestionInvalid, setRunQuestionInvalid] = React.useState(false)
@@ -203,11 +217,19 @@ export function WorkflowDetailWorkspace({
   const runAbortRef = React.useRef<AbortController | null>(null)
   const runFileInputRef = React.useRef<HTMLInputElement>(null)
   const runScrollRef = React.useRef<HTMLDivElement>(null)
+  const addNodeRef = React.useRef<WorkflowNodeAddHandler | null>(null)
+  const handleAddNodeReady = React.useCallback(
+    (handler: WorkflowNodeAddHandler | null) => {
+      addNodeRef.current = handler
+      setIsCanvasReady(Boolean(handler))
+    },
+    []
+  )
 
   const isDirty = Boolean(
     definition &&
-      graph &&
-      workflowGraphSignature(definition.graph) !== workflowGraphSignature(graph)
+    graph &&
+    workflowGraphSignature(definition.graph) !== workflowGraphSignature(graph)
   )
   const hasUnsavedChanges = isDirty || isAppDirty
   const latestPublishedVersion = versions.reduce(
@@ -240,14 +262,13 @@ export function WorkflowDetailWorkspace({
     currentRun && !TERMINAL_STATUSES.has(currentRun.status)
   )
   const runInputDisabled =
-    isRunning ||
-    isRunActive ||
-    (runTarget?.source === "draft" && isAppDirty)
+    isRunning || isRunActive || (runTarget?.source === "draft" && isAppDirty)
   const visibleRunFiles = form.interactionConfig.file_upload ? runFiles : []
   const executionGraph = currentRun
     ? currentRun.source === "published"
-      ? (versions.find((version) => version.graph_hash === currentRun.graph_hash)
-          ?.graph ?? null)
+      ? (versions.find(
+          (version) => version.graph_hash === currentRun.graph_hash
+        )?.graph ?? null)
       : definition?.graph_hash === currentRun.graph_hash
         ? definition.graph
         : null
@@ -329,7 +350,7 @@ export function WorkflowDetailWorkspace({
       setRuntimeStatuses(
         Object.fromEntries(
           response.items.map((item) => [item.node_id, item.status])
-      )
+        )
       )
     },
     [agent.id, token, workspaceId]
@@ -361,8 +382,7 @@ export function WorkflowDetailWorkspace({
           return {
             ...current,
             outputs: { ...current.outputs, result: previous + event.delta },
-            live_stream_epoch:
-              event.stream_epoch ?? current.live_stream_epoch,
+            live_stream_epoch: event.stream_epoch ?? current.live_stream_epoch,
             live_stream_cursor:
               event.live_sequence ?? current.live_stream_cursor,
           }
@@ -433,9 +453,9 @@ export function WorkflowDetailWorkspace({
         const latestRun = runs[0] ?? null
         setCurrentRun(latestRun)
         if (latestRun) {
-          void loadExecutionsRef.current(latestRun.id).catch(
-            reportErrorRef.current
-          )
+          void loadExecutionsRef
+            .current(latestRun.id)
+            .catch(reportErrorRef.current)
           if (!TERMINAL_STATUSES.has(latestRun.status)) {
             observeRunRef.current(latestRun)
           }
@@ -527,12 +547,7 @@ export function WorkflowDetailWorkspace({
         return
       const uploaded =
         form.interactionConfig.file_upload && runFiles.length
-          ? await uploadWorkflowFiles(
-              token,
-              workspaceId,
-              agent.id,
-              runFiles
-            )
+          ? await uploadWorkflowFiles(token, workspaceId, agent.id, runFiles)
           : []
       const run = await createWorkflowRun(
         token,
@@ -680,7 +695,7 @@ export function WorkflowDetailWorkspace({
 
   if (isLoading || !definition || !graph) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center gap-2 text-sm text-muted-foreground">
+      <div className="text-muted-foreground flex min-h-[60vh] items-center justify-center gap-2 text-sm">
         <LoaderCircleIcon className="size-4 animate-spin" />
         {t("正在加载")}
       </div>
@@ -691,11 +706,11 @@ export function WorkflowDetailWorkspace({
     <div
       className={
         standalone
-          ? "flex h-svh flex-col overflow-hidden bg-background"
-          : "-mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0"
+          ? "bg-background flex h-svh flex-col overflow-hidden"
+          : "bg-background -mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0"
       }
     >
-      <header className="z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+      <header className="bg-background/95 z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b px-4 py-3 backdrop-blur sm:px-6">
         <Button
           type="button"
           variant="ghost"
@@ -712,7 +727,7 @@ export function WorkflowDetailWorkspace({
         >
           <ArrowLeftIcon />
         </Button>
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background shadow-sm">
+        <span className="bg-foreground text-background flex size-10 shrink-0 items-center justify-center rounded-xl shadow-sm">
           <WorkflowIcon className="size-5" />
         </span>
         <div className="min-w-0 flex-1">
@@ -745,7 +760,7 @@ export function WorkflowDetailWorkspace({
               <Badge variant="secondary">{t("未保存")}</Badge>
             ) : null}
           </div>
-          <p className="mt-0.5 hidden truncate text-xs text-muted-foreground sm:block">
+          <p className="text-muted-foreground mt-0.5 hidden truncate text-xs sm:block">
             {t("工作流")} · {currentViewLabel}
           </p>
         </div>
@@ -781,16 +796,20 @@ export function WorkflowDetailWorkspace({
             <span className="hidden sm:inline">{t("保存")}</span>
           </Button>
         ) : null}
-        {visibleActiveView === "settings" && agent.can_edit ? (
-          <Button
-            type="button"
-            variant="outline"
-            aria-label={t("添加节点")}
-            onClick={() => setPaletteOpen(true)}
-          >
-            <PlusIcon />
-            <span className="hidden sm:inline">{t("添加节点")}</span>
-          </Button>
+        {visibleActiveView === "settings" && agent.can_edit && graph ? (
+          <WorkflowNodePalette
+            tools={tools}
+            agents={agents}
+            isToolsLoading={isToolsLoading}
+            toolsError={toolsError}
+            onRetryTools={onRetryTools}
+            graph={graph}
+            disabled={!isCanvasReady}
+            onAdd={(type, title, config) =>
+              addNodeRef.current?.(type, title, config)
+            }
+            t={t}
+          />
         ) : null}
         {visibleActiveView === "settings" ? (
           <Button
@@ -865,7 +884,7 @@ export function WorkflowDetailWorkspace({
 
       <div className="flex min-h-0 flex-1">
         {standalone ? null : (
-          <aside className="hidden w-52 shrink-0 border-r bg-muted/20 p-3 lg:block">
+          <aside className="bg-muted/20 hidden w-52 shrink-0 border-r p-3 lg:block">
             <nav className="space-y-1" aria-label={t("工作流详情导航")}>
               {renderNavItems("w-full justify-start")}
             </nav>
@@ -874,14 +893,14 @@ export function WorkflowDetailWorkspace({
         <div className="relative flex min-w-0 flex-1 flex-col">
           {standalone ? null : (
             <nav
-              className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden"
+              className="bg-background flex shrink-0 gap-1 overflow-x-auto border-b p-2 lg:hidden"
               aria-label={t("工作流详情导航")}
             >
               {renderNavItems("shrink-0")}
             </nav>
           )}
           {visibleActiveView === "settings" && currentRun ? (
-            <div className="flex flex-wrap items-center gap-3 border-b bg-muted/25 px-4 py-2 text-xs">
+            <div className="bg-muted/25 flex flex-wrap items-center gap-3 border-b px-4 py-2 text-xs">
               <Badge
                 variant={
                   currentRun.status === "failed" ? "destructive" : "outline"
@@ -916,15 +935,17 @@ export function WorkflowDetailWorkspace({
                 key={`${definition.id}:${canvasGeneration}`}
                 agent={agent}
                 graph={graph}
+                graphRevision={definition.revision}
                 models={models}
                 knowledgeBases={knowledgeBases}
                 mcpServers={mcpServers}
+                tools={tools}
+                agents={agents}
                 runtimeStatuses={runtimeStatuses}
                 readOnly={!agent.can_edit}
-                paletteOpen={paletteOpen}
-                onClosePalette={() => setPaletteOpen(false)}
                 form={form}
                 setForm={setForm}
+                onAddNodeReady={handleAddNodeReady}
                 onChange={setGraph}
                 t={t}
               />
@@ -934,7 +955,7 @@ export function WorkflowDetailWorkspace({
                   aria-modal="false"
                   aria-label={t("运行工作流")}
                   className={cn(
-                    "absolute z-40 flex min-h-0 overflow-hidden rounded-2xl border border-border/80 bg-background/98 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.55)] backdrop-blur-xl transition-[inset,width] duration-200",
+                    "border-border/80 bg-background/98 absolute z-40 flex min-h-0 overflow-hidden rounded-2xl border shadow-[0_24px_80px_-32px_rgba(0,0,0,0.55)] backdrop-blur-xl transition-[inset,width] duration-200",
                     runExpanded
                       ? "inset-2 sm:inset-y-3 sm:right-3 sm:left-auto sm:w-2/3 lg:w-1/3 lg:min-w-96"
                       : "inset-2 sm:inset-y-4 sm:right-4 sm:left-auto sm:w-96"
@@ -944,21 +965,21 @@ export function WorkflowDetailWorkspace({
                     className="flex min-h-0 flex-1 flex-col"
                     onSubmit={(event) => void handleRun(event)}
                   >
-                    <header className="flex shrink-0 items-center gap-3 border-b bg-background/95 px-4 py-3">
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50 shadow-xs">
-                        <WorkflowIcon className="size-[18px] text-foreground" />
+                    <header className="bg-background/95 flex shrink-0 items-center gap-3 border-b px-4 py-3">
+                      <span className="bg-muted/50 flex size-9 shrink-0 items-center justify-center rounded-lg border shadow-xs">
+                        <WorkflowIcon className="text-foreground size-[18px]" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <strong className="block truncate text-sm font-semibold">
                           {form.name || agent.name}
                         </strong>
-                        <span className="block text-[11px] text-muted-foreground">
+                        <span className="text-muted-foreground block text-[11px]">
                           {agent.can_edit ? t("调试运行") : t("运行已发布版本")}
                         </span>
                       </span>
                       <IconButton
                         label={t(runExpanded ? "收起" : "展开")}
-                        className="size-8 text-muted-foreground hover:text-foreground"
+                        className="text-muted-foreground hover:text-foreground size-8"
                         onClick={() => setRunExpanded((current) => !current)}
                       >
                         {runExpanded ? (
@@ -969,7 +990,7 @@ export function WorkflowDetailWorkspace({
                       </IconButton>
                       <IconButton
                         label={t("关闭")}
-                        className="size-8 text-muted-foreground hover:text-foreground"
+                        className="text-muted-foreground hover:text-foreground size-8"
                         onClick={() => setRunOpen(false)}
                       >
                         <XIcon className="size-4" />
@@ -978,28 +999,33 @@ export function WorkflowDetailWorkspace({
 
                     <div
                       ref={runScrollRef}
-                      className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-muted/10 px-4 py-5"
+                      className="bg-muted/10 min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-5"
                     >
                       {form.interactionConfig.prologue ? (
                         <div className="flex items-start gap-2.5">
-                          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background shadow-xs">
+                          <span className="bg-background flex size-8 shrink-0 items-center justify-center rounded-lg border shadow-xs">
                             <WorkflowIcon className="size-4" />
                           </span>
-                          <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-tl-md border bg-background px-3.5 py-3 text-sm leading-6 shadow-xs">
+                          <div className="bg-background max-w-[85%] rounded-2xl rounded-tl-md border px-3.5 py-3 text-sm leading-6 whitespace-pre-wrap shadow-xs">
                             {form.interactionConfig.prologue}
                           </div>
                         </div>
                       ) : !currentRun ? (
                         <div className="flex min-h-full flex-col items-center justify-center px-6 text-center">
-                          <span className="flex size-12 items-center justify-center rounded-2xl border bg-background shadow-sm">
-                            <WorkflowIcon className="size-5 text-muted-foreground" />
+                          <span className="bg-background flex size-12 items-center justify-center rounded-2xl border shadow-sm">
+                            <WorkflowIcon className="text-muted-foreground size-5" />
                           </span>
-                          <p className="mt-4 max-w-xs text-sm leading-6 text-muted-foreground">
-                          {runTarget?.source === "published"
-                            ? t("问题将作为开始节点的 question 输出注入已发布版本 v{version}。", {
-                                version: runTarget.versionNumber ?? "",
-                              })
-                            : t("问题将作为开始节点的 question 输出注入当前草稿。")}
+                          <p className="text-muted-foreground mt-4 max-w-xs text-sm leading-6">
+                            {runTarget?.source === "published"
+                              ? t(
+                                  "问题将作为开始节点的 question 输出注入已发布版本 v{version}。",
+                                  {
+                                    version: runTarget.versionNumber ?? "",
+                                  }
+                                )
+                              : t(
+                                  "问题将作为开始节点的 question 输出注入当前草稿。"
+                                )}
                           </p>
                         </div>
                       ) : null}
@@ -1008,7 +1034,7 @@ export function WorkflowDetailWorkspace({
                         <div className="grid gap-4">
                           {currentRunQuestion ? (
                             <div className="ml-auto grid max-w-[85%] justify-items-end gap-1">
-                              <p className="rounded-2xl rounded-tr-md bg-foreground px-3.5 py-2.5 text-sm leading-6 text-background shadow-sm">
+                              <p className="bg-foreground text-background rounded-2xl rounded-tr-md px-3.5 py-2.5 text-sm leading-6 shadow-sm">
                                 {currentRunQuestion}
                               </p>
                               <Button
@@ -1027,10 +1053,10 @@ export function WorkflowDetailWorkspace({
                             </div>
                           ) : null}
                           <div className="flex items-start gap-2.5">
-                            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background shadow-xs">
+                            <span className="bg-background flex size-8 shrink-0 items-center justify-center rounded-lg border shadow-xs">
                               <WorkflowIcon className="size-4" />
                             </span>
-                            <article className="grid min-w-0 flex-1 gap-4 rounded-2xl rounded-tl-md border bg-background p-3.5 shadow-xs">
+                            <article className="bg-background grid min-w-0 flex-1 gap-4 rounded-2xl rounded-tl-md border p-3.5 shadow-xs">
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge
                                   variant={
@@ -1041,7 +1067,7 @@ export function WorkflowDetailWorkspace({
                                 >
                                   {runStatusLabel(currentRun, t)}
                                 </Badge>
-                                <span className="text-xs text-muted-foreground">
+                                <span className="text-muted-foreground text-xs">
                                   {t("已执行 {count} 个节点", {
                                     count: currentRun.step_count,
                                   })}
@@ -1060,7 +1086,7 @@ export function WorkflowDetailWorkspace({
 
                               {currentRunOutput ? (
                                 <section className="grid gap-2">
-                                  <h3 className="text-xs font-medium text-muted-foreground">
+                                  <h3 className="text-muted-foreground text-xs font-medium">
                                     {t("运行结果")}
                                   </h3>
                                   <MarkdownContent
@@ -1071,12 +1097,15 @@ export function WorkflowDetailWorkspace({
                               ) : null}
 
                               {currentRun.last_error ? (
-                                <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-                                  {workflowErrorMessage(currentRun.last_error, t)}
+                                <p className="bg-destructive/10 text-destructive rounded-lg p-3 text-sm">
+                                  {workflowErrorMessage(
+                                    currentRun.last_error,
+                                    t
+                                  )}
                                 </p>
                               ) : currentRun.status !== "succeeded" &&
                                 currentRun.status !== "awaiting_input" ? (
-                                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <p className="text-muted-foreground flex items-center gap-2 text-sm">
                                   <LoaderCircleIcon className="size-4 animate-spin" />
                                   {runStatusLabel(currentRun, t)}
                                 </p>
@@ -1117,13 +1146,13 @@ export function WorkflowDetailWorkspace({
                       ) : null}
                     </div>
 
-                    <footer className="shrink-0 border-t bg-background/95 p-3.5">
+                    <footer className="bg-background/95 shrink-0 border-t p-3.5">
                       {runQuestionInvalid ? (
-                        <p className="mb-2 text-xs text-destructive">
+                        <p className="text-destructive mb-2 text-xs">
                           {t("请输入问题")}
                         </p>
                       ) : null}
-                      <div className="relative rounded-2xl border bg-muted/20 p-1.5 shadow-sm transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:shadow-md">
+                      <div className="bg-muted/20 focus-within:border-ring focus-within:bg-background relative rounded-2xl border p-1.5 shadow-sm transition-[background-color,border-color,box-shadow] focus-within:shadow-md">
                         {form.interactionConfig.file_upload ? (
                           <input
                             ref={runFileInputRef}
@@ -1152,14 +1181,18 @@ export function WorkflowDetailWorkspace({
                             visibleRunFiles.length ? "pb-2" : "pb-12"
                           )}
                           placeholder={
-                            form.interactionConfig.user_input_title || t("请输入问题")
+                            form.interactionConfig.user_input_title ||
+                            t("请输入问题")
                           }
                           value={runQuestion}
                           disabled={runInputDisabled}
                           aria-invalid={runQuestionInvalid}
                           onChange={(event) => {
                             setRunQuestion(event.target.value)
-                            if (runQuestionInvalid && event.target.value.trim()) {
+                            if (
+                              runQuestionInvalid &&
+                              event.target.value.trim()
+                            ) {
                               setRunQuestionInvalid(false)
                             }
                           }}
@@ -1177,7 +1210,9 @@ export function WorkflowDetailWorkspace({
                           files={visibleRunFiles}
                           onRemove={(indexToRemove) =>
                             setRunFiles((current) =>
-                              current.filter((_, index) => index !== indexToRemove)
+                              current.filter(
+                                (_, index) => index !== indexToRemove
+                              )
                             )
                           }
                           t={t}
@@ -1235,7 +1270,7 @@ export function WorkflowDetailWorkspace({
               ) : null}
             </>
           ) : (
-            <main className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
+            <main className="bg-muted/20 min-h-0 flex-1 overflow-y-auto">
               {visibleActiveView === "overview" ? (
                 <AgentOverviewPanel
                   key={`${agent.id}:overview`}
@@ -1287,13 +1322,13 @@ export function WorkflowDetailWorkspace({
             <DialogDescription>{t("节点执行记录")}</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 overflow-y-auto p-5">
-            <div className="overflow-hidden rounded-lg border bg-muted/10">
+            <div className="bg-muted/10 overflow-hidden rounded-lg border">
               {executions.map((execution) => (
                 <details
                   key={execution.id}
                   className="group border-b last:border-b-0"
                 >
-                  <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                  <summary className="hover:bg-muted/40 focus-visible:ring-ring flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset [&::-webkit-details-marker]:hidden">
                     <span
                       className={cn(
                         "size-2 shrink-0 rounded-full",
@@ -1318,7 +1353,7 @@ export function WorkflowDetailWorkspace({
                       )}
                     </span>
                     {execution.duration_ms !== null ? (
-                      <span className="shrink-0 text-xs text-muted-foreground">
+                      <span className="text-muted-foreground shrink-0 text-xs">
                         {t("{duration} 毫秒", {
                           duration: execution.duration_ms,
                         })}
@@ -1326,41 +1361,41 @@ export function WorkflowDetailWorkspace({
                     ) : null}
                     <ChevronDownIcon
                       aria-hidden="true"
-                      className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                      className="text-muted-foreground size-4 shrink-0 transition-transform group-open:rotate-180"
                     />
                   </summary>
-                  <div className="grid gap-3 border-t bg-muted/20 px-3 py-3">
+                  <div className="bg-muted/20 grid gap-3 border-t px-3 py-3">
                     {execution.error ? (
                       <section className="grid gap-1.5">
-                        <h4 className="text-xs font-medium text-destructive">
+                        <h4 className="text-destructive text-xs font-medium">
                           {t("错误")}
                         </h4>
-                        <p className="break-words rounded-md bg-destructive/10 px-2.5 py-2 text-xs leading-5 text-destructive whitespace-pre-wrap [overflow-wrap:anywhere]">
+                        <p className="bg-destructive/10 text-destructive rounded-md px-2.5 py-2 text-xs leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
                           {workflowErrorMessage(execution.error, t)}
                         </p>
                       </section>
                     ) : null}
                     <section className="grid gap-1.5">
-                      <h4 className="text-xs font-medium text-muted-foreground">
+                      <h4 className="text-muted-foreground text-xs font-medium">
                         {t("输出内容")}
                       </h4>
                       {Object.keys(execution.outputs).length ? (
                         <JsonBlock value={execution.outputs} />
                       ) : (
-                        <p className="rounded-md border bg-background px-2.5 py-2 text-xs text-muted-foreground">
+                        <p className="bg-background text-muted-foreground rounded-md border px-2.5 py-2 text-xs">
                           {t("暂无输出内容")}
                         </p>
                       )}
                     </section>
                     <section className="grid gap-1.5">
-                      <h4 className="text-xs font-medium text-muted-foreground">
+                      <h4 className="text-muted-foreground text-xs font-medium">
                         {t("输入内容")}
                       </h4>
                       <JsonBlock value={execution.inputs} />
                     </section>
                     {Object.keys(execution.model_usage).length ? (
                       <section className="grid gap-1.5">
-                        <h4 className="text-xs font-medium text-muted-foreground">
+                        <h4 className="text-muted-foreground text-xs font-medium">
                           {t("模型用量")}
                         </h4>
                         <JsonBlock value={execution.model_usage} />
@@ -1385,36 +1420,34 @@ export function WorkflowDetailWorkspace({
           <div className="divide-y rounded-md border">
             {versions.length ? (
               versions.map((version) => (
-              <div key={version.id} className="flex items-center gap-3 p-3">
-                <Badge>v{version.version_number}</Badge>
-                <div className="min-w-0 flex-1">
+                <div key={version.id} className="flex items-center gap-3 p-3">
+                  <Badge>v{version.version_number}</Badge>
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">
                       {t("草稿修订 {revision}", {
                         revision: version.definition_revision,
                       })}
                     </p>
-                    <p className="truncate text-xs text-muted-foreground">
+                    <p className="text-muted-foreground truncate text-xs">
                       {new Date(version.created_at).toLocaleString()} ·{" "}
                       {version.graph_hash.slice(0, 12)}
                     </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={
-                    agent.status !== "active" ||
-                    isRunning ||
-                      isRunActive
-                  }
-                  onClick={() => {
-                    setHistoryOpen(false)
-                    openRunDialog(version.version_number)
-                  }}
-                >
-                  <PlayIcon />
-                  {t("运行")}
-                </Button>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      agent.status !== "active" || isRunning || isRunActive
+                    }
+                    onClick={() => {
+                      setHistoryOpen(false)
+                      openRunDialog(version.version_number)
+                    }}
+                  >
+                    <PlayIcon />
+                    {t("运行")}
+                  </Button>
                   {agent.can_edit ? (
                     <Button
                       type="button"
@@ -1425,10 +1458,10 @@ export function WorkflowDetailWorkspace({
                       {t("恢复")}
                     </Button>
                   ) : null}
-              </div>
+                </div>
               ))
             ) : (
-              <p className="p-6 text-center text-sm text-muted-foreground">
+              <p className="text-muted-foreground p-6 text-center text-sm">
                 {t("暂无已发布版本")}
               </p>
             )}
@@ -1444,7 +1477,7 @@ export function WorkflowDetailWorkspace({
           <DialogHeader>
             <DialogTitle>{t("工作流设置")}</DialogTitle>
             <DialogDescription>
-              {t("配置工作流的默认模型；知识库和只读 MCP 工具由节点选择。")}
+              {t("配置工作流的默认模型；知识库、工具和 Agent 由节点选择。")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={onSaveApp}>
@@ -1453,7 +1486,9 @@ export function WorkflowDetailWorkspace({
               setForm={setForm}
               models={models}
               knowledgeBases={knowledgeBases}
-              mcpServers={mcpServers}
+              tools={tools}
+              token={token}
+              workspaceId={workspaceId}
               readOnly={!agent.can_edit}
               t={t}
             />

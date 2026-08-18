@@ -23,6 +23,7 @@ from app.shareddomain.workflows.services import (
     version_to_response,
 )
 from app.application.workflow_runs import (
+    cancel_workflow_run,
     create_workflow_run,
     get_workflow_run,
     list_workflow_node_executions,
@@ -46,6 +47,7 @@ from app.application.workflow_uploads import (
 )
 
 __all__ = [
+    "cancel_workflow_run",
     "create_external_workflow_run",
     "create_workflow_run",
     "get_external_workflow_run",
@@ -112,10 +114,12 @@ async def update_workflow_definition(
     definition = await get_or_create_definition(db, agent, actor, workspace_role)
     updated = await save_definition(
         db,
+        agent,
         definition,
         payload.graph,
         payload.expected_revision,
         actor,
+        workspace_role,
     )
     return definition_to_response(updated)
 
@@ -173,13 +177,19 @@ async def restore_workflow_version(
     if version is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow version not found.")
     graph = await validate_workflow_resources(
-        db, agent, version.graph, actor, workspace_role
+        db,
+        agent,
+        version.graph,
+        actor,
+        workspace_role,
     )
     updated = await save_definition(
         db,
+        agent,
         definition,
         graph,
         expected_revision,
         actor,
+        workspace_role,
     )
     return definition_to_response(updated)

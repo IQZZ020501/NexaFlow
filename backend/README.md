@@ -52,6 +52,11 @@ On Windows the API and worker also install the `WindowsSelectorEventLoopPolicy`
 so psycopg async connections work (Windows defaults to the Proactor loop,
 which psycopg rejects).
 
+The `dev` and `coverage` Makefile targets delegate process orchestration to
+Python standard-library scripts, so GNU Make can run them from Windows
+PowerShell or Command Prompt without Bash. GNU Make itself must still be
+installed separately on Windows.
+
 Set `CELERY_BROKER_URL` for Redis. The API process and every worker must share
 the configured `KNOWLEDGE_STORAGE_DIR` and connect to the same `QDRANT_URL`;
 otherwise workers can miss uploaded files or write vectors to a different
@@ -65,6 +70,18 @@ deltas use bounded, short-lived Redis Streams while checkpoints, process
 events, and terminal answers stay in PostgreSQL. Closing an Agent event stream
 only stops observation; it does not cancel the durable run. If Redis live reads
 fail, the client still receives the durable terminal answer.
+
+Python Tools and Workflow code nodes require the network-disabled sandbox Unix
+socket, which is mounted only into the Compose worker. For local development,
+start the sandbox-capable worker from `backend/`:
+
+```bash
+make worker-compose
+```
+
+The host-only `make worker` command remains useful for tasks that do not execute
+Python code, but it cannot run Python Tools or Workflow code nodes because the
+sandbox socket is intentionally unavailable on the host.
 
 ## MCP transports
 

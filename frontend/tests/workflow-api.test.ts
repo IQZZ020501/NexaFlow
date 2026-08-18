@@ -56,6 +56,89 @@ describe("workflow API", () => {
     expect(JSON.parse(body).expected_revision).toBe(7)
   })
 
+  test("sends legacy graphs and consumes the server-normalized Tool graph", async () => {
+    let requestBody = ""
+    globalThis.fetch = (async (
+      _input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      requestBody = String(init?.body)
+      return Response.json({
+        id: "definition-1",
+        workspace_id: "ws-1",
+        agent_id: "workflow-1",
+        revision: 2,
+        graph: {
+          nodes: [
+            {
+              id: "tool-1",
+              type: "workflow",
+              position: { x: 0, y: 0 },
+              data: {
+                type: "tool",
+                title: "Search",
+                config: {
+                  tool: { tool_id: "tool-1", version_id: "version-1" },
+                  arguments: {},
+                },
+              },
+            },
+          ],
+          edges: [],
+          viewport: { x: 0, y: 0, zoom: 1 },
+        },
+        graph_hash: "hash",
+        updated_by_user_id: "user-1",
+        created_at: "2026-08-17T00:00:00Z",
+        updated_at: "2026-08-17T00:00:00Z",
+      })
+    }) as typeof fetch
+
+    const updated = await updateWorkflowDefinition(
+      "token",
+      "ws-1",
+      "workflow-1",
+      1,
+      {
+        nodes: [
+          {
+            id: "legacy-mcp",
+            type: "workflow",
+            position: { x: 0, y: 0 },
+            data: {
+              type: "mcp",
+              title: "Legacy MCP",
+              config: {
+                server_id: "server-1",
+                tool_name: "search",
+                arguments: {},
+              },
+            },
+          },
+          {
+            id: "legacy-code",
+            type: "workflow",
+            position: { x: 240, y: 0 },
+            data: {
+              type: "code",
+              title: "Legacy code",
+              config: { code: "result = inputs", inputs: {} },
+            },
+          },
+        ],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }
+    )
+
+    expect(
+      JSON.parse(requestBody).graph.nodes.map(
+        (node: { data: { type: string } }) => node.data.type
+      )
+    ).toEqual(["mcp", "code"])
+    expect(updated.graph.nodes.map((node) => node.data.type)).toEqual(["tool"])
+  })
+
   test("selects an immutable version for production runs", async () => {
     let body = ""
     globalThis.fetch = (async (
@@ -83,7 +166,8 @@ describe("workflow API", () => {
   })
 
   test("uploads debug attachments and passes their ids to the run", async () => {
-    const requests: Array<{ url: string; body: BodyInit | null | undefined }> = []
+    const requests: Array<{ url: string; body: BodyInit | null | undefined }> =
+      []
     globalThis.fetch = (async (
       input: RequestInfo | URL,
       init?: RequestInit
@@ -174,17 +258,11 @@ describe("workflow API", () => {
               delta: "# 标题",
             },
           ])
-        : ndjsonResponse([
-            { type: "complete", sequence: 3, run: {} },
-          ])
+        : ndjsonResponse([{ type: "complete", sequence: 3, run: {} }])
     }) as typeof fetch
 
-    await observeWorkflowRun(
-      "token",
-      "ws-1",
-      "workflow-1",
-      "run-1",
-      (event) => eventTypes.push(event.type)
+    await observeWorkflowRun("token", "ws-1", "workflow-1", "run-1", (event) =>
+      eventTypes.push(event.type)
     )
 
     expect(eventTypes).toEqual(["answer_delta", "complete"])

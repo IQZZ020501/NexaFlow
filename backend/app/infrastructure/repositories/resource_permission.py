@@ -1,12 +1,28 @@
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.domain.resource_permission import ResourcePermission as ResourcePermissionORM
 from app.domain.user import User as UserORM
 from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipORM
 from app.entities.resource_permission import ResourcePermission
 from app.entities.user import User
-from app.infrastructure.repositories.mapping import save, to_entity
+from app.infrastructure.repositories.mapping import save, to_entity, to_orm
+
+
+def _grant_predicate(
+    workspace_id: str,
+    resource_type: str,
+    resource_id: str,
+    user_id: str,
+) -> tuple[ColumnElement[bool], ...]:
+    return (
+        ResourcePermissionORM.workspace_id == workspace_id,
+        ResourcePermissionORM.resource_type == resource_type,
+        ResourcePermissionORM.resource_id == resource_id,
+        ResourcePermissionORM.user_id == user_id,
+    )
 
 
 async def get_user_grant(
@@ -18,10 +34,12 @@ async def get_user_grant(
 ) -> ResourcePermission | None:
     row = await db.scalar(
         select(ResourcePermissionORM).where(
-            ResourcePermissionORM.workspace_id == workspace_id,
-            ResourcePermissionORM.resource_type == resource_type,
-            ResourcePermissionORM.resource_id == resource_id,
-            ResourcePermissionORM.user_id == user_id,
+            *_grant_predicate(
+                workspace_id,
+                resource_type,
+                resource_id,
+                user_id,
+            ),
         )
     )
     return to_entity(ResourcePermission, row) if row else None
@@ -40,6 +58,45 @@ async def save_resource_permission(
     entity: ResourcePermission,
 ) -> None:
     await save(db, ResourcePermissionORM, entity)
+
+
+async def upsert_resource_permission(
+    db: AsyncSession,
+    entity: ResourcePermission,
+) -> ResourcePermission:
+    row = await db.scalar(
+        select(ResourcePermissionORM).where(
+            *_grant_predicate(
+                entity.workspace_id,
+                entity.resource_type,
+                entity.resource_id,
+                entity.user_id,
+            ),
+        )
+    )
+    if row is None:
+        try:
+            async with db.begin_nested():
+                row = to_orm(ResourcePermissionORM, entity)
+                db.add(row)
+                await db.flush()
+        except IntegrityError:
+            row = await db.scalar(
+                select(ResourcePermissionORM).where(
+                    *_grant_predicate(
+                        entity.workspace_id,
+                        entity.resource_type,
+                        entity.resource_id,
+                        entity.user_id,
+                    ),
+                )
+            )
+            if row is None:
+                raise
+    if row.permission != entity.permission:
+        row.permission = entity.permission
+        await db.flush()
+    return to_entity(ResourcePermission, row)
 
 
 async def list_resource_permission_rows(

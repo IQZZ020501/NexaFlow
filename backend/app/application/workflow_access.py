@@ -43,6 +43,7 @@ from app.schemas.workflow import (
     WorkflowGraph,
     WorkflowRunCreateRequest,
 )
+from app.shareddomain.agents.models import agent_run_display_status
 
 
 def _external_error(status_value: str) -> str | None:
@@ -62,13 +63,14 @@ def _external_run_response(
     detail,
     progress: list[ExternalWorkflowProgressEventResponse] | None = None,
 ) -> ExternalWorkflowRunResponse:
+    display_status = agent_run_display_status(run.status)
     return ExternalWorkflowRunResponse(
         id=run.id,
         conversation_id=run.conversation_id,
         inputs=detail.inputs,
-        outputs=detail.outputs if run.status == "succeeded" else {},
-        status=run.status,
-        error=_external_error(run.status),
+        outputs=detail.outputs if display_status == "succeeded" else {},
+        status=display_status,
+        error=_external_error(display_status),
         progress=progress or [],
         created_at=run.created_at,
         started_at=run.started_at,
@@ -335,8 +337,12 @@ async def list_public_workflow_conversations(
             PublicWorkflowConversationResponse(
                 conversation_id=row.conversation_id,
                 inputs=detail.inputs,
-                outputs=detail.outputs if row.status == "succeeded" else {},
-                status=row.status,
+                outputs=(
+                    detail.outputs
+                    if agent_run_display_status(row.status) == "succeeded"
+                    else {}
+                ),
+                status=agent_run_display_status(row.status),
                 run_count=row.run_count,
                 created_at=row.created_at,
                 updated_at=row.updated_at,

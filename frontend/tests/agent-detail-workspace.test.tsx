@@ -16,11 +16,16 @@ import {
   unrenderedAgentToolCalls,
 } from "@/components/agents/agent-detail-workspace"
 import { LanguageProvider, useLanguage } from "@/contexts/language-provider"
-import type { Agent, AgentRun, AgentRunEvent, AgentToolCall } from "@/lib/api/agents"
+import type {
+  Agent,
+  AgentRun,
+  AgentRunEvent,
+  AgentToolCall,
+} from "@/lib/api/agents"
 import type { AgentFormState } from "@/components/agents/agents-page"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
-import type { McpServer } from "@/lib/api/mcp"
+import type { ToolSummary } from "@/lib/api/tools"
 
 import {
   jsonResponse,
@@ -69,25 +74,28 @@ function knowledgeBase(id: string, name: string): KnowledgeBase {
   }
 }
 
-function mcpServer(): McpServer {
+function tool(): ToolSummary {
   return {
-    id: "server-1",
+    id: "tool-1",
     workspace_id: WS,
-    name: "Database",
-    transport: "streamable_http",
-    url: "https://mcp.example.com/mcp",
-    stdio_command: null,
-    tools: [
-      { name: "search", description: "Search the catalog", input_schema: {}, annotations: null, definition_hash: "h1", policy_mode: "read_only" },
-      { name: "execute_sql", description: "Run SQL", input_schema: {}, annotations: null, definition_hash: "h2", policy_mode: "approval_required" },
-    ],
+    kind: "mcp",
+    function_name: "search",
+    display_name: "Catalog search",
+    description: "Search the catalog",
+    current_version_id: "version-1",
     status: "active",
-    has_bearer_token: false,
-    bearer_token_hint: null,
-    last_error: null,
+    availability: "available",
+    source: {
+      id: "source-1",
+      name: "Database",
+      kind: "mcp",
+      transport: "streamable_http",
+    },
     created_by_user_id: "u-1",
-    created_at: "2026-08-01T00:00:00Z",
-    updated_at: "2026-08-01T00:00:00Z",
+    permission: "owner",
+    can_view: true,
+    can_use: true,
+    can_manage: true,
   }
 }
 
@@ -109,7 +117,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     model_id: "model-1",
     knowledge_query_mode: "required",
     knowledge_base_ids: ["knowledge-1"],
-    mcp_tools: [{ server_id: "server-1", tool_name: "search" }],
+    tools: [{ tool_id: "tool-1", version_id: "version-1" }],
     status: "active",
     published: false,
     has_unpublished_changes: false,
@@ -134,7 +142,7 @@ function formFrom(agent: Agent): AgentFormState {
     instructions: agent.instructions,
     knowledgeQueryMode: agent.knowledge_query_mode,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
-    mcpTools: agent.mcp_tools.map((tool) => ({ ...tool })),
+    tools: (agent.tools ?? []).map((tool) => ({ ...tool })),
     status: agent.status,
   }
 }
@@ -196,12 +204,15 @@ const session = makeSession({
       must_change_password: false,
       is_active: true,
       created_at: "2026-01-01T00:00:00Z",
-      workspaces: [{ id: WS, name: "Test Workspace", is_default: true, role: "admin" }],
+      workspaces: [
+        { id: WS, name: "Test Workspace", is_default: true, role: "admin" },
+      ],
       teams: [],
     },
     memberships: [{ workspace_id: WS, role: "admin" }],
   },
-  notify: (kind: "success" | "error", message: string) => notifyCalls.push({ kind, message }),
+  notify: (kind: "success" | "error", message: string) =>
+    notifyCalls.push({ kind, message }),
 })
 mockUseSession(session)
 
@@ -233,7 +244,10 @@ type FetchCase = {
   respond: Respond
 }
 
-function fetchRouter(cases: FetchCase[], fallback?: (url: string, init?: RequestInit) => Response) {
+function fetchRouter(
+  cases: FetchCase[],
+  fallback?: (url: string, init?: RequestInit) => Response
+) {
   return (url: string, init?: RequestInit) => {
     const u = new URL(url, "http://localhost")
     const method = init?.method ?? "GET"
@@ -265,10 +279,12 @@ afterEach(() => {
 const agent = makeAgent()
 const models = [model("model-1", "DeepSeek Chat")]
 const knowledgeBases = [knowledgeBase("knowledge-1", "产品文档")]
-const mcpServers = [mcpServer()]
+const tools = [tool()]
 
 function LanguageProviderWrap({ children }: { children: React.ReactNode }) {
-  return <LanguageProvider defaultLanguage="zh-Hans">{children}</LanguageProvider>
+  return (
+    <LanguageProvider defaultLanguage="zh-Hans">{children}</LanguageProvider>
+  )
 }
 
 type HarnessProps = {
@@ -296,13 +312,19 @@ type HarnessProps = {
   onAsk?: (event: unknown) => void
   onCancelAsk?: () => void
   onNewConversation?: () => void
-  onToolCallDecision?: (runId: string, callId: string, decision: "approve" | "reject") => void
+  onToolCallDecision?: (
+    runId: string,
+    callId: string,
+    decision: "approve" | "reject"
+  ) => void
 }
 
 function Harness(props: HarnessProps = {}) {
   const { t } = useLanguage()
   const workspaceAgent = props.agent ?? agent
-  const [form, setForm] = useState<AgentFormState>(() => formFrom(workspaceAgent))
+  const [form, setForm] = useState<AgentFormState>(() =>
+    formFrom(workspaceAgent)
+  )
   const [question, setQuestion] = useState(props.question ?? "")
   const [files, setFiles] = useState<File[]>(props.files ?? [])
   const callbacks = {
@@ -316,7 +338,8 @@ function Harness(props: HarnessProps = {}) {
     onCancelAsk: props.onCancelAsk ?? (() => undefined),
     onNewConversation: props.onNewConversation ?? (() => undefined),
     onToolCallDecision: props.onToolCallDecision ?? (() => undefined),
-    notify: (kind: "success" | "error", message: string) => notifyCalls.push({ kind, message }),
+    notify: (kind: "success" | "error", message: string) =>
+      notifyCalls.push({ kind, message }),
     t,
   }
   return (
@@ -326,7 +349,7 @@ function Harness(props: HarnessProps = {}) {
       setForm={setForm}
       models={models}
       knowledgeBases={knowledgeBases}
-      mcpServers={mcpServers}
+      tools={tools}
       runs={props.runs ?? []}
       toolCallsByRun={props.toolCallsByRun ?? {}}
       resolvingCallId={props.resolvingCallId ?? null}
@@ -381,29 +404,38 @@ describe("AgentDetailWorkspace header and navigation", () => {
   })
 
   test("publish action cycles through publish states", () => {
-    const view = renderPage(
-      <Harness agent={makeAgent({ published: false })} />
-    )
+    const view = renderPage(<Harness agent={makeAgent({ published: false })} />)
     expect(screen.getByText("发布").closest("button")!).toBeTruthy()
     view.rerender(
       <LanguageProviderWrap>
-        <Harness agent={makeAgent({ published: true, has_unpublished_changes: true })} />
+        <Harness
+          agent={makeAgent({ published: true, has_unpublished_changes: true })}
+        />
       </LanguageProviderWrap>
     )
     expect(screen.getByText("重新发布").closest("button")!).toBeTruthy()
   })
 
   test("unpublish action appears for a published clean agent", () => {
-    renderPage(<Harness agent={makeAgent({ published: true, has_unpublished_changes: false })} />)
+    renderPage(
+      <Harness
+        agent={makeAgent({ published: true, has_unpublished_changes: false })}
+      />
+    )
     expect(screen.getByText("取消发布").closest("button")!).toBeTruthy()
   })
 
   test("publish is disabled while dirty or publishing", () => {
     renderPage(<Harness isDirty />)
-    expect((screen.getByText("发布").closest("button")! as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (screen.getByText("发布").closest("button")! as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
     renderPage(<Harness isPublishing />)
     const publishButtons = screen.getAllByRole("button", { name: /发布/ })
-    expect(publishButtons.some((button) => (button as HTMLButtonElement).disabled)).toBe(true)
+    expect(
+      publishButtons.some((button) => (button as HTMLButtonElement).disabled)
+    ).toBe(true)
   })
 
   test("hides the publish button for non-admin members", () => {
@@ -413,10 +445,14 @@ describe("AgentDetailWorkspace header and navigation", () => {
 
   test("save button is disabled until dirty", () => {
     renderPage(<Harness activeView="settings" />)
-    const cleanSave = screen.getAllByRole("button", { name: "保存" }).at(-1) as HTMLButtonElement
+    const cleanSave = screen
+      .getAllByRole("button", { name: "保存" })
+      .at(-1) as HTMLButtonElement
     expect(cleanSave.disabled).toBe(true)
     renderPage(<Harness activeView="settings" isDirty />)
-    const dirtySave = screen.getAllByRole("button", { name: "保存" }).at(-1) as HTMLButtonElement
+    const dirtySave = screen
+      .getAllByRole("button", { name: "保存" })
+      .at(-1) as HTMLButtonElement
     expect(dirtySave.disabled).toBe(false)
   })
 
@@ -436,7 +472,9 @@ describe("AgentDetailWorkspace header and navigation", () => {
       newConversationCalls += 1
     }) as () => void
     let newConversationCalls = 0
-    renderPage(<Harness activeView="settings" onNewConversation={onNewConversation} />)
+    renderPage(
+      <Harness activeView="settings" onNewConversation={onNewConversation} />
+    )
     fireEvent.click(screen.getByLabelText("新建对话"))
     expect(newConversationCalls).toBe(1)
     fireEvent.click(screen.getByLabelText("预览"))
@@ -468,11 +506,7 @@ describe("AgentDetailWorkspace header and navigation", () => {
 
   test("navigation switches views for editable agents", () => {
     const views: string[] = []
-    renderPage(
-      <Harness
-        onViewChange={(view) => views.push(view)}
-      />
-    )
+    renderPage(<Harness onViewChange={(view) => views.push(view)} />)
     fireEvent.click(navButton("对话日志"))
     fireEvent.click(navButton("监控统计"))
     fireEvent.click(navButton("对话用户"))
@@ -483,12 +517,16 @@ describe("AgentDetailWorkspace header and navigation", () => {
   test("view-only agents only see overview and settings", () => {
     renderPage(<Harness agent={makeAgent({ can_edit: false })} />)
     const navs = screen.getAllByLabelText("Agent 详情导航")
-    expect(within(navs[0]).queryByRole("button", { name: "对话日志" })).toBeNull()
+    expect(
+      within(navs[0]).queryByRole("button", { name: "对话日志" })
+    ).toBeNull()
     expect(within(navs[0]).getByText("概览").closest("button")!).toBeTruthy()
   })
 
   test("falls back to overview when a restricted view is active", () => {
-    renderPage(<Harness agent={makeAgent({ can_edit: false })} activeView="logs" />)
+    renderPage(
+      <Harness agent={makeAgent({ can_edit: false })} activeView="logs" />
+    )
     expect(screen.getByText("公开访问与 API")).toBeTruthy()
     expect(screen.queryByText("对话日志")).toBeNull()
   })
@@ -527,7 +565,11 @@ describe("AgentDetailWorkspace preview", () => {
   })
 
   test("renders a failed run with the error message", () => {
-    const run = makeRun({ status: "failed", result: "", last_error: "model timeout" })
+    const run = makeRun({
+      status: "failed",
+      result: "",
+      last_error: "model timeout",
+    })
     renderPage(<Harness activeView="settings" runs={[run]} />)
     expect(screen.getByText("model timeout")).toBeTruthy()
   })
@@ -547,7 +589,12 @@ describe("AgentDetailWorkspace preview", () => {
   })
 
   test("renders the answering indicator for a running run", () => {
-    const run = makeRun({ id: "run-r", status: "running", result: "", events: [] })
+    const run = makeRun({
+      id: "run-r",
+      status: "running",
+      result: "",
+      events: [],
+    })
     renderPage(<Harness activeView="settings" runs={[run]} />)
     expect(screen.getAllByText("正在生成回答").length).toBeGreaterThan(0)
   })
@@ -629,7 +676,15 @@ describe("AgentDetailWorkspace preview", () => {
           tool_kind: "knowledge",
           server_name: "",
           input: { query: "x" },
-          output: { hits: [{ document: "doc-a", knowledge_base: "kb-a", content: "chunk content" }] },
+          output: {
+            hits: [
+              {
+                document: "doc-a",
+                knowledge_base: "kb-a",
+                content: "chunk content",
+              },
+            ],
+          },
           duration_ms: 10,
         },
       ],
@@ -650,7 +705,9 @@ describe("AgentDetailWorkspace preview", () => {
         activeView="settings"
         runs={[run]}
         toolCallsByRun={{ "run-1": [makeToolCall()] }}
-        onToolCallDecision={(runId, callId, decision) => calls.push([runId, callId, decision])}
+        onToolCallDecision={(runId, callId, decision) =>
+          calls.push([runId, callId, decision])
+        }
       />
     )
     expect(screen.getByText("工具调用需要确认")).toBeTruthy()
@@ -668,7 +725,9 @@ describe("AgentDetailWorkspace preview", () => {
         activeView="settings"
         runs={[run]}
         toolCallsByRun={{
-          "run-1": [makeToolCall({ status: "uncertain", last_error: "retry failed" })],
+          "run-1": [
+            makeToolCall({ status: "uncertain", last_error: "retry failed" }),
+          ],
         }}
       />
     )
@@ -702,7 +761,9 @@ describe("AgentDetailWorkspace preview", () => {
     expect(details).toBeTruthy()
     details.open = false
     details.dispatchEvent(new Event("toggle", { bubbles: true }))
-    await waitFor(() => expect(screen.getByText("等待工具调用确认")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("等待工具调用确认")).toBeTruthy()
+    )
   })
 
   test("typing and submitting the ask form calls onAsk", () => {
@@ -715,7 +776,9 @@ describe("AgentDetailWorkspace preview", () => {
         }}
       />
     )
-    const textarea = screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "What is new?" } })
     expect(textarea.value).toBe("What is new?")
     const form = textarea.closest("form")
@@ -725,22 +788,40 @@ describe("AgentDetailWorkspace preview", () => {
 
   test("submit button is disabled without a question or while busy", () => {
     renderPage(<Harness activeView="settings" />)
-    expect((screen.getByLabelText("发送问题") as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (screen.getByLabelText("发送问题") as HTMLButtonElement).disabled
+    ).toBe(true)
     renderPage(<Harness activeView="settings" question="q" isAsking />)
     expect(screen.getByLabelText("停止生成")).toBeTruthy()
   })
 
   test("ask controls are disabled for dirty or disabled agents", () => {
     renderPage(<Harness activeView="settings" isDirty />)
-    expect((screen.getAllByLabelText("向 Agent 提问").at(-1) as HTMLTextAreaElement).disabled).toBe(true)
-    expect((screen.getAllByLabelText("添加附件").at(-1) as HTMLButtonElement).disabled).toBe(true)
-    renderPage(<Harness activeView="settings" agent={makeAgent({ status: "disabled" })} />)
-    expect((screen.getAllByLabelText("向 Agent 提问").at(-1) as HTMLTextAreaElement).disabled).toBe(true)
+    expect(
+      (screen.getAllByLabelText("向 Agent 提问").at(-1) as HTMLTextAreaElement)
+        .disabled
+    ).toBe(true)
+    expect(
+      (screen.getAllByLabelText("添加附件").at(-1) as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
+    renderPage(
+      <Harness
+        activeView="settings"
+        agent={makeAgent({ status: "disabled" })}
+      />
+    )
+    expect(
+      (screen.getAllByLabelText("向 Agent 提问").at(-1) as HTMLTextAreaElement)
+        .disabled
+    ).toBe(true)
   })
 
   test("attaches and removes files", () => {
     renderPage(<Harness activeView="settings" />)
-    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    const fileInput = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement
     const file = new File(["a"], "notes.txt", { type: "text/plain" })
     fireEvent.change(fileInput, { target: { files: [file] } })
     expect(screen.getByText("notes.txt")).toBeTruthy()
@@ -749,7 +830,9 @@ describe("AgentDetailWorkspace preview", () => {
   })
 
   test("shows a pending question while asking", () => {
-    renderPage(<Harness activeView="settings" pendingQuestion="Loading question" />)
+    renderPage(
+      <Harness activeView="settings" pendingQuestion="Loading question" />
+    )
     expect(screen.queryByText("开始和 Agent 对话")).toBeNull()
   })
 
@@ -760,7 +843,9 @@ describe("AgentDetailWorkspace preview", () => {
         runs={[makeRun({ status: "succeeded", result: "answer" })]}
       />
     )
-    const scrollHost = container.querySelector(".overflow-y-auto") as HTMLElement
+    const scrollHost = container.querySelector(
+      ".overflow-y-auto"
+    ) as HTMLElement
     fireEvent.scroll(scrollHost, { target: { scrollTop: 10 } })
     expect(screen.getByText("answer")).toBeTruthy()
   })
@@ -800,7 +885,17 @@ describe("AgentOverviewPanel", () => {
         exact: true,
         respond: () =>
           jsonResponse({
-            credential: { id: "cred-1", agent_id: "agent-1", workspace_id: WS, name: "Production", hint: "nxf_…abcd", created_by_user_id: "u-1", last_used_at: null, revoked_at: null, created_at: "2026-08-04T00:00:00Z" },
+            credential: {
+              id: "cred-1",
+              agent_id: "agent-1",
+              workspace_id: WS,
+              name: "Production",
+              hint: "nxf_…abcd",
+              created_by_user_id: "u-1",
+              last_used_at: null,
+              revoked_at: null,
+              created_at: "2026-08-04T00:00:00Z",
+            },
             token: "nxf_secret_token",
           }),
       },
@@ -810,7 +905,17 @@ describe("AgentOverviewPanel", () => {
         exact: true,
         respond: () =>
           jsonResponse({
-            credential: { id: "cred-1", agent_id: "agent-1", workspace_id: WS, name: "Production", hint: "nxf_…wxyz", created_by_user_id: "u-1", last_used_at: null, revoked_at: null, created_at: "2026-08-04T00:00:00Z" },
+            credential: {
+              id: "cred-1",
+              agent_id: "agent-1",
+              workspace_id: WS,
+              name: "Production",
+              hint: "nxf_…wxyz",
+              created_by_user_id: "u-1",
+              last_used_at: null,
+              revoked_at: null,
+              created_at: "2026-08-04T00:00:00Z",
+            },
             token: "nxf_rotated_token",
           }),
       },
@@ -825,23 +930,35 @@ describe("AgentOverviewPanel", () => {
     fireEvent.click(screen.getByText("管理 API Key").closest("button")!)
     await waitFor(() => expect(screen.getByText("暂无 API Key")).toBeTruthy())
 
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Production" } })
+    fireEvent.change(screen.getByLabelText("名称"), {
+      target: { value: "Production" },
+    })
     fireEvent.submit(screen.getByLabelText("名称").closest("form")!)
-    await waitFor(() => expect(screen.getByText("nxf_secret_token")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("nxf_secret_token")).toBeTruthy()
+    )
     expect(screen.getAllByText("Production").length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByText("轮换").closest("button")!)
-    await waitFor(() => expect(screen.getByText("nxf_rotated_token")).toBeTruthy())
-    expect(notifyCalls.some((call) => call.message === "API Key 已轮换")).toBe(true)
+    await waitFor(() =>
+      expect(screen.getByText("nxf_rotated_token")).toBeTruthy()
+    )
+    expect(notifyCalls.some((call) => call.message === "API Key 已轮换")).toBe(
+      true
+    )
 
     fireEvent.click(screen.getByText("撤销").closest("button")!)
     fireEvent.click(
       within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
         "button",
-        { name: "撤销" },
-      ),
+        { name: "撤销" }
+      )
     )
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "API Key 已撤销")).toBe(true))
+    await waitFor(() =>
+      expect(
+        notifyCalls.some((call) => call.message === "API Key 已撤销")
+      ).toBe(true)
+    )
     expect(screen.getByText("已撤销")).toBeTruthy()
 
     fireEvent.click(screen.getByText("关闭").closest("button")!)
@@ -862,7 +979,17 @@ describe("AgentOverviewPanel", () => {
         respond: () =>
           jsonResponse({
             items: [
-              { id: "cred-2", agent_id: "agent-1", workspace_id: WS, name: "Service", hint: "nxf_…0000", created_by_user_id: "u-1", last_used_at: "2026-08-05T00:00:00Z", revoked_at: null, created_at: "2026-08-01T00:00:00Z" },
+              {
+                id: "cred-2",
+                agent_id: "agent-1",
+                workspace_id: WS,
+                name: "Service",
+                hint: "nxf_…0000",
+                created_by_user_id: "u-1",
+                last_used_at: "2026-08-05T00:00:00Z",
+                revoked_at: null,
+                created_at: "2026-08-01T00:00:00Z",
+              },
             ],
           }),
       },
@@ -897,7 +1024,9 @@ describe("AgentOverviewPanel API key failure paths", () => {
     ]
     renderPage(<Harness />)
     fireEvent.click(screen.getByText("管理 API Key").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 
   test("reports an error when creating an API key fails", async () => {
@@ -918,9 +1047,13 @@ describe("AgentOverviewPanel API key failure paths", () => {
     renderPage(<Harness />)
     fireEvent.click(screen.getByText("管理 API Key").closest("button")!)
     await waitFor(() => expect(screen.getByText("暂无 API Key")).toBeTruthy())
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Broken" } })
+    fireEvent.change(screen.getByLabelText("名称"), {
+      target: { value: "Broken" },
+    })
     fireEvent.submit(screen.getByLabelText("名称").closest("form")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 
   test("reports an error when rotating an API key fails", async () => {
@@ -942,7 +1075,9 @@ describe("AgentOverviewPanel API key failure paths", () => {
     fireEvent.click(screen.getByText("管理 API Key").closest("button")!)
     await waitFor(() => expect(screen.getByText("Key cred-r")).toBeTruthy())
     fireEvent.click(screen.getByText("轮换").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 
   test("shows the rotating spinner while a rotation is in flight", async () => {
@@ -975,7 +1110,11 @@ describe("AgentOverviewPanel API key failure paths", () => {
         token: "nxf_rotated",
       })
     )
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "API Key 已轮换")).toBe(true))
+    await waitFor(() =>
+      expect(
+        notifyCalls.some((call) => call.message === "API Key 已轮换")
+      ).toBe(true)
+    )
   })
 
   test("reports an error when revoking an API key fails", async () => {
@@ -1000,10 +1139,12 @@ describe("AgentOverviewPanel API key failure paths", () => {
     fireEvent.click(
       within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
         "button",
-        { name: "撤销" },
-      ),
+        { name: "撤销" }
+      )
     )
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 
   test("revoking one key leaves the other credentials untouched", async () => {
@@ -1012,7 +1153,8 @@ describe("AgentOverviewPanel API key failure paths", () => {
         method: "GET",
         pathname: `/api/v1/workspaces/${WS}/agents/agent-1/api-credentials`,
         exact: true,
-        respond: () => jsonResponse({ items: [credential("cred-a"), credential("cred-b")] }),
+        respond: () =>
+          jsonResponse({ items: [credential("cred-a"), credential("cred-b")] }),
       },
       {
         method: "DELETE",
@@ -1028,10 +1170,14 @@ describe("AgentOverviewPanel API key failure paths", () => {
     fireEvent.click(
       within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
         "button",
-        { name: "撤销" },
-      ),
+        { name: "撤销" }
+      )
     )
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "API Key 已撤销")).toBe(true))
+    await waitFor(() =>
+      expect(
+        notifyCalls.some((call) => call.message === "API Key 已撤销")
+      ).toBe(true)
+    )
     expect(screen.getByText("已撤销")).toBeTruthy()
     expect(screen.getByText("Key cred-b")).toBeTruthy()
   })
@@ -1058,11 +1204,17 @@ describe("AgentOverviewPanel API key failure paths", () => {
     renderPage(<Harness />)
     fireEvent.click(screen.getByText("管理 API Key").closest("button")!)
     await waitFor(() => expect(screen.getByText("暂无 API Key")).toBeTruthy())
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Production" } })
+    fireEvent.change(screen.getByLabelText("名称"), {
+      target: { value: "Production" },
+    })
     fireEvent.submit(screen.getByLabelText("名称").closest("form")!)
     await waitFor(() => expect(screen.getByText("nxf_copy_me")).toBeTruthy())
     fireEvent.click(screen.getByLabelText("复制 API Key"))
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "API Key 已复制")).toBe(true))
+    await waitFor(() =>
+      expect(
+        notifyCalls.some((call) => call.message === "API Key 已复制")
+      ).toBe(true)
+    )
   })
 
   test("reports an error when copying the public link fails", async () => {
@@ -1078,7 +1230,11 @@ describe("AgentOverviewPanel API key failure paths", () => {
     try {
       renderPage(<Harness />)
       fireEvent.click(screen.getByText("复制链接").closest("button")!)
-      await waitFor(() => expect(notifyCalls.some((call) => call.message === "复制失败")).toBe(true))
+      await waitFor(() =>
+        expect(notifyCalls.some((call) => call.message === "复制失败")).toBe(
+          true
+        )
+      )
     } finally {
       Object.defineProperty(navigator, "clipboard", {
         value: originalClipboard,
@@ -1143,16 +1299,22 @@ describe("AgentLogsPanel", () => {
       },
     ]
     renderPage(<Harness activeView="logs" />)
-    await waitFor(() => expect(screen.getByText("How do I reset my password?")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("How do I reset my password?")).toBeTruthy()
+    )
     expect(screen.getByText("公开访问")).toBeTruthy()
     expect(screen.getByText("Visitor")).toBeTruthy()
     expect(screen.getByText("成功")).toBeTruthy()
     expect(screen.getByText("显示 1-20，共 45 条")).toBeTruthy()
 
     fireEvent.click(screen.getByText("下一页").closest("button")!)
-    await waitFor(() => expect(screen.getByText("显示 21-40，共 45 条")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("显示 21-40，共 45 条")).toBeTruthy()
+    )
     fireEvent.click(screen.getByText("上一页").closest("button")!)
-    await waitFor(() => expect(screen.getByText("显示 1-20，共 45 条")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("显示 1-20，共 45 条")).toBeTruthy()
+    )
 
     fireEvent.click(screen.getByLabelText("查看日志详情"))
     await waitFor(() => expect(screen.getByText("对话详情")).toBeTruthy())
@@ -1208,7 +1370,9 @@ describe("AgentLogsPanel", () => {
       },
     ]
     renderPage(<Harness activeView="logs" />)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 
   test("renders console-sourced logs and opens details with the keyboard", async () => {
@@ -1236,7 +1400,9 @@ describe("AgentLogsPanel", () => {
       },
     ]
     renderPage(<Harness activeView="logs" />)
-    await waitFor(() => expect(screen.getByText("How do I reset my password?")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("How do I reset my password?")).toBeTruthy()
+    )
     expect(screen.getByText("控制台")).toBeTruthy()
     expect(screen.getByText("step failed")).toBeTruthy()
 
@@ -1263,10 +1429,16 @@ describe("AgentLogsPanel", () => {
           }),
       },
     ]
-    renderPage(<Harness agent={makeAgent({ app_type: "workflow" })} activeView="logs" />)
-    await waitFor(() => expect(screen.getByText("How do I reset my password?")).toBeTruthy())
+    renderPage(
+      <Harness agent={makeAgent({ app_type: "workflow" })} activeView="logs" />
+    )
+    await waitFor(() =>
+      expect(screen.getByText("How do I reset my password?")).toBeTruthy()
+    )
     fireEvent.click(screen.getByLabelText("查看日志详情"))
-    await waitFor(() => expect(screen.getByText("工作流未返回结果")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("工作流未返回结果")).toBeTruthy()
+    )
   })
 
   test("reports an error when refreshing logs fails", async () => {
@@ -1279,16 +1451,25 @@ describe("AgentLogsPanel", () => {
         respond: () => {
           page += 1
           if (page === 1) {
-            return jsonResponse({ items: [logItem], total: 1, offset: 0, limit: 20 })
+            return jsonResponse({
+              items: [logItem],
+              total: 1,
+              offset: 0,
+              limit: 20,
+            })
           }
           return jsonResponse({ detail: "boom" }, 500)
         },
       },
     ]
     renderPage(<Harness activeView="logs" />)
-    await waitFor(() => expect(screen.getByText("How do I reset my password?")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("How do I reset my password?")).toBeTruthy()
+    )
     fireEvent.click(screen.getByText("刷新").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 })
 
@@ -1304,8 +1485,24 @@ describe("AgentMonitoringPanel", () => {
       total_tokens: 1234,
     },
     daily: [
-      { date: "2026-08-04", active_users: 1, conversations: 2, runs: 5, succeeded: 4, failed: 1, total_tokens: 100 },
-      { date: "2026-08-05", active_users: 2, conversations: 3, runs: 8, succeeded: 8, failed: 0, total_tokens: 200 },
+      {
+        date: "2026-08-04",
+        active_users: 1,
+        conversations: 2,
+        runs: 5,
+        succeeded: 4,
+        failed: 1,
+        total_tokens: 100,
+      },
+      {
+        date: "2026-08-05",
+        active_users: 2,
+        conversations: 3,
+        runs: 8,
+        succeeded: 8,
+        failed: 0,
+        total_tokens: 200,
+      },
     ],
   }
 
@@ -1348,7 +1545,9 @@ describe("AgentMonitoringPanel", () => {
       },
     ]
     renderPage(<Harness activeView="monitoring" />)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 })
 
@@ -1397,7 +1596,8 @@ describe("AgentConversationUsersPanel", () => {
         method: "GET",
         pathname: `/api/v1/workspaces/${WS}/agents/agent-1/conversation-users`,
         exact: false,
-        respond: () => jsonResponse({ items: [], total: 0, offset: 0, limit: 20 }),
+        respond: () =>
+          jsonResponse({ items: [], total: 0, offset: 0, limit: 20 }),
       },
     ]
     renderPage(<Harness activeView="users" />)
@@ -1423,9 +1623,13 @@ describe("AgentConversationUsersPanel", () => {
     await waitFor(() => expect(screen.getByText("Visitor")).toBeTruthy())
     expect(screen.getByText("显示 1-20，共 45 条")).toBeTruthy()
     fireEvent.click(screen.getByText("下一页").closest("button")!)
-    await waitFor(() => expect(screen.getByText("显示 21-40，共 45 条")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("显示 21-40，共 45 条")).toBeTruthy()
+    )
     fireEvent.click(screen.getByText("上一页").closest("button")!)
-    await waitFor(() => expect(screen.getByText("显示 1-20，共 45 条")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("显示 1-20，共 45 条")).toBeTruthy()
+    )
   })
 })
 
@@ -1436,7 +1640,9 @@ describe("AgentDetailWorkspace edge behavior", () => {
     const far = { clientHeight: 400, scrollHeight: 1000, scrollTop: 0 }
     expect(isNearScrollBottom(far)).toBe(false)
     expect(isNearScrollBottom({ ...far, scrollTop: 900 })).toBe(true)
-    expect(isNearScrollBottom({ clientHeight: 0, scrollHeight: 0, scrollTop: 0 })).toBe(true)
+    expect(
+      isNearScrollBottom({ clientHeight: 0, scrollHeight: 0, scrollTop: 0 })
+    ).toBe(true)
   })
 
   test("processTimeline splices eager knowledge after the first thought", () => {
@@ -1469,16 +1675,32 @@ describe("AgentDetailWorkspace edge behavior", () => {
       duration_ms: 0,
     } as AgentRunEvent
     const withThought = processTimeline(
-      makeRun({ status: "running", result: "", events: [knowledgeEvent, thought] })
+      makeRun({
+        status: "running",
+        result: "",
+        events: [knowledgeEvent, thought],
+      })
     )
     // Knowledge is spliced in after the first thought event.
-    expect(withThought.map((item) => item.event.call_id)).toEqual(["", "call-3"])
+    expect(withThought.map((item) => item.event.call_id)).toEqual([
+      "",
+      "call-3",
+    ])
     // Knowledge at turn 0 with no thought leaves the order untouched.
     const noThought = processTimeline(
       makeRun({
         status: "running",
         result: "",
-        events: [knowledgeEvent, { ...thought, type: "tool", tool_name: "search", call_id: "call-9", tool_kind: "mcp" } as AgentRunEvent],
+        events: [
+          knowledgeEvent,
+          {
+            ...thought,
+            type: "tool",
+            tool_name: "search",
+            call_id: "call-9",
+            tool_kind: "mcp",
+          } as AgentRunEvent,
+        ],
       })
     )
     expect(noThought.map((item) => item.event.call_id)).toEqual([
@@ -1563,7 +1785,9 @@ describe("AgentDetailWorkspace edge behavior", () => {
   test("collapsedProcessStatusKey covers the collapsed states", () => {
     expect(collapsedProcessStatusKey("running", true, false)).toBe("执行过程")
     expect(collapsedProcessStatusKey("running", false, false)).toBeNull()
-    expect(collapsedProcessStatusKey("awaiting_approval", false, false)).toBe("等待工具调用确认")
+    expect(collapsedProcessStatusKey("awaiting_approval", false, false)).toBe(
+      "等待工具调用确认"
+    )
     expect(collapsedProcessStatusKey("running", true, true)).toBeNull()
   })
 
@@ -1575,8 +1799,14 @@ describe("AgentDetailWorkspace edge behavior", () => {
       configurable: true,
     })
     const first = renderPage(<Harness activeView="settings" runs={[run]} />)
-    fireEvent.click(first.container.querySelectorAll('[aria-label="复制"]')[0] as HTMLElement)
-    await waitFor(() => expect(first.container.querySelector('[aria-label="已复制"]')).toBeTruthy())
+    fireEvent.click(
+      first.container.querySelectorAll('[aria-label="复制"]')[0] as HTMLElement
+    )
+    await waitFor(() =>
+      expect(
+        first.container.querySelector('[aria-label="已复制"]')
+      ).toBeTruthy()
+    )
 
     Object.defineProperty(navigator, "clipboard", {
       value: {
@@ -1587,8 +1817,14 @@ describe("AgentDetailWorkspace edge behavior", () => {
       configurable: true,
     })
     const view = renderPage(<Harness activeView="settings" runs={[run]} />)
-    fireEvent.click(view.container.querySelectorAll('[aria-label="复制"]')[0] as HTMLElement)
-    await waitFor(() => expect(view.container.querySelectorAll('[aria-label="复制"]').length).toBe(2))
+    fireEvent.click(
+      view.container.querySelectorAll('[aria-label="复制"]')[0] as HTMLElement
+    )
+    await waitFor(() =>
+      expect(
+        view.container.querySelectorAll('[aria-label="复制"]').length
+      ).toBe(2)
+    )
     Object.defineProperty(navigator, "clipboard", {
       value: originalClipboard,
       configurable: true,
@@ -1622,7 +1858,9 @@ describe("AgentDetailWorkspace edge behavior", () => {
 
   test("switches to the debug preview panel", () => {
     const view = renderPage(<Harness activeView="settings" />)
-    const configPanel = view.container.querySelector(".border-r.bg-muted\\/30") as HTMLElement | null
+    const configPanel = view.container.querySelector(
+      ".border-r.bg-muted\\/30"
+    ) as HTMLElement | null
     expect(configPanel).not.toBeNull()
     expect(configPanel!.className).toContain("flex")
     fireEvent.click(screen.getByRole("button", { name: "调试预览" }))
@@ -1639,7 +1877,9 @@ describe("AgentDetailWorkspace edge behavior", () => {
         }}
       />
     )
-    const textarea = screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "Entered question" } })
     fireEvent.keyDown(textarea, { key: "Enter" })
     await waitFor(() => expect(submitted).toBeTruthy())
@@ -1650,8 +1890,12 @@ describe("AgentDetailWorkspace edge behavior", () => {
 
   test("follows the preview scroll container when it is the scroll host", () => {
     const run = makeRun({ status: "running", result: "", events: [] })
-    const { container } = renderPage(<Harness activeView="settings" runs={[run]} />)
-    const scrollHost = container.querySelector(".overflow-y-auto") as HTMLElement
+    const { container } = renderPage(
+      <Harness activeView="settings" runs={[run]} />
+    )
+    const scrollHost = container.querySelector(
+      ".overflow-y-auto"
+    ) as HTMLElement
     Object.defineProperty(scrollHost, "getClientRects", {
       value: () => [{ toJSON: () => ({}) }],
       configurable: true,

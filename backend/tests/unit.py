@@ -107,6 +107,1795 @@ def test_effective_agent_permission_matrix() -> None:
     assert effective_agent_permission(agent, member, "member", grant) == "view"
 
 
+def test_tool_ref_requires_stable_ids() -> None:
+    from app.entities.tools import ToolRef
+
+    reference = ToolRef(tool_id="tool-1", version_id="version-1")
+    assert reference.tool_id == "tool-1"
+    assert reference.version_id == "version-1"
+
+    for fields in (
+        {"tool_id": "", "version_id": "version-1"},
+        {"tool_id": "tool-1", "version_id": "   "},
+        {"tool_id": None, "version_id": "version-1"},
+        {"tool_id": "tool-1", "version_id": 1},
+    ):
+        try:
+            ToolRef(**fields)
+        except ValueError:
+            continue
+        raise AssertionError(f"Invalid ToolRef accepted: {fields}")
+
+    try:
+        reference.version_id = "version-2"  # type: ignore[misc]
+    except FrozenInstanceError:
+        pass
+    else:
+        raise AssertionError("ToolRef must be immutable.")
+
+
+def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
+    from app.entities.agents import AgentPublicationVersion, AgentRun
+    from app.entities.tools import ToolSnapshot
+    from app.shareddomain.agents.services import agent_publication_from_version
+    from app.shareddomain.agents.publications import (
+        agent_publication_hash,
+        build_agent_configuration_snapshot,
+        build_agent_resource_snapshot,
+        publication_from_snapshots,
+    )
+
+    agent = Agent(
+        id="agent-1",
+        workspace_id="ws-1",
+        name="Research",
+        description="Searches releases.",
+        interaction_config={"prologue": "Hello"},
+        instructions="Use tools when needed.",
+        model_id="model-1",
+        knowledge_query_mode="required",
+    )
+    first = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-b",
+        version_id="version-b",
+        source_id="source-1",
+        kind="python",
+        function_name="second",
+        display_name="Second",
+        description="",
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "additionalProperties": False},
+        definition_hash="hash-b",
+        policy_id="policy-b",
+        policy_revision=2,
+        bound_by_user_id="user-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console",),
+        workflow_callable=True,
+        parallel_safe=False,
+        execution_spec={"code": "result = {}"},
+    )
+    second = ToolSnapshot(
+        **{
+            **first.__dict__,
+            "tool_id": "tool-a",
+            "version_id": "version-a",
+            "function_name": "first",
+            "definition_hash": "hash-a",
+            "policy_id": "policy-a",
+        }
+    )
+
+    configuration = build_agent_configuration_snapshot(agent)
+    resources = build_agent_resource_snapshot(
+        ["kb-b", "kb-a"],
+        [first, second],
+    )
+    reordered = build_agent_resource_snapshot(
+        ["kb-a", "kb-b"],
+        [second, first],
+    )
+    assert resources == reordered
+    assert [item["tool_id"] for item in resources["tools"]] == ["tool-a", "tool-b"]
+    assert agent_publication_hash(configuration, resources) == agent_publication_hash(
+        configuration,
+        reordered,
+    )
+
+    publication = publication_from_snapshots(configuration, resources)
+    assert publication.name == "Research"
+    assert publication.knowledge_base_ids == ["kb-a", "kb-b"]
+    assert [item.tool_id for item in publication.tools] == ["tool-a", "tool-b"]
+
+    version = AgentPublicationVersion(
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        version_number=1,
+        schema_version=1,
+        configuration_snapshot=configuration,
+        resource_snapshot=resources,
+        configuration_hash=agent_publication_hash(configuration, resources),
+        published_by_user_id="user-1",
+    )
+    run = AgentRun(
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        configuration_source="published",
+        agent_publication_version_id=version.id,
+        snapshot_schema_version=version.schema_version,
+        application_snapshot={
+            "configuration": configuration,
+            "resources": resources,
+        },
+        application_snapshot_hash=version.configuration_hash,
+        tool_snapshots=resources["tools"],
+    )
+    assert run.agent_publication_version_id == version.id
+    assert run.configuration_source == "published"
+    assert agent_publication_from_version(version).name == agent.name
+    version.configuration_hash = "0" * 64
+    try:
+        agent_publication_from_version(version)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("A drifted Agent publication version was accepted.")
+
+
+def test_agent_tool_binding_requires_current_available_policy() -> None:
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
+    from app.shareddomain.tools.bindings import build_bindable_tool_snapshot
+
+    source = ToolSource(id="source-1", workspace_id="ws-1", kind="python")
+    tool = Tool(
+        id="tool-1",
+        workspace_id="ws-1",
+        source_id=source.id,
+        kind="python",
+        function_name="lookup",
+        current_version_id="version-1",
+    )
+    version = ToolVersion(
+        id="version-1",
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        display_name="Lookup",
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "additionalProperties": False},
+        execution_spec={"code": "result = {}"},
+        definition_hash="hash-1",
+    )
+    policy = ToolPolicy(
+        id="policy-1",
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        tool_version_id=version.id,
+        definition_hash=version.definition_hash,
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=["console", "public", "api"],
+        workflow_callable=True,
+    )
+    assert (
+        build_bindable_tool_snapshot(tool, source, version, policy, "user-1").tool_id
+        == tool.id
+    )
+
+    tool.current_version_id = "version-2"
+    expect_http_error(
+        lambda: build_bindable_tool_snapshot(
+            tool, source, version, policy, "user-1"
+        ),
+        422,
+    )
+    tool.current_version_id = version.id
+    policy.definition_hash = "drifted"
+    expect_http_error(
+        lambda: build_bindable_tool_snapshot(
+            tool, source, version, policy, "user-1"
+        ),
+        422,
+    )
+
+
+def test_tool_snapshot_is_an_immutable_internal_contract() -> None:
+    from app.entities.tools import ToolSnapshot
+
+    snapshot = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-1",
+        version_id="version-1",
+        source_id="source-1",
+        kind="python",
+        function_name="lookup_order",
+        display_name="Lookup order",
+        description="Returns one order.",
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "additionalProperties": False},
+        definition_hash="hash-1",
+        policy_id="policy-1",
+        policy_revision=3,
+        bound_by_user_id="user-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console", "workflow"),
+        workflow_callable=True,
+        parallel_safe=False,
+        execution_spec={"code": "result = inputs"},
+    )
+
+    assert snapshot.kind == "python"
+    assert snapshot.execution_spec == {"code": "result = inputs"}
+    try:
+        snapshot.definition_hash = "hash-2"  # type: ignore[misc]
+    except FrozenInstanceError:
+        pass
+    else:
+        raise AssertionError("ToolSnapshot must be immutable.")
+
+
+def test_tool_contracts_deep_freeze_nested_json() -> None:
+    import json
+    from copy import copy, deepcopy
+    from operator import setitem
+
+    from app.entities.tools import ToolSnapshot, validate_tool_json_schema
+    from app.ports.tool_runtime import ToolRuntimeResult
+
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "maxLength": 64,
+                "examples": ["one"],
+            }
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {"type": "integer"},
+            }
+        },
+        "additionalProperties": False,
+    }
+    execution_spec = {
+        "provider": {"name": "python", "limits": [{"cpu": 1}]}
+    }
+    snapshot = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-1",
+        version_id="version-1",
+        source_id="source-1",
+        kind="python",
+        function_name="lookup_order",
+        display_name="Lookup order",
+        description="Returns one order.",
+        input_schema=input_schema,
+        output_schema=output_schema,
+        definition_hash="hash-1",
+        policy_id="policy-1",
+        policy_revision=3,
+        bound_by_user_id="user-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console",),
+        workflow_callable=True,
+        parallel_safe=False,
+        execution_spec=execution_spec,
+    )
+    usage = {"tokens": {"input": 1}, "providers": ["sandbox"]}
+    result = ToolRuntimeResult(
+        ok=True,
+        data={"items": [{"id": 1}]},
+        summary="Done.",
+        error_code=None,
+        error_message=None,
+        outcome="confirmed",
+        usage=usage,
+    )
+    assert snapshot.output_schema is not None
+
+    mutations = (
+        (snapshot.input_schema, "type", "string"),
+        (snapshot.input_schema["properties"], "extra", {}),
+        (snapshot.input_schema["properties"]["query"], "maxLength", 1),
+        (snapshot.input_schema["properties"]["query"]["examples"], 0, "two"),
+        (snapshot.input_schema["required"], 0, "other"),
+        (snapshot.output_schema, "type", "array"),
+        (snapshot.output_schema["properties"]["items"], "maxItems", 3),
+        (snapshot.execution_spec, "provider", {}),
+        (snapshot.execution_spec["provider"], "name", "mcp"),
+        (snapshot.execution_spec["provider"]["limits"], 0, {}),
+        (result.data, "items", []),
+        (result.data["items"], 0, {}),
+        (result.data["items"][0], "id", 2),
+        (result.usage, "tokens", {}),
+        (result.usage["tokens"], "input", 2),
+        (result.usage["providers"], 0, "remote"),
+    )
+    for target, key, value in mutations:
+        try:
+            setitem(target, key, value)
+        except TypeError:
+            continue
+        raise AssertionError(f"Nested Tool JSON remained mutable: {target}")
+
+    input_schema["required"][0] = "changed"
+    execution_spec["provider"]["limits"][0]["cpu"] = 99
+    usage["tokens"]["input"] = 99
+    assert isinstance(snapshot.input_schema["required"], list)
+    assert snapshot.input_schema["required"] == ["query"]
+    assert snapshot.execution_spec["provider"]["limits"][0]["cpu"] == 1
+    assert result.usage["tokens"]["input"] == 1
+
+    for value in (
+        snapshot.input_schema,
+        snapshot.output_schema,
+        snapshot.execution_spec,
+        result.data,
+        result.usage,
+    ):
+        json.loads(json.dumps(value))
+
+    for value in (
+        snapshot.input_schema,
+        snapshot.input_schema["required"],
+    ):
+        assert copy(value) is value
+        assert deepcopy(value) is value
+    assert validate_tool_json_schema(snapshot.input_schema) == snapshot.input_schema
+
+
+def test_freeze_json_rejects_non_json_values() -> None:
+    from app.entities.tools import freeze_json
+
+    source = {
+        "values": (None, False, "text", 1, 1.5),
+        "nested": [{"ok": True}],
+    }
+    frozen = freeze_json(source)
+    assert frozen == {
+        "values": [None, False, "text", 1, 1.5],
+        "nested": [{"ok": True}],
+    }
+    assert frozen is not source
+    assert frozen["nested"] is not source["nested"]
+
+    for invalid in (
+        {1: "non-string key"},
+        {"value": {1, 2}},
+        {"value": b"bytes"},
+        {"value": object()},
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ):
+        try:
+            freeze_json(invalid)
+        except ValueError:
+            continue
+        raise AssertionError(f"Non-JSON Tool value was accepted: {invalid!r}")
+
+
+def test_tool_adapter_contract_is_provider_neutral() -> None:
+    from datetime import datetime, timezone
+
+    from app.entities.tools import ToolSnapshot
+    from app.ports.tool_runtime import (
+        ToolAdapter,
+        ToolInvocationContext,
+        ToolRuntimeResult,
+    )
+
+    snapshot = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-1",
+        version_id="version-1",
+        source_id="source-1",
+        kind="builtin",
+        function_name="current_time",
+        display_name="Current time",
+        description="Returns the current time.",
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "additionalProperties": False},
+        definition_hash="hash-1",
+        policy_id="policy-1",
+        policy_revision=3,
+        bound_by_user_id="user-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console",),
+        workflow_callable=True,
+        parallel_safe=True,
+        execution_spec={"builtin": "current_time"},
+    )
+    context = ToolInvocationContext(
+        workspace_id="workspace-1",
+        origin="agent",
+        root_run_id="root-1",
+        run_id="run-1",
+        invocation_id="invocation-1",
+        execution_user_id="user-1",
+        access_source="console",
+        deadline_at=datetime(2026, 8, 16, tzinfo=timezone.utc),
+        idempotency_key="key-1",
+    )
+
+    class FakeAdapter:
+        kind = "builtin"
+
+        async def invoke(self, snapshot, arguments, context):
+            assert snapshot.kind == self.kind
+            assert arguments == {}
+            assert context.workspace_id == "workspace-1"
+            return ToolRuntimeResult(
+                ok=True,
+                data={"time": "2026-08-16T00:00:00Z"},
+                summary="Current time returned.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={},
+            )
+
+    adapter = FakeAdapter()
+    assert isinstance(adapter, ToolAdapter)
+    result = asyncio.run(adapter.invoke(snapshot, {}, context))
+    assert result.ok is True
+    assert result.outcome == "confirmed"
+
+
+def test_agent_tool_definition_comes_from_unified_snapshot() -> None:
+    from app.application.agent_tools import build_unified_agent_tool
+    from app.entities.tools import ToolSnapshot
+
+    snapshot = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-1",
+        version_id="version-1",
+        source_id="source-1",
+        kind="python",
+        function_name="calculate_tax",
+        display_name="Calculate tax",
+        description="Calculate one tax amount.",
+        input_schema={
+            "type": "object",
+            "properties": {"amount": {"type": "number"}},
+            "required": ["amount"],
+            "additionalProperties": False,
+        },
+        output_schema=None,
+        definition_hash="hash-1",
+        policy_id="policy-1",
+        policy_revision=1,
+        bound_by_user_id="user-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console",),
+        workflow_callable=True,
+        parallel_safe=False,
+        execution_spec={"code": "result = {'tax': inputs['amount'] * 0.1}"},
+    )
+
+    tool = build_unified_agent_tool(snapshot)
+
+    assert tool.name == "calculate_tax"
+    assert tool.description == "Calculate one tax amount."
+    assert tool.args_schema == snapshot.input_schema
+    assert tool.metadata == {
+        "display_name": "Calculate tax",
+        "kind": "python",
+        "server_name": "",
+        "parallel_safe": False,
+        "policy_mode": "",
+        "server_id": "",
+        "definition_hash": "hash-1",
+        "source_tool_name": "",
+    }
+
+
+def test_agent_tool_runtime_uses_stable_invocation_identity_and_envelope() -> None:
+    import hashlib
+
+    from app.application.agent_tool_runtime import (
+        agent_tool_invocation_identity,
+        tool_runtime_result_to_agent_result,
+    )
+    from app.ports.tool_runtime import ToolRuntimeResult
+
+    invocation_id, idempotency_key = agent_tool_invocation_identity(
+        "run-1",
+        3,
+        "call-7",
+    )
+    assert invocation_id == "3:call-7"
+    assert idempotency_key == hashlib.sha256(
+        b"agent:run-1:3:call-7"
+    ).hexdigest()
+
+    succeeded = tool_runtime_result_to_agent_result(
+        ToolRuntimeResult(
+            ok=True,
+            data={"total": 12},
+            summary="Calculated.",
+            error_code=None,
+            error_message=None,
+            outcome="confirmed",
+            usage={},
+        )
+    )
+    assert succeeded.content == '{"total": 12}'
+    assert succeeded.output == {"total": 12}
+    assert succeeded.is_error is False
+
+    uncertain = tool_runtime_result_to_agent_result(
+        ToolRuntimeResult(
+            ok=False,
+            data=None,
+            summary="Request state is unknown.",
+            error_code="tool_outcome_uncertain",
+            error_message="Request state is unknown.",
+            outcome="uncertain",
+            usage={},
+        )
+    )
+    assert uncertain.content == "Request state is unknown."
+    assert uncertain.is_error is True
+    assert uncertain.outcome_uncertain is True
+
+
+def test_agent_tool_call_migration_preserves_approval_gate() -> None:
+    import importlib.util
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202608160005_agent_publication_versions.py"
+    )
+    spec = importlib.util.spec_from_file_location("agent_publication_versions", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    assert migration._migrated_tool_call_status("pending", "auto") == "queued"
+    assert (
+        migration._migrated_tool_call_status("pending", "each_call")
+        == "awaiting_approval"
+    )
+    assert migration._migrated_tool_call_status("approved", "each_call") == "approved"
+
+    assert migration._permission_backfill_action(None) == "insert"
+    assert migration._permission_backfill_action("view") == "keep"
+    assert migration._permission_backfill_action("use") == "keep"
+    assert (
+        migration._membership_history_revokes_fallback_grant(
+            "workspace.member.remove", {"role": "member"}
+        )
+        is True
+    )
+    assert (
+        migration._membership_history_revokes_fallback_grant(
+            "workspace.member.update",
+            {"previous_role": "admin", "role": "member"},
+        )
+        is True
+    )
+    assert (
+        migration._membership_history_revokes_fallback_grant(
+            "workspace.member.update",
+            {"previous_role": "member", "role": "admin"},
+        )
+        is False
+    )
+    assert migration._agent_run_requires_drain("queued", "agent") is True
+    assert migration._agent_run_requires_drain("running", "agent") is True
+    assert migration._agent_run_requires_drain("succeeded", "agent") is False
+    assert migration._agent_run_requires_drain("queued", "workflow") is False
+
+    now = datetime(2026, 8, 17, tzinfo=UTC)
+    assert migration._json_datetime(None) is None
+    assert migration._json_datetime("not-a-date") is None
+    assert migration._json_datetime(now.isoformat()) == now
+    assert migration._json_datetime(now) == now
+
+    configuration = {
+        "name": "Published Agent",
+        "description": "Frozen description",
+        "instructions": "Frozen instructions",
+        "model_id": "model-1",
+        "knowledge_query_mode": "required",
+        "interaction_config": {"prologue": "Hello"},
+    }
+    resources = {
+        "knowledge_base_ids": ["kb-1"],
+        "tools": [
+            {
+                "kind": "mcp",
+                "execution_spec": {
+                    "server_id": "server-1",
+                    "tool_name": "lookup",
+                },
+            }
+        ],
+    }
+    assert migration._legacy_publication_snapshot(configuration, resources) == {
+        **configuration,
+        "knowledge_base_ids": ["kb-1"],
+        "mcp_tools": [{"server_id": "server-1", "tool_name": "lookup"}],
+    }
+
+    call = {
+        "status": "pending",
+        "approved_by_user_id": None,
+        "approved_at": None,
+        "result_output": None,
+        "result_content": "",
+        "result_summary": "",
+        "result_is_error": False,
+        "last_error": None,
+        "started_at": None,
+        "finished_at": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    expected_state = migration._migrated_invocation_state(call, now, "each_call")
+    assert migration._migrated_invocation_state_matches(
+        expected_state,
+        {**expected_state},
+    )
+    assert not migration._migrated_invocation_state_matches(
+        expected_state,
+        {**expected_state, "status": "succeeded"},
+    )
+
+
+def test_unified_agent_runs_use_a_worker_generation_fence() -> None:
+    from app.shareddomain.agents.models import (
+        AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
+        AGENT_RUN_UNIFIED_QUEUED_STATUS,
+        AGENT_RUN_UNIFIED_RUNNING_STATUS,
+        agent_run_display_status,
+        is_unified_agent_run_status,
+    )
+
+    assert AGENT_RUN_UNIFIED_QUEUED_STATUS == "queued_v2"
+    assert AGENT_RUN_UNIFIED_RUNNING_STATUS == "running_v2"
+    assert AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS == "awaiting_approval_v2"
+    assert is_unified_agent_run_status("queued") is False
+    assert is_unified_agent_run_status(AGENT_RUN_UNIFIED_QUEUED_STATUS) is True
+    assert agent_run_display_status(AGENT_RUN_UNIFIED_QUEUED_STATUS) == "queued"
+    assert agent_run_display_status(AGENT_RUN_UNIFIED_RUNNING_STATUS) == "running"
+    assert (
+        agent_run_display_status(AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS)
+        == "awaiting_approval"
+    )
+
+
+def test_tool_invocation_identity_ignores_refreshable_deadline() -> None:
+    from app.application.tool_runtime import _same_invocation
+    from app.entities.tools import ToolInvocation
+    from app.shareddomain.tools.runtime import exhausted_tool_invocation_terminal_state
+
+    fields = {
+        "workspace_id": "workspace-1",
+        "origin": "agent",
+        "root_run_id": "run-1",
+        "run_id": "run-1",
+        "invocation_id": "2:call-1",
+        "execution_user_id": "user-1",
+        "access_source": "console",
+        "tool_id": "tool-1",
+        "tool_version_id": "version-1",
+        "arguments_hash": "a" * 64,
+        "idempotency_key": "agent:run-1:2:call-1",
+    }
+    original = ToolInvocation(
+        **fields,
+        policy_snapshot={
+            "tool_snapshot": {"tool_id": "tool-1"},
+            "deadline_at": "2026-08-17T00:00:00+00:00",
+        },
+    )
+    resumed = ToolInvocation(
+        **fields,
+        policy_snapshot={
+            "tool_snapshot": {"tool_id": "tool-1"},
+            "deadline_at": "2026-08-17T01:00:00+00:00",
+        },
+    )
+    changed = ToolInvocation(
+        **fields,
+        policy_snapshot={
+            "tool_snapshot": {"tool_id": "tool-2"},
+            "deadline_at": "2026-08-17T01:00:00+00:00",
+        },
+    )
+
+    assert _same_invocation(original, resumed) is True
+    assert _same_invocation(original, changed) is False
+    assert exhausted_tool_invocation_terminal_state(
+        "running",
+        "external_write",
+    )[:2] == ("uncertain", "uncertain")
+    assert exhausted_tool_invocation_terminal_state(
+        "running",
+        "external_read",
+    )[:2] == ("failed", "confirmed")
+    assert exhausted_tool_invocation_terminal_state(
+        "queued",
+        "external_write",
+    )[:2] == ("failed", "confirmed")
+
+
+def test_public_tool_responses_exclude_execution_details() -> None:
+    from app.schemas.tool import ToolDetailResponse, ToolSummaryResponse
+
+    internal_payload = {
+        "id": "tool-1",
+        "workspace_id": "workspace-1",
+        "kind": "mcp",
+        "function_name": "lookup_order",
+        "display_name": "Lookup order",
+        "description": "Returns one order.",
+        "current_version_id": "version-1",
+        "status": "active",
+        "availability": "available",
+        "source": {
+            "id": "source-1",
+            "name": "Orders",
+            "kind": "mcp",
+            "transport": "streamable_http",
+            "connection": {"url": "https://private.example.com/mcp"},
+        },
+        "created_by_user_id": "owner-1",
+        "permission": "use",
+        "can_view": True,
+        "can_use": True,
+        "can_manage": False,
+        "python_code": "result = inputs",
+        "mcp_connection": {"bearer_token": "secret"},
+        "execution_spec": {"server_id": "server-1", "tool_name": "lookup"},
+    }
+
+    summary = ToolSummaryResponse.model_validate(internal_payload).model_dump()
+    detail = ToolDetailResponse.model_validate(
+        {
+            **internal_payload,
+            "version_id": "version-1",
+            "revision": 1,
+            "input_schema": {"type": "object", "additionalProperties": False},
+            "output_schema": {"type": "object", "additionalProperties": False},
+            "approval": "each_call",
+            "effect": "unknown",
+            "workflow_callable": True,
+            "parallel_safe": False,
+        }
+    ).model_dump()
+
+    sensitive_fields = {"python_code", "mcp_connection", "execution_spec"}
+    assert sensitive_fields.isdisjoint(summary)
+    assert sensitive_fields.isdisjoint(detail)
+    assert "connection" not in summary["source"]
+    assert "connection" not in detail["source"]
+
+
+def test_builtin_tool_summary_accepts_system_owner() -> None:
+    from app.schemas.tool import ToolSummaryResponse
+
+    summary = ToolSummaryResponse.model_validate(
+        {
+            "id": "tool-current-time",
+            "workspace_id": "workspace-1",
+            "kind": "builtin",
+            "function_name": "current_time",
+            "display_name": "Current time",
+            "description": "Returns the current time.",
+            "current_version_id": "version-1",
+            "status": "active",
+            "availability": "available",
+            "source": {
+                "id": "source-builtin",
+                "name": "Builtins",
+                "kind": "builtin",
+            },
+            "created_by_user_id": None,
+            "permission": None,
+            "can_view": True,
+            "can_use": True,
+            "can_manage": False,
+        }
+    )
+
+    assert summary.created_by_user_id is None
+
+
+def test_tool_ref_schema_requires_canonical_ids() -> None:
+    from pydantic import ValidationError
+
+    from app.schemas.tool import ToolRefSchema
+
+    reference = ToolRefSchema(tool_id=" tool-1 ", version_id=" version-1 ")
+    assert reference.model_dump() == {
+        "tool_id": "tool-1",
+        "version_id": "version-1",
+    }
+
+    for payload in (
+        {"tool_id": "", "version_id": "version-1"},
+        {"tool_id": "tool-1", "version_id": "   "},
+        {"tool_id": "tool-1", "version_id": "version-1", "server_id": "old"},
+    ):
+        try:
+            ToolRefSchema.model_validate(payload)
+        except ValidationError:
+            continue
+        raise AssertionError(f"Invalid HTTP ToolRef accepted: {payload}")
+
+
+def test_workflow_uses_canonical_tool_refs_and_inline_python_builtin() -> None:
+    from app.schemas.workflow import LlmNodeConfig, ToolNodeConfig
+    from app.shareddomain.tools.catalog import build_inline_python_tool
+
+    reference = {"tool_id": "tool-1", "version_id": "version-1"}
+    node = ToolNodeConfig.model_validate(
+        {"tool": reference, "arguments": {"value": "{{start.question}}"}}
+    )
+    llm = LlmNodeConfig.model_validate(
+        {"prompt": "Use a tool", "tools": [reference]}
+    )
+    assert node.tool.model_dump() == reference
+    assert [item.model_dump() for item in llm.tools] == [reference]
+
+    tool, version, policy = build_inline_python_tool("workspace-1")
+    assert tool.stable_key == "inline_python"
+    assert tool.current_version_id == version.id
+    assert version.execution_spec == {
+        "builtin": "inline_python",
+        "workflow_only": True,
+        "direct_only": True,
+    }
+    assert policy.approval == "auto"
+    assert policy.effect == "pure"
+    assert policy.workflow_callable is True
+    assert policy.parallel_safe is False
+
+
+def test_workflow_legacy_tools_normalize_to_one_canonical_node_contract() -> None:
+    from app.entities.tools import ToolRef
+    from app.schemas.workflow import WorkflowGraph
+    from app.shareddomain.workflows.resources import (
+        canonicalize_workflow_graph,
+        workflow_resource_references,
+    )
+
+    graph = WorkflowGraph.model_validate(
+        {
+            "nodes": [
+                {
+                    "id": "remote",
+                    "type": "workflow",
+                    "position": {"x": 0, "y": 0},
+                    "data": {
+                        "type": "mcp",
+                        "title": "Remote",
+                        "config": {
+                            "server_id": "server-1",
+                            "tool_name": "lookup",
+                            "arguments": {"query": "hello"},
+                        },
+                    },
+                },
+                {
+                    "id": "python",
+                    "type": "workflow",
+                    "position": {"x": 0, "y": 100},
+                    "data": {
+                        "type": "code",
+                        "title": "Python",
+                        "config": {
+                            "code": "result = inputs",
+                            "inputs": {"value": 1},
+                        },
+                    },
+                },
+                {
+                    "id": "model",
+                    "type": "workflow",
+                    "position": {"x": 0, "y": 200},
+                    "data": {
+                        "type": "llm",
+                        "title": "Model",
+                        "config": {
+                            "prompt": "answer",
+                            "mcp_enable": True,
+                            "mcp_servers": [
+                                {"server_id": "server-1", "tool_name": "lookup"}
+                            ],
+                        },
+                    },
+                },
+            ],
+            "edges": [],
+        }
+    )
+    remote = ToolRef("tool-remote", "version-remote")
+    inline = ToolRef("tool-inline", "version-inline")
+    canonical = canonicalize_workflow_graph(
+        graph,
+        {("server-1", "lookup"): remote},
+        inline,
+    )
+
+    assert [node.data.type for node in canonical.nodes] == ["tool", "tool", "llm"]
+    assert canonical.nodes[0].data.config == {
+        "tool": {"tool_id": "tool-remote", "version_id": "version-remote"},
+        "arguments": {"query": "hello"},
+    }
+    assert canonical.nodes[1].data.config == {
+        "tool": {"tool_id": "tool-inline", "version_id": "version-inline"},
+        "arguments": {"code": "result = inputs", "inputs": {"value": 1}},
+    }
+    assert canonical.nodes[2].data.config["tools"] == [
+        {"tool_id": "tool-remote", "version_id": "version-remote"}
+    ]
+    assert "mcp_enable" not in canonical.nodes[2].data.config
+    assert workflow_resource_references(canonical)[1] == [remote, inline]
+
+
+def test_workflow_selects_only_exact_bound_tool_versions() -> None:
+    from app.entities.tools import ToolRef, ToolSnapshot
+    from app.shareddomain.workflows.resources import select_tool_snapshots
+
+    def snapshot(tool_id: str, version_id: str) -> ToolSnapshot:
+        return ToolSnapshot(
+            schema_version=1,
+            tool_id=tool_id,
+            version_id=version_id,
+            source_id="source-1",
+            kind="python",
+            function_name=tool_id,
+            display_name=tool_id,
+            description="",
+            input_schema={"type": "object", "additionalProperties": False},
+            output_schema={"type": "object", "additionalProperties": False},
+            definition_hash=f"hash-{version_id}",
+            policy_id=f"policy-{tool_id}",
+            policy_revision=1,
+            bound_by_user_id="binder-1",
+            approval="auto",
+            effect="pure",
+            allowed_access_sources=("console",),
+            workflow_callable=True,
+            parallel_safe=False,
+            execution_spec={"code": "result = {}"},
+        )
+
+    selected = select_tool_snapshots(
+        [ToolRef("tool-b", "version-b")],
+        [snapshot("tool-a", "version-a"), snapshot("tool-b", "version-b")],
+    )
+    assert [(item.tool_id, item.bound_by_user_id) for item in selected] == [
+        ("tool-b", "binder-1")
+    ]
+
+    for reference in (
+        ToolRef("missing", "version-1"),
+        ToolRef("tool-b", "version-other"),
+    ):
+        try:
+            select_tool_snapshots(
+                [reference],
+                [snapshot("tool-b", "version-b")],
+            )
+        except ValueError:
+            continue
+        raise AssertionError("Unbound Workflow Tool version was accepted.")
+
+
+def test_workflow_resource_snapshot_must_match_the_canonical_graph() -> None:
+    from app.entities.tools import ToolRef, ToolSnapshot
+    from app.schemas.workflow import WorkflowGraph
+    from app.shareddomain.workflows.resources import (
+        build_workflow_resource_snapshot,
+        load_workflow_resource_snapshot,
+        workflow_resource_hash,
+    )
+
+    reference = ToolRef("tool-1", "version-1")
+    graph = WorkflowGraph.model_validate(
+        {
+            "nodes": [
+                {
+                    "id": "tool",
+                    "type": "workflow",
+                    "position": {"x": 0, "y": 0},
+                    "data": {
+                        "type": "tool",
+                        "title": "Tool",
+                        "config": {
+                            "tool": {
+                                "tool_id": reference.tool_id,
+                                "version_id": reference.version_id,
+                            },
+                            "arguments": {},
+                        },
+                    },
+                }
+            ],
+            "edges": [],
+        }
+    )
+    tool = ToolSnapshot(
+        schema_version=1,
+        tool_id=reference.tool_id,
+        version_id=reference.version_id,
+        source_id="source-1",
+        kind="python",
+        function_name="tool_1",
+        display_name="Tool",
+        description="",
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "additionalProperties": False},
+        definition_hash="hash-1",
+        policy_id="policy-1",
+        policy_revision=1,
+        bound_by_user_id="binder-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console",),
+        workflow_callable=True,
+        parallel_safe=False,
+        execution_spec={"code": "result = {}"},
+    )
+    payload = build_workflow_resource_snapshot([], [tool])
+    knowledge_ids, tools = load_workflow_resource_snapshot(
+        graph,
+        payload,
+        workflow_resource_hash(payload),
+    )
+    assert knowledge_ids == []
+    assert tools == [tool]
+
+    for invalid in (
+        {**payload, "legacy": True},
+        {**payload, "tools": []},
+    ):
+        try:
+            load_workflow_resource_snapshot(
+                graph,
+                invalid,
+                workflow_resource_hash(invalid),
+            )
+        except ValueError:
+            continue
+        raise AssertionError("Invalid Workflow resource snapshot was accepted.")
+
+
+def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
+    from app.shareddomain.workflows.engine import (
+        WorkflowValidationError,
+        validate_graph,
+    )
+    from app.shareddomain.workflows.resources import (
+        build_workflow_resource_snapshot,
+        load_workflow_agent_snapshots,
+        workflow_resource_hash,
+    )
+
+    def node(node_id: str, node_type: str, config: dict | None = None) -> dict:
+        return {
+            "id": node_id,
+            "type": "workflow",
+            "position": {"x": 0, "y": 0},
+            "data": {
+                "type": node_type,
+                "title": node_id,
+                "config": config or {},
+            },
+        }
+
+    graph = validate_graph(
+        {
+            "nodes": [
+                node("start", "start"),
+                node(
+                    "agent",
+                    "agent",
+                    {
+                        "agent_id": "agent-1",
+                        "agent_version_id": "version-1",
+                        "input": "{{start.question}}",
+                    },
+                ),
+                node("end", "end", {"outputs": {"result": "{{agent.result}}"}}),
+            ],
+            "edges": [
+                {"id": "e1", "source": "start", "target": "agent"},
+                {"id": "e2", "source": "agent", "target": "end"},
+            ],
+        }
+    )
+    agent_snapshot = {
+        "agent_id": "agent-1",
+        "version_id": "version-1",
+        "version_number": 1,
+        "configuration_hash": "hash-1",
+        "configuration_snapshot": {"name": "Helper"},
+        "resource_snapshot": {"knowledge_base_ids": [], "tools": []},
+        "bound_by_user_id": "binder-1",
+    }
+    snapshot = build_workflow_resource_snapshot([], [], [agent_snapshot])
+    assert load_workflow_agent_snapshots(
+        graph,
+        snapshot,
+        workflow_resource_hash(snapshot),
+    ) == [agent_snapshot]
+
+    wrong_agent = build_workflow_resource_snapshot(
+        [],
+        [],
+        [{**agent_snapshot, "agent_id": "agent-2"}],
+    )
+    try:
+        load_workflow_agent_snapshots(
+            graph,
+            wrong_agent,
+            workflow_resource_hash(wrong_agent),
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Workflow Agent identity mismatch was accepted.")
+
+    invalid = build_workflow_resource_snapshot([], [], [])
+    try:
+        load_workflow_agent_snapshots(
+            graph,
+            invalid,
+            workflow_resource_hash(invalid),
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Workflow Agent version missing from snapshot was accepted.")
+
+    parallel_graph = {
+        "nodes": [
+            node("start", "start"),
+            node(
+                "agent_a",
+                "agent",
+                {"agent_id": "a1", "agent_version_id": "v1", "input": "a"},
+            ),
+            node(
+                "agent_b",
+                "agent",
+                {"agent_id": "a2", "agent_version_id": "v2", "input": "b"},
+            ),
+            node("end", "end", {"outputs": {}}),
+        ],
+        "edges": [
+            {"id": "a1", "source": "start", "target": "agent_a"},
+            {"id": "a2", "source": "agent_a", "target": "end"},
+            {"id": "b1", "source": "start", "target": "agent_b"},
+            {"id": "b2", "source": "agent_b", "target": "end"},
+        ],
+    }
+    try:
+        validate_graph(parallel_graph)
+    except WorkflowValidationError:
+        pass
+    else:
+        raise AssertionError("Parallel Workflow Agent nodes were accepted.")
+
+    oversized_graph = {
+        "nodes": [
+            node("start", "start"),
+            node(
+                "agent",
+                "agent",
+                {
+                    "agent_id": "agent-1",
+                    "agent_version_id": "version-1",
+                    "input": "x" * (128 * 1024),
+                },
+            ),
+            node("end", "end", {"outputs": {}}),
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "agent"},
+            {"id": "e2", "source": "agent", "target": "end"},
+        ],
+    }
+    try:
+        validate_graph(oversized_graph)
+    except WorkflowValidationError:
+        pass
+    else:
+        raise AssertionError("Oversized Workflow Agent input was accepted.")
+
+
+def test_workflow_tool_invocation_identity_is_stable_and_bounded() -> None:
+    from app.application.workflow_tool_runtime import workflow_tool_invocation_identity
+    from app.shareddomain.tools.runtime import tool_arguments_hash
+
+    first = workflow_tool_invocation_identity("run-1", "node-1", "call-1")
+    second = workflow_tool_invocation_identity("run-1", "node-1", "call-1")
+    assert first == second
+    assert first[0] == "node-1:call-1"
+    assert len(first[1]) == 64
+    assert tool_arguments_hash({"a": 1, "nested": {"b": 2, "c": 3}}) == (
+        tool_arguments_hash({"nested": {"c": 3, "b": 2}, "a": 1})
+    )
+
+    try:
+        workflow_tool_invocation_identity("run-1", "n" * 200, "c" * 100)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Oversized Workflow Tool identity was accepted.")
+
+
+def test_workflow_tool_runtime_serializes_unsafe_tools_and_blocks_direct_only_llm() -> None:
+    from app.application.workflow_tool_runtime import WorkflowToolRuntime
+    from app.entities.tools import ToolSnapshot
+
+    def snapshot(
+        tool_id: str,
+        *,
+        parallel_safe: bool,
+        direct_only: bool = False,
+    ) -> ToolSnapshot:
+        return ToolSnapshot(
+            schema_version=1,
+            tool_id=tool_id,
+            version_id=f"version-{tool_id}",
+            source_id="source-1",
+            kind="builtin",
+            function_name=tool_id,
+            display_name=tool_id,
+            description="",
+            input_schema={"type": "object"},
+            output_schema={"type": "object"},
+            definition_hash=f"hash-{tool_id}",
+            policy_id=f"policy-{tool_id}",
+            policy_revision=1,
+            bound_by_user_id="user-1",
+            approval="auto",
+            effect="pure",
+            allowed_access_sources=("console",),
+            workflow_callable=True,
+            parallel_safe=parallel_safe,
+            execution_spec={"direct_only": direct_only},
+        )
+
+    serial = snapshot("serial", parallel_safe=False)
+    parallel = snapshot("parallel", parallel_safe=True)
+    direct_only = snapshot("direct", parallel_safe=True, direct_only=True)
+    runtime = WorkflowToolRuntime(
+        SimpleNamespace(),
+        SimpleNamespace(),
+        [serial, parallel, direct_only],
+        "worker-1",
+        SimpleNamespace(),
+        asyncio.Event(),
+    )
+    active = 0
+    maximum = 0
+
+    async def fake_invoke(_snapshot, _node_id, _call_id, _arguments):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return SimpleNamespace(is_error=False)
+
+    runtime._invoke = fake_invoke  # type: ignore[method-assign]
+
+    async def assert_runtime_contract() -> None:
+        nonlocal maximum
+        await asyncio.gather(
+            runtime.invoke(serial, "node-1", "direct", {}),
+            runtime.invoke(serial, "node-2", "direct", {}),
+        )
+        assert maximum == 1
+        maximum = 0
+        await asyncio.gather(
+            runtime.invoke(parallel, "node-1", "direct", {}),
+            runtime.invoke(parallel, "node-2", "direct", {}),
+        )
+        assert maximum == 2
+        try:
+            await runtime.invoke(direct_only, "node-3", "llm:1:direct", {})
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("Direct-only Workflow Tool was exposed to an LLM.")
+
+    asyncio.run(assert_runtime_contract())
+
+
+def test_workflow_tool_migration_matches_runtime_catalog() -> None:
+    import importlib.util
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    import sqlalchemy as sa
+
+    from app.shareddomain.tools.catalog import build_inline_python_tool
+
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202608170002_workflow_tool_resources.py"
+    )
+    spec = importlib.util.spec_from_file_location("workflow_tool_resources", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    created_at = datetime(2026, 8, 17, tzinfo=UTC)
+    source, migrated_tool, migrated_version, migrated_policy = (
+        migration._inline_python_rows("workspace-1", created_at)
+    )
+    tool, version, policy = build_inline_python_tool("workspace-1", created_at)
+    assert source["name"] == "Built-in"
+    assert migrated_tool["id"] == tool.id
+    assert migrated_tool["function_name"] == tool.function_name
+    assert migrated_version["id"] == version.id
+    assert migrated_version["definition_hash"] == version.definition_hash
+    assert migrated_policy["id"] == policy.id
+    assert migrated_policy["tool_version_id"] == policy.tool_version_id
+
+    graph = {
+        "nodes": [
+            {
+                "data": {
+                    "type": "knowledge",
+                    "config": {"knowledge_base_ids": ["kb-1", "kb-1"]},
+                }
+            },
+            {
+                "data": {
+                    "type": "mcp",
+                    "config": {"server_id": "server-1", "tool_name": "lookup"},
+                }
+            },
+            {"data": {"type": "code", "config": {"code": "result = {}"}}},
+            {
+                "data": {
+                    "type": "llm",
+                    "config": {
+                        "tools": [
+                            {"tool_id": "tool-1", "version_id": "version-1"}
+                        ]
+                    },
+                }
+            },
+        ]
+    }
+    assert migration._graph_references(graph) == (
+        ["kb-1"],
+        [("server-1", "lookup")],
+        [("tool-1", "version-1")],
+        True,
+    )
+    assert migration._graph_has_canonical_tool_reference(graph)
+    assert migration._graph_has_canonical_tool_reference(
+        {"nodes": [{"data": {"type": "tool", "config": {}}}]}
+    )
+
+    metadata = sa.MetaData()
+    tools = sa.Table(
+        "tools",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("kind", sa.String, nullable=False),
+        sa.Column("stable_key", sa.String, nullable=False),
+        sa.Column("current_version_id", sa.String),
+    )
+    definitions = sa.Table(
+        "workflow_definitions",
+        metadata,
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("agent_id", sa.String, nullable=False),
+        sa.Column("graph", sa.JSON, nullable=False),
+        sa.Column("updated_by_user_id", sa.String, nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    bindings = sa.Table(
+        "application_tool_bindings",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("application_id", sa.String, nullable=False),
+        sa.Column("tool_id", sa.String, nullable=False),
+        sa.Column("tool_version_id", sa.String, nullable=False),
+        sa.Column("bound_by_user_id", sa.String, nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            tools.insert(),
+            {
+                "id": migrated_tool["id"],
+                "workspace_id": "workspace-1",
+                "kind": "builtin",
+                "stable_key": "inline_python",
+                "current_version_id": migrated_version["id"],
+            },
+        )
+        connection.execute(
+            definitions.insert(),
+            {
+                "workspace_id": "workspace-1",
+                "agent_id": "workflow-1",
+                "graph": {
+                    "nodes": [
+                        {
+                            "data": {
+                                "type": "code",
+                                "config": {"code": "result = {}"},
+                            }
+                        }
+                    ]
+                },
+                "updated_by_user_id": "user-1",
+                "updated_at": created_at,
+            },
+        )
+        migration._backfill_inline_python_bindings(connection)
+        migration._backfill_inline_python_bindings(connection)
+        rows = connection.execute(sa.select(bindings)).mappings().all()
+        assert len(rows) == 1
+        assert rows[0]["application_id"] == "workflow-1"
+        assert rows[0]["tool_version_id"] == migrated_version["id"]
+
+
+def test_coverage_runner_times_out_suites() -> None:
+    import importlib.util
+    import subprocess
+    from pathlib import Path
+
+    path = Path(__file__).parents[1] / "scripts/coverage.py"
+    spec = importlib.util.spec_from_file_location("coverage_runner", path)
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    original_run = runner.subprocess.run
+
+    def timeout(*_args, **kwargs):
+        assert kwargs["timeout"] == runner.COMMAND_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired("coverage", kwargs["timeout"])
+
+    runner.subprocess.run = timeout
+    log_path = None
+    try:
+        suite, returncode, log_path = runner._run_suite("unit", 20260818)
+        assert suite == "unit"
+        assert returncode == 124
+        assert "timed out" in log_path.read_text()
+    finally:
+        runner.subprocess.run = original_run
+        if log_path is not None:
+            log_path.unlink(missing_ok=True)
+
+
+def test_effective_tool_access_matrix() -> None:
+    from app.entities.tools import ToolAccess, effective_tool_access
+
+    full_access = ToolAccess(can_view=True, can_use=True, can_manage=True)
+    assert (
+        effective_tool_access(
+            is_owner=True,
+            is_workspace_admin=False,
+            grant=None,
+        )
+        == full_access
+    )
+    assert (
+        effective_tool_access(
+            is_owner=False,
+            is_workspace_admin=True,
+            grant=None,
+        )
+        == full_access
+    )
+    assert effective_tool_access(
+        is_owner=False,
+        is_workspace_admin=False,
+        grant="use",
+    ) == ToolAccess(can_view=True, can_use=True, can_manage=False)
+    assert effective_tool_access(
+        is_owner=False,
+        is_workspace_admin=False,
+        grant="view",
+    ) == ToolAccess(can_view=True, can_use=False, can_manage=False)
+    assert effective_tool_access(
+        is_owner=False,
+        is_workspace_admin=False,
+        grant=None,
+    ) == ToolAccess(can_view=False, can_use=False, can_manage=False)
+
+
+def test_tool_authorization_applies_builtin_and_global_admin_rules() -> None:
+    from app.application.tools import evaluate_tool_authorization
+    from app.entities.resource_permission import ResourcePermission
+    from app.entities.tools import Tool, ToolAccess
+    from app.entities.user import User
+
+    member = User(id="member-1")
+    builtin = Tool(id="builtin-1", kind="builtin")
+    builtin_authorization = evaluate_tool_authorization(
+        builtin,
+        member,
+        "member",
+        None,
+    )
+    assert builtin_authorization.access == ToolAccess(
+        can_view=True,
+        can_use=True,
+        can_manage=False,
+    )
+    assert builtin_authorization.permission == "use"
+    outside_workspace = evaluate_tool_authorization(
+        builtin,
+        member,
+        None,
+        None,
+    )
+    assert outside_workspace.access == ToolAccess(
+        can_view=False,
+        can_use=False,
+        can_manage=False,
+    )
+    assert outside_workspace.permission is None
+
+    global_admin = User(id="global-admin-1", is_global_admin=True)
+    private_tool = Tool(
+        id="private-1",
+        kind="python",
+        status="disabled",
+        availability="unavailable",
+        created_by_user_id="owner-1",
+    )
+    admin_authorization = evaluate_tool_authorization(
+        private_tool,
+        global_admin,
+        "member",
+        None,
+    )
+    assert admin_authorization.access == ToolAccess(
+        can_view=True,
+        can_use=True,
+        can_manage=True,
+    )
+    assert admin_authorization.permission == "admin"
+
+    former_owner = User(id="owner-1")
+    former_owner_authorization = evaluate_tool_authorization(
+        private_tool,
+        former_owner,
+        None,
+        None,
+    )
+    assert former_owner_authorization.access == ToolAccess(False, False, False)
+    assert former_owner_authorization.permission is None
+
+    stale_grant_authorization = evaluate_tool_authorization(
+        private_tool,
+        member,
+        None,
+        ResourcePermission(permission="use", user_id=member.id),
+    )
+    assert stale_grant_authorization.access == ToolAccess(False, False, False)
+    assert stale_grant_authorization.permission is None
+
+    inactive_owner = User(id="owner-1", is_active=False)
+    inactive_authorization = evaluate_tool_authorization(
+        private_tool,
+        inactive_owner,
+        "member",
+        None,
+    )
+    assert inactive_authorization.access == ToolAccess(False, False, False)
+    assert inactive_authorization.permission is None
+
+
+def test_python_tool_schema_validation_closes_objects() -> None:
+    from app.entities.tools import validate_tool_json_schema
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "maxLength": 200},
+            "options": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer"}},
+            },
+        },
+        "required": ["query"],
+    }
+
+    restricted = validate_tool_json_schema(schema)
+
+    assert restricted["additionalProperties"] is False
+    assert restricted["properties"]["options"]["additionalProperties"] is False
+    assert "additionalProperties" not in schema
+
+    for invalid in (
+        {"type": "string", "maxLength": 20},
+        {"type": "object", "additionalProperties": True},
+    ):
+        try:
+            validate_tool_json_schema(invalid)
+        except ValueError:
+            continue
+        raise AssertionError(f"Unsafe Python Tool schema accepted: {invalid}")
+
+
+def test_python_tool_schema_validation_enforces_limits() -> None:
+    from app.entities.tools import (
+        MAX_TOOL_ARRAY_ITEMS,
+        MAX_TOOL_SCHEMA_BYTES,
+        MAX_TOOL_SCHEMA_DEPTH,
+        MAX_TOOL_SCHEMA_PROPERTIES,
+        MAX_TOOL_STRING_LENGTH,
+        validate_tool_json_schema,
+    )
+
+    nested: dict[str, object] = {"type": "integer"}
+    for index in range(MAX_TOOL_SCHEMA_DEPTH):
+        nested = {
+            "type": "object",
+            "properties": {f"level_{index}": nested},
+        }
+
+    invalid_schemas = (
+        {
+            "type": "object",
+            "properties": {"remote": {"$ref": "https://example.com/schema"}},
+        },
+        {
+            "type": "object",
+            "$defs": {"value": {"type": "integer"}},
+            "properties": {"local": {"$ref": "#/$defs/value"}},
+        },
+        {
+            "type": "object",
+            "description": "x" * MAX_TOOL_SCHEMA_BYTES,
+        },
+        {
+            "type": "object",
+            "properties": {
+                f"field_{index}": {"type": "integer"}
+                for index in range(MAX_TOOL_SCHEMA_PROPERTIES + 1)
+            },
+        },
+        nested,
+        {
+            "type": "object",
+            "properties": {
+                "items": {"type": "array", "items": {"type": "integer"}}
+            },
+        },
+        {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "maxItems": MAX_TOOL_ARRAY_ITEMS + 1,
+                }
+            },
+        },
+        {
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+        },
+        {
+            "type": "object",
+            "properties": {
+                "value": {
+                    "type": "string",
+                    "maxLength": MAX_TOOL_STRING_LENGTH + 1,
+                }
+            },
+        },
+        {
+            "type": "object",
+            "properties": {
+                "value": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "pattern": "^(a+)+$",
+                }
+            },
+        },
+    )
+    for schema in invalid_schemas:
+        try:
+            validate_tool_json_schema(schema)
+        except ValueError:
+            continue
+        raise AssertionError(f"Over-broad Python Tool schema accepted: {schema}")
+
+
+def test_python_tool_schema_rejects_defs_depth_bypass() -> None:
+    from app.entities.tools import (
+        MAX_TOOL_SCHEMA_DEPTH,
+        validate_tool_json_schema,
+    )
+
+    hidden_depth: dict[str, object] = {"type": "integer"}
+    for index in range(MAX_TOOL_SCHEMA_DEPTH):
+        hidden_depth = {
+            "type": "object",
+            "properties": {f"level_{index}": hidden_depth},
+        }
+    schema = {"type": "object", "$defs": {"hidden": hidden_depth}}
+    try:
+        validate_tool_json_schema(schema)
+    except ValueError:
+        return
+    raise AssertionError("$defs bypassed the Tool schema depth limit.")
+
+
+def test_python_tool_schema_rejects_legacy_definitions_property_bypass() -> None:
+    from app.entities.tools import (
+        MAX_TOOL_SCHEMA_PROPERTIES,
+        validate_tool_json_schema,
+    )
+
+    schema = {
+        "type": "object",
+        "definitions": {
+            "hidden": {
+                "type": "object",
+                "properties": {
+                    f"field_{index}": {"type": "integer"}
+                    for index in range(MAX_TOOL_SCHEMA_PROPERTIES + 1)
+                },
+            }
+        },
+    }
+    try:
+        validate_tool_json_schema(schema)
+    except ValueError:
+        return
+    raise AssertionError("definitions bypassed the Tool schema property limit.")
+
+
+def test_python_tool_code_is_limited_to_eight_kibibytes() -> None:
+    from app.entities.tools import (
+        MAX_PYTHON_TOOL_CODE_BYTES,
+        validate_python_tool_code,
+    )
+
+    boundary = "x" * MAX_PYTHON_TOOL_CODE_BYTES
+    assert validate_python_tool_code(boundary) == boundary
+
+    for code in (boundary + "x", "\u754c" * (MAX_PYTHON_TOOL_CODE_BYTES // 3 + 1)):
+        try:
+            validate_python_tool_code(code)
+        except ValueError:
+            continue
+        raise AssertionError("Oversized Python Tool code was accepted.")
+
+
 def test_validate_agent_permission_only_accepts_view() -> None:
     validate_agent_permission("view")
     expect_http_error(lambda: validate_agent_permission("edit"), 422)
@@ -2729,7 +4518,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
     assert name == f"mcp_order_items_{digest}"
     # deterministic for the same server/tool pair
     assert mcp_function_name(tool) == name
-    built = build_mcp_agent_tool(tool, SimpleNamespace())
+    built = build_mcp_agent_tool(tool, SimpleNamespace(), "agent-1")
     assert built.metadata is not None
     assert built.metadata["policy_mode"] == "approval_required"
 
@@ -2753,6 +4542,8 @@ def test_run_to_response_maps_run_fields() -> None:
         model_usage={"model_calls": 1, "total_tokens": 12},
     )
     response = run_to_response(run, trace_id="trace-1")
+    child = AgentRun(id="child-1", parent_run_id="parent-1", root_run_id="")
+    assert child.root_run_id == "parent-1"
     assert response.id == "run-1"
     assert response.workspace_id == "ws-1"
     assert response.agent_id == "agent-1"
@@ -2965,7 +4756,15 @@ def test_agent_memory_query_is_bounded_and_projected() -> None:
 
 
 def test_mcp_server_to_response() -> None:
-    from app.entities.tools import McpServer, McpToolPolicy
+    from app.entities.tools import (
+        McpServer,
+        McpToolPolicy,
+        Tool,
+        ToolPolicy,
+        ToolSource,
+        ToolVersion,
+    )
+    from app.shareddomain.tools.catalog import McpCatalogLeaf
     from app.shareddomain.tools.services import (
         effective_mcp_tool_policy_mode,
         mcp_server_to_response,
@@ -3000,14 +4799,79 @@ def test_mcp_server_to_response() -> None:
         last_error=None,
         created_by_user_id="user-1",
     )
-    stale_policy = McpToolPolicy(
+    source = ToolSource(
+        id="source-1",
         workspace_id="ws-1",
         mcp_server_id="mcp-1",
-        tool_name="search",
-        definition_hash="stale",
-        mode="read_only",
+        kind="mcp",
+        created_by_user_id="user-1",
     )
-    response = mcp_server_to_response(server, [stale_policy])
+    search_tool = Tool(
+        id="tool-search",
+        workspace_id="ws-1",
+        source_id=source.id,
+        kind="mcp",
+        stable_key="search",
+        function_name="mcp_search_12345678",
+        current_version_id="version-search",
+        created_by_user_id="user-1",
+    )
+    search_definition = McpTool(
+        name="search",
+        description="Search public records.",
+        input_schema={"type": "object"},
+        annotations={"readOnlyHint": True, "destructiveHint": False},
+    )
+    search_hash = mcp_tool_definition_hash(search_definition)
+    search_version = ToolVersion(
+        id="version-search",
+        workspace_id="ws-1",
+        tool_id=search_tool.id,
+        description="Search public records.",
+        input_schema={"type": "object"},
+        execution_spec={
+            "server_id": "mcp-1",
+            "tool_name": "search",
+            "annotations": {"readOnlyHint": True, "destructiveHint": False},
+        },
+        definition_hash=search_hash,
+    )
+    stale_policy = ToolPolicy(
+        workspace_id="ws-1",
+        tool_id=search_tool.id,
+        tool_version_id=search_version.id,
+        definition_hash="stale",
+        approval="auto",
+        effect="external_read",
+    )
+    unknown_tool = Tool(
+        id="tool-unknown",
+        workspace_id="ws-1",
+        source_id=source.id,
+        kind="mcp",
+        stable_key="unknown",
+        function_name="mcp_unknown_12345678",
+        current_version_id="version-unknown",
+        created_by_user_id="user-1",
+    )
+    unknown_version = ToolVersion(
+        id="version-unknown",
+        workspace_id="ws-1",
+        tool_id=unknown_tool.id,
+        description="Unclassified operation.",
+        input_schema={"type": "object"},
+        execution_spec={
+            "server_id": "mcp-1",
+            "tool_name": "unknown",
+            "annotations": None,
+        },
+        definition_hash="u" * 64,
+    )
+    leaves = [
+        McpCatalogLeaf(source, search_tool, search_version, stale_policy),
+        McpCatalogLeaf(source, unknown_tool, unknown_version, None),
+    ]
+    response = mcp_server_to_response(server, leaves)
     assert response.id == "mcp-1"
     assert response.workspace_id == "ws-1"
     assert response.url == "https://tools.example.com/mcp"
@@ -3016,9 +4880,7 @@ def test_mcp_server_to_response() -> None:
     assert response.tools[0].policy_mode == "approval_required"
     assert response.tools[1].policy_mode == "approval_required"
 
-    response = mcp_server_to_response(server)
-    assert response.tools[0].policy_mode == "approval_required"
-    assert response.tools[1].policy_mode == "approval_required"
+    assert mcp_server_to_response(server).tools == []
     assert (
         effective_mcp_tool_policy_mode(
             McpTool(
@@ -3030,23 +4892,49 @@ def test_mcp_server_to_response() -> None:
         )
         == "approval_required"
     )
-    read_only_policy = McpToolPolicy(
-        workspace_id="ws-1",
-        mcp_server_id="mcp-1",
-        tool_name="search",
-        definition_hash=response.tools[0].definition_hash,
-        mode="read_only",
-    )
-    response = mcp_server_to_response(server, [read_only_policy])
+    stale_policy.definition_hash = search_hash
+    response = mcp_server_to_response(server, leaves)
     assert response.tools[0].policy_mode == "read_only"
-    assert response.tools[0].definition_hash == mcp_tool_definition_hash(
-        McpTool(
-            name="search",
-            description="Search public records.",
-            input_schema={"type": "object"},
-            annotations={"readOnlyHint": True, "destructiveHint": False},
-        )
+    assert response.tools[0].definition_hash == search_hash
+
+
+def test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch() -> None:
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
+    from app.shareddomain.tools.catalog import (
+        McpCatalogLeaf,
+        legacy_mcp_policy_mode,
     )
+
+    source = ToolSource(id="source-1", workspace_id="ws-1", kind="mcp")
+    tool = Tool(
+        id="tool-1",
+        workspace_id="ws-1",
+        source_id=source.id,
+        kind="mcp",
+        current_version_id="version-2",
+    )
+    version = ToolVersion(
+        id="version-2",
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        definition_hash="b" * 64,
+    )
+    policy = ToolPolicy(
+        workspace_id="ws-1",
+        tool_id=tool.id,
+        tool_version_id=version.id,
+        definition_hash=version.definition_hash,
+        approval="auto",
+        effect="external_read",
+    )
+    leaf = McpCatalogLeaf(source=source, tool=tool, version=version, policy=policy)
+    assert legacy_mcp_policy_mode(leaf) == "read_only"
+
+    policy.definition_hash = "a" * 64
+    assert legacy_mcp_policy_mode(leaf) == "approval_required"
+
+    tool.status = "disabled"
+    assert legacy_mcp_policy_mode(leaf) == "disabled"
 
 
 def test_celery_worker_pool_is_fork_safe_without_prefork() -> None:
@@ -3439,6 +5327,37 @@ def test_mcp_server_create_request_transport_matrix() -> None:
 def main() -> None:
     test_effective_permission_matrix()
     test_validate_permission_rejects_unknown()
+    test_tool_ref_requires_stable_ids()
+    test_agent_publication_snapshot_is_canonical_and_tool_versioned()
+    test_agent_tool_binding_requires_current_available_policy()
+    test_tool_snapshot_is_an_immutable_internal_contract()
+    test_tool_contracts_deep_freeze_nested_json()
+    test_freeze_json_rejects_non_json_values()
+    test_tool_adapter_contract_is_provider_neutral()
+    test_agent_tool_definition_comes_from_unified_snapshot()
+    test_agent_tool_runtime_uses_stable_invocation_identity_and_envelope()
+    test_agent_tool_call_migration_preserves_approval_gate()
+    test_unified_agent_runs_use_a_worker_generation_fence()
+    test_tool_invocation_identity_ignores_refreshable_deadline()
+    test_public_tool_responses_exclude_execution_details()
+    test_builtin_tool_summary_accepts_system_owner()
+    test_tool_ref_schema_requires_canonical_ids()
+    test_workflow_uses_canonical_tool_refs_and_inline_python_builtin()
+    test_workflow_legacy_tools_normalize_to_one_canonical_node_contract()
+    test_workflow_selects_only_exact_bound_tool_versions()
+    test_workflow_resource_snapshot_must_match_the_canonical_graph()
+    test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel()
+    test_workflow_tool_invocation_identity_is_stable_and_bounded()
+    test_workflow_tool_runtime_serializes_unsafe_tools_and_blocks_direct_only_llm()
+    test_workflow_tool_migration_matches_runtime_catalog()
+    test_coverage_runner_times_out_suites()
+    test_effective_tool_access_matrix()
+    test_tool_authorization_applies_builtin_and_global_admin_rules()
+    test_python_tool_schema_validation_closes_objects()
+    test_python_tool_schema_validation_enforces_limits()
+    test_python_tool_schema_rejects_defs_depth_bypass()
+    test_python_tool_schema_rejects_legacy_definitions_property_bypass()
+    test_python_tool_code_is_limited_to_eight_kibibytes()
     test_knowledge_writes_recheck_locked_owner()
     test_clean_upload_filename_sanitizes_path_and_classification()
     test_parse_task_options_validates_boundaries()
@@ -3487,6 +5406,7 @@ def main() -> None:
     test_agent_memory_compacts_old_turns()
     test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()
+    test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch()
     test_celery_worker_pool_is_fork_safe_without_prefork()
     test_worker_database_rejects_in_memory_sqlite()
     test_windows_event_loop_policy_is_selector_based()

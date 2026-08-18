@@ -1564,7 +1564,7 @@ def main() -> None:
             knowledge_url(default_workspace_id),
             headers=auth_headers(research_token),
         )
-        assert denied_cross_workspace.status_code == 403, denied_cross_workspace.text
+        assert denied_cross_workspace.status_code == 404, denied_cross_workspace.text
 
         view_grant = client.put(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/permissions/{bob_id}"),

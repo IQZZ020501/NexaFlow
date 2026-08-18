@@ -5,6 +5,7 @@ import type { ComponentType } from "react"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   BracesIcon,
+  BotIcon,
   BrainCircuitIcon,
   Code2Icon,
   DatabaseIcon,
@@ -42,12 +43,14 @@ import type { Agent } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
+import type { ToolDetail, ToolRef } from "@/lib/api/tools"
 import type {
   WorkflowNode,
   WorkflowNodeData,
   WorkflowNodeType,
 } from "@/lib/api/workflows"
 import { copyText } from "@/lib/clipboard"
+import { toolDisplayName } from "@/lib/tool-display"
 import { cn } from "@/lib/utils"
 import {
   WORKFLOW_START_FIELDS,
@@ -107,6 +110,8 @@ export const NODE_ICONS: Record<
   "reply-node": MessageSquareMoreIcon,
   template: TextCursorInputIcon,
   variable: BracesIcon,
+  tool: WrenchIcon,
+  agent: BotIcon,
   mcp: WrenchIcon,
   code: Code2Icon,
 }
@@ -114,6 +119,7 @@ export const NODE_ICONS: Record<
 const STATUS_STYLES = {
   running: "border-sky-500 ring-2 ring-sky-500/20",
   awaiting_input: "border-amber-500 ring-2 ring-amber-500/20",
+  awaiting_child: "border-sky-500 ring-2 ring-sky-500/20",
   succeeded: "",
   failed: "border-destructive ring-2 ring-destructive/15",
   skipped: "border-muted-foreground/30 opacity-60",
@@ -122,6 +128,7 @@ const STATUS_STYLES = {
 const STATUS_LABELS = {
   running: "运行中",
   awaiting_input: "等待填写表单",
+  awaiting_child: "等待执行",
   succeeded: "运行成功",
   failed: "运行失败",
   skipped: "已跳过",
@@ -130,6 +137,7 @@ const STATUS_LABELS = {
 const STATUS_ICONS = {
   running: LoaderCircleIcon,
   awaiting_input: ClipboardListIcon,
+  awaiting_child: BotIcon,
   succeeded: CheckCircle2Icon,
   failed: CircleAlertIcon,
   skipped: CircleDotDashedIcon,
@@ -148,6 +156,8 @@ const NODE_ACCENTS: Record<WorkflowNodeType, string> = {
   "reply-node": "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   template: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   variable: "bg-pink-500/10 text-pink-600 dark:text-pink-400",
+  tool: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+  agent: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
   mcp: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
   code: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
 }
@@ -179,6 +189,8 @@ const OUTPUT_FIELD_LABELS: Partial<
   classifier: { class: "分类结果" },
   template: { text: "模板内容" },
   variable: { value: "变量值" },
+  tool: { result: "工具结果" },
+  agent: { result: "执行结果" },
   mcp: { result: "工具结果" },
   code: { result: "执行结果", stdout: "标准输出", stderr: "错误输出" },
   "reranker-node": { result_list: "重排结果列表", result: "重排结果" },
@@ -383,6 +395,10 @@ function previewValue(value: unknown) {
   return compact.length > 42 ? `${compact.slice(0, 42)}...` : compact
 }
 
+function publishedAgentVersionId(agent: Agent) {
+  return agent.current_published_version_id ?? null
+}
+
 function configSummary(node: WorkflowNodeData, t: TFunction) {
   const config = node.config
   switch (node.type) {
@@ -390,7 +406,8 @@ function configSummary(node: WorkflowNodeData, t: TFunction) {
       return null
     case "end": {
       const outputs = config.outputs
-      const count = outputs && typeof outputs === "object" ? Object.keys(outputs).length : 0
+      const count =
+        outputs && typeof outputs === "object" ? Object.keys(outputs).length : 0
       return `${t("输出映射")} · ${count}`
     }
     case "llm":
@@ -424,11 +441,31 @@ function configSummary(node: WorkflowNodeData, t: TFunction) {
       return `${t("模板内容")} · ${previewValue(config.template) || t("未配置")}`
     case "variable":
       return `${t("变量值")} · ${previewValue(config.value) || t("未配置")}`
+    case "tool": {
+      const reference =
+        config.tool && typeof config.tool === "object"
+          ? (config.tool as Record<string, unknown>)
+          : null
+      const tool = node.tools?.find((item) => item.id === reference?.tool_id)
+      return tool
+        ? toolDisplayName(tool, t)
+        : previewValue(reference?.tool_id) || t("未配置")
+    }
+    case "agent":
+      return (
+        node.agents?.find(
+          (item) =>
+            item.id === config.agent_id ||
+            publishedAgentVersionId(item) === config.agent_version_id
+        )?.name ??
+        (previewValue(config.agent_version_id) || t("暂无已发布版本"))
+      )
     case "mcp":
       return previewValue(config.tool_name) || t("选择只读 MCP 工具")
     case "code": {
       const inputs = config.inputs
-      const count = inputs && typeof inputs === "object" ? Object.keys(inputs).length : 0
+      const count =
+        inputs && typeof inputs === "object" ? Object.keys(inputs).length : 0
       return `${t("代码输入")} · ${count}`
     }
   }
@@ -474,7 +511,9 @@ function JsonEditor({
         }}
       />
       {invalid ? (
-        <span className="font-normal text-destructive">{t("JSON 格式无效")}</span>
+        <span className="font-normal text-destructive">
+          {t("JSON 格式无效")}
+        </span>
       ) : null}
     </label>
   )
@@ -539,8 +578,7 @@ function VariablePicker({
 }) {
   const [open, setOpen] = React.useState(false)
   const startNodeId =
-    (node.nodes ?? []).find((item) => item.data.type === "start")?.id ??
-    "start"
+    (node.nodes ?? []).find((item) => item.data.type === "start")?.id ?? "start"
   const upstream = React.useMemo(() => {
     const nodes = node.nodes ?? []
     const edges = node.edges ?? []
@@ -569,7 +607,10 @@ function VariablePicker({
           {label ? <ChevronDownIcon className="ml-auto size-3.5" /> : null}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 w-60 overflow-y-auto">
+      <DropdownMenuContent
+        align="start"
+        className="max-h-80 w-60 overflow-y-auto"
+      >
         <p className="px-2 pt-1.5 pb-0.5 text-[10px] font-medium text-muted-foreground">
           {t("全局变量")}
         </p>
@@ -686,9 +727,7 @@ function TextEditor({
   const insertReference = React.useCallback(
     (reference: string) => {
       const { start, end } = selectionRef.current
-      onChange(
-        rawValue.slice(0, start) + reference + rawValue.slice(end)
-      )
+      onChange(rawValue.slice(0, start) + reference + rawValue.slice(end))
       const nextPosition = start + reference.length
       selectionRef.current = { start: nextPosition, end: nextPosition }
       setEditing(true)
@@ -705,14 +744,19 @@ function TextEditor({
       <span className="flex items-center justify-between gap-2">
         <label htmlFor={id}>{label}</label>
         {insertVariables && !readOnly ? (
-          <VariablePicker nodeId={nodeId} node={node} t={t} onInsert={insertReference} />
+          <VariablePicker
+            nodeId={nodeId}
+            node={node}
+            t={t}
+            onInsert={insertReference}
+          />
         ) : null}
       </span>
       {showLocalizedPreview ? (
         <button
           type="button"
           id={id}
-          className="w-full min-w-0 whitespace-pre-wrap break-words rounded-md border bg-background px-2.5 py-2 text-left text-sm font-normal leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+          className="w-full min-w-0 rounded-md border bg-background px-2.5 py-2 text-left text-sm leading-5 font-normal break-words whitespace-pre-wrap outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
           style={{ minHeight: `${rows * 20 + 18}px` }}
           disabled={readOnly}
           onClick={() => {
@@ -842,8 +886,7 @@ function LlmSettingsDialog({
     unknown
   >
   const modelSetting = (config.model_setting ?? {}) as Record<string, unknown>
-  const reasoningContentEnabled =
-    modelSetting.reasoning_content_enable === true
+  const reasoningContentEnabled = modelSetting.reasoning_content_enable === true
   const paramValue = (key: string) => {
     const value = modelParams[key]
     return typeof value === "number" ? String(value) : ""
@@ -874,7 +917,10 @@ function LlmSettingsDialog({
         <fieldset className="grid gap-3 text-sm font-medium">
           <legend>{t("模型参数")}</legend>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1.5 font-normal" htmlFor={`${nodeId}-llm-temperature`}>
+            <label
+              className="grid gap-1.5 font-normal"
+              htmlFor={`${nodeId}-llm-temperature`}
+            >
               {t("温度")}
               <Input
                 id={`${nodeId}-llm-temperature`}
@@ -890,7 +936,10 @@ function LlmSettingsDialog({
                 }
               />
             </label>
-            <label className="grid gap-1.5 font-normal" htmlFor={`${nodeId}-llm-top-p`}>
+            <label
+              className="grid gap-1.5 font-normal"
+              htmlFor={`${nodeId}-llm-top-p`}
+            >
               {t("Top P")}
               <Input
                 id={`${nodeId}-llm-top-p`}
@@ -904,7 +953,10 @@ function LlmSettingsDialog({
                 onChange={(event) => updateParam("top_p", event.target.value)}
               />
             </label>
-            <label className="grid gap-1.5 font-normal sm:col-span-2" htmlFor={`${nodeId}-llm-max-tokens`}>
+            <label
+              className="grid gap-1.5 font-normal sm:col-span-2"
+              htmlFor={`${nodeId}-llm-max-tokens`}
+            >
               {t("最大输出 Token")}
               <Input
                 id={`${nodeId}-llm-max-tokens`}
@@ -943,9 +995,7 @@ function LlmSettingsDialog({
               })
             }
             className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
-              reasoningContentEnabled
-                ? "bg-primary"
-                : "bg-muted-foreground/40"
+              reasoningContentEnabled ? "bg-primary" : "bg-muted-foreground/40"
             }`}
           >
             <span
@@ -958,7 +1008,11 @@ function LlmSettingsDialog({
           </button>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
             {t("关闭")}
           </Button>
         </DialogFooter>
@@ -981,8 +1035,7 @@ function ConditionEditor({
   t: TFunction
 }) {
   const startNodeId =
-    (node.nodes ?? []).find((item) => item.data.type === "start")?.id ??
-    "start"
+    (node.nodes ?? []).find((item) => item.data.type === "start")?.id ?? "start"
   const branches = conditionBranches(node.config, startNodeId)
   const updateBranches = (next: ConditionBranch[]) =>
     onUpdate({
@@ -998,10 +1051,7 @@ function ConditionEditor({
       `${sourceId} · ${field}`
     )
   }
-  const updateBranch = (
-    branchIndex: number,
-    patch: Partial<ConditionBranch>
-  ) =>
+  const updateBranch = (branchIndex: number, patch: Partial<ConditionBranch>) =>
     updateBranches(
       branches.map((branch, index) =>
         index === branchIndex ? { ...branch, ...patch } : branch
@@ -1080,7 +1130,7 @@ function ConditionEditor({
                 type="source"
                 position={Position.Right}
                 title={displayType}
-                className="!pointer-events-auto !absolute !right-[-1.375rem] !top-1/2 !z-20 !size-4 !border-[3px] !border-card !bg-foreground"
+                className="!pointer-events-auto !absolute !top-1/2 !right-[-1.375rem] !z-20 !size-4 !border-[3px] !border-card !bg-foreground"
               />
             </div>
             {isElse ? (
@@ -1176,7 +1226,8 @@ function ConditionEditor({
                         className="size-7"
                         disabled={
                           readOnly ||
-                          (branches.length === 2 && branch.conditions.length === 1)
+                          (branches.length === 2 &&
+                            branch.conditions.length === 1)
                         }
                         onClick={() => {
                           if (branch.conditions.length === 1) {
@@ -1230,7 +1281,9 @@ function ConditionEditor({
         className="h-8 w-full border-dashed bg-transparent text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground"
         disabled={readOnly || branches.length >= 20}
         onClick={() => {
-          const elseIndex = branches.findIndex((branch) => branch.type === "ELSE")
+          const elseIndex = branches.findIndex(
+            (branch) => branch.type === "ELSE"
+          )
           const next = [...branches]
           next.splice(elseIndex < 0 ? next.length : elseIndex, 0, {
             id: createConditionId(),
@@ -1260,6 +1313,110 @@ function ConditionEditor({
   )
 }
 
+function ToolArgumentsFields({
+  nodeId,
+  tool,
+  value,
+  readOnly,
+  onChange,
+  t,
+}: {
+  nodeId: string
+  tool?: ToolDetail
+  value: Record<string, unknown>
+  readOnly: boolean
+  onChange: (value: Record<string, unknown>) => void
+  t: TFunction
+}) {
+  const schema =
+    tool?.input_schema && typeof tool.input_schema === "object"
+      ? tool.input_schema
+      : null
+  const properties =
+    schema?.properties && typeof schema.properties === "object"
+      ? (schema.properties as Record<string, unknown>)
+      : {}
+  const required = new Set(
+    Array.isArray(schema?.required) ? schema.required.map(String) : []
+  )
+  const propertyEntries = Object.entries(properties)
+
+  if (!propertyEntries.length) {
+    return (
+      <JsonEditor
+        id={`${nodeId}-tool-arguments`}
+        label={t("工具参数")}
+        value={value}
+        readOnly={readOnly}
+        onChange={(nextValue) => {
+          if (
+            nextValue &&
+            typeof nextValue === "object" &&
+            !Array.isArray(nextValue)
+          ) {
+            onChange(nextValue as Record<string, unknown>)
+          }
+        }}
+        t={t}
+      />
+    )
+  }
+
+  const knownNames = new Set(propertyEntries.map(([name]) => name))
+  const extraEntries = Object.entries(value).filter(
+    ([name]) => !knownNames.has(name)
+  )
+
+  return (
+    <fieldset className="grid max-h-72 gap-2.5 overflow-y-auto pr-1">
+      <legend className="text-xs font-medium">{t("工具参数")}</legend>
+      {propertyEntries.map(([name, propertyValue]) => {
+        const property =
+          propertyValue && typeof propertyValue === "object"
+            ? (propertyValue as Record<string, unknown>)
+            : {}
+        const title =
+          typeof property.title === "string" && property.title.trim()
+            ? property.title
+            : name
+        const description =
+          typeof property.description === "string" ? property.description : ""
+        const defaultValue = "default" in property ? property.default : null
+        return (
+          <div key={name} className="grid gap-1">
+            <JsonEditor
+              id={`${nodeId}-tool-argument-${name}`}
+              label={`${title}${required.has(name) ? " *" : ""}`}
+              value={name in value ? value[name] : defaultValue}
+              readOnly={readOnly}
+              onChange={(nextValue) =>
+                onChange({ ...value, [name]: nextValue })
+              }
+              t={t}
+            />
+            {description ? (
+              <p className="text-[11px] leading-4 text-muted-foreground">
+                {description}
+              </p>
+            ) : null}
+          </div>
+        )
+      })}
+      {extraEntries.map(([name, extraValue]) => (
+        <JsonEditor
+          key={name}
+          id={`${nodeId}-tool-extra-${name}`}
+          label={name}
+          value={extraValue}
+          readOnly={readOnly}
+          onChange={(nextValue) => onChange({ ...value, [name]: nextValue })}
+          t={t}
+        />
+      ))}
+    </fieldset>
+  )
+}
+
 function NodeConfigFields({
   nodeId,
   node,
@@ -1267,6 +1424,8 @@ function NodeConfigFields({
   models,
   knowledgeBases,
   mcpServers,
+  tools,
+  agents,
   readOnly,
   onUpdate,
   t,
@@ -1277,6 +1436,8 @@ function NodeConfigFields({
   models: RegisteredModel[]
   knowledgeBases: KnowledgeBase[]
   mcpServers: McpServer[]
+  tools: ToolDetail[]
+  agents: Agent[]
   readOnly: boolean
   onUpdate: (data: WorkflowNodeData) => void
   t: TFunction
@@ -1289,7 +1450,8 @@ function NodeConfigFields({
       ? Object.entries(config.outputs as Record<string, unknown>)
       : []
   const updateOutputItem = (index: number, key: string, value: string) => {
-    if (outputEntries.some(([itemKey], i) => i !== index && itemKey === key)) return
+    if (outputEntries.some(([itemKey], i) => i !== index && itemKey === key))
+      return
     updateConfig({
       outputs: Object.fromEntries(
         outputEntries.map(([itemKey, itemValue], i) =>
@@ -1300,9 +1462,7 @@ function NodeConfigFields({
   }
   const removeOutputItem = (index: number) =>
     updateConfig({
-      outputs: Object.fromEntries(
-        outputEntries.filter((_, i) => i !== index)
-      ),
+      outputs: Object.fromEntries(outputEntries.filter((_, i) => i !== index)),
     })
   const addOutputItem = () =>
     updateConfig({
@@ -1369,6 +1529,86 @@ function NodeConfigFields({
           label: `${server.name} / ${tool.name}`,
         }))
     )
+  const availableWorkflowTools = tools.filter(
+    (tool) =>
+      tool.can_use &&
+      tool.status === "active" &&
+      tool.availability === "available" &&
+      Boolean(tool.current_version_id) &&
+      tool.approval === "auto" &&
+      tool.workflow_callable
+  )
+  const availableLlmTools = availableWorkflowTools.filter(
+    (tool) => tool.function_name !== "inline_python"
+  )
+  const selectedToolRefs = Array.isArray(config.tools)
+    ? config.tools.flatMap((item) => {
+        if (!item || typeof item !== "object") return []
+        const reference = item as Record<string, unknown>
+        return typeof reference.tool_id === "string" &&
+          typeof reference.version_id === "string"
+          ? [
+              {
+                tool_id: reference.tool_id,
+                version_id: reference.version_id,
+              },
+            ]
+          : []
+      })
+    : []
+  const unavailableSelectedToolRefs = selectedToolRefs.filter(
+    (reference) =>
+      !availableLlmTools.some((tool) => tool.id === reference.tool_id)
+  )
+  const toolSelected = (toolId: string) =>
+    selectedToolRefs.some((item) => item.tool_id === toolId)
+  const toggleToolReference = (tool: ToolDetail, checked: boolean) => {
+    if (!tool.current_version_id) return
+    updateConfig({
+      tools: checked
+        ? [
+            ...selectedToolRefs.filter((item) => item.tool_id !== tool.id),
+            { tool_id: tool.id, version_id: tool.current_version_id },
+          ]
+        : selectedToolRefs.filter((item) => item.tool_id !== tool.id),
+    })
+  }
+  const directToolReference =
+    config.tool && typeof config.tool === "object"
+      ? (config.tool as Partial<ToolRef>)
+      : null
+  const selectedDirectTool = directToolReference
+    ? tools.find((tool) => tool.id === directToolReference.tool_id)
+    : undefined
+  const directToolWithMatchingSchema =
+    selectedDirectTool?.version_id === directToolReference?.version_id
+      ? selectedDirectTool
+      : undefined
+  const directToolUnavailable = Boolean(
+    directToolReference &&
+    (!selectedDirectTool ||
+      !selectedDirectTool.can_use ||
+      selectedDirectTool.status !== "active" ||
+      selectedDirectTool.availability !== "available")
+  )
+  const directToolCurrentVersionId = selectedDirectTool?.current_version_id
+  const directToolHasNewVersion = Boolean(
+    directToolCurrentVersionId &&
+    directToolCurrentVersionId !== directToolReference?.version_id
+  )
+  const directToolArguments =
+    config.arguments &&
+    typeof config.arguments === "object" &&
+    !Array.isArray(config.arguments)
+      ? (config.arguments as Record<string, unknown>)
+      : {}
+  const selectedAgentId = String(config.agent_id ?? "")
+  const selectedAgentVersionId = String(config.agent_version_id ?? "")
+  const selectedAgent = agents.find(
+    (item) =>
+      item.id === selectedAgentId ||
+      publishedAgentVersionId(item) === selectedAgentVersionId
+  )
   const selectedMcpRefs = Array.isArray(config.mcp_servers)
     ? (config.mcp_servers as Array<{ server_id: string; tool_name: string }>)
     : []
@@ -1381,7 +1621,7 @@ function NodeConfigFields({
   const toggleMcpReference = (
     reference: { server_id: string; tool_name: string },
     checked: boolean
-    ) =>
+  ) =>
     updateConfig({
       mcp_servers: checked
         ? [...selectedMcpRefs, reference]
@@ -1394,7 +1634,9 @@ function NodeConfigFields({
   const isResult = config.is_result !== false
   const dialogueType = String(config.dialogue_type ?? "NODE")
   const selectedModelId = String(config.model_id ?? agent.model_id ?? "")
-  const selectedModel = activeModels.find((model) => model.id === selectedModelId)
+  const selectedModel = activeModels.find(
+    (model) => model.id === selectedModelId
+  )
   const replyType = String(config.reply_type ?? "custom")
   const replyFields = Array.isArray(config.fields) ? config.fields : null
   const replyFieldPath = Array.isArray(replyFields?.[0])
@@ -1417,7 +1659,11 @@ function NodeConfigFields({
                 readOnly={readOnly}
                 aria-label={t("字段名")}
                 onChange={(event) =>
-                  updateOutputItem(index, event.target.value, String(value ?? ""))
+                  updateOutputItem(
+                    index,
+                    event.target.value,
+                    String(value ?? "")
+                  )
                 }
               />
               <Input
@@ -1450,7 +1696,10 @@ function NodeConfigFields({
       ) : null}
       {node.type === "llm" ? (
         <>
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-llm-model`}>
+          <label
+            className="grid gap-1.5 text-xs font-medium"
+            htmlFor={`${nodeId}-llm-model`}
+          >
             {t("节点模型")}
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
@@ -1486,7 +1735,9 @@ function NodeConfigFields({
                   onSelect={() => updateConfig({ model_id: null })}
                 >
                   {t("使用工作流默认模型")}
-                  {!config.model_id ? <span className="text-primary">✓</span> : null}
+                  {!config.model_id ? (
+                    <span className="text-primary">✓</span>
+                  ) : null}
                 </DropdownMenuItem>
                 {activeModels.map((model) => (
                   <DropdownMenuItem
@@ -1566,10 +1817,12 @@ function NodeConfigFields({
                   sideOffset={4}
                   className="w-(--radix-dropdown-menu-trigger-width) min-w-40"
                 >
-                  {([
-                    ["NODE", "仅取本节点历史"],
-                    ["WORKFLOW", "整条流程历史"],
-                  ] as const).map(([value, label]) => (
+                  {(
+                    [
+                      ["NODE", "仅取本节点历史"],
+                      ["WORKFLOW", "整条流程历史"],
+                    ] as const
+                  ).map(([value, label]) => (
                     <DropdownMenuItem
                       key={value}
                       className="justify-between whitespace-nowrap"
@@ -1597,60 +1850,132 @@ function NodeConfigFields({
               }
             />
           </div>
-          <div className="flex items-center justify-between gap-2 text-xs font-medium">
-            <span>{t("启用 MCP")}</span>
-            <button
-              type="button"
-              role="switch"
-              id={`${nodeId}-llm-mcp`}
-              aria-checked={Boolean(config.mcp_enable)}
-              aria-label={t("启用 MCP")}
-              disabled={readOnly}
-              onClick={() =>
-                updateConfig({
-                  mcp_enable: !config.mcp_enable,
-                  mcp_servers: config.mcp_enable ? [] : selectedMcpRefs,
-                })
-              }
-              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
-                config.mcp_enable ? "bg-primary" : "bg-muted-foreground/40"
-              }`}
-            >
-              <span
-                className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
-                  config.mcp_enable ? "translate-x-[18px]" : "translate-x-0.5"
-                }`}
-              />
-            </button>
-          </div>
-          {config.mcp_enable ? (
-            <fieldset className="grid gap-1.5 text-xs font-medium">
-              <legend>{t("MCP 工具（可多选）")}</legend>
-              <div className="grid max-h-32 gap-2 overflow-y-auto rounded-md border bg-background p-2">
-                {availableMcp.length ? (
-                  availableMcp.map((item) => (
-                    <label
-                      key={`${item.server_id}:${item.tool_name}`}
-                      className="flex items-center gap-2 text-xs font-normal"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={mcpSelected(item)}
-                        disabled={readOnly}
-                        onChange={(event) =>
-                          toggleMcpReference(item, event.target.checked)
-                        }
-                      />
-                      <span className="min-w-0 truncate">{item.label}</span>
-                    </label>
-                  ))
-                ) : (
-                  <span className="font-normal text-muted-foreground">
-                    {t("暂无可用 MCP 工具")}
-                  </span>
-                )}
+          <fieldset className="grid gap-1.5 text-xs font-medium">
+            <legend>{t("工具")}</legend>
+            <div className="grid max-h-36 gap-2 overflow-y-auto rounded-md border bg-background p-2">
+              {availableLlmTools.length ||
+              unavailableSelectedToolRefs.length ? (
+                <>
+                  {availableLlmTools.map((tool) => {
+                    const checked = toolSelected(tool.id)
+                    return (
+                      <label
+                        key={tool.id}
+                        className="flex items-center gap-2 text-xs font-normal"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={
+                            readOnly ||
+                            (!checked && selectedToolRefs.length >= 20)
+                          }
+                          onChange={(event) =>
+                            toggleToolReference(tool, event.target.checked)
+                          }
+                        />
+                        <span className="min-w-0 truncate">
+                          {toolDisplayName(tool, t)}
+                        </span>
+                      </label>
+                    )
+                  })}
+                  {unavailableSelectedToolRefs.map((reference) => {
+                    const tool = tools.find(
+                      (item) => item.id === reference.tool_id
+                    )
+                    return (
+                      <label
+                        key={`${reference.tool_id}:${reference.version_id}`}
+                        className="flex items-center gap-2 text-xs font-normal text-muted-foreground"
+                      >
+                        <input
+                          type="checkbox"
+                          checked
+                          disabled={readOnly}
+                          onChange={() =>
+                            updateConfig({
+                              tools: selectedToolRefs.filter(
+                                (item) => item.tool_id !== reference.tool_id
+                              ),
+                            })
+                          }
+                        />
+                        <span className="min-w-0 truncate">
+                          {tool ? toolDisplayName(tool, t) : reference.tool_id}{" "}
+                          {`(${t("不可用")})`}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </>
+              ) : (
+                <span className="font-normal text-muted-foreground">
+                  {t("暂无可用工具")}
+                </span>
+              )}
+            </div>
+          </fieldset>
+          {"mcp_enable" in config || "mcp_servers" in config ? (
+            <>
+              <div className="flex items-center justify-between gap-2 text-xs font-medium">
+                <span>{t("启用 MCP")}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  id={`${nodeId}-llm-mcp`}
+                  aria-checked={Boolean(config.mcp_enable)}
+                  aria-label={t("启用 MCP")}
+                  disabled={readOnly}
+                  onClick={() =>
+                    updateConfig({
+                      mcp_enable: !config.mcp_enable,
+                      mcp_servers: config.mcp_enable ? [] : selectedMcpRefs,
+                    })
+                  }
+                  className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+                    config.mcp_enable ? "bg-primary" : "bg-muted-foreground/40"
+                  }`}
+                >
+                  <span
+                    className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
+                      config.mcp_enable
+                        ? "translate-x-[18px]"
+                        : "translate-x-0.5"
+                    }`}
+                  />
+                </button>
               </div>
-            </fieldset>
+              {config.mcp_enable ? (
+                <fieldset className="grid gap-1.5 text-xs font-medium">
+                  <legend>{t("MCP 工具（可多选）")}</legend>
+                  <div className="grid max-h-32 gap-2 overflow-y-auto rounded-md border bg-background p-2">
+                    {availableMcp.length ? (
+                      availableMcp.map((item) => (
+                        <label
+                          key={`${item.server_id}:${item.tool_name}`}
+                          className="flex items-center gap-2 text-xs font-normal"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={mcpSelected(item)}
+                            disabled={readOnly}
+                            onChange={(event) =>
+                              toggleMcpReference(item, event.target.checked)
+                            }
+                          />
+                          <span className="min-w-0 truncate">{item.label}</span>
+                        </label>
+                      ))
+                    ) : (
+                      <span className="font-normal text-muted-foreground">
+                        {t("暂无可用 MCP 工具")}
+                      </span>
+                    )}
+                  </div>
+                </fieldset>
+              ) : null}
+            </>
           ) : null}
           <div className="flex items-center justify-between gap-2 text-xs font-medium">
             <span>{t("返回内容")}</span>
@@ -1716,7 +2041,9 @@ function NodeConfigFields({
                     onSelect={() => updateConfig({ reply_type: type })}
                   >
                     {t(type === "referencing" ? "引用变量" : "自定义")}
-                    {replyType === type ? <CheckIcon className="text-primary" /> : null}
+                    {replyType === type ? (
+                      <CheckIcon className="text-primary" />
+                    ) : null}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -1732,7 +2059,9 @@ function NodeConfigFields({
                 disabled={readOnly}
                 label={
                   replyFieldDescription ||
-                  (replyFieldPath.length ? replyFieldPath.join(" > ") : t("选择引用变量"))
+                  (replyFieldPath.length
+                    ? replyFieldPath.join(" > ")
+                    : t("选择引用变量"))
                 }
                 className="h-9 w-full justify-start border bg-background px-2 text-xs text-foreground shadow-xs hover:bg-muted"
                 onInsert={(_reference, path, description) =>
@@ -1851,7 +2180,10 @@ function NodeConfigFields({
             onChange={(classes) => updateConfig({ classes })}
             t={t}
           />
-          <label className="grid gap-1.5 text-xs font-medium" htmlFor={`${nodeId}-classifier-default`}>
+          <label
+            className="grid gap-1.5 text-xs font-medium"
+            htmlFor={`${nodeId}-classifier-default`}
+          >
             {t("默认出口")}
             <Input
               id={`${nodeId}-classifier-default`}
@@ -1911,7 +2243,9 @@ function NodeConfigFields({
                         }}
                       >
                         <span className="min-w-0 truncate">{item.name}</span>
-                        {selected ? <CheckIcon className="text-primary" /> : null}
+                        {selected ? (
+                          <CheckIcon className="text-primary" />
+                        ) : null}
                       </DropdownMenuItem>
                     )
                   })}
@@ -1926,9 +2260,7 @@ function NodeConfigFields({
 
             <fieldset className="grid gap-1.5">
               <legend className="text-xs font-medium">{t("检索参数")}</legend>
-              <div
-                className="grid grid-cols-[minmax(0,1fr)_7.5rem] items-center gap-3 text-xs"
-              >
+              <div className="grid grid-cols-[minmax(0,1fr)_7.5rem] items-center gap-3 text-xs">
                 <span
                   id={`${nodeId}-knowledge-mode-label`}
                   className="text-muted-foreground"
@@ -1959,7 +2291,9 @@ function NodeConfigFields({
                       <DropdownMenuItem
                         key={item.value}
                         className="justify-between"
-                        onSelect={() => updateConfig({ search_mode: item.value })}
+                        onSelect={() =>
+                          updateConfig({ search_mode: item.value })
+                        }
                       >
                         {t(item.label)}
                         {searchMode === item.value ? (
@@ -1970,9 +2304,7 @@ function NodeConfigFields({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-              <div
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs"
-              >
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs">
                 <label
                   className="text-muted-foreground"
                   htmlFor={`${nodeId}-knowledge-similarity`}
@@ -1990,9 +2322,7 @@ function NodeConfigFields({
                   t={t}
                 />
               </div>
-              <div
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs"
-              >
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs">
                 <label
                   className="text-muted-foreground"
                   htmlFor={`${nodeId}-knowledge-limit`}
@@ -2009,9 +2339,7 @@ function NodeConfigFields({
                   t={t}
                 />
               </div>
-              <div
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs"
-              >
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs">
                 <label
                   className="text-muted-foreground"
                   htmlFor={`${nodeId}-knowledge-max-chars`}
@@ -2089,7 +2417,9 @@ function NodeConfigFields({
                   <DropdownMenuItem
                     key={model.id}
                     className="justify-between"
-                    onSelect={() => updateConfig({ reranker_model_id: model.id })}
+                    onSelect={() =>
+                      updateConfig({ reranker_model_id: model.id })
+                    }
                   >
                     {model.name}
                     {selectedReranker?.id === model.id ? <CheckIcon /> : null}
@@ -2105,7 +2435,9 @@ function NodeConfigFields({
               node={node}
               t={t}
               disabled={readOnly}
-              label={String(config.question_reference_address ?? t("选择引用变量"))}
+              label={String(
+                config.question_reference_address ?? t("选择引用变量")
+              )}
               className="h-8 w-full justify-between border bg-background px-2 text-xs"
               onInsert={(reference) =>
                 updateConfig({ question_reference_address: reference })
@@ -2115,7 +2447,10 @@ function NodeConfigFields({
           <fieldset className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
             <legend className="text-xs font-medium">{t("重排内容")}</legend>
             {rerankerReferences.map((reference, index) => (
-              <div key={`${reference}-${index}`} className="flex min-w-0 items-center gap-2">
+              <div
+                key={`${reference}-${index}`}
+                className="flex min-w-0 items-center gap-2"
+              >
                 <VariablePicker
                   nodeId={nodeId}
                   node={node}
@@ -2125,8 +2460,9 @@ function NodeConfigFields({
                   className="h-8 min-w-0 flex-1 justify-between border bg-background px-2 text-xs"
                   onInsert={(nextReference) =>
                     updateConfig({
-                      reranker_reference_list: rerankerReferences.map((item, itemIndex) =>
-                        itemIndex === index ? nextReference : item
+                      reranker_reference_list: rerankerReferences.map(
+                        (item, itemIndex) =>
+                          itemIndex === index ? nextReference : item
                       ),
                     })
                   }
@@ -2169,13 +2505,26 @@ function NodeConfigFields({
               ["max_paragraph_char_number", "最大引用字符数", 1, 20000, 100],
             ] as const
           ).map(([key, label, min, max, step]) => (
-            <div key={key} className="flex items-center justify-between gap-3 text-xs">
-              <label htmlFor={`${nodeId}-reranker-${key}`} className="text-muted-foreground">
+            <div
+              key={key}
+              className="flex items-center justify-between gap-3 text-xs"
+            >
+              <label
+                htmlFor={`${nodeId}-reranker-${key}`}
+                className="text-muted-foreground"
+              >
                 {t(label)}
               </label>
               <NumberStepper
                 id={`${nodeId}-reranker-${key}`}
-                value={Number(rerankerSetting[key] ?? (key === "max_paragraph_char_number" ? 5000 : key === "top_n" ? 3 : 0))}
+                value={Number(
+                  rerankerSetting[key] ??
+                    (key === "max_paragraph_char_number"
+                      ? 5000
+                      : key === "top_n"
+                        ? 3
+                        : 0)
+                )}
                 min={min}
                 max={max}
                 step={step}
@@ -2240,26 +2589,26 @@ function NodeConfigFields({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent className="w-(--radix-dropdown-menu-trigger-width)">
-                    {(["input", "textarea", "select", "date", "number"] as const).map(
-                      (type) => (
-                        <DropdownMenuItem
-                          key={type}
-                          onSelect={() => updateFormField(index, { type })}
-                        >
-                          {t(
-                            type === "select"
-                              ? "下拉选择"
-                              : type === "date"
-                                ? "日期"
-                                : type === "number"
-                                  ? "数字"
-                                  : type === "textarea"
-                                    ? "多行文本"
-                                    : "输入框"
-                          )}
-                        </DropdownMenuItem>
-                      )
-                    )}
+                    {(
+                      ["input", "textarea", "select", "date", "number"] as const
+                    ).map((type) => (
+                      <DropdownMenuItem
+                        key={type}
+                        onSelect={() => updateFormField(index, { type })}
+                      >
+                        {t(
+                          type === "select"
+                            ? "下拉选择"
+                            : type === "date"
+                              ? "日期"
+                              : type === "number"
+                                ? "数字"
+                                : type === "textarea"
+                                  ? "多行文本"
+                                  : "输入框"
+                        )}
+                      </DropdownMenuItem>
+                    ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
                 {field.type === "select" ? (
@@ -2279,7 +2628,9 @@ function NodeConfigFields({
                       checked={field.is_required}
                       disabled={readOnly}
                       onChange={(event) =>
-                        updateFormField(index, { is_required: event.target.checked })
+                        updateFormField(index, {
+                          is_required: event.target.checked,
+                        })
                       }
                     />
                     {t("必填")}
@@ -2320,7 +2671,9 @@ function NodeConfigFields({
                     aria-label={t("默认值")}
                     placeholder={t("默认值")}
                     onChange={(event) =>
-                      updateFormField(index, { default_value: event.target.value })
+                      updateFormField(index, {
+                        default_value: event.target.value,
+                      })
                     }
                   />
                 ) : null}
@@ -2358,7 +2711,9 @@ function NodeConfigFields({
             value={config.form_content_format ?? "{{ form }}"}
             readOnly={readOnly}
             rows={4}
-            onChange={(form_content_format) => updateConfig({ form_content_format })}
+            onChange={(form_content_format) =>
+              updateConfig({ form_content_format })
+            }
             node={node}
             nodeId={nodeId}
             t={t}
@@ -2368,7 +2723,9 @@ function NodeConfigFields({
               type="checkbox"
               checked={config.is_result !== false}
               disabled={readOnly}
-              onChange={(event) => updateConfig({ is_result: event.target.checked })}
+              onChange={(event) =>
+                updateConfig({ is_result: event.target.checked })
+              }
             />
             {t("返回内容")}
           </label>
@@ -2420,6 +2777,97 @@ function NodeConfigFields({
           onChange={(value) => updateConfig({ value })}
           t={t}
         />
+      ) : null}
+      {node.type === "tool" ? (
+        <>
+          <label className="grid gap-1.5 text-xs font-medium">
+            {t("工具")}
+            <Input
+              value={
+                (selectedDirectTool
+                  ? toolDisplayName(selectedDirectTool, t)
+                  : undefined) ??
+                directToolReference?.tool_id ??
+                ""
+              }
+              readOnly
+              disabled
+            />
+          </label>
+          <label className="grid gap-1.5 text-xs font-medium">
+            {t("已发布版本")}
+            <Input
+              value={directToolReference?.version_id ?? ""}
+              readOnly
+              disabled
+            />
+          </label>
+          {directToolUnavailable ? (
+            <div
+              role="alert"
+              className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs leading-5 text-amber-900 dark:text-amber-200"
+            >
+              <p className="font-medium">{t("工具已不可用或授权已撤销")}</p>
+              <p>{t("可从节点菜单移除该工具")}</p>
+            </div>
+          ) : !readOnly && directToolHasNewVersion ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (!selectedDirectTool || !directToolCurrentVersionId) return
+                updateConfig({
+                  tool: {
+                    tool_id: selectedDirectTool.id,
+                    version_id: directToolCurrentVersionId,
+                  },
+                })
+              }}
+            >
+              {t("升级到当前版本")}
+            </Button>
+          ) : null}
+          <ToolArgumentsFields
+            key={`${directToolReference?.tool_id ?? "tool"}:${directToolReference?.version_id ?? "version"}`}
+            nodeId={nodeId}
+            tool={directToolWithMatchingSchema}
+            value={directToolArguments}
+            readOnly={readOnly}
+            onChange={(argumentsValue) =>
+              updateConfig({ arguments: argumentsValue })
+            }
+            t={t}
+          />
+        </>
+      ) : null}
+      {node.type === "agent" ? (
+        <>
+          <label className="grid gap-1.5 text-xs font-medium">
+            {t("Agent")}
+            <Input
+              value={selectedAgent?.name ?? selectedAgentId}
+              readOnly
+              disabled
+            />
+          </label>
+          <label className="grid gap-1.5 text-xs font-medium">
+            {t("已发布版本")}
+            <Input value={selectedAgentVersionId} readOnly disabled />
+          </label>
+          <TextEditor
+            id={`${nodeId}-agent-input`}
+            label={t("输入内容")}
+            value={config.input ?? ""}
+            readOnly={readOnly}
+            rows={4}
+            onChange={(input) => updateConfig({ input })}
+            node={node}
+            nodeId={nodeId}
+            t={t}
+            insertVariables
+          />
+        </>
       ) : null}
       {node.type === "mcp" ? (
         <>
@@ -2551,13 +2999,11 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
   const canOperate = !node.readOnly && !["start", "end"].includes(node.type)
   const canRename = !node.readOnly && node.type === "start"
   const onRename = node.onRename as
-    | ((nodeId: string, title: string) => void)
-    | undefined
+    ((nodeId: string, title: string) => void) | undefined
   const onCopy = node.onCopy as ((nodeId: string) => void) | undefined
   const onDelete = node.onDelete as ((nodeId: string) => void) | undefined
   const onUpdate = node.onUpdate as
-    | ((data: WorkflowNodeData) => void)
-    | undefined
+    ((data: WorkflowNodeData) => void) | undefined
   const nodeId = id
 
   const toggleExpanded = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -2578,7 +3024,14 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
         "group relative min-h-24 rounded-xl border bg-card px-3.5 py-3 shadow-md transition-[border-color,box-shadow,opacity] hover:shadow-lg",
         node.type === "condition"
           ? "w-80"
-          : ["llm", "knowledge", "reply-node", "reranker-node", "form-node"].includes(node.type)
+          : [
+                "llm",
+                "knowledge",
+                "reply-node",
+                "reranker-node",
+                "form-node",
+                "agent",
+              ].includes(node.type)
             ? "w-80"
             : "w-64",
         selected && "border-foreground shadow-lg ring-2 ring-foreground/10",
@@ -2622,7 +3075,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
               }}
             />
           ) : (
-            <span className="block truncate text-sm font-semibold leading-5">
+            <span className="block truncate text-sm leading-5 font-semibold">
               {node.title}
             </span>
           )}
@@ -2632,20 +3085,29 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
           {status ? (
-          <span
-            className={cn(
-              "mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
-              status === "running" && "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400",
-              status === "awaiting_input" && "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-              status === "succeeded" && "border-foreground/15 bg-muted text-foreground",
-              status === "failed" && "border-destructive/30 bg-destructive/10 text-destructive",
-              status === "skipped" && "border-muted-foreground/30 bg-muted text-muted-foreground"
-            )}
-            title={t(STATUS_LABELS[status])}
-          >
-            <StatusIcon className={cn("size-3", status === "running" && "animate-spin")} />
-            <span className="sr-only">{t(STATUS_LABELS[status])}</span>
-          </span>
+            <span
+              className={cn(
+                "mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
+                status === "running" &&
+                  "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400",
+                status === "awaiting_input" &&
+                  "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                status === "awaiting_child" &&
+                  "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400",
+                status === "succeeded" &&
+                  "border-foreground/15 bg-muted text-foreground",
+                status === "failed" &&
+                  "border-destructive/30 bg-destructive/10 text-destructive",
+                status === "skipped" &&
+                  "border-muted-foreground/30 bg-muted text-muted-foreground"
+              )}
+              title={t(STATUS_LABELS[status])}
+            >
+              <StatusIcon
+                className={cn("size-3", status === "running" && "animate-spin")}
+              />
+              <span className="sr-only">{t(STATUS_LABELS[status])}</span>
+            </span>
           ) : null}
           {node.type === "llm" && onUpdate ? (
             <IconButton
@@ -2665,7 +3127,11 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
             aria-expanded={expanded}
             onClick={toggleExpanded}
           >
-            {expanded ? <ChevronUpIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
+            {expanded ? (
+              <ChevronUpIcon className="size-3.5" />
+            ) : (
+              <ChevronDownIcon className="size-3.5" />
+            )}
           </IconButton>
           {canOperate ? (
             <span className="nodrag">
@@ -2725,7 +3191,16 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
           <span className="block truncate">{summary}</span>
         </div>
       ) : null}
-      {expanded && !["knowledge", "llm", "condition", "reply-node", "code", "document-extract-node", "form-node"].includes(node.type) ? (
+      {expanded &&
+      ![
+        "knowledge",
+        "llm",
+        "condition",
+        "reply-node",
+        "code",
+        "document-extract-node",
+        "form-node",
+      ].includes(node.type) ? (
         <div className="mt-2 space-y-1.5 border-t border-border/70 pt-2">
           {node.type === "start" ? (
             <>
@@ -2764,7 +3239,14 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
           )}
         </div>
       ) : null}
-      {expanded && onUpdate && node.agent && node.models && node.knowledgeBases && node.mcpServers ? (
+      {expanded &&
+      onUpdate &&
+      node.agent &&
+      node.models &&
+      node.knowledgeBases &&
+      node.mcpServers &&
+      node.tools &&
+      node.agents ? (
         <div className="nodrag mt-2 border-t border-border/70 pt-2">
           <NodeConfigFields
             nodeId={nodeId}
@@ -2773,13 +3255,18 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
             models={node.models}
             knowledgeBases={node.knowledgeBases}
             mcpServers={node.mcpServers}
+            tools={node.tools}
+            agents={node.agents}
             readOnly={Boolean(node.readOnly)}
             onUpdate={onUpdate}
             t={t}
           />
         </div>
       ) : null}
-      {expanded && (node.type === "code" || node.type === "document-extract-node" || node.type === "form-node") ? (
+      {expanded &&
+      (node.type === "code" ||
+        node.type === "document-extract-node" ||
+        node.type === "form-node") ? (
         <div className="mt-2 space-y-1.5 border-t border-border/70 pt-2">
           {outputFields.map((field) => (
             <OutputFieldRow
@@ -2877,30 +3364,48 @@ function OutputFieldRow({
 
 function outputFieldNames(node: WorkflowNodeData) {
   const config = node.config
-  if (node.type === "end" && config.outputs && typeof config.outputs === "object") {
+  if (
+    node.type === "end" &&
+    config.outputs &&
+    typeof config.outputs === "object"
+  ) {
     return Object.keys(config.outputs)
   }
   if (node.type === "classifier" && Array.isArray(config.classes)) {
     return config.classes.flatMap((item) =>
-      item && typeof item === "object" && typeof (item as Record<string, unknown>).handle === "string"
+      item &&
+      typeof item === "object" &&
+      typeof (item as Record<string, unknown>).handle === "string"
         ? [String((item as Record<string, unknown>).handle)]
         : []
     )
+  }
+  if (node.type === "tool" && config.tool && typeof config.tool === "object") {
+    const reference = config.tool as Partial<ToolRef>
+    const tool = node.tools?.find(
+      (item) =>
+        item.id === reference.tool_id &&
+        item.version_id === reference.version_id
+    )
+    const properties =
+      tool?.output_schema?.properties &&
+      typeof tool.output_schema.properties === "object"
+        ? Object.keys(tool.output_schema.properties)
+        : []
+    return properties.length ? properties : ["result"]
   }
   const fields: Partial<Record<WorkflowNodeType, string[]>> = {
     classifier: ["class"],
     knowledge: KNOWLEDGE_OUTPUT_FIELDS.map((item) => item.field),
     "reranker-node": ["result_list", "result"],
     "form-node": [
-      ...(
-        Array.isArray(config.form_field_list)
-          ? config.form_field_list.flatMap((item) =>
-              item && typeof item === "object" && "variable" in item
-                ? [String((item as Record<string, unknown>).variable)]
-                : []
-            )
-          : []
-      ),
+      ...(Array.isArray(config.form_field_list)
+        ? config.form_field_list.flatMap((item) =>
+            item && typeof item === "object" && "variable" in item
+              ? [String((item as Record<string, unknown>).variable)]
+              : []
+          )
+        : []),
       "form_data",
       "result",
     ],
@@ -2909,6 +3414,7 @@ function outputFieldNames(node: WorkflowNodeData) {
     "reply-node": ["answer"],
     template: ["text"],
     variable: ["value"],
+    agent: ["result"],
     mcp: ["result"],
     code: ["result", "stdout", "stderr"],
   }

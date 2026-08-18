@@ -329,7 +329,6 @@ afterEach(() => {
   globalThis.fetch = originalFetch
   cleanup()
 })
-
 beforeEach(() => {
   Object.assign(session, { token: "test-token", isSessionRestored: true })
   replaced.length = 0
@@ -573,7 +572,17 @@ describe("clipboard", () => {
 
 describe("getErrorMessage", () => {
   test("maps ApiError, plain errors, and unknown values", () => {
-    expect(getErrorMessage(new ApiError(404, "找不到"), t)).toBe("找不到")
+    expect(getErrorMessage(new ApiError(401, "expired"), t)).toBe("请重新登录")
+    expect(getErrorMessage(new ApiError(403, "forbidden"), t)).toBe(
+      "资源不存在或无权访问"
+    )
+    expect(getErrorMessage(new ApiError(404, "找不到"), t)).toBe(
+      "资源不存在或无权访问"
+    )
+    expect(getErrorMessage(new ApiError(503, "离线"), t)).toBe("离线")
+    expect(getErrorMessage(new TypeError("Failed to fetch"), t)).toBe(
+      "网络连接失败，请稍后重试"
+    )
     expect(getErrorMessage(new Error("崩溃"), t)).toBe("崩溃")
     expect(getErrorMessage("意外值", t)).toBe("请求失败")
     expect(getErrorMessage(null, t)).toBe("请求失败")

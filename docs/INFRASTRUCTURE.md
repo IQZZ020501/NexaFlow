@@ -16,6 +16,7 @@
 - `backend/app/infrastructure/secrets.py` — Fernet 对称加解密工具与密钥尾号提示 `secret_hint`
 - `backend/app/infrastructure/model_utils.py` — 通用工具：UUID 主键 `new_id` 与 UTC 时间 `utc_now`
 - `backend/app/infrastructure/mcp_stdio.py` — stdio 配置序列化、输入边界校验及可执行文件/工作目录运行时校验
+- `backend/app/infrastructure/code_sandbox.py` — 通过 worker 独占 Unix socket 调用无网络、只读文件系统的 Python sandbox；API 进程不执行用户代码
 - `backend/app/infrastructure/validation.py` — 输入规范化：email/username/name 校验与 trim
 - `backend/app/infrastructure/system_log.py` — SystemLog ORM 模型与 `record_system_log` 系统日志落库
 - `backend/app/infrastructure/celery.py` — Celery 应用工厂（broker、序列化、ack 策略）与任务失败全局错误钩子
@@ -32,6 +33,7 @@
 - `backend/app/infrastructure/repositories/audit.py` — 审计日志列表查询数据访问层
 - `backend/app/infrastructure/repositories/team.py` — 团队及成员关系数据访问层（含级联删除）
 - `backend/app/infrastructure/repositories/workspace.py` — 工作空间与成员关系数据访问层（含管理员计数）
+- `backend/app/infrastructure/repositories/tools.py` — Tool Source/Tool/Version/Policy/授权绑定与 durable ToolInvocation 的租约、恢复和审计数据访问层
 
 ### infrastructure/sql/（手写 SQL）
 
@@ -75,12 +77,22 @@
   - `202608100002_localize_default_agent_instructions.py` — 本地化默认 Agent 指令
   - `202608100003_agent_public_access.py` — Agent 发布身份、外部来源主体、API 凭据与会话隔离索引；回滚时删除无法还原为登录用户语义的外部 Run
   - `202608160001_knowledge_bm25_search.py` — 安装 `pg_search` 扩展并将知识关键词索引切换为 Jieba + BM25；回滚恢复原生 GIN 索引
+  - `202608160003_unified_tool_persistence.py` — 统一 Tool catalog、不可变版本、策略、应用绑定与 ToolInvocation，并回填 MCP
+  - `202608160004_mcp_network_policy.py` — 持久化 MCP Source 的公网/部署网络信任策略
+  - `202608160005_agent_publication_versions.py` — Agent 不可变发布版本、Run 快照与统一 Tool 调用迁移
+  - `202608170001_agent_worker_generation_fence.py` — 隔离 legacy/unified Agent worker 队列与状态代际
+  - `202608170002_workflow_tool_resources.py` — Workflow 发布版本冻结 canonical Tool 资源快照
+  - `202608170003_workflow_agent_children.py` — Workflow Agent 节点的 root/parent/depth lineage 与等待子 Run 状态
 
 ## backend 根配置
 
 - `backend/pyproject.toml` — 项目元数据与依赖声明（FastAPI/Celery/LangChain/LangGraph/MCP/Qdrant/Alembic 等）
 - `backend/.env.example` — 环境变量模板：环境/日志/数据库/JWT/模型密钥/知识存储/Qdrant/Redis/MCP/CORS/Agent 外部请求限流/引导管理员与默认工作区
 - `backend/README.md` — 后台 worker 运行说明（Celery 命令与共享 `KNOWLEDGE_STORAGE_DIR`/`QDRANT_URL` 要求）
+- `backend/Makefile` — 跨平台开发入口；`make worker-compose` 启动带 sandbox socket 的 Compose worker，host `make worker` 不支持 Python Tool/Workflow Code 执行
+- `backend/scripts/dev.py` — `make dev` 的跨平台 Uvicorn 与 Compose Worker 日志编排
+- `backend/scripts/coverage.py` — `make coverage` 的跨平台并行套件、隔离存储与覆盖率合并
+- `backend/scripts/coverage.sh` — POSIX 环境兼容入口，转发到 Python coverage runner
 - `backend/uv.lock` — uv 依赖锁文件
 
 ## 相关测试

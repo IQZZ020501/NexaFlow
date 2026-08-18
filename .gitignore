@@ -49,6 +49,7 @@ backend/storage/
 
 # docs
 docs/MVP_TASK_PLAN.md
+docs/local/
 
 # code graph
 .codegraph

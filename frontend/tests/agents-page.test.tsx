@@ -25,6 +25,7 @@ import type {
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
+import type { ToolDetail, ToolSummary } from "@/lib/api/tools"
 import { getAgentRun } from "@/lib/api/agents"
 
 import {
@@ -41,7 +42,12 @@ import {
 
 const WS = "ws-1"
 
-function model(id: string, name: string, modelName: string, status = "active"): RegisteredModel {
+function model(
+  id: string,
+  name: string,
+  modelName: string,
+  status = "active"
+): RegisteredModel {
   return {
     id,
     workspace_id: WS,
@@ -62,7 +68,12 @@ function model(id: string, name: string, modelName: string, status = "active"): 
   }
 }
 
-function knowledgeBase(id: string, name: string, description: string, status = "active"): KnowledgeBase {
+function knowledgeBase(
+  id: string,
+  name: string,
+  description: string,
+  status = "active"
+): KnowledgeBase {
   return {
     id,
     workspace_id: WS,
@@ -87,8 +98,22 @@ function mcpServer(): McpServer {
     url: "https://mcp.example.com/mcp",
     stdio_command: null,
     tools: [
-      { name: "search", description: "Search the catalog", input_schema: {}, annotations: null, definition_hash: "h1", policy_mode: "read_only" },
-      { name: "execute_sql", description: "Run SQL", input_schema: {}, annotations: null, definition_hash: "h2", policy_mode: "approval_required" },
+      {
+        name: "search",
+        description: "Search the catalog",
+        input_schema: {},
+        annotations: null,
+        definition_hash: "h1",
+        policy_mode: "read_only",
+      },
+      {
+        name: "execute_sql",
+        description: "Run SQL",
+        input_schema: {},
+        annotations: null,
+        definition_hash: "h2",
+        policy_mode: "approval_required",
+      },
     ],
     status: "active",
     has_bearer_token: false,
@@ -97,6 +122,41 @@ function mcpServer(): McpServer {
     created_by_user_id: "u-1",
     created_at: "2026-08-01T00:00:00Z",
     updated_at: "2026-08-01T00:00:00Z",
+  }
+}
+
+function makeTool(overrides: Partial<ToolDetail> = {}): ToolDetail {
+  return {
+    id: "tool-1",
+    workspace_id: WS,
+    kind: "python",
+    function_name: "lookup",
+    display_name: "Lookup",
+    description: "Lookup data",
+    current_version_id: "version-1",
+    status: "active",
+    availability: "available",
+    source: {
+      id: "source-1",
+      name: "Mine",
+      kind: "python",
+      transport: null,
+    },
+    created_by_user_id: "u-1",
+    permission: "owner",
+    can_view: true,
+    can_use: true,
+    can_manage: true,
+    version_id: "version-1",
+    revision: 1,
+    input_schema: { type: "object" },
+    output_schema: { type: "object" },
+    approval: "auto",
+    effect: "pure",
+    workflow_callable: true,
+    parallel_safe: true,
+    draft: null,
+    ...overrides,
   }
 }
 
@@ -118,7 +178,7 @@ export function makeAgent(overrides: Partial<Agent> = {}): Agent {
     model_id: "model-1",
     knowledge_query_mode: "required",
     knowledge_base_ids: ["knowledge-1"],
-    mcp_tools: [{ server_id: "server-1", tool_name: "search" }],
+    tools: [{ tool_id: "tool-1", version_id: "version-1" }],
     status: "active",
     published: false,
     has_unpublished_changes: false,
@@ -139,7 +199,7 @@ function makeWorkflow(overrides: Partial<Agent> = {}): Agent {
     app_type: "workflow",
     model_id: "model-1",
     knowledge_base_ids: [],
-    mcp_tools: [],
+    tools: [],
     published: true,
     ...overrides,
   })
@@ -204,7 +264,9 @@ const adminMe = {
     must_change_password: false,
     is_active: true,
     created_at: "2026-01-01T00:00:00Z",
-    workspaces: [{ id: WS, name: "Test Workspace", is_default: true, role: "admin" }],
+    workspaces: [
+      { id: WS, name: "Test Workspace", is_default: true, role: "admin" },
+    ],
     teams: [],
   },
   memberships: [{ workspace_id: WS, role: "admin" }],
@@ -219,7 +281,8 @@ const memberMe = {
 const notifyCalls: Array<{ kind: string; message: string }> = []
 const session = makeSession({
   me: adminMe,
-  notify: (kind: "success" | "error", message: string) => notifyCalls.push({ kind, message }),
+  notify: (kind: "success" | "error", message: string) =>
+    notifyCalls.push({ kind, message }),
 })
 mockUseSession(session)
 
@@ -269,16 +332,33 @@ mock.module("@/components/workflows/workflow-detail-workspace", () => ({
     onSaveApp: (event: unknown) => void
     onViewChange: (view: string) => void
     onBack: () => void
+    agents?: Agent[]
+    tools?: ToolDetail[]
+    toolsError?: string | null
+    onRetryTools?: () => void
   }) => (
     <div data-testid="workflow-stub">
-      WF-STUB:{props.agent.name}
+      WF-STUB:<span>{props.agent.name}</span>
+      <span data-testid="workflow-agent-count">
+        {props.agents?.length ?? 0}
+      </span>
+      <span data-testid="workflow-tool-count">{props.tools?.length ?? 0}</span>
+      {props.toolsError ? <span>{props.toolsError}</span> : null}
+      {props.onRetryTools ? (
+        <button type="button" onClick={props.onRetryTools}>
+          stub-retry-tools
+        </button>
+      ) : null}
       <button type="button" onClick={() => props.onDelete()}>
         stub-delete
       </button>
       <button type="button" onClick={() => props.onManagePermissions()}>
         stub-perms
       </button>
-      <button type="button" onClick={() => props.onSaveApp({ preventDefault: () => undefined })}>
+      <button
+        type="button"
+        onClick={() => props.onSaveApp({ preventDefault: () => undefined })}
+      >
         stub-save
       </button>
       <button type="button" onClick={() => props.onBack()}>
@@ -289,7 +369,9 @@ mock.module("@/components/workflows/workflow-detail-workspace", () => ({
       </button>
       <button
         type="button"
-        onClick={() => props.setForm({ ...props.form, name: `${props.form.name} !` })}
+        onClick={() =>
+          props.setForm({ ...props.form, name: `${props.form.name} !` })
+        }
       >
         stub-make-dirty
       </button>
@@ -309,7 +391,10 @@ type FetchCase = {
   respond: Respond
 }
 
-function fetchRouter(cases: FetchCase[], fallback?: (url: string, init?: RequestInit) => Response) {
+function fetchRouter(
+  cases: FetchCase[],
+  fallback?: (url: string, init?: RequestInit) => Response
+) {
   return (url: string, init?: RequestInit) => {
     const u = new URL(url, "http://localhost")
     const method = init?.method ?? "GET"
@@ -363,7 +448,10 @@ function resetNav() {
   session.me = adminMe
 }
 
-function baseRoutes(agents: Agent[] = [makeAgent()]) {
+function baseRoutes(
+  agents: Agent[] = [makeAgent()],
+  tools: ToolSummary[] = []
+) {
   return [
     {
       method: "GET",
@@ -375,19 +463,29 @@ function baseRoutes(agents: Agent[] = [makeAgent()]) {
       method: "GET",
       pathname: `/api/v1/workspaces/${WS}/models`,
       exact: true,
-      respond: () => jsonResponse([model("model-1", "DeepSeek Chat", "deepseek-chat")]),
+      respond: () =>
+        jsonResponse([model("model-1", "DeepSeek Chat", "deepseek-chat")]),
     },
     {
       method: "GET",
       pathname: `/api/v1/workspaces/${WS}/knowledge-bases`,
       exact: true,
-      respond: () => jsonResponse([knowledgeBase("knowledge-1", "产品文档", "产品使用文档")]),
+      respond: () =>
+        jsonResponse([
+          knowledgeBase("knowledge-1", "产品文档", "产品使用文档"),
+        ]),
     },
     {
       method: "GET",
       pathname: `/api/v1/workspaces/${WS}/mcp-servers`,
       exact: true,
       respond: () => jsonResponse([mcpServer()]),
+    },
+    {
+      method: "GET",
+      pathname: `/api/v1/workspaces/${WS}/tools`,
+      exact: true,
+      respond: () => jsonResponse(tools),
     },
   ]
 }
@@ -405,17 +503,20 @@ function openModelDropdown() {
   fireEvent.click(trigger)
 }
 
-async function renderDetail(opts: {
-  agent?: Agent
-  initialView?: string
-  hasLegacyView?: boolean
-  agents?: Agent[]
-  extraRoutes?: FetchCase[]
-} = {}) {
+async function renderDetail(
+  opts: {
+    agent?: Agent
+    initialView?: string
+    hasLegacyView?: boolean
+    agents?: Agent[]
+    tools?: ToolSummary[]
+    extraRoutes?: FetchCase[]
+  } = {}
+) {
   const agent = opts.agent ?? makeAgent()
   navState.params.id = agent.id
   routes = [
-    ...baseRoutes(opts.agents ?? [agent]),
+    ...baseRoutes(opts.agents ?? [agent], opts.tools),
     ...(opts.extraRoutes ?? []),
     {
       method: "GET",
@@ -433,6 +534,14 @@ async function renderDetail(opts: {
   return agent
 }
 
+async function expectWorkflowStub(name = "Weekly Digest") {
+  await waitFor(() =>
+    expect(screen.getByTestId("workflow-stub").textContent).toContain(
+      `WF-STUB:${name}`
+    )
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /* Tests                                                               */
 /* ------------------------------------------------------------------ */
@@ -444,10 +553,16 @@ afterEach(() => {
 
 describe("AgentsPage list view", () => {
   test("renders agent and workflow cards with badges and counts", async () => {
-    routes = baseRoutes([makeAgent(), makeWorkflow(), makeWorkflow({ id: "agent-3", name: "Nightly Report", published: false })])
+    routes = baseRoutes([
+      makeAgent(),
+      makeWorkflow(),
+      makeWorkflow({ id: "agent-3", name: "Nightly Report", published: false }),
+    ])
     renderPage(<AgentsPage />)
 
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
     expect(screen.getByText("Weekly Digest")).toBeTruthy()
     expect(screen.getByText("已发布")).toBeTruthy()
     expect(screen.getByText("未发布")).toBeTruthy()
@@ -457,7 +572,7 @@ describe("AgentsPage list view", () => {
     expect(within(agentCard).getByText("已启用")).toBeTruthy()
     expect(within(agentCard).getByText("DeepSeek Chat")).toBeTruthy()
     expect(within(agentCard).getAllByText("1").length).toBe(2)
-    expect(within(agentCard).getByText("MCP 工具")).toBeTruthy()
+    expect(within(agentCard).getByText("工具")).toBeTruthy()
 
     const workflowCard = cardOf("Weekly Digest")
     expect(within(workflowCard).getByText("工作流")).toBeTruthy()
@@ -470,7 +585,9 @@ describe("AgentsPage list view", () => {
   test("opens an agent by clicking its card", async () => {
     routes = baseRoutes([makeAgent()])
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
 
     fireEvent.click(cardOf("Research Assistant"))
     expect(navState.pushCalls).toContain("/app/apps/agent-1")
@@ -479,16 +596,24 @@ describe("AgentsPage list view", () => {
   test("opens an agent from the pencil edit button", async () => {
     routes = baseRoutes([makeAgent()])
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
 
-    fireEvent.click(within(cardOf("Research Assistant")).getByRole("button", { name: "编辑应用" }))
+    fireEvent.click(
+      within(cardOf("Research Assistant")).getByRole("button", {
+        name: "编辑应用",
+      })
+    )
     expect(navState.pushCalls).toContain("/app/apps/agent-1")
   })
 
   test("filters cards by search across name and model", async () => {
     routes = baseRoutes([makeAgent(), makeWorkflow()])
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
 
     const search = screen.getByPlaceholderText("搜索应用...")
     fireEvent.change(search, { target: { value: "digest" } })
@@ -507,20 +632,44 @@ describe("AgentsPage list view", () => {
     routes = baseRoutes([])
     renderPage(<AgentsPage />)
     await waitFor(() => expect(screen.getByText("还没有应用")).toBeTruthy())
-    expect(screen.getByText("创建应用后，可以编排对话、检索和工具调用流程。")).toBeTruthy()
+    expect(
+      screen.getByText("创建应用后，可以编排对话、检索和工具调用流程。")
+    ).toBeTruthy()
     expect(screen.getAllByText("新建应用").length).toBeGreaterThanOrEqual(2)
   })
 
   test("shows the no-model empty state and disables creation", async () => {
     routes = [
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/agents`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/models`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/knowledge-bases`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/mcp-servers`, exact: true, respond: () => jsonResponse([]) },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/agents`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/models`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/knowledge-bases`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/mcp-servers`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
     ]
     renderPage(<AgentsPage />)
     await waitFor(() =>
-      expect(screen.getByText("先接入一个已启用的大语言模型，再创建 Agent。")).toBeTruthy()
+      expect(
+        screen.getByText("先接入一个已启用的大语言模型，再创建 Agent。")
+      ).toBeTruthy()
     )
     const createButtons = screen.getAllByRole("button", { name: "新建应用" })
     expect(createButtons.length).toBeGreaterThan(0)
@@ -531,13 +680,35 @@ describe("AgentsPage list view", () => {
 
   test("reports an error when workspace data fails to load", async () => {
     routes = [
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/agents`, exact: true, respond: () => jsonResponse([], 500) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/models`, exact: true, respond: () => jsonResponse([], 500) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/knowledge-bases`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/mcp-servers`, exact: true, respond: () => jsonResponse([]) },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/agents`,
+        exact: true,
+        respond: () => jsonResponse([], 500),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/models`,
+        exact: true,
+        respond: () => jsonResponse([], 500),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/knowledge-bases`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/mcp-servers`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
     await waitFor(() => expect(screen.getByText("还没有应用")).toBeTruthy())
   })
 
@@ -554,12 +725,29 @@ describe("AgentsPage list view", () => {
         exact: false,
         respond: (_init, _path, query) => {
           offsets.push(query?.get("offset") ?? null)
-          return jsonResponse(query?.get("offset") === "50" ? secondBatch : fifty)
+          return jsonResponse(
+            query?.get("offset") === "50" ? secondBatch : fifty
+          )
         },
       },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/models`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/knowledge-bases`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/mcp-servers`, exact: true, respond: () => jsonResponse([]) },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/models`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/knowledge-bases`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/mcp-servers`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
     ]
     class FakeIntersectionObserver {
       static instances: FakeIntersectionObserver[] = []
@@ -579,12 +767,15 @@ describe("AgentsPage list view", () => {
       }
     }
     const OriginalIntersectionObserver = globalThis.IntersectionObserver
-    ;(globalThis as { IntersectionObserver: unknown }).IntersectionObserver = FakeIntersectionObserver
+    ;(globalThis as { IntersectionObserver: unknown }).IntersectionObserver =
+      FakeIntersectionObserver
     try {
       renderPage(<AgentsPage />)
       await waitFor(() => expect(screen.getByText("Agent 0")).toBeTruthy())
       expect(screen.queryByText("Agent 50")).toBeNull()
-      FakeIntersectionObserver.instances.forEach((instance) => instance.trigger())
+      FakeIntersectionObserver.instances.forEach((instance) =>
+        instance.trigger()
+      )
       await waitFor(() => expect(screen.getByText("Agent 50")).toBeTruthy())
       expect(offsets).toContain("50")
     } finally {
@@ -602,12 +793,31 @@ describe("AgentsPage list view", () => {
         respond: (_init, _path, query) => {
           offset = query?.get("offset") ?? null
           if (offset === "50") return jsonResponse([], 500)
-          return jsonResponse(Array.from({ length: 50 }, (_, index) => makeAgent({ id: `agent-${index}`, name: `Agent ${index}` })))
+          return jsonResponse(
+            Array.from({ length: 50 }, (_, index) =>
+              makeAgent({ id: `agent-${index}`, name: `Agent ${index}` })
+            )
+          )
         },
       },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/models`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/knowledge-bases`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/mcp-servers`, exact: true, respond: () => jsonResponse([]) },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/models`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/knowledge-bases`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/mcp-servers`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
     ]
     class FakeIntersectionObserver2 {
       static instances: FakeIntersectionObserver2[] = []
@@ -620,16 +830,24 @@ describe("AgentsPage list view", () => {
       unobserve() {}
       disconnect() {}
       trigger() {
-        this.callback([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+        this.callback(
+          [{ isIntersecting: true } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver
+        )
       }
     }
     const OriginalIntersectionObserver = globalThis.IntersectionObserver
-    ;(globalThis as { IntersectionObserver: unknown }).IntersectionObserver = FakeIntersectionObserver2
+    ;(globalThis as { IntersectionObserver: unknown }).IntersectionObserver =
+      FakeIntersectionObserver2
     try {
       renderPage(<AgentsPage />)
       await waitFor(() => expect(screen.getByText("Agent 0")).toBeTruthy())
-      FakeIntersectionObserver2.instances.forEach((instance) => instance.trigger())
-      await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+      FakeIntersectionObserver2.instances.forEach((instance) =>
+        instance.trigger()
+      )
+      await waitFor(() =>
+        expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+      )
     } finally {
       globalThis.IntersectionObserver = OriginalIntersectionObserver
     }
@@ -638,7 +856,9 @@ describe("AgentsPage list view", () => {
   test("hides edit affordances for view-only agents", async () => {
     routes = baseRoutes([makeAgent({ can_edit: false })])
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
     const card = cardOf("Research Assistant")
     expect(within(card).queryByRole("button", { name: "编辑应用" })).toBeNull()
     expect(within(card).queryByTitle("更多")).toBeNull()
@@ -647,12 +867,16 @@ describe("AgentsPage list view", () => {
   test("opens an agent with the keyboard", async () => {
     routes = baseRoutes([makeAgent()])
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
     const card = cardOf("Research Assistant")
     fireEvent.keyDown(card, { key: "Enter" })
     expect(navState.pushCalls).toContain("/app/apps/agent-1")
     fireEvent.keyDown(card, { key: " " })
-    expect(navState.pushCalls.filter((href) => href === "/app/apps/agent-1").length).toBe(2)
+    expect(
+      navState.pushCalls.filter((href) => href === "/app/apps/agent-1").length
+    ).toBe(2)
   })
 
   test("shows the loading indicator while fetching more agents", async () => {
@@ -672,9 +896,24 @@ describe("AgentsPage list view", () => {
               })
             : jsonResponse(fifty),
       },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/models`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/knowledge-bases`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/mcp-servers`, exact: true, respond: () => jsonResponse([]) },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/models`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/knowledge-bases`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/mcp-servers`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
     ]
     class FakeIntersectionObserver3 {
       static instances: FakeIntersectionObserver3[] = []
@@ -687,17 +926,25 @@ describe("AgentsPage list view", () => {
       unobserve() {}
       disconnect() {}
       trigger() {
-        this.callback([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+        this.callback(
+          [{ isIntersecting: true } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver
+        )
       }
     }
     const OriginalIntersectionObserver = globalThis.IntersectionObserver
-    ;(globalThis as { IntersectionObserver: unknown }).IntersectionObserver = FakeIntersectionObserver3
+    ;(globalThis as { IntersectionObserver: unknown }).IntersectionObserver =
+      FakeIntersectionObserver3
     try {
       renderPage(<AgentsPage />)
       await waitFor(() => expect(screen.getByText("Agent 0")).toBeTruthy())
-      FakeIntersectionObserver3.instances.forEach((instance) => instance.trigger())
+      FakeIntersectionObserver3.instances.forEach((instance) =>
+        instance.trigger()
+      )
       await waitFor(() => expect(screen.getByText("正在加载")).toBeTruthy())
-      resolveBatch!(jsonResponse([makeAgent({ id: "agent-50", name: "Agent 50" })]))
+      resolveBatch!(
+        jsonResponse([makeAgent({ id: "agent-50", name: "Agent 50" })])
+      )
       await waitFor(() => expect(screen.getByText("Agent 50")).toBeTruthy())
     } finally {
       globalThis.IntersectionObserver = OriginalIntersectionObserver
@@ -716,9 +963,24 @@ describe("AgentsPage list view", () => {
           return jsonResponse([makeAgent(), makeWorkflow()])
         },
       },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/models`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/knowledge-bases`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/mcp-servers`, exact: true, respond: () => jsonResponse([]) },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/models`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/knowledge-bases`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/mcp-servers`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
     ]
     class FakeIntersectionObserver4 {
       static instances: FakeIntersectionObserver4[] = []
@@ -731,16 +993,24 @@ describe("AgentsPage list view", () => {
       unobserve() {}
       disconnect() {}
       trigger() {
-        this.callback([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+        this.callback(
+          [{ isIntersecting: true } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver
+        )
       }
     }
     const OriginalIntersectionObserver = globalThis.IntersectionObserver
-    ;(globalThis as { IntersectionObserver: unknown }).IntersectionObserver = FakeIntersectionObserver4
+    ;(globalThis as { IntersectionObserver: unknown }).IntersectionObserver =
+      FakeIntersectionObserver4
     try {
       renderPage(<AgentsPage />)
-      await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
+      await waitFor(() =>
+        expect(screen.getByText("Research Assistant")).toBeTruthy()
+      )
       expect(screen.getByText("已加载全部")).toBeTruthy()
-      FakeIntersectionObserver4.instances.forEach((instance) => instance.trigger())
+      FakeIntersectionObserver4.instances.forEach((instance) =>
+        instance.trigger()
+      )
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(offsets).toEqual(["0"])
     } finally {
@@ -750,7 +1020,8 @@ describe("AgentsPage list view", () => {
 
   test("skips data loading without a selected workspace", async () => {
     const previousWorkspaceId = session.selectedWorkspaceId
-    ;(session as { selectedWorkspaceId: string | null }).selectedWorkspaceId = null
+    ;(session as { selectedWorkspaceId: string | null }).selectedWorkspaceId =
+      null
     try {
       routes = [
         {
@@ -765,7 +1036,8 @@ describe("AgentsPage list view", () => {
       renderPage(<AgentsPage />)
       await waitFor(() => expect(screen.getByText("还没有应用")).toBeTruthy())
     } finally {
-      ;(session as { selectedWorkspaceId: string | null }).selectedWorkspaceId = previousWorkspaceId
+      ;(session as { selectedWorkspaceId: string | null }).selectedWorkspaceId =
+        previousWorkspaceId
     }
   })
 })
@@ -793,27 +1065,42 @@ describe("AgentsPage create flow", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "新建应用" })[0])
     expect(screen.getByText("选择要创建的应用类型")).toBeTruthy()
 
-    fireEvent.click(screen.getByText("智能对话助手，自动规划并使用模型、知识和工具。"))
+    fireEvent.click(
+      screen.getByText("智能对话助手，自动规划并使用模型、知识和工具。")
+    )
     const dialog = screen.getByRole("dialog")
-    expect(within(dialog).getAllByText("新建应用").length).toBeGreaterThanOrEqual(2)
+    expect(
+      within(dialog).getAllByText("新建应用").length
+    ).toBeGreaterThanOrEqual(2)
 
-    fireEvent.change(within(dialog).getByLabelText("Agent 名称"), { target: { value: "Support Copilot" } })
-    fireEvent.change(within(dialog).getByLabelText("描述"), { target: { value: "Answers support questions" } })
+    fireEvent.change(within(dialog).getByLabelText("Agent 名称"), {
+      target: { value: "Support Copilot" },
+    })
+    fireEvent.change(within(dialog).getByLabelText("描述"), {
+      target: { value: "Answers support questions" },
+    })
 
     openModelDropdown()
-    fireEvent.click(await screen.findByRole("menuitem", { name: /DeepSeek Chat/ }))
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /DeepSeek Chat/ })
+    )
 
     const form = within(dialog).getByLabelText("Agent 名称").closest("form")
     fireEvent.submit(form!)
-    await waitFor(() => expect(navState.pushCalls).toContain("/app/apps/agent-new"))
+    await waitFor(() =>
+      expect(navState.pushCalls).toContain("/app/apps/agent-new")
+    )
     expect(createdMethod).toBe("POST")
     const payload = JSON.parse(createdBody)
     expect(payload.name).toBe("Support Copilot")
     expect(payload.app_type).toBe("agent")
     expect(payload.model_id).toBe("model-1")
     expect(payload.knowledge_base_ids).toEqual([])
-    expect(payload.mcp_tools).toEqual([])
-    expect(notifyCalls.some((call) => call.message === "Agent 已创建")).toBe(true)
+    expect(payload.tools).toEqual([])
+    expect(payload.mcp_tools).toBeUndefined()
+    expect(notifyCalls.some((call) => call.message === "Agent 已创建")).toBe(
+      true
+    )
   })
 
   test("creates a workflow with workflow payload normalization", async () => {
@@ -834,21 +1121,32 @@ describe("AgentsPage create flow", () => {
     await waitFor(() => expect(screen.getByText("还没有应用")).toBeTruthy())
 
     fireEvent.click(screen.getAllByRole("button", { name: "新建应用" })[0])
-    fireEvent.click(screen.getByText("按预设步骤编排固定流程，适合确定性的处理任务。"))
+    fireEvent.click(
+      screen.getByText("按预设步骤编排固定流程，适合确定性的处理任务。")
+    )
 
     const dialog = screen.getByRole("dialog")
-    fireEvent.change(within(dialog).getByLabelText("工作流名称"), { target: { value: "Release Flow" } })
+    fireEvent.change(within(dialog).getByLabelText("工作流名称"), {
+      target: { value: "Release Flow" },
+    })
     openModelDropdown()
-    fireEvent.click(await screen.findByRole("menuitem", { name: /DeepSeek Chat/ }))
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /DeepSeek Chat/ })
+    )
 
     const form = within(dialog).getByLabelText("工作流名称").closest("form")
     fireEvent.submit(form!)
-    await waitFor(() => expect(navState.pushCalls).toContain("/app/apps/wf-new"))
+    await waitFor(() =>
+      expect(navState.pushCalls).toContain("/app/apps/wf-new")
+    )
     const payload = JSON.parse(createdBody)
     expect(payload.app_type).toBe("workflow")
-    expect(payload.mcp_tools).toEqual([])
+    expect(payload.tools).toEqual([])
+    expect(payload.mcp_tools).toBeUndefined()
     expect(payload.knowledge_base_ids).toEqual([])
-    expect(notifyCalls.some((call) => call.message === "工作流已创建")).toBe(true)
+    expect(notifyCalls.some((call) => call.message === "工作流已创建")).toBe(
+      true
+    )
   })
 
   test("keeps the create dialog open when the submit fails", async () => {
@@ -864,14 +1162,22 @@ describe("AgentsPage create flow", () => {
     renderPage(<AgentsPage />)
     await waitFor(() => expect(screen.getByText("还没有应用")).toBeTruthy())
     fireEvent.click(screen.getAllByRole("button", { name: "新建应用" })[0])
-    fireEvent.click(screen.getByText("智能对话助手，自动规划并使用模型、知识和工具。"))
+    fireEvent.click(
+      screen.getByText("智能对话助手，自动规划并使用模型、知识和工具。")
+    )
     const dialog = screen.getByRole("dialog")
-    fireEvent.change(within(dialog).getByLabelText("Agent 名称"), { target: { value: "Broken" } })
+    fireEvent.change(within(dialog).getByLabelText("Agent 名称"), {
+      target: { value: "Broken" },
+    })
     openModelDropdown()
-    fireEvent.click(await screen.findByRole("menuitem", { name: /DeepSeek Chat/ }))
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /DeepSeek Chat/ })
+    )
     const form = within(dialog).getByLabelText("Agent 名称").closest("form")
     fireEvent.submit(form!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
     expect(screen.getByRole("dialog")).toBeTruthy()
   })
 
@@ -880,7 +1186,9 @@ describe("AgentsPage create flow", () => {
     renderPage(<AgentsPage />)
     await waitFor(() => expect(screen.getByText("还没有应用")).toBeTruthy())
     fireEvent.click(screen.getAllByRole("button", { name: "新建应用" })[0])
-    fireEvent.click(screen.getByText("智能对话助手，自动规划并使用模型、知识和工具。"))
+    fireEvent.click(
+      screen.getByText("智能对话助手，自动规划并使用模型、知识和工具。")
+    )
     const dialog = screen.getByRole("dialog")
     fireEvent.click(within(dialog).getByText("取消").closest("button")!)
     expect(screen.queryByRole("dialog")).toBeNull()
@@ -888,6 +1196,49 @@ describe("AgentsPage create flow", () => {
 })
 
 describe("AgentsPage detail view", () => {
+  test("surfaces a failed Tool detail in the Workflow palette and retries it", async () => {
+    const workflow = makeWorkflow()
+    const callableAgent = makeAgent({
+      id: "agent-callable",
+      current_published_version_id: "agent-version-1",
+      published: true,
+    })
+    const tool = makeTool()
+    let detailFails = true
+
+    await renderDetail({
+      agent: workflow,
+      agents: [workflow, callableAgent],
+      tools: [tool],
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/tools/${tool.id}`,
+          exact: true,
+          respond: () =>
+            detailFails
+              ? jsonResponse({ detail: "detail unavailable" }, 503)
+              : jsonResponse(tool),
+        },
+      ],
+    })
+
+    await waitFor(() =>
+      expect(screen.getByText("detail unavailable")).toBeTruthy()
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("workflow-agent-count").textContent).toBe("2")
+    )
+    expect(screen.getByTestId("workflow-tool-count").textContent).toBe("0")
+
+    detailFails = false
+    fireEvent.click(screen.getByRole("button", { name: "stub-retry-tools" }))
+    await waitFor(() =>
+      expect(screen.getByTestId("workflow-tool-count").textContent).toBe("1")
+    )
+    expect(screen.queryByText("detail unavailable")).toBeNull()
+  })
+
   test("loads a deep-linked agent missing from the list", async () => {
     const agent = makeAgent({ id: "agent-9", name: "Deep Linked" })
     routes = [
@@ -932,7 +1283,11 @@ describe("AgentsPage detail view", () => {
           exact: true,
           respond: (init) => {
             patchBody = String(init?.body ?? "")
-            return jsonResponse({ ...agent, name: "Renamed Assistant", description: "Updated description" })
+            return jsonResponse({
+              ...agent,
+              name: "Renamed Assistant",
+              description: "Updated description",
+            })
           },
         },
       ],
@@ -942,18 +1297,73 @@ describe("AgentsPage detail view", () => {
       .find((button) => Boolean(button.closest("nav")))
     expect(settingsNavButton).toBeTruthy()
     fireEvent.click(settingsNavButton!)
-    await waitFor(() => expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy()
+    )
     expect(navState.replaceCalls).toContain("/app/apps/agent-1/settings")
 
     const nameInput = screen.getByLabelText("Agent 名称") as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: "Renamed Assistant" } })
     await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
 
-    fireEvent.click(document.querySelector('button[form="agent-settings-form"]') as HTMLButtonElement)
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "Agent 已更新")).toBe(true))
+    fireEvent.click(
+      document.querySelector(
+        'button[form="agent-settings-form"]'
+      ) as HTMLButtonElement
+    )
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "Agent 已更新")).toBe(
+        true
+      )
+    )
     const payload = JSON.parse(patchBody)
     expect(payload.name).toBe("Renamed Assistant")
     expect(payload.app_type).toBe("agent")
+  })
+
+  test("migrates legacy MCP bindings only through canonical Tool refs", async () => {
+    const agent = makeAgent({
+      tools: undefined,
+      mcp_tools: [{ server_id: "server-1", tool_name: "search" }],
+    })
+    let patchBody = ""
+    await renderDetail({
+      agent,
+      extraRoutes: [
+        {
+          method: "PATCH",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1`,
+          exact: true,
+          respond: (init) => {
+            patchBody = String(init?.body ?? "")
+            return jsonResponse({ ...agent, name: "Legacy renamed" })
+          },
+        },
+      ],
+    })
+    const settings = screen
+      .getAllByRole("button", { name: "设置" })
+      .find((button) => Boolean(button.closest("nav")))
+    fireEvent.click(settings!)
+    await screen.findByLabelText("Agent 名称")
+    fireEvent.click(screen.getByText("工具"))
+    expect(
+      screen.getByText(
+        "此 Agent 仍绑定旧版 MCP 工具；旧绑定不会继续写入，请重新选择需要保留的工具。"
+      )
+    ).toBeTruthy()
+    fireEvent.change(screen.getByLabelText("Agent 名称"), {
+      target: { value: "Legacy renamed" },
+    })
+    fireEvent.click(
+      document.querySelector(
+        'button[form="agent-settings-form"]'
+      ) as HTMLButtonElement
+    )
+    await waitFor(() => expect(patchBody).not.toBe(""))
+    const payload = JSON.parse(patchBody)
+    expect(payload.tools).toEqual([])
+    expect(payload.mcp_tools).toBeUndefined()
   })
 
   test("publishes an unpublished agent", async () => {
@@ -975,7 +1385,11 @@ describe("AgentsPage detail view", () => {
     })
     expect(screen.getByText("发布")).toBeTruthy()
     fireEvent.click(screen.getByText("发布"))
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "Agent 已发布")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "Agent 已发布")).toBe(
+        true
+      )
+    )
     expect(JSON.parse(patchBody)).toEqual({ published: true })
   })
 
@@ -988,12 +1402,20 @@ describe("AgentsPage detail view", () => {
           method: "PATCH",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1`,
           exact: true,
-          respond: (init) => jsonResponse({ ...agent, ...JSON.parse(String(init?.body ?? "{}")) }),
+          respond: (init) =>
+            jsonResponse({
+              ...agent,
+              ...JSON.parse(String(init?.body ?? "{}")),
+            }),
         },
       ],
     })
     fireEvent.click(screen.getByText("重新发布"))
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "Agent 已发布")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "Agent 已发布")).toBe(
+        true
+      )
+    )
   })
 
   test("unpublishes a published agent", async () => {
@@ -1014,7 +1436,11 @@ describe("AgentsPage detail view", () => {
       ],
     })
     fireEvent.click(screen.getByText("取消发布"))
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "Agent 已取消发布")).toBe(true))
+    await waitFor(() =>
+      expect(
+        notifyCalls.some((call) => call.message === "Agent 已取消发布")
+      ).toBe(true)
+    )
     expect(JSON.parse(patchBody)).toEqual({ published: false })
   })
 
@@ -1024,7 +1450,9 @@ describe("AgentsPage detail view", () => {
     routes = baseRoutes([agent])
     navState.params.id = "agent-1"
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
     expect(screen.queryByText("发布")).toBeNull()
   })
 
@@ -1051,7 +1479,7 @@ describe("AgentsPage detail view", () => {
     routes = baseRoutes([workflow])
     navState.params.id = "agent-2"
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy())
+    await expectWorkflowStub()
     expect(screen.queryByText("应用")).toBeNull()
   })
 
@@ -1082,19 +1510,28 @@ describe("AgentsPage detail view", () => {
     ]
     navState.params.id = "agent-2"
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy())
+    await expectWorkflowStub()
 
     fireEvent.click(screen.getByText("stub-save").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "工作流已更新")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "工作流已更新")).toBe(
+        true
+      )
+    )
     const payload = JSON.parse(patchBody)
     expect(payload.app_type).toBe("workflow")
-    expect(payload.mcp_tools).toEqual([])
+    expect(payload.tools).toEqual([])
+    expect(payload.mcp_tools).toBeUndefined()
 
     fireEvent.click(screen.getByText("stub-delete").closest("button")!)
     const dialog = screen.getByRole("dialog")
     expect(within(dialog).getByText("删除工作流")).toBeTruthy()
     fireEvent.click(within(dialog).getByText("删除").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "工作流已删除")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "工作流已删除")).toBe(
+        true
+      )
+    )
     expect(deleteCount).toBe(1)
   })
 
@@ -1117,7 +1554,7 @@ describe("AgentsPage detail view", () => {
     ]
     navState.params.id = "agent-2"
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy())
+    await expectWorkflowStub()
     fireEvent.click(screen.getByText("stub-perms").closest("button")!)
     await waitFor(() => expect(screen.getByText("资源授权")).toBeTruthy())
   })
@@ -1127,7 +1564,9 @@ describe("AgentsPage detail view", () => {
     routes = baseRoutes([workflow])
     navState.params.id = "agent-2"
     renderPage(<AgentsPage initialView="settings" />)
-    await waitFor(() => expect(navState.replaceCalls).toContain("/workflow/agent-2"))
+    await waitFor(() =>
+      expect(navState.replaceCalls).toContain("/workflow/agent-2")
+    )
   })
 
   test("deletes the agent from the detail menu", async () => {
@@ -1153,7 +1592,11 @@ describe("AgentsPage detail view", () => {
 
     expect(screen.getByText("删除 Agent")).toBeTruthy()
     fireEvent.click(screen.getByText("删除").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "Agent 已删除")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "Agent 已删除")).toBe(
+        true
+      )
+    )
     expect(deleteCount).toBe(1)
     await waitFor(() => expect(navState.pushCalls).toContain("/app/apps"))
   })
@@ -1172,7 +1615,9 @@ describe("AgentsPage detail view", () => {
       ],
     })
     fireEvent.click(screen.getByText("发布"))
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 
   test("confirms discarding dirty changes before leaving", async () => {
@@ -1184,7 +1629,11 @@ describe("AgentsPage detail view", () => {
           method: "PATCH",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1`,
           exact: true,
-          respond: (init) => jsonResponse({ ...agent, ...JSON.parse(String(init?.body ?? "{}")) }),
+          respond: (init) =>
+            jsonResponse({
+              ...agent,
+              ...JSON.parse(String(init?.body ?? "{}")),
+            }),
         },
       ],
     })
@@ -1192,7 +1641,9 @@ describe("AgentsPage detail view", () => {
       .getAllByRole("button", { name: "设置" })
       .find((button) => Boolean(button.closest("nav")))
     fireEvent.click(settingsNavButton!)
-    await waitFor(() => expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy()
+    )
     const nameInput = screen.getByLabelText("Agent 名称") as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: "Renamed" } })
     await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
@@ -1200,8 +1651,8 @@ describe("AgentsPage detail view", () => {
     fireEvent.click(
       within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
         "button",
-        { name: "放弃更改" },
-      ),
+        { name: "放弃更改" }
+      )
     )
     await waitFor(() => expect(navState.pushCalls).toContain("/app/apps"))
     await waitFor(() => expect(nameInput.value).toBe(agent.name))
@@ -1215,7 +1666,9 @@ describe("AgentsPage detail view", () => {
       .getAllByRole("button", { name: "设置" })
       .find((button) => Boolean(button.closest("nav")))
     fireEvent.click(settingsNavButton!)
-    await waitFor(() => expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy()
+    )
     const nameInput = screen.getByLabelText("Agent 名称") as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: "Renamed" } })
     await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
@@ -1223,11 +1676,11 @@ describe("AgentsPage detail view", () => {
     fireEvent.click(
       within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
         "button",
-        { name: "取消" },
-      ),
+        { name: "取消" }
+      )
     )
     await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull(),
+      expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull()
     )
     expect(navState.pushCalls).not.toContain("/app/apps")
   })
@@ -1251,7 +1704,9 @@ describe("AgentsPage detail view", () => {
     ]
     navState.params.id = "agent-1"
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
     fireEvent.pointerDown(screen.getByLabelText("设置"))
     fireEvent.click(screen.getByLabelText("设置"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /资源授权/ }))
@@ -1263,7 +1718,7 @@ describe("AgentsPage detail view", () => {
     routes = baseRoutes([workflow])
     navState.params.id = "agent-2"
     renderPage(<AgentsPage workflowCanvasMode />)
-    await waitFor(() => expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy())
+    await expectWorkflowStub()
     fireEvent.click(screen.getByText("stub-back").closest("button")!)
     expect(navState.replaceCalls).toContain("/app/apps/agent-2")
   })
@@ -1273,9 +1728,11 @@ describe("AgentsPage detail view", () => {
     routes = baseRoutes([workflow])
     navState.params.id = "agent-2"
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("WF-STUB:Weekly Digest")).toBeTruthy())
+    await expectWorkflowStub()
     fireEvent.click(screen.getByText("stub-view-settings").closest("button")!)
-    await waitFor(() => expect(navState.pushCalls).toContain("/workflow/agent-2"))
+    await waitFor(() =>
+      expect(navState.pushCalls).toContain("/workflow/agent-2")
+    )
   })
 })
 
@@ -1292,7 +1749,18 @@ describe("AgentsPage card menu: permissions and delete", () => {
         respond: () =>
           jsonResponse([
             {
-              user: { id: "u-2", username: "alice", name: "Alice", email: "a@x.co", is_global_admin: false, must_change_password: false, is_active: true, created_at: "", workspaces: [], teams: [] },
+              user: {
+                id: "u-2",
+                username: "alice",
+                name: "Alice",
+                email: "a@x.co",
+                is_global_admin: false,
+                must_change_password: false,
+                is_active: true,
+                created_at: "",
+                workspaces: [],
+                teams: [],
+              },
               role: "member",
             },
           ]),
@@ -1310,22 +1778,41 @@ describe("AgentsPage card menu: permissions and delete", () => {
         respond: (init) => {
           putBody = String(init?.body ?? "")
           return jsonResponse({
-            user: { id: "u-2", username: "alice", name: "Alice", email: "a@x.co", is_global_admin: false, must_change_password: false, is_active: true, created_at: "", workspaces: [], teams: [] },
+            user: {
+              id: "u-2",
+              username: "alice",
+              name: "Alice",
+              email: "a@x.co",
+              is_global_admin: false,
+              must_change_password: false,
+              is_active: true,
+              created_at: "",
+              workspaces: [],
+              teams: [],
+            },
             permission: "view",
           })
         },
       },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
-    fireEvent.pointerDown(within(cardOf("Research Assistant")).getByTitle("更多"))
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
+    fireEvent.pointerDown(
+      within(cardOf("Research Assistant")).getByTitle("更多")
+    )
     fireEvent.click(within(cardOf("Research Assistant")).getByTitle("更多"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /资源授权/ }))
 
     await waitFor(() => expect(screen.getByText("Alice / alice")).toBeTruthy())
     fireEvent.click(screen.getByLabelText("用户"))
     fireEvent.click(screen.getByText("保存授权").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "授权已保存")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "授权已保存")).toBe(
+        true
+      )
+    )
     expect(JSON.parse(putBody)).toEqual({ permission: "view" })
   })
 
@@ -1347,7 +1834,18 @@ describe("AgentsPage card menu: permissions and delete", () => {
         respond: () =>
           jsonResponse([
             {
-              user: { id: "u-3", username: "bob", name: "Bob", email: "b@x.co", is_global_admin: false, must_change_password: false, is_active: true, created_at: "", workspaces: [], teams: [] },
+              user: {
+                id: "u-3",
+                username: "bob",
+                name: "Bob",
+                email: "b@x.co",
+                is_global_admin: false,
+                must_change_password: false,
+                is_active: true,
+                created_at: "",
+                workspaces: [],
+                teams: [],
+              },
               permission: "view",
             },
           ]),
@@ -1363,14 +1861,22 @@ describe("AgentsPage card menu: permissions and delete", () => {
       },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
-    fireEvent.pointerDown(within(cardOf("Research Assistant")).getByTitle("更多"))
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
+    fireEvent.pointerDown(
+      within(cardOf("Research Assistant")).getByTitle("更多")
+    )
     fireEvent.click(within(cardOf("Research Assistant")).getByTitle("更多"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /资源授权/ }))
 
     await waitFor(() => expect(screen.getByText("Bob")).toBeTruthy())
     fireEvent.click(screen.getByLabelText("撤销授权"))
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "授权已撤销")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "授权已撤销")).toBe(
+        true
+      )
+    )
     expect(revoked).toBe(true)
   })
 
@@ -1392,11 +1898,17 @@ describe("AgentsPage card menu: permissions and delete", () => {
       },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
-    fireEvent.pointerDown(within(cardOf("Research Assistant")).getByTitle("更多"))
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
+    fireEvent.pointerDown(
+      within(cardOf("Research Assistant")).getByTitle("更多")
+    )
     fireEvent.click(within(cardOf("Research Assistant")).getByTitle("更多"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /资源授权/ }))
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
     expect(screen.queryByText("保存授权")).toBeNull()
   })
 
@@ -1414,9 +1926,25 @@ describe("AgentsPage card menu: permissions and delete", () => {
           return jsonResponse(relistCount > 1 ? [] : [agent])
         },
       },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/models`, exact: true, respond: () => jsonResponse([model("model-1", "DeepSeek Chat", "deepseek-chat")]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/knowledge-bases`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/mcp-servers`, exact: true, respond: () => jsonResponse([]) },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/models`,
+        exact: true,
+        respond: () =>
+          jsonResponse([model("model-1", "DeepSeek Chat", "deepseek-chat")]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/knowledge-bases`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/mcp-servers`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
       {
         method: "DELETE",
         pathname: `/api/v1/workspaces/${WS}/agents/agent-1`,
@@ -1428,15 +1956,25 @@ describe("AgentsPage card menu: permissions and delete", () => {
       },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
-    fireEvent.pointerDown(within(cardOf("Research Assistant")).getByTitle("更多"))
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
+    fireEvent.pointerDown(
+      within(cardOf("Research Assistant")).getByTitle("更多")
+    )
     fireEvent.click(within(cardOf("Research Assistant")).getByTitle("更多"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /删除/ }))
 
     const dialog = screen.getByRole("dialog")
-    expect(within(dialog).getByText("确定删除 Agent“Research Assistant”吗？")).toBeTruthy()
+    expect(
+      within(dialog).getByText("确定删除 Agent“Research Assistant”吗？")
+    ).toBeTruthy()
     fireEvent.click(within(dialog).getByText("删除").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "Agent 已删除")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "Agent 已删除")).toBe(
+        true
+      )
+    )
     expect(deleteCount).toBe(1)
     expect(relistCount).toBe(2)
     await waitFor(() => expect(screen.getByText("还没有应用")).toBeTruthy())
@@ -1458,8 +1996,12 @@ describe("AgentsPage card menu: permissions and delete", () => {
       },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
-    fireEvent.pointerDown(within(cardOf("Research Assistant")).getByTitle("更多"))
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
+    fireEvent.pointerDown(
+      within(cardOf("Research Assistant")).getByTitle("更多")
+    )
     fireEvent.click(within(cardOf("Research Assistant")).getByTitle("更多"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /删除/ }))
     fireEvent.click(screen.getByText("取消").closest("button")!)
@@ -1483,8 +2025,12 @@ describe("AgentsPage card menu: permissions and delete", () => {
       },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
-    fireEvent.pointerDown(within(cardOf("Research Assistant")).getByTitle("更多"))
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
+    fireEvent.pointerDown(
+      within(cardOf("Research Assistant")).getByTitle("更多")
+    )
     fireEvent.click(within(cardOf("Research Assistant")).getByTitle("更多"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /删除/ }))
     expect(screen.getByRole("dialog")).toBeTruthy()
@@ -1505,12 +2051,20 @@ describe("AgentsPage card menu: permissions and delete", () => {
       },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
-    fireEvent.pointerDown(within(cardOf("Research Assistant")).getByTitle("更多"))
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
+    fireEvent.pointerDown(
+      within(cardOf("Research Assistant")).getByTitle("更多")
+    )
     fireEvent.click(within(cardOf("Research Assistant")).getByTitle("更多"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /删除/ }))
-    fireEvent.click(within(screen.getByRole("dialog")).getByText("删除").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByText("删除").closest("button")!
+    )
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
     // The dialog stays open so the user can retry or cancel.
     expect(screen.getByRole("dialog")).toBeTruthy()
   })
@@ -1526,12 +2080,31 @@ describe("AgentsPage card menu: permissions and delete", () => {
         exact: false,
         respond: () => {
           relistCount += 1
-          return jsonResponse(relistCount > 1 ? { detail: "boom" } : [agent], relistCount > 1 ? 500 : 200)
+          return jsonResponse(
+            relistCount > 1 ? { detail: "boom" } : [agent],
+            relistCount > 1 ? 500 : 200
+          )
         },
       },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/models`, exact: true, respond: () => jsonResponse([model("model-1", "DeepSeek Chat", "deepseek-chat")]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/knowledge-bases`, exact: true, respond: () => jsonResponse([]) },
-      { method: "GET", pathname: `/api/v1/workspaces/${WS}/mcp-servers`, exact: true, respond: () => jsonResponse([]) },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/models`,
+        exact: true,
+        respond: () =>
+          jsonResponse([model("model-1", "DeepSeek Chat", "deepseek-chat")]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/knowledge-bases`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/mcp-servers`,
+        exact: true,
+        respond: () => jsonResponse([]),
+      },
       {
         method: "DELETE",
         pathname: `/api/v1/workspaces/${WS}/agents/agent-1`,
@@ -1543,13 +2116,21 @@ describe("AgentsPage card menu: permissions and delete", () => {
       },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
-    fireEvent.pointerDown(within(cardOf("Research Assistant")).getByTitle("更多"))
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
+    fireEvent.pointerDown(
+      within(cardOf("Research Assistant")).getByTitle("更多")
+    )
     fireEvent.click(within(cardOf("Research Assistant")).getByTitle("更多"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /删除/ }))
-    fireEvent.click(within(screen.getByRole("dialog")).getByText("删除").closest("button")!)
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByText("删除").closest("button")!
+    )
     await waitFor(() => expect(deleteCount).toBe(1))
-    await waitFor(() => expect(notifyCalls.filter((call) => call.kind === "error").length).toBe(1))
+    await waitFor(() =>
+      expect(notifyCalls.filter((call) => call.kind === "error").length).toBe(1)
+    )
     // The deleted agent is still removed from the local list.
     expect(screen.queryByText("Research Assistant")).toBeNull()
   })
@@ -1565,7 +2146,18 @@ describe("AgentsPage card menu: permissions and delete", () => {
         respond: () =>
           jsonResponse([
             {
-              user: { id: "u-2", username: "alice", name: "Alice", email: "a@x.co", is_global_admin: false, must_change_password: false, is_active: true, created_at: "", workspaces: [], teams: [] },
+              user: {
+                id: "u-2",
+                username: "alice",
+                name: "Alice",
+                email: "a@x.co",
+                is_global_admin: false,
+                must_change_password: false,
+                is_active: true,
+                created_at: "",
+                workspaces: [],
+                teams: [],
+              },
               role: "member",
             },
           ]),
@@ -1584,8 +2176,12 @@ describe("AgentsPage card menu: permissions and delete", () => {
       },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
-    fireEvent.pointerDown(within(cardOf("Research Assistant")).getByTitle("更多"))
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
+    fireEvent.pointerDown(
+      within(cardOf("Research Assistant")).getByTitle("更多")
+    )
     fireEvent.click(within(cardOf("Research Assistant")).getByTitle("更多"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /资源授权/ }))
     await waitFor(() => expect(screen.getByText("Alice / alice")).toBeTruthy())
@@ -1594,7 +2190,9 @@ describe("AgentsPage card menu: permissions and delete", () => {
     fireEvent.click(trigger)
     fireEvent.click(await screen.findByRole("menuitem", { name: /alice/ }))
     fireEvent.click(screen.getByText("保存授权").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 
   test("reports an error when revoking a permission fails", async () => {
@@ -1614,7 +2212,18 @@ describe("AgentsPage card menu: permissions and delete", () => {
         respond: () =>
           jsonResponse([
             {
-              user: { id: "u-3", username: "bob", name: "Bob", email: "b@x.co", is_global_admin: false, must_change_password: false, is_active: true, created_at: "", workspaces: [], teams: [] },
+              user: {
+                id: "u-3",
+                username: "bob",
+                name: "Bob",
+                email: "b@x.co",
+                is_global_admin: false,
+                must_change_password: false,
+                is_active: true,
+                created_at: "",
+                workspaces: [],
+                teams: [],
+              },
               permission: "view",
             },
           ]),
@@ -1627,13 +2236,19 @@ describe("AgentsPage card menu: permissions and delete", () => {
       },
     ]
     renderPage(<AgentsPage />)
-    await waitFor(() => expect(screen.getByText("Research Assistant")).toBeTruthy())
-    fireEvent.pointerDown(within(cardOf("Research Assistant")).getByTitle("更多"))
+    await waitFor(() =>
+      expect(screen.getByText("Research Assistant")).toBeTruthy()
+    )
+    fireEvent.pointerDown(
+      within(cardOf("Research Assistant")).getByTitle("更多")
+    )
     fireEvent.click(within(cardOf("Research Assistant")).getByTitle("更多"))
     fireEvent.click(await screen.findByRole("menuitem", { name: /资源授权/ }))
     await waitFor(() => expect(screen.getByText("Bob")).toBeTruthy())
     fireEvent.click(screen.getByLabelText("撤销授权"))
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 })
 
@@ -1683,20 +2298,49 @@ describe("AgentsPage run flows", () => {
           exact: false,
           respond: () =>
             ndjson([
-              { type: "process", sequence: 1, event: { type: "thought", turn: 1, tool_name: "", status: "succeeded", summary: "agent.answer_ready", call_id: "", tool_label: "", tool_kind: "unknown", server_name: "", input: {}, output: null, duration_ms: 0 } },
-              { type: "answer_delta", sequence: 2, delta: "Hello from the stream" },
+              {
+                type: "process",
+                sequence: 1,
+                event: {
+                  type: "thought",
+                  turn: 1,
+                  tool_name: "",
+                  status: "succeeded",
+                  summary: "agent.answer_ready",
+                  call_id: "",
+                  tool_label: "",
+                  tool_kind: "unknown",
+                  server_name: "",
+                  input: {},
+                  output: null,
+                  duration_ms: 0,
+                },
+              },
+              {
+                type: "answer_delta",
+                sequence: 2,
+                delta: "Hello from the stream",
+              },
               { type: "complete", sequence: 3, run: finishedRun },
             ]),
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
 
-    const textarea = screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement
-    fireEvent.change(textarea, { target: { value: "Summarize the latest releases" } })
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
+    fireEvent.change(textarea, {
+      target: { value: "Summarize the latest releases" },
+    })
     fireEvent.click(screen.getByLabelText("发送问题"))
 
-    await waitFor(() => expect(screen.getByText("Hello from the stream")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Hello from the stream")).toBeTruthy()
+    )
     expect(screen.getByText("Summarize the latest releases")).toBeTruthy()
     expect(screen.getByText("回答已生成")).toBeTruthy()
   })
@@ -1704,7 +2348,11 @@ describe("AgentsPage run flows", () => {
   test("uploads attachments and streams reasoning deltas", async () => {
     const agent = makeAgent()
     const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
-    const finishedRun = makeRun({ id: "run-1", status: "succeeded", result: "Final answer" })
+    const finishedRun = makeRun({
+      id: "run-1",
+      status: "succeeded",
+      result: "Final answer",
+    })
     let runBody = ""
     await renderDetail({
       agent,
@@ -1722,7 +2370,13 @@ describe("AgentsPage run flows", () => {
           exact: true,
           respond: () =>
             jsonResponse([
-              { id: "up-1", filename: "report.pdf", content_type: "application/pdf", size_bytes: 10, category: "document" },
+              {
+                id: "up-1",
+                filename: "report.pdf",
+                content_type: "application/pdf",
+                size_bytes: 10,
+                category: "document",
+              },
             ]),
         },
         {
@@ -1740,21 +2394,40 @@ describe("AgentsPage run flows", () => {
           exact: false,
           respond: () =>
             ndjson([
-              { type: "reasoning_delta", sequence: 1, live_sequence: "1000-0", stream_epoch: "worker-1", turn: 1, delta: "Thinking…" },
-              { type: "answer_delta", sequence: 2, live_sequence: "1000-1", stream_epoch: "worker-1", delta: "Final answer" },
+              {
+                type: "reasoning_delta",
+                sequence: 1,
+                live_sequence: "1000-0",
+                stream_epoch: "worker-1",
+                turn: 1,
+                delta: "Thinking…",
+              },
+              {
+                type: "answer_delta",
+                sequence: 2,
+                live_sequence: "1000-1",
+                stream_epoch: "worker-1",
+                delta: "Final answer",
+              },
               { type: "complete", sequence: 3, run: finishedRun },
             ]),
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
 
-    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    const fileInput = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement
     const file = new File(["pdf"], "report.pdf", { type: "application/pdf" })
     fireEvent.change(fileInput, { target: { files: [file] } })
     await waitFor(() => expect(screen.getByText("report.pdf")).toBeTruthy())
 
-    const textarea = screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "Analyze this report" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
 
@@ -1782,21 +2455,30 @@ describe("AgentsPage run flows", () => {
             new Promise<Response>((_resolve, reject) => {
               const signal = init?.signal
               if (signal?.aborted) reject(signal.reason)
-              else signal?.addEventListener("abort", () => reject(signal.reason), { once: true })
+              else
+                signal?.addEventListener("abort", () => reject(signal.reason), {
+                  once: true,
+                })
             }),
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
 
-    const textarea = screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "Will this hang?" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
     await waitFor(() => expect(screen.getByLabelText("停止生成")).toBeTruthy())
 
     fireEvent.click(screen.getByLabelText("停止生成"))
     await waitFor(() => expect(screen.getByLabelText("发送问题")).toBeTruthy())
-    expect((screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement).value).toBe("Will this hang?")
+    expect(
+      (screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement).value
+    ).toBe("Will this hang?")
   })
 
   test("reports an error when the run submission fails", async () => {
@@ -1819,14 +2501,22 @@ describe("AgentsPage run flows", () => {
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
 
-    const textarea = screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "This will fail" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
 
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
-    expect((screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement).value).toBe("This will fail")
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
+    expect(
+      (screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement).value
+    ).toBe("This will fail")
   })
 
   test("loads existing runs with an awaiting approval and resolves it", async () => {
@@ -1836,10 +2526,28 @@ describe("AgentsPage run flows", () => {
       status: "awaiting_approval",
       result: "",
       events: [
-        { type: "thought", turn: 1, tool_name: "", status: "running", summary: "agent.analyzing", call_id: "", tool_label: "", tool_kind: "unknown", server_name: "", input: {}, output: null, duration_ms: 0, reasoning: "" },
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "running",
+          summary: "agent.analyzing",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "",
+        },
       ],
     })
-    const resolvedRun = makeRun({ id: "run-1", status: "succeeded", result: "Query executed" })
+    const resolvedRun = makeRun({
+      id: "run-1",
+      status: "succeeded",
+      result: "Query executed",
+    })
     let toolCallStatus = "awaiting_approval"
     let approveBody: string | null = null
     await renderDetail({
@@ -1856,13 +2564,19 @@ describe("AgentsPage run flows", () => {
           method: "GET",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/tool-calls`,
           exact: true,
-          respond: () => jsonResponse([makeToolCall({ status: toolCallStatus as AgentToolCall["status"] })]),
+          respond: () =>
+            jsonResponse([
+              makeToolCall({
+                status: toolCallStatus as AgentToolCall["status"],
+              }),
+            ]),
         },
         {
           method: "GET",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/stream`,
           exact: false,
-          respond: () => ndjson([{ type: "complete", sequence: 5, run: resolvedRun }]),
+          respond: () =>
+            ndjson([{ type: "complete", sequence: 5, run: resolvedRun }]),
         },
         {
           method: "POST",
@@ -1871,16 +2585,24 @@ describe("AgentsPage run flows", () => {
           respond: (init) => {
             approveBody = String(init?.body ?? "")
             toolCallStatus = "approved"
-            return jsonResponse(makeRun({ id: "run-1", status: "queued", result: "" }))
+            return jsonResponse(
+              makeRun({ id: "run-1", status: "queued", result: "" })
+            )
           },
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("工具调用需要确认")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("工具调用需要确认")).toBeTruthy()
+    )
     expect(screen.getByText(/execute_sql/)).toBeTruthy()
 
     fireEvent.click(screen.getByText("批准并执行").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "工具调用已批准")).toBe(true))
+    await waitFor(() =>
+      expect(
+        notifyCalls.some((call) => call.message === "工具调用已批准")
+      ).toBe(true)
+    )
     expect(approveBody ?? "").toBe("")
   })
 
@@ -1891,7 +2613,21 @@ describe("AgentsPage run flows", () => {
       status: "awaiting_approval",
       result: "",
       events: [
-        { type: "thought", turn: 1, tool_name: "", status: "running", summary: "agent.analyzing", call_id: "", tool_label: "", tool_kind: "unknown", server_name: "", input: {}, output: null, duration_ms: 0, reasoning: "" },
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "running",
+          summary: "agent.analyzing",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "",
+        },
       ],
     })
     await renderDetail({
@@ -1914,19 +2650,39 @@ describe("AgentsPage run flows", () => {
           method: "GET",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/stream`,
           exact: false,
-          respond: () => ndjson([{ type: "complete", sequence: 5, run: makeRun({ status: "failed", last_error: "rejected", result: "" }) }]),
+          respond: () =>
+            ndjson([
+              {
+                type: "complete",
+                sequence: 5,
+                run: makeRun({
+                  status: "failed",
+                  last_error: "rejected",
+                  result: "",
+                }),
+              },
+            ]),
         },
         {
           method: "POST",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/tool-calls/call-1/reject`,
           exact: true,
-          respond: () => jsonResponse(makeRun({ id: "run-1", status: "queued", result: "" })),
+          respond: () =>
+            jsonResponse(
+              makeRun({ id: "run-1", status: "queued", result: "" })
+            ),
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("工具调用需要确认")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("工具调用需要确认")).toBeTruthy()
+    )
     fireEvent.click(screen.getByText("拒绝").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "工具调用已拒绝")).toBe(true))
+    await waitFor(() =>
+      expect(
+        notifyCalls.some((call) => call.message === "工具调用已拒绝")
+      ).toBe(true)
+    )
   })
 
   test("starts a new conversation and resets the preview", async () => {
@@ -1947,8 +2703,14 @@ describe("AgentsPage run flows", () => {
     await waitFor(() => expect(screen.getByText("Old answer")).toBeTruthy())
 
     fireEvent.click(screen.getByLabelText("新建对话"))
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
-    expect(navState.pushCalls.some((href) => href.startsWith("/app/apps/agent-1/settings?conversation_id="))).toBe(true)
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    expect(
+      navState.pushCalls.some((href) =>
+        href.startsWith("/app/apps/agent-1/settings?conversation_id=")
+      )
+    ).toBe(true)
   })
 
   test("ignores empty ask submissions", async () => {
@@ -1975,8 +2737,12 @@ describe("AgentsPage run flows", () => {
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
-    const textarea = screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
     const form = textarea.closest("form")
     fireEvent.submit(form!)
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -1986,7 +2752,12 @@ describe("AgentsPage run flows", () => {
   test("notifies when the run stream reports an error", async () => {
     const agent = makeAgent()
     const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
-    const failedRun = makeRun({ id: "run-1", status: "failed", result: "", last_error: "execution failed" })
+    const failedRun = makeRun({
+      id: "run-1",
+      status: "failed",
+      result: "",
+      last_error: "execution failed",
+    })
     await renderDetail({
       agent,
       initialView: "settings",
@@ -2015,18 +2786,32 @@ describe("AgentsPage run flows", () => {
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
-    const textarea = screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "This will error" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
-    await waitFor(() => expect(notifyCalls.some((call) => call.message === "Agent 回答失败")).toBe(true))
-    await waitFor(() => expect(screen.getByText("execution failed")).toBeTruthy())
+    await waitFor(() =>
+      expect(
+        notifyCalls.some((call) => call.message === "Agent 回答失败")
+      ).toBe(true)
+    )
+    await waitFor(() =>
+      expect(screen.getByText("execution failed")).toBeTruthy()
+    )
   })
 
   test("drops stream events that arrive after a new conversation", async () => {
     const agent = makeAgent()
     const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
-    const finishedRun = makeRun({ id: "run-1", status: "succeeded", result: "Late answer" })
+    const finishedRun = makeRun({
+      id: "run-1",
+      status: "succeeded",
+      result: "Late answer",
+    })
     let emitStream: (() => void) | null = null
     await renderDetail({
       agent,
@@ -2061,13 +2846,19 @@ describe("AgentsPage run flows", () => {
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
-    const textarea = screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "Race me" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
     await waitFor(() => expect(screen.getByLabelText("停止生成")).toBeTruthy())
     fireEvent.click(screen.getByLabelText("新建对话"))
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
     emitStream!()
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByText("Late answer")).toBeNull()
@@ -2105,9 +2896,13 @@ describe("AgentsPage run flows", () => {
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("工具调用需要确认")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("工具调用需要确认")).toBeTruthy()
+    )
     fireEvent.click(screen.getByText("批准并执行").closest("button")!)
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 
   test("ignores a stale tool call resolution after switching conversations", async () => {
@@ -2139,7 +2934,14 @@ describe("AgentsPage run flows", () => {
           method: "GET",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/stream`,
           exact: false,
-          respond: () => ndjson([{ type: "complete", sequence: 1, run: makeRun({ status: "succeeded", result: "" }) }]),
+          respond: () =>
+            ndjson([
+              {
+                type: "complete",
+                sequence: 1,
+                run: makeRun({ status: "succeeded", result: "" }),
+              },
+            ]),
         },
         {
           method: "POST",
@@ -2152,13 +2954,21 @@ describe("AgentsPage run flows", () => {
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("工具调用需要确认")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("工具调用需要确认")).toBeTruthy()
+    )
     fireEvent.click(screen.getByText("批准并执行").closest("button")!)
     fireEvent.click(screen.getByLabelText("新建对话"))
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
-    resolveApprove!(jsonResponse(makeRun({ id: "run-1", status: "queued", result: "" })))
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    resolveApprove!(
+      jsonResponse(makeRun({ id: "run-1", status: "queued", result: "" }))
+    )
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(notifyCalls.some((call) => call.message === "工具调用已批准")).toBe(false)
+    expect(notifyCalls.some((call) => call.message === "工具调用已批准")).toBe(
+      false
+    )
   })
 
   test("ignores a stale tool-call list after switching conversations", async () => {
@@ -2199,26 +3009,43 @@ describe("AgentsPage run flows", () => {
           method: "GET",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/stream`,
           exact: false,
-          respond: () => ndjson([{ type: "complete", sequence: 1, run: makeRun({ status: "succeeded", result: "" }) }]),
+          respond: () =>
+            ndjson([
+              {
+                type: "complete",
+                sequence: 1,
+                run: makeRun({ status: "succeeded", result: "" }),
+              },
+            ]),
         },
         {
           method: "POST",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/tool-calls/call-1/approve`,
           exact: true,
-          respond: () => jsonResponse(makeRun({ id: "run-1", status: "queued", result: "" })),
+          respond: () =>
+            jsonResponse(
+              makeRun({ id: "run-1", status: "queued", result: "" })
+            ),
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("工具调用需要确认")).toBeTruthy(), {
-      timeout: 3000,
-    })
+    await waitFor(
+      () => expect(screen.getByText("工具调用需要确认")).toBeTruthy(),
+      {
+        timeout: 3000,
+      }
+    )
     fireEvent.click(screen.getByText("批准并执行").closest("button")!)
     await waitFor(() => expect(callsRequested).toBe(true))
     fireEvent.click(screen.getByLabelText("新建对话"))
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
     resolveCalls!(jsonResponse([makeToolCall({ status: "approved" })]))
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(notifyCalls.some((call) => call.message === "工具调用已批准")).toBe(false)
+    expect(notifyCalls.some((call) => call.message === "工具调用已批准")).toBe(
+      false
+    )
   })
 
   test("discards run lists that resolve after a conversation switch", async () => {
@@ -2241,8 +3068,12 @@ describe("AgentsPage run flows", () => {
     })
     await waitFor(() => expect(screen.getByText("正在加载")).toBeTruthy())
     fireEvent.click(screen.getByLabelText("新建对话"))
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
-    resolveRuns!(jsonResponse([makeRun({ status: "succeeded", result: "Old answer" })]))
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    resolveRuns!(
+      jsonResponse([makeRun({ status: "succeeded", result: "Old answer" })])
+    )
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByText("Old answer")).toBeNull()
   })
@@ -2275,16 +3106,30 @@ describe("AgentsPage run flows", () => {
           method: "GET",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/stream`,
           exact: false,
-          respond: () => ndjson([{ type: "complete", sequence: 1, run: makeRun({ status: "succeeded", result: "" }) }]),
+          respond: () =>
+            ndjson([
+              {
+                type: "complete",
+                sequence: 1,
+                run: makeRun({ status: "succeeded", result: "" }),
+              },
+            ]),
         },
       ],
     })
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 
   test("drops observed stream events that arrive after a new conversation", async () => {
     const agent = makeAgent()
-    const runningRun = makeRun({ id: "run-1", status: "running", result: "", events: [] })
+    const runningRun = makeRun({
+      id: "run-1",
+      status: "running",
+      result: "",
+      events: [],
+    })
     let emitObserved: (() => void) | null = null
     await renderDetail({
       agent,
@@ -2331,7 +3176,9 @@ describe("AgentsPage run flows", () => {
     })
     await waitFor(() => expect(emitObserved).toBeTruthy())
     fireEvent.click(screen.getByLabelText("新建对话"))
-    await waitFor(() => expect(screen.getByText("开始和 Agent 对话")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
     emitObserved!()
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByText("正在分析问题")).toBeNull()
@@ -2339,7 +3186,12 @@ describe("AgentsPage run flows", () => {
 
   test("loads tool calls when the stream requests approval", async () => {
     const agent = makeAgent()
-    const queuedRun = makeRun({ id: "run-1", status: "queued", result: "", events: [] })
+    const queuedRun = makeRun({
+      id: "run-1",
+      status: "queued",
+      result: "",
+      events: [],
+    })
     await renderDetail({
       agent,
       initialView: "settings",
@@ -2372,13 +3224,20 @@ describe("AgentsPage run flows", () => {
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("工具调用需要确认")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("工具调用需要确认")).toBeTruthy()
+    )
     expect(screen.getByText(/execute_sql/)).toBeTruthy()
   })
 
   test("reports an error when observing a live run fails", async () => {
     const agent = makeAgent()
-    const runningRun = makeRun({ id: "run-1", status: "running", result: "", events: [] })
+    const runningRun = makeRun({
+      id: "run-1",
+      status: "running",
+      result: "",
+      events: [],
+    })
     await renderDetail({
       agent,
       initialView: "settings",
@@ -2397,7 +3256,9 @@ describe("AgentsPage run flows", () => {
         },
       ],
     })
-    await waitFor(() => expect(notifyCalls.some((call) => call.kind === "error")).toBe(true))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
+    )
   })
 })
 
@@ -2410,7 +3271,9 @@ describe("lib/api/agents direct calls", () => {
     }) as unknown as typeof fetch
     const run = await getAgentRun("token", WS, "agent-1", "run-1")
     expect(run.id).toBe("run-1")
-    expect(requestedUrl).toBe(`/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1`)
+    expect(requestedUrl).toBe(
+      `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1`
+    )
   })
 })
 
@@ -2418,9 +3281,7 @@ describe("lib/api/agents direct calls", () => {
 /* Stream merge pure functions                                         */
 /* ------------------------------------------------------------------ */
 
-const thoughtEvent = (
-  overrides: Record<string, unknown> = {}
-): AgentRunEvent =>
+const thoughtEvent = (overrides: Record<string, unknown> = {}): AgentRunEvent =>
   ({
     type: "thought",
     turn: 1,
@@ -2436,7 +3297,7 @@ const thoughtEvent = (
     duration_ms: 0,
     reasoning: "",
     ...overrides,
-  } as AgentRunEvent)
+  }) as AgentRunEvent
 
 function formFromAgentFixture(agent: Agent): AgentFormState {
   return {
@@ -2449,7 +3310,7 @@ function formFromAgentFixture(agent: Agent): AgentFormState {
     instructions: agent.instructions,
     knowledgeQueryMode: agent.knowledge_query_mode,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
-    mcpTools: agent.mcp_tools.map((tool) => ({ ...tool })),
+    tools: (agent.tools ?? []).map((tool) => ({ ...tool })),
     status: agent.status,
   }
 }
@@ -2485,10 +3346,17 @@ describe("run stream merge pure functions", () => {
   })
 
   test("mergeAgentRunSnapshot replaces the placeholder and prepends unknowns", () => {
-    const placeholder = makeRun({ id: "pending-1", status: "running", result: "draft" })
+    const placeholder = makeRun({
+      id: "pending-1",
+      status: "running",
+      result: "draft",
+    })
     const live = makeRun({ id: "run-1", status: "succeeded", result: "answer" })
     const replaced = mergeAgentRunSnapshot(
-      [placeholder, makeRun({ id: "run-2", status: "succeeded", result: "other" })],
+      [
+        placeholder,
+        makeRun({ id: "run-2", status: "succeeded", result: "other" }),
+      ],
       live,
       "pending-1"
     )
@@ -2500,7 +3368,11 @@ describe("run stream merge pure functions", () => {
   })
 
   test("process events append when nothing matches and replace by call id", () => {
-    const run = makeRun({ status: "running", result: "", events: [thoughtEvent()] })
+    const run = makeRun({
+      status: "running",
+      result: "",
+      events: [thoughtEvent()],
+    })
     const appended = mergeAgentRunStreamEvent([run], "run-1", {
       type: "process",
       sequence: 2,
@@ -2531,10 +3403,7 @@ describe("run stream merge pure functions", () => {
     const run = makeRun({
       status: "running",
       result: "",
-      events: [
-        thoughtEvent({ reasoning: "" }),
-        thoughtEvent({ turn: 2 }),
-      ],
+      events: [thoughtEvent({ reasoning: "" }), thoughtEvent({ turn: 2 })],
     })
     const streamed = mergeAgentRunStreamEvent([run], "run-1", {
       type: "reasoning_delta",
@@ -2547,7 +3416,15 @@ describe("run stream merge pure functions", () => {
     expect(streamed[0].events[1]).toEqual(run.events[1])
 
     const deduped = mergeAgentRunStreamEvent(
-      [makeRun({ status: "running", result: "", events: [], live_stream_epoch: "w-1", live_stream_cursor: "1000-5" })],
+      [
+        makeRun({
+          status: "running",
+          result: "",
+          events: [],
+          live_stream_epoch: "w-1",
+          live_stream_cursor: "1000-5",
+        }),
+      ],
       "run-1",
       {
         type: "reasoning_delta",
@@ -2579,7 +3456,15 @@ describe("run stream merge pure functions", () => {
     expect(streamed[0].result).toBe("Hello world")
 
     const deduped = mergeAgentRunStreamEvent(
-      [makeRun({ status: "running", result: "x", events: [], live_stream_epoch: "w-1", live_stream_cursor: "1000-5" })],
+      [
+        makeRun({
+          status: "running",
+          result: "x",
+          events: [],
+          live_stream_epoch: "w-1",
+          live_stream_cursor: "1000-5",
+        }),
+      ],
       "run-1",
       {
         type: "answer_delta",
@@ -2645,8 +3530,14 @@ describe("run stream merge pure functions", () => {
   })
 
   test("run events replace matching runs", () => {
-    const runs = [makeRun({ id: "run-1", status: "running", result: "", events: [] })]
-    const finished = makeRun({ id: "run-1", status: "succeeded", result: "done" })
+    const runs = [
+      makeRun({ id: "run-1", status: "running", result: "", events: [] }),
+    ]
+    const finished = makeRun({
+      id: "run-1",
+      status: "succeeded",
+      result: "done",
+    })
     const replaced = mergeAgentRunStreamEvent(runs, "run-1", {
       type: "complete",
       sequence: 9,
@@ -2659,10 +3550,7 @@ describe("run stream merge pure functions", () => {
     const agent = makeAgent()
     expect(isAgentFormDirty(formFromAgentFixture(agent), agent)).toBe(false)
     expect(
-      isAgentFormDirty(
-        { ...formFromAgentFixture(agent), name: "  " },
-        agent
-      )
+      isAgentFormDirty({ ...formFromAgentFixture(agent), name: "  " }, agent)
     ).toBe(true)
     expect(
       isAgentFormDirty(
@@ -2683,17 +3571,14 @@ describe("run stream merge pure functions", () => {
       )
     ).toBe(true)
     expect(
-      isAgentFormDirty(
-        { ...formFromAgentFixture(agent), mcpTools: [] },
-        agent
-      )
+      isAgentFormDirty({ ...formFromAgentFixture(agent), tools: [] }, agent)
     ).toBe(true)
     // Workflow app types ignore knowledge and MCP bindings.
     const workflow = makeWorkflow()
     const workflowForm: AgentFormState = {
       ...formFromAgentFixture(workflow),
       knowledgeBaseIds: ["knowledge-9"],
-      mcpTools: [{ server_id: "server-9", tool_name: "tool" }],
+      tools: [{ tool_id: "tool-9", version_id: "version-9" }],
     }
     expect(isAgentFormDirty(workflowForm, workflow)).toBe(false)
   })

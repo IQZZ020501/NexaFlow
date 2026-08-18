@@ -1,36 +1,53 @@
-from dataclasses import dataclass
-
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ports import model_registry as model_repository
 from app.ports.llm import RegisteredModel
-from app.entities.agents import Agent
+from app.entities.agents import Agent, AgentPublicationVersion
+from app.entities.tools import ToolRef, ToolSnapshot
 from app.entities.workflows import WorkflowDefinition
 from app.entities.knowledge import KnowledgeBase
 from app.entities.user import User
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
+from app.infrastructure.repositories import tools as tools_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.validation import normalize_name
 from app.schemas.agent import (
     AgentCreateRequest,
     AgentInteractionConfig,
+    AgentMcpToolRef,
     AgentResponse,
     AgentUpdateRequest,
     validate_agent_interaction_config,
 )
+from app.schemas.tool import ToolRefSchema
 from app.shareddomain.agents.permissions import (
     AGENT_RESOURCE_TYPE,
     can_edit_agent,
     require_agent_edit,
     require_agent_view,
 )
+from app.shareddomain.agents.publications import (
+    AGENT_PUBLICATION_SCHEMA_VERSION,
+    AgentPublication,
+    agent_publication_hash,
+    build_agent_configuration_snapshot,
+    build_agent_resource_snapshot,
+    normalized_interaction_config,
+    publication_from_snapshots,
+)
 from app.shareddomain.audit.services import record_audit_log
 from app.shareddomain.knowledge.services import (
     get_knowledge_base,
     require_knowledge_base_permission,
+)
+from app.shareddomain.tools.bindings import (
+    resolve_application_tool_snapshot_map,
+    resolve_application_tool_snapshots,
+    resolve_tool_refs_for_actor,
+    sync_application_tool_bindings,
 )
 from app.shareddomain.tools.services import resolve_mcp_tools
 from app.shareddomain.workflows.defaults import default_workflow_graph
@@ -46,22 +63,6 @@ DEFAULT_AGENT_INSTRUCTIONS = (
 )
 
 
-@dataclass(frozen=True)
-class AgentPublication:
-    name: str
-    description: str
-    instructions: str
-    model_id: str
-    knowledge_query_mode: str
-    knowledge_base_ids: list[str]
-    mcp_tools: list[dict[str, str]]
-    interaction_config: dict[str, object]
-
-
-def normalized_interaction_config(value: dict[str, object]) -> dict[str, object]:
-    return AgentInteractionConfig.model_validate(value).model_dump(mode="json")
-
-
 def validate_agent_status(value: str) -> str:
     if value not in AGENT_STATUSES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid agent status.")
@@ -71,9 +72,12 @@ def validate_agent_status(value: str) -> str:
 def agent_to_response(
     agent: Agent,
     knowledge_base_ids: list[str],
-    mcp_tools: list[dict[str, str]],
+    tools: list[ToolRef],
+    legacy_mcp_tools: list[dict[str, str]],
     actor: User,
     workspace_role: str | None,
+    *,
+    has_unpublished_changes: bool,
 ) -> AgentResponse:
     return AgentResponse(
         id=agent.id,
@@ -86,15 +90,12 @@ def agent_to_response(
         model_id=agent.model_id,
         knowledge_query_mode=agent.knowledge_query_mode,
         knowledge_base_ids=knowledge_base_ids,
-        mcp_tools=mcp_tools,
+        tools=[{"tool_id": item.tool_id, "version_id": item.version_id} for item in tools],
+        mcp_tools=legacy_mcp_tools,
         status=agent.status,
         published=agent.published,
-        has_unpublished_changes=(
-            agent.published
-            and agent.published_snapshot is not None
-            and agent.published_snapshot
-            != agent_publication_snapshot(agent, knowledge_base_ids, mcp_tools)
-        ),
+        current_published_version_id=agent.current_published_version_id,
+        has_unpublished_changes=has_unpublished_changes,
         published_by_user_id=agent.published_by_user_id,
         published_at=agent.published_at,
         created_by_user_id=agent.created_by_user_id,
@@ -116,7 +117,8 @@ def agent_publication(
         model_id=agent.model_id,
         knowledge_query_mode=agent.knowledge_query_mode,
         knowledge_base_ids=sorted(knowledge_base_ids),
-        mcp_tools=sorted(
+        tools=[],
+        legacy_mcp_tools=sorted(
             mcp_tools,
             key=lambda item: (item["server_id"], item["tool_name"]),
         ),
@@ -145,14 +147,135 @@ def agent_publication_snapshot(
 def agent_publication_from_snapshot(agent: Agent) -> AgentPublication | None:
     if agent.published_snapshot is None:
         return None
+    snapshot = dict(agent.published_snapshot)
     return AgentPublication(
-        **{
-            **agent.published_snapshot,
-            "interaction_config": normalized_interaction_config(
-                agent.published_snapshot.get("interaction_config", {})
-            ),
-        }
+        name=str(snapshot["name"]),
+        description=str(snapshot.get("description", "")),
+        instructions=str(snapshot["instructions"]),
+        model_id=str(snapshot["model_id"]),
+        knowledge_query_mode=str(snapshot["knowledge_query_mode"]),
+        knowledge_base_ids=list(snapshot.get("knowledge_base_ids", [])),
+        tools=[],
+        legacy_mcp_tools=list(snapshot.get("mcp_tools", [])),
+        interaction_config=normalized_interaction_config(
+            snapshot.get("interaction_config", {})
+        ),
     )
+
+
+def agent_publication_from_version(
+    version: AgentPublicationVersion,
+) -> AgentPublication:
+    try:
+        valid = version.schema_version == AGENT_PUBLICATION_SCHEMA_VERSION and (
+            agent_publication_hash(
+                version.configuration_snapshot,
+                version.resource_snapshot,
+            )
+            == version.configuration_hash
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Agent publication version is invalid.") from exc
+    if not valid:
+        raise ValueError("Agent publication version is invalid.")
+    return publication_from_snapshots(
+        version.configuration_snapshot,
+        version.resource_snapshot,
+    )
+
+
+async def resolve_requested_agent_tools(
+    db: AsyncSession,
+    workspace_id: str,
+    tools: list[ToolRefSchema],
+    legacy_mcp_tools: list[AgentMcpToolRef],
+    actor: User,
+    workspace_role: str | None,
+) -> list[ToolSnapshot]:
+    references: list[ToolRef]
+    if tools:
+        references = [
+            ToolRef(tool_id=str(item.tool_id), version_id=str(item.version_id))
+            for item in tools
+        ]
+    elif legacy_mcp_tools:
+        legacy = [item.model_dump() for item in legacy_mcp_tools]
+        resolved = await resolve_mcp_tools(
+            db,
+            workspace_id,
+            legacy,
+            strict=True,
+            actor=actor,
+            workspace_role=workspace_role,
+        )
+        references = [
+            ToolRef(tool_id=item.tool_id, version_id=item.tool_version_id)
+            for item in resolved
+        ]
+    else:
+        references = []
+    return await resolve_tool_refs_for_actor(
+        db,
+        workspace_id,
+        references,
+        actor,
+        workspace_role,
+    )
+
+
+def legacy_mcp_references(tools: list[ToolSnapshot]) -> list[dict[str, str]]:
+    return AgentPublication(
+        name="",
+        description="",
+        instructions="",
+        model_id="",
+        knowledge_query_mode="required",
+        knowledge_base_ids=[],
+        tools=tools,
+        interaction_config={},
+    ).mcp_tools
+
+
+async def agent_has_unpublished_changes(
+    db: AsyncSession,
+    agent: Agent,
+    knowledge_base_ids: list[str],
+) -> bool:
+    if not agent.published:
+        return False
+    if agent.current_published_version_id is None:
+        return True
+    version = await agent_repository.get_agent_publication_version(
+        db,
+        agent.workspace_id,
+        agent.current_published_version_id,
+    )
+    if version is None or version.agent_id != agent.id:
+        return True
+    try:
+        tools = await resolve_application_tool_snapshots(
+            db,
+            agent.workspace_id,
+            agent.id,
+        )
+    except HTTPException:
+        tools = None
+    return _agent_has_unpublished_changes(agent, knowledge_base_ids, version, tools)
+
+
+def _agent_has_unpublished_changes(
+    agent: Agent,
+    knowledge_base_ids: list[str],
+    version: AgentPublicationVersion | None,
+    tools: list[ToolSnapshot] | None,
+) -> bool:
+    if not agent.published:
+        return False
+    if version is None or version.agent_id != agent.id or tools is None:
+        return True
+    configuration = build_agent_configuration_snapshot(agent)
+    resources = build_agent_resource_snapshot(knowledge_base_ids, tools)
+    return agent_publication_hash(configuration, resources) != version.configuration_hash
 
 
 async def accessible_agent_knowledge_bases(
@@ -266,9 +389,26 @@ async def list_agents(
         offset,
     )
     bindings = await agent_repository.list_binding_map(db, [agent.id for agent in agents])
-    mcp_bindings = await agent_repository.list_mcp_binding_map(
+    application_ids = [agent.id for agent in agents]
+    tool_bindings = await tools_repository.list_application_tool_reference_map(
+        db, application_ids
+    )
+    legacy_mcp_bindings = await tools_repository.list_application_mcp_reference_map(
+        db, application_ids
+    )
+    publication_versions = await agent_repository.list_agent_publication_version_map(
         db,
-        [agent.id for agent in agents],
+        workspace_id,
+        [
+            version_id
+            for agent in agents
+            if (version_id := agent.current_published_version_id) is not None
+        ],
+    )
+    tool_snapshot_map = await resolve_application_tool_snapshot_map(
+        db,
+        workspace_id,
+        application_ids,
     )
     responses: list[AgentResponse] = []
     for agent in agents:
@@ -283,9 +423,16 @@ async def list_agents(
             agent_to_response(
                 agent,
                 [knowledge_base.id for knowledge_base in knowledge_bases],
-                mcp_bindings[agent.id],
+                tool_bindings[agent.id],
+                legacy_mcp_bindings[agent.id],
                 actor,
                 workspace_role,
+                has_unpublished_changes=_agent_has_unpublished_changes(
+                    agent,
+                    bindings[agent.id],
+                    publication_versions.get(agent.current_published_version_id or ""),
+                    tool_snapshot_map[agent.id],
+                ),
             )
         )
     return responses
@@ -299,7 +446,12 @@ async def get_agent_response(
 ) -> AgentResponse:
     await require_agent_view(db, agent, actor, workspace_role)
     bindings = await agent_repository.list_binding_map(db, [agent.id])
-    mcp_bindings = await agent_repository.list_mcp_binding_map(db, [agent.id])
+    tool_bindings = await tools_repository.list_application_tool_reference_map(
+        db, [agent.id]
+    )
+    legacy_mcp_bindings = await tools_repository.list_application_mcp_reference_map(
+        db, [agent.id]
+    )
     knowledge_bases = await accessible_agent_knowledge_bases(
         db,
         agent.workspace_id,
@@ -310,9 +462,15 @@ async def get_agent_response(
     return agent_to_response(
         agent,
         [knowledge_base.id for knowledge_base in knowledge_bases],
-        mcp_bindings[agent.id],
+        tool_bindings[agent.id],
+        legacy_mcp_bindings[agent.id],
         actor,
         workspace_role,
+        has_unpublished_changes=await agent_has_unpublished_changes(
+            db,
+            agent,
+            bindings[agent.id],
+        ),
     )
 
 
@@ -331,12 +489,13 @@ async def create_agent(
         actor,
         workspace_role,
     )
-    mcp_references = [item.model_dump() for item in payload.mcp_tools]
-    await resolve_mcp_tools(
+    tool_snapshots = await resolve_requested_agent_tools(
         db,
         workspace_id,
-        mcp_references,
-        strict=True,
+        payload.tools,
+        payload.mcp_tools,
+        actor,
+        workspace_role,
     )
     agent = Agent(
         workspace_id=workspace_id,
@@ -370,7 +529,13 @@ async def create_agent(
             agent,
             [knowledge_base.id for knowledge_base in knowledge_bases],
         )
-        await agent_repository.replace_mcp_bindings(db, agent, mcp_references)
+        await sync_application_tool_bindings(
+            db,
+            workspace_id,
+            agent.id,
+            tool_snapshots,
+            actor.id,
+        )
         record_audit_log(
             db,
             actor,
@@ -381,7 +546,10 @@ async def create_agent(
             {
                 "model_id": model.id,
                 "knowledge_base_ids": [item.id for item in knowledge_bases],
-                "mcp_tools": mcp_references,
+                "tools": [
+                    {"tool_id": item.tool_id, "version_id": item.version_id}
+                    for item in tool_snapshots
+                ],
             },
             workspace_id=workspace_id,
         )
@@ -394,15 +562,18 @@ async def create_agent(
     return agent_to_response(
         agent,
         [knowledge_base.id for knowledge_base in knowledge_bases],
-        mcp_references,
+        [ToolRef(tool_id=item.tool_id, version_id=item.version_id) for item in tool_snapshots],
+        legacy_mcp_references(tool_snapshots),
         actor,
         workspace_role,
+        has_unpublished_changes=False,
     )
 
 
 def _reset_agent_publication(agent: Agent) -> None:
     agent.published = False
     agent.published_snapshot = None
+    agent.current_published_version_id = None
     agent.published_by_user_id = None
     agent.published_at = None
 
@@ -444,21 +615,39 @@ async def apply_agent_publication(
             actor,
             workspace_role,
         )
-        publication_mcp_bindings = (
-            await agent_repository.list_mcp_binding_map(db, [agent.id])
-        )[agent.id]
-        await resolve_mcp_tools(
+        publication_tools = await resolve_application_tool_snapshots(
             db,
             agent.workspace_id,
-            publication_mcp_bindings,
-            strict=True,
+            agent.id,
+        )
+        configuration = build_agent_configuration_snapshot(agent)
+        resources = build_agent_resource_snapshot(
+            publication_bindings,
+            publication_tools,
+        )
+        version = await agent_repository.create_agent_publication_version(
+            db,
+            AgentPublicationVersion(
+                workspace_id=agent.workspace_id,
+                agent_id=agent.id,
+                version_number=(
+                    await agent_repository.next_agent_publication_version_number(
+                        db, agent.id
+                    )
+                ),
+                schema_version=AGENT_PUBLICATION_SCHEMA_VERSION,
+                configuration_snapshot=configuration,
+                resource_snapshot=resources,
+                configuration_hash=agent_publication_hash(
+                    configuration,
+                    resources,
+                ),
+                published_by_user_id=actor.id,
+            ),
         )
         agent.published = True
-        agent.published_snapshot = agent_publication_snapshot(
-            agent,
-            publication_bindings,
-            publication_mcp_bindings,
-        )
+        agent.published_snapshot = None
+        agent.current_published_version_id = version.id
         agent.published_by_user_id = actor.id
         agent.published_at = utc_now()
     elif payload.published is False:
@@ -473,6 +662,10 @@ async def update_agent(
     workspace_role: str | None,
 ) -> AgentResponse:
     require_agent_edit(agent, actor, workspace_role)
+    locked = await agent_repository.lock_agent(db, agent.id)
+    if locked is None or locked.workspace_id != agent.workspace_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent not found.")
+    agent = locked
     details = payload.model_dump(exclude_unset=True)
     if payload.published is not None and workspace_role != "admin":
         raise HTTPException(
@@ -483,12 +676,17 @@ async def update_agent(
     current_bindings = (
         await agent_repository.list_binding_map(db, [agent.id])
     )[agent.id]
+    current_tool_bindings = (
+        await tools_repository.list_application_tool_reference_map(db, [agent.id])
+    )[agent.id]
     current_mcp_bindings = (
-        await agent_repository.list_mcp_binding_map(db, [agent.id])
+        await tools_repository.list_application_mcp_reference_map(db, [agent.id])
     )[agent.id]
     legacy_publication_snapshot = (
         agent_publication_snapshot(agent, current_bindings, current_mcp_bindings)
-        if agent.published and agent.published_snapshot is None
+        if agent.app_type == "workflow"
+        and agent.published
+        and agent.published_snapshot is None
         else None
     )
     configuration_changed = False
@@ -552,20 +750,25 @@ async def update_agent(
             or set(payload.knowledge_base_ids) != set(current_bindings)
         )
 
-    if payload.mcp_tools is not None:
-        mcp_references = [item.model_dump() for item in payload.mcp_tools]
-        await resolve_mcp_tools(
+    if payload.tools is not None or payload.mcp_tools is not None:
+        tool_snapshots = await resolve_requested_agent_tools(
             db,
             agent.workspace_id,
-            mcp_references,
-            strict=True,
+            payload.tools or [],
+            payload.mcp_tools or [],
+            actor,
+            workspace_role,
         )
-        await agent_repository.replace_mcp_bindings(db, agent, mcp_references)
+        await sync_application_tool_bindings(
+            db,
+            agent.workspace_id,
+            agent.id,
+            tool_snapshots,
+            actor.id,
+        )
         configuration_changed = configuration_changed or {
-            (item["server_id"], item["tool_name"]) for item in mcp_references
-        } != {
-            (item["server_id"], item["tool_name"]) for item in current_mcp_bindings
-        }
+            (item.tool_id, item.version_id) for item in current_tool_bindings
+        } != {(item.tool_id, item.version_id) for item in tool_snapshots}
 
     if configuration_changed and legacy_publication_snapshot is not None:
         agent.published_snapshot = legacy_publication_snapshot
@@ -604,6 +807,19 @@ async def delete_agent(
     agent = await agent_repository.lock_agent(db, agent.id)
     if agent is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent not found.")
+    run_ids = await agent_repository.list_agent_run_ids(db, agent.id)
+    if (
+        await agent_repository.has_unsettled_agent_execution(db, agent.id)
+        or await tools_repository.has_unsettled_agent_tool_invocations(
+            db,
+            agent.workspace_id,
+            run_ids,
+        )
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Agent has an active run or Tool call.",
+        )
     record_audit_log(
         db,
         actor,

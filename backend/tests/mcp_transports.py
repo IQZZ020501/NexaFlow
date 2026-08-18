@@ -52,7 +52,7 @@ def start_http_server(transport: str) -> tuple[subprocess.Popen[bytes], str]:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    for _ in range(100):
+    for _ in range(500):
         if process.poll() is not None:
             raise AssertionError(f"MCP test server exited with {process.returncode}")
         try:
@@ -90,6 +90,7 @@ async def assert_remote_transport(transport: str) -> None:
             transport="sse" if transport == "sse" else "streamable_http",
             url=url,
             bearer_token=TOKEN,
+            network_policy="deployment",
         )
         discovery = await discover_mcp_tools(connection, runtime_settings)
         assert {tool["name"] for tool in discovery.tools} == {"echo", "wait"}

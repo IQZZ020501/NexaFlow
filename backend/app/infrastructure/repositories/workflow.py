@@ -13,7 +13,12 @@ from app.entities.workflows import (
 )
 from app.infrastructure.repositories.mapping import refresh_entity, save, to_entity, to_orm
 from app.infrastructure.model_utils import utc_now
-from app.shareddomain.agents.models import Agent, AgentRun
+from app.shareddomain.agents.models import (
+    AGENT_RUN_AWAITING_INPUT_STATUSES,
+    AGENT_RUN_RUNNING_STATUSES,
+    Agent,
+    AgentRun,
+)
 from app.shareddomain.workflows.models import (
     WorkflowDefinition,
     WorkflowNodeExecution,
@@ -22,6 +27,24 @@ from app.shareddomain.workflows.models import (
     WorkflowUpload,
     WorkflowUploadStorageCleanup,
 )
+
+
+async def has_workflow_agent_binder_audit_references(
+    db: AsyncSession,
+    user_id: str,
+) -> bool:
+    # ponytail: user deletion is rare; use a portable scan until snapshot volume warrants JSON indexing.
+    for model in (WorkflowVersion, WorkflowRunDetail):
+        snapshots = await db.scalars(select(model.resource_snapshot))
+        for snapshot in snapshots.all():
+            agents = snapshot.get("agents", []) if isinstance(snapshot, dict) else []
+            if isinstance(agents, list) and any(
+                isinstance(agent, dict)
+                and agent.get("bound_by_user_id") == user_id
+                for agent in agents
+            ):
+                return True
+    return False
 
 
 async def create_upload(
@@ -359,7 +382,7 @@ async def save_owned_run_detail(
     owned = await db.scalar(
         select(AgentRun.id).where(
             AgentRun.id == entity.run_id,
-            AgentRun.status == "running",
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
     )
@@ -386,7 +409,7 @@ async def reset_waiting_run_deadline(
     waiting = await db.scalar(
         select(AgentRun.id).where(
             AgentRun.id == run_id,
-            AgentRun.status == "awaiting_input",
+            AgentRun.status.in_(AGENT_RUN_AWAITING_INPUT_STATUSES),
         )
     )
     if waiting is None:
@@ -413,7 +436,7 @@ async def start_node_execution(
     owned = await db.scalar(
         select(AgentRun.id).where(
             AgentRun.id == run_id,
-            AgentRun.status == "running",
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
     )
@@ -463,7 +486,7 @@ async def finish_node_execution(
     owned = await db.scalar(
         select(AgentRun.id).where(
             AgentRun.id == entity.run_id,
-            AgentRun.status == "running",
+            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
             AgentRun.worker_task_id == worker_task_id,
         )
     )

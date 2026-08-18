@@ -30,6 +30,11 @@ describe("i18n", () => {
     expect(translate("en", "分段 {value}", { value: 1 })).toBe("Segment 1")
   })
 
+  test("falls back to the source key when a runtime translation is missing", () => {
+    const missingKey = "missing {value}" as Parameters<typeof translate>[1]
+    expect(translate("en", missingKey, { value: 1 })).toBe("missing 1")
+  })
+
   test("builds localized feature pages", () => {
     expect(getPages(tFor("zh-Hans"))[0]?.label).toBe("应用")
     expect(getPages(tFor("zh-Hant"))[0]?.label).toBe("應用")

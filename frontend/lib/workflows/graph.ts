@@ -22,6 +22,22 @@ export const WORKFLOW_NODE_TYPES: WorkflowNodeType[] = [
   "variable",
   "mcp",
   "code",
+  "tool",
+  "agent",
+]
+
+export const WORKFLOW_BASIC_NODE_TYPES: WorkflowNodeType[] = [
+  "reply-node",
+  "start",
+  "end",
+  "llm",
+  "classifier",
+  "knowledge",
+  "reranker-node",
+  "form-node",
+  "document-extract-node",
+  "condition",
+  "variable",
 ]
 
 const WORKFLOW_NODE_LABELS: Record<WorkflowNodeType, TranslationKey> = {
@@ -37,6 +53,8 @@ const WORKFLOW_NODE_LABELS: Record<WorkflowNodeType, TranslationKey> = {
   "reply-node": "指定回复",
   template: "模板转换",
   variable: "变量赋值",
+  tool: "工具",
+  agent: "Agent",
   mcp: "MCP 工具节点",
   code: "Python 代码",
 }
@@ -77,7 +95,10 @@ export function workflowErrorMessage(message: string, t: TFunction) {
 }
 
 /** Start node globals, referenced as {{global.<value>}} (MaxKB-compatible). */
-export const WORKFLOW_START_GLOBALS: Array<{ label: TranslationKey; value: string }> = [
+export const WORKFLOW_START_GLOBALS: Array<{
+  label: TranslationKey
+  value: string
+}> = [
   { label: "当前时间", value: "time" },
   { label: "历史记录", value: "history_context" },
   { label: "会话 ID", value: "chat_id" },
@@ -85,7 +106,10 @@ export const WORKFLOW_START_GLOBALS: Array<{ label: TranslationKey; value: strin
 ]
 
 /** Start node run outputs, referenced as {{<nodeId>.<value>}}. */
-export const WORKFLOW_START_FIELDS: Array<{ label: TranslationKey; value: string }> = [
+export const WORKFLOW_START_FIELDS: Array<{
+  label: TranslationKey
+  value: string
+}> = [
   { label: "用户问题", value: "question" },
   { label: "上传文件", value: "files" },
   { label: "文档", value: "document" },
@@ -105,10 +129,9 @@ export const WORKFLOW_NODE_PRESETS: WorkflowNodePreset[] = [
     label: "问题优化",
     config: (t, startNodeId = "start") => ({
       system_prompt: t("你是一个问题优化专家。"),
-      prompt: t("请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.question}}").replace(
-        "{{start.question}}",
-        `{{${startNodeId}.question}}`
-      ),
+      prompt: t(
+        "请在不改变原意的前提下优化下面的问题，只返回优化后的问题：\n\n{{start.question}}"
+      ).replace("{{start.question}}", `{{${startNodeId}.question}}`),
     }),
   },
 ]
@@ -131,8 +154,7 @@ export function defaultNodeConfig(
         dialogue_type: "NODE",
         model_params_setting: {},
         model_setting: {},
-        mcp_enable: false,
-        mcp_servers: [],
+        tools: [],
         is_result: true,
       }
     case "classifier":
@@ -210,6 +232,17 @@ export function defaultNodeConfig(
       return { template: questionReference }
     case "variable":
       return { value: questionReference }
+    case "tool":
+      return {
+        tool: { tool_id: "", version_id: "" },
+        arguments: {},
+      }
+    case "agent":
+      return {
+        agent_id: "",
+        agent_version_id: "",
+        input: questionReference,
+      }
     case "mcp":
       return { server_id: "", tool_name: "", arguments: {} }
     case "code":
@@ -418,7 +451,9 @@ export function selectWorkflowRunTarget(
     ? versions.find((item) => item.version_number === selectedVersionNumber)
     : versions.reduce<(typeof versions)[number] | null>(
         (latest, item) =>
-          !latest || item.version_number > latest.version_number ? item : latest,
+          !latest || item.version_number > latest.version_number
+            ? item
+            : latest,
         null
       )
   return version

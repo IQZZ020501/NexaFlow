@@ -39,7 +39,7 @@ export function translate(
   key: TranslationKey,
   values?: Record<string, string | number>
 ) {
-  const message = translations[language][key]
+  const message = translations[language][key] ?? zhHans[key] ?? key
 
   if (!values) {
     return message

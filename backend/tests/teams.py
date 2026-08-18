@@ -96,7 +96,7 @@ def main() -> None:
             teams_url(default_workspace_id),
             headers=auth_headers(research_token),
         )
-        assert denied.status_code == 403, denied.text
+        assert denied.status_code == 404, denied.text
 
         empty_teams = client.get(
             teams_url(research_workspace_id),

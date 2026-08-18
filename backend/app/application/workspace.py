@@ -25,6 +25,10 @@ from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.ports import model_registry
 from app.shareddomain.knowledge.services import delete_workspace_knowledge_bases
+from app.shareddomain.tools.catalog import (
+    ensure_workspace_system_catalog,
+    tombstone_workspace_mcp_catalog,
+)
 from app.shareddomain.workflows.uploads import queue_upload_cleanups
 from app.tasks.knowledge import enqueue_knowledge_storage_cleanup
 from app.tasks.knowledge import enqueue_upload_storage_cleanups
@@ -91,7 +95,7 @@ async def build_workspace_context(
             user_id=user.id,
             workspace_id=workspace_id,
         )
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace access denied.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
 
     return WorkspaceContext(
         workspace=workspace,
@@ -177,7 +181,7 @@ async def get_workspace_for_user(db: AsyncSession, workspace_id: str, user: User
 
     membership = await workspace_repository.get_workspace_membership(db, workspace_id, user.id)
     if membership is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace access denied.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
     return workspace
 
 
@@ -216,6 +220,7 @@ async def create_workspace(
                 role="admin",
             ),
         )
+        await ensure_workspace_system_catalog(db, workspace.id)
         record_audit_log(
             db,
             actor,
@@ -470,6 +475,7 @@ async def delete_workspace_permanently(
         workspace_id=workspace.id,
     )
     await agent_repository.delete_workspace_agent_graph(db, workspace.id)
+    await tombstone_workspace_mcp_catalog(db, workspace.id)
     await mcp_repository.delete_workspace_mcp_servers(db, workspace.id)
     await model_registry.delete_registered_models_in_workspace(db, workspace.id)
     await workspace_repository.delete_workspace_graph(db, workspace.id)

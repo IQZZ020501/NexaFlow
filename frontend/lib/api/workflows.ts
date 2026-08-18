@@ -4,6 +4,7 @@ import type { Agent } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
+import type { ToolDetail } from "@/lib/api/tools"
 
 export type WorkflowNodeType =
   | "start"
@@ -18,6 +19,8 @@ export type WorkflowNodeType =
   | "reply-node"
   | "template"
   | "variable"
+  | "tool"
+  | "agent"
   | "mcp"
   | "code"
 
@@ -35,6 +38,8 @@ export type WorkflowNodeData = Record<string, unknown> & {
   models?: RegisteredModel[]
   knowledgeBases?: KnowledgeBase[]
   mcpServers?: McpServer[]
+  tools?: ToolDetail[]
+  agents?: Agent[]
   nodes?: WorkflowNode[]
   edges?: WorkflowEdge[]
 }
@@ -90,6 +95,7 @@ export type WorkflowRunStatus =
   | "queued"
   | "running"
   | "awaiting_input"
+  | "awaiting_child"
   | "succeeded"
   | "failed"
   | "cancelled"
@@ -151,7 +157,13 @@ export type WorkflowNodeExecution = {
   run_id: string
   node_id: string
   node_type: WorkflowNodeType
-  status: "running" | "awaiting_input" | "succeeded" | "failed" | "skipped"
+  status:
+    | "running"
+    | "awaiting_input"
+    | "awaiting_child"
+    | "succeeded"
+    | "failed"
+    | "skipped"
   sequence: number
   inputs: Record<string, unknown>
   outputs: Record<string, unknown>
@@ -353,10 +365,7 @@ export function listWorkflowRuns(
   options: { limit?: number; offset?: number } = {}
 ) {
   return request<WorkflowRun[]>(
-    workflowPath(
-      workspaceId,
-      `/${workflowId}/runs${listQuery(options)}`
-    ),
+    workflowPath(workspaceId, `/${workflowId}/runs${listQuery(options)}`),
     { token }
   )
 }

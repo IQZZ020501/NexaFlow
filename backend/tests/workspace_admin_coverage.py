@@ -95,6 +95,384 @@ async def expire_refresh_session(token: str) -> None:
         await db.commit()
 
 
+async def exercise_direct_workspace_service_branches(
+    workspace_id: str,
+    other_workspace_id: str,
+    inactive_id: str,
+) -> None:
+    """Cover workspace application branches by direct calls.
+
+    The API dependency path is not traced by coverage under the test harness,
+    so branch-heavy workspace functions are exercised here directly.
+    """
+    from fastapi import HTTPException
+
+    from app.application import workspace as workspace_service
+    from app.application.workspace import (
+        add_workspace_member,
+        build_workspace_context,
+        create_workspace,
+        get_workspace_for_user,
+        get_workspace_member,
+        remove_workspace_member,
+        update_workspace,
+        update_workspace_member_role,
+    )
+    from app.schemas.workspace import (
+        WorkspaceCreateRequest,
+        WorkspaceUpdateRequest,
+    )
+
+    async with get_session_factory()() as db:
+        admin = await user_repo.get_active_user_by_username(db, "admin")
+        research = await user_repo.get_active_user_by_username(db, "research-admin")
+        assert admin is not None and research is not None
+        workspace = await workspace_repo.get_workspace_by_id(db, workspace_id)
+        other = await workspace_repo.get_workspace_by_id(db, other_workspace_id)
+        assert workspace is not None and other is not None
+
+        def expect(exc: HTTPException, code: int) -> None:
+            assert exc.status_code == code, (exc.status_code, exc.detail)
+
+        # build_workspace_context: not-found / inactive / admin / denied /
+        # member branches.
+        try:
+            await build_workspace_context(db, research, "no-such-workspace")
+        except HTTPException as exc:
+            expect(exc, 404)
+        else:
+            raise AssertionError("missing context did not 404")
+        workspace.status = "archived"
+        await workspace_repo.save_workspace(db, workspace)
+        await db.commit()
+        try:
+            await build_workspace_context(db, research, workspace_id)
+        except HTTPException as exc:
+            expect(exc, 403)
+        else:
+            raise AssertionError("inactive context did not 403")
+        workspace.status = "active"
+        await workspace_repo.save_workspace(db, workspace)
+        await db.commit()
+        admin_context = await build_workspace_context(db, admin, workspace_id)
+        assert admin_context.membership_role == "admin"
+        member_context = await build_workspace_context(db, research, workspace_id)
+        assert member_context.membership_role == "admin"
+        try:
+            await build_workspace_context(db, research, other_workspace_id)
+        except HTTPException as exc:
+            expect(exc, 404)
+        else:
+            raise AssertionError("denied context did not 404")
+
+        # get_workspace_for_user branches.
+        try:
+            await get_workspace_for_user(db, "no-such-workspace", research)
+        except HTTPException as exc:
+            expect(exc, 404)
+        else:
+            raise AssertionError("missing get did not 404")
+        try:
+            await get_workspace_for_user(db, other_workspace_id, research)
+        except HTTPException as exc:
+            expect(exc, 404)
+        else:
+            raise AssertionError("denied get did not 404")
+        assert (await get_workspace_for_user(db, workspace_id, research)).id == workspace_id
+        assert (await get_workspace_for_user(db, workspace_id, admin)).id == workspace_id
+
+        # create_workspace branches.
+        try:
+            await create_workspace(
+                db,
+                WorkspaceCreateRequest(
+                    name="Ghost Admin", description="", admin_user_id="no-such-user"
+                ),
+                admin,
+            )
+        except HTTPException as exc:
+            expect(exc, 404)
+        else:
+            raise AssertionError("missing admin did not 404")
+        inactive_owner = await user_repo.get_user_by_id(db, inactive_id)
+        assert inactive_owner is not None and not inactive_owner.is_active
+        try:
+            await create_workspace(
+                db,
+                WorkspaceCreateRequest(
+                    name="Inactive Admin",
+                    description="",
+                    admin_user_id=inactive_owner.id,
+                ),
+                admin,
+            )
+        except HTTPException as exc:
+            expect(exc, 400)
+        else:
+            raise AssertionError("inactive admin did not 400")
+        member_user = await user_repo.get_active_user_by_username(db, "ws-member")
+        assert member_user is not None
+        created = await create_workspace(
+            db,
+            WorkspaceCreateRequest(
+                name="Direct Throwaway",
+                description="created directly",
+                admin_user_id=research.id,
+            ),
+            admin,
+        )
+        throwaway_id = created.workspace.id
+
+        # update_workspace branches.
+        try:
+            await update_workspace(
+                db,
+                workspace,
+                WorkspaceUpdateRequest(status="frozen"),
+                admin,
+            )
+        except HTTPException as exc:
+            expect(exc, 422)
+        else:
+            raise AssertionError("invalid status did not 422")
+        archived = await update_workspace(
+            db,
+            workspace,
+            WorkspaceUpdateRequest(status="archived"),
+            admin,
+        )
+        assert archived.status == "archived"
+        restored = await update_workspace(
+            db,
+            workspace,
+            WorkspaceUpdateRequest(status="active"),
+            admin,
+        )
+        assert restored.status == "active"
+        renamed = await update_workspace(
+            db,
+            workspace,
+            WorkspaceUpdateRequest(name="Direct Renamed"),
+            admin,
+        )
+        assert renamed.name == "Direct Renamed"
+
+        # get_workspace_member 404.
+        try:
+            await get_workspace_member(db, workspace, "no-such-user")
+        except HTTPException as exc:
+            expect(exc, 404)
+        else:
+            raise AssertionError("missing member did not 404")
+
+        # add_workspace_member branches.
+        try:
+            await add_workspace_member(db, workspace, research.id, "admin", research)
+        except HTTPException as exc:
+            expect(exc, 403)
+        else:
+            raise AssertionError("non-admin adding admin did not 403")
+        try:
+            await add_workspace_member(db, workspace, member_user.id, "member", admin)
+        except HTTPException as exc:
+            expect(exc, 409)
+        else:
+            raise AssertionError("duplicate member did not 409")
+        extra_admin = await user_repo.get_active_user_by_username(db, "extra-owner")
+        assert extra_admin is not None
+        added = await add_workspace_member(
+            db, workspace, extra_admin.id, "member", admin
+        )
+        assert added.role == "member"
+
+        # update_workspace_member_role branches.
+        try:
+            await update_workspace_member_role(
+                db, workspace, research.id, "member", research
+            )
+        except HTTPException as exc:
+            expect(exc, 403)
+        else:
+            raise AssertionError("non-admin demoting admin did not 403")
+        try:
+            await update_workspace_member_role(
+                db, workspace, research.id, "member", admin
+            )
+        except HTTPException as exc:
+            expect(exc, 400)
+        else:
+            raise AssertionError("last admin demotion did not 400")
+        promoted = await update_workspace_member_role(
+            db, workspace, extra_admin.id, "admin", admin
+        )
+        assert promoted.role == "admin"
+        demoted = await update_workspace_member_role(
+            db, workspace, research.id, "member", admin
+        )
+        assert demoted.role == "member"
+        re_promoted = await update_workspace_member_role(
+            db, workspace, research.id, "admin", admin
+        )
+        assert re_promoted.role == "admin"
+        member_again = await update_workspace_member_role(
+            db, workspace, extra_admin.id, "member", admin
+        )
+        assert member_again.role == "member"
+
+        # remove_workspace_member branches.
+        try:
+            await remove_workspace_member(db, workspace, research.id, research)
+        except HTTPException as exc:
+            expect(exc, 403)
+        else:
+            raise AssertionError("non-admin removing admin did not 403")
+        try:
+            await remove_workspace_member(db, workspace, research.id, admin)
+        except HTTPException as exc:
+            expect(exc, 400)
+        else:
+            raise AssertionError("last admin removal did not 400")
+        await remove_workspace_member(db, workspace, extra_admin.id, admin)
+
+        # delete_workspace_permanently success path on a throwaway workspace.
+        original_kb = workspace_service.enqueue_knowledge_storage_cleanup
+        original_upload = workspace_service.enqueue_upload_storage_cleanups
+        cleaned: list[str] = []
+
+        async def fake_kb_cleanup(cleanup_id: str, _settings) -> None:
+            cleaned.append(cleanup_id)
+
+        async def fake_upload_cleanups(cleanup_ids: list[str], _settings) -> None:
+            cleaned.extend(cleanup_ids)
+
+        workspace_service.enqueue_knowledge_storage_cleanup = fake_kb_cleanup
+        workspace_service.enqueue_upload_storage_cleanups = fake_upload_cleanups
+        try:
+            throwaway = await workspace_repo.get_workspace_by_id(
+                db, throwaway_id
+            )
+            assert throwaway is not None
+            await workspace_service.delete_workspace_permanently(
+                db,
+                throwaway,
+                admin,
+                settings(),
+            )
+        finally:
+            workspace_service.enqueue_knowledge_storage_cleanup = original_kb
+            workspace_service.enqueue_upload_storage_cleanups = original_upload
+        assert await workspace_repo.get_workspace_by_id(db, throwaway_id) is None
+
+        # Remaining direct branches: global-admin list, IntegrityError 409s,
+        # member-not-found 404, create_workspace_user and the cleanup loop.
+        listed = await workspace_service.list_workspaces(db, admin)
+        assert any(item.id == workspace_id for item in listed)
+        await workspace_service.list_workspaces(db, research)
+
+        original_create = workspace_service.workspace_repository.create_workspace
+
+        async def failing_create(db, entity):
+            raise IntegrityError("stmt", {}, Exception("boom"))
+
+        workspace_service.workspace_repository.create_workspace = failing_create
+        try:
+            await create_workspace(
+                db,
+                WorkspaceCreateRequest(
+                    name="Conflict", description="", admin_user_id=research.id
+                ),
+                admin,
+            )
+        except HTTPException as exc:
+            expect(exc, 409)
+        else:
+            raise AssertionError("create conflict did not 409")
+        finally:
+            workspace_service.workspace_repository.create_workspace = original_create
+
+        original_save = workspace_service.workspace_repository.save_workspace
+        workspace_service.workspace_repository.save_workspace = failing_create
+        try:
+            await update_workspace(
+                db,
+                workspace,
+                WorkspaceUpdateRequest(description="conflict"),
+                admin,
+            )
+        except HTTPException as exc:
+            expect(exc, 409)
+        else:
+            raise AssertionError("update conflict did not 409")
+        finally:
+            workspace_service.workspace_repository.save_workspace = original_save
+
+        described = await update_workspace(
+            db,
+            workspace,
+            WorkspaceUpdateRequest(description="Direct Description"),
+            admin,
+        )
+        assert described.description == "Direct Description"
+
+        try:
+            await add_workspace_member(
+                db, workspace, "no-such-user", "member", admin
+            )
+        except HTTPException as exc:
+            expect(exc, 404)
+        else:
+            raise AssertionError("missing user add did not 404")
+
+        from app.schemas.workspace import WorkspaceUserCreateRequest
+
+        created_user = await workspace_service.create_workspace_user(
+            db,
+            workspace,
+            WorkspaceUserCreateRequest(
+                username="direct-ws-user",
+                email="direct-ws-user@example.com",
+                name="Direct WS User",
+            ),
+            admin,
+            settings(),
+        )
+        assert created_user.user.id
+
+        original_delete_kbs = workspace_service.delete_workspace_knowledge_bases
+
+        async def fake_delete_kbs(db, wid) -> list[str]:
+            return ["cleanup-1"]
+
+        workspace_service.delete_workspace_knowledge_bases = fake_delete_kbs
+        workspace_service.enqueue_knowledge_storage_cleanup = fake_kb_cleanup
+        workspace_service.enqueue_upload_storage_cleanups = fake_upload_cleanups
+        try:
+            created2 = await create_workspace(
+                db,
+                WorkspaceCreateRequest(
+                    name="Cleanup Throwaway",
+                    description="",
+                    admin_user_id=research.id,
+                ),
+                admin,
+            )
+            throwaway2 = await workspace_repo.get_workspace_by_id(
+                db, created2.workspace.id
+            )
+            assert throwaway2 is not None
+            await workspace_service.delete_workspace_permanently(
+                db,
+                throwaway2,
+                admin,
+                settings(),
+            )
+        finally:
+            workspace_service.delete_workspace_knowledge_bases = original_delete_kbs
+            workspace_service.enqueue_knowledge_storage_cleanup = original_kb
+            workspace_service.enqueue_upload_storage_cleanups = original_upload
+        assert "cleanup-1" in cleaned
+
+
 async def exercise_direct_workspace_service_404() -> None:
     """update_workspace / delete_workspace_permanently with a missing id."""
     from fastapi import HTTPException
@@ -136,12 +514,35 @@ async def exercise_direct_identity_edges() -> None:
     """Direct service/repository branches not reachable through the API."""
     from fastapi import HTTPException
 
+    from app.application import identity as identity_service
     from app.application.identity import (
+        authenticate_user,
+        change_password,
+        change_user_password,
+        create_user,
         delete_user_permanently,
+        ensure_user_is_not_last_active_workspace_admin,
         find_user_by_identity,
+        get_me,
+        get_user,
+        issue_refresh_session,
+        list_users,
+        refresh_access_token,
+        revoke_refresh_token,
+        update_user,
         user_teams_by_user_id,
+        user_to_response_with_scopes,
         user_workspaces_by_user_id,
     )
+    from app.entities.team import Team
+    from app.entities.user import RefreshSession
+    from app.entities.workspace import Workspace, WorkspaceMembership
+    from app.infrastructure.agent_rate_limit import (
+        LoginRateLimitExceeded,
+        LoginRateLimitUnavailable,
+    )
+    from app.infrastructure.security import hash_password, verify_password
+    from app.schemas.user import UserCreateRequest, UserUpdateRequest
 
     async with get_session_factory()() as db:
         # Empty user lists short-circuit the scope queries.
@@ -177,6 +578,538 @@ async def exercise_direct_identity_edges() -> None:
             assert exc.status_code == 404, exc.status_code
         else:
             raise AssertionError("deleting a missing user did not 404")
+
+        # ------------------------------------------------------------------
+        # Direct-call coverage for the remaining identity application
+        # branches (the FastAPI request path is not traced by coverage).
+        # ------------------------------------------------------------------
+        def expect(exc: HTTPException, code: int) -> None:
+            assert exc.status_code == code, (exc.status_code, exc.detail)
+
+        async def make_user(username: str, *, is_active: bool = True) -> User:
+            user = await user_repo.create_user(
+                db,
+                User(
+                    username=username,
+                    email=f"{username}@direct.test",
+                    name=username,
+                    password_hash=hash_password("TestPass@123"),
+                    is_active=is_active,
+                    must_change_password=True,
+                ),
+            )
+            await db.commit()
+            return user
+
+        async def make_workspace(name: str, *, status: str = "active") -> Workspace:
+            workspace = await workspace_repo.create_workspace(
+                db,
+                Workspace(
+                    name=name,
+                    slug=name.lower().replace(" ", "-"),
+                    status=status,
+                ),
+            )
+            await db.commit()
+            return workspace
+
+        admin_user = await user_repo.get_active_user_by_username(db, "admin")
+        assert admin_user is not None
+
+        # issue_refresh_session: real session row for a real user.
+        token_holder = await make_user("refresh-holder")
+        refresh_token = await issue_refresh_session(db, token_holder, settings())
+        assert refresh_token
+        await db.commit()
+        session = await user_repo.get_active_refresh_session(
+            db, hash_refresh_token(refresh_token), utc_now()
+        )
+        assert session is not None and session.user_id == token_holder.id
+
+        # list_users: scope maps computed for a non-empty user set.
+        all_users = await list_users(db)
+        assert any(item.id == admin_user.id for item in all_users)
+        assert len(await list_users(db, limit=1, offset=0)) <= 1
+
+        # get_user: found and missing.
+        assert (await get_user(db, admin_user.id)).id == admin_user.id
+        try:
+            await get_user(db, "no-such-user-id")
+        except HTTPException as exc:
+            expect(exc, 404)
+        else:
+            raise AssertionError("get_user on missing user did not 404")
+
+        # ensure_user_is_not_last_active_workspace_admin branches.
+        inactive_user = await make_user("direct-inactive", is_active=False)
+        await ensure_user_is_not_last_active_workspace_admin(
+            db, inactive_user
+        )  # early return for inactive users.
+        solo_ws = await make_workspace("Direct Solo WS")
+        solo_admin = await make_user("direct-solo-admin")
+        await user_repo.create_workspace_membership(
+            db,
+            WorkspaceMembership(
+                workspace_id=solo_ws.id, user_id=solo_admin.id, role="admin"
+            ),
+        )
+        await db.commit()
+        try:
+            await ensure_user_is_not_last_active_workspace_admin(db, solo_admin)
+        except HTTPException as exc:
+            expect(exc, 400)
+        else:
+            raise AssertionError("last active workspace admin was not rejected")
+        peer_admin = await make_user("direct-peer-admin")
+        await user_repo.create_workspace_membership(
+            db,
+            WorkspaceMembership(
+                workspace_id=solo_ws.id, user_id=peer_admin.id, role="admin"
+            ),
+        )
+        await db.commit()
+        # A second active admin makes the check pass.
+        await ensure_user_is_not_last_active_workspace_admin(db, solo_admin)
+
+        # create_user branches.
+        try:
+            await create_user(
+                db,
+                UserCreateRequest(
+                    username="cu-missing-ws",
+                    email="cu-missing-ws@direct.test",
+                    name="CU Missing WS",
+                    workspace_id="no-such-ws",
+                ),
+                admin_user,
+                settings(),
+            )
+        except HTTPException as exc:
+            expect(exc, 404)
+        else:
+            raise AssertionError("create_user in missing workspace did not 404")
+        archived_ws = await make_workspace("Direct Archived WS", status="archived")
+        try:
+            await create_user(
+                db,
+                UserCreateRequest(
+                    username="cu-archived-ws",
+                    email="cu-archived-ws@direct.test",
+                    name="CU Archived WS",
+                    workspace_id=archived_ws.id,
+                ),
+                admin_user,
+                settings(),
+            )
+        except HTTPException as exc:
+            expect(exc, 403)
+        else:
+            raise AssertionError("create_user in archived workspace did not 403")
+        host_ws = await make_workspace("Direct Host WS")
+        try:
+            await create_user(
+                db,
+                UserCreateRequest(
+                    username="cu-missing-team",
+                    email="cu-missing-team@direct.test",
+                    name="CU Missing Team",
+                    workspace_id=host_ws.id,
+                    team_ids=["no-such-team"],
+                ),
+                admin_user,
+                settings(),
+            )
+        except HTTPException as exc:
+            expect(exc, 404)
+        else:
+            raise AssertionError("create_user with unknown team did not 404")
+        other_ws = await make_workspace("Direct Other WS")
+        other_team = await team_repo.create_team(
+            db,
+            Team(workspace_id=other_ws.id, name="Other Team", slug="other-team"),
+        )
+        await db.commit()
+        try:
+            await create_user(
+                db,
+                UserCreateRequest(
+                    username="cu-cross-team",
+                    email="cu-cross-team@direct.test",
+                    name="CU Cross Team",
+                    workspace_id=host_ws.id,
+                    team_ids=[other_team.id],
+                ),
+                admin_user,
+                settings(),
+            )
+        except HTTPException as exc:
+            expect(exc, 422)
+        else:
+            raise AssertionError("create_user with cross-workspace team did not 422")
+        host_team = await team_repo.create_team(
+            db,
+            Team(workspace_id=host_ws.id, name="Host Team", slug="host-team"),
+        )
+        await db.commit()
+        created = await create_user(
+            db,
+            UserCreateRequest(
+                username="cu-success",
+                email="cu-success@direct.test",
+                name="CU Success",
+                workspace_id=host_ws.id,
+                team_ids=[host_team.id],
+            ),
+            admin_user,
+            settings(),
+        )
+        assert created.initial_password
+        assert [item.id for item in created.user.workspaces] == [host_ws.id]
+        assert [item.id for item in created.user.teams] == [host_team.id]
+        assert (
+            await workspace_repo.get_workspace_membership(
+                db, host_ws.id, created.user.id
+            )
+            is not None
+        )
+        assert (
+            await team_repo.get_team_membership(db, host_team.id, created.user.id)
+            is not None
+        )
+        created_entity = await user_repo.get_user_by_id(db, created.user.id)
+        assert created_entity is not None
+        # Duplicate username and duplicate email -> IntegrityError -> 409.
+        try:
+            await create_user(
+                db,
+                UserCreateRequest(
+                    username="admin",
+                    email="dup-username@direct.test",
+                    name="Dup Username",
+                ),
+                admin_user,
+                settings(),
+            )
+        except HTTPException as exc:
+            expect(exc, 409)
+        else:
+            raise AssertionError("duplicate username did not 409")
+        try:
+            await create_user(
+                db,
+                UserCreateRequest(
+                    username="dup-email-user",
+                    email=admin_user.email,
+                    name="Dup Email",
+                ),
+                admin_user,
+                settings(),
+            )
+        except HTTPException as exc:
+            expect(exc, 409)
+        else:
+            raise AssertionError("duplicate email did not 409")
+
+        # user_to_response_with_scopes: with memberships and without.
+        scoped = await user_to_response_with_scopes(db, created_entity)
+        assert [item.id for item in scoped.workspaces] == [host_ws.id]
+        assert [item.id for item in scoped.teams] == [host_team.id]
+        bare_user = await make_user("direct-bare")
+        bare = await user_to_response_with_scopes(db, bare_user)
+        assert bare.workspaces == [] and bare.teams == []
+        # user_teams_by_user_id with real memberships.
+        teams_by_user = await user_teams_by_user_id(db, [created_entity])
+        assert [item.id for item in teams_by_user[created_entity.id]] == [host_team.id]
+
+        # update_user: rename + disable paths, then IntegrityError -> 409.
+        updater = await make_user("direct-updater")
+        renamed = await update_user(
+            db,
+            updater,
+            admin_user,
+            UserUpdateRequest(
+                username="direct-updater-renamed",
+                email="direct-updater@direct.test",
+                name="Direct Updater",
+            ),
+        )
+        assert renamed.username == "direct-updater-renamed"
+        disabled = await update_user(
+            db, updater, admin_user, UserUpdateRequest(is_active=False)
+        )
+        assert disabled.is_active is False
+        disabled_row = await user_repo.get_user_by_id(db, updater.id)
+        assert disabled_row is not None and not disabled_row.is_active
+        original_save_user = user_repo.save_user
+
+        async def failing_save_user(db, entity):
+            raise IntegrityError("stmt", {}, Exception("boom"))
+
+        user_repo.save_user = failing_save_user
+        try:
+            await update_user(
+                db, updater, admin_user, UserUpdateRequest(name="Conflict")
+            )
+        except HTTPException as exc:
+            expect(exc, 409)
+        else:
+            raise AssertionError("update_user conflict did not 409")
+        finally:
+            user_repo.save_user = original_save_user
+
+        # change_user_password: success path.
+        password_holder = await make_user("direct-pw-holder")
+        changed_pw = await change_user_password(
+            db, password_holder, admin_user, "ManagedDirect@123"
+        )
+        assert changed_pw.must_change_password is False
+        pw_row = await user_repo.get_user_by_id(db, password_holder.id)
+        assert verify_password("ManagedDirect@123", pw_row.password_hash)
+
+        # delete_user_permanently: full success on a throwaway user.
+        doomed = await make_user("direct-doomed")
+        doomed_token = await issue_refresh_session(db, doomed, settings())
+        await user_repo.create_workspace_membership(
+            db,
+            WorkspaceMembership(
+                workspace_id=host_ws.id, user_id=doomed.id, role="member"
+            ),
+        )
+        await db.commit()
+        await delete_user_permanently(db, doomed, admin_user)
+        assert await user_repo.get_user_by_id(db, doomed.id) is None
+        assert (
+            await user_repo.get_active_refresh_session(
+                db, hash_refresh_token(doomed_token), utc_now()
+            )
+            is None
+        )
+
+        # delete_user_permanently: retained by Agent publication audits -> 409.
+        original_agent_refs = (
+            identity_service.agent_repository.has_agent_publication_audit_references
+        )
+
+        async def has_agent_refs(db, user_id):
+            return True
+
+        identity_service.agent_repository.has_agent_publication_audit_references = (
+            has_agent_refs
+        )
+        try:
+            agent_doomed = await make_user("direct-agent-doomed")
+            try:
+                await delete_user_permanently(db, agent_doomed, admin_user)
+            except HTTPException as exc:
+                expect(exc, 409)
+            else:
+                raise AssertionError("agent audit references did not 409")
+        finally:
+            identity_service.agent_repository.has_agent_publication_audit_references = (
+                original_agent_refs
+            )
+
+        # delete_user_permanently: retained by Workflow Agent binding -> 409.
+        original_workflow_refs = (
+            identity_service.workflow_repository.has_workflow_agent_binder_audit_references
+        )
+
+        async def has_workflow_refs(db, user_id):
+            return True
+
+        identity_service.workflow_repository.has_workflow_agent_binder_audit_references = (
+            has_workflow_refs
+        )
+        try:
+            workflow_doomed = await make_user("direct-workflow-doomed")
+            try:
+                await delete_user_permanently(db, workflow_doomed, admin_user)
+            except HTTPException as exc:
+                expect(exc, 409)
+            else:
+                raise AssertionError("workflow audit references did not 409")
+        finally:
+            identity_service.workflow_repository.has_workflow_agent_binder_audit_references = (
+                original_workflow_refs
+            )
+
+        # delete_user_permanently: retained by Tool audit references -> 409.
+        original_tools_refs = (
+            identity_service.tools_repository.has_retained_user_audit_references
+        )
+
+        async def has_tools_refs(db, user_id):
+            return True
+
+        identity_service.tools_repository.has_retained_user_audit_references = (
+            has_tools_refs
+        )
+        try:
+            tools_doomed = await make_user("direct-tools-doomed")
+            try:
+                await delete_user_permanently(db, tools_doomed, admin_user)
+            except HTTPException as exc:
+                expect(exc, 409)
+            else:
+                raise AssertionError("tool audit references did not 409")
+        finally:
+            identity_service.tools_repository.has_retained_user_audit_references = (
+                original_tools_refs
+            )
+
+        # authenticate_user: rate-limit branches, invalid credentials, success.
+        original_enforce = identity_service.enforce_login_rate_limit
+
+        async def rate_limited(settings, username, source_ip):
+            raise LoginRateLimitExceeded(30)
+
+        identity_service.enforce_login_rate_limit = rate_limited
+        try:
+            await authenticate_user(
+                db, admin_user.username, "whatever", settings(), "203.0.113.5"
+            )
+        except HTTPException as exc:
+            expect(exc, 429)
+            assert exc.headers.get("Retry-After") == "30", exc.headers
+        else:
+            raise AssertionError("rate-limited login did not 429")
+        finally:
+            identity_service.enforce_login_rate_limit = original_enforce
+
+        async def rate_unavailable(settings, username, source_ip):
+            raise LoginRateLimitUnavailable()
+
+        identity_service.enforce_login_rate_limit = rate_unavailable
+        try:
+            await authenticate_user(db, admin_user.username, "whatever", settings())
+        except HTTPException as exc:
+            expect(exc, 503)
+        else:
+            raise AssertionError("unavailable rate limiter did not 503")
+        finally:
+            identity_service.enforce_login_rate_limit = original_enforce
+
+        # Unknown username -> 401.
+        try:
+            await authenticate_user(db, "ghost-login", "WrongPass@123", settings())
+        except HTTPException as exc:
+            expect(exc, 401)
+        else:
+            raise AssertionError("unknown user login did not 401")
+        # Wrong password -> 401.
+        try:
+            await authenticate_user(
+                db, token_holder.username, "WrongPass@123", settings()
+            )
+        except HTTPException as exc:
+            expect(exc, 401)
+        else:
+            raise AssertionError("wrong password login did not 401")
+        # Inactive user -> 401.
+        try:
+            await authenticate_user(
+                db, inactive_user.username, "TestPass@123", settings()
+            )
+        except HTTPException as exc:
+            expect(exc, 401)
+        else:
+            raise AssertionError("inactive user login did not 401")
+        # Success -> access token plus a refresh session row.
+        token_response, issued_refresh = await authenticate_user(
+            db, token_holder.username, "TestPass@123", settings(), "203.0.113.9"
+        )
+        assert token_response.access_token
+        auth_session = await user_repo.get_active_refresh_session(
+            db, hash_refresh_token(issued_refresh), utc_now()
+        )
+        assert auth_session is not None and auth_session.user_id == token_holder.id
+
+        # refresh_access_token: valid token, invalid token, inactive user.
+        valid = await refresh_access_token(db, refresh_token, settings())
+        assert valid.access_token
+        try:
+            await refresh_access_token(db, "garbage-token", settings())
+        except HTTPException as exc:
+            expect(exc, 401)
+        else:
+            raise AssertionError("garbage refresh token did not 401")
+        original_get_session = (
+            identity_service.user_repository.get_active_refresh_session
+        )
+
+        async def fake_get_session(db, token_hash, now):
+            return RefreshSession(
+                user_id=inactive_user.id,
+                token_hash=token_hash,
+                expires_at=utc_now() + timedelta(days=1),
+            )
+
+        identity_service.user_repository.get_active_refresh_session = fake_get_session
+        try:
+            await refresh_access_token(db, "inactive-user-token", settings())
+        except HTTPException as exc:
+            expect(exc, 401)
+        else:
+            raise AssertionError("inactive-user refresh did not 401")
+        finally:
+            identity_service.user_repository.get_active_refresh_session = (
+                original_get_session
+            )
+
+        # revoke_refresh_token: with a token and without one.
+        revoker = await make_user("direct-revoker")
+        revoke_token = await issue_refresh_session(db, revoker, settings())
+        await db.commit()
+        assert (
+            await user_repo.get_active_refresh_session(
+                db, hash_refresh_token(revoke_token), utc_now()
+            )
+            is not None
+        )
+        await revoke_refresh_token(db, revoke_token)
+        assert (
+            await user_repo.get_active_refresh_session(
+                db, hash_refresh_token(revoke_token), utc_now()
+            )
+            is None
+        )
+        await revoke_refresh_token(db, None)
+        await revoke_refresh_token(db, "")
+
+        # change_password: wrong current, same password, success.
+        cp_holder = await make_user("direct-cp-holder")
+        try:
+            await change_password(
+                db, cp_holder, "NewDirect@123", settings(), current_password="Wrong@123"
+            )
+        except HTTPException as exc:
+            expect(exc, 400)
+        else:
+            raise AssertionError("wrong current password did not 400")
+        try:
+            await change_password(
+                db, cp_holder, "TestPass@123", settings(), current_password="TestPass@123"
+            )
+        except HTTPException as exc:
+            expect(exc, 400)
+        else:
+            raise AssertionError("same password did not 400")
+        cp_refresh = await change_password(
+            db, cp_holder, "NewDirect@123", settings(), current_password="TestPass@123"
+        )
+        assert cp_refresh
+        cp_row = await user_repo.get_user_by_id(db, cp_holder.id)
+        assert cp_row.must_change_password is False
+        assert verify_password("NewDirect@123", cp_row.password_hash)
+        assert not verify_password("TestPass@123", cp_row.password_hash)
+
+        # get_me: memberships included.
+        me = await get_me(db, created_entity)
+        assert me.user.id == created_entity.id
+        assert any(
+            item.workspace_id == host_ws.id and item.role == "member"
+            for item in me.memberships
+        )
 
 
 async def exercise_repository_edges(
@@ -313,12 +1246,12 @@ def run_workspace_block() -> None:
             headers=auth_headers(admin_token),
         )
         assert super_members.status_code == 200, super_members.text
-        # Non-member, non-admin -> 403 "access denied".
+        # Non-member, non-admin -> 404 to avoid revealing workspace existence.
         denied_members = client.get(
             members_url(default_workspace_id),
             headers=auth_headers(research_token),
         )
-        assert denied_members.status_code == 403, denied_members.text
+        assert denied_members.status_code == 404, denied_members.text
         # Workspace member with membership -> context builds (teams list only
         # requires a context, not an admin role).
         member_context = client.get(
@@ -350,7 +1283,7 @@ def run_workspace_block() -> None:
             f"/api/v1/workspaces/{default_workspace_id}",
             headers=auth_headers(research_token),
         )
-        assert denied_get.status_code == 403, denied_get.text
+        assert denied_get.status_code == 404, denied_get.text
         member_get = client.get(
             f"/api/v1/workspaces/{research_workspace_id}",
             headers=auth_headers(research_token),
@@ -576,6 +1509,14 @@ def run_workspace_block() -> None:
             json={"user_id": member_user_id, "role": "member"},
         )
         assert re_added.status_code == 201, re_added.text
+
+        asyncio.run(
+            exercise_direct_workspace_service_branches(
+                research_workspace_id,
+                extra_workspace_id,
+                inactive_id,
+            )
+        )
 
         # --- teams ----------------------------------------------------------
         member_create_denied = client.post(

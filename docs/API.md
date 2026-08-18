@@ -15,11 +15,11 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 
 ## 接口约定（速查）
 
-- 工作空间上下文：路径参数 `/workspaces/{workspace_id}/...`，非成员 403，工作空间非 active 403。
+- 工作空间上下文：路径参数 `/workspaces/{workspace_id}/...`；非成员按不可枚举策略返回 404，已确认成员但工作空间非 active 或操作权限不足时返回 403。
 - 状态码：创建 201、删除 204、异步任务 202；错误统一 FastAPI `{"detail": ...}`。
 - 分页：所有列表端点统一 `limit`（`ge=1 le=200`，默认 100）+ `offset`（`ge=0`）查询参数。
-- 鉴权：`/auth/login|refresh|logout`、`/health` 与已发布 Agent 的 `/public/agents/{agent_id}/*` 不要求登录；公开 Agent 会话使用 HttpOnly 访客 Cookie 隔离。`/agent-api/{agent_id}/*` 使用 Agent 级 API Key Bearer 鉴权，其中 `/documentation` 用于校验 Key 并解锁该 Agent 的专属文档页；其余接口使用登录 Bearer，且需完成初始改密（`require_password_changed`）。
-- API 文档：后端 `/docs` 与 `/openapi.json` 始终保留完整 FastAPI 文档，覆盖登录态管理、公开访问和 Agent API 全部接口。Agent 概览的“API 文档”入口跳转到 `/agent-api/{agent_id}/docs`，输入该 Agent 的有效 API Key 后只展示该 Agent 的 Run 创建、查询和流式订阅接口。
+- 鉴权：`/auth/login|refresh|logout`、`/health` 与已发布应用的 `/public/agents/{agent_id}/*`、`/public/workflows/{workflow_id}/*` 不要求登录；公开会话使用 HttpOnly 访客 Cookie 隔离。`/agent-api/{agent_id}/*` 与 `/workflow-api/{workflow_id}/*` 使用应用级 API Key Bearer 鉴权；其余接口使用登录 Bearer，且需完成初始改密（`require_password_changed`）。
+- API 文档：后端 `/docs` 与 `/openapi.json` 保留完整 FastAPI 文档。应用概览的专属文档入口使用 `/agent-api/{agent_id}/docs` 或 `/workflow-api/{workflow_id}/docs`，验证对应 API Key 后只展示该应用的 Run 创建、查询和流式订阅接口。
 - 流式：登录态 Agent 先 `POST /runs` 持久提交，再 `GET /runs/{run_id}/stream?after={sequence}&live_after={redis_stream_id}` 订阅 NDJSON。`after` 重放 PostgreSQL 过程/终态事件，`live_after` 补发短期 Redis 答案/推理增量；实时事件的 `stream_epoch` 变化表示新 worker 已接管，客户端必须清空已累积的答案和推理后重新累积。公开/API Key 流复用同一 durable Run，只输出固定枚举的安全进度摘要、知识片段数量、答案增量、模型思考过程（`reasoning_delta` 增量与 progress 累积文本）和终态白名单，不返回工具名称/参数、检索原文、System Prompt 或 trace。终态 Run 快照始终覆盖实时片段，断线不取消 Run。请求中的旧 `preview` 字段仅为兼容保留并被忽略，所有 Run 都是持久执行。所有 `/api` 响应默认 `no-store`。
 - 全局管理员仅限 `/admin/*` 与工作空间生命周期管理。
 
@@ -40,9 +40,13 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/endpoints/knowledge_retrieval.py` — 同前缀 RAG 检索接口：兼容结果列表 `POST /{kb_id}/query` 与带生产链路 trace 的 `POST /{kb_id}/query/inspect`
 - `backend/app/api/v1/endpoints/knowledge_evaluation.py` — 同前缀 `/evaluations`：评测用例列表/创建/删除、异步运行、运行列表/详情、指定运行与最近运行指标汇总；读取要求 view/edit，写入要求 edit
 - `backend/app/api/v1/endpoints/models.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
-- `backend/app/api/v1/endpoints/mcp_servers.py` — MCP Server CRUD/刷新，以及管理员按工具定义哈希审核执行策略；创建请求用 `transport` 区分 `streamable_http`/`sse`（URL + 可选 Bearer）与 `stdio`（命令、参数、工作目录和环境变量）
+- `backend/app/api/v1/endpoints/tool_sources.py` — `/workspaces/{workspace_id}/tool-sources`：MCP Source 创建、分页、刷新、启停和删除；普通成员限公网 HTTP/SSE，stdio 与私网配置要求工作空间管理员
+- `backend/app/api/v1/endpoints/tools.py` — `/workspaces/{workspace_id}/tools`：builtin/Python/MCP 统一目录、详情、Python 草稿/测试/发布/启停/归档、策略及 `view/use` 授权
+- `backend/app/api/v1/endpoints/mcp_servers.py` — 旧 MCP Server 契约兼容接口；新工具中心使用 `tool-sources` 与 `tools` 路由
 - `backend/app/api/v1/endpoints/agents.py` — Agent CRUD、发布、API 凭据、跨来源对话日志/用户/统计，以及登录态 Run 提交、工具账本、审批/拒绝与游标 NDJSON 订阅
 - `backend/app/api/v1/endpoints/agent_access.py` — `/public/agents/{agent_id}` 提供已发布 Agent 的公开资料、访客会话、对话历史和安全 Run 流；`/agent-api/{agent_id}` 提供 Agent API Key 校验、专属文档解锁、Run 提交、查询和安全流
+- `backend/app/api/v1/endpoints/workflows.py` — Workflow 草稿定义、资源校验、不可变版本、恢复、调试运行、表单恢复与节点审计
+- `backend/app/api/v1/endpoints/workflow_access.py` — `/public/workflows/{workflow_id}` 与 `/workflow-api/{workflow_id}` 的资料、会话、API 文档、Run 和安全流
 
 ### app/api/v1/admin/
 
@@ -56,6 +60,8 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/schemas/team.py` — 团队创建/更新/响应模型
 - `backend/app/schemas/knowledge.py` — 知识库、文档、QA 导入模式、分块、解析参数、任务、批量创建、检索命中/trace 与检索评测请求/响应模型
 - `backend/app/schemas/agent.py` — Agent 创建/更新/响应与运行/计划/事件/流式响应模型
+- `backend/app/schemas/tool.py` — 统一 Tool/Source/Version/Policy/Permission/Invocation 与固定 `ToolRef` 契约
+- `backend/app/schemas/workflow.py` — Workflow 图、节点配置、版本、运行、节点审计、表单恢复与 Tool/Agent 固定引用契约
 - `backend/app/schemas/model.py` — LLM 供应商目录（model-types/base-models/credential-form）与已注册模型模型
 - `backend/app/schemas/mcp.py` — MCP Server、三种传输互斥配置、stdio 配置与工具列表的请求/响应模型
 - `backend/app/schemas/audit.py` — 审计日志响应模型

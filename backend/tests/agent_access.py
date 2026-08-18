@@ -1010,6 +1010,31 @@ async def assert_direct_access_units(
             live_context = await agent_access.get_published_application_context(
                 db, agent_id, "agent"
             )
+            locked_agent = await agent_repository.lock_agent(db, agent_id)
+            assert locked_agent is not None
+            current_publication_id = locked_agent.current_published_version_id
+            assert current_publication_id is not None
+            try:
+                locked_agent.current_published_version_id = None
+                await agent_repository.save_agent(db, locked_agent)
+                await db.commit()
+                await _expect_http(
+                    409,
+                    agent_access.create_external_agent_run(
+                        db,
+                        live_context,
+                        "public",
+                        "stale-publication-consumer",
+                        "Stale publication question",
+                        settings,
+                    ),
+                )
+            finally:
+                locked_agent = await agent_repository.lock_agent(db, agent_id)
+                assert locked_agent is not None
+                locked_agent.current_published_version_id = current_publication_id
+                await agent_repository.save_agent(db, locked_agent)
+                await db.commit()
             direct_run_response = await agent_access.create_external_agent_run(
                 db, live_context, "public", "direct-consumer", "Direct question",
                 settings,
@@ -1042,10 +1067,16 @@ async def assert_direct_access_units(
                 access_source="public",
                 consumer_id=actor.id,
             )
+            approve_run.configuration_source = "legacy"
+            approve_run.agent_publication_version_id = None
             await db.execute(
                 update(AgentRunOrm)
                 .where(AgentRunOrm.id == approve_run.id)
-                .values(status="awaiting_approval")
+                .values(
+                    status="awaiting_approval",
+                    configuration_source="legacy",
+                    agent_publication_version_id=None,
+                )
             )
             await agent_repository.create_agent_tool_call(
                 db,
@@ -1079,10 +1110,16 @@ async def assert_direct_access_units(
                 access_source="public",
                 consumer_id=actor.id,
             )
+            reject_run.configuration_source = "legacy"
+            reject_run.agent_publication_version_id = None
             await db.execute(
                 update(AgentRunOrm)
                 .where(AgentRunOrm.id == reject_run.id)
-                .values(status="awaiting_approval")
+                .values(
+                    status="awaiting_approval",
+                    configuration_source="legacy",
+                    agent_publication_version_id=None,
+                )
             )
             await agent_repository.create_agent_tool_call(
                 db,
@@ -1277,10 +1314,16 @@ async def assert_direct_endpoint_calls(
             access_source="public",
             consumer_id=user.id,
         )
+        approve_run.configuration_source = "legacy"
+        approve_run.agent_publication_version_id = None
         await db.execute(
             update(AgentRunOrm)
             .where(AgentRunOrm.id == approve_run.id)
-            .values(status="awaiting_approval")
+            .values(
+                status="awaiting_approval",
+                configuration_source="legacy",
+                agent_publication_version_id=None,
+            )
         )
         await agent_repository.create_agent_tool_call(
             db,
@@ -1314,10 +1357,16 @@ async def assert_direct_endpoint_calls(
             access_source="public",
             consumer_id=user.id,
         )
+        reject_run.configuration_source = "legacy"
+        reject_run.agent_publication_version_id = None
         await db.execute(
             update(AgentRunOrm)
             .where(AgentRunOrm.id == reject_run.id)
-            .values(status="awaiting_approval")
+            .values(
+                status="awaiting_approval",
+                configuration_source="legacy",
+                agent_publication_version_id=None,
+            )
         )
         await agent_repository.create_agent_tool_call(
             db,
@@ -1375,7 +1424,11 @@ async def seed_approval(workspace_id: str, run_id: str, call_id: str) -> None:
         await db.execute(
             update(AgentRunOrm)
             .where(AgentRunOrm.id == run_id)
-            .values(status="awaiting_approval")
+            .values(
+                status="awaiting_approval",
+                configuration_source="legacy",
+                agent_publication_version_id=None,
+            )
         )
         await agent_repository.create_agent_tool_call(
             db,

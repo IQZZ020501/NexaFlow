@@ -60,10 +60,15 @@ async def _patched_run_durable_workflow_run(
     run_id: str,
     settings,
     worker_task_id: str | None = None,
+    *,
+    generation: str = "legacy",
 ) -> str:
     try:
         return await _orig_run_durable_workflow_run(
-            run_id, settings, worker_task_id
+            run_id,
+            settings,
+            worker_task_id,
+            generation=generation,
         )
     except BaseException:
         # The app suppresses the heartbeat CancelledError itself; when the
@@ -1031,7 +1036,8 @@ def test_resume_workflow_form_error_branches() -> None:
                     mcp_tools=[],
                     model_id=model_id,
                     model_name="Coverage Model",
-                    status="awaiting_input",
+                    configuration_source="draft",
+                    status="awaiting_input_v2",
                     checkpoint_phase="workflow",
                     trace_id="trace-form",
                     model_usage={},
@@ -1053,7 +1059,7 @@ def test_resume_workflow_form_error_branches() -> None:
                     assert exc.status_code == 409
                     assert "not awaiting form input" in str(exc.detail)
                 # 414-415: pending form runtime node changed
-                run_entity.status = "awaiting_input"
+                run_entity.status = "awaiting_input_v2"
                 changed = WorkflowFormSubmitRequest(
                     runtime_node_id="other", form_data={}
                 )
@@ -1576,10 +1582,12 @@ def test_workflow_services_boundaries() -> None:
                 try:
                     await save_definition(
                         db,
+                        workflow_agent,
                         created_def,
                         WorkflowGraph.model_validate(_simple_graph()),
                         99,
                         actor,
+                        "admin",
                     )
                     raise AssertionError("expected 409 stale revision")
                 except HTTPException as exc:
@@ -1588,10 +1596,12 @@ def test_workflow_services_boundaries() -> None:
                 # 276-277: successful save bumps the revision
                 updated = await save_definition(
                     db,
+                    workflow_agent,
                     created_def,
                     WorkflowGraph.model_validate(_simple_graph()),
                     created_def.revision,
                     actor,
+                    "admin",
                 )
                 assert updated.revision == created_def.revision + 1
 
@@ -2154,6 +2164,10 @@ def test_workflow_run_direct_api_functions() -> None:
     from app.infrastructure.repositories import workflow as workflow_repository
     from app.infrastructure.session import get_session_factory
     from app.schemas.workflow import WorkflowFormSubmitRequest, WorkflowRunCreateRequest
+    from app.shareddomain.workflows.resources import (
+        build_workflow_resource_snapshot,
+        workflow_resource_hash,
+    )
     from tests.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
@@ -2176,6 +2190,7 @@ def test_workflow_run_direct_api_functions() -> None:
             async with get_session_factory()() as db:
                 actor = await user_repository.get_user_by_id(db, admin_user_id)
                 assert actor is not None
+                resource_snapshot = build_workflow_resource_snapshot([], [])
 
                 # 224: disabled workflow agents cannot run
                 agent_entity = await agent_repository.get_agent_by_id(db, agent_id)
@@ -2303,7 +2318,8 @@ def test_workflow_run_direct_api_functions() -> None:
                     mcp_tools=[],
                     model_id=model_id,
                     model_name="Coverage Model",
-                    status="awaiting_input",
+                    configuration_source="draft",
+                    status="awaiting_input_v2",
                     checkpoint_phase="workflow",
                     trace_id="trace-resume",
                     model_usage={},
@@ -2321,6 +2337,8 @@ def test_workflow_run_direct_api_functions() -> None:
                     definition_id=definition.id,
                     definition_revision=definition.revision,
                     graph_snapshot=_form_graph(),
+                    resource_snapshot=resource_snapshot,
+                    resource_hash=workflow_resource_hash(resource_snapshot),
                     inputs={"question": "resume"},
                 )
                 detail.run_id = created.id
@@ -2359,7 +2377,8 @@ def test_workflow_run_direct_api_functions() -> None:
                     mcp_tools=[],
                     model_id=model_id,
                     model_name="Coverage Model",
-                    status="awaiting_input",
+                    configuration_source="draft",
+                    status="awaiting_input_v2",
                     checkpoint_phase="workflow",
                     trace_id="trace-submit",
                     model_usage={},
@@ -2379,6 +2398,8 @@ def test_workflow_run_direct_api_functions() -> None:
                     definition_id=definition.id,
                     definition_revision=definition.revision,
                     graph_snapshot=_form_graph(),
+                    resource_snapshot=resource_snapshot,
+                    resource_hash=workflow_resource_hash(resource_snapshot),
                     inputs={"question": "submit"},
                 )
                 detail_again.run_id = created_again.id
@@ -2421,7 +2442,8 @@ def test_workflow_run_direct_api_functions() -> None:
                     mcp_tools=[],
                     model_id=model_id,
                     model_name="Coverage Model",
-                    status="awaiting_input",
+                    configuration_source="draft",
+                    status="awaiting_input_v2",
                     checkpoint_phase="workflow",
                     trace_id="trace-451",
                     model_usage={},
@@ -2441,6 +2463,8 @@ def test_workflow_run_direct_api_functions() -> None:
                     definition_id=definition.id,
                     definition_revision=definition.revision,
                     graph_snapshot=_form_graph(),
+                    resource_snapshot=resource_snapshot,
+                    resource_hash=workflow_resource_hash(resource_snapshot),
                     inputs={"question": "resume-451"},
                 )
                 detail_three.run_id = created_three.id

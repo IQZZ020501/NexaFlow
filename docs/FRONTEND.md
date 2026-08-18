@@ -22,6 +22,7 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 
 - `frontend/app/layout.tsx` — 根布局：元信息 + AppProviders 包裹
 - `frontend/app/page.tsx` — 首页重定向到 `/app/apps`
+- `frontend/app/not-found.tsx` — 站点级三语 404 页面，不回显后端资源细节
 - `frontend/app/(platform)/app/layout.tsx` — 平台区布局：SessionGate + TopBar
 - `frontend/app/(platform)/app/page.tsx` — 重定向到 `/app/apps`
 - `frontend/app/(platform)/app/knowledge/page.tsx` — 知识库列表页
@@ -29,9 +30,10 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/app/(platform)/app/knowledge/[id]/upload/page.tsx` — 上传向导「选择文件」步骤
 - `frontend/app/(platform)/app/knowledge/[id]/upload/segment/page.tsx` — 上传向导「分段预览」步骤（server 解析路由状态）
 - `frontend/app/(platform)/app/knowledge/[id]/documents/[docId]/page.tsx` — 文档详情页
-- `frontend/app/(platform)/app/tools/page.tsx` — MCP 工具管理页
+- `frontend/app/(platform)/app/tools/page.tsx` — 统一工具中心：builtin/Python/MCP 目录、来源与授权管理
 - `frontend/app/(platform)/app/apps/page.tsx` — Agent 应用列表页
 - `frontend/app/(platform)/app/apps/[id]/page.tsx` — Agent 详情页
+- `frontend/app/(platform)/workflow/[id]/page.tsx` — Workflow 画布；查看授权用户进入只读模式
 - `frontend/app/(public)/chat/[id]/page.tsx` — 已发布 Agent 的匿名公开对话页
 - `frontend/app/(public)/agent-api/[id]/docs/page.tsx` — API Key 解锁的单 Agent API 文档页
 - `frontend/app/(platform)/app/models/page.tsx` — 模型管理页
@@ -55,7 +57,7 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 **agents/**（Agent 功能）
 - `frontend/components/agents/agents-page.tsx` — Agent CRUD、持久 Run 提交、PostgreSQL/Redis 双游标重连、实时答案与审批状态合并
 - `frontend/components/agents/agent-detail-workspace.tsx` — 运行工作台：过程事件、待审批/不确定工具调用处理
-- `frontend/components/agents/agent-config-fields.tsx` — 配置表单字段（模型、显式知识检索策略、知识库/MCP）
+- `frontend/components/agents/agent-config-fields.tsx` — 配置表单字段（模型、显式知识检索策略、知识库与统一 Tool picker）
 - `frontend/components/agents/agent-management-panels.tsx` — Agent 概览、API 凭据、对话日志、监控统计与对话用户面板
 - `frontend/components/agents/public-agent-chat.tsx` — 匿名公开对话历史、提问、脱敏执行摘要与答案流；最终回答沿用调试页的 Markdown 展示，执行链展示模型思考过程但不暴露工具名称/参数或检索原文
 - `frontend/components/agents/agent-api-documentation.tsx` — 校验 Agent API Key 后仅展示当前 Agent 的 API 调用文档
@@ -64,7 +66,12 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/components/llm/llm-page.tsx` — 模型管理页：注册模型 CRUD、凭据、目录浏览
 
 **tools/**（工具功能）
-- `frontend/components/tools/mcp-tools-page.tsx` — MCP Server 管理：Streamable HTTP/SSE URL 配置、stdio 命令/参数/工作目录/环境变量填写与管理员工具执行策略审核
+- `frontend/components/tools/tools-page.tsx` — 生产工具中心：mine/shared/builtin 分组、跨页加载、详情、来源状态、策略与授权入口
+- `frontend/components/tools/python-tool-dialog.tsx` — Python Tool 草稿、schema、沙箱测试、发布与版本状态
+- `frontend/components/tools/mcp-source-dialog.tsx` — MCP Source 创建：普通成员公网 HTTP/SSE，管理员额外支持 stdio/私网
+- `frontend/components/tools/tool-permissions-dialog.tsx` — 同工作空间成员搜索及 `view/use/none` 授权管理
+- `frontend/components/tools/tool-picker.tsx` — Agent 共用 Tool picker：搜索、键盘选择、固定 Tool/Version 引用与失效状态
+- `frontend/components/tools/mcp-tools-page.tsx` — 旧 MCP 专页兼容组件；生产 `/app/tools` 不再使用，仅保留既有回归覆盖
 
 **system/**（系统管理功能）
 - `frontend/components/system/system-shell.tsx` — 系统管理壳：数据加载、CRUD 编排、Tab 切换
@@ -133,6 +140,9 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/lib/api/run-stream.ts` — 登录态与公开 Run 共用的 NDJSON 双游标重连器
 - `frontend/lib/api/llm.ts` — 模型 API：目录、注册模型 CRUD、凭据
 - `frontend/lib/api/mcp.ts` — MCP Server API：三种传输契约、CRUD、刷新、工具列表与执行策略
+- `frontend/lib/api/tools.ts` — 统一 Tool/Source API：目录、Python 生命周期、固定版本、策略、授权与测试 Invocation
+- `frontend/lib/api/workflows.ts` — Workflow 草稿、发布版本、Tool/Agent 资源快照、运行与节点审计
+- `frontend/lib/api/public-workflows.ts` — 已发布 Workflow 的公开/API 会话与运行流
 - `frontend/lib/api/system.ts` — 系统管理 API：工作空间/团队/用户/审计
 
 ### tests/（bun 测试）
@@ -146,6 +156,10 @@ Next.js 15 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`ap
 - `frontend/tests/feature-page-catalog.test.ts` — pages 目录完整性
 - `frontend/tests/i18n.test.ts` — 词典一致性/翻译插值
 - `frontend/tests/mcp-registration.test.ts` — MCP 三种传输创建载荷与隐藏字段隔离
+- `frontend/tests/tools-page.test.tsx` — 统一工具中心、来源、状态、策略与错误恢复
+- `frontend/tests/tool-picker.test.tsx` — Tool picker 搜索、键盘、焦点与固定版本行为
+- `frontend/tests/tool-permissions-dialog.test.tsx` — 成员搜索、授权切换、撤销与失败重试
+- `frontend/tests/workflow-node-card.test.tsx` — Workflow Tool/Agent 节点、只读与失效绑定状态
 
 ## 关键约定
 
