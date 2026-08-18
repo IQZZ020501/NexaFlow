@@ -31,7 +31,7 @@ from tests.support import (  # noqa: F401  (must run before any app import)
 
 from fastapi import HTTPException
 from openai import APIStatusError, OpenAIError
-from sqlalchemy import func, select, text
+from sqlalchemy import URL, func, make_url, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import NullPool, StaticPool
 
@@ -2173,18 +2173,22 @@ def test_object_storage() -> None:
 
 
 def test_load_env_file() -> None:
+    assert config_mod.ENV_FILE == Path(config_mod.__file__).resolve().parents[3] / ".env"
     with TemporaryDirectory() as temp_dir:
         env_path = Path(temp_dir) / ".env"
         env_path.write_text(
-            "# comment\n\nSOME_KEY=value1\nQUOTED=\"quoted value\"\nEMPTY=\n"
+            "# comment\n\nSOME_KEY=value1\nQUOTED=\"quoted value\"\n"
+            "SPECIAL='literal $value # tag'\nEMPTY=\n"
         )
         with patch.dict(os.environ, {}, clear=False):
             original = os.environ.get("SOME_KEY")
             original_quoted = os.environ.get("QUOTED")
+            original_special = os.environ.get("SPECIAL")
             try:
                 config_mod.load_env_file(env_path)
                 assert os.environ["SOME_KEY"] == "value1"
                 assert os.environ["QUOTED"] == "quoted value"
+                assert os.environ["SPECIAL"] == "literal $value # tag"
             finally:
                 if original is None:
                     os.environ.pop("SOME_KEY", None)
@@ -2194,6 +2198,10 @@ def test_load_env_file() -> None:
                     os.environ.pop("QUOTED", None)
                 else:
                     os.environ["QUOTED"] = original_quoted
+                if original_special is None:
+                    os.environ.pop("SPECIAL", None)
+                else:
+                    os.environ["SPECIAL"] = original_special
 
         config_mod.load_env_file(Path(temp_dir) / "missing.env")
 
@@ -2203,6 +2211,57 @@ def test_load_env_file() -> None:
         with patch.dict(os.environ, {"PRIORITY_KEY": "existing"}, clear=False):
             config_mod.load_env_file(env_path2)
             assert os.environ["PRIORITY_KEY"] == "existing"
+
+
+def test_database_url_from_env() -> None:
+    components = {
+        "POSTGRES_USER": "nexa-user",
+        "POSTGRES_PASSWORD": "p@ss:/#%",
+        "POSTGRES_DB": "nexa-db",
+        "POSTGRES_HOST": "::1",
+        "POSTGRES_PORT": "5544",
+    }
+    with patch.dict(os.environ, components, clear=True):
+        parsed = make_url(config_mod._database_url_from_env())
+        assert parsed.username == "nexa-user"
+        assert parsed.password == "p@ss:/#%"
+        assert parsed.database == "nexa-db"
+        assert parsed.host == "::1"
+        assert parsed.port == 5544
+
+    configured_url = URL.create(
+        "postgresql+psycopg",
+        username="nexa-user",
+        password="p@ss:/#%",
+        host="remote-db",
+        port=6432,
+        database="nexa-db",
+    ).render_as_string(hide_password=False)
+    with patch.dict(
+        os.environ,
+        {**components, "DATABASE_URL": configured_url},
+        clear=True,
+    ):
+        assert config_mod._database_url_from_env() == configured_url
+
+    with patch.dict(
+        os.environ,
+        {
+            **components,
+            "POSTGRES_PASSWORD": "different",
+            "DATABASE_URL": configured_url,
+        },
+        clear=True,
+    ):
+        error = expect_error(config_mod._database_url_from_env, RuntimeError)
+        assert "POSTGRES_PASSWORD" in str(error)
+
+    with patch.dict(os.environ, {"DATABASE_URL": "not a url"}, clear=True):
+        expect_error(config_mod._database_url_from_env, RuntimeError)
+
+    for port in ("invalid", "70000"):
+        with patch.dict(os.environ, {**components, "POSTGRES_PORT": port}, clear=True):
+            expect_error(config_mod._database_url_from_env, RuntimeError)
 
 
 def _valid_settings() -> config_mod.Settings:
@@ -4452,6 +4511,7 @@ def main() -> None:
     test_object_storage()
 
     test_load_env_file()
+    test_database_url_from_env()
     test_settings_defaults_and_validation()
     test_settings_from_env()
 

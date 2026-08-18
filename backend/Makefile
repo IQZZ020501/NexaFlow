@@ -2,7 +2,7 @@
 
 HOST ?= 127.0.0.1
 PORT ?= 8000
-COMPOSE ?= docker compose -f ../deploy/docker-compose.yml -f ../deploy/docker-compose.dev.yml
+COMPOSE ?= docker compose --env-file ../.env -f ../deploy/docker-compose.yml -f ../deploy/docker-compose.dev.yml
 WORKER_LOG_TAIL ?= 20
 
 dev: migrate

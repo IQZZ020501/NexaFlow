@@ -34,6 +34,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Compose configuration
+        working-directory: .
+        run: |
+          cp .env.example .env
+          docker compose --env-file .env -f deploy/docker-compose.yml config --quiet
+          docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml config --quiet
+          rm .env
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

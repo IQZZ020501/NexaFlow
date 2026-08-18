@@ -299,7 +299,7 @@ Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_r
 
 ## 11. 安全与运维注意事项
 
-- 内嵌 Beat 的 worker 与 API 必须使用同一 PostgreSQL/Redis 配置；worker 必须显式获得容器内 `DATABASE_URL`；
+- 内嵌 Beat 的 worker 与 API 必须使用同一 PostgreSQL/Redis 配置；Compose 必须显式传入相同数据库组件并覆盖容器内主机名；
 - 只有 worker 挂载 sandbox socket；沙箱不得接入 Compose 网络或业务数据卷；
 - MCP 管理员仍具备项目既有的 worker 进程级 stdio 执行权限；Workflow 只接受当前可用、允许调用且不需要逐次审批的固定 ToolSnapshot；
 - Redis 负责队列，不作为审计真源；运行、checkpoint、事件和节点记录均以 PostgreSQL 为准；

@@ -40,6 +40,11 @@ docs/      module documentation — start at docs/INDEX.md
 
 Knowledge processing and Agent runs are published to Redis through Celery.
 
+Backend entry points, Alembic, and Celery load the repository-root `.env`.
+Create it from `.env.example`; do not create a second file under `backend/`.
+When `DATABASE_URL` is empty, the backend safely constructs it from the shared
+`POSTGRES_*` components.
+
 ```bash
 uv run celery -A app.infrastructure.celery:celery_app worker --beat --loglevel=INFO
 ```
