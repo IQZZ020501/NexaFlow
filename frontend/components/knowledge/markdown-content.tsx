@@ -2,8 +2,10 @@
 
 import * as React from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly"
 import remarkGfm from "remark-gfm"
 
+import { MarkdownCodeBlock } from "@/components/knowledge/markdown-code-block"
 import { cn } from "@/lib/utils"
 import { useLanguage } from "@/contexts/language-provider"
 
@@ -47,6 +49,32 @@ function MarkdownImage(
       {...restProps}
     />
   )
+}
+
+function MarkdownPre(
+  props: React.HTMLAttributes<HTMLPreElement> & { node?: unknown },
+) {
+  const child = React.Children.toArray(props.children)[0]
+  if (
+    !React.isValidElement<{
+      className?: string
+      children?: React.ReactNode
+    }>(child)
+  ) {
+    const { className, ...restProps } = omitMarkdownNode(props)
+    return <pre className={className} {...restProps} />
+  }
+  const language =
+    /(?:^|\s)language-([^\s]+)/.exec(child.props.className ?? "")?.[1]
+      ?.toLowerCase()
+      .slice(0, 64) ?? ""
+  const code = React.Children.toArray(child.props.children)
+    .map((value) =>
+      typeof value === "string" || typeof value === "number" ? value : ""
+    )
+    .join("")
+    .replace(/\n$/, "")
+  return <MarkdownCodeBlock code={code} language={language} />
 }
 
 const markdownComponents: Components = {
@@ -132,18 +160,7 @@ const markdownComponents: Components = {
       />
     )
   },
-  pre(props) {
-    const { className, ...restProps } = omitMarkdownNode(props)
-    return (
-      <pre
-        className={cn(
-          "my-3 overflow-x-auto rounded-md border bg-muted/40 p-3 text-xs leading-5",
-          className
-        )}
-        {...restProps}
-      />
-    )
-  },
+  pre: MarkdownPre,
   table(props) {
     const { className, ...restProps } = omitMarkdownNode(props)
     return (
@@ -176,6 +193,7 @@ const markdownComponents: Components = {
 }
 
 export function MarkdownContent({ content, className }: MarkdownContentProps) {
+  const { t } = useLanguage()
   const value = content.trim()
   const components = React.useMemo<Components>(
     () => ({ ...markdownComponents, img: MarkdownImage }),
@@ -183,12 +201,19 @@ export function MarkdownContent({ content, className }: MarkdownContentProps) {
   )
 
   if (!value) {
-    return <p className={cn("text-sm text-muted-foreground", className)}>暂无内容</p>
+    return (
+      <p className={cn("text-sm text-muted-foreground", className)}>
+        {t("暂无内容")}
+      </p>
+    )
   }
 
   return (
     <div className={cn("min-w-0 text-sm leading-6 text-foreground", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkCjkFriendly]}
+        components={components}
+      >
         {value}
       </ReactMarkdown>
     </div>

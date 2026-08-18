@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  BarChart3Icon,
   ChevronDownIcon,
   CircleCheckIcon,
   Building2Icon,
@@ -31,7 +32,10 @@ import { languageOptions } from "@/i18n"
 import { displayWorkspaceName, initials } from "@/lib/display"
 import { getPages } from "@/lib/pages"
 import { themeOptions } from "@/lib/theme-options"
-import { getUserRoleLabel } from "@/components/system/system-utils"
+import {
+  canAccessWorkspaceAnalytics,
+  getUserRoleLabel,
+} from "@/components/system/system-utils"
 
 const PAGE_LINKS: Record<string, string> = {
   apps: "/app/apps",
@@ -69,7 +73,8 @@ export function TopBar() {
     (workspace) => workspace.id !== selectedWorkspaceId
   )
   const featurePages = getPages(t)
-  const isSystemActive = pathname.startsWith("/system")
+  const isAnalyticsActive = pathname.startsWith("/system/analytics")
+  const canAccessAnalytics = canAccessWorkspaceAnalytics(me)
   const canAccessSystem =
     me.user.is_global_admin ||
     me.user.workspaces.some((workspace) => workspace.role === "admin") ||
@@ -159,16 +164,16 @@ export function TopBar() {
               </Button>
             )
           })}
-          {canAccessSystem ? (
+          {canAccessAnalytics ? (
             <Button
               type="button"
-              variant={isSystemActive ? "secondary" : "ghost"}
+              variant={isAnalyticsActive ? "secondary" : "ghost"}
               asChild
               className="h-10 min-w-28 px-4 text-sm"
             >
-              <Link href={systemHref}>
-                <SettingsIcon data-icon="inline-start" />
-                <span className="hidden sm:inline">{t("系统管理")}</span>
+              <Link href="/system/analytics">
+                <BarChart3Icon data-icon="inline-start" />
+                <span className="hidden sm:inline">{t("数据大屏")}</span>
               </Link>
             </Button>
           ) : null}

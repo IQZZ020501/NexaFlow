@@ -1271,7 +1271,7 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
     provider = StreamingProvider(
         [
             ModelCompletion(
-                content="",
+                content="I will search again. ",
                 tool_calls=(ModelToolCall("call-1", "test_tool", "{}"),),
                 finish_reason="tool_calls",
             ),
@@ -1314,6 +1314,47 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
     assert len(emitted[6]["delta"]) == MAX_REASONING_CHARS - len("Inspect ")
     assert len(emitted[7]["event"]["reasoning"]) == MAX_REASONING_CHARS
     assert emitted[-1]["delta"] == "Streamed answer."
+
+
+async def assert_streaming_tool_preamble_is_not_emitted_on_failure() -> None:
+    emitted: list[dict] = []
+
+    async def emit(event: dict) -> None:
+        emitted.append(event)
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        return AgentToolResult(content="tool result", summary="Tool completed.")
+
+    provider = StreamingProvider(
+        [
+            ModelCompletion(
+                content="I will search again. ",
+                tool_calls=(ModelToolCall("call-1", "test_tool", "{}"),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="", tool_calls=(), finish_reason="stop"),
+        ],
+        [[], []],
+    )
+    try:
+        await run_agent(
+            provider,  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [
+                create_agent_tool(
+                    name="test_tool",
+                    description="Test tool",
+                    parameters={"type": "object"},
+                    execute=execute,
+                )
+            ],
+            on_event=emit,
+        )
+    except AgentRunnerError as exc:
+        assert str(exc) == "Agent returned an empty response."
+    else:
+        raise AssertionError("Empty final response was accepted.")
+    assert not [event for event in emitted if event["type"] == "answer_delta"]
 
 
 async def assert_parallel_policy_is_enforced() -> None:
@@ -3070,6 +3111,7 @@ def main() -> None:
     assert_tool_routing_context_is_explicit()
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
     asyncio.run(assert_streaming_run_emits_process_and_answer())
+    asyncio.run(assert_streaming_tool_preamble_is_not_emitted_on_failure())
     asyncio.run(assert_parallel_policy_is_enforced())
     asyncio.run(assert_runtime_budgets_are_enforced())
     asyncio.run(assert_retrieval_progress_uses_evidence_ids())

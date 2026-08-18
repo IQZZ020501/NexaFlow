@@ -17,6 +17,14 @@ export function canManageTeamMembers(me: MeResponse, team: Team) {
   )
 }
 
+export function canAccessWorkspaceAnalytics(me: MeResponse) {
+  return Boolean(
+    me.user.is_global_admin ||
+      me.memberships.some((membership) => membership.role === "admin") ||
+      me.user.workspaces.some((workspace) => workspace.role === "admin")
+  )
+}
+
 export function formatUserWorkspaces(user: User, t: TFunction) {
   if (!user.workspaces.length) {
     return "-"

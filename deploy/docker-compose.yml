@@ -11,7 +11,7 @@ services:
     volumes:
       - ./data/postgresql:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexaflow} -d ${POSTGRES_DB:-nexaflow}"]
+      test: ["CMD-SHELL", "PGAPPNAME=nexaflow-healthcheck pg_isready -U ${POSTGRES_USER:-nexaflow} -d ${POSTGRES_DB:-nexaflow}"]
       interval: 5s
       timeout: 5s
       retries: 10

@@ -28,4 +28,4 @@ RUN set -eux; \
     rm -f /tmp/pg_search.deb; \
     rm -rf /var/lib/apt/lists/*
 
-CMD ["postgres", "-c", "shared_preload_libraries=pg_search"]
+CMD ["postgres", "-c", "shared_preload_libraries=pg_search", "-c", "log_line_prefix=%m [%p] [%a] [%u@%d] [%r] [%i] ", "-c", "log_min_duration_statement=1000", "-c", "log_parameter_max_length=0", "-c", "log_parameter_max_length_on_error=0"]

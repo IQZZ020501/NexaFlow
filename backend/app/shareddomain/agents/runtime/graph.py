@@ -129,6 +129,7 @@ async def agent_node(
     thought = callback.thought(turn)
     await callback.process(thought)
     answer_started = False
+    answer_deltas: list[str] = []
     reasoning = ""
 
     async def emit_reasoning_delta(delta: str) -> None:
@@ -178,7 +179,8 @@ async def agent_node(
                             "Agent model returned an invalid stream message."
                         )
                     await emit_reasoning_delta(reasoning_content(chunk))
-                    await emit_answer_delta(chunk.text)
+                    if chunk.text:
+                        answer_deltas.append(chunk.text)
                     aggregate = chunk if aggregate is None else aggregate + chunk
                 message = message_chunk_to_message(
                     aggregate or AIMessageChunk(content="")
@@ -222,6 +224,10 @@ async def agent_node(
         raise AgentRunnerError("Agent response was truncated.")
     if not completion.content.strip():
         raise AgentRunnerError("Agent returned an empty response.")
+    # ponytail: buffer one model turn; add provisional deltas only if token-level
+    # answer latency matters more than keeping tool preambles out of the answer.
+    for delta in answer_deltas:
+        await emit_answer_delta(delta)
     return {
         "messages": messages,
         "turn": turn,

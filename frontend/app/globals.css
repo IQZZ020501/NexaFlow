@@ -165,3 +165,21 @@
     cursor: pointer;
   }
 }
+
+@layer components {
+  .markdown-shiki .shiki,
+  .markdown-shiki .shiki span {
+    color: var(--shiki-light);
+    font-style: var(--shiki-light-font-style);
+    font-weight: var(--shiki-light-font-weight);
+    text-decoration: var(--shiki-light-text-decoration);
+  }
+
+  .dark .markdown-shiki .shiki,
+  .dark .markdown-shiki .shiki span {
+    color: var(--shiki-dark);
+    font-style: var(--shiki-dark-font-style);
+    font-weight: var(--shiki-dark-font-weight);
+    text-decoration: var(--shiki-dark-text-decoration);
+  }
+}
