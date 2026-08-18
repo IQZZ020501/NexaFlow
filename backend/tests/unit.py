@@ -2125,8 +2125,9 @@ def test_evidence_windows_mark_truncation_and_preserve_article_boundary() -> Non
         cjk_chunk,
         max_chars=100,
     )
-    assert cjk_window.start_offset <= cjk_chunk.start_offset < cjk_window.end_offset
-    assert cjk_window.content.startswith("甲")
+    assert cjk_window.start_offset <= cjk_chunk.start_offset
+    assert cjk_chunk.end_offset <= cjk_window.end_offset
+    assert len(cjk_window.content) <= 100
 
     joined, truncated, ids = bounded_text_chunks(
         [("chunk-1", "a" * 60), ("chunk-2", "b" * 60)],
