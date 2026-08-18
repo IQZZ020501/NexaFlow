@@ -9,11 +9,13 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities.rag.retrieval import (
+    MAX_EVIDENCE_CONTENT_CHARS,
     MAX_RERANK_CHILDREN,
     QUERY_OVERFETCH_FACTOR,
     RankedHit,
     apply_rerank_results,
-    parent_context,
+    bounded_text_chunks,
+    parent_evidence,
     reciprocal_rank_fusion,
 )
 from app.entities.knowledge import (
@@ -323,6 +325,7 @@ async def retrieve_knowledge_base(
 
     assemble_started_at = time.perf_counter()
     responses: list[KnowledgeQueryHitResponse] = []
+    truncated_hits = 0
     if not any(chunk.parent_id for chunk, _ in ordered_hits):
         grouped_hits: dict[
             str,
@@ -333,19 +336,33 @@ async def retrieve_knowledge_base(
         for document_id, hits in list(grouped_hits.items())[: payload.limit]:
             document = documents_by_id[document_id]
             representative_chunk, representative_hit = hits[0]
+            content, content_truncated, contributing_chunk_ids = bounded_text_chunks(
+                [
+                    (chunk.id, chunk.content)
+                    for chunk, _ in sorted(
+                        hits,
+                        key=lambda item: item[0].chunk_index,
+                    )
+                ],
+                MAX_EVIDENCE_CONTENT_CHARS,
+            )
+            truncated_hits += int(content_truncated)
             responses.append(
                 KnowledgeQueryHitResponse(
                     chunk_id=representative_chunk.id,
                     document_id=document_id,
                     document_filename=document.filename,
                     chunk_index=representative_chunk.chunk_index,
-                    content="\n\n".join(
-                        chunk.content
-                        for chunk, _ in sorted(
-                            hits,
-                            key=lambda item: item[0].chunk_index,
-                        )
-                    ),
+                    content=content,
+                    content_truncated=content_truncated,
+                    contributing_chunk_ids=contributing_chunk_ids,
+                    kind=representative_chunk.kind,
+                    question=(representative_chunk.meta or {}).get("question")
+                    if isinstance((representative_chunk.meta or {}).get("question"), str)
+                    else None,
+                    source=(representative_chunk.meta or {}).get("source")
+                    if isinstance((representative_chunk.meta or {}).get("source"), str)
+                    else None,
                     distance=representative_hit.distance,
                     similarity=normalized_cosine_similarity(
                         representative_hit.distance
@@ -388,16 +405,42 @@ async def retrieve_knowledge_base(
             parent = parents_by_id.get(chunk.parent_id) if chunk.parent_id else None
             if chunk.parent_id and parent is None:
                 continue
-            content = (
-                parent_context(parent, chunk)
-                if parent is not None
-                else "\n\n".join(
-                    flat_chunk.content
-                    for flat_chunk, _ in sorted(
-                        flat_hits_by_document[chunk.document_id],
-                        key=lambda item: item[0].chunk_index,
-                    )
+            evidence_window = (
+                parent_evidence(parent, chunk) if parent is not None else None
+            )
+            if evidence_window is not None:
+                content = evidence_window.content
+                content_truncated = evidence_window.truncated
+                evidence_start_offset = evidence_window.start_offset
+                evidence_end_offset = evidence_window.end_offset
+                contributing_chunk_ids = [
+                    child.id
+                    for child, _ in ordered_hits
+                    if child.parent_id == parent.id
+                ][:20] or [chunk.id]
+            else:
+                content, content_truncated, contributing_chunk_ids = bounded_text_chunks(
+                    [
+                        (flat_chunk.id, flat_chunk.content)
+                        for flat_chunk, _ in sorted(
+                            flat_hits_by_document[chunk.document_id],
+                            key=lambda item: item[0].chunk_index,
+                        )
+                    ],
+                    MAX_EVIDENCE_CONTENT_CHARS,
                 )
+                evidence_start_offset = None
+                evidence_end_offset = None
+            truncated_hits += int(content_truncated)
+            section_path = (
+                [
+                    value
+                    for value in (parent.meta or {}).get("section_path", [])
+                    if isinstance(value, str) and value
+                ]
+                if parent is not None
+                and isinstance((parent.meta or {}).get("section_path"), list)
+                else []
             )
             responses.append(
                 KnowledgeQueryHitResponse(
@@ -407,8 +450,20 @@ async def retrieve_knowledge_base(
                     parent_id=parent.id if parent else None,
                     parent_title=parent.title if parent else None,
                     parent_index=parent.parent_index if parent else None,
+                    section_path=section_path,
                     chunk_index=chunk.chunk_index,
                     content=content,
+                    content_truncated=content_truncated,
+                    evidence_start_offset=evidence_start_offset,
+                    evidence_end_offset=evidence_end_offset,
+                    contributing_chunk_ids=contributing_chunk_ids,
+                    kind=chunk.kind,
+                    question=(chunk.meta or {}).get("question")
+                    if isinstance((chunk.meta or {}).get("question"), str)
+                    else None,
+                    source=(chunk.meta or {}).get("source")
+                    if isinstance((chunk.meta or {}).get("source"), str)
+                    else None,
                     distance=hit.distance,
                     similarity=normalized_cosine_similarity(hit.distance),
                     sources=list(hit.sources),
@@ -441,6 +496,7 @@ async def retrieve_knowledge_base(
         fused_candidates=len(ranked_hits),
         rerank_status=rerank_status,
         returned_hits=len(responses),
+        truncated_hits=truncated_hits,
         duration_ms=duration_ms,
         stage_duration_ms=bounded_stage_duration_ms,
     )
@@ -457,6 +513,7 @@ async def retrieve_knowledge_base(
         fused_candidates=trace.fused_candidates,
         rerank_status=trace.rerank_status,
         returned_hits=trace.returned_hits,
+        truncated_hits=trace.truncated_hits,
         duration_ms=trace.duration_ms,
     )
     return KnowledgeQueryInspectResponse(hits=responses, trace=trace)

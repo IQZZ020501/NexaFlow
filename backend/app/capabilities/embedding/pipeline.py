@@ -17,6 +17,7 @@ from app.infrastructure.model_utils import new_id
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150
 PARENT_CHUNK_SIZE = CHUNK_SIZE * 4
+SEGMENTATION_VERSION = "hierarchical-v2"
 EMBED_BATCH_SIZE = 64
 PDF_OCR_LANGUAGE = "chi_sim+eng"
 MARKITDOWN = MarkItDown(enable_plugins=False)
@@ -44,6 +45,11 @@ SUPPORTED_DOCUMENT_EXTENSIONS = frozenset(
 )
 MARKDOWN_HEADING_PATTERN = re.compile(
     r"^\s{0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$"
+)
+PLAIN_SECTION_HEADING_PATTERN = re.compile(
+    r"^\s*(?P<title>第[〇零一二三四五六七八九十百千万两\d]+(?:编|部|篇|章|节)(?:[ \t]+.*)?|"
+    r"[一二三四五六七八九十百千万两\d]+[、.．][ \t]*\S.*|"
+    r"[（(][一二三四五六七八九十百千万两\d]+[）)][ \t]*\S.*)\s*$"
 )
 PDF_INLINE_FORMAT_TAG_PATTERN = re.compile(r"</?(?:sub|sup)>", re.IGNORECASE)
 PDF_CJK_SPACE_PATTERN = re.compile(
@@ -566,14 +572,13 @@ def split_parent_chunks(
             offset += len(line)
             continue
 
-        heading = MARKDOWN_HEADING_PATTERN.match(line.rstrip("\r\n"))
+        heading = _structural_heading(line.rstrip("\r\n"))
         if heading is not None:
             content = text[section_start:offset].strip()
             if content:
                 sections.append((section_title, section_path, content))
             section_start = offset
-            level = len(heading.group(1))
-            section_title = heading.group(2).strip()
+            level, section_title = heading
             heading_stack = heading_stack[: level - 1]
             heading_stack.append(section_title)
             section_path = list(heading_stack)
@@ -594,6 +599,32 @@ def split_parent_chunks(
             for span in split_text_spans(section, max_size, 0, "\n\n")
         )
     return parents
+
+
+def _structural_heading(line: str) -> tuple[int, str] | None:
+    """Recognize headings emitted by Markdown, DOCX, and legal-text parsers.
+
+    MarkItDown commonly emits DOCX headings as plain lines (for example,
+    ``第二章``), so Markdown-only detection silently allowed a parent chunk to
+    span two legal sections. Article lines intentionally do not match because
+    the pattern only accepts 编/部/篇/章/节 markers.
+    """
+    markdown = MARKDOWN_HEADING_PATTERN.match(line)
+    if markdown is not None:
+        return len(markdown.group(1)), markdown.group(2).strip()
+
+    plain = PLAIN_SECTION_HEADING_PATTERN.match(line)
+    if plain is None:
+        return None
+    title = plain.group("title").strip()
+    if title.startswith("第"):
+        marker = re.match(r"第[^编部篇章节]*([编部篇章节])", title)
+        level = 2 if marker and marker.group(1) == "节" else 1
+    elif title[0] in "（(":
+        level = 2
+    else:
+        level = 1
+    return level, title
 
 
 def build_hierarchical_chunks(

@@ -275,7 +275,25 @@ class AgentModelHandler(BaseHTTPRequestHandler):
             (name for name in tool_names if name.startswith("mcp_")),
             None,
         )
-        if "search_knowledge" in tool_names and not any(
+        grounding_call = any(
+            item.get("role") == "system"
+            and "final evidence verifier" in item.get("content", "")
+            for item in body.get("messages", [])
+        )
+        if grounding_call:
+            message = {
+                "role": "assistant",
+                "content": json.dumps(
+                    {
+                        "status": "verified",
+                        "answer": "Completed.",
+                        "evidence_ids": [],
+                        "reason_codes": [],
+                    }
+                ),
+            }
+            finish_reason = "stop"
+        elif "search_knowledge" in tool_names and not any(
             item.get("role") == "tool" for item in body.get("messages", [])
         ):
             message = {

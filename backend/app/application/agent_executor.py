@@ -16,7 +16,10 @@ from app.application.agent_memory import (
     PreparedConversationMemory,
     prepare_conversation_memory,
 )
+from app.application.agent_grounding import verify_grounding
 from app.application.agent_tools import (
+    bounded_knowledge_context,
+    knowledge_packets_from_output,
     build_knowledge_search_tool,
     build_mcp_agent_tool,
     build_unified_agent_tool,
@@ -713,43 +716,44 @@ async def _execute_claimed_agent_run(
         else None
     )
     knowledge_context = ""
+    initial_evidence: list[dict[str, Any]] = []
     if not run.checkpoint and knowledge_tool is not None and run.knowledge_query_mode == "required":
         eager_call_id = f"eager-knowledge-{run.id}"
-        eager_event = next(
-            (event for event in process_events if event.get("call_id") == eager_call_id),
-            None,
+        # The persisted event is deliberately redacted/bounded for UI replay;
+        # it is not authoritative evidence. Re-run the read-only eager query
+        # whenever the durable checkpoint is absent so retries never ground on
+        # a 2,000-character event preview.
+        eager_started_at = time.perf_counter()
+        eager_result = await _invoke_required_knowledge(
+            knowledge_tool,
+            run.goal,
+            settings.agent_tool_timeout_seconds,
         )
-        if eager_event is None:
-            eager_started_at = time.perf_counter()
-            eager_result = await _invoke_required_knowledge(
-                knowledge_tool,
-                run.goal,
-                settings.agent_tool_timeout_seconds,
-            )
-            eager_event = {
-                "type": "tool",
-                "turn": 0,
-                "tool_name": "search_knowledge",
-                "status": "failed" if eager_result.is_error else "succeeded",
-                "summary": eager_result.summary,
-                "call_id": eager_call_id,
-                "tool_label": "knowledge",
-                "tool_kind": "knowledge",
-                "server_name": "",
-                "input": {"query": run.goal},
-                "output": safe_event_value(eager_result.output),
-                "duration_ms": round(
-                    (time.perf_counter() - eager_started_at) * 1000
-                ),
-            }
-            _upsert_process_event(process_events, eager_event)
-            await _append_event(
-                run,
-                {"type": "process", "event": eager_event},
-                worker_task_id=worker_task_id,
-            )
-        knowledge_context = json.dumps(
-            eager_event.get("output")
+        eager_output = eager_result.output
+        eager_event = {
+            "type": "tool",
+            "turn": 0,
+            "tool_name": "search_knowledge",
+            "status": "failed" if eager_result.is_error else "succeeded",
+            "summary": eager_result.summary,
+            "call_id": eager_call_id,
+            "tool_label": "knowledge",
+            "tool_kind": "knowledge",
+            "server_name": "",
+            "input": {"query": run.goal},
+            "output": safe_event_value(eager_result.output),
+            "duration_ms": round(
+                (time.perf_counter() - eager_started_at) * 1000
+            ),
+        }
+        _upsert_process_event(process_events, eager_event)
+        await _append_event(
+            run,
+            {"type": "process", "event": eager_event},
+            worker_task_id=worker_task_id,
+        )
+        knowledge_context = bounded_knowledge_context(
+            eager_output
             or {
                 "query": run.goal,
                 "hits": [],
@@ -758,9 +762,9 @@ async def _execute_claimed_agent_run(
                     if eager_event.get("status") == "failed"
                     else "not_found"
                 ),
-            },
-            ensure_ascii=False,
-        )[:12000]
+            }
+        )
+        initial_evidence = knowledge_packets_from_output(eager_output)
 
     tools: list[StructuredTool] = []
     if knowledge_tool is not None and run.knowledge_query_mode == "agentic":
@@ -827,6 +831,19 @@ async def _execute_claimed_agent_run(
         knowledge_context=knowledge_context,
         context_messages=memory.messages,
     )
+    grounding_handler = None
+    if knowledge_tool is not None:
+
+        async def grounding_handler(draft, evidence_packets):
+            return await verify_grounding(
+                chat_model,
+                question=run.goal,
+                draft=draft,
+                evidence_packets=evidence_packets,
+                attachment_context=run.attachment_context,
+                required=run.knowledge_query_mode == "required",
+            )
+
     if run.configuration_source in {"draft", "published"}:
         unified_runtime = UnifiedAgentToolRuntime(
             run,
@@ -911,6 +928,8 @@ async def _execute_claimed_agent_run(
                     max_turns=max_turns,
                     max_tool_calls=max_tool_calls,
                     max_model_tokens=max_model_tokens,
+                    grounding_handler=grounding_handler,
+                    initial_evidence=initial_evidence,
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc
@@ -925,6 +944,8 @@ async def _execute_claimed_agent_run(
                 last_error=None,
                 finished_at=utc_now(),
                 model_usage=result.model_usage,
+                grounding_status=result.grounding_status,
+                grounding_meta=result.grounding_meta or {},
             )
             await db.commit()
         if not finalized:
@@ -980,6 +1001,12 @@ async def _execute_claimed_agent_run(
                 events=_completed_process_events(process_events),
                 last_error=error,
                 finished_at=utc_now(),
+                grounding_status=(
+                    "unavailable"
+                    if run.grounding_status in {"pending", "not_started"}
+                    else run.grounding_status
+                ),
+                grounding_meta={"error": type(exc).__name__},
             )
             await db.commit()
         try:
@@ -1060,6 +1087,12 @@ async def _fail_unhandled_claimed_run(
             events=_completed_process_events(process_events),
             last_error=error,
             finished_at=utc_now(),
+            grounding_status=(
+                "unavailable"
+                if run.grounding_status in {"pending", "not_started"}
+                else run.grounding_status
+            ),
+            grounding_meta={"error": type(exc).__name__},
         )
         if finalized:
             record_system_log(

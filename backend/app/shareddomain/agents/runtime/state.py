@@ -18,5 +18,9 @@ class AgentState(TypedDict):
     no_new_evidence_rounds: int
     pending_tool_calls: list[PendingToolCall]
     finish_reason: str
+    draft_answer: str
     final_answer: str
+    grounding_status: str
+    grounding_meta: dict[str, Any]
+    evidence_packets: list[dict[str, Any]]
     model_usage: dict[str, Any]

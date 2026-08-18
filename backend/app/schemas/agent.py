@@ -207,6 +207,8 @@ class AgentRunResponse(BaseModel):
     events: list[AgentRunEventResponse]
     result: str
     model_usage: dict[str, Any] = Field(default_factory=dict)
+    grounding_status: str = "not_started"
+    grounding_meta: dict[str, Any] = Field(default_factory=dict)
     last_error: str | None
     planned_at: datetime | None
     started_at: datetime | None

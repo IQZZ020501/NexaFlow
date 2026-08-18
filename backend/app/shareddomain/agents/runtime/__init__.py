@@ -1,6 +1,7 @@
 from app.shareddomain.agents.runtime.callbacks import safe_event_value
 from app.shareddomain.agents.runtime.executor import (
     AgentExecutionResult,
+    AgentGroundingResult,
     deserialize_agent_state,
     run_agent,
     serialize_agent_state,
@@ -22,6 +23,7 @@ from app.shareddomain.agents.runtime.usage import (
 
 __all__ = [
     "AgentExecutionResult",
+    "AgentGroundingResult",
     "AgentRunnerError",
     "AgentToolResult",
     "AgentExecutionPaused",
