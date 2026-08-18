@@ -47,9 +47,8 @@ MARKDOWN_HEADING_PATTERN = re.compile(
     r"^\s{0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$"
 )
 PLAIN_SECTION_HEADING_PATTERN = re.compile(
-    r"^\s*(?P<title>第[〇零一二三四五六七八九十百千万两\d]+(?:编|部|篇|章|节)(?:[ \t]+.*)?|"
-    r"[一二三四五六七八九十百千万两\d]+[、.．][ \t]*\S.*|"
-    r"[（(][一二三四五六七八九十百千万两\d]+[）)][ \t]*\S.*)\s*$"
+    r"^\s*(?P<title>第[〇零一二三四五六七八九十百千万两\d]+"
+    r"(?:编|部|篇|章|节)(?:[ \t]+.*)?)\s*$"
 )
 PDF_INLINE_FORMAT_TAG_PATTERN = re.compile(r"</?(?:sub|sup)>", re.IGNORECASE)
 PDF_CJK_SPACE_PATTERN = re.compile(
@@ -606,8 +605,8 @@ def _structural_heading(line: str) -> tuple[int, str] | None:
 
     MarkItDown commonly emits DOCX headings as plain lines (for example,
     ``第二章``), so Markdown-only detection silently allowed a parent chunk to
-    span two legal sections. Article lines intentionally do not match because
-    the pattern only accepts 编/部/篇/章/节 markers.
+    span two legal sections. Article lines and numbered list items intentionally
+    do not match because the pattern only accepts 编/部/篇/章/节 markers.
     """
     markdown = MARKDOWN_HEADING_PATTERN.match(line)
     if markdown is not None:
@@ -617,13 +616,14 @@ def _structural_heading(line: str) -> tuple[int, str] | None:
     if plain is None:
         return None
     title = plain.group("title").strip()
-    if title.startswith("第"):
-        marker = re.match(r"第[^编部篇章节]*([编部篇章节])", title)
-        level = 2 if marker and marker.group(1) == "节" else 1
-    elif title[0] in "（(":
-        level = 2
-    else:
-        level = 1
+    marker = re.match(r"第[^编部篇章节]*([编部篇章节])", title)
+    level = {
+        "编": 1,
+        "部": 1,
+        "篇": 1,
+        "章": 2,
+        "节": 3,
+    }.get(marker.group(1) if marker else "", 1)
     return level, title
 
 

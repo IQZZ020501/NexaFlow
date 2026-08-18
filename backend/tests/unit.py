@@ -2084,6 +2084,13 @@ def test_plain_legal_headings_keep_chapters_in_separate_parents() -> None:
     chapter_two = parents[1].content
     assert "第十六条" in chapter_two
     assert "第三章" not in chapter_two
+    numbered = split_parent_chunks(
+        "第二章 总则\n（一）适用范围。\n1、说明。\n第二节 细则\n第二条 内容。",
+        max_size=5000,
+    )
+    assert len(numbered) == 2
+    assert numbered[0].section_path == ["第二章 总则"]
+    assert numbered[1].section_path == ["第二章 总则", "第二节 细则"]
 
 
 def test_evidence_windows_mark_truncation_and_preserve_article_boundary() -> None:
@@ -2110,6 +2117,16 @@ def test_evidence_windows_mark_truncation_and_preserve_article_boundary() -> Non
     assert window.truncated is True
     assert "第十六条" in window.content
     assert "[… evidence truncated …]" in window.content
+
+    cjk_content = "甲" * 1_000
+    cjk_chunk = SimpleNamespace(start_offset=900, end_offset=950)
+    cjk_window = parent_evidence(
+        SimpleNamespace(content=cjk_content),
+        cjk_chunk,
+        max_chars=100,
+    )
+    assert cjk_window.start_offset <= cjk_chunk.start_offset < cjk_window.end_offset
+    assert cjk_window.content.startswith("甲")
 
     joined, truncated, ids = bounded_text_chunks(
         [("chunk-1", "a" * 60), ("chunk-2", "b" * 60)],

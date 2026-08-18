@@ -1914,7 +1914,11 @@ async def assert_run_lease_takeover(
             db,
             run.id,
             "worker-3",
-            {"current": "without usage"},
+            {
+                "current": "without usage",
+                "grounding_status": "pending",
+                "grounding_meta": None,
+            },
             "agent",
         )
         checkpointed_run = await agent_repository.get_agent_run_by_id(db, run.id)
@@ -1923,6 +1927,8 @@ async def assert_run_lease_takeover(
             "model_calls": 1,
             "total_tokens": 12,
         }
+        assert checkpointed_run.grounding_status == "pending"
+        assert checkpointed_run.grounding_meta == {}
         assert (
             await agent_repository.append_owned_agent_run_event(
                 db,
@@ -1957,7 +1963,11 @@ async def assert_run_lease_takeover(
         current = await agent_repository.get_agent_run_by_id(db, run.id)
     assert current is not None
     assert current.attempts == 2
-    assert current.checkpoint == {"current": "without usage"}
+    assert current.checkpoint == {
+        "current": "without usage",
+        "grounding_status": "pending",
+        "grounding_meta": None,
+    }
     assert current.model_usage == {"model_calls": 1, "total_tokens": 12}
 
 

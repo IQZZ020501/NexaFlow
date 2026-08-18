@@ -149,12 +149,16 @@ def parent_evidence(
     half = (max_chars - len(EVIDENCE_TRUNCATION_MARKER)) // 2
     start = max(0, min(center - half, len(content) - (max_chars - len(EVIDENCE_TRUNCATION_MARKER))))
     end = start + max_chars - len(EVIDENCE_TRUNCATION_MARKER)
+    raw_start, raw_end = start, end
     while start > 0 and not content[start - 1].isspace():
         start -= 1
     while end < len(content) and not content[end].isspace():
         end += 1
-    if end - start > max_chars - len(EVIDENCE_TRUNCATION_MARKER):
-        end = start + max_chars - len(EVIDENCE_TRUNCATION_MARKER)
+    if (
+        end - start > max_chars - len(EVIDENCE_TRUNCATION_MARKER)
+        or not start <= center < end
+    ):
+        start, end = raw_start, raw_end
 
     # Prefer including the complete article containing the retrieved child
     # when it fits; this avoids cutting between ``第十五条`` and its body.

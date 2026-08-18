@@ -343,7 +343,7 @@ async def retrieve_knowledge_base(
                         hits,
                         key=lambda item: item[0].chunk_index,
                     )
-                ],
+                ][:20],
                 MAX_EVIDENCE_CONTENT_CHARS,
             )
             truncated_hits += int(content_truncated)
@@ -437,7 +437,7 @@ async def retrieve_knowledge_base(
                     value
                     for value in (parent.meta or {}).get("section_path", [])
                     if isinstance(value, str) and value
-                ]
+                ][:12]
                 if parent is not None
                 and isinstance((parent.meta or {}).get("section_path"), list)
                 else []

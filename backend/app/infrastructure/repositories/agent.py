@@ -924,7 +924,7 @@ async def save_agent_run_checkpoint(
     if "grounding_status" in checkpoint:
         values["grounding_status"] = checkpoint["grounding_status"]
     if "grounding_meta" in checkpoint:
-        values["grounding_meta"] = checkpoint["grounding_meta"]
+        values["grounding_meta"] = checkpoint["grounding_meta"] or {}
     result = await db.execute(
         update(AgentRun)
         .where(
