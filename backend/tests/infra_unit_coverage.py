@@ -1933,6 +1933,34 @@ def test_code_sandbox_execute() -> None:
     )
     assert "script crashed" in str(errored)
 
+    busy = _sandbox_expect_error(
+        lambda: _run_sandbox(
+            _FakeSandboxReader(
+                _sandbox_response(
+                    ok=False,
+                    exit_code=1,
+                    stderr="ignored",
+                    error="sandbox_busy",
+                )
+            )
+        )
+    )
+    assert isinstance(busy, code_sandbox.WorkflowSandboxBusyError)
+
+    stderr_busy = _sandbox_expect_error(
+        lambda: _run_sandbox(
+            _FakeSandboxReader(
+                _sandbox_response(
+                    ok=False,
+                    exit_code=1,
+                    stderr="sandbox_busy",
+                    error=None,
+                )
+            )
+        )
+    )
+    assert type(stderr_busy) is code_sandbox.WorkflowSandboxError
+
     # non-int exit code
     invalid_exit = _sandbox_expect_error(
         lambda: _run_sandbox(

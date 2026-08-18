@@ -83,8 +83,9 @@ async def execute_workflow_code(
     stderr = str(response.get("stderr") or "")
     exit_code = response.get("exit_code")
     if response.get("ok") is not True or not isinstance(exit_code, int):
-        reason = str(response.get("error") or stderr or "Code execution failed.")
-        if reason == "sandbox_busy":
+        error = response.get("error")
+        reason = str(error or stderr or "Code execution failed.")
+        if error == "sandbox_busy":
             raise WorkflowSandboxBusyError(reason)
         raise WorkflowSandboxError(reason[:1000])
     marker_index = stdout.rfind(RESULT_MARKER)
