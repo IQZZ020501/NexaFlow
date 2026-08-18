@@ -190,18 +190,18 @@ erDiagram
 | Condition | 有序 `IF / ELSE IF N / ELSE` 分支 + `and/or` 条件组 + 上游字段引用 + 16 种比较符 -> 首个命中分支 handle + `branch_name` | 三家分支基础；对齐 MaxKB 常用确定性判断与分支结构 |
 | Variable | 任意 JSON/引用 -> `value` | 三家变量能力 |
 | Tool | 固定 Tool/Version + 参数 -> 结构化工具输出 | builtin/Python/MCP 共用 WorkflowToolRuntime 与 `tool_invocations` |
-| Inline Python | Python + JSON 输入 -> result/stdout/stderr | 节点 UI 保留 Code 形态，发布/运行时绑定内置 `inline_python` Tool 并使用独立沙箱 |
+| Inline Python | Python + JSON 输入 -> result/stdout/stderr | 持久化仍使用 `code` 节点类型；节点 UI 保留 Code 形态，发布/运行时绑定内置 `inline_python` Tool 并使用独立沙箱 |
 | Agent | 固定已发布 AgentVersion + 输入 -> child Run 结果 | 父运行进入 `awaiting_child`，由 child Run 终态恢复；预算、取消和 deadline 向下传播 |
 
 变量语法为 `{{node_id.path}}`。完整字符串引用保留原 JSON 类型，嵌入字符串时对象和数组序列化为紧凑 JSON。Start 固定输出本次运行的问题（`question`）、上传文件（`files`）以及全局变量：当前时间（`time`，`%Y-%m-%d %H:%M:%S`）、同会话历史（`history_context`，`[{question, answer}]`）、会话 ID（`chat_id`）与运行开始时间戳（`start_time`，epoch 秒）。全局变量可通过 `{{global.<field>}}` 命名空间在任何节点引用（兼容裸引用 `{{time}}` 等）。节点输入框提供「插入变量」选择器：全局变量组 + 沿入边可达的上游节点输出字段（对齐 MaxKB 的 NodeCascader），避免手写错误引用。
 
 节点库另提供“问题优化”预设以生成标准 LLM 节点；“指定回复”是置顶的 `reply-node` 持久化节点类型。
 
-旧版 Template 节点不再允许新增；后端与前端仍保留读取、编辑和执行兼容，避免已有草稿及发布版本失效。
+`mcp` 与 `code` 仍是受支持的持久化兼容节点类型；保存、发布和运行时会分别解析为固定 MCP Tool 引用与内置 `inline_python` Tool。旧版 Template 节点不再允许新增；后端与前端仍保留读取、编辑和执行兼容，避免已有草稿及发布版本失效。
 
 后续再增加 Loop、Iteration、通用 HITL、HTTP、Subworkflow。Form、文档内容提取和单层 Agent 子运行已经落地；图片/音频专用处理、多层 Agent 嵌套和子工作流仍不能仅添加一个卡片即宣称完成。
 
-## 7. Code 生产沙箱
+## 7. Inline Python（持久化 `code`）生产沙箱
 
 Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全局变量 `result` 赋值。worker 通过 `/run/sandbox/sandbox.sock` 发送单行 JSON；API 和 frontend 不挂载该 socket。
 

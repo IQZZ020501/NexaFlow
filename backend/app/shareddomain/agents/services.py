@@ -43,12 +43,13 @@ from app.shareddomain.knowledge.services import (
     get_knowledge_base,
     require_knowledge_base_permission,
 )
-from app.shareddomain.tools.services import resolve_mcp_tools
 from app.shareddomain.tools.bindings import (
+    resolve_application_tool_snapshot_map,
     resolve_application_tool_snapshots,
     resolve_tool_refs_for_actor,
     sync_application_tool_bindings,
 )
+from app.shareddomain.tools.services import resolve_mcp_tools
 from app.shareddomain.workflows.defaults import default_workflow_graph
 from app.shareddomain.workflows.engine import graph_hash
 from app.shareddomain.workflows.uploads import queue_upload_cleanups
@@ -258,6 +259,19 @@ async def agent_has_unpublished_changes(
             agent.id,
         )
     except HTTPException:
+        tools = None
+    return _agent_has_unpublished_changes(agent, knowledge_base_ids, version, tools)
+
+
+def _agent_has_unpublished_changes(
+    agent: Agent,
+    knowledge_base_ids: list[str],
+    version: AgentPublicationVersion | None,
+    tools: list[ToolSnapshot] | None,
+) -> bool:
+    if not agent.published:
+        return False
+    if version is None or version.agent_id != agent.id or tools is None:
         return True
     configuration = build_agent_configuration_snapshot(agent)
     resources = build_agent_resource_snapshot(knowledge_base_ids, tools)
@@ -382,6 +396,20 @@ async def list_agents(
     legacy_mcp_bindings = await tools_repository.list_application_mcp_reference_map(
         db, application_ids
     )
+    publication_versions = await agent_repository.list_agent_publication_version_map(
+        db,
+        workspace_id,
+        [
+            version_id
+            for agent in agents
+            if (version_id := agent.current_published_version_id) is not None
+        ],
+    )
+    tool_snapshot_map = await resolve_application_tool_snapshot_map(
+        db,
+        workspace_id,
+        application_ids,
+    )
     responses: list[AgentResponse] = []
     for agent in agents:
         knowledge_bases = await accessible_agent_knowledge_bases(
@@ -399,10 +427,11 @@ async def list_agents(
                 legacy_mcp_bindings[agent.id],
                 actor,
                 workspace_role,
-                has_unpublished_changes=await agent_has_unpublished_changes(
-                    db,
+                has_unpublished_changes=_agent_has_unpublished_changes(
                     agent,
                     bindings[agent.id],
+                    publication_versions.get(agent.current_published_version_id or ""),
+                    tool_snapshot_map[agent.id],
                 ),
             )
         )

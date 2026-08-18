@@ -181,7 +181,7 @@ async def get_workspace_for_user(db: AsyncSession, workspace_id: str, user: User
 
     membership = await workspace_repository.get_workspace_membership(db, workspace_id, user.id)
     if membership is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace access denied.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
     return workspace
 
 

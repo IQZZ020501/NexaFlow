@@ -274,7 +274,7 @@ def main() -> None:
             f"/api/v1/workspaces/{default_workspace_id}",
             headers=auth_headers(research_token),
         )
-        assert denied_default.status_code == 403, denied_default.text
+        assert denied_default.status_code == 404, denied_default.text
 
         research_workspace = client.get(
             f"/api/v1/workspaces/{research_workspace_id}",

@@ -267,6 +267,86 @@ def _backfill_inline_python(bind: sa.Connection) -> None:
         )
 
 
+def _backfill_inline_python_bindings(bind: sa.Connection) -> None:
+    definitions = sa.table(
+        "workflow_definitions",
+        sa.column("workspace_id", sa.String(36)),
+        sa.column("agent_id", sa.String(36)),
+        sa.column("graph", sa.JSON()),
+        sa.column("updated_by_user_id", sa.String(36)),
+        sa.column("updated_at", sa.DateTime(timezone=True)),
+    )
+    tools = sa.table(
+        "tools",
+        sa.column("id", sa.String(36)),
+        sa.column("workspace_id", sa.String(36)),
+        sa.column("kind", sa.String(20)),
+        sa.column("stable_key", sa.String(255)),
+        sa.column("current_version_id", sa.String(36)),
+    )
+    bindings = sa.table(
+        "application_tool_bindings",
+        sa.column("id", sa.String(36)),
+        sa.column("workspace_id", sa.String(36)),
+        sa.column("application_id", sa.String(36)),
+        sa.column("tool_id", sa.String(36)),
+        sa.column("tool_version_id", sa.String(36)),
+        sa.column("bound_by_user_id", sa.String(36)),
+        sa.column("created_at", sa.DateTime(timezone=True)),
+    )
+    inline_tools = {
+        row["workspace_id"]: row
+        for row in bind.execute(
+            sa.select(tools).where(
+                tools.c.kind == "builtin",
+                tools.c.stable_key == "inline_python",
+            )
+        ).mappings()
+    }
+    existing = {
+        (row["workspace_id"], row["application_id"], row["tool_id"])
+        for row in bind.execute(
+            sa.select(
+                bindings.c.workspace_id,
+                bindings.c.application_id,
+                bindings.c.tool_id,
+            )
+        ).mappings()
+    }
+    rows: list[dict[str, Any]] = []
+    for definition in bind.execute(sa.select(definitions)).mappings():
+        try:
+            _knowledge, _mcp, _canonical, has_code = _graph_references(
+                definition["graph"]
+            )
+        except ValueError:
+            continue
+        if not has_code:
+            continue
+        tool = inline_tools.get(definition["workspace_id"])
+        if tool is None or tool["current_version_id"] is None:
+            raise RuntimeError("Inline Python Tool could not be bound to a Workflow.")
+        key = (definition["workspace_id"], definition["agent_id"], tool["id"])
+        if key in existing:
+            continue
+        rows.append(
+            {
+                "id": _stable_catalog_id(
+                    f"binding:{definition['agent_id']}:{tool['id']}"
+                ),
+                "workspace_id": definition["workspace_id"],
+                "application_id": definition["agent_id"],
+                "tool_id": tool["id"],
+                "tool_version_id": tool["current_version_id"],
+                "bound_by_user_id": definition["updated_by_user_id"],
+                "created_at": definition["updated_at"] or datetime.now(UTC),
+            }
+        )
+        existing.add(key)
+    if rows:
+        bind.execute(bindings.insert(), rows)
+
+
 def _graph_references(
     graph: Any,
 ) -> tuple[list[str], list[tuple[str, str]], list[tuple[str, str]], bool]:
@@ -327,6 +407,26 @@ def _graph_references(
         list(dict.fromkeys(canonical)),
         has_code,
     )
+
+
+def _graph_has_canonical_tool_reference(graph: Any) -> bool:
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
+        return False
+    for node in graph["nodes"]:
+        if not isinstance(node, dict) or not isinstance(node.get("data"), dict):
+            continue
+        data = node["data"]
+        if data.get("type") == "tool":
+            return True
+        config = data.get("config")
+        if (
+            data.get("type") == "llm"
+            and isinstance(config, dict)
+            and isinstance(config.get("tools"), list)
+            and bool(config["tools"])
+        ):
+            return True
+    return False
 
 
 def _tool_snapshot(
@@ -524,7 +624,11 @@ def _backfill_workflow_versions(bind: sa.Connection) -> None:
                 ),
                 "agents": [],
             }
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError) as exc:
+            if _graph_has_canonical_tool_reference(row["graph"]):
+                raise RuntimeError(
+                    "Canonical Workflow Tool references could not be migrated."
+                ) from exc
             resource = legacy
         bind.execute(
             workflow_versions.update()
@@ -563,6 +667,7 @@ def upgrade() -> None:
         sa.Column("resource_hash", sa.String(length=64), nullable=True),
     )
     _backfill_inline_python(bind)
+    _backfill_inline_python_bindings(bind)
     _backfill_workflow_versions(bind)
     legacy = _legacy_snapshot()
     details = sa.table(

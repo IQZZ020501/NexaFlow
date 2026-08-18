@@ -241,17 +241,6 @@ export function PythonToolDialog({
     void loadExistingTool(tool.id)
   }, [loadExistingTool, open, tool])
 
-  async function reload(toolId: string) {
-    const nextDetail = await getTool(token, workspaceId, toolId)
-    setDetail(nextDetail)
-    setForm((current) => ({
-      ...formFromDetail(nextDetail),
-      testArguments: current.testArguments,
-    }))
-    onChanged(nextDetail)
-    return nextDetail
-  }
-
   async function save(showMessage = true) {
     const payload = payloadFromForm(form)
     if (!payload) return null
@@ -266,12 +255,25 @@ export function PythonToolDialog({
         return created
       }
       const revision = detail?.draft?.revision
-      if (!revision) return detail
+      if (revision == null) {
+        onMessage("error", t("工具草稿不存在，请重新加载后重试"))
+        return null
+      }
       await updatePythonToolDraft(token, workspaceId, currentToolId, {
         ...payload,
         expected_revision: revision,
       })
-      const updated = await reload(currentToolId)
+      const updated = await getTool(token, workspaceId, currentToolId)
+      if (updated.draft?.revision == null) {
+        onMessage("error", t("工具草稿不存在，请重新加载后重试"))
+        return null
+      }
+      setDetail(updated)
+      setForm((current) => ({
+        ...formFromDetail(updated),
+        testArguments: current.testArguments,
+      }))
+      onChanged(updated)
       if (showMessage) onMessage("success", t("工具草稿已保存"))
       return updated
     } catch (error) {

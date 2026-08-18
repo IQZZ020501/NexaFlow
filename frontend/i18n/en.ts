@@ -401,6 +401,7 @@ export const en = {
   "暂无可用 Agent": "No Agents available",
   "Python 工具已创建": "Python tool created",
   "工具草稿已保存": "Tool draft saved",
+  "工具草稿不存在，请重新加载后重试": "Tool draft is unavailable. Reload and try again.",
   "工具已发布": "Tool published",
   "工具已启用": "Tool enabled",
   "工具已禁用": "Tool disabled",

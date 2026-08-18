@@ -142,6 +142,7 @@ def _encoded_json(value: Any, limit: int) -> bytes:
             value,
             ensure_ascii=False,
             allow_nan=False,
+            sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
     except (TypeError, ValueError, UnicodeEncodeError) as exc:

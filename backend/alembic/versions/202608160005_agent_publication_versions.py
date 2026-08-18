@@ -1670,50 +1670,40 @@ def upgrade() -> None:
 
     _backfill(bind, versions)
 
-    op.create_foreign_key(
-        "fk_agents_current_publication_workspace",
-        "agents",
-        "agent_publication_versions",
-        ["workspace_id", "id", "current_published_version_id"],
-        ["workspace_id", "agent_id", "id"],
-    )
-    op.create_foreign_key(
-        "fk_agent_runs_publication_workspace",
-        "agent_runs",
-        "agent_publication_versions",
-        ["workspace_id", "agent_id", "agent_publication_version_id"],
-        ["workspace_id", "agent_id", "id"],
-    )
-    op.create_check_constraint(
-        "ck_agent_runs_configuration_source",
-        "agent_runs",
-        "configuration_source IN ('draft', 'published', 'legacy')",
-    )
-    op.create_check_constraint(
-        "ck_agent_runs_snapshot_schema_version",
-        "agent_runs",
-        "snapshot_schema_version >= 1",
-    )
-    op.create_check_constraint(
-        "ck_agent_runs_publication_source",
-        "agent_runs",
-        "(configuration_source = 'published' AND agent_publication_version_id IS NOT NULL) "
-        "OR (configuration_source IN ('draft', 'legacy') "
-        "AND agent_publication_version_id IS NULL)",
-    )
-    for column, column_type in (
-        ("snapshot_schema_version", sa.Integer()),
-        ("configuration_source", sa.String(length=20)),
-        ("application_snapshot", sa.JSON()),
-        ("application_snapshot_hash", sa.String(length=64)),
-        ("tool_snapshots", sa.JSON()),
-    ):
-        op.alter_column(
-            "agent_runs",
-            column,
-            existing_type=column_type,
-            server_default=None,
+    with op.batch_alter_table("agent_runs") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_agent_runs_publication_workspace",
+            "agent_publication_versions",
+            ["workspace_id", "agent_id", "agent_publication_version_id"],
+            ["workspace_id", "agent_id", "id"],
         )
+        batch_op.create_check_constraint(
+            "ck_agent_runs_configuration_source",
+            "configuration_source IN ('draft', 'published', 'legacy')",
+        )
+        batch_op.create_check_constraint(
+            "ck_agent_runs_snapshot_schema_version",
+            "snapshot_schema_version >= 1",
+        )
+        batch_op.create_check_constraint(
+            "ck_agent_runs_publication_source",
+            "(configuration_source = 'published' "
+            "AND agent_publication_version_id IS NOT NULL) "
+            "OR (configuration_source IN ('draft', 'legacy') "
+            "AND agent_publication_version_id IS NULL)",
+        )
+        for column, column_type in (
+            ("snapshot_schema_version", sa.Integer()),
+            ("configuration_source", sa.String(length=20)),
+            ("application_snapshot", sa.JSON()),
+            ("application_snapshot_hash", sa.String(length=64)),
+            ("tool_snapshots", sa.JSON()),
+        ):
+            batch_op.alter_column(
+                column,
+                existing_type=column_type,
+                server_default=None,
+            )
 
 
 def downgrade() -> None:
@@ -1732,31 +1722,29 @@ def downgrade() -> None:
     _restore_migration_grants(bind)
     _restore_legacy_agent_published_snapshots(bind)
     _remove_migrated_agent_tool_invocations(bind)
-    for name in (
-        "ck_agent_runs_publication_source",
-        "ck_agent_runs_snapshot_schema_version",
-        "ck_agent_runs_configuration_source",
-    ):
-        op.drop_constraint(name, "agent_runs", type_="check")
-    op.drop_constraint(
-        "fk_agent_runs_publication_workspace", "agent_runs", type_="foreignkey"
-    )
     op.drop_index(
         op.f("ix_agent_runs_agent_publication_version_id"), table_name="agent_runs"
     )
-    for column in (
-        "tool_snapshots",
-        "application_snapshot_hash",
-        "application_snapshot",
-        "agent_publication_version_id",
-        "configuration_source",
-        "snapshot_schema_version",
-    ):
-        op.drop_column("agent_runs", column)
+    with op.batch_alter_table("agent_runs") as batch_op:
+        for name in (
+            "ck_agent_runs_publication_source",
+            "ck_agent_runs_snapshot_schema_version",
+            "ck_agent_runs_configuration_source",
+        ):
+            batch_op.drop_constraint(name, type_="check")
+        batch_op.drop_constraint(
+            "fk_agent_runs_publication_workspace", type_="foreignkey"
+        )
+        for column in (
+            "tool_snapshots",
+            "application_snapshot_hash",
+            "application_snapshot",
+            "agent_publication_version_id",
+            "configuration_source",
+            "snapshot_schema_version",
+        ):
+            batch_op.drop_column(column)
 
-    op.drop_constraint(
-        "fk_agents_current_publication_workspace", "agents", type_="foreignkey"
-    )
     op.drop_index(
         op.f("ix_agents_current_published_version_id"), table_name="agents"
     )

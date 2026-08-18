@@ -12,10 +12,7 @@ logger = get_logger(__name__)
 
 
 async def enqueue_tool_invocation(invocation_id: str, settings: Settings) -> None:
-    celery_app.conf.update(
-        broker_url=settings.celery_broker_url,
-        task_always_eager=False,
-    )
+    celery_app.conf.update(broker_url=settings.celery_broker_url)
     try:
         await asyncio.to_thread(
             celery_app.send_task,

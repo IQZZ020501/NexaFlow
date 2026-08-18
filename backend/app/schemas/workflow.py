@@ -1,5 +1,6 @@
-from datetime import datetime
+import json
 import re
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from jinja2 import Environment, TemplateSyntaxError
@@ -410,6 +411,22 @@ class WorkflowAgentNodeConfig(BaseModel):
     agent_id: str = Field(min_length=1, max_length=36)
     agent_version_id: str = Field(min_length=1, max_length=36)
     input: Any
+
+    @field_validator("input")
+    @classmethod
+    def validate_input_size(cls, value: Any) -> Any:
+        try:
+            encoded = json.dumps(
+                value,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError, UnicodeEncodeError) as exc:
+            raise ValueError("Workflow Agent input must be valid JSON.") from exc
+        if len(encoded) > 128 * 1024:
+            raise ValueError("Workflow Agent input exceeds 128 KiB.")
+        return value
 
 
 class McpNodeConfig(BaseModel):

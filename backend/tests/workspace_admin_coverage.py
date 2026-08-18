@@ -175,9 +175,9 @@ async def exercise_direct_workspace_service_branches(
         try:
             await get_workspace_for_user(db, other_workspace_id, research)
         except HTTPException as exc:
-            expect(exc, 403)
+            expect(exc, 404)
         else:
-            raise AssertionError("denied get did not 403")
+            raise AssertionError("denied get did not 404")
         assert (await get_workspace_for_user(db, workspace_id, research)).id == workspace_id
         assert (await get_workspace_for_user(db, workspace_id, admin)).id == workspace_id
 
@@ -1283,7 +1283,7 @@ def run_workspace_block() -> None:
             f"/api/v1/workspaces/{default_workspace_id}",
             headers=auth_headers(research_token),
         )
-        assert denied_get.status_code == 403, denied_get.text
+        assert denied_get.status_code == 404, denied_get.text
         member_get = client.get(
             f"/api/v1/workspaces/{research_workspace_id}",
             headers=auth_headers(research_token),

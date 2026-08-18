@@ -4341,8 +4341,6 @@ def test_cancelling_root_run_cancels_active_children() -> None:
         # RUN-020: a late worker finalize after cancellation cannot overwrite
         # the cancelled outcome and never invokes the provider again.
         from app.application.tool_runtime import execute_tool_invocation
-        from app.infrastructure.config import Settings
-
         class LateFinalizeAdapter:
             kind = "mcp"
             calls = 0
@@ -4355,7 +4353,7 @@ def test_cancelling_root_run_cancels_active_children() -> None:
         late = asyncio.run(
             execute_tool_invocation(
                 running_invocation_id,
-                Settings.from_env(require_bootstrap=False),
+                test_settings(),
                 worker_task_id="late-finalize-worker",
                 adapter=late_adapter,
             )

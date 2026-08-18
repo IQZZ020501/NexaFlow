@@ -41,6 +41,7 @@ export function isPrivateMcpUrl(value: string) {
   } catch {
     return false
   }
+  const isIpv6 = hostname.includes(":")
 
   if (
     hostname === "localhost" ||
@@ -49,9 +50,10 @@ export function isPrivateMcpUrl(value: string) {
     hostname === "0.0.0.0" ||
     hostname === "::" ||
     hostname === "::1" ||
-    hostname.startsWith("fc") ||
-    hostname.startsWith("fd") ||
-    /^fe[89ab]/.test(hostname)
+    (isIpv6 &&
+      (hostname.startsWith("fc") ||
+        hostname.startsWith("fd") ||
+        /^fe[89ab]/.test(hostname)))
   ) {
     return true
   }

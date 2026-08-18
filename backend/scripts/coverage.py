@@ -32,6 +32,7 @@ SUITES = (
     "agent_runtime_coverage",
     "infra_unit_coverage",
 )
+COMMAND_TIMEOUT_SECONDS = 30 * 60
 
 
 def _run_suite(suite: str, run_id: int) -> tuple[str, int, Path]:
@@ -42,22 +43,29 @@ def _run_suite(suite: str, run_id: int) -> tuple[str, int, Path]:
         Path(tempfile.gettempdir()) / f"app-test-knowledge-storage-{suite}"
     )
     with log_path.open("wb") as log:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "coverage",
-                "run",
-                "--source=app",
-                f"--data-file=.coverage.{suite}",
-                "-m",
-                f"tests.{suite}",
-            ],
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            env=environment,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "coverage",
+                    "run",
+                    "--source=app",
+                    f"--data-file=.coverage.{suite}",
+                    "-m",
+                    f"tests.{suite}",
+                ],
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                check=False,
+                timeout=COMMAND_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            log.write(
+                f"{suite} timed out after {COMMAND_TIMEOUT_SECONDS} seconds\n".encode()
+            )
+            return suite, 124, log_path
     return suite, result.returncode, log_path
 
 
@@ -101,17 +109,27 @@ def main() -> int:
             return 1
 
     files = _coverage_files()
-    if files:
-        subprocess.run(
-            [sys.executable, "-m", "coverage", "combine", *files], check=True
+    try:
+        if files:
+            subprocess.run(
+                [sys.executable, "-m", "coverage", "combine", *files],
+                check=True,
+                timeout=COMMAND_TIMEOUT_SECONDS,
+            )
+        elif not Path(".coverage").exists():
+            print("no coverage data found", file=sys.stderr)
+            return 1
+        return subprocess.run(
+            [sys.executable, "-m", "coverage", "report", "--fail-under=97", "-m"],
+            check=False,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+        ).returncode
+    except subprocess.TimeoutExpired:
+        print(
+            f"coverage command timed out after {COMMAND_TIMEOUT_SECONDS} seconds",
+            file=sys.stderr,
         )
-    elif not Path(".coverage").exists():
-        print("no coverage data found", file=sys.stderr)
         return 1
-    return subprocess.run(
-        [sys.executable, "-m", "coverage", "report", "--fail-under=97", "-m"],
-        check=False,
-    ).returncode
 
 
 if __name__ == "__main__":

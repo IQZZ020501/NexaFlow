@@ -233,6 +233,72 @@ def load_network_policy_migration():
     return module
 
 
+def test_agent_publication_migration_supports_sqlite_foreign_keys() -> None:
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine, inspect, text
+
+    migration = load_agent_publication_migration()
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=ON"))
+        connection.execute(text("CREATE TABLE workspaces (id TEXT PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE users (id TEXT PRIMARY KEY)"))
+        connection.execute(
+            text(
+                "CREATE TABLE agents ("
+                "id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, "
+                "UNIQUE (workspace_id, id), "
+                "FOREIGN KEY (workspace_id) REFERENCES workspaces(id))"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE agent_runs ("
+                "id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, "
+                "agent_id TEXT NOT NULL, "
+                "FOREIGN KEY (workspace_id, agent_id) "
+                "REFERENCES agents(workspace_id, id))"
+            )
+        )
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration._assert_agent_runs_drained = lambda _bind: None
+        migration._backfill = lambda _bind, _versions: None
+        migration.upgrade()
+
+        inspector = inspect(connection)
+        assert "agent_publication_versions" in inspector.get_table_names()
+        assert {
+            "ck_agent_runs_configuration_source",
+            "ck_agent_runs_snapshot_schema_version",
+            "ck_agent_runs_publication_source",
+        }.issubset(
+            {
+                constraint["name"]
+                for constraint in inspector.get_check_constraints("agent_runs")
+            }
+        )
+        assert any(
+            foreign_key["name"] == "fk_agent_runs_publication_workspace"
+            for foreign_key in inspector.get_foreign_keys("agent_runs")
+        )
+        assert not any(
+            foreign_key["referred_table"] == "agent_publication_versions"
+            for foreign_key in inspector.get_foreign_keys("agents")
+        )
+
+        migration._assert_downgrade_safe = lambda _bind: None
+        migration._restore_migration_grants = lambda _bind: None
+        migration._restore_legacy_agent_published_snapshots = lambda _bind: None
+        migration._remove_migrated_agent_tool_invocations = lambda _bind: None
+        migration.downgrade()
+        inspector = inspect(connection)
+        assert "agent_publication_versions" not in inspector.get_table_names()
+        assert "configuration_source" not in {
+            column["name"] for column in inspector.get_columns("agent_runs")
+        }
+
+
 def load_agent_publication_migration():
     path = (
         Path(__file__).parents[1]
@@ -399,13 +465,18 @@ def test_legacy_disabled_tools_remain_disabled_after_backfill() -> None:
 def test_mcp_function_name_candidates_extend_stable_digest_on_collision() -> None:
     from app.shareddomain.tools.catalog import mcp_function_name_candidates
 
+    migration = load_migration()
     candidates = mcp_function_name_candidates("server-1", "order items!")
     assert candidates[:3] == (
         "mcp_order_items_bd4a7707",
         "mcp_order_items_bd4a77076205",
         "mcp_order_items_bd4a770762057d62",
     )
-    assert len(candidates[-1].rsplit("_", 1)[-1]) == 64
+    assert all(len(candidate) <= 64 for candidate in candidates)
+    assert len(candidates[-1]) == 64
+    assert migration._mcp_function_name_candidates(
+        "server-1", "order items!"
+    ) == candidates
 
 
 def test_resolved_mcp_tool_preserves_catalog_function_name() -> None:
@@ -424,6 +495,19 @@ def test_resolved_mcp_tool_preserves_catalog_function_name() -> None:
     )
 
     assert mcp_function_name(resolved) == "mcp_lookup_bd4a77076205"
+    overlong = ResolvedMcpTool(
+        server=resolved.server,
+        definition=resolved.definition,
+        tool_id=resolved.tool_id,
+        tool_version_id=resolved.tool_version_id,
+        function_name="mcp_" + "x" * 80,
+    )
+    overlong_name = mcp_function_name(overlong)
+    assert len(overlong_name) == 64
+    assert overlong_name == mcp_function_name(overlong)
+    assert overlong_name != mcp_function_name(
+        ResolvedMcpTool(server=resolved.server, definition=resolved.definition)
+    )
 
 
 def test_disabled_mcp_policy_wins_over_definition_drift() -> None:
@@ -4943,7 +5027,7 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
 
         def retry(**kwargs):
             retry_kwargs.update(kwargs)
-            raise RetrySignal()
+            return RetrySignal()
 
         tool_tasks.execute_tool_invocation = busy
         try:
@@ -4954,8 +5038,9 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
                 ),
                 "invocation-2",
             )
-        except RetrySignal:
+        except RetrySignal as exc:
             assert retry_kwargs["countdown"] == 30
+            assert isinstance(exc.__cause__, ToolInvocationBusy)
         else:
             raise AssertionError("A busy Tool invocation must be retried.")
 
@@ -4974,6 +5059,7 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
         ]
 
         dispatched.clear()
+        tool_dispatch.celery_app.conf.task_always_eager = True
         tool_dispatch.celery_app.send_task = lambda *args, **kwargs: dispatched.append(
             {"task": args[0], **kwargs}
         )
@@ -4983,6 +5069,7 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
         assert dispatched == [
             {"task": "app.tools.run", "args": ("invocation-5",)}
         ]
+        assert tool_dispatch.celery_app.conf.task_always_eager is True
         assert calls == [("invocation-1", "tool-worker-1")]
 
         def unavailable(**_kwargs):
@@ -5135,6 +5222,7 @@ def test_tool_tasks_are_registered() -> None:
 
 def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
+    test_agent_publication_migration_supports_sqlite_foreign_keys()
     test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()
     test_legacy_disabled_tools_remain_disabled_after_backfill()
     test_mcp_function_name_candidates_extend_stable_digest_on_collision()

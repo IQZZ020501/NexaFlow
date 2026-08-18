@@ -102,7 +102,11 @@ def _mcp_definition_hash(definition: dict[str, Any]) -> str:
 def _mcp_function_name_candidates(server_id: str, tool_name: str) -> tuple[str, ...]:
     stem = re.sub(r"[^a-zA-Z0-9_-]", "_", tool_name).strip("_")[:40] or "tool"
     digest = hashlib.sha256(f"{server_id}:{tool_name}".encode()).hexdigest()
-    return tuple(f"mcp_{stem}_{digest[:length]}" for length in range(8, 65, 4))
+    candidates = tuple(
+        f"mcp_{stem[: 59 - length]}_{digest[:length]}"
+        for length in range(8, 57, 4)
+    )
+    return (*candidates, f"mcp_{digest[:60]}")
 
 
 def _mcp_function_name(server_id: str, tool_name: str) -> str:
@@ -878,6 +882,7 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
         sa.column("workspace_id", sa.String(36)),
         sa.column("agent_id", sa.String(36)),
         sa.column("graph", sa.JSON()),
+        sa.column("updated_at", sa.DateTime(timezone=True)),
     )
     workflow_versions = sa.table(
         "workflow_versions",
@@ -1052,6 +1057,37 @@ def _backfill(bind: sa.Connection, tables: dict[str, sa.Table]) -> None:
                     tool_name,
                     row["created_by_user_id"],
                 )
+
+    for row in bind.execute(
+        sa.select(
+            workflow_definitions.c.workspace_id,
+            workflow_definitions.c.agent_id,
+            workflow_definitions.c.graph,
+            workflow_definitions.c.updated_at,
+            agents.c.created_by_user_id,
+        ).select_from(
+            workflow_definitions.join(
+                agents,
+                sa.and_(
+                    workflow_definitions.c.workspace_id == agents.c.workspace_id,
+                    workflow_definitions.c.agent_id == agents.c.id,
+                ),
+            )
+        )
+    ).mappings():
+        for server_id, tool_name in _extract_mcp_references(
+            _json_value(row["graph"])
+        ):
+            binding_rows.append(
+                {
+                    "workspace_id": row["workspace_id"],
+                    "agent_id": row["agent_id"],
+                    "mcp_server_id": server_id,
+                    "tool_name": tool_name,
+                    "created_at": row["updated_at"],
+                    "created_by_user_id": row["created_by_user_id"],
+                }
+            )
 
     for row in bind.execute(
         sa.select(

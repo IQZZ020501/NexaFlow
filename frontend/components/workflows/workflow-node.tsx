@@ -446,11 +446,10 @@ function configSummary(node: WorkflowNodeData, t: TFunction) {
         config.tool && typeof config.tool === "object"
           ? (config.tool as Record<string, unknown>)
           : null
-      return (
-        node.tools?.find((item) => item.id === reference?.tool_id)
-          ?.display_name ??
-        (previewValue(reference?.tool_id) || t("未配置"))
-      )
+      const tool = node.tools?.find((item) => item.id === reference?.tool_id)
+      return tool
+        ? toolDisplayName(tool, t)
+        : previewValue(reference?.tool_id) || t("未配置")
     }
     case "agent":
       return (
@@ -1881,30 +1880,34 @@ function NodeConfigFields({
                       </label>
                     )
                   })}
-                  {unavailableSelectedToolRefs.map((reference) => (
-                    <label
-                      key={`${reference.tool_id}:${reference.version_id}`}
-                      className="flex items-center gap-2 text-xs font-normal text-muted-foreground"
-                    >
-                      <input
-                        type="checkbox"
-                        checked
-                        disabled={readOnly}
-                        onChange={() =>
-                          updateConfig({
-                            tools: selectedToolRefs.filter(
-                              (item) => item.tool_id !== reference.tool_id
-                            ),
-                          })
-                        }
-                      />
-                      <span className="min-w-0 truncate">
-                        {tools.find((tool) => tool.id === reference.tool_id)
-                          ?.display_name ?? reference.tool_id}{" "}
-                        {`(${t("不可用")})`}
-                      </span>
-                    </label>
-                  ))}
+                  {unavailableSelectedToolRefs.map((reference) => {
+                    const tool = tools.find(
+                      (item) => item.id === reference.tool_id
+                    )
+                    return (
+                      <label
+                        key={`${reference.tool_id}:${reference.version_id}`}
+                        className="flex items-center gap-2 text-xs font-normal text-muted-foreground"
+                      >
+                        <input
+                          type="checkbox"
+                          checked
+                          disabled={readOnly}
+                          onChange={() =>
+                            updateConfig({
+                              tools: selectedToolRefs.filter(
+                                (item) => item.tool_id !== reference.tool_id
+                              ),
+                            })
+                          }
+                        />
+                        <span className="min-w-0 truncate">
+                          {tool ? toolDisplayName(tool, t) : reference.tool_id}{" "}
+                          {`(${t("不可用")})`}
+                        </span>
+                      </label>
+                    )
+                  })}
                 </>
               ) : (
                 <span className="font-normal text-muted-foreground">

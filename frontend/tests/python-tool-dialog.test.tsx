@@ -264,6 +264,48 @@ describe("PythonToolDialog", () => {
     ).toBe(true)
   })
 
+  test("does not publish edits when the server draft is missing", async () => {
+    const requests: string[] = []
+    const messages: string[] = []
+    let getCount = 0
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      const method = init?.method ?? "GET"
+      requests.push(`${method} ${String(input)}`)
+      if (method === "GET" && ++getCount > 1) {
+        return jsonResponse({ ...detail, draft: null })
+      }
+      return jsonResponse(detail)
+    }) as typeof fetch
+
+    renderPage(
+      <PythonToolDialog
+        open
+        onOpenChange={() => undefined}
+        token="token"
+        workspaceId="ws-1"
+        tool={summary}
+        onChanged={() => undefined}
+        onArchived={() => undefined}
+        onMessage={(_kind, message) => messages.push(message)}
+      />
+    )
+
+    await screen.findByDisplayValue("Formatter")
+    fireEvent.change(screen.getByLabelText("显示名称"), {
+      target: { value: "Unsaved formatter" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "发布" }))
+    await waitFor(() =>
+      expect(messages).toContain("工具草稿不存在，请重新加载后重试")
+    )
+    expect(
+      requests.some((request) => request.endsWith("/tools/tool-1/publish"))
+    ).toBe(false)
+  })
+
   test("creates a new python tool from an empty form", async () => {
     const requests: Array<{ method: string; url: string; body?: unknown }> = []
     const messages: string[] = []

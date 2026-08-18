@@ -1298,15 +1298,45 @@ def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
     else:
         raise AssertionError("Parallel Workflow Agent nodes were accepted.")
 
+    oversized_graph = {
+        "nodes": [
+            node("start", "start"),
+            node(
+                "agent",
+                "agent",
+                {
+                    "agent_id": "agent-1",
+                    "agent_version_id": "version-1",
+                    "input": "x" * (128 * 1024),
+                },
+            ),
+            node("end", "end", {"outputs": {}}),
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "agent"},
+            {"id": "e2", "source": "agent", "target": "end"},
+        ],
+    }
+    try:
+        validate_graph(oversized_graph)
+    except WorkflowValidationError:
+        pass
+    else:
+        raise AssertionError("Oversized Workflow Agent input was accepted.")
+
 
 def test_workflow_tool_invocation_identity_is_stable_and_bounded() -> None:
     from app.application.workflow_tool_runtime import workflow_tool_invocation_identity
+    from app.shareddomain.tools.runtime import tool_arguments_hash
 
     first = workflow_tool_invocation_identity("run-1", "node-1", "call-1")
     second = workflow_tool_invocation_identity("run-1", "node-1", "call-1")
     assert first == second
     assert first[0] == "node-1:call-1"
     assert len(first[1]) == 64
+    assert tool_arguments_hash({"a": 1, "nested": {"b": 2, "c": 3}}) == (
+        tool_arguments_hash({"nested": {"c": 3, "b": 2}, "a": 1})
+    )
 
     try:
         workflow_tool_invocation_identity("run-1", "n" * 200, "c" * 100)
@@ -1401,6 +1431,8 @@ def test_workflow_tool_migration_matches_runtime_catalog() -> None:
     from datetime import UTC, datetime
     from pathlib import Path
 
+    import sqlalchemy as sa
+
     from app.shareddomain.tools.catalog import build_inline_python_tool
 
     path = (
@@ -1458,6 +1490,108 @@ def test_workflow_tool_migration_matches_runtime_catalog() -> None:
         [("tool-1", "version-1")],
         True,
     )
+    assert migration._graph_has_canonical_tool_reference(graph)
+    assert migration._graph_has_canonical_tool_reference(
+        {"nodes": [{"data": {"type": "tool", "config": {}}}]}
+    )
+
+    metadata = sa.MetaData()
+    tools = sa.Table(
+        "tools",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("kind", sa.String, nullable=False),
+        sa.Column("stable_key", sa.String, nullable=False),
+        sa.Column("current_version_id", sa.String),
+    )
+    definitions = sa.Table(
+        "workflow_definitions",
+        metadata,
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("agent_id", sa.String, nullable=False),
+        sa.Column("graph", sa.JSON, nullable=False),
+        sa.Column("updated_by_user_id", sa.String, nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    bindings = sa.Table(
+        "application_tool_bindings",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("application_id", sa.String, nullable=False),
+        sa.Column("tool_id", sa.String, nullable=False),
+        sa.Column("tool_version_id", sa.String, nullable=False),
+        sa.Column("bound_by_user_id", sa.String, nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            tools.insert(),
+            {
+                "id": migrated_tool["id"],
+                "workspace_id": "workspace-1",
+                "kind": "builtin",
+                "stable_key": "inline_python",
+                "current_version_id": migrated_version["id"],
+            },
+        )
+        connection.execute(
+            definitions.insert(),
+            {
+                "workspace_id": "workspace-1",
+                "agent_id": "workflow-1",
+                "graph": {
+                    "nodes": [
+                        {
+                            "data": {
+                                "type": "code",
+                                "config": {"code": "result = {}"},
+                            }
+                        }
+                    ]
+                },
+                "updated_by_user_id": "user-1",
+                "updated_at": created_at,
+            },
+        )
+        migration._backfill_inline_python_bindings(connection)
+        migration._backfill_inline_python_bindings(connection)
+        rows = connection.execute(sa.select(bindings)).mappings().all()
+        assert len(rows) == 1
+        assert rows[0]["application_id"] == "workflow-1"
+        assert rows[0]["tool_version_id"] == migrated_version["id"]
+
+
+def test_coverage_runner_times_out_suites() -> None:
+    import importlib.util
+    import subprocess
+    from pathlib import Path
+
+    path = Path(__file__).parents[1] / "scripts/coverage.py"
+    spec = importlib.util.spec_from_file_location("coverage_runner", path)
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    original_run = runner.subprocess.run
+
+    def timeout(*_args, **kwargs):
+        assert kwargs["timeout"] == runner.COMMAND_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired("coverage", kwargs["timeout"])
+
+    runner.subprocess.run = timeout
+    log_path = None
+    try:
+        suite, returncode, log_path = runner._run_suite("unit", 20260818)
+        assert suite == "unit"
+        assert returncode == 124
+        assert "timed out" in log_path.read_text()
+    finally:
+        runner.subprocess.run = original_run
+        if log_path is not None:
+            log_path.unlink(missing_ok=True)
 
 
 def test_effective_tool_access_matrix() -> None:
@@ -4408,6 +4542,8 @@ def test_run_to_response_maps_run_fields() -> None:
         model_usage={"model_calls": 1, "total_tokens": 12},
     )
     response = run_to_response(run, trace_id="trace-1")
+    child = AgentRun(id="child-1", parent_run_id="parent-1", root_run_id="")
+    assert child.root_run_id == "parent-1"
     assert response.id == "run-1"
     assert response.workspace_id == "ws-1"
     assert response.agent_id == "agent-1"
@@ -5214,6 +5350,7 @@ def main() -> None:
     test_workflow_tool_invocation_identity_is_stable_and_bounded()
     test_workflow_tool_runtime_serializes_unsafe_tools_and_blocks_direct_only_llm()
     test_workflow_tool_migration_matches_runtime_catalog()
+    test_coverage_runner_times_out_suites()
     test_effective_tool_access_matrix()
     test_tool_authorization_applies_builtin_and_global_admin_rules()
     test_python_tool_schema_validation_closes_objects()

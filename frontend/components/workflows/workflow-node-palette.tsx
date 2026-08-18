@@ -40,6 +40,7 @@ type WorkflowNodePaletteProps = {
   ) => void
   t: TFunction
   readOnly?: boolean
+  disabled?: boolean
   isToolsLoading?: boolean
   toolsError?: string | null
   onRetryTools?: () => void
@@ -71,6 +72,7 @@ export function WorkflowNodePalette({
   onAdd,
   t,
   readOnly = false,
+  disabled = false,
   isToolsLoading = false,
   toolsError = null,
   onRetryTools,
@@ -112,6 +114,7 @@ export function WorkflowNodePalette({
     title?: string,
     config?: Record<string, unknown>
   ) {
+    if (disabled) return
     onAdd(type, title, config)
     setOpen(false)
   }
@@ -130,7 +133,12 @@ export function WorkflowNodePalette({
       }}
     >
       <PopoverPrimitive.Trigger asChild>
-        <Button type="button" variant="outline" aria-label={t("添加节点")}>
+        <Button
+          type="button"
+          variant="outline"
+          aria-label={t("添加节点")}
+          disabled={disabled}
+        >
           <PlusIcon />
           <span className="hidden sm:inline">{t("添加节点")}</span>
         </Button>

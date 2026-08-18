@@ -136,15 +136,6 @@ def queued_agent_run_status(generation: str) -> str:
 class Agent(Base):
     __tablename__ = "agents"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["workspace_id", "id", "current_published_version_id"],
-            [
-                "agent_publication_versions.workspace_id",
-                "agent_publication_versions.agent_id",
-                "agent_publication_versions.id",
-            ],
-            name="fk_agents_current_publication_workspace",
-        ),
         UniqueConstraint("workspace_id", "name", name="uq_agents_workspace_name"),
         UniqueConstraint("workspace_id", "id", name="uq_agents_workspace_id"),
         CheckConstraint(

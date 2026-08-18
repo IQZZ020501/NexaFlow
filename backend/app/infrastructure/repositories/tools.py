@@ -7,6 +7,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.resource_permission import ResourcePermission as ResourcePermissionOrm
+from app.domain.user import User as UserOrm
+from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.resource_permission import ResourcePermission
 from app.entities.tools import (
     ApplicationToolBinding,
@@ -18,6 +20,7 @@ from app.entities.tools import (
     ToolSource,
     ToolVersion,
 )
+from app.entities.user import User
 from app.infrastructure.repositories.mapping import save, to_entity
 from app.shareddomain.tools.models import (
     ApplicationToolBinding as ApplicationToolBindingOrm,
@@ -55,6 +58,17 @@ ToolCatalogDetailRow = tuple[
     ResourcePermission | None,
 ]
 McpCatalogRow = tuple[ToolSource, Tool, ToolVersion, ToolPolicy | None]
+ApplicationToolSnapshotRow = tuple[
+    str,
+    ApplicationToolBinding,
+    Tool | None,
+    ToolSource | None,
+    ToolVersion | None,
+    ToolPolicy | None,
+    User | None,
+    str | None,
+    ResourcePermission | None,
+]
 
 
 async def get_tool_source(
@@ -591,6 +605,112 @@ async def list_application_tool_bindings(
         .order_by(ApplicationToolBindingOrm.created_at, ApplicationToolBindingOrm.id)
     )
     return [to_entity(ApplicationToolBinding, row) for row in rows.all()]
+
+
+async def list_application_tool_snapshot_rows(
+    db: AsyncSession,
+    workspace_id: str,
+    application_ids: list[str],
+) -> list[ApplicationToolSnapshotRow]:
+    if not application_ids:
+        return []
+    grant = ResourcePermissionOrm
+    rows = await db.execute(
+        select(
+            ApplicationToolBindingOrm.application_id,
+            ApplicationToolBindingOrm,
+            ToolOrm,
+            ToolSourceOrm,
+            ToolVersionOrm,
+            ToolPolicyOrm,
+            UserOrm,
+            WorkspaceMembershipOrm.role,
+            grant,
+        )
+        .outerjoin(
+            ToolOrm,
+            and_(
+                ToolOrm.workspace_id == ApplicationToolBindingOrm.workspace_id,
+                ToolOrm.id == ApplicationToolBindingOrm.tool_id,
+            ),
+        )
+        .outerjoin(
+            ToolSourceOrm,
+            and_(
+                ToolSourceOrm.workspace_id == ApplicationToolBindingOrm.workspace_id,
+                ToolSourceOrm.id == ToolOrm.source_id,
+            ),
+        )
+        .outerjoin(
+            ToolVersionOrm,
+            and_(
+                ToolVersionOrm.workspace_id
+                == ApplicationToolBindingOrm.workspace_id,
+                ToolVersionOrm.id == ApplicationToolBindingOrm.tool_version_id,
+            ),
+        )
+        .outerjoin(
+            ToolPolicyOrm,
+            and_(
+                ToolPolicyOrm.workspace_id
+                == ApplicationToolBindingOrm.workspace_id,
+                ToolPolicyOrm.tool_id == ApplicationToolBindingOrm.tool_id,
+            ),
+        )
+        .outerjoin(UserOrm, UserOrm.id == ApplicationToolBindingOrm.bound_by_user_id)
+        .outerjoin(
+            WorkspaceMembershipOrm,
+            and_(
+                WorkspaceMembershipOrm.workspace_id
+                == ApplicationToolBindingOrm.workspace_id,
+                WorkspaceMembershipOrm.user_id
+                == ApplicationToolBindingOrm.bound_by_user_id,
+            ),
+        )
+        .outerjoin(
+            grant,
+            and_(
+                grant.workspace_id == ApplicationToolBindingOrm.workspace_id,
+                grant.resource_type == "tool",
+                grant.resource_id == ApplicationToolBindingOrm.tool_id,
+                grant.user_id == ApplicationToolBindingOrm.bound_by_user_id,
+            ),
+        )
+        .where(
+            ApplicationToolBindingOrm.workspace_id == workspace_id,
+            ApplicationToolBindingOrm.application_id.in_(application_ids),
+        )
+        .order_by(
+            ApplicationToolBindingOrm.created_at,
+            ApplicationToolBindingOrm.id,
+        )
+    )
+    return [
+        (
+            application_id,
+            to_entity(ApplicationToolBinding, binding),
+            to_entity(Tool, tool) if tool is not None else None,
+            to_entity(ToolSource, source) if source is not None else None,
+            to_entity(ToolVersion, version) if version is not None else None,
+            to_entity(ToolPolicy, policy) if policy is not None else None,
+            to_entity(User, binder) if binder is not None else None,
+            membership_role,
+            to_entity(ResourcePermission, permission)
+            if permission is not None
+            else None,
+        )
+        for (
+            application_id,
+            binding,
+            tool,
+            source,
+            version,
+            policy,
+            binder,
+            membership_role,
+            permission,
+        ) in rows.all()
+    ]
 
 
 async def list_application_tool_reference_map(
@@ -1168,18 +1288,18 @@ async def has_retained_user_audit_references(
     )
     if invocation_id is not None:
         return True
-    policy_snapshots = await db.scalars(select(ToolInvocationOrm.policy_snapshot))
-    for policy_snapshot in policy_snapshots.all():
-        tool_snapshot = (
-            policy_snapshot.get("tool_snapshot", {})
-            if isinstance(policy_snapshot, dict)
-            else {}
+    snapshot_invocation_id = await db.scalar(
+        select(ToolInvocationOrm.id)
+        .where(
+            ToolInvocationOrm.policy_snapshot["tool_snapshot"][
+                "bound_by_user_id"
+            ].as_string()
+            == user_id
         )
-        if (
-            isinstance(tool_snapshot, dict)
-            and tool_snapshot.get("bound_by_user_id") == user_id
-        ):
-            return True
+        .limit(1)
+    )
+    if snapshot_invocation_id is not None:
+        return True
     draft_id = await db.scalar(
         select(ToolDraftOrm.id)
         .where(ToolDraftOrm.updated_by_user_id == user_id)

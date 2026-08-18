@@ -597,7 +597,7 @@ export function ToolsPage() {
             {t("重试")}
           </Button>
         </div>
-      ) : tools.length === 0 ? (
+      ) : tools.length === 0 && sources.length === 0 ? (
         <div className="flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
           <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
             <WrenchIcon className="size-5" />

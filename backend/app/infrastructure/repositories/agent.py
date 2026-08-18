@@ -195,6 +195,23 @@ async def get_agent_publication_version(
     )
 
 
+async def list_agent_publication_version_map(
+    db: AsyncSession,
+    workspace_id: str,
+    version_ids: list[str],
+) -> dict[str, AgentPublicationVersionEntity]:
+    if not version_ids:
+        return {}
+    rows = await db.scalars(
+        select(AgentPublicationVersion).where(
+            AgentPublicationVersion.workspace_id == workspace_id,
+            AgentPublicationVersion.id.in_(version_ids),
+        )
+    )
+    versions = [to_entity(AgentPublicationVersionEntity, row) for row in rows.all()]
+    return {version.id: version for version in versions}
+
+
 async def has_agent_publication_audit_references(
     db: AsyncSession,
     user_id: str,

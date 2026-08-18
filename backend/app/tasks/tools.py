@@ -33,7 +33,7 @@ def run_tool_invocation_job(self, invocation_id: str) -> None:
         raise self.retry(
             exc=exc,
             countdown=settings.agent_executor_heartbeat_seconds,
-        )
+        ) from exc
 
 
 @celery_app.task(

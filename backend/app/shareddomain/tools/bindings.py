@@ -18,7 +18,10 @@ from app.infrastructure.repositories import tools as repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.shareddomain.tools.catalog import get_tool_catalog_detail
-from app.shareddomain.tools.permissions import require_tool_use
+from app.shareddomain.tools.permissions import (
+    evaluate_tool_authorization,
+    require_tool_use,
+)
 from app.shareddomain.tools.runtime import build_tool_snapshot
 
 
@@ -148,6 +151,66 @@ async def resolve_application_tool_snapshots(
     return sorted(snapshots, key=lambda item: (item.tool_id, item.version_id))
 
 
+async def resolve_application_tool_snapshot_map(
+    db: AsyncSession,
+    workspace_id: str,
+    application_ids: list[str],
+) -> dict[str, list[ToolSnapshot] | None]:
+    snapshots: dict[str, list[ToolSnapshot] | None] = {
+        application_id: [] for application_id in application_ids
+    }
+    rows = await repository.list_application_tool_snapshot_rows(
+        db,
+        workspace_id,
+        application_ids,
+    )
+    for (
+        application_id,
+        binding,
+        tool,
+        source,
+        version,
+        policy,
+        binder,
+        role,
+        grant,
+    ) in rows:
+        items = snapshots[application_id]
+        if items is None:
+            continue
+        if (
+            tool is None
+            or source is None
+            or version is None
+            or policy is None
+            or binder is None
+            or not binder.is_active
+            or (role is None and not binder.is_global_admin)
+        ):
+            snapshots[application_id] = None
+            continue
+        try:
+            require_tool_use(evaluate_tool_authorization(tool, binder, role, grant))
+            snapshot = build_bindable_tool_snapshot(
+                tool,
+                source,
+                version,
+                policy,
+                binding.bound_by_user_id,
+            )
+        except (HTTPException, ValueError):
+            snapshots[application_id] = None
+            continue
+        items.append(snapshot)
+    for application_id, items in snapshots.items():
+        if items is not None:
+            snapshots[application_id] = sorted(
+                items,
+                key=lambda item: (item.tool_id, item.version_id),
+            )
+    return snapshots
+
+
 async def sync_application_tool_bindings(
     db: AsyncSession,
     workspace_id: str,
@@ -189,6 +252,7 @@ async def sync_application_tool_bindings(
 
 __all__ = [
     "build_bindable_tool_snapshot",
+    "resolve_application_tool_snapshot_map",
     "resolve_application_tool_snapshots",
     "resolve_tool_refs_for_actor",
     "sync_application_tool_bindings",

@@ -8,7 +8,6 @@ responses lives here, separate from run orchestration.
 from contextvars import ContextVar
 import hashlib
 import json
-import re
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -36,6 +35,7 @@ from app.shareddomain.agents.runtime import (
 )
 from app.shareddomain.agents.services import accessible_agent_knowledge_bases
 from app.shareddomain.agents.models import agent_run_display_status
+from app.shareddomain.tools.catalog import mcp_function_name as catalog_mcp_function_name
 from app.shareddomain.tools.services import (
     ResolvedMcpTool,
     effective_mcp_tool_policy_mode,
@@ -313,11 +313,11 @@ def build_unified_agent_tool(snapshot: ToolSnapshot) -> StructuredTool:
 
 def mcp_function_name(tool: ResolvedMcpTool) -> str:
     if tool.function_name:
-        return tool.function_name
-    name = tool.definition.name
-    stem = re.sub(r"[^a-zA-Z0-9_-]", "_", name).strip("_")[:40] or "tool"
-    digest = hashlib.sha256(f"{tool.server.id}:{name}".encode()).hexdigest()[:8]
-    return f"mcp_{stem}_{digest}"
+        if len(tool.function_name) <= 64:
+            return tool.function_name
+        digest = hashlib.sha256(tool.function_name.encode()).hexdigest()[:8]
+        return f"{tool.function_name[:55]}_{digest}"
+    return catalog_mcp_function_name(tool.server.id, tool.definition.name)
 
 
 def build_mcp_agent_tool(

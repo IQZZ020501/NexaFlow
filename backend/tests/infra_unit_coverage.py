@@ -3311,6 +3311,36 @@ def test_mcp_tool_policy_services() -> None:
         assert owner_policy.definition_hash == unannotated.version.definition_hash
         assert owner_cas.await_count == 1
 
+    concurrent_leaf = replace(leaf, policy=None)
+    with patch.object(
+        tools_services,
+        "_require_mcp_source_manager",
+        new=AsyncMock(return_value=concurrent_leaf.source),
+    ), patch.object(
+        tools_services,
+        "get_mcp_catalog_leaf",
+        new=AsyncMock(return_value=concurrent_leaf),
+    ), patch.object(
+        tools_services.tools_repository,
+        "save_tool_policy",
+        new=AsyncMock(
+            side_effect=IntegrityError("insert", {}, RuntimeError("duplicate"))
+        ),
+    ):
+        expect_http_error(
+            lambda: run(
+                tools_services.set_mcp_tool_policy(
+                    db,
+                    server,
+                    "echo",
+                    "read_only",
+                    actor,
+                )
+            ),
+            409,
+        )
+        assert db.rollback.await_count == 1
+
     with patch.object(
         tools_services,
         "_require_mcp_source_manager",
@@ -3347,20 +3377,15 @@ def test_retained_tool_user_reference_query() -> None:
     assert run(tools_repo.has_retained_user_audit_references(invocation_db, "u1"))
 
     snapshot_db = AsyncMock()
-    snapshot_db.scalar.side_effect = [None, None]
-    snapshot_db.scalars.return_value = SimpleNamespace(
-        all=lambda: [{"tool_snapshot": {"bound_by_user_id": "u1"}}]
-    )
+    snapshot_db.scalar.side_effect = [None, None, "snapshot-invocation-1"]
     assert run(tools_repo.has_retained_user_audit_references(snapshot_db, "u1"))
 
     draft_db = AsyncMock()
-    draft_db.scalar.side_effect = [None, None, "draft-1"]
-    draft_db.scalars.return_value = SimpleNamespace(all=lambda: [])
+    draft_db.scalar.side_effect = [None, None, None, "draft-1"]
     assert run(tools_repo.has_retained_user_audit_references(draft_db, "u1"))
 
     empty_db = AsyncMock()
-    empty_db.scalar.side_effect = [None, None, None]
-    empty_db.scalars.return_value = SimpleNamespace(all=lambda: [])
+    empty_db.scalar.side_effect = [None, None, None, None]
     assert not run(tools_repo.has_retained_user_audit_references(empty_db, "u1"))
 
 

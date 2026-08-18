@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.agent_runs import prepare_agent_run
 from app.application.tool_runtime import preflight_tool_snapshot
 from app.application.workspace import build_workspace_context
-from app.entities.agents import AgentRun
+from app.entities.agents import AgentPublicationVersion, AgentRun
+from app.entities.tools import ToolSnapshot
 from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.model_utils import new_id, utc_now
@@ -72,6 +73,49 @@ async def _require_snapshot_binder(
         raise ValueError("Workflow Agent access was revoked.") from exc
 
 
+async def _validated_snapshot_tools(
+    db: AsyncSession,
+    workspace_id: str,
+    snapshot: dict[str, Any],
+) -> tuple[AgentPublicationVersion, list[ToolSnapshot]]:
+    version_id = snapshot.get("version_id")
+    agent_id = snapshot.get("agent_id")
+    if not isinstance(version_id, str) or not isinstance(agent_id, str):
+        raise ValueError("Workflow Agent snapshot is invalid.")
+    version = await agent_repository.get_agent_publication_version(
+        db,
+        workspace_id,
+        version_id,
+    )
+    if (
+        version is None
+        or version.agent_id != agent_id
+        or version.configuration_hash != snapshot.get("configuration_hash")
+        or version.configuration_snapshot != snapshot.get("configuration_snapshot")
+        or version.resource_snapshot != snapshot.get("resource_snapshot")
+        or agent_publication_hash(
+            version.configuration_snapshot,
+            version.resource_snapshot,
+        )
+        != version.configuration_hash
+    ):
+        raise ValueError("Workflow Agent publication changed or is invalid.")
+    await _require_snapshot_binder(db, workspace_id, snapshot)
+    try:
+        tools = [
+            tool_snapshot_from_payload(item)
+            for item in version.resource_snapshot.get("tools", [])
+        ]
+    except ValueError as exc:
+        raise ValueError("Workflow Agent Tool snapshot is invalid.") from exc
+    if any(
+        tool.approval != "auto" or tool.effect not in SAFE_CHILD_EFFECTS
+        for tool in tools
+    ):
+        raise ValueError("Workflow Agent Tools must be automatic and read-only.")
+    return version, tools
+
+
 async def preflight_workflow_agent_snapshots(
     db: AsyncSession,
     workspace_id: str,
@@ -81,41 +125,7 @@ async def preflight_workflow_agent_snapshots(
     access_source: str,
 ) -> None:
     for snapshot in snapshots:
-        version_id = snapshot.get("version_id")
-        agent_id = snapshot.get("agent_id")
-        if not isinstance(version_id, str) or not isinstance(agent_id, str):
-            raise ValueError("Workflow Agent snapshot is invalid.")
-        version = await agent_repository.get_agent_publication_version(
-            db,
-            workspace_id,
-            version_id,
-        )
-        if (
-            version is None
-            or version.agent_id != agent_id
-            or version.configuration_hash != snapshot.get("configuration_hash")
-            or version.configuration_snapshot != snapshot.get("configuration_snapshot")
-            or version.resource_snapshot != snapshot.get("resource_snapshot")
-            or agent_publication_hash(
-                version.configuration_snapshot,
-                version.resource_snapshot,
-            )
-            != version.configuration_hash
-        ):
-            raise ValueError("Workflow Agent publication changed or is invalid.")
-        await _require_snapshot_binder(db, workspace_id, snapshot)
-        try:
-            tools = [
-                tool_snapshot_from_payload(item)
-                for item in version.resource_snapshot.get("tools", [])
-            ]
-        except ValueError as exc:
-            raise ValueError("Workflow Agent Tool snapshot is invalid.") from exc
-        if any(
-            tool.approval != "auto" or tool.effect not in SAFE_CHILD_EFFECTS
-            for tool in tools
-        ):
-            raise ValueError("Workflow Agent Tools must be automatic and read-only.")
+        _version, tools = await _validated_snapshot_tools(db, workspace_id, snapshot)
         for tool in tools:
             if await preflight_tool_snapshot(
                 db,
@@ -158,42 +168,15 @@ async def ensure_workflow_agent_child(
         )
     ) >= MAX_WORKFLOW_CHILDREN:
         raise ValueError("Workflow child Agent limit reached.")
+    if remaining_model_tokens <= 0:
+        raise ValueError("Workflow child Agent token budget exhausted.")
 
-    version_id = snapshot.get("version_id")
-    agent_id = snapshot.get("agent_id")
-    if not isinstance(version_id, str) or not isinstance(agent_id, str):
-        raise ValueError("Workflow Agent snapshot is invalid.")
-    version = await agent_repository.get_agent_publication_version(
+    version, _tools = await _validated_snapshot_tools(
         db,
         parent.workspace_id,
-        version_id,
+        snapshot,
     )
-    if (
-        version is None
-        or version.agent_id != agent_id
-        or version.configuration_hash != snapshot.get("configuration_hash")
-        or version.configuration_snapshot != snapshot.get("configuration_snapshot")
-        or version.resource_snapshot != snapshot.get("resource_snapshot")
-        or agent_publication_hash(
-            version.configuration_snapshot,
-            version.resource_snapshot,
-        )
-        != version.configuration_hash
-    ):
-        raise ValueError("Workflow Agent publication changed or is invalid.")
-    await _require_snapshot_binder(db, parent.workspace_id, snapshot)
-    try:
-        tools = [
-            tool_snapshot_from_payload(item)
-            for item in version.resource_snapshot.get("tools", [])
-        ]
-    except ValueError as exc:
-        raise ValueError("Workflow Agent Tool snapshot is invalid.") from exc
-    if any(
-        tool.approval != "auto" or tool.effect not in SAFE_CHILD_EFFECTS
-        for tool in tools
-    ):
-        raise ValueError("Workflow Agent Tools must be automatic and read-only.")
+    agent_id = version.agent_id
 
     child, _model = await prepare_agent_run(
         db,
@@ -220,7 +203,7 @@ async def ensure_workflow_agent_child(
             "deadline_at": deadline_at,
             "max_turns": MAX_CHILD_TURNS,
             "max_tool_calls": MAX_CHILD_TOOL_CALLS,
-            "max_model_tokens": max(1, remaining_model_tokens),
+            "max_model_tokens": remaining_model_tokens,
         },
     }
     return await agent_repository.save_agent_run(db, child)

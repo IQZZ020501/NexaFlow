@@ -1014,23 +1014,27 @@ async def assert_direct_access_units(
             assert locked_agent is not None
             current_publication_id = locked_agent.current_published_version_id
             assert current_publication_id is not None
-            locked_agent.current_published_version_id = None
-            await agent_repository.save_agent(db, locked_agent)
-            await db.commit()
-            await _expect_http(
-                409,
-                agent_access.create_external_agent_run(
-                    db,
-                    live_context,
-                    "public",
-                    "stale-publication-consumer",
-                    "Stale publication question",
-                    settings,
-                ),
-            )
-            locked_agent.current_published_version_id = current_publication_id
-            await agent_repository.save_agent(db, locked_agent)
-            await db.commit()
+            try:
+                locked_agent.current_published_version_id = None
+                await agent_repository.save_agent(db, locked_agent)
+                await db.commit()
+                await _expect_http(
+                    409,
+                    agent_access.create_external_agent_run(
+                        db,
+                        live_context,
+                        "public",
+                        "stale-publication-consumer",
+                        "Stale publication question",
+                        settings,
+                    ),
+                )
+            finally:
+                locked_agent = await agent_repository.lock_agent(db, agent_id)
+                assert locked_agent is not None
+                locked_agent.current_published_version_id = current_publication_id
+                await agent_repository.save_agent(db, locked_agent)
+                await db.commit()
             direct_run_response = await agent_access.create_external_agent_run(
                 db, live_context, "public", "direct-consumer", "Direct question",
                 settings,

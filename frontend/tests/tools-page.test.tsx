@@ -192,6 +192,7 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findByText("Empty MCP")
+    expect(screen.queryByText("还没有工具")).toBeNull()
     const emptySourceCard = screen.getByText("Empty MCP").closest("article")!
     expect(within(emptySourceCard).getByText("工具")).toBeTruthy()
     expect(within(emptySourceCard).getByText("0")).toBeTruthy()
@@ -351,7 +352,7 @@ describe("ToolsPage", () => {
     ).toBe(true)
 
     fireEvent.change(screen.getByLabelText("MCP 地址"), {
-      target: { value: "https://tools.example.com/mcp" },
+      target: { value: "https://fdn.example.com/mcp" },
     })
     expect(
       (

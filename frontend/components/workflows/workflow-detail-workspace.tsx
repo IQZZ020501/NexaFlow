@@ -207,6 +207,7 @@ export function WorkflowDetailWorkspace({
   const [runDetailsOpen, setRunDetailsOpen] = React.useState(false)
   const [runExpanded, setRunExpanded] = React.useState(false)
   const [canvasGeneration, setCanvasGeneration] = React.useState(0)
+  const [isCanvasReady, setIsCanvasReady] = React.useState(false)
   const [runQuestion, setRunQuestion] = React.useState("")
   const [runFiles, setRunFiles] = React.useState<File[]>([])
   const [runQuestionInvalid, setRunQuestionInvalid] = React.useState(false)
@@ -220,6 +221,7 @@ export function WorkflowDetailWorkspace({
   const handleAddNodeReady = React.useCallback(
     (handler: WorkflowNodeAddHandler | null) => {
       addNodeRef.current = handler
+      setIsCanvasReady(Boolean(handler))
     },
     []
   )
@@ -802,6 +804,7 @@ export function WorkflowDetailWorkspace({
             toolsError={toolsError}
             onRetryTools={onRetryTools}
             graph={graph}
+            disabled={!isCanvasReady}
             onAdd={(type, title, config) =>
               addNodeRef.current?.(type, title, config)
             }

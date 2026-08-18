@@ -3099,6 +3099,22 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
                 await ensure_workflow_agent_child(
                     db,
                     branch_parent,
+                    "branch-budget",
+                    "goal",
+                    snapshot,
+                    actor,
+                    "admin",
+                    deadline_at=future_deadline,
+                    remaining_model_tokens=0,
+                )
+            except ValueError as exc:
+                assert "token budget exhausted" in str(exc)
+            else:
+                raise AssertionError("Exhausted child token budget was accepted.")
+            try:
+                await ensure_workflow_agent_child(
+                    db,
+                    branch_parent,
                     "branch-invalid",
                     "goal",
                     {"version_id": None, "agent_id": agent_id},

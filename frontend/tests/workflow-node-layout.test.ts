@@ -4,8 +4,9 @@ import { join } from "node:path"
 
 function expectStringArray(text: string, values: string[], negated = false) {
   const members = values.map((value) => JSON.stringify(value)).join(",\\s*")
-  const prefix = negated ? "!" : ""
-  expect(text).toMatch(new RegExp(`${prefix}\\[\\s*${members},?\\s*\\]`))
+  const pattern = new RegExp(`\\[\\s*${members},?\\s*\\]`)
+  if (negated) expect(text).not.toMatch(pattern)
+  else expect(text).toMatch(pattern)
 }
 
 const source = readFileSync(
@@ -250,6 +251,8 @@ test("the node palette stays anchored, viewport-bounded, and hidden when read-on
   expect(paletteSource).toContain("h-[32rem]")
   expect(paletteSource).toContain("max-h-[calc(100svh-2rem)]")
   expect(paletteSource).toContain("if (readOnly) return null")
+  expect(paletteSource).toContain("disabled={disabled}")
+  expect(detailSource).toContain("disabled={!isCanvasReady}")
 })
 
 test("reranker settings stay inside the fixed-width node card", () => {
@@ -515,8 +518,7 @@ test("LLM outputs use translated labels at the bottom of its settings", () => {
       "code",
       "document-extract-node",
       "form-node",
-    ],
-    true
+    ]
   )
 })
 

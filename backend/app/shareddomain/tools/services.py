@@ -719,7 +719,14 @@ async def set_mcp_tool_policy(
     policy.reviewed_at = utc_now()
     policy.updated_at = policy.reviewed_at
     if expected_revision is None:
-        policy = await tools_repository.save_tool_policy(db, policy)
+        try:
+            policy = await tools_repository.save_tool_policy(db, policy)
+        except IntegrityError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "MCP Tool policy was updated concurrently.",
+            ) from exc
     else:
         saved_policy = await tools_repository.update_tool_policy_if_revision(
             db,

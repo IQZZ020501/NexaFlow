@@ -23,6 +23,9 @@ api/{auth,workspaces,teams,tool_sources,tools,mcp_servers,admin/users,admin/audi
 - `backend/app/domain/workspace.py` — Workspace 与 WorkspaceMembership 实体（状态/角色约束）
 - `backend/app/domain/team.py` — Team 与 TeamMembership 实体（复合外键约束）
 - `backend/app/domain/resource_permission.py` — ResourcePermission ORM（知识库、Agent 与 Tool 的资源级授权）
+
+### app/entities/（纯领域实体）
+
 - `backend/app/entities/tools.py` — ToolSource、Tool、Version、Draft、Policy、Binding、Snapshot 与 Invocation 纯实体
 
 ### app/application/

@@ -79,7 +79,11 @@ def normalize_mcp_definition(definition: dict[str, Any]) -> dict[str, Any]:
 def mcp_function_name_candidates(server_id: str, tool_name: str) -> tuple[str, ...]:
     stem = re.sub(r"[^a-zA-Z0-9_-]", "_", tool_name).strip("_")[:40] or "tool"
     digest = hashlib.sha256(f"{server_id}:{tool_name}".encode()).hexdigest()
-    return tuple(f"mcp_{stem}_{digest[:length]}" for length in range(8, 65, 4))
+    candidates = tuple(
+        f"mcp_{stem[: 59 - length]}_{digest[:length]}"
+        for length in range(8, 57, 4)
+    )
+    return (*candidates, f"mcp_{digest[:60]}")
 
 
 def mcp_function_name(server_id: str, tool_name: str) -> str:
