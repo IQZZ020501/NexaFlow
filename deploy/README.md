@@ -7,8 +7,8 @@ the Next.js frontend.
 ## Quick start
 
 ```bash
-cp deploy/.env.example deploy/.env   # then edit secrets
-docker compose -f deploy/docker-compose.yml up --build
+cp .env.example .env   # then edit secrets
+docker compose --env-file .env -f deploy/docker-compose.yml up --build
 ```
 
 - API: http://localhost:8000 (`/health`, `/api/v1/...`)
@@ -18,22 +18,18 @@ docker compose -f deploy/docker-compose.yml up --build
 
 To run only PostgreSQL, Redis, and Qdrant (while running the backend and
 frontend directly on the host, e.g. `make dev` + `bun dev`), use the dev
-override. It publishes `5432`/`6379`/`6333` to the host and pins readable
-container names (`nexaflow-db`, `nexaflow-redis`, `nexaflow-qdrant`):
+override. It publishes PostgreSQL on `POSTGRES_PORT` (default `5432`) plus
+Redis/Qdrant on `6379`/`6333`, and pins readable container names
+(`nexaflow-db`, `nexaflow-redis`, `nexaflow-qdrant`):
 
 ```bash
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d db redis qdrant
+docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d db redis qdrant
 ```
 
-No `deploy/.env` is required for this flow. The compose defaults match
-`backend/.env.example` (`nexaflow`/`nexaflow`/`nexaflow`). If you override
-either side, keep `POSTGRES_*` and `backend/.env`'s `DATABASE_URL` in sync
-before PostgreSQL initializes; changing them later does not rewrite an
-existing data directory.
-
-Point `backend/.env` at the published endpoints
-(`postgresql+psycopg://nexaflow:nexaflow@localhost:5432/nexaflow`,
-`redis://localhost:6379/0`, `http://127.0.0.1:6333`) and run migrations with
+The host backend and Compose use the same root `.env`. `POSTGRES_*` configures
+both the published PostgreSQL service and the backend connection; the backend
+safely constructs the URL, so credentials are not duplicated inside a
+hand-written `DATABASE_URL`. Run migrations with
 `cd backend && uv run python -m alembic upgrade head`.
 When the API runs on the host and the Compose worker is enabled, the dev
 override mounts `backend/storage` at the worker's `/data`; keep
@@ -60,14 +56,25 @@ Persistent volumes: `db-data` (PostgreSQL), `redis-data`, `qdrant-data`, and
 
 ## Configuration
 
-All runtime configuration comes from `deploy/.env` (see `.env.example`).
-The compose file overrides `DATABASE_URL` and `CELERY_BROKER_URL` to point at
-the bundled services, connects the API and worker to the bundled Qdrant through
-`QDRANT_URL`, and mounts the uploads volume for `KNOWLEDGE_STORAGE_DIR`.
-PostgreSQL credentials in `deploy/.env` must stay in sync with the ones in
-`backend/.env`'s `DATABASE_URL` (default `nexaflow`/`nexaflow`/`nexaflow`) —
-they configure the same database, accessed from the host and from the compose
-network respectively.
+All runtime configuration comes from the repository-root `.env` (see
+`.env.example`). The base compose file forces `ENVIRONMENT=production`, clears
+the optional host `DATABASE_URL`, and overrides `POSTGRES_HOST`, Redis, Qdrant,
+and upload-storage locations for the container network. The development
+override sets the worker back to `ENVIRONMENT=development`.
+
+Leave `DATABASE_URL` empty for the normal setup. The backend safely constructs
+it from `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, and
+`POSTGRES_PORT`. If a host deployment needs a full `DATABASE_URL`, its user,
+password, and database must match any configured `POSTGRES_*` components or
+startup fails instead of silently using drifted credentials. Existing
+PostgreSQL data directories are not rewritten when these values change.
+The bundled Compose topology always uses its `db` service; an external database
+requires a deployment-specific Compose override.
+
+For production, replace every example secret and set `CORS_ORIGINS` to the
+actual frontend origins. The base compose file already supplies the production
+environment mode; host-managed production processes must set
+`ENVIRONMENT=production` themselves.
 `JWT_EXPIRES_MINUTES` controls access token lifetime;
 `REFRESH_TOKEN_EXPIRES_DAYS` controls persisted refresh sessions.
 `AGENT_EXECUTOR_LEASE_SECONDS` and `AGENT_EXECUTOR_HEARTBEAT_SECONDS` control
@@ -78,6 +85,23 @@ Agent runs.
 Celery uses `solo` automatically on macOS (HTTPS trust evaluation is unsafe
 after a multithreaded process fork) and Windows (`prefork` needs `os.fork()`,
 which Windows lacks); Linux containers keep `prefork`.
+
+### Migrating from split environment files
+
+1. Copy `.env.example` to the repository-root `.env`.
+2. Merge the existing secrets and shared application values from
+   `backend/.env` and `deploy/.env` into that file.
+3. Copy the old database name, user, and password into `POSTGRES_*`; normally
+   leave `DATABASE_URL` empty so the backend constructs it for each runtime.
+   Wrap literal values containing spaces, `#`, or `$` in single quotes, and do
+   not use `${VAR}` expansion in the shared file.
+4. Validate both Compose modes with the commands below, then remove the two old
+   local files. They are no longer read.
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml config --quiet
+docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml config --quiet
+```
 
 ### Python code sandbox
 
@@ -157,7 +181,7 @@ docker build -f deploy/dockerfiles/frontend.Dockerfile \
 Run migrations before first start or after upgrading:
 
 ```bash
-docker compose -f deploy/docker-compose.yml run --rm api alembic upgrade head
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm api alembic upgrade head
 ```
 
 Knowledge BM25 migrations require `pg_search` 0.25.2. The bundled database

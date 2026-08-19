@@ -97,10 +97,10 @@ flowchart LR
 ### 1. 准备配置
 
 ```bash
-cp deploy/.env.example deploy/.env
+cp .env.example .env
 ```
 
-编辑 `deploy/.env`，至少替换以下值：
+编辑根目录 `.env`，至少替换以下值：
 
 - `POSTGRES_PASSWORD`
 - `JWT_SECRET_KEY`
@@ -112,10 +112,10 @@ cp deploy/.env.example deploy/.env
 ### 2. 初始化并启动
 
 ```bash
-docker compose -f deploy/docker-compose.yml build db
-docker compose -f deploy/docker-compose.yml up -d db redis qdrant sandbox
-docker compose -f deploy/docker-compose.yml run --rm --build api alembic upgrade head
-docker compose -f deploy/docker-compose.yml up -d --build
+docker compose --env-file .env -f deploy/docker-compose.yml build db
+docker compose --env-file .env -f deploy/docker-compose.yml up -d db redis qdrant sandbox
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm --build api alembic upgrade head
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 ```
 
 `db` 镜像内置 PostgreSQL 17、`pg_search` 0.25.2 及 `pgvector`，并在数据库启动时预加载 `pg_search`。使用外部 PostgreSQL 时必须先安装 `pg_search` 与 `pgvector`，将 `pg_search` 加入 `shared_preload_libraries` 并重启数据库，再执行 Alembic 迁移。
@@ -128,19 +128,19 @@ docker compose -f deploy/docker-compose.yml up -d --build
 - API 健康检查：<http://localhost:8000/health>
 - OpenAPI：<http://localhost:8000/docs>
 
-使用 `deploy/.env` 中的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 登录。首次登录必须修改初始密码。
+使用根目录 `.env` 中的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 登录。首次登录必须修改初始密码。
 
 ### 3. 查看状态与日志
 
 ```bash
-docker compose -f deploy/docker-compose.yml ps
-docker compose -f deploy/docker-compose.yml logs -f api worker frontend
+docker compose --env-file .env -f deploy/docker-compose.yml ps
+docker compose --env-file .env -f deploy/docker-compose.yml logs -f api worker frontend
 ```
 
 停止服务：
 
 ```bash
-docker compose -f deploy/docker-compose.yml down
+docker compose --env-file .env -f deploy/docker-compose.yml down
 ```
 
 数据保存在 `deploy/data` 的 bind mount 中，`down` 不会删除它。如需重置本地数据，必须先停止相关容器；不要在 Redis、PostgreSQL 或 Qdrant 运行时删除其挂载目录。
@@ -149,13 +149,13 @@ docker compose -f deploy/docker-compose.yml down
 
 ## 本地开发
 
-本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。Windows 需要额外安装 GNU Make；Makefile 目标通过 Python 编排，不依赖 Bash。此模式只在 Docker 中运行 PostgreSQL、Redis、Qdrant、Worker 和沙箱，API 与前端直接在宿主机运行；不需要 `deploy/.env`。
+本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。Windows 需要额外安装 GNU Make；Makefile 目标通过 Python 编排，不依赖 Bash。此模式只在 Docker 中运行 PostgreSQL、Redis、Qdrant、Worker 和沙箱，API 与前端直接在宿主机运行；宿主机和容器共用根目录 `.env`。
 
 ### 1. 首次初始化
 
 ```bash
-test -f backend/.env || cp backend/.env.example backend/.env
-docker compose \
+test -f .env || cp .env.example .env
+docker compose --env-file .env \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.dev.yml \
   up -d --build db redis qdrant
@@ -168,12 +168,12 @@ cd ../frontend
 bun install --frozen-lockfile
 ```
 
-默认配置使用本机端口 `5432`、`6379` 和 `6333`。如果修改数据库账号或端口，需要同时更新 `backend/.env`。
+默认配置使用本机端口 `5432`、`6379` 和 `6333`。后端会从同一份 `POSTGRES_*` 组件安全构造宿主机连接串，Compose 则显式覆盖容器内主机名，无需重复维护数据库账号。
 
 ### 2. 启动容器服务
 
 ```bash
-docker compose \
+docker compose --env-file .env \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.dev.yml \
   up -d --build db redis qdrant sandbox worker
@@ -252,7 +252,7 @@ python3 -m sandbox.self_check
 - 远程 MCP 默认拒绝私网与回环地址；只有明确可信的部署才应启用 `MCP_ALLOW_PRIVATE_NETWORKS`。
 - stdio MCP 配置允许工作空间管理员启动后端进程，因此只应向可信管理员开放管理权限。
 - Python Tool 与 Python Code 节点必须运行在独立沙箱服务中；不要把沙箱 socket 暴露给 API 或宿主外部网络。
-- 不要提交 `backend/.env`、`deploy/.env`、模型凭据或其他真实密钥。
+- 不要提交根目录 `.env`、模型凭据或其他真实密钥。
 
 ## 贡献
 

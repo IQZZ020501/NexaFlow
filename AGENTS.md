@@ -70,9 +70,11 @@ Correctness, safety, evidence, and validation take priority over speed.
 - Hand-written SQL goes under `backend/app/infrastructure/sql/<feature>/` for
   explicit write workflows, seed data, and complex queries; keep parameter
   binding in Python services.
-- `backend/.env.example` documents initialization env keys. Real `.env` files are
-  local-only and gitignored; bootstrap admin credentials and managed-user initial
-  passwords must come from env values, not Python constants.
+- Root `.env.example` is the only environment template; host backend commands
+  and Compose both read root `.env`, while Compose explicitly overrides
+  container-only endpoints. Real `.env` files are local-only and gitignored;
+  bootstrap admin credentials and managed-user initial passwords must come from
+  env values, not Python constants.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
 - Knowledge keyword retrieval uses `pg_search` 0.25.2 BM25 over

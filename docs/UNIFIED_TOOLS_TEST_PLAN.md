@@ -419,8 +419,8 @@ bun run build
 
 # Compose 静态与 sandbox 自检
 cd ..
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml config --quiet
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml \
+docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml config --quiet
+docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml \
   run --rm --no-deps --entrypoint python sandbox -m sandbox.self_check
 ```
 
