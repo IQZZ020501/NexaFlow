@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { IconButton } from "../components/ui/icon-button"
+import { IconButton } from "../src/components/ui/icon-button"
 
 test("icon button forwards dropdown trigger attributes", () => {
   const markup = renderToStaticMarkup(

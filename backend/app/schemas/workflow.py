@@ -536,6 +536,7 @@ class WorkflowNodeExecutionResponse(BaseModel):
 class WorkflowRunResponse(BaseModel):
     id: str
     conversation_id: str
+    regenerated_from_run_id: str | None = None
     workspace_id: str
     agent_id: str
     requested_by_user_id: str | None
@@ -557,6 +558,8 @@ class WorkflowRunResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     pending_form: WorkflowPendingForm | None = None
+    feedback: Literal["positive", "negative"] | None = None
+    feedback_updated_at: datetime | None = None
 
 
 class WorkflowNodeExecutionListResponse(BaseModel):
@@ -619,6 +622,7 @@ class ExternalWorkflowProgressEventResponse(BaseModel):
 class ExternalWorkflowRunResponse(BaseModel):
     id: str
     conversation_id: str
+    regenerated_from_run_id: str | None = None
     inputs: dict[str, Any]
     outputs: dict[str, Any]
     status: str
@@ -629,6 +633,8 @@ class ExternalWorkflowRunResponse(BaseModel):
     finished_at: datetime | None
     updated_at: datetime
     pending_form: WorkflowPendingForm | None = None
+    feedback: Literal["positive", "negative"] | None = None
+    feedback_updated_at: datetime | None = None
 
 
 class ExternalWorkflowRunListResponse(BaseModel):

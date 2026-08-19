@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AnalyticsCountComparison(BaseModel):
@@ -46,6 +46,11 @@ class WorkspaceAnalyticsTrendPoint(BaseModel):
     input_tokens: int
     output_tokens: int
     total_tokens: int
+
+
+class WorkspaceAnalyticsHourlyPoint(BaseModel):
+    hour: int = Field(ge=0, le=23)
+    runs: int
 
 
 class WorkspaceAnalyticsDistributionItem(BaseModel):
@@ -114,6 +119,7 @@ class WorkspaceAnalyticsMetadata(BaseModel):
 class WorkspaceAnalyticsResponse(BaseModel):
     summary: WorkspaceAnalyticsSummary
     trends: list[WorkspaceAnalyticsTrendPoint]
+    hourly_runs: list[WorkspaceAnalyticsHourlyPoint]
     distributions: WorkspaceAnalyticsDistributions
     rankings: WorkspaceAnalyticsRankings
     frequent_questions: list[WorkspaceAnalyticsFrequentQuestion]

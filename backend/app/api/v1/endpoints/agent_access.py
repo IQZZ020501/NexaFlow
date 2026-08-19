@@ -26,7 +26,9 @@ from app.application.agents import (
     list_external_agent_runs,
     list_external_agent_run_tool_calls,
     list_public_agent_conversations,
+    regenerate_external_agent_run,
     resolve_external_agent_tool_approval,
+    set_external_agent_run_feedback,
     stream_external_agent_run,
     upload_public_agent_files,
 )
@@ -45,6 +47,7 @@ from app.schemas.agent import (
     PublicAgentConversationListResponse,
     PublicAgentProfileResponse,
     PublicAgentRunCreateRequest,
+    RunFeedbackRequest,
 )
 
 _api_key_scheme = HTTPBearer(auto_error=False)
@@ -167,6 +170,50 @@ async def get_public_agent_run(
         user.id,
     )
     return external_run_to_response(run)
+
+
+@public_router.post(
+    "/runs/{run_id}/regenerate",
+    response_model=ExternalAgentRunResponse,
+)
+async def regenerate_public_agent_run(
+    agent_id: str,
+    run_id: str,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> ExternalAgentRunResponse:
+    context = await get_workspace_published_agent_context(db, agent_id, user)
+    return await regenerate_external_agent_run(
+        db,
+        context,
+        run_id,
+        "public",
+        user.id,
+        settings,
+    )
+
+
+@public_router.post(
+    "/runs/{run_id}/feedback",
+    response_model=ExternalAgentRunResponse,
+)
+async def set_public_agent_run_feedback(
+    agent_id: str,
+    run_id: str,
+    payload: RunFeedbackRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> ExternalAgentRunResponse:
+    await get_workspace_published_agent_context(db, agent_id, user)
+    return await set_external_agent_run_feedback(
+        db,
+        agent_id,
+        run_id,
+        "public",
+        user.id,
+        payload.value,
+    )
 
 
 @public_router.get("/runs/{run_id}/stream", response_class=StreamingResponse)

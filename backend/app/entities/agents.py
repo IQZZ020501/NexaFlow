@@ -87,6 +87,7 @@ class AgentRun:
     root_run_id: str = ""
     parent_run_id: str | None = None
     parent_node_id: str | None = None
+    regenerated_from_run_id: str | None = None
     depth: int = 0
     goal: str = ""
     attachment_context: str = ""
@@ -111,6 +112,8 @@ class AgentRun:
     checkpoint_phase: str = "agent"
     grounding_status: str = "not_started"
     grounding_meta: dict[str, Any] = field(default_factory=dict)
+    feedback: str | None = None
+    feedback_updated_at: datetime | None = None
     trace_id: str = ""
     plan: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)

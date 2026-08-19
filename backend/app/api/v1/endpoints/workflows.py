@@ -20,6 +20,7 @@ from app.application.workflows import (
     get_workflow_run,
     list_workflow_node_executions,
     list_workflow_runs,
+    regenerate_workflow_run,
     list_workflow_versions,
     publish_workflow_definition,
     restore_workflow_version,
@@ -27,6 +28,7 @@ from app.application.workflows import (
     validate_workflow_definition,
     stream_workflow_run,
     submit_workflow_form,
+    set_workflow_run_feedback,
     upload_workspace_workflow_files,
 )
 from app.schemas.workflow import (
@@ -43,6 +45,7 @@ from app.schemas.workflow import (
     WorkflowVersionResponse,
     WorkflowUploadResponse,
 )
+from app.schemas.agent import RunFeedbackRequest
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/workflows",
@@ -257,6 +260,50 @@ async def cancel_run(
         run_id,
         context.user,
         context.membership_role,
+    )
+
+
+@router.post(
+    "/{agent_id}/runs/{run_id}/regenerate",
+    response_model=WorkflowRunResponse,
+)
+async def regenerate_workspace_workflow_run(
+    agent_id: str,
+    run_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkflowRunResponse:
+    return await regenerate_workflow_run(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        context.user,
+        context.membership_role,
+        settings,
+    )
+
+
+@router.post(
+    "/{agent_id}/runs/{run_id}/feedback",
+    response_model=WorkflowRunResponse,
+)
+async def set_workspace_workflow_run_feedback(
+    agent_id: str,
+    run_id: str,
+    payload: RunFeedbackRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkflowRunResponse:
+    return await set_workflow_run_feedback(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        context.user,
+        context.membership_role,
+        payload.value,
     )
 
 

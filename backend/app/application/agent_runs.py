@@ -5,6 +5,7 @@ surface): preparing, executing, streaming, and listing agent runs.
 """
 
 import asyncio
+from copy import deepcopy
 import json
 from collections.abc import AsyncIterator
 from datetime import timedelta
@@ -40,6 +41,7 @@ from app.shareddomain.agents.services import (
 )
 from app.shareddomain.agents.permissions import require_agent_view
 from app.shareddomain.agents.models import (
+    AGENT_RUN_SUCCEEDED_STATUS,
     agent_run_generation,
     queued_agent_run_status,
 )
@@ -218,6 +220,7 @@ async def list_agent_runs(
             limit,
             offset,
             conversation_id=conversation_id,
+            latest_versions_only=True,
         )
     ]
 
@@ -296,6 +299,223 @@ async def get_agent_run_entity(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent run not found.")
     return run
+
+
+async def validate_regeneration_source(
+    db: AsyncSession,
+    source: AgentRun,
+    *,
+    origin: str,
+) -> None:
+    if source.status != AGENT_RUN_SUCCEEDED_STATUS:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Only a completed run can be regenerated.",
+        )
+    if await agent_repository.get_active_agent_run(
+        db,
+        source.agent_id,
+        source.access_source,
+        source.consumer_id,
+        source.conversation_id,
+    ) is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This conversation already has an active run.",
+        )
+    if source.configuration_source == "published":
+        version = (
+            await agent_repository.get_agent_publication_version(
+                db,
+                source.workspace_id,
+                source.agent_publication_version_id,
+            )
+            if source.agent_publication_version_id
+            else None
+        )
+        if version is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "The source publication is no longer available.",
+            )
+        try:
+            agent_publication_from_version(version)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "The source publication is no longer valid.",
+            ) from exc
+        if source.application_snapshot != {
+            "schema_version": version.schema_version,
+            "configuration": version.configuration_snapshot,
+            "resources": version.resource_snapshot,
+        } or source.application_snapshot_hash != version.configuration_hash:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "The source publication snapshot changed.",
+            )
+    try:
+        await get_agent_model(db, source.workspace_id, source.model_id)
+    except HTTPException as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "The source Agent model is no longer available.",
+        ) from exc
+    try:
+        snapshots = [tool_snapshot_from_payload(item) for item in source.tool_snapshots]
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "The source run snapshot is invalid.",
+        ) from exc
+    for snapshot in snapshots:
+        if await preflight_tool_snapshot(
+            db,
+            snapshot,
+            origin=origin,
+            workspace_id=source.workspace_id,
+            execution_user_id=source.execution_user_id,
+            access_source=source.access_source,
+        ) is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "A source Tool is no longer executable.",
+            )
+
+
+def build_regenerated_agent_run(source: AgentRun, actor: User) -> AgentRun:
+    """Create a fresh root run from an immutable source snapshot."""
+    return AgentRun(
+        workspace_id=source.workspace_id,
+        agent_id=source.agent_id,
+        requested_by_user_id=actor.id if source.access_source == "console" else None,
+        execution_user_id=(
+            actor.id if source.access_source == "console" else source.execution_user_id
+        ),
+        access_source=source.access_source,
+        consumer_id=source.consumer_id,
+        conversation_id=source.conversation_id,
+        goal=source.goal,
+        attachment_context=source.attachment_context,
+        instructions=source.instructions,
+        knowledge_base_ids=deepcopy(source.knowledge_base_ids),
+        knowledge_query_mode=source.knowledge_query_mode,
+        mcp_tools=deepcopy(source.mcp_tools),
+        snapshot_schema_version=source.snapshot_schema_version,
+        configuration_source=source.configuration_source,
+        agent_publication_version_id=source.agent_publication_version_id,
+        application_snapshot=deepcopy(source.application_snapshot),
+        application_snapshot_hash=source.application_snapshot_hash,
+        tool_snapshots=deepcopy(source.tool_snapshots),
+        model_id=source.model_id,
+        model_name=source.model_name,
+        regenerated_from_run_id=source.id,
+        status=queued_agent_run_status(agent_run_generation(source.configuration_source)),
+        checkpoint_phase="agent",
+        trace_id=new_id(),
+    )
+
+
+async def regenerate_agent_run_from_source(
+    db: AsyncSession,
+    source: AgentRun,
+    actor: User,
+    settings: Settings,
+    *,
+    origin: str = "agent",
+) -> AgentRun:
+    await validate_regeneration_source(db, source, origin=origin)
+    regenerated = build_regenerated_agent_run(source, actor)
+    try:
+        regenerated = await agent_repository.create_agent_run(db, regenerated)
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This conversation already has an active run.",
+        ) from exc
+    await enqueue_prepared_agent_run(
+        regenerated.id,
+        settings,
+        unified=regenerated.configuration_source in {"draft", "published"},
+    )
+    current = await agent_repository.get_agent_run_by_id(db, regenerated.id)
+    assert current is not None
+    return current
+
+
+async def update_run_feedback(
+    db: AsyncSession,
+    run: AgentRun,
+    value: str | None,
+) -> AgentRun:
+    if run.status != AGENT_RUN_SUCCEEDED_STATUS or not run.result:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Feedback is available only for completed results.",
+        )
+    if value not in {None, "positive", "negative"}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid feedback.")
+    if run.feedback == value:
+        return run
+    run.feedback = value
+    run.feedback_updated_at = utc_now() if value is not None else None
+    run = await agent_repository.save_agent_run(db, run)
+    await db.commit()
+    current = await agent_repository.get_agent_run_by_id(db, run.id)
+    assert current is not None
+    return current
+
+
+async def regenerate_agent_run(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    run_id: str,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+) -> AgentRunResponse:
+    source = await get_agent_run_entity(
+        db,
+        workspace_id,
+        agent_id,
+        run_id,
+        actor,
+        workspace_role,
+    )
+    current_agent = await get_agent(db, workspace_id, agent_id)
+    if current_agent.status != ACTIVE_STATUS:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Agent is disabled.")
+    regenerated = await regenerate_agent_run_from_source(
+        db,
+        source,
+        actor,
+        settings,
+    )
+    return run_to_response(regenerated, trace_id=regenerated.trace_id)
+
+
+async def set_agent_run_feedback(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    run_id: str,
+    actor: User,
+    workspace_role: str | None,
+    value: str | None,
+) -> AgentRunResponse:
+    source = await get_agent_run_entity(
+        db,
+        workspace_id,
+        agent_id,
+        run_id,
+        actor,
+        workspace_role,
+    )
+    updated = await update_run_feedback(db, source, value)
+    return run_to_response(updated, trace_id=updated.trace_id)
 
 
 def tool_call_to_response(call: Any) -> AgentToolCallResponse:

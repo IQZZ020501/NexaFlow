@@ -16,10 +16,8 @@ from app.application.agent_memory import (
     PreparedConversationMemory,
     prepare_conversation_memory,
 )
-from app.application.agent_grounding import verify_grounding
 from app.application.agent_tools import (
     bounded_knowledge_context,
-    knowledge_packets_from_output,
     build_knowledge_search_tool,
     build_mcp_agent_tool,
     build_unified_agent_tool,
@@ -716,7 +714,6 @@ async def _execute_claimed_agent_run(
         else None
     )
     knowledge_context = ""
-    initial_evidence: list[dict[str, Any]] = []
     if not run.checkpoint and knowledge_tool is not None and run.knowledge_query_mode == "required":
         eager_call_id = f"eager-knowledge-{run.id}"
         # The persisted event is deliberately redacted/bounded for UI replay;
@@ -764,7 +761,6 @@ async def _execute_claimed_agent_run(
                 ),
             }
         )
-        initial_evidence = knowledge_packets_from_output(eager_output)
 
     tools: list[StructuredTool] = []
     if knowledge_tool is not None and run.knowledge_query_mode == "agentic":
@@ -831,19 +827,6 @@ async def _execute_claimed_agent_run(
         knowledge_context=knowledge_context,
         context_messages=memory.messages,
     )
-    grounding_handler = None
-    if knowledge_tool is not None:
-
-        async def grounding_handler(draft, evidence_packets):
-            return await verify_grounding(
-                chat_model,
-                question=run.goal,
-                draft=draft,
-                evidence_packets=evidence_packets,
-                attachment_context=run.attachment_context,
-                required=run.knowledge_query_mode == "required",
-            )
-
     if run.configuration_source in {"draft", "published"}:
         unified_runtime = UnifiedAgentToolRuntime(
             run,
@@ -928,8 +911,6 @@ async def _execute_claimed_agent_run(
                     max_turns=max_turns,
                     max_tool_calls=max_tool_calls,
                     max_model_tokens=max_model_tokens,
-                    grounding_handler=grounding_handler,
-                    initial_evidence=initial_evidence,
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { ApiError, request } from "../lib/api-client"
+import { ApiError, request } from "../src/lib/api-client"
 
 const originalFetch = globalThis.fetch
 

@@ -7,12 +7,12 @@ const readSource = (path: string) =>
 
 describe("App Router scroll candidates", () => {
   test("renders normal route content before fixed progress indicators", () => {
-    const providersSource = readSource("../contexts/app-providers.tsx")
+    const providersSource = readSource("../src/contexts/app-providers.tsx")
     expect(providersSource.indexOf("{children}")).toBeLessThan(
       providersSource.indexOf("<TopProgress />")
     )
 
-    const sessionGateSource = readSource("../components/app/session-gate.tsx")
+    const sessionGateSource = readSource("../src/components/app/session-gate.tsx")
     const loadingBranch = sessionGateSource.slice(
       sessionGateSource.indexOf("if (!isSessionRestored")
     )
@@ -20,7 +20,7 @@ describe("App Router scroll candidates", () => {
       loadingBranch.indexOf("<TopLoadingBar")
     )
 
-    const agentsPageSource = readSource("../components/agents/agents-page.tsx")
+    const agentsPageSource = readSource("../src/components/agents/agents-page.tsx")
     expect(
       agentsPageSource.indexOf('<div className="flex flex-col gap-4')
     ).toBeLessThan(agentsPageSource.indexOf("<TopLoadingBar"))

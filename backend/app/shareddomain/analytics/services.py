@@ -20,6 +20,7 @@ from app.schemas.analytics import (
     WorkspaceAnalyticsDistributions,
     WorkspaceAnalyticsDistributionItem,
     WorkspaceAnalyticsFrequentQuestion,
+    WorkspaceAnalyticsHourlyPoint,
     WorkspaceAnalyticsMemberSummary,
     WorkspaceAnalyticsMetadata,
     WorkspaceAnalyticsRankings,
@@ -250,6 +251,19 @@ def _build_trends(
     ]
 
 
+def _build_hourly_runs(
+    runs: list[WorkspaceAnalyticsRun],
+) -> list[WorkspaceAnalyticsHourlyPoint]:
+    values = [0] * 24
+    for run in runs:
+        if run.created_at is not None:
+            values[_utc(run.created_at).hour] += 1
+    return [
+        WorkspaceAnalyticsHourlyPoint(hour=hour, runs=count)
+        for hour, count in enumerate(values)
+    ]
+
+
 def _build_rankings(
     runs: list[WorkspaceAnalyticsRun],
     team_members: list[WorkspaceAnalyticsTeamMember],
@@ -469,6 +483,7 @@ async def get_workspace_analytics(
             ),
         ),
         trends=_build_trends(current_runs, period),
+        hourly_runs=_build_hourly_runs(current_runs),
         distributions=WorkspaceAnalyticsDistributions(
             run_types=_distribution(Counter(run.app_type for run in current_runs)),
             access_sources=_distribution(

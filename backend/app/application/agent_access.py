@@ -15,9 +15,11 @@ from app.application.agent_runs import (
     enqueue_prepared_agent_run,
     list_canonical_agent_run_tool_calls,
     prepare_agent_run,
+    regenerate_agent_run_from_source,
     resolve_agent_run_tool_approval,
     stream_agent_run,
     tool_call_to_response,
+    update_run_feedback,
 )
 from app.application.workspace import WorkspaceContext, build_workspace_context
 from app.entities.agents import (
@@ -375,6 +377,11 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
     return ExternalAgentRunResponse(
         id=str(value["id"]),
         conversation_id=str(value["conversation_id"]),
+        regenerated_from_run_id=(
+            str(value["regenerated_from_run_id"])
+            if value.get("regenerated_from_run_id")
+            else None
+        ),
         question=str(value.get("goal") or value.get("question") or ""),
         status=run_status,
         result=str(value.get("result") or ""),
@@ -384,6 +391,8 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
         started_at=value.get("started_at"),
         finished_at=value.get("finished_at"),
         updated_at=value["updated_at"],
+        feedback=value.get("feedback"),
+        feedback_updated_at=value.get("feedback_updated_at"),
     )
 
 
@@ -875,6 +884,53 @@ async def get_external_agent_run(
     return run
 
 
+async def regenerate_external_agent_run(
+    db: AsyncSession,
+    context: PublishedAgentContext,
+    run_id: str,
+    access_source: ExternalAccessSource,
+    consumer_id: str,
+    settings: Settings,
+) -> ExternalAgentRunResponse:
+    if access_source != "public":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent run not found.")
+    source = await get_external_agent_run(
+        db,
+        context.agent.id,
+        run_id,
+        access_source,
+        consumer_id,
+    )
+    regenerated = await regenerate_agent_run_from_source(
+        db,
+        source,
+        context.publisher,
+        settings,
+    )
+    return external_run_to_response(regenerated)
+
+
+async def set_external_agent_run_feedback(
+    db: AsyncSession,
+    agent_id: str,
+    run_id: str,
+    access_source: ExternalAccessSource,
+    consumer_id: str,
+    value: str | None,
+) -> ExternalAgentRunResponse:
+    if access_source != "public":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent run not found.")
+    source = await get_external_agent_run(
+        db,
+        agent_id,
+        run_id,
+        access_source,
+        consumer_id,
+    )
+    updated = await update_run_feedback(db, source, value)
+    return external_run_to_response(updated)
+
+
 async def list_external_agent_run_tool_calls(
     db: AsyncSession,
     agent_id: str,
@@ -932,6 +988,7 @@ async def list_external_agent_runs(
         limit,
         offset,
         conversation_id=conversation_id,
+        latest_versions_only=True,
     )
     total = await agent_repository.count_agent_runs(
         db,
@@ -939,6 +996,7 @@ async def list_external_agent_runs(
         access_source=access_source,
         consumer_id=consumer_id,
         conversation_id=conversation_id,
+        latest_versions_only=True,
     )
     return ExternalAgentRunListResponse(
         items=[external_run_to_response(run) for run in runs],
@@ -1074,6 +1132,8 @@ async def list_agent_logs(
                 result=run.result,
                 last_error=run.last_error,
                 model_usage=run.model_usage,
+                feedback=run.feedback,
+                feedback_updated_at=run.feedback_updated_at,
                 created_at=run.created_at,
                 started_at=run.started_at,
                 finished_at=run.finished_at,

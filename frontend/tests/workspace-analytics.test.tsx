@@ -9,6 +9,7 @@ import {
 import type { MeResponse } from "@/lib/api/auth"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
 import type { Workspace } from "@/lib/api/system"
+import { deriveAnalyticsKeyMetrics } from "@/components/system/workspace-analytics-metrics"
 import {
   cleanup,
   fireEvent,
@@ -96,6 +97,10 @@ const analytics: WorkspaceAnalytics = {
       total_tokens: 130,
     },
   ],
+  hourly_runs: Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    runs: hour === 0 ? 3 : hour === 23 ? 1 : 0,
+  })),
   distributions: {
     run_types: [
       { key: "agent", count: 3 },
@@ -218,8 +223,10 @@ describe("workspace analytics", () => {
     expect(within(tokenCard).getByText("1 次运行的用量未完整上报")).toBeTruthy()
     expect(screen.getByText("公开/API 调用")).toBeTruthy()
     expect(screen.getByText("How do I deploy?")).toBeTruthy()
+    expect(screen.getByText("时段活跃曲线")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "团队" }))
     expect(screen.getByText("Analytics Team")).toBeTruthy()
-    expect(screen.getByText("单日最高")).toBeTruthy()
+    expect(screen.getByText("单日最高 3")).toBeTruthy()
     expect(requests).toHaveLength(1)
     const url = new URL(requests[0], "http://app.local")
     expect(url.pathname).toBe("/api/v1/workspaces/ws-1/analytics")
@@ -325,6 +332,66 @@ describe("workspace analytics", () => {
     renderPage(<TopBar />)
     const link = screen.getByRole("link", { name: "数据大屏" })
     expect(link.getAttribute("href")).toBe("/system/analytics")
+  })
+
+  test("derives key metrics from the correct distributions and handles zero denominators", () => {
+    expect(deriveAnalyticsKeyMetrics(analytics)).toEqual({
+      averageTokens: 70,
+      consoleRunsPerUser: 1,
+      failedCancelledRuns: 2,
+      externalCallShare: 0.5,
+    })
+
+    expect(
+      deriveAnalyticsKeyMetrics({
+        ...analytics,
+        summary: {
+          ...analytics.summary,
+          runs: { value: 0, previous_value: 0, change_percent: 0 },
+          active_users: { value: 0, previous_value: 0, change_percent: 0 },
+          tokens: { ...analytics.summary.tokens, total: 0 },
+        },
+        distributions: {
+          run_types: [],
+          access_sources: [],
+          statuses: [],
+        },
+      })
+    ).toEqual({
+      averageTokens: null,
+      consoleRunsPerUser: null,
+      failedCancelledRuns: 0,
+      externalCallShare: null,
+    })
+  })
+
+  test("switches ranking views and expands frequent questions without another request", async () => {
+    const longAnalytics: WorkspaceAnalytics = {
+      ...analytics,
+      frequent_questions: Array.from({ length: 7 }, (_, index) => ({
+        question: `Question ${index + 1}`,
+        count: index + 3,
+        latest_at: `2026-08-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+      })),
+    }
+    handler = () => jsonResponse(longAnalytics)
+    renderPage(<WorkspaceAnalyticsPage />)
+    await waitFor(() => expect(screen.getByText("Question 1")).toBeTruthy())
+    expect(requests).toHaveLength(1)
+    expect(screen.queryByText("Question 6")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "用户" }))
+    expect(screen.getByText("NexaFlow Admin")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "团队" }))
+    expect(screen.getByText("Analytics Team")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "应用 / 工作流" }))
+    expect(screen.getByText("Support Agent")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "展开全部" }))
+    expect(screen.getByText("Question 6")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "收起" }))
+    expect(screen.queryByText("Question 6")).toBeNull()
+    expect(requests).toHaveLength(1)
   })
 })
 

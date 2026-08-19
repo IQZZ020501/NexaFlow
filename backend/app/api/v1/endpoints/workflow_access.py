@@ -21,6 +21,8 @@ from app.application.workflows import (
     get_workflow_api_documentation,
     list_external_workflow_runs,
     list_public_workflow_conversations,
+    regenerate_external_workflow_run,
+    set_external_workflow_run_feedback,
     stream_external_workflow_run,
     submit_external_workflow_form,
     upload_public_workflow_files,
@@ -35,6 +37,7 @@ from app.schemas.workflow import (
     WorkflowFormSubmitRequest,
     WorkflowUploadResponse,
 )
+from app.schemas.agent import RunFeedbackRequest
 
 _api_key_scheme = HTTPBearer(auto_error=False)
 
@@ -157,6 +160,51 @@ async def get_public_workflow_run(
     await get_workspace_published_workflow_context(db, workflow_id, user)
     return await get_external_workflow_run(
         db, workflow_id, run_id, "public", user.id
+    )
+
+
+@public_router.post(
+    "/runs/{run_id}/regenerate",
+    response_model=ExternalWorkflowRunResponse,
+)
+async def regenerate_public_workflow_run(
+    workflow_id: str,
+    run_id: str,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> ExternalWorkflowRunResponse:
+    await get_workspace_published_workflow_context(db, workflow_id, user)
+    return await regenerate_external_workflow_run(
+        db,
+        workflow_id,
+        run_id,
+        "public",
+        user.id,
+        user,
+        settings,
+    )
+
+
+@public_router.post(
+    "/runs/{run_id}/feedback",
+    response_model=ExternalWorkflowRunResponse,
+)
+async def set_public_workflow_run_feedback(
+    workflow_id: str,
+    run_id: str,
+    payload: RunFeedbackRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> ExternalWorkflowRunResponse:
+    await get_workspace_published_workflow_context(db, workflow_id, user)
+    return await set_external_workflow_run_feedback(
+        db,
+        workflow_id,
+        run_id,
+        "public",
+        user.id,
+        payload.value,
     )
 
 

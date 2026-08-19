@@ -12,7 +12,7 @@ import FileZipOutlined from "@ant-design/icons/es/icons/FileZipOutlined"
 import {
   getDocumentFileIcon,
   getDocumentFileIconColor,
-} from "../components/knowledge/document-file-icon"
+} from "../src/components/knowledge/document-file-icon"
 
 test("selects a file icon from the document extension", () => {
   expect(getDocumentFileIcon("notice.PDF")).toBe(FilePdfOutlined)

@@ -6,7 +6,7 @@
 
 ```text
 backend/   FastAPI 后端（Python >=3.11，SQLAlchemy 异步 + Celery）
-frontend/  Next.js 15 App Router + React 19 + TypeScript（Bun，shadcn/ui）
+frontend/  Next.js 16 App Router + React 19 + TypeScript（Bun，shadcn/ui，src 布局）
 deploy/    Docker Compose 全栈编排、Dockerfile、Nginx 示例
 ```
 
@@ -27,5 +27,4 @@ deploy/    Docker Compose 全栈编排、Dockerfile、Nginx 示例
 | [INFRASTRUCTURE.md](INFRASTRUCTURE.md) | backend/app/infrastructure + alembic + backend 根配置 |
 | [FRONTEND.md](FRONTEND.md) | frontend/ 全部（路由/组件/上下文/i18n/lib/测试） |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | deploy/、scripts/、仓库根文件 |
-
 

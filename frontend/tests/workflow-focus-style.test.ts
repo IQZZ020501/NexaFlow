@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const workflowCanvasSource = readFileSync(
-  join(import.meta.dir, "../components/workflows/workflow-canvas.tsx"),
+  join(import.meta.dir, "../src/components/workflows/workflow-canvas.tsx"),
   "utf8"
 )
 const interactionFieldsSource = readFileSync(
-  join(import.meta.dir, "../components/agents/interaction-config-fields.tsx"),
+  join(import.meta.dir, "../src/components/agents/interaction-config-fields.tsx"),
   "utf8"
 )
 

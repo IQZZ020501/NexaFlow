@@ -5,11 +5,11 @@ import {
   observeWorkflowRun,
   uploadWorkflowFiles,
   updateWorkflowDefinition,
-} from "../lib/api/workflows"
+} from "../src/lib/api/workflows"
 import {
   createPublicWorkflowRun,
   getWorkflowApiDocumentation,
-} from "../lib/api/public-workflows"
+} from "../src/lib/api/public-workflows"
 
 const originalFetch = globalThis.fetch
 const originalSetTimeout = globalThis.setTimeout

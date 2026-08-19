@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from collections.abc import AsyncIterator
 from datetime import date, timedelta
 import math
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.tool_runtime import preflight_tool_snapshot
 from app.application.agent_child_runs import preflight_workflow_agent_snapshots
-from app.application.agent_runs import cancel_run_tree
+from app.application.agent_runs import cancel_run_tree, update_run_feedback
 from app.application.workflow_uploads import resolve_workspace_workflow_files
 from app.entities.agents import AgentRun
 from app.entities.user import User
@@ -71,6 +72,7 @@ def workflow_run_to_response(
     return WorkflowRunResponse(
         id=run.id,
         conversation_id=run.conversation_id,
+        regenerated_from_run_id=run.regenerated_from_run_id,
         workspace_id=run.workspace_id,
         agent_id=run.agent_id,
         requested_by_user_id=run.requested_by_user_id,
@@ -92,7 +94,147 @@ def workflow_run_to_response(
         created_at=run.created_at,
         updated_at=run.updated_at,
         pending_form=workflow_pending_form(run),
+        feedback=run.feedback,
+        feedback_updated_at=run.feedback_updated_at,
     )
+
+
+async def regenerate_workflow_run_from_source(
+    db: AsyncSession,
+    source: AgentRun,
+    detail: WorkflowRunDetail,
+    actor: User,
+    settings: Settings,
+) -> WorkflowRunResponse:
+    if source.status != "succeeded":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Only a completed run can be regenerated.",
+        )
+    if await agent_repository.get_active_agent_run(
+        db,
+        source.agent_id,
+        source.access_source,
+        source.consumer_id,
+        source.conversation_id,
+    ) is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This workflow conversation already has an active run.",
+        )
+    graph = WorkflowGraph.model_validate(detail.graph_snapshot)
+    try:
+        knowledge_base_ids, tool_snapshots = load_workflow_resource_snapshot(
+            graph,
+            detail.resource_snapshot,
+            detail.resource_hash,
+        )
+        agent_snapshots = load_workflow_agent_snapshots(
+            graph,
+            detail.resource_snapshot,
+            detail.resource_hash,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "The source workflow snapshot is invalid.",
+        ) from exc
+    if knowledge_base_ids != source.knowledge_base_ids:
+        raise HTTPException(status.HTTP_409_CONFLICT, "The source workflow snapshot changed.")
+    for snapshot in tool_snapshots:
+        if await preflight_tool_snapshot(
+            db,
+            snapshot,
+            origin="workflow",
+            workspace_id=source.workspace_id,
+            execution_user_id=source.execution_user_id,
+            access_source=source.access_source,
+        ) is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "A source Workflow Tool is no longer executable.",
+            )
+    try:
+        await preflight_workflow_agent_snapshots(
+            db,
+            source.workspace_id,
+            agent_snapshots,
+            execution_user_id=source.execution_user_id,
+            access_source=source.access_source,
+        )
+        await get_agent_model(db, source.workspace_id, source.model_id)
+    except (HTTPException, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A source Workflow resource is no longer available.",
+        ) from exc
+    form_submissions = {
+        execution.node_id: deepcopy(execution.outputs["form_data"])
+        for execution in await workflow_repository.list_node_executions(db, source.id)
+        if execution.node_type == "form-node"
+        and execution.status == "succeeded"
+        and isinstance(execution.outputs.get("form_data"), dict)
+    }
+    run = AgentRun(
+        workspace_id=source.workspace_id,
+        agent_id=source.agent_id,
+        requested_by_user_id=actor.id if source.access_source == "console" else None,
+        execution_user_id=(
+            actor.id if source.access_source == "console" else source.execution_user_id
+        ),
+        access_source=source.access_source,
+        consumer_id=source.consumer_id,
+        conversation_id=source.conversation_id,
+        goal=source.goal,
+        instructions=source.instructions,
+        knowledge_base_ids=deepcopy(source.knowledge_base_ids),
+        knowledge_query_mode=source.knowledge_query_mode,
+        mcp_tools=deepcopy(source.mcp_tools),
+        application_snapshot=deepcopy(source.application_snapshot),
+        application_snapshot_hash=source.application_snapshot_hash,
+        tool_snapshots=deepcopy(source.tool_snapshots),
+        model_id=source.model_id,
+        model_name=source.model_name,
+        regenerated_from_run_id=source.id,
+        configuration_source="draft",
+        status=queued_agent_run_status(agent_run_generation("draft")),
+        checkpoint_phase="workflow",
+        checkpoint={"workflow_form_submissions": form_submissions},
+        trace_id=new_id(),
+        model_usage={},
+    )
+    new_detail = WorkflowRunDetail(
+        workspace_id=detail.workspace_id,
+        run_id=run.id,
+        definition_id=detail.definition_id,
+        definition_revision=detail.definition_revision,
+        version_id=detail.version_id,
+        version_number=detail.version_number,
+        source=detail.source,
+        graph_hash=detail.graph_hash,
+        graph_snapshot=deepcopy(detail.graph_snapshot),
+        resource_snapshot=deepcopy(detail.resource_snapshot),
+        resource_hash=detail.resource_hash,
+        inputs=deepcopy(detail.inputs),
+        max_steps=detail.max_steps,
+        max_model_tokens=detail.max_model_tokens,
+        deadline_at=utc_now(),
+    )
+    try:
+        run = await agent_repository.create_agent_run(db, run)
+        await workflow_repository.create_run_detail(db, new_detail)
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This workflow conversation already has an active run.",
+        ) from exc
+    await enqueue_agent_run(run.id, settings, generation="unified")
+    current = await agent_repository.get_agent_run_by_id(db, run.id)
+    current_detail = await workflow_repository.get_run_detail(db, run.id)
+    assert current is not None and current_detail is not None
+    return workflow_run_to_response(current, current_detail)
 
 
 def workflow_pending_form(run: AgentRun) -> WorkflowPendingForm | None:
@@ -470,6 +612,49 @@ async def cancel_workflow_run(
     return workflow_run_to_response(run, detail)
 
 
+async def regenerate_workflow_run(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    run_id: str,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+) -> WorkflowRunResponse:
+    source_response = await get_workflow_run(
+        db,
+        workspace_id,
+        agent_id,
+        run_id,
+        actor,
+        workspace_role,
+    )
+    del source_response
+    source = await agent_repository.get_agent_run_by_id(db, run_id)
+    detail = await workflow_repository.get_run_detail(db, run_id)
+    if source is None or detail is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
+    return await regenerate_workflow_run_from_source(db, source, detail, actor, settings)
+
+
+async def set_workflow_run_feedback(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    run_id: str,
+    actor: User,
+    workspace_role: str | None,
+    value: str | None,
+) -> WorkflowRunResponse:
+    await get_workflow_run(db, workspace_id, agent_id, run_id, actor, workspace_role)
+    run = await agent_repository.get_agent_run_by_id(db, run_id)
+    detail = await workflow_repository.get_run_detail(db, run_id)
+    if run is None or detail is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
+    updated = await update_run_feedback(db, run, value)
+    return workflow_run_to_response(updated, detail)
+
+
 async def list_workflow_runs(
     db: AsyncSession,
     workspace_id: str,
@@ -488,6 +673,7 @@ async def list_workflow_runs(
         actor.id,
         limit,
         offset,
+        latest_versions_only=True,
     )
     details = {
         item.run_id: item

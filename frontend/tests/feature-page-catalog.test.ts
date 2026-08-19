@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { pages } from "../lib/pages"
+import { pages } from "../src/lib/pages"
 
 const workspacePageKeys = ["apps", "knowledge", "models", "tools"] as const
 

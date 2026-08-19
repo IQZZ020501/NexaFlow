@@ -4744,6 +4744,91 @@ def test_run_to_response_maps_run_fields() -> None:
     assert response.trace_id == "trace-1"
 
 
+def test_regenerated_agent_run_starts_from_a_fresh_checkpoint() -> None:
+    from app.application.agent_runs import build_regenerated_agent_run
+    from app.entities.agents import AgentRun
+
+    source = AgentRun(
+        id="run-source",
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        requested_by_user_id="user-1",
+        execution_user_id="user-1",
+        access_source="console",
+        consumer_id="user-1",
+        conversation_id="conversation-1",
+        goal="Explain the release notes",
+        attachment_context="attached context",
+        instructions="Answer precisely.",
+        knowledge_base_ids=["kb-1"],
+        configuration_source="draft",
+        model_id="model-1",
+        model_name="deepseek-chat",
+        status="succeeded",
+        checkpoint={"final_answer": "old answer"},
+        checkpoint_phase="done",
+        result="old answer",
+        events=[{"type": "answer"}],
+        feedback="positive",
+    )
+
+    regenerated = build_regenerated_agent_run(
+        source,
+        User(id="user-1", username="owner"),
+    )
+
+    assert regenerated.id != source.id
+    assert regenerated.regenerated_from_run_id == source.id
+    assert regenerated.conversation_id == source.conversation_id
+    assert regenerated.goal == source.goal
+    assert regenerated.attachment_context == source.attachment_context
+    assert regenerated.status == "queued_v2"
+    assert regenerated.checkpoint == {}
+    assert regenerated.checkpoint_phase == "agent"
+    assert regenerated.result == ""
+    assert regenerated.events == []
+    assert regenerated.feedback is None
+
+
+def test_repeated_run_feedback_write_is_idempotent() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.application.agent_runs import update_run_feedback
+    from app.entities.agents import AgentRun
+    from app.infrastructure.model_utils import utc_now
+
+    feedback_updated_at = utc_now()
+    run = AgentRun(
+        id="run-1",
+        status="succeeded",
+        result="answer",
+        feedback="positive",
+        feedback_updated_at=feedback_updated_at,
+    )
+
+    class FakeDatabase:
+        def __init__(self) -> None:
+            self.commits = 0
+
+        async def commit(self) -> None:
+            self.commits += 1
+
+    db = FakeDatabase()
+    save_run = AsyncMock(side_effect=lambda _db, current: current)
+    with patch(
+        "app.application.agent_runs.agent_repository.save_agent_run",
+        new=save_run,
+    ):
+        updated = asyncio.run(
+            update_run_feedback(db, run, "positive")  # type: ignore[arg-type]
+        )
+
+    assert updated is run
+    assert run.feedback_updated_at == feedback_updated_at
+    save_run.assert_not_awaited()
+    assert db.commits == 0
+
+
 def test_agent_usage_normalizes_provider_metadata() -> None:
     from langchain_core.messages import AIMessage
 
@@ -5593,6 +5678,8 @@ def main() -> None:
     test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()
+    test_regenerated_agent_run_starts_from_a_fresh_checkpoint()
+    test_repeated_run_feedback_write_is_idempotent()
     test_agent_usage_normalizes_provider_metadata()
     test_agent_memory_compacts_old_turns()
     test_agent_memory_query_is_bounded_and_projected()

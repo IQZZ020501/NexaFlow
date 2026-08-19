@@ -6,9 +6,9 @@ import {
   revokeAgentPermission,
   type Agent,
   type AgentPermission,
-} from "../lib/api/agents"
-import { availableAgentPermissionTargets } from "../components/agents/agent-permissions-dialog"
-import type { WorkspaceMember } from "../lib/api/system"
+} from "../src/lib/api/agents"
+import { availableAgentPermissionTargets } from "../src/components/agents/agent-permissions-dialog"
+import type { WorkspaceMember } from "../src/lib/api/system"
 
 const originalFetch = globalThis.fetch
 

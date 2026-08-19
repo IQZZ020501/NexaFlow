@@ -3368,11 +3368,18 @@ async def assert_durable_execution_paths(
         events = await agent_repository.list_agent_run_events(db, run.id)
     assert current is not None
     assert current.status == "succeeded"
-    from app.application.agent_grounding import GROUNDING_FALLBACK_ANSWER
-
-    assert current.result == GROUNDING_FALLBACK_ANSWER
+    assert current.result == "Happy answer."
+    assert current.grounding_status == "skipped"
+    assert current.grounding_meta == {"reason": "no_grounding_source"}
     assert current.checkpoint_phase == "done"
-    assert current.checkpoint.get("final_answer") == GROUNDING_FALLBACK_ANSWER
+    assert current.checkpoint.get("final_answer") == "Happy answer."
+    assert not any(
+        event.event.get("type") == "process"
+        and str(event.event.get("event", {}).get("summary", "")).startswith(
+            "agent.grounding_"
+        )
+        for event in events
+    )
     assert events[-1].event["type"] == "complete"
 
     # -- canonical runs keep knowledge calls in the durable legacy ledger --

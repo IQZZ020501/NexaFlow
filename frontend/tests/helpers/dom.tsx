@@ -117,12 +117,13 @@ export function mockNextNavigation(options: {
 }
 
 export function mockNextImage() {
+  /* eslint-disable @next/next/no-img-element -- test stub for next/image */
   mock.module("next/image", () => ({
-    // eslint-disable-next-line @next/next/no-img-element -- test stub for next/image
     default: (props: Record<string, unknown>) => (
       <img {...(props as object)} alt={(props.alt as string) ?? ""} />
     ),
   }))
+  /* eslint-enable @next/next/no-img-element */
 }
 
 export function mockNextLink() {

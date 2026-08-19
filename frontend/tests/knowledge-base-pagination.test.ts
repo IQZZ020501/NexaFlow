@@ -3,7 +3,7 @@ import {
   DOCUMENT_PAGE_SIZES,
   documentPageCount,
   paginateDocuments,
-} from "../components/knowledge/knowledge-base-page"
+} from "../src/components/knowledge/knowledge-base-page"
 
 describe("knowledge document pagination", () => {
   test("defaults to 10 items per page and offers 10/20/50/100", () => {

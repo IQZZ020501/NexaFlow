@@ -4,9 +4,9 @@ import { join } from "node:path"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { AgentConfigFields } from "../components/agents/agent-config-fields"
-import { AgentAttachmentList } from "../components/agents/agent-attachment-list"
-import { InteractionConfigFields } from "../components/agents/interaction-config-fields"
+import { AgentConfigFields } from "../src/components/agents/agent-config-fields"
+import { AgentAttachmentList } from "../src/components/agents/agent-attachment-list"
+import { InteractionConfigFields } from "../src/components/agents/interaction-config-fields"
 import {
   isAgentFormDirty,
   isAgentListLoading,
@@ -15,19 +15,19 @@ import {
   mergeAgentRunStreamEvent,
   mergeInitialAgentRun,
   type AgentFormState,
-} from "../components/agents/agents-page"
+} from "../src/components/agents/agents-page"
 import {
   agentPublicationAction,
   collapsedProcessStatusKey,
   isNearScrollBottom,
   processTimeline,
   unrenderedAgentToolCalls,
-} from "../components/agents/agent-detail-workspace"
-import type { Agent, AgentRun, AgentToolCall } from "../lib/api/agents"
-import { normalizeInteractionConfigForAppType } from "../lib/interaction-config"
+} from "../src/components/agents/agent-detail-workspace"
+import type { Agent, AgentRun, AgentToolCall } from "../src/lib/api/agents"
+import { normalizeInteractionConfigForAppType } from "../src/lib/interaction-config"
 
 const agentsPageSource = readFileSync(
-  join(import.meta.dir, "../components/agents/agents-page.tsx"),
+  join(import.meta.dir, "../src/components/agents/agents-page.tsx"),
   "utf8"
 )
 

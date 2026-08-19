@@ -317,6 +317,13 @@ type HarnessProps = {
     callId: string,
     decision: "approve" | "reject"
   ) => void
+  onRegenerateRun?: (runId: string) => void
+  onRunFeedback?: (
+    runId: string,
+    value: "positive" | "negative" | null
+  ) => void
+  regeneratingRunId?: string | null
+  feedbackPendingRunId?: string | null
 }
 
 function Harness(props: HarnessProps = {}) {
@@ -338,6 +345,8 @@ function Harness(props: HarnessProps = {}) {
     onCancelAsk: props.onCancelAsk ?? (() => undefined),
     onNewConversation: props.onNewConversation ?? (() => undefined),
     onToolCallDecision: props.onToolCallDecision ?? (() => undefined),
+    onRegenerateRun: props.onRegenerateRun ?? (() => undefined),
+    onRunFeedback: props.onRunFeedback ?? (() => undefined),
     notify: (kind: "success" | "error", message: string) =>
       notifyCalls.push({ kind, message }),
     t,
@@ -377,6 +386,10 @@ function Harness(props: HarnessProps = {}) {
       onCancelAsk={callbacks.onCancelAsk}
       onNewConversation={callbacks.onNewConversation}
       onToolCallDecision={callbacks.onToolCallDecision}
+      onRegenerateRun={callbacks.onRegenerateRun}
+      onRunFeedback={callbacks.onRunFeedback}
+      regeneratingRunId={props.regeneratingRunId ?? null}
+      feedbackPendingRunId={props.feedbackPendingRunId ?? null}
       notify={callbacks.notify}
       t={t}
     />
@@ -562,6 +575,37 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.getByText("Summarize the latest releases")).toBeTruthy()
     expect(screen.getByText("bold")).toBeTruthy()
     expect(screen.getByText("summary")).toBeTruthy()
+  })
+
+  test("renders unified result actions and disables regeneration while busy", () => {
+    const regenerated: string[] = []
+    const feedback: Array<[string, "positive" | "negative" | null]> = []
+    const run = makeRun({
+      status: "succeeded",
+      result: "Completed answer",
+      feedback: "positive",
+    })
+    renderPage(
+      <Harness
+        activeView="settings"
+        runs={[run]}
+        isAsking
+        onRegenerateRun={(runId) => regenerated.push(runId)}
+        onRunFeedback={(runId, value) => feedback.push([runId, value])}
+      />
+    )
+
+    const regenerate = screen.getByRole("button", { name: "重新生成" })
+    const like = screen.getByRole("button", { name: "取消点赞" })
+    expect((regenerate as HTMLButtonElement).disabled).toBe(true)
+    expect(like.getAttribute("aria-pressed")).toBe("true")
+
+    fireEvent.click(regenerate)
+    fireEvent.click(like)
+    expect(regenerated).toEqual([])
+    expect(feedback).toEqual([["run-1", null]])
+    expect(screen.getByRole("button", { name: "点踩" })).toBeTruthy()
+    expect(screen.getAllByRole("button", { name: "复制" }).length).toBeGreaterThan(0)
   })
 
   test("renders a failed run with the error message", () => {
@@ -1258,6 +1302,8 @@ describe("AgentLogsPanel", () => {
     result: "**Step one**",
     last_error: null,
     model_usage: { prompt_tokens: 5 },
+    feedback: "positive",
+    feedback_updated_at: "2026-08-04T00:01:00Z",
     created_at: "2026-08-04T00:00:00Z",
     started_at: null,
     finished_at: null,
@@ -1305,6 +1351,7 @@ describe("AgentLogsPanel", () => {
     expect(screen.getByText("公开访问")).toBeTruthy()
     expect(screen.getByText("Visitor")).toBeTruthy()
     expect(screen.getByText("成功")).toBeTruthy()
+    expect(screen.getByRole("img", { name: "点赞" })).toBeTruthy()
     expect(screen.getByText("显示 1-20，共 45 条")).toBeTruthy()
 
     fireEvent.click(screen.getByText("下一页").closest("button")!)
@@ -1319,6 +1366,7 @@ describe("AgentLogsPanel", () => {
     fireEvent.click(screen.getByLabelText("查看日志详情"))
     await waitFor(() => expect(screen.getByText("对话详情")).toBeTruthy())
     expect(screen.getByText("Step one")).toBeTruthy()
+    expect(screen.getAllByRole("img", { name: "点赞" }).length).toBeGreaterThan(0)
     expect(screen.getByText("暂无错误")).toBeTruthy()
     expect(screen.getByText(/"prompt_tokens"/)).toBeTruthy()
   })
@@ -1330,6 +1378,7 @@ describe("AgentLogsPanel", () => {
       question: "",
       access_source: "api",
       status: "failed",
+      feedback: null,
       last_error: "execution crashed",
       result: "",
       display_name: "",
@@ -1355,6 +1404,7 @@ describe("AgentLogsPanel", () => {
     await waitFor(() => expect(screen.getByText("未提供问题")).toBeTruthy())
     expect(screen.getByText("API")).toBeTruthy()
     expect(screen.getByText("失败")).toBeTruthy()
+    expect(screen.getByRole("img", { name: "暂无反馈" })).toBeTruthy()
     expect(screen.getByText("execution crashed")).toBeTruthy()
     fireEvent.click(screen.getByText("刷新").closest("button")!)
     await waitFor(() => expect(screen.getByText("暂无对话日志")).toBeTruthy())
@@ -1390,6 +1440,7 @@ describe("AgentLogsPanel", () => {
                 access_source: "console",
                 display_name: "",
                 result: "",
+                feedback: "negative",
                 last_error: "step failed",
               },
             ],
@@ -1404,6 +1455,7 @@ describe("AgentLogsPanel", () => {
       expect(screen.getByText("How do I reset my password?")).toBeTruthy()
     )
     expect(screen.getByText("控制台")).toBeTruthy()
+    expect(screen.getByRole("img", { name: "点踩" })).toBeTruthy()
     expect(screen.getByText("step failed")).toBeTruthy()
 
     const row = screen.getByLabelText("查看日志详情")
