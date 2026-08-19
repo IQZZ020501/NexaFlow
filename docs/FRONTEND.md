@@ -40,7 +40,11 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/app/(auth)/login/page.tsx` — 登录页（登录回调与已登录跳转）
 - `frontend/src/app/(dashboard)/system/layout.tsx` — 系统管理布局
 - `frontend/src/app/(dashboard)/system/page.tsx` — 重定向到 `/system/workspaces`
-- `frontend/src/app/(dashboard)/system/[tab]/page.tsx` — 系统管理 Tab 页（workspaces/teams/users/audit）
+- `frontend/src/app/(dashboard)/system/[tab]/page.tsx` — 系统管理基础 Tab 页（workspaces/teams/users/audit）
+- `frontend/src/app/(dashboard)/system/operations/page.tsx` — 系统运行、健康状态和脱敏运行日志
+- `frontend/src/app/(dashboard)/system/governance/page.tsx` — 工作空间资源盘点、配额策略和成员邀请
+- `frontend/src/app/(dashboard)/system/security/page.tsx` — 当前用户/系统管理员的会话设备撤销
+- `frontend/src/app/(public)/invite/[token]/page.tsx` — 一次性工作空间邀请接受页
 
 ### components/（按功能分组）
 
@@ -82,6 +86,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/components/system/panels/workspaces-panel.tsx` — 工作空间列表面板
 - `frontend/src/components/system/panels/teams-panel.tsx` — 团队列表面板
 - `frontend/src/components/system/panels/audit-panel.tsx` — 审计日志面板
+- `frontend/src/components/system/system-governance-page.tsx` — 系统运行、工作空间治理和会话安全面板
 - `frontend/src/components/system/dialogs/scope-dialogs.tsx` — 工作空间/团队对话框
 - `frontend/src/components/system/dialogs/user-dialogs.tsx` — 用户对话框
 
@@ -143,7 +148,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/lib/api/tools.ts` — 统一 Tool/Source API：目录、Python 生命周期、固定版本、策略、授权与测试 Invocation
 - `frontend/src/lib/api/workflows.ts` — Workflow 草稿、发布版本、Tool/Agent 资源快照、运行与节点审计
 - `frontend/src/lib/api/public-workflows.ts` — 已发布 Workflow 的公开/API 会话与运行流
-- `frontend/src/lib/api/system.ts` — 系统管理 API：工作空间/团队/用户/审计
+- `frontend/src/lib/api/system.ts` — 系统管理 API：工作空间/团队/用户/审计/运行健康/治理/邀请/会话
 
 ### tests/（bun 测试）
 

@@ -13,18 +13,20 @@ class SystemLog(Base):
     __tablename__ = "system_logs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    level: Mapped[str] = mapped_column(String(16), default="info")
-    event: Mapped[str] = mapped_column(String(64))
-    message: Mapped[str] = mapped_column(Text)
-    path: Mapped[str | None] = mapped_column(String(512))
-    method: Mapped[str | None] = mapped_column(String(16))
-    status_code: Mapped[int | None] = mapped_column(Integer)
-    user_id: Mapped[str | None] = mapped_column(String(36))
-    username: Mapped[str | None] = mapped_column(String(64))
+    level: Mapped[str] = mapped_column(String(20), default="info", index=True)
+    event: Mapped[str] = mapped_column(String(80), index=True)
+    message: Mapped[str] = mapped_column(String(1000))
+    path: Mapped[str | None] = mapped_column(String(255), index=True)
+    method: Mapped[str | None] = mapped_column(String(12))
+    status_code: Mapped[int | None] = mapped_column(Integer, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    username: Mapped[str | None] = mapped_column(String(80))
     ip_address: Mapped[str | None] = mapped_column(String(64))
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     stack_trace: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=True
+    )
 
 
 def record_system_log(

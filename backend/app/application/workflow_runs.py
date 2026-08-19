@@ -21,6 +21,7 @@ from app.infrastructure.agent_live_stream import (
     AgentLiveStreamReader,
 )
 from app.infrastructure.config import Settings
+from app.application.governance import enforce_workspace_run_quota
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import workflow as workflow_repository
@@ -375,6 +376,7 @@ async def create_workflow_run(
         )
     if access_source != "console" and not consumer_id:
         raise ValueError("External workflow runs require a consumer id.")
+    await enforce_workspace_run_quota(db, workspace_id)
     agent = await get_workflow_agent(db, workspace_id, agent_id)
     if payload.source == "draft" and access_source == "console":
         require_agent_edit(agent, actor, workspace_role)

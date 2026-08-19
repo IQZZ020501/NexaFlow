@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -6,7 +6,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.audit import list_workspace_audit_logs
 from app.application.analytics import get_workspace_analytics
+from app.application.governance import (
+    get_workspace_governance,
+    get_workspace_inventory,
+    update_workspace_governance,
+)
+from app.application.invitations import (
+    create_workspace_invitation,
+    list_workspace_invitations,
+    revoke_workspace_invitation,
+)
 from app.schemas.analytics import WorkspaceAnalyticsResponse
+from app.schemas.governance import (
+    WorkspaceGovernanceResponse,
+    WorkspaceGovernanceUpdateRequest,
+    WorkspaceInventoryResponse,
+)
+from app.schemas.invitation import (
+    WorkspaceInvitationCreateRequest,
+    WorkspaceInvitationResponse,
+)
 from app.schemas.audit import AuditLogResponse
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
@@ -92,6 +111,68 @@ async def read_workspace_analytics(
         from_date,
         to_date,
     )
+
+
+@router.get("/{workspace_id}/governance", response_model=WorkspaceGovernanceResponse)
+async def read_workspace_governance(
+    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkspaceGovernanceResponse:
+    return await get_workspace_governance(db, context.workspace.id)
+
+
+@router.patch("/{workspace_id}/governance", response_model=WorkspaceGovernanceResponse)
+async def patch_workspace_governance(
+    payload: WorkspaceGovernanceUpdateRequest,
+    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkspaceGovernanceResponse:
+    return await update_workspace_governance(db, context.workspace, context.user, payload)
+
+
+@router.get("/{workspace_id}/inventory", response_model=WorkspaceInventoryResponse)
+async def read_workspace_inventory(
+    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkspaceInventoryResponse:
+    return await get_workspace_inventory(db, context.workspace.id)
+
+
+@router.get(
+    "/{workspace_id}/invitations",
+    response_model=list[WorkspaceInvitationResponse],
+)
+async def list_invitations(
+    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[WorkspaceInvitationResponse]:
+    return await list_workspace_invitations(db, context.workspace.id)
+
+
+@router.post(
+    "/{workspace_id}/invitations",
+    response_model=WorkspaceInvitationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_invitation(
+    payload: WorkspaceInvitationCreateRequest,
+    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkspaceInvitationResponse:
+    return await create_workspace_invitation(db, context.workspace.id, context.user, payload)
+
+
+@router.delete(
+    "/{workspace_id}/invitations/{invitation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_invitation(
+    invitation_id: str,
+    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    await revoke_workspace_invitation(db, context.workspace.id, invitation_id, context.user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/{workspace_id}", response_model=WorkspaceResponse)
@@ -198,5 +279,24 @@ async def list_workspace_logs(
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    actor: Annotated[str | None, Query(max_length=120)] = None,
+    action: Annotated[str | None, Query(max_length=80)] = None,
+    resource_type: Annotated[str | None, Query(max_length=40)] = None,
+    resource_id: Annotated[str | None, Query(max_length=36)] = None,
+    search: Annotated[str | None, Query(max_length=120)] = None,
+    from_date: Annotated[datetime | None, Query(alias="from")] = None,
+    to_date: Annotated[datetime | None, Query(alias="to")] = None,
 ) -> list[AuditLogResponse]:
-    return await list_workspace_audit_logs(db, context.workspace.id, limit, offset)
+    return await list_workspace_audit_logs(
+        db,
+        context.workspace.id,
+        limit,
+        offset,
+        actor=actor,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        search=search,
+        from_date=from_date,
+        to_date=to_date,
+    )

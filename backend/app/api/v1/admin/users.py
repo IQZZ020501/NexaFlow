@@ -22,6 +22,12 @@ from app.application.identity import (
     list_users,
     update_user,
 )
+from app.application.sessions import (
+    list_user_sessions,
+    revoke_all_user_sessions,
+    revoke_user_session,
+)
+from app.schemas.user import RefreshSessionResponse
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -73,6 +79,39 @@ async def change_managed_user_password(
 ) -> UserResponse:
     user = await get_user(db, user_id)
     return await change_user_password(db, user, actor, payload.new_password)
+
+
+@router.get("/{user_id}/sessions", response_model=list[RefreshSessionResponse])
+async def list_managed_user_sessions(
+    user_id: str,
+    _: Annotated[User, Depends(require_global_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[RefreshSessionResponse]:
+    user = await get_user(db, user_id)
+    return await list_user_sessions(db, user)
+
+
+@router.delete("/{user_id}/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_managed_user_session(
+    user_id: str,
+    session_id: str,
+    _: Annotated[User, Depends(require_global_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    user = await get_user(db, user_id)
+    await revoke_user_session(db, user.id, session_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/{user_id}/sessions", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_managed_user_sessions(
+    user_id: str,
+    _: Annotated[User, Depends(require_global_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    user = await get_user(db, user_id)
+    await revoke_all_user_sessions(db, user.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

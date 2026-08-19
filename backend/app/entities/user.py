@@ -25,3 +25,7 @@ class RefreshSession:
     token_hash: str = ""
     expires_at: datetime = field(default_factory=utc_now)
     created_at: datetime = field(default_factory=utc_now)
+    user_agent: str | None = None
+    ip_address: str | None = None
+    last_used_at: datetime = field(default_factory=utc_now)
+    revoked_at: datetime | None = None

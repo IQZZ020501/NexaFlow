@@ -1245,8 +1245,8 @@ describe("system-utils", () => {
       "启用状态: 是；全局管理员: 否"
     )
     expect(formatAuditDetails({ roles: ["a", "b"], flags: [true, false] }, t)).toBe(
-      "roles: a、b；flags: 是、否"
+      "其他字段: a、b；其他字段: 是、否"
     )
-    expect(formatAuditDetails({ slug_x: "v" }, t)).toBe("slug_x: v")
+    expect(formatAuditDetails({ slug_x: "v" }, t)).toBe("其他字段: v")
   })
 })

@@ -105,7 +105,7 @@ export function formatAuditDetails(
   return entries
     .map(([key, value]) => {
       const labelKey = AUDIT_DETAIL_LABEL_KEYS[key]
-      const label = labelKey ? t(labelKey) : key
+      const label = labelKey ? t(labelKey) : t("其他字段")
       return `${label}: ${formatAuditDetailValue(key, value, t)}`
     })
     .join(t("详情分隔符"))

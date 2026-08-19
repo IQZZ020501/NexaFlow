@@ -62,6 +62,9 @@ async def issue_refresh_session(
     db: AsyncSession,
     user: User,
     settings: Settings,
+    *,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
 ) -> str:
     now = utc_now()
     await user_repository.delete_expired_refresh_sessions(db, now)
@@ -72,6 +75,9 @@ async def issue_refresh_session(
             user_id=user.id,
             token_hash=hash_refresh_token(token),
             expires_at=now + timedelta(days=settings.refresh_token_expires_days),
+            user_agent=user_agent[:512] if user_agent else None,
+            ip_address=ip_address,
+            last_used_at=now,
         ),
     )
     return token
@@ -393,6 +399,7 @@ async def authenticate_user(
     password: str,
     settings: Settings,
     ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> tuple[TokenResponse, str]:
     username = normalize_username(username)
     try:
@@ -434,7 +441,13 @@ async def authenticate_user(
         await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials.")
 
-    refresh_token = await issue_refresh_session(db, user, settings)
+    refresh_token = await issue_refresh_session(
+        db,
+        user,
+        settings,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
     await db.commit()
     log_event(
         logger,
@@ -471,6 +484,9 @@ async def refresh_access_token(
             user_id=session.user_id,
         )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token.")
+    session.last_used_at = utc_now()
+    await user_repository.save_refresh_session(db, session)
+    await db.commit()
     log_event(
         logger,
         logging.INFO,
@@ -493,6 +509,9 @@ async def change_password(
     new_password: str,
     settings: Settings,
     current_password: str | None = None,
+    *,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> str:
     if not current_password or not verify_password(current_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is invalid.")
@@ -503,7 +522,13 @@ async def change_password(
     user.must_change_password = False
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
     user = await user_repository.save_user(db, user)
-    refresh_token = await issue_refresh_session(db, user, settings)
+    refresh_token = await issue_refresh_session(
+        db,
+        user,
+        settings,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
     await db.commit()
     log_event(
         logger,

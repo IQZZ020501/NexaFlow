@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -18,5 +19,25 @@ async def list_logs(
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    workspace_id: Annotated[str | None, Query(max_length=36)] = None,
+    actor: Annotated[str | None, Query(max_length=120)] = None,
+    action: Annotated[str | None, Query(max_length=80)] = None,
+    resource_type: Annotated[str | None, Query(max_length=40)] = None,
+    resource_id: Annotated[str | None, Query(max_length=36)] = None,
+    search: Annotated[str | None, Query(max_length=120)] = None,
+    from_date: Annotated[datetime | None, Query(alias="from")] = None,
+    to_date: Annotated[datetime | None, Query(alias="to")] = None,
 ) -> list[AuditLogResponse]:
-    return await list_audit_logs(db, limit, offset)
+    return await list_audit_logs(
+        db,
+        limit,
+        offset,
+        workspace_id=workspace_id,
+        actor=actor,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        search=search,
+        from_date=from_date,
+        to_date=to_date,
+    )

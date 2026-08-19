@@ -17,6 +17,8 @@ from app.shareddomain.agents.models import (  # noqa: F401
 from app.shareddomain.audit.models import AuditLog  # noqa: F401
 from app.infrastructure.base import Base
 from app.domain.user import RefreshSession, User  # noqa: F401
+from app.domain.workspace_governance import WorkspaceGovernance  # noqa: F401
+from app.domain.workspace_invitation import WorkspaceInvitation  # noqa: F401
 from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeAsset,
     KnowledgeAttachment,

@@ -50,6 +50,13 @@ export type UserPasswordResetResponse = {
   initial_password: string
 }
 
+export function acceptWorkspaceInvitation(token: string, password: string) {
+  return request<User>("/api/v1/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  })
+}
+
 export function login(username: string, password: string) {
   return request<LoginResponse>("/api/v1/auth/login", {
     method: "POST",

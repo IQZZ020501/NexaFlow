@@ -119,7 +119,13 @@ export function TopBar() {
                 <ChevronDownIcon className="size-3.5 shrink-0" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="min-w-56">
+            <DropdownMenuContent
+              align="start"
+              side="bottom"
+              sideOffset={6}
+              collisionPadding={8}
+              className="max-h-72 min-w-56 overflow-y-auto"
+            >
               <DropdownMenuLabel>{t("其他工作空间")}</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>

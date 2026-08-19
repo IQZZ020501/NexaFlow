@@ -197,6 +197,27 @@ export function CreateUserDialog({
               </Field>
             ) : null}
             {me.user.is_global_admin ? (
+              <label className="flex items-start gap-3 rounded-lg border p-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4"
+                  checked={userCreateForm.isGlobalAdmin}
+                  onChange={(event) =>
+                    setUserCreateForm((current) => ({
+                      ...current,
+                      isGlobalAdmin: event.target.checked,
+                    }))
+                  }
+                />
+                <span className="grid gap-1">
+                  <span className="font-medium">{t("全局管理员权限")}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("可治理全部工作空间")}
+                  </span>
+                </span>
+              </label>
+            ) : null}
+            {me.user.is_global_admin ? (
               <Field>
                 <FieldLabel>{t("团队")}</FieldLabel>
                 {!userCreateForm.workspaceId ? (
@@ -274,6 +295,7 @@ export function CreateUserDialog({
 type EditUserDialogProps = {
   userForm: UserForm | null
   setUserForm: React.Dispatch<React.SetStateAction<UserForm | null>>
+  canManageGlobalAdmin: boolean
   isSavingUser: boolean
   handleUpdateUser: React.FormEventHandler<HTMLFormElement>
 }
@@ -281,6 +303,7 @@ type EditUserDialogProps = {
 export function EditUserDialog({
   userForm,
   setUserForm,
+  canManageGlobalAdmin,
   isSavingUser,
   handleUpdateUser,
 }: EditUserDialogProps) {
@@ -345,6 +368,31 @@ export function EditUserDialog({
                   required
                 />
               </Field>
+              {canManageGlobalAdmin ? (
+                <label className="flex items-start gap-3 rounded-lg border p-3 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4"
+                    checked={userForm.isGlobalAdmin}
+                    onChange={(event) =>
+                      setUserForm((current) =>
+                        current
+                          ? {
+                              ...current,
+                              isGlobalAdmin: event.target.checked,
+                            }
+                          : current
+                      )
+                    }
+                  />
+                  <span className="grid gap-1">
+                    <span className="font-medium">{t("全局管理员权限")}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t("可治理全部工作空间")}
+                    </span>
+                  </span>
+                </label>
+              ) : null}
             </FieldGroup>
             <DialogFooter className="pt-5">
               <Button

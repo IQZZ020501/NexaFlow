@@ -14,6 +14,7 @@ from app.entities.user import RefreshSession, User
 from app.entities.workspace import WORKSPACE_ADMIN_ROLE
 from app.entities.workspace import Workspace, WorkspaceMembership
 from app.infrastructure.repositories import mapping
+from app.infrastructure.model_utils import utc_now
 
 
 async def list_users(
@@ -70,6 +71,7 @@ async def get_active_refresh_session(
         .where(
             RefreshSessionOrm.token_hash == token_hash,
             RefreshSessionOrm.expires_at > now,
+            RefreshSessionOrm.revoked_at.is_(None),
             UserOrm.is_active.is_(True),
         )
     )
@@ -88,10 +90,57 @@ async def delete_refresh_session(db: AsyncSession, token_hash: str) -> None:
     )
 
 
+async def list_refresh_sessions(
+    db: AsyncSession,
+    user_id: str,
+    now: datetime,
+) -> list[RefreshSession]:
+    result = await db.scalars(
+        select(RefreshSessionOrm)
+        .where(
+            RefreshSessionOrm.user_id == user_id,
+            RefreshSessionOrm.expires_at > now,
+            RefreshSessionOrm.revoked_at.is_(None),
+        )
+        .order_by(RefreshSessionOrm.last_used_at.desc(), RefreshSessionOrm.id.desc())
+    )
+    return [mapping.to_entity(RefreshSession, row) for row in result.all()]
+
+
+async def revoke_refresh_session_by_id(
+    db: AsyncSession,
+    session_id: str,
+    user_id: str | None = None,
+) -> None:
+    statement = select(RefreshSessionOrm).where(RefreshSessionOrm.id == session_id)
+    if user_id is not None:
+        statement = statement.where(RefreshSessionOrm.user_id == user_id)
+    row = await db.scalar(statement)
+    if row is not None:
+        row.revoked_at = utc_now()
+
+
 async def delete_refresh_sessions_for_user(db: AsyncSession, user_id: str) -> None:
     await db.execute(
         delete(RefreshSessionOrm).where(RefreshSessionOrm.user_id == user_id)
     )
+
+
+async def revoke_other_refresh_sessions(
+    db: AsyncSession,
+    user_id: str,
+    current_session_id: str | None,
+    now: datetime,
+) -> None:
+    statement = select(RefreshSessionOrm).where(
+        RefreshSessionOrm.user_id == user_id,
+        RefreshSessionOrm.revoked_at.is_(None),
+        RefreshSessionOrm.expires_at > now,
+    )
+    if current_session_id:
+        statement = statement.where(RefreshSessionOrm.id != current_session_id)
+    for row in (await db.scalars(statement)).all():
+        row.revoked_at = now
 
 
 async def list_workspace_scope_rows(
@@ -210,6 +259,14 @@ async def create_user(db: AsyncSession, entity: User) -> User:
 
 
 async def create_refresh_session(
+    db: AsyncSession,
+    entity: RefreshSession,
+) -> RefreshSession:
+    orm_row = await mapping.save(db, RefreshSessionOrm, entity)
+    return mapping.to_entity(RefreshSession, orm_row)
+
+
+async def save_refresh_session(
     db: AsyncSession,
     entity: RefreshSession,
 ) -> RefreshSession:

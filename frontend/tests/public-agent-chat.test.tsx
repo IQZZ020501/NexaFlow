@@ -573,6 +573,9 @@ describe("clipboard", () => {
 describe("getErrorMessage", () => {
   test("maps ApiError, plain errors, and unknown values", () => {
     expect(getErrorMessage(new ApiError(401, "expired"), t)).toBe("请重新登录")
+    expect(
+      getErrorMessage(new ApiError(401, "Invalid credentials."), t)
+    ).toBe("用户名或密码错误")
     expect(getErrorMessage(new ApiError(403, "forbidden"), t)).toBe(
       "资源不存在或无权访问"
     )

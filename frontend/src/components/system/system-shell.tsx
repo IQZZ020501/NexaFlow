@@ -21,6 +21,7 @@ import {
   deleteUser,
   deleteWorkspace,
   listAuditLogs,
+  listWorkspaceAuditLogs,
   listTeamMembers,
   listWorkspaceMembers,
   listTeams,
@@ -35,6 +36,7 @@ import {
 } from "@/lib/api/system"
 import type {
   AuditLog,
+  AuditFilters,
   MeResponse,
   Team,
   TeamMember,
@@ -101,7 +103,9 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
       (activeTab === "users" &&
         !session.isSessionLoading &&
         !canAccessUsers) ||
-      (activeTab === "audit" && !session.me?.user.is_global_admin)
+      (activeTab === "audit" &&
+        !session.me?.user.is_global_admin &&
+        getMembershipRole(session.me, session.selectedWorkspaceId) !== "admin")
     ) {
       router.replace("/system/teams")
     }
@@ -112,6 +116,7 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
     router,
     session.isSessionLoading,
     session.me,
+    session.selectedWorkspaceId,
   ])
 
   if (!session.me || !session.token || !canAccessSystem) {
@@ -203,6 +208,7 @@ function SystemPageContent({
     name: "",
     workspaceId: selectedWorkspaceId ?? "",
     teamIds: [],
+    isGlobalAdmin: false,
   })
   const [users, setUsers] = React.useState<User[]>([])
   const [workspaceMembers, setWorkspaceMembers] = React.useState<
@@ -217,6 +223,10 @@ function SystemPageContent({
     WorkspaceMember[]
   >([])
   const [auditLogs, setAuditLogs] = React.useState<AuditLog[]>([])
+  const [auditSearch, setAuditSearch] = React.useState("")
+  const [auditAction, setAuditAction] = React.useState("")
+  const [auditOffset, setAuditOffset] = React.useState(0)
+  const [auditHasMore, setAuditHasMore] = React.useState(false)
   const [userForm, setUserForm] = React.useState<UserForm | null>(null)
   const [userPasswordForm, setUserPasswordForm] =
     React.useState<UserPasswordForm | null>(null)
@@ -319,7 +329,7 @@ function SystemPageContent({
           },
         ]
       : []),
-    ...(me.user.is_global_admin
+    ...(me.user.is_global_admin || canManageWorkspace
       ? [
           {
             key: "audit" as const,
@@ -405,14 +415,26 @@ function SystemPageContent({
     setIsAuditLoading(true)
 
     try {
-      setAuditLogs(await listAuditLogs(token))
+      const filters: AuditFilters = {
+        limit: 100,
+        offset: auditOffset,
+        search: auditSearch || undefined,
+        action: auditAction || undefined,
+      }
+      const nextLogs = me.user.is_global_admin
+        ? await listAuditLogs(token, filters)
+        : selectedWorkspaceId
+          ? await listWorkspaceAuditLogs(token, selectedWorkspaceId, filters)
+          : []
+      setAuditLogs((current) => (auditOffset ? [...current, ...nextLogs] : nextLogs))
+      setAuditHasMore(nextLogs.length === 100)
     } catch (error) {
       setAuditLogs([])
       reportError(error)
     } finally {
       setIsAuditLoading(false)
     }
-  }, [reportError, token])
+  }, [auditAction, auditOffset, auditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
 
   const loadUserCreateTeams = React.useCallback(
     async (workspaceId: string) => {
@@ -490,13 +512,17 @@ function SystemPageContent({
   ])
 
   React.useEffect(() => {
-    if (activeTab !== "audit" || !me.user.is_global_admin) {
+    if (
+      activeTab !== "audit" ||
+      (!me.user.is_global_admin &&
+        getMembershipRole(me, selectedWorkspaceId) !== "admin")
+    ) {
       return
     }
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadAuditLogs()
-  }, [activeTab, loadAuditLogs, me.user.is_global_admin])
+  }, [activeTab, loadAuditLogs, me, me.user.is_global_admin, selectedWorkspaceId])
 
   const filteredUsers = React.useMemo(() => {
     const query = userSearch.trim().toLowerCase()
@@ -570,6 +596,7 @@ function SystemPageContent({
       name: "",
       workspaceId,
       teamIds: [],
+      isGlobalAdmin: false,
     })
     setIsUserCreateDialogOpen(true)
     if (me.user.is_global_admin && workspaceId) {
@@ -1056,6 +1083,7 @@ function SystemPageContent({
             username: userCreateForm.username,
             email: userCreateForm.email,
             name: userCreateForm.name,
+            is_global_admin: userCreateForm.isGlobalAdmin,
             workspace_id: userCreateForm.workspaceId || null,
             team_ids: userCreateForm.teamIds,
           })
@@ -1079,6 +1107,7 @@ function SystemPageContent({
         name: "",
         workspaceId: "",
         teamIds: [],
+        isGlobalAdmin: false,
       })
       setUserCreateTeams([])
       onNotify(
@@ -1111,6 +1140,7 @@ function SystemPageContent({
       username: user.username,
       email: user.email,
       name: user.name,
+      isGlobalAdmin: user.is_global_admin,
     })
   }
 
@@ -1121,6 +1151,23 @@ function SystemPageContent({
       return
     }
 
+    const currentUser = users.find((user) => user.id === userForm.id)
+    if (
+      currentUser &&
+      currentUser.is_global_admin !== userForm.isGlobalAdmin &&
+      !(await confirmAction({
+        description: t(
+          userForm.isGlobalAdmin
+            ? "授予 {name} 全局管理员权限？"
+            : "撤销 {name} 全局管理员权限？",
+          { name: currentUser.name }
+        ),
+        confirmLabel: t("确认"),
+      }))
+    ) {
+      return
+    }
+
     setIsSavingUser(true)
 
     try {
@@ -1128,6 +1175,7 @@ function SystemPageContent({
         username: userForm.username,
         email: userForm.email,
         name: userForm.name,
+        is_global_admin: userForm.isGlobalAdmin,
       })
       updateUserInList(user)
       setUserForm(null)
@@ -1257,6 +1305,20 @@ function SystemPageContent({
       isWorkspaceMembersLoading={isWorkspaceMembersLoading}
       auditLogs={auditLogs}
       isAuditLoading={isAuditLoading}
+      auditSearch={auditSearch}
+      setAuditSearch={(value) => {
+        setAuditSearch(value)
+        setAuditOffset(0)
+      }}
+      auditAction={auditAction}
+      setAuditAction={(value) => {
+        setAuditAction(value)
+        setAuditOffset(0)
+      }}
+      onRefresh={() => void loadAuditLogs()}
+      onLoadMore={() => setAuditOffset((current) => current + 100)}
+      hasMore={auditHasMore}
+      workspaceScope={me.user.is_global_admin ? null : selectedWorkspace?.name ?? null}
       workspaceEditForm={workspaceEditForm}
       setWorkspaceEditForm={setWorkspaceEditForm}
       isSavingWorkspace={isSavingWorkspace}
@@ -1278,6 +1340,7 @@ function SystemPageContent({
       handleUserCreateWorkspaceChange={handleUserCreateWorkspaceChange}
       userForm={userForm}
       setUserForm={setUserForm}
+      canManageGlobalAdmin={me.user.is_global_admin}
       isSavingUser={isSavingUser}
       handleUpdateUser={handleUpdateUser}
       userPasswordForm={userPasswordForm}

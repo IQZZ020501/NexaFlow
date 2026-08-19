@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,8 +55,29 @@ async def list_audit_logs(
     db: AsyncSession,
     limit: int,
     offset: int = 0,
+    *,
+    workspace_id: str | None = None,
+    actor: str | None = None,
+    action: str | None = None,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    search: str | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
 ) -> list[AuditLogResponse]:
-    logs = await audit_repository.list_audit_logs(db, limit, offset)
+    logs = await audit_repository.list_audit_logs(
+        db,
+        limit,
+        offset,
+        workspace_id=workspace_id,
+        actor=actor,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        search=search,
+        from_date=from_date,
+        to_date=to_date,
+    )
     return [audit_log_to_response(item) for item in logs]
 
 
@@ -64,11 +86,26 @@ async def list_workspace_audit_logs(
     workspace_id: str,
     limit: int,
     offset: int = 0,
+    *,
+    actor: str | None = None,
+    action: str | None = None,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    search: str | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
 ) -> list[AuditLogResponse]:
     logs = await audit_repository.list_workspace_audit_logs(
         db,
         workspace_id,
         limit,
         offset,
+        actor=actor,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        search=search,
+        from_date=from_date,
+        to_date=to_date,
     )
     return [audit_log_to_response(item) for item in logs]

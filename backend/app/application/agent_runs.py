@@ -26,6 +26,7 @@ from app.infrastructure.agent_live_stream import (
     AgentLiveStreamReader,
 )
 from app.infrastructure.config import Settings
+from app.application.governance import enforce_workspace_run_quota
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import tools as tool_repository
@@ -862,6 +863,7 @@ async def prepare_agent_run(
         consumer_id = actor.id
     elif not consumer_id:
         raise ValueError("External Agent runs require a consumer id.")
+    await enforce_workspace_run_quota(db, workspace_id)
     agent = await agent_repository.lock_agent(db, agent_id)
     if agent is None or agent.workspace_id != workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent not found.")

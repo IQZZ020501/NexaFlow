@@ -17,6 +17,16 @@ class TokenResponse(BaseModel):
     must_change_password: bool
 
 
+class RefreshSessionResponse(BaseModel):
+    id: str
+    created_at: datetime
+    last_used_at: datetime
+    expires_at: datetime
+    user_agent: str | None
+    ip_address: str | None
+    is_current: bool = False
+
+
 class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=6, max_length=255)
     current_password: str | None = Field(default=None, min_length=1, max_length=255)

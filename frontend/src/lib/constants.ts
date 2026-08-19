@@ -1,4 +1,4 @@
-import { type TranslationKey } from "@/i18n"
+import { type TFunction, type TranslationKey } from "@/i18n"
 
 export const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
   active: "已启用",
@@ -71,4 +71,63 @@ export const AUDIT_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
   "knowledge_task.rebuild_index.fail": "重建索引失败",
   "resource_permission.grant": "授权资源",
   "resource_permission.revoke": "撤销授权",
+  "agent.create": "创建 Agent",
+  "agent.update": "更新 Agent",
+  "agent.delete": "删除 Agent",
+  "agent.api_credential.create": "创建 Agent API 凭据",
+  "agent.api_credential.revoke": "撤销 Agent API 凭据",
+  "agent.api_credential.rotate": "轮换 Agent API 凭据",
+  "agent.tool_call.approve": "批准 Agent 工具调用",
+  "team.member.add": "添加团队成员",
+  "team.member.remove": "移除团队成员",
+  "team.member.update": "更新团队成员角色",
+  "knowledge_attachment.upload": "上传知识库附件",
+  "knowledge_base.owner_transfer": "转移知识库所有权",
+  "knowledge_document.create_from_attachments": "从附件创建知识文档",
+  "knowledge_evaluation_case.create": "创建评测用例",
+  "knowledge_evaluation_run.delete": "删除运行记录",
+  "mcp_server.create": "创建 MCP 服务",
+  "mcp_server.delete": "删除 MCP 服务",
+  "mcp_server.enable": "启用 MCP 服务",
+  "mcp_server.refresh": "刷新 MCP 服务",
+  "mcp_tool.policy.update": "更新 MCP 工具策略",
+  "tool.create": "创建工具",
+  "tool.delete": "删除工具",
+  "tool.draft.update": "更新工具草稿",
+  "tool.enable": "启用工具",
+  "tool.publish": "发布工具",
+  "workspace.governance.update": "更新工作空间治理",
+  "workspace.invitation.create": "创建工作空间邀请",
+  "workspace.invitation.accept": "接受工作空间邀请",
+  "workspace.invitation.revoke": "撤销工作空间邀请",
+}
+
+export const SYSTEM_LOG_LEVEL_LABEL_KEYS: Record<string, TranslationKey> = {
+  critical: "严重",
+  error: "错误",
+  warning: "警告",
+  info: "信息",
+  debug: "调试",
+}
+
+export const SYSTEM_LOG_EVENT_LABEL_KEYS: Record<string, TranslationKey> = {
+  "auth.login_failed": "登录失败",
+  "request.unhandled_exception": "请求处理异常",
+  "agent.execution_failed": "Agent 执行失败",
+  "workflow.execution_failed": "工作流执行失败",
+}
+
+export function auditActionLabel(action: string, t: TFunction) {
+  const labelKey = AUDIT_ACTION_LABEL_KEYS[action]
+  return labelKey ? t(labelKey) : t("其他操作")
+}
+
+export function systemLogLevelLabel(level: string, t: TFunction) {
+  const labelKey = SYSTEM_LOG_LEVEL_LABEL_KEYS[level]
+  return labelKey ? t(labelKey) : t("其他级别")
+}
+
+export function systemLogEventLabel(event: string, t: TFunction) {
+  const labelKey = SYSTEM_LOG_EVENT_LABEL_KEYS[event]
+  return labelKey ? t(labelKey) : t("其他系统事件")
 }
