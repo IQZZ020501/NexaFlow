@@ -1,6 +1,12 @@
 import { ApiError } from "@/lib/api-client"
 import { type TFunction } from "@/i18n"
 
+/**
+ * Converts an unknown error into a user-facing message.
+ *
+ * @param error - The error value to convert
+ * @returns A localized message for recognized authentication, authorization, network, or unknown errors; otherwise, the original error message
+ */
 export function getErrorMessage(error: unknown, t: TFunction) {
   if (error instanceof ApiError) {
     if (error.status === 401 && error.message === "Invalid credentials.") {

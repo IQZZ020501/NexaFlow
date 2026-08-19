@@ -27,6 +27,18 @@ type RunActionBarProps = {
   t: TFunction
 }
 
+/**
+ * Renders controls for regenerating a result, submitting feedback, and copying its text.
+ *
+ * @param result - The result text to copy
+ * @param feedback - The currently selected feedback option
+ * @param regenerating - Whether result regeneration is in progress
+ * @param feedbackPending - Whether feedback submission is in progress
+ * @param regenerateDisabled - Whether regeneration is explicitly disabled
+ * @param onRegenerate - Handles result regeneration
+ * @param onFeedback - Handles feedback selection changes
+ * @param t - Translates control labels
+ */
 export function RunActionBar({
   result,
   feedback = null,

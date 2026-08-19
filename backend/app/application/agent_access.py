@@ -367,6 +367,15 @@ def external_progress_events(
 
 
 def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRunResponse:
+    """
+    Convert an agent run into its external response representation.
+    
+    Parameters:
+    	run (AgentRun | dict[str, Any]): The agent run entity or mapping to convert.
+    
+    Returns:
+    	ExternalAgentRunResponse: The external run response, including status, result, progress, timestamps, feedback, and regeneration information.
+    """
     value = run if isinstance(run, dict) else vars(run)
     run_status = agent_run_display_status(str(value.get("status") or ""))
     generic_error = None
@@ -872,6 +881,21 @@ async def get_external_agent_run(
     access_source: ExternalAccessSource,
     consumer_id: str,
 ) -> AgentRun:
+    """
+    Retrieve an externally accessible agent run for the specified consumer.
+    
+    Parameters:
+        agent_id (str): Identifier of the agent associated with the run.
+        run_id (str): Identifier of the run to retrieve.
+        access_source (ExternalAccessSource): Source through which the run was accessed.
+        consumer_id (str): Identifier of the consumer who owns the run.
+    
+    Returns:
+        AgentRun: The matching agent run.
+    
+    Raises:
+        HTTPException: If the run does not exist or does not match the agent, access source, or consumer.
+    """
     await get_published_agent_context(db, agent_id)
     run = await agent_repository.get_agent_run_by_id(db, run_id)
     if (
@@ -892,6 +916,19 @@ async def regenerate_external_agent_run(
     consumer_id: str,
     settings: Settings,
 ) -> ExternalAgentRunResponse:
+    """
+    Regenerate a publicly accessible agent run from its source run.
+    
+    Parameters:
+        context (PublishedAgentContext): The published agent context used to authorize regeneration.
+        run_id (str): The identifier of the source run.
+        access_source (ExternalAccessSource): The access channel for the run.
+        consumer_id (str): The external consumer requesting regeneration.
+        settings (Settings): Application settings required for run regeneration.
+    
+    Returns:
+        ExternalAgentRunResponse: The regenerated run represented for external access.
+    """
     if access_source != "public":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent run not found.")
     source = await get_external_agent_run(
@@ -918,6 +955,22 @@ async def set_external_agent_run_feedback(
     consumer_id: str,
     value: str | None,
 ) -> ExternalAgentRunResponse:
+    """
+    Update feedback for an externally accessible agent run.
+    
+    Parameters:
+        agent_id (str): Identifier of the agent that owns the run.
+        run_id (str): Identifier of the run.
+        access_source (ExternalAccessSource): Source through which the run was accessed.
+        consumer_id (str): Identifier of the external consumer.
+        value (str | None): Feedback value, or `None` to clear the feedback.
+    
+    Returns:
+        ExternalAgentRunResponse: The updated external run.
+    
+    Raises:
+        HTTPException: If the run was not accessed publicly or cannot be found.
+    """
     if access_source != "public":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent run not found.")
     source = await get_external_agent_run(
@@ -938,6 +991,16 @@ async def list_external_agent_run_tool_calls(
     access_source: ExternalAccessSource,
     consumer_id: str,
 ) -> list[AgentToolCallResponse]:
+    """
+    List tool calls associated with an externally accessible agent run.
+    
+    Parameters:
+        access_source (ExternalAccessSource): The source through which the run was accessed.
+        consumer_id (str): The consumer identity authorized to access the run.
+    
+    Returns:
+        list[AgentToolCallResponse]: Tool calls for the run.
+    """
     run = await get_external_agent_run(db, agent_id, run_id, access_source, consumer_id)
     if run.configuration_source in {"draft", "published"}:
         return await list_canonical_agent_run_tool_calls(db, run)
@@ -979,6 +1042,17 @@ async def list_external_agent_runs(
     offset: int,
     conversation_id: str | None = None,
 ) -> ExternalAgentRunListResponse:
+    """
+    List the latest external runs for a published agent.
+    
+    Parameters:
+        access_source (ExternalAccessSource): Source through which the runs were accessed.
+        consumer_id (str): Consumer identity whose runs should be listed.
+        conversation_id (str | None): Optional conversation used to filter the runs.
+    
+    Returns:
+        ExternalAgentRunListResponse: Paginated external runs and their total count.
+    """
     await get_published_agent_context(db, agent_id)
     runs = await agent_repository.list_agent_runs(
         db,
@@ -1102,6 +1176,18 @@ async def list_agent_logs(
     limit: int,
     offset: int,
 ) -> AgentLogListResponse:
+    """
+    List paginated execution logs for an agent.
+    
+    Parameters:
+        workspace_id (str): Workspace containing the agent.
+        agent_id (str): Agent whose logs are requested.
+        actor (User): User requesting the logs.
+        workspace_role (str | None): Actor's role in the workspace.
+    
+    Returns:
+        AgentLogListResponse: Paginated agent logs with execution details, consumer display names, feedback, and total count.
+    """
     agent = await get_agent(db, workspace_id, agent_id)
     require_agent_edit(agent, actor, workspace_role)
     runs = await agent_repository.list_agent_runs_for_management(

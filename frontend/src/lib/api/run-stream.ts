@@ -21,6 +21,12 @@ type ObserveNdjsonStreamOptions = {
 const INITIAL_RECONNECT_DELAY_MS = 250
 const MAX_RECONNECT_DELAY_MS = 5_000
 
+/**
+ * Waits for the reconnect delay, allowing the wait to be cancelled.
+ *
+ * @param delayMs - The delay in milliseconds.
+ * @param signal - An optional signal that cancels the wait and rejects with its abort reason.
+ */
 function waitForReconnect(delayMs: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) {
@@ -39,6 +45,15 @@ function waitForReconnect(delayMs: number, signal?: AbortSignal) {
   })
 }
 
+/**
+ * Consumes an NDJSON response stream and processes each parsed event.
+ *
+ * @param cursor - The initial numeric cursor used to track stream progress
+ * @param liveCursor - The initial live cursor used to track stream progress
+ * @param isTerminal - Determines whether an event marks the end of observation
+ * @returns The latest numeric and live cursors and whether a terminal event was received
+ * @throws Error If the response has no body
+ */
 async function consumeNdjsonStream<TEvent extends NdjsonCursorEvent>(
   response: Response,
   onEvent: (event: TEvent) => void,
@@ -85,6 +100,16 @@ async function consumeNdjsonStream<TEvent extends NdjsonCursorEvent>(
   return { cursor, liveCursor, terminal }
 }
 
+/**
+ * Observes an NDJSON stream until a terminal event is received or observation is aborted.
+ *
+ * Reconnects after transient failures, resuming from the latest event cursors and increasing
+ * the delay between attempts up to five seconds.
+ *
+ * @param getResponse - Creates a stream response using the current numeric and live cursors.
+ * @param onEvent - Handles each event received from the stream.
+ * @throws An error for non-retryable HTTP responses or the abort reason when observation is aborted.
+ */
 export async function observeNdjsonStream<TEvent extends NdjsonCursorEvent>(
   getResponse: StreamResponseFactory,
   onEvent: (event: TEvent) => void,

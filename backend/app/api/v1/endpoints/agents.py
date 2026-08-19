@@ -435,6 +435,16 @@ async def cancel_workspace_agent_run(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AgentRunResponse:
+    """
+    Cancel an agent run within a workspace.
+    
+    Parameters:
+    	agent_id (str): Identifier of the agent that owns the run.
+    	run_id (str): Identifier of the run to cancel.
+    
+    Returns:
+    	AgentRunResponse: The updated agent run.
+    """
     return await cancel_agent_run(
         db,
         context.workspace.id,
@@ -453,6 +463,16 @@ async def regenerate_workspace_agent_run(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AgentRunResponse:
+    """
+    Regenerate a workspace-scoped agent run.
+    
+    Parameters:
+        agent_id (str): Identifier of the agent that owns the run.
+        run_id (str): Identifier of the run to regenerate.
+    
+    Returns:
+        AgentRunResponse: The regenerated agent run.
+    """
     return await regenerate_agent_run(
         db,
         context.workspace.id,
@@ -472,6 +492,14 @@ async def set_workspace_agent_run_feedback(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AgentRunResponse:
+    """Submit feedback for an agent run.
+    
+    Parameters:
+        payload (RunFeedbackRequest): Feedback value to apply to the run.
+    
+    Returns:
+        AgentRunResponse: The updated agent run.
+    """
     return await set_agent_run_feedback(
         db,
         context.workspace.id,

@@ -3,18 +3,33 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Provides the root context for a dialog and its associated components.
+ *
+ * @param props - Properties controlling the dialog's state and behavior.
+ */
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
 
+/**
+ * Renders dialog content in a portal outside the dialog's parent hierarchy.
+ *
+ * @param props - Props forwarded to the Radix Dialog portal.
+ */
 function DialogPortal({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
   return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />
 }
 
+/**
+ * Renders a full-screen backdrop for a dialog.
+ *
+ * @param className - Additional classes merged with the default backdrop styles
+ */
 function DialogOverlay({
   className,
   ...props
@@ -31,6 +46,11 @@ function DialogOverlay({
   )
 }
 
+/**
+ * Renders dialog content in a centered modal or right-aligned panel.
+ *
+ * @param side - The dialog layout: `"center"` for a centered modal or `"right"` for a side panel.
+ */
 function DialogContent({
   className,
   children,
@@ -58,6 +78,11 @@ function DialogContent({
   )
 }
 
+/**
+ * Renders a styled container for dialog header content.
+ *
+ * @param className - Additional CSS classes to apply to the header
+ */
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -68,6 +93,11 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/**
+ * Renders a responsive container for dialog actions.
+ *
+ * @param className - Additional classes to apply to the footer
+ */
 function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -78,6 +108,11 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/**
+ * Renders a styled title for a dialog.
+ *
+ * @param className - Additional classes to apply to the title
+ */
 function DialogTitle({
   className,
   ...props
@@ -91,6 +126,12 @@ function DialogTitle({
   )
 }
 
+/**
+ * Renders descriptive text for a dialog.
+ *
+ * @param className - Additional classes to apply to the description
+ * @returns The dialog description element
+ */
 function DialogDescription({
   className,
   ...props

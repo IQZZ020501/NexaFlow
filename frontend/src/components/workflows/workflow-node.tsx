@@ -198,6 +198,13 @@ const OUTPUT_FIELD_LABELS: Partial<
   "document-extract-node": { content: "文档内容" },
 }
 
+/**
+ * Resolves the localized display label for a workflow node output field.
+ *
+ * @param type - The workflow node type that owns the output field
+ * @param field - The output field identifier
+ * @returns The localized field label, or the field identifier when no label is defined
+ */
 function outputFieldLabel(type: WorkflowNodeType, field: string, t: TFunction) {
   const label =
     type === "knowledge"
@@ -208,6 +215,15 @@ function outputFieldLabel(type: WorkflowNodeType, field: string, t: TFunction) {
   return label ? t(label) : field
 }
 
+/**
+ * Formats a workflow variable path with its source node and field label.
+ *
+ * @param sourceId - The identifier of the variable source, or `"global"` for a global variable.
+ * @param field - The variable field name.
+ * @param nodes - The workflow nodes available as variable sources.
+ * @param t - The translation function used for localized labels.
+ * @returns The localized variable path label, or `null` when the source or global field is unknown.
+ */
 function workflowVariablePathLabel(
   sourceId: string,
   field: string,
@@ -232,6 +248,14 @@ function workflowVariablePathLabel(
   return `${sourceTitle} · ${fieldLabel}`
 }
 
+/**
+ * Formats a workflow variable reference with a localized path label when possible.
+ *
+ * @param reference - The workflow variable reference to format
+ * @param nodes - The workflow nodes used to resolve node-specific labels
+ * @param t - The translation function used to localize the label
+ * @returns The localized variable path label, or the original reference when it cannot be resolved
+ */
 function workflowVariableReferenceLabel(
   reference: string,
   nodes: WorkflowNode[],
@@ -245,6 +269,13 @@ function workflowVariableReferenceLabel(
     : reference
 }
 
+/**
+ * Formats workflow variable references in text using localized labels.
+ *
+ * @param rawValue - The text containing workflow variable references
+ * @param nodes - Workflow nodes used to resolve variable sources
+ * @returns The text with resolved references replaced by localized labels
+ */
 function workflowVariableTextLabel(
   rawValue: string,
   nodes: WorkflowNode[],
@@ -320,6 +351,13 @@ type FormFieldConfig = {
   optionList: string[]
 }
 
+/**
+ * Normalizes condition configuration into branch definitions.
+ *
+ * @param config - Current or legacy condition configuration.
+ * @param startNodeId - Identifier used for legacy conditions without an explicit field reference.
+ * @returns The normalized condition branches.
+ */
 function conditionBranches(
   config: Record<string, unknown>,
   startNodeId = "start"
@@ -373,10 +411,21 @@ function conditionBranches(
   ]
 }
 
+/**
+ * Generates a short unique identifier for a condition.
+ *
+ * @returns A 12-character identifier derived from a random UUID
+ */
 function createConditionId() {
   return crypto.randomUUID().replaceAll("-", "").slice(0, 12)
 }
 
+/**
+ * Normalizes condition branch types based on their position in the branch list.
+ *
+ * @param branches - The condition branches to normalize.
+ * @returns The branches with the first branch set to `IF`, the final `ELSE` branch preserved, and all other branches set to `ELSE IF`.
+ */
 function normalizeConditionBranches(branches: ConditionBranch[]) {
   return branches.map((branch, index) => ({
     ...branch,
@@ -389,16 +438,35 @@ function normalizeConditionBranches(branches: ConditionBranch[]) {
   }))
 }
 
+/**
+ * Creates a compact preview of a string value.
+ *
+ * @param value - The value to preview
+ * @returns The trimmed, whitespace-normalized value truncated to 42 characters, or an empty string for non-string values
+ */
 function previewValue(value: unknown) {
   if (typeof value !== "string") return ""
   const compact = value.replace(/\s+/g, " ").trim()
   return compact.length > 42 ? `${compact.slice(0, 42)}...` : compact
 }
 
+/**
+ * Retrieves the currently published version ID for an agent.
+ *
+ * @param agent - The agent whose published version ID is retrieved.
+ * @returns The published version ID, or `null` when no version is published.
+ */
 function publishedAgentVersionId(agent: Agent) {
   return agent.current_published_version_id ?? null
 }
 
+/**
+ * Builds a localized configuration summary for a workflow node.
+ *
+ * @param node - The workflow node whose configuration is summarized
+ * @param t - The translation function used for summary labels
+ * @returns A localized configuration summary, or `null` for start nodes
+ */
 function configSummary(node: WorkflowNodeData, t: TFunction) {
   const config = node.config
   switch (node.type) {
@@ -471,6 +539,16 @@ function configSummary(node: WorkflowNodeData, t: TFunction) {
   }
 }
 
+/**
+ * Provides a JSON text editor that parses valid input and reports formatting errors.
+ *
+ * @param id - The textarea identifier
+ * @param label - The label displayed for the editor
+ * @param value - The initial value to serialize as JSON
+ * @param readOnly - Whether editing is disabled
+ * @param onChange - Called with the parsed JSON value when input is valid
+ * @param t - The translation function used for the invalid JSON message
+ */
 function JsonEditor({
   id,
   label,
@@ -519,6 +597,14 @@ function JsonEditor({
   )
 }
 
+/**
+ * Provides an input for editing comma-separated form options.
+ *
+ * @param value - The current form options
+ * @param readOnly - Whether the input is read-only
+ * @param onChange - Called with the updated, trimmed options
+ * @param t - Translation function for the input's accessible label and placeholder
+ */
 function FormOptionsInput({
   value,
   readOnly,
@@ -559,6 +645,17 @@ function FormOptionsInput({
   )
 }
 
+/**
+ * Provides a menu for selecting global, start-node, and upstream workflow variables.
+ *
+ * @param nodeId - The current workflow node ID used to determine upstream variables.
+ * @param node - The workflow data containing nodes and edges.
+ * @param t - The localization function.
+ * @param label - Optional label displayed on the picker trigger.
+ * @param className - Optional CSS class name for the trigger.
+ * @param disabled - Whether the picker is disabled.
+ * @param onInsert - Called with the selected variable reference, path, and description.
+ */
 function VariablePicker({
   nodeId,
   node,
@@ -690,6 +787,13 @@ function VariablePicker({
   )
 }
 
+/**
+ * Renders a text editor with optional workflow-variable insertion and localized previews.
+ *
+ * @param value - The text or value displayed and edited as text
+ * @param insertVariables - Whether to enable workflow-variable insertion and localized previews
+ * @returns The text editor component
+ */
 function TextEditor({
   id,
   label,
@@ -804,6 +908,16 @@ function TextEditor({
   )
 }
 
+/**
+ * Provides a bounded numeric input with increment and decrement controls.
+ *
+ * @param id - The input element's identifier
+ * @param min - The minimum permitted value
+ * @param max - The maximum permitted value
+ * @param step - The amount added or subtracted by the controls
+ * @param readOnly - Whether value changes are disabled
+ * @param onChange - Called with the clamped updated value
+ */
 function NumberStepper({
   id,
   value,
@@ -863,6 +977,17 @@ function NumberStepper({
   )
 }
 
+/**
+ * Provides advanced controls for configuring an LLM node's model parameters and reasoning-content setting.
+ *
+ * @param open - Whether the settings dialog is visible
+ * @param onOpenChange - Handles changes to the dialog visibility
+ * @param nodeId - Identifier used to associate the dialog controls with the node
+ * @param node - Workflow node whose model settings are edited
+ * @param readOnly - Whether editing controls are disabled
+ * @param onUpdate - Applies updated node configuration
+ * @param t - Translation function for dialog labels
+ */
 function LlmSettingsDialog({
   open,
   onOpenChange,
@@ -1021,6 +1146,15 @@ function LlmSettingsDialog({
   )
 }
 
+/**
+ * Edits conditional branches and their rules for a workflow node.
+ *
+ * @param nodeId - The identifier of the condition node
+ * @param node - The workflow node whose branches are being edited
+ * @param readOnly - Whether branch and rule controls are disabled
+ * @param onUpdate - Called with the updated workflow node
+ * @param t - Translation function for labels and messages
+ */
 function ConditionEditor({
   nodeId,
   node,
@@ -1313,6 +1447,16 @@ function ConditionEditor({
   )
 }
 
+/**
+ * Renders editable tool arguments from the tool's input schema, or a JSON editor when no properties are defined.
+ *
+ * @param nodeId - Identifier used to generate unique editor IDs
+ * @param tool - Tool whose input schema defines the available arguments
+ * @param value - Current tool argument values
+ * @param readOnly - Whether the argument editors are read-only
+ * @param onChange - Called when an argument value changes
+ * @param t - Translation function used for editor labels
+ */
 function ToolArgumentsFields({
   nodeId,
   tool,
@@ -1417,6 +1561,21 @@ function ToolArgumentsFields({
   )
 }
 
+/**
+ * Renders configuration controls for a workflow node and applies configuration updates.
+ *
+ * @param nodeId - The node identifier used to associate controls with the node.
+ * @param node - The workflow node whose configuration is being edited.
+ * @param agent - The workflow's default agent configuration.
+ * @param models - Models available for node configuration.
+ * @param knowledgeBases - Knowledge bases available for retrieval configuration.
+ * @param mcpServers - MCP servers available for tool selection.
+ * @param tools - Tools available for workflow configuration.
+ * @param agents - Agents available for agent-node configuration.
+ * @param readOnly - Whether editing controls are disabled.
+ * @param onUpdate - Callback invoked with the updated node data.
+ * @param t - Translation function used for labels and messages.
+ */
 function NodeConfigFields({
   nodeId,
   node,
@@ -2958,6 +3117,9 @@ function NodeConfigFields({
   )
 }
 
+/**
+ * Renders a workflow node card with its status, configuration, controls, handles, and output references.
+ */
 export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
   const { t } = useLanguage()
   const [confirmAction, confirmDialog] = useConfirmDialog()
@@ -3323,6 +3485,14 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
   )
 }
 
+/**
+ * Displays an output field reference with an option to copy the reference.
+ *
+ * @param label - Optional label displayed before the output value
+ * @param displayValue - Optional text displayed instead of the reference
+ * @param reference - The output field reference to copy
+ * @param t - Translation function for button labels and notifications
+ */
 function OutputFieldRow({
   label,
   displayValue,
@@ -3362,6 +3532,12 @@ function OutputFieldRow({
   )
 }
 
+/**
+ * Determines the available output field names for a workflow node.
+ *
+ * @param node - The workflow node whose output fields are derived
+ * @returns The node's available output field names
+ */
 function outputFieldNames(node: WorkflowNodeData) {
   const config = node.config
   if (

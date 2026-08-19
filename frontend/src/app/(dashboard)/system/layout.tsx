@@ -5,6 +5,11 @@ import * as React from "react"
 import { SessionGate } from "@/components/app/session-gate"
 import { TopBar } from "@/components/app/top-bar"
 
+/**
+ * Renders the system layout with session gating, a top bar, and responsive content spacing.
+ *
+ * @returns The system layout containing the provided children
+ */
 export default function SystemLayout({
   children,
 }: {

@@ -63,10 +63,24 @@ const SessionContext = React.createContext<SessionContextValue | undefined>(
   undefined
 )
 
+/**
+ * Replaces the session user when the supplied user belongs to the current session.
+ *
+ * @param me - The current session data, or `null` when no session exists
+ * @param user - The user data to apply
+ * @returns The updated session data when user IDs match; otherwise, the original session data
+ */
 export function replaceSessionUser(me: MeResponse | null, user: User) {
   return me?.user.id === user.id ? { ...me, user } : me
 }
 
+/**
+ * Adds an administrator membership for a newly created workspace when the current user created it.
+ *
+ * @param me - The current user and their workspace memberships
+ * @param payload - The newly created workspace and its administrator
+ * @returns The updated user data, or `me` when no membership is added
+ */
 export function addCreatedWorkspaceMembership(
   me: MeResponse | null,
   payload: WorkspaceCreateResponse
@@ -90,6 +104,14 @@ export function addCreatedWorkspaceMembership(
   }
 }
 
+/**
+ * Adds a newly created team to the administrator's team memberships.
+ *
+ * @param me - The current session user data, or `null`
+ * @param team - The newly created team
+ * @param adminUserId - The user ID designated as the team's administrator
+ * @returns Session user data with the team added when applicable, otherwise the original value
+ */
 export function addCreatedTeamMembership(
   me: MeResponse | null,
   team: Team,
@@ -121,6 +143,14 @@ export function addCreatedTeamMembership(
   }
 }
 
+/**
+ * Selects the initial active workspace accessible to the user.
+ *
+ * @param me - The current user's session data
+ * @param workspaces - The available workspaces
+ * @param storedWorkspaceId - The previously selected workspace ID, if available
+ * @returns The stored workspace ID when eligible, otherwise the first eligible active workspace ID, or `null` when none is available
+ */
 export function getInitialWorkspaceId(
   me: MeResponse,
   workspaces: Workspace[],
@@ -143,6 +173,11 @@ export function getInitialWorkspaceId(
   )
 }
 
+/**
+ * Provides authentication state, session lifecycle management, workspace and team data, and session operations to descendant components.
+ *
+ * @param children - The components rendered within the session context
+ */
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { t } = useLanguage()
   const [token, setToken] = React.useState<string | null>(null)
@@ -565,6 +600,11 @@ export const useSession = () => {
   return context
 }
 
+/**
+ * Provides the localized name of the selected workspace.
+ *
+ * @returns The localized workspace name, or a localized message when no workspace is selected
+ */
 export function useCurrentWorkspaceName() {
   const { t } = useLanguage()
   const { currentWorkspace } = useSession()

@@ -53,6 +53,12 @@ export type RegisteredModelPayload = {
   status?: string
 }
 
+/**
+ * Lists available model providers, optionally filtered by model type.
+ *
+ * @param modelType - The model type used to filter the provider catalog.
+ * @returns The matching model provider catalog entries.
+ */
 export function listModelProviderCatalog(token: string, modelType?: string) {
   const query = modelType ? `?model_type=${encodeURIComponent(modelType)}` : ""
   return request<ModelProviderCatalog[]>(`/api/v1/model-providers${query}`, {
@@ -65,6 +71,12 @@ export type ModelTypeOption = {
   value: string
 }
 
+/**
+ * Lists the model types supported by a model provider.
+ *
+ * @param provider - The provider whose supported model types to retrieve
+ * @returns The provider's supported model types
+ */
 export function listModelProviderModelTypes(token: string, provider: string) {
   return request<ModelTypeOption[]>(
     `/api/v1/model-providers/model-types?provider=${encodeURIComponent(provider)}`,
@@ -72,6 +84,13 @@ export function listModelProviderModelTypes(token: string, provider: string) {
   )
 }
 
+/**
+ * Lists the base models available from a provider for a model type.
+ *
+ * @param provider - The model provider identifier
+ * @param modelType - The model type used to filter available models
+ * @returns The provider's available base model options
+ */
 export function listModelProviderBaseModels(
   token: string,
   provider: string,
@@ -83,6 +102,12 @@ export function listModelProviderBaseModels(
   )
 }
 
+/**
+ * Retrieves the credential form fields for a model provider.
+ *
+ * @param provider - The provider whose credential fields to retrieve
+ * @returns The provider's credential form field definitions
+ */
 export function getModelProviderForm(token: string, provider: string) {
   return request<ModelCredentialField[]>(
     `/api/v1/model-providers/credential-form?provider=${encodeURIComponent(provider)}`,
@@ -90,6 +115,13 @@ export function getModelProviderForm(token: string, provider: string) {
   )
 }
 
+/**
+ * Lists the models registered in a workspace.
+ *
+ * @param workspaceId - The workspace whose registered models to retrieve
+ * @param options - Optional pagination parameters
+ * @returns The workspace's registered models
+ */
 export function listRegisteredModels(
   token: string,
   workspaceId: string,
@@ -101,6 +133,13 @@ export function listRegisteredModels(
   )
 }
 
+/**
+ * Creates a registered model for a workspace.
+ *
+ * @param workspaceId - The workspace that will own the model
+ * @param payload - The model details to create
+ * @returns The created registered model
+ */
 export function createRegisteredModel(
   token: string,
   workspaceId: string,
@@ -113,6 +152,14 @@ export function createRegisteredModel(
   })
 }
 
+/**
+ * Partially updates a registered model in a workspace.
+ *
+ * @param workspaceId - The workspace containing the model
+ * @param modelId - The identifier of the model to update
+ * @param payload - The model fields to update
+ * @returns The updated registered model
+ */
 export function updateRegisteredModel(
   token: string,
   workspaceId: string,
@@ -129,6 +176,12 @@ export function updateRegisteredModel(
   )
 }
 
+/**
+ * Deletes a registered model from a workspace.
+ *
+ * @param workspaceId - The workspace containing the model
+ * @param modelId - The registered model to delete
+ */
 export function deleteRegisteredModel(
   token: string,
   workspaceId: string,

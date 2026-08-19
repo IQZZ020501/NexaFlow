@@ -23,10 +23,21 @@ export const AGENT_FILE_UPLOAD_SETTING: AgentInteractionConfig["file_upload_sett
   file_upload_type: ["document", "image"],
 }
 
+/**
+ * Gets the file upload types supported by an application type.
+ *
+ * @param appType - The application type to inspect
+ * @returns The file upload types supported by `appType`
+ */
 export function allowedFileUploadTypes(appType: AppType) {
   return FILE_UPLOAD_TYPES[appType]
 }
 
+/**
+ * Creates the default interaction configuration for an agent.
+ *
+ * @returns An interaction configuration with empty text fields, browser text-to-speech, disabled file uploads, and the default document and image upload settings.
+ */
 export function defaultInteractionConfig(): AgentInteractionConfig {
   return {
     prologue: "",
@@ -37,6 +48,13 @@ export function defaultInteractionConfig(): AgentInteractionConfig {
   }
 }
 
+/**
+ * Normalizes interaction settings for the specified application type.
+ *
+ * @param config - The interaction configuration to normalize
+ * @param appType - The application type whose supported settings determine the result
+ * @returns A configuration with application-specific interaction and file upload settings
+ */
 export function normalizeInteractionConfigForAppType(
   config: AgentInteractionConfig,
   appType: AppType
@@ -64,6 +82,12 @@ export function normalizeInteractionConfigForAppType(
   }
 }
 
+/**
+ * Converts selected file upload types into a comma-separated list of accepted file extensions.
+ *
+ * @param types - The file upload types to convert
+ * @returns A comma-separated extension list, or `undefined` when no extensions are available
+ */
 export function acceptedUploadExtensions(types: FileUploadType[]) {
   const extensions = types.flatMap((type) => FILE_UPLOAD_EXTENSIONS[type] ?? [])
   return extensions.length ? extensions.join(",") : undefined

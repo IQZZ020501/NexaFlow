@@ -1,6 +1,13 @@
 import { PaperclipIcon, XIcon } from "lucide-react"
 import type { TFunction } from "@/i18n"
 
+/**
+ * Renders attached files with localized remove controls.
+ *
+ * @param files - The files to display
+ * @param onRemove - Called with the index of the file selected for removal
+ * @returns The attachment list, or `null` when `files` is empty
+ */
 export function AgentAttachmentList({
   files,
   onRemove,

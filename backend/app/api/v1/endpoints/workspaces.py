@@ -104,6 +104,16 @@ async def read_workspace_analytics(
     from_date: Annotated[date | None, Query(alias="from")] = None,
     to_date: Annotated[date | None, Query(alias="to")] = None,
 ) -> WorkspaceAnalyticsResponse:
+    """
+    Retrieve analytics for the current workspace, optionally limited to a date range.
+    
+    Parameters:
+    	from_date (date | None): Start date of the analytics range, inclusive.
+    	to_date (date | None): End date of the analytics range, inclusive.
+    
+    Returns:
+    	WorkspaceAnalyticsResponse: Analytics for the workspace within the specified date range.
+    """
     return await get_workspace_analytics(
         db,
         context.workspace,
@@ -118,6 +128,11 @@ async def read_workspace_governance(
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceGovernanceResponse:
+    """Retrieve governance settings for the current workspace.
+    
+    Returns:
+    	WorkspaceGovernanceResponse: The workspace's governance settings.
+    """
     return await get_workspace_governance(db, context.workspace.id)
 
 
@@ -127,6 +142,17 @@ async def patch_workspace_governance(
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceGovernanceResponse:
+    """
+    Update governance settings for a workspace.
+    
+    Parameters:
+    	payload (WorkspaceGovernanceUpdateRequest): Updated governance settings.
+    	context (WorkspaceContext): Authenticated workspace context.
+    	db (AsyncSession): Database session.
+    
+    Returns:
+    	WorkspaceGovernanceResponse: The updated workspace governance settings.
+    """
     return await update_workspace_governance(db, context.workspace, context.user, payload)
 
 
@@ -135,6 +161,11 @@ async def read_workspace_inventory(
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceInventoryResponse:
+    """Retrieve inventory information for the current workspace.
+    
+    Returns:
+    	WorkspaceInventoryResponse: The workspace's inventory data.
+    """
     return await get_workspace_inventory(db, context.workspace.id)
 
 
@@ -146,6 +177,11 @@ async def list_invitations(
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[WorkspaceInvitationResponse]:
+    """List invitations for the current workspace.
+    
+    Returns:
+    	list[WorkspaceInvitationResponse]: The workspace's invitations.
+    """
     return await list_workspace_invitations(db, context.workspace.id)
 
 
@@ -159,6 +195,16 @@ async def create_invitation(
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceInvitationResponse:
+    """
+    Create an invitation for a workspace.
+    
+    Parameters:
+    	payload (WorkspaceInvitationCreateRequest): Invitation details.
+    	context (WorkspaceContext): Authenticated workspace context.
+    
+    Returns:
+    	WorkspaceInvitationResponse: The created workspace invitation.
+    """
     return await create_workspace_invitation(db, context.workspace.id, context.user, payload)
 
 
@@ -171,6 +217,12 @@ async def revoke_invitation(
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
+    """
+    Revoke a workspace invitation.
+    
+    Parameters:
+    	invitation_id (str): Identifier of the invitation to revoke
+    """
     await revoke_workspace_invitation(db, context.workspace.id, invitation_id, context.user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -182,6 +234,13 @@ async def patch_workspace(
     actor: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceResponse:
+    """
+    Update workspace metadata.
+    
+    Parameters:
+    	workspace_id (str): The identifier of the workspace to update
+    	payload (WorkspaceUpdateRequest): The updated workspace data
+    """
     workspace = await get_workspace_for_user(db, workspace_id, actor)
     return await update_workspace(db, workspace, payload, actor)
 
@@ -287,6 +346,21 @@ async def list_workspace_logs(
     from_date: Annotated[datetime | None, Query(alias="from")] = None,
     to_date: Annotated[datetime | None, Query(alias="to")] = None,
 ) -> list[AuditLogResponse]:
+    """
+    List audit log records for a workspace with optional filters and pagination.
+    
+    Parameters:
+        actor (str | None): Filters records by actor.
+        action (str | None): Filters records by action.
+        resource_type (str | None): Filters records by resource type.
+        resource_id (str | None): Filters records by resource identifier.
+        search (str | None): Filters records by matching search text.
+        from_date (datetime | None): Includes records from this date onward.
+        to_date (datetime | None): Includes records through this date.
+    
+    Returns:
+        list[AuditLogResponse]: The matching workspace audit log records.
+    """
     return await list_workspace_audit_logs(
         db,
         context.workspace.id,

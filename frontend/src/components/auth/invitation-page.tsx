@@ -12,6 +12,12 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 
+/**
+ * Provides a form for accepting a workspace invitation and setting a password.
+ *
+ * @param token - The invitation token used to accept the workspace invitation
+ * @returns The invitation acceptance or success view
+ */
 export function InvitationPage({ token }: { token: string }) {
   const { t } = useLanguage()
   const [password, setPassword] = React.useState("")

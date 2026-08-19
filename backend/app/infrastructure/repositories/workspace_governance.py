@@ -6,6 +6,15 @@ from app.infrastructure.repositories import mapping
 
 
 async def get(db: AsyncSession, workspace_id: str) -> WorkspaceGovernance | None:
+    """
+    Retrieve workspace governance data for a workspace.
+    
+    Parameters:
+        workspace_id (str): Identifier of the workspace.
+    
+    Returns:
+        WorkspaceGovernance | None: The workspace governance entity, or `None` if no matching workspace exists.
+    """
     row = await db.get(WorkspaceGovernanceOrm, workspace_id)
     return mapping.to_entity(WorkspaceGovernance, row) if row is not None else None
 
@@ -14,6 +23,15 @@ async def save(
     db: AsyncSession,
     entity: WorkspaceGovernance,
 ) -> WorkspaceGovernance:
+    """
+    Create or update governance settings for a workspace.
+    
+    Parameters:
+    	entity (WorkspaceGovernance): Governance settings to persist.
+    
+    Returns:
+    	WorkspaceGovernance: The persisted workspace governance settings.
+    """
     row = await db.get(WorkspaceGovernanceOrm, entity.workspace_id)
     if row is None:
         row = WorkspaceGovernanceOrm(

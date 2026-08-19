@@ -68,6 +68,13 @@ type UploadedDocument = KnowledgeDocument & {
   chunks: KnowledgeDocumentChunk[]
 }
 
+/**
+ * Keeps the selected document ID valid for the available documents.
+ *
+ * @param documents - The documents available for selection
+ * @param selectedDocumentId - The currently selected document ID
+ * @returns The selected ID when it exists, the first document's ID when it does not, or `null` when no documents are available
+ */
 export function resolveSelectedDocumentId(
   documents: ReadonlyArray<{ id: string }>,
   selectedDocumentId: string | null,
@@ -119,6 +126,20 @@ const SMART_CLEANING_RULES =
 const SMART_SPLIT_SEPARATOR =
   DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.splitSeparator
 
+/**
+ * Manages the file selection, segmentation preview, and knowledge base import workflow.
+ *
+ * @param token - Authentication token used for knowledge base operations
+ * @param workspaceId - Workspace containing the knowledge base
+ * @param knowledgeBase - Knowledge base receiving the imported documents
+ * @param step - Current step of the upload workflow
+ * @param routeState - Optional state used to restore an in-progress import
+ * @param onCancel - Called when the workflow is cancelled
+ * @param onRouteSegment - Called when transitioning to or updating the segmentation step
+ * @param onBackToFiles - Called when returning to file selection
+ * @param onDone - Called after documents are successfully submitted for indexing
+ * @param onNotify - Reports workflow success and error messages
+ */
 export function KnowledgeUploadFlow({
   token,
   workspaceId,
@@ -1503,6 +1524,13 @@ export function KnowledgeUploadFlow({
   )
 }
 
+/**
+ * Renders a section heading with an icon, title, and description.
+ *
+ * @param icon - The icon displayed beside the heading
+ * @param title - The section title
+ * @param description - The supporting description
+ */
 function SectionTitle({
   icon: Icon,
   title,
@@ -1529,6 +1557,12 @@ function SectionTitle({
   )
 }
 
+/**
+ * Renders a labeled metric value.
+ *
+ * @param label - The metric label
+ * @param value - The metric value
+ */
 function MetricItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 border-t pt-3">
@@ -1540,6 +1574,14 @@ function MetricItem({ label, value }: { label: string; value: string }) {
   )
 }
 
+/**
+ * Renders a selectable segmentation mode option with its title and description.
+ *
+ * @param checked - Whether the option is currently selected
+ * @param title - The option's title
+ * @param description - The option's descriptive text
+ * @param onSelect - Called when the option is selected
+ */
 function SegmentModeOption({
   checked,
   title,
@@ -1584,6 +1626,12 @@ function SegmentModeOption({
   )
 }
 
+/**
+ * Displays the queued files and provides controls to remove individual files.
+ *
+ * @param files - The files awaiting upload
+ * @param onRemove - Called with the index of a file selected for removal
+ */
 function FileList({
   files,
   onRemove,
@@ -1639,6 +1687,15 @@ function FileList({
   )
 }
 
+/**
+ * Displays the selected document's parsing status and segmented content preview.
+ *
+ * @param document - The document whose preview should be displayed
+ * @param isLoading - Whether a preview is currently being generated
+ * @param token - Authentication token used to load chunk content
+ * @param workspaceId - Workspace containing the knowledge base
+ * @param knowledgeBaseId - Knowledge base containing the document
+ */
 function PreviewPane({
   document,
   isLoading,
@@ -1714,6 +1771,12 @@ function PreviewPane({
   )
 }
 
+/**
+ * Resolves a document status to its localized display label.
+ *
+ * @param status - The document status to label
+ * @returns The localized label for a recognized status, or the original status for an unrecognized value
+ */
 function documentStatusLabel(status: string, t: TFunction) {
   const labels: Record<string, TranslationKey> = {
     uploaded: "待分段",

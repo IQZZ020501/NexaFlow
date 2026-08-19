@@ -156,6 +156,11 @@ type SystemPageViewProps = {
   teamMembersDialogProps: React.ComponentProps<typeof TeamMembersDialog>
 }
 
+/**
+ * Renders the system-management interface with permission-aware navigation, panels, and dialogs.
+ *
+ * @returns The system-management interface.
+ */
 export function SystemPageView({
   activeSystemTab,
   systemTabs,
@@ -485,6 +490,13 @@ export function SystemPageView({
   )
 }
 
+/**
+ * Determines whether the current user can manage the selected workspace or any workspace.
+ *
+ * @param me - The current user's profile and workspace memberships
+ * @param workspaceId - The selected workspace identifier, or `null` when no workspace is selected
+ * @returns `true` if the user is a global administrator, administers the selected workspace, or administers any workspace, `false` otherwise.
+ */
 function canManageAnyWorkspace(me: MeResponse, workspaceId: string | null) {
   return Boolean(
     me.user.is_global_admin ||

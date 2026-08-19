@@ -157,6 +157,16 @@ async def get_public_workflow_run(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_password_changed)],
 ) -> ExternalWorkflowRunResponse:
+    """
+    Retrieve a workflow run from a published public workflow.
+    
+    Parameters:
+    	workflow_id (str): Identifier of the workflow.
+    	run_id (str): Identifier of the workflow run.
+    
+    Returns:
+    	ExternalWorkflowRunResponse: The requested workflow run.
+    """
     await get_workspace_published_workflow_context(db, workflow_id, user)
     return await get_external_workflow_run(
         db, workflow_id, run_id, "public", user.id
@@ -174,6 +184,16 @@ async def regenerate_public_workflow_run(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_password_changed)],
 ) -> ExternalWorkflowRunResponse:
+    """
+    Regenerate a public workflow run.
+    
+    Parameters:
+        workflow_id (str): Identifier of the workflow.
+        run_id (str): Identifier of the run to regenerate.
+    
+    Returns:
+        ExternalWorkflowRunResponse: The regenerated workflow run.
+    """
     await get_workspace_published_workflow_context(db, workflow_id, user)
     return await regenerate_external_workflow_run(
         db,
@@ -197,6 +217,15 @@ async def set_public_workflow_run_feedback(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_password_changed)],
 ) -> ExternalWorkflowRunResponse:
+    """
+    Submit feedback for a public workflow run.
+    
+    Parameters:
+        payload (RunFeedbackRequest): Feedback value to apply to the workflow run.
+    
+    Returns:
+        ExternalWorkflowRunResponse: The workflow run with the submitted feedback.
+    """
     await get_workspace_published_workflow_context(db, workflow_id, user)
     return await set_external_workflow_run_feedback(
         db,
@@ -217,6 +246,16 @@ async def submit_public_workflow_form(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_password_changed)],
 ) -> ExternalWorkflowRunResponse:
+    """Submit a form for a public workflow run.
+    
+    Parameters:
+        workflow_id (str): Identifier of the workflow.
+        run_id (str): Identifier of the workflow run.
+        payload (WorkflowFormSubmitRequest): Form data to submit.
+    
+    Returns:
+        ExternalWorkflowRunResponse: The updated workflow run.
+    """
     await get_workspace_published_workflow_context(db, workflow_id, user)
     return await submit_external_workflow_form(
         db, workflow_id, run_id, "public", user.id, payload, settings

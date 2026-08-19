@@ -44,6 +44,11 @@ const PAGE_LINKS: Record<string, string> = {
   tools: "/app/tools",
 }
 
+/**
+ * Renders the authenticated user's application navigation bar.
+ *
+ * @returns The top navigation bar, or `null` when no authenticated user is available.
+ */
 export function TopBar() {
   const { language, setLanguage, t } = useLanguage()
   const { theme, setTheme } = useTheme()

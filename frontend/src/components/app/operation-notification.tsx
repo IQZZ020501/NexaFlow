@@ -4,6 +4,12 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { AppNotification } from "@/lib/notifications"
 
+/**
+ * Displays a dismissible success or error notification banner.
+ *
+ * @param notification - The notification to display, or `null` when no banner should be rendered.
+ * @returns The notification banner, or `null` when no notification is provided.
+ */
 export function OperationNotification({
   notification,
   onDismiss,

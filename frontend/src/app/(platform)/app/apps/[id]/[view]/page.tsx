@@ -3,6 +3,12 @@ import { redirect } from "next/navigation"
 import { AgentsPage } from "@/components/agents/agents-page"
 import { appViewPath, parseAgentDetailView } from "@/lib/agent-views"
 
+/**
+ * Renders an agent detail view or redirects overview requests to the canonical app path.
+ *
+ * @param params - The agent identifier and requested detail view.
+ * @param searchParams - Optional conversation identifier from the query string.
+ */
 export default async function AgentDetailViewPage({
   params,
   searchParams,

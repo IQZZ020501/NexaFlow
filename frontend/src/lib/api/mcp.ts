@@ -47,10 +47,26 @@ export type McpServerCreatePayload =
       }
     }
 
+/**
+ * Builds the API path for MCP servers in a workspace.
+ *
+ * @param workspaceId - The workspace identifier
+ * @param suffix - An optional path suffix
+ * @returns The workspace-scoped MCP server API path
+ */
 function mcpPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/mcp-servers${suffix}`
 }
 
+/**
+ * Retrieves MCP servers configured for a workspace.
+ *
+ * @param workspaceId - The workspace whose MCP servers to retrieve
+ * @param options - Optional pagination parameters
+ * @param options.limit - The maximum number of servers to return
+ * @param options.offset - The number of servers to skip
+ * @returns The workspace's MCP servers
+ */
 export function listMcpServers(
   token: string,
   workspaceId: string,
@@ -61,6 +77,13 @@ export function listMcpServers(
   })
 }
 
+/**
+ * Creates an MCP server in a workspace.
+ *
+ * @param workspaceId - The workspace containing the server
+ * @param payload - The server configuration
+ * @returns The created MCP server
+ */
 export function createMcpServer(
   token: string,
   workspaceId: string,
@@ -73,6 +96,12 @@ export function createMcpServer(
   })
 }
 
+/**
+ * Refreshes an MCP server's configuration and available tools.
+ *
+ * @param serverId - The identifier of the MCP server to refresh
+ * @returns The refreshed MCP server
+ */
 export function refreshMcpServer(
   token: string,
   workspaceId: string,
@@ -84,6 +113,13 @@ export function refreshMcpServer(
   })
 }
 
+/**
+ * Deletes an MCP server from a workspace.
+ *
+ * @param token - Authentication token for the request
+ * @param workspaceId - Identifier of the workspace containing the server
+ * @param serverId - Identifier of the server to delete
+ */
 export function deleteMcpServer(
   token: string,
   workspaceId: string,
@@ -95,6 +131,13 @@ export function deleteMcpServer(
   })
 }
 
+/**
+ * Updates the policy mode for an MCP server tool.
+ *
+ * @param toolName - The name of the tool whose policy to update
+ * @param mode - The policy mode to apply to the tool
+ * @returns The updated tool policy metadata
+ */
 export function updateMcpToolPolicy(
   token: string,
   workspaceId: string,

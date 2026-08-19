@@ -51,6 +51,13 @@ import { latestRunVersions } from "@/lib/run-versions"
 import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import { workflowErrorMessage, workflowNodeLabel } from "@/lib/workflows/graph"
 
+/**
+ * Derives a conversation title from the question input.
+ *
+ * @param inputs - The conversation inputs containing an optional question
+ * @param fallback - The title to use when the question is absent or blank
+ * @returns The trimmed question text or the fallback title
+ */
 function conversationLabel(inputs: Record<string, unknown>, fallback: string) {
   const question = inputs.question
   return (
@@ -102,6 +109,15 @@ function updateRun(
   })
 }
 
+/**
+ * Renders the workflow conversation history with controls for creating and selecting conversations.
+ *
+ * @param profile - The workflow profile displayed in the history header
+ * @param conversations - The conversations available for selection
+ * @param conversationId - The currently selected conversation ID
+ * @param onNew - Called when a new conversation is requested
+ * @param onSelect - Called with the ID of the selected conversation
+ */
 function ConversationHistory({
   profile,
   conversations,
@@ -168,6 +184,12 @@ function ConversationHistory({
   )
 }
 
+/**
+ * Renders the chat interface for a published public workflow.
+ *
+ * @param workflowId - The identifier of the workflow to run.
+ * @param initialConversationId - The conversation to load initially, if provided.
+ */
 export function PublicWorkflowChat({
   workflowId,
   initialConversationId = null,

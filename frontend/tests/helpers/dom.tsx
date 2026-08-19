@@ -92,6 +92,11 @@ export function mockUseSession(session = makeSession()) {
   }))
 }
 
+/**
+ * Mocks Next.js navigation hooks with configurable route state and navigation callbacks.
+ *
+ * @param options - Navigation parameters, pathname, search string, and optional `push` and `replace` callbacks.
+ */
 export function mockNextNavigation(options: {
   params?: Record<string, string>
   search?: string
@@ -116,6 +121,9 @@ export function mockNextNavigation(options: {
   }))
 }
 
+/**
+ * Mocks `next/image` with a native `<img>` test stub.
+ */
 export function mockNextImage() {
   /* eslint-disable @next/next/no-img-element -- test stub for next/image */
   mock.module("next/image", () => ({
@@ -126,6 +134,9 @@ export function mockNextImage() {
   /* eslint-enable @next/next/no-img-element */
 }
 
+/**
+ * Mocks `next/link` with an anchor element for tests.
+ */
 export function mockNextLink() {
   mock.module("next/link", () => ({
     default: ({

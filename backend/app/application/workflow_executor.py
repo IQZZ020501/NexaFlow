@@ -84,6 +84,17 @@ async def _workflow_context(
     run: AgentRun,
     graph: WorkflowGraph,
 ) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
+    """
+    Builds conversation context and per-node dialogue histories for a workflow run.
+    
+    Parameters:
+    	run (AgentRun): The current run whose conversation and agent scope determine the history.
+    	graph (WorkflowGraph): The workflow graph used to identify LLM nodes with node-level dialogue.
+    
+    Returns:
+    	context (dict[str, Any]): Global workflow context containing timestamps, conversation ID, and prior run history.
+    	histories (dict[str, list[dict[str, Any]]]): Successful prior answers grouped by node-level dialogue node ID.
+    """
     node_ids = [
         node.id
         for node in graph.nodes

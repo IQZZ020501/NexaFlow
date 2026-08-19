@@ -5597,6 +5597,7 @@ def test_mcp_server_create_request_transport_matrix() -> None:
 
 
 def main() -> None:
+    """Run the complete pure-unit test suite and print a success marker when all tests pass."""
     test_effective_permission_matrix()
     test_validate_permission_rejects_unknown()
     test_tool_ref_requires_stable_ids()

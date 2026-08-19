@@ -56,6 +56,20 @@ type AgentConfigFieldsProps = {
   t: TFunction
 }
 
+/**
+ * Renders configuration fields for an agent or workflow, including its identity, model, status, knowledge bases, and tools.
+ *
+ * @param form - The current agent or workflow configuration.
+ * @param setForm - Updates the configuration state.
+ * @param models - Available models for selection.
+ * @param knowledgeBases - Available knowledge bases.
+ * @param tools - Available tools.
+ * @param token - Authentication token used by the tool picker.
+ * @param workspaceId - Workspace identifier used by the tool picker.
+ * @param hasLegacyToolBindings - Whether the agent has legacy tool bindings.
+ * @param readOnly - Whether the configuration controls are disabled.
+ * @param t - Translates interface text.
+ */
 export function AgentConfigFields({
   form,
   setForm,

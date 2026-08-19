@@ -42,6 +42,11 @@ html, body { background-color: oklch(1 0 0); }
 html.dark, html.dark body { background-color: oklch(0.145 0 0); }
 `
 
+/**
+ * Renders the root HTML layout for the application.
+ *
+ * @param children - The page content rendered within the application providers
+ */
 export default function RootLayout({
   children,
 }: {

@@ -40,6 +40,13 @@ const CLEANING_RULES = new Set([
   "collapse_spaces",
 ])
 
+/**
+ * Gets the first value associated with a search parameter key.
+ *
+ * @param searchParams - The search parameters to inspect
+ * @param key - The parameter key
+ * @returns The first value when the parameter contains multiple values, or the parameter value
+ */
 function firstValue(
   searchParams: KnowledgeUploadSearchParams,
   key: string,
@@ -48,6 +55,15 @@ function firstValue(
   return Array.isArray(value) ? value[0] : value
 }
 
+/**
+ * Parses an integer within the specified inclusive range.
+ *
+ * @param value - The value to parse.
+ * @param minimum - The smallest accepted integer.
+ * @param maximum - The largest accepted integer.
+ * @param fallback - The value to use when parsing fails or the result is outside the range.
+ * @returns The parsed integer when valid; otherwise, `fallback`.
+ */
 function integerValue(
   value: string | undefined,
   minimum: number,
@@ -60,10 +76,24 @@ function integerValue(
     : fallback
 }
 
+/**
+ * Builds the URL for uploading documents to a knowledge base.
+ *
+ * @param knowledgeBaseId - The knowledge base identifier
+ * @returns The encoded knowledge-base upload URL
+ */
 export function knowledgeUploadPath(knowledgeBaseId: string) {
   return `/app/knowledge/${encodeURIComponent(knowledgeBaseId)}/upload`
 }
 
+/**
+ * Builds the URL for uploading document segments to a knowledge base.
+ *
+ * @param documentIds - Document identifiers to include, deduplicated and limited to the upload maximum
+ * @param parseSettings - Segmentation and cleaning settings to encode in the URL
+ * @param importMode - Import mode for the upload
+ * @returns The encoded segment-upload URL
+ */
 export function knowledgeUploadSegmentPath(
   knowledgeBaseId: string,
   documentIds: string[],
@@ -84,6 +114,12 @@ export function knowledgeUploadSegmentPath(
   return `${knowledgeUploadPath(knowledgeBaseId)}/segment?${searchParams}`
 }
 
+/**
+ * Parses upload route parameters into normalized document, import, and parsing settings.
+ *
+ * @param searchParams - The route query parameters to parse.
+ * @returns The validated and normalized upload route state.
+ */
 export function parseKnowledgeUploadRouteState(
   searchParams: KnowledgeUploadSearchParams,
 ): KnowledgeUploadRouteState {

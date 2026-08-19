@@ -49,6 +49,9 @@ const PROCESSING_TASK_STATUSES: Record<string, true> = {
   running: true,
 }
 
+/**
+ * Renders the document detail page for the authenticated session.
+ */
 export function DocumentDetailPage() {
   const { token, selectedWorkspaceId, notify } = useSession()
 
@@ -65,6 +68,12 @@ export function DocumentDetailPage() {
   )
 }
 
+/**
+ * Renders the document detail page with metadata, processing status, chunks, and task history.
+ *
+ * @param selectedWorkspaceId - The workspace containing the document, or `null` when no workspace is selected.
+ * @returns The document detail page content.
+ */
 function DocumentDetailPageContent({
   token,
   selectedWorkspaceId,

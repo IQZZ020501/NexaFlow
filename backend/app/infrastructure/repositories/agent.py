@@ -441,6 +441,17 @@ async def list_agent_runs(
     conversation_id: str | None = None,
     latest_versions_only: bool = False,
 ) -> list[AgentRunEntity]:
+    """
+    List runs for an agent and consumer, optionally filtered by status or conversation.
+    
+    Parameters:
+    	access_source (str): The source through which the runs were accessed.
+    	consumer_id (str): The identifier of the consumer associated with the runs.
+    	latest_versions_only (bool): Whether to exclude failed or cancelled regenerated runs and runs with a non-failed successor.
+    
+    Returns:
+    	list[AgentRunEntity]: Runs matching the specified filters, ordered from newest to oldest.
+    """
     statement = (
         select(AgentRun)
         .where(
@@ -487,6 +498,15 @@ async def count_agent_runs(
     conversation_id: str | None = None,
     latest_versions_only: bool = False,
 ) -> int:
+    """
+    Count runs belonging to an agent, with optional access, consumer, conversation, and version filters.
+    
+    Parameters:
+        latest_versions_only (bool): Whether to count only runs without a non-failed, non-cancelled regenerated successor.
+    
+    Returns:
+        int: The number of matching runs.
+    """
     statement = select(func.count()).select_from(AgentRun).where(
         AgentRun.agent_id == agent_id
     )
@@ -603,6 +623,18 @@ async def list_consumer_conversations(
     access_source: str,
     consumer_id: str,
 ) -> list[tuple]:
+    """
+    List conversations for a consumer, including their latest visible run and activity totals.
+    
+    Parameters:
+        agent_id (str): Identifier of the agent.
+        access_source (str): Source through which the consumer accesses the agent.
+        consumer_id (str): Identifier of the consumer.
+    
+    Returns:
+        list[tuple]: Rows containing the latest run ID, conversation ID, goal, status,
+        result, run count, creation time, and last update time for each conversation.
+    """
     scope = (
         AgentRun.agent_id == agent_id,
         AgentRun.access_source == access_source,
@@ -722,6 +754,16 @@ async def list_conversation_memory_runs(
     *,
     limit: int,
 ) -> tuple[AgentRunEntity | None, list[AgentRunEntity]]:
+    """
+    Find prior successful runs with conversation memory for an agent run.
+    
+    Parameters:
+        run (AgentRunEntity): Run whose workspace, agent, consumer, access source, and conversation define the search scope.
+        limit (int): Maximum number of memory runs to return.
+    
+    Returns:
+        tuple[AgentRunEntity | None, list[AgentRunEntity]]: The latest qualifying run with a context summary and the subsequent qualifying runs in chronological order.
+    """
     scope = (
         AgentRun.workspace_id == run.workspace_id,
         AgentRun.agent_id == run.agent_id,

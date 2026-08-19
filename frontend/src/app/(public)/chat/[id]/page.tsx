@@ -5,6 +5,11 @@ type PublicAgentChatPageProps = {
   searchParams: Promise<{ conversation_id?: string | string[] }>
 }
 
+/**
+ * Renders the public application chat page for an application.
+ *
+ * @returns The chat interface with the initial conversation selected when provided.
+ */
 export default async function PublicAgentChatPage({
   params,
   searchParams,

@@ -40,6 +40,24 @@ async def list_audit_logs(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
 ) -> list[AuditLogEntity]:
+    """
+    Retrieve audit logs with optional filters and pagination.
+    
+    Parameters:
+        limit (int): Maximum number of logs to retrieve.
+        offset (int): Number of logs to skip.
+        workspace_id (str | None): Workspace identifier used to filter logs.
+        actor (str | None): User ID, username, or name used to filter logs.
+        action (str | None): Action used to filter logs.
+        resource_type (str | None): Resource type used to filter logs.
+        resource_id (str | None): Resource identifier used to filter logs.
+        search (str | None): Text matched against action, resource name or type, and actor username.
+        from_date (datetime | None): Inclusive lower bound for the creation date.
+        to_date (datetime | None): Exclusive upper bound for the creation date.
+    
+    Returns:
+        list[AuditLogEntity]: Matching audit logs ordered from newest to oldest.
+    """
     statement = select(AuditLog)
     if workspace_id:
         statement = statement.where(AuditLog.workspace_id == workspace_id)
@@ -93,6 +111,22 @@ async def list_workspace_audit_logs(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
 ) -> list[AuditLogEntity]:
+    """
+    Retrieve audit logs for a workspace with optional filtering and pagination.
+    
+    Parameters:
+        workspace_id (str): Identifier of the workspace whose audit logs are retrieved.
+        actor (str | None): Optional actor identity or name filter.
+        action (str | None): Optional action filter.
+        resource_type (str | None): Optional resource type filter.
+        resource_id (str | None): Optional resource identifier filter.
+        search (str | None): Optional text search across audit log fields.
+        from_date (datetime | None): Optional inclusive lower bound for creation time.
+        to_date (datetime | None): Optional inclusive upper bound for creation time.
+    
+    Returns:
+        list[AuditLogEntity]: Audit logs matching the filters, ordered newest first.
+    """
     return await list_audit_logs(
         db,
         limit,

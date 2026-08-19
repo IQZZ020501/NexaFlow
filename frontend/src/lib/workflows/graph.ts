@@ -73,10 +73,23 @@ const WORKFLOW_ERROR_LABELS: Partial<Record<string, TranslationKey>> = {
     "文档引用必须包含文件 ID。",
 }
 
+/**
+ * Resolves the localized label for a workflow node type.
+ *
+ * @returns The localized node label
+ */
 export function workflowNodeLabel(type: WorkflowNodeType, t: TFunction) {
   return t(WORKFLOW_NODE_LABELS[type])
 }
 
+/**
+ * Resolves the display label for a workflow execution node.
+ *
+ * @param nodeId - The graph node identifier
+ * @param type - The node type used when no title is available
+ * @param graph - The workflow graph containing the node, if available
+ * @returns The node's trimmed title, or its localized type label when no title is available
+ */
 export function workflowExecutionNodeLabel(
   nodeId: string,
   type: WorkflowNodeType,
@@ -89,6 +102,13 @@ export function workflowExecutionNodeLabel(
   return title || workflowNodeLabel(type, t)
 }
 
+/**
+ * Translates a recognized workflow error message.
+ *
+ * @param message - The workflow error message to translate
+ * @param t - The translation function
+ * @returns The translated error message, or the original message when no translation is defined
+ */
 export function workflowErrorMessage(message: string, t: TFunction) {
   const label = WORKFLOW_ERROR_LABELS[message]
   return label ? t(label) : message
@@ -136,6 +156,13 @@ export const WORKFLOW_NODE_PRESETS: WorkflowNodePreset[] = [
   },
 ]
 
+/**
+ * Creates the default configuration for a workflow node type.
+ *
+ * @param type - The workflow node type to configure
+ * @param startNodeId - The identifier used for references to the workflow start node
+ * @returns The initial configuration for the specified node type
+ */
 export function defaultNodeConfig(
   type: WorkflowNodeType,
   startNodeId = "start"
@@ -253,6 +280,16 @@ export function defaultNodeConfig(
   }
 }
 
+/**
+ * Creates a workflow graph node with a generated identifier, grid position, and configuration.
+ *
+ * @param type - The workflow node type
+ * @param title - The node title
+ * @param index - The node's layout index
+ * @param config - Optional node configuration; defaults to the configuration for `type`
+ * @param startNodeId - The identifier of the workflow start node used by the default configuration
+ * @returns A configured workflow node
+ */
 export function createWorkflowNode(
   type: WorkflowNodeType,
   title: string,
@@ -275,6 +312,14 @@ export function createWorkflowNode(
   }
 }
 
+/**
+ * Ensures condition nodes with only `IF` and `ELSE` branches include an `ELSE IF` branch.
+ *
+ * Existing edges from the `ELSE` branch are duplicated and redirected to the new `ELSE IF` branch.
+ *
+ * @param graph - The workflow graph to update
+ * @returns The updated graph, or the original graph when no condition branches require migration
+ */
 export function ensureConditionElseIfBranches(
   graph: WorkflowGraph
 ): WorkflowGraph {
@@ -341,6 +386,15 @@ export function ensureConditionElseIfBranches(
   return changed ? { ...graph, nodes, edges } : graph
 }
 
+/**
+ * Creates a workflow edge connecting two nodes.
+ *
+ * @param source - The identifier of the source node
+ * @param target - The identifier of the target node
+ * @param sourceHandle - The optional source handle identifier
+ * @param targetHandle - The optional target handle identifier
+ * @returns A workflow edge with a generated identifier
+ */
 export function createWorkflowEdge(
   source: string,
   target: string,
@@ -356,6 +410,14 @@ export function createWorkflowEdge(
   }
 }
 
+/**
+ * Creates a normalized, independent workflow graph snapshot.
+ *
+ * @param nodes - The workflow nodes to include
+ * @param edges - The workflow edges to include
+ * @param viewport - The graph viewport to include
+ * @returns A normalized workflow graph with cloned node configurations and viewport data
+ */
 export function serializeWorkflowGraph(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
@@ -383,6 +445,12 @@ export function serializeWorkflowGraph(
   }
 }
 
+/**
+ * Creates a stable serialized representation of a workflow graph.
+ *
+ * @param graph - The workflow graph to serialize
+ * @returns A JSON string containing the normalized graph
+ */
 export function workflowGraphSignature(graph: WorkflowGraph) {
   return JSON.stringify(
     serializeWorkflowGraph(graph.nodes, graph.edges, graph.viewport)
@@ -390,10 +458,11 @@ export function workflowGraphSignature(graph: WorkflowGraph) {
 }
 
 /**
- * Collects every upstream node reachable through incoming edges together with
- * its output field names, for variable picking in node inputs. The start node
- * is intentionally not included: its fields are always available through the
- * `{{global.*}}` namespace.
+ * Collects output fields from nodes reachable upstream of a workflow node.
+ *
+ * @param nodeId - The ID of the node whose incoming graph is traversed
+ * @param fieldsOf - Extracts available output field names from a node's data
+ * @returns Reachable upstream nodes with their IDs, titles, and output fields
  */
 export function upstreamWorkflowFields(
   nodes: WorkflowNode[],
@@ -426,6 +495,14 @@ export function upstreamWorkflowFields(
   return result
 }
 
+/**
+ * Removes a workflow node and its connected edges from a graph.
+ *
+ * @param nodes - The workflow nodes in the graph
+ * @param edges - The workflow edges in the graph
+ * @param nodeId - The identifier of the node to remove
+ * @returns The graph without the specified node or edges connected to it
+ */
 export function removeWorkflowNode(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
@@ -439,6 +516,14 @@ export function removeWorkflowNode(
   }
 }
 
+/**
+ * Selects the workflow graph to use for execution.
+ *
+ * @param canEdit - Whether the workflow is editable.
+ * @param versions - Available published workflow versions.
+ * @param selectedVersionNumber - The requested version number, or the latest version when omitted.
+ * @returns The draft target for editable workflows without a selected version, a published target when available, or `null` when no matching version exists.
+ */
 export function selectWorkflowRunTarget(
   canEdit: boolean,
   versions: Pick<WorkflowVersion, "version_number" | "graph">[],

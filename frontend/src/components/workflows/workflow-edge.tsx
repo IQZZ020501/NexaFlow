@@ -17,6 +17,12 @@ type WorkflowEdgeData = Record<string, unknown> & {
 
 type InteractiveWorkflowEdge = Edge<WorkflowEdgeData, "workflow">
 
+/**
+ * Renders an interactive workflow edge with selection styling and an optional delete control.
+ *
+ * @param data - Controls read-only behavior and handles delete requests.
+ * @returns The rendered workflow edge.
+ */
 export function WorkflowEdgeCard({
   id,
   sourceX,

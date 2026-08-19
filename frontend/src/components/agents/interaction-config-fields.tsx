@@ -31,6 +31,16 @@ type InteractionConfigFieldsProps = {
   compact?: boolean
 }
 
+/**
+ * Renders controls for editing agent interaction settings.
+ *
+ * @param appType - The application type used to determine available file upload types
+ * @param value - The current interaction configuration
+ * @param onChange - Called with the updated interaction configuration
+ * @param idPrefix - Prefix used to generate control IDs
+ * @param readOnly - Whether editing controls are disabled
+ * @param compact - Whether to use the compact layout
+ */
 export function InteractionConfigFields({
   appType,
   value,

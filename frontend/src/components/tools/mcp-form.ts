@@ -25,6 +25,12 @@ const STDIO_CONFIG_FIELDS = new Set([
   "transport",
 ])
 
+/**
+ * Determines whether a hostname is a valid IPv4 address in a private or local-use range.
+ *
+ * @param hostname - The hostname to evaluate
+ * @returns `true` if the hostname is a valid IPv4 address in a private or local-use range, `false` otherwise
+ */
 function isPrivateIpv4(hostname: string) {
   const octets = hostname.split(".").map(Number)
   if (
@@ -53,6 +59,12 @@ export const STDIO_CONFIG_EXAMPLE = `{
   }
 }`
 
+/**
+ * Determines whether a URL targets a private or local network address.
+ *
+ * @param value - The URL to inspect
+ * @returns `true` if the URL has a private or local hostname or IP address, `false` for invalid or public URLs
+ */
 export function isPrivateMcpUrl(value: string) {
   let hostname: string
   try {
@@ -90,6 +102,12 @@ export function isPrivateMcpUrl(value: string) {
   return isPrivateIpv4(hostname)
 }
 
+/**
+ * Parses and normalizes a JSON stdio configuration.
+ *
+ * @param value - The JSON configuration text to parse
+ * @returns The normalized stdio configuration, or `null` when the input is invalid
+ */
 export function parseStdioConfig(
   value: string
 ):
@@ -155,6 +173,12 @@ export function parseStdioConfig(
   }
 }
 
+/**
+ * Builds an MCP server creation payload from form values.
+ *
+ * @param form - The MCP server form data to validate and convert
+ * @returns The creation payload, or `null` if required values are missing or the stdio configuration is invalid
+ */
 export function buildMcpServerCreatePayload(
   form: McpForm
 ): McpSourceCreatePayload | null {

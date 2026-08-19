@@ -52,10 +52,27 @@ type KnowledgeEvaluationProps = {
   reportError: (error: unknown) => void
 }
 
+/**
+ * Formats a numeric metric to three decimal places.
+ *
+ * @param value - The metric value to format
+ * @returns The formatted metric as a string
+ */
 function metric(value: number) {
   return Number(value.toFixed(3)).toString()
 }
 
+/**
+ * Provides an interface for creating, running, and reviewing knowledge-base retrieval evaluations.
+ *
+ * @param token - Authentication token used for evaluation API requests
+ * @param workspaceId - Workspace containing the knowledge base
+ * @param knowledgeBaseId - Knowledge base to evaluate
+ * @param documents - Documents available for selecting expected evaluation results
+ * @param canEdit - Whether the user can modify cases and evaluation runs
+ * @param reportError - Callback for reporting API and evaluation errors
+ * @returns The knowledge-base evaluation interface
+ */
 export function KnowledgeEvaluation({
   token,
   workspaceId,

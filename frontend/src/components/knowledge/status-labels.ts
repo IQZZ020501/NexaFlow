@@ -1,5 +1,11 @@
 import type { TFunction, TranslationKey } from "@/i18n"
 
+/**
+ * Resolves a document status to its translated display label.
+ *
+ * @param status - The document status to label
+ * @returns The translated label for a known status, or the original status for an unknown value
+ */
 export function documentStatusLabel(status: string, t: TFunction) {
   const labels: Record<string, TranslationKey> = { // values are TranslationKeys
     uploaded: "待解析",
@@ -18,6 +24,12 @@ export function documentStatusLabel(status: string, t: TFunction) {
   return labelKey ? t(labelKey) : status
 }
 
+/**
+ * Determines the CSS class for a document status indicator.
+ *
+ * @param status - The document status
+ * @returns The CSS class corresponding to the status
+ */
 export function documentStatusDotClassName(status: string) {
   if (status.endsWith("_failed")) {
     return "bg-destructive"
@@ -35,6 +47,13 @@ export function documentStatusDotClassName(status: string) {
   return "bg-muted-foreground"
 }
 
+/**
+ * Converts a task type to its translated label.
+ *
+ * @param taskType - The task type to label
+ * @param t - The translation function
+ * @returns The translated label for a known task type, or the original task type
+ */
 export function taskTypeLabel(taskType: string, t: TFunction) {
   const labels: Record<string, TranslationKey> = { // values are TranslationKeys
     parse: "解析",
@@ -46,6 +65,12 @@ export function taskTypeLabel(taskType: string, t: TFunction) {
   return labelKey ? t(labelKey) : taskType
 }
 
+/**
+ * Provides a translated label for a task status.
+ *
+ * @param status - The task status to label
+ * @returns The translated label for a recognized status, or the original status
+ */
 export function taskStatusLabel(status: string, t: TFunction) {
   const labels: Record<string, TranslationKey> = { // values are TranslationKeys
     queued: "排队中",
@@ -58,6 +83,12 @@ export function taskStatusLabel(status: string, t: TFunction) {
   return labelKey ? t(labelKey) : status
 }
 
+/**
+ * Determines the CSS class for a task status indicator.
+ *
+ * @param status - The task status to classify
+ * @returns The CSS class corresponding to the status
+ */
 export function taskStatusDotClassName(status: string) {
   if (status === "failed") {
     return "bg-destructive"
@@ -71,6 +102,12 @@ export function taskStatusDotClassName(status: string) {
   return "bg-muted-foreground"
 }
 
+/**
+ * Formats a byte count using bytes, kilobytes, or megabytes.
+ *
+ * @param bytes - The number of bytes to format
+ * @returns The formatted byte count
+ */
 export function formatBytes(bytes: number) {
   if (bytes < 1024) {
     return `${bytes} B`

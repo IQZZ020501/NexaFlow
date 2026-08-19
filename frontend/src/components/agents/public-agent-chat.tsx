@@ -148,6 +148,14 @@ export function hasPublicToolDetails(event: ExternalAgentProgressEvent) {
   )
 }
 
+/**
+ * Renders a knowledge retrieval or tool execution event with its status and optional expandable details.
+ *
+ * @param event - The progress event to display.
+ * @param title - The event title.
+ * @param detail - Optional secondary event detail.
+ * @param statusIcon - The status indicator to display.
+ */
 function PublicToolEventRow({
   event,
   title,
@@ -436,6 +444,15 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
   )
 }
 
+/**
+ * Applies a streamed Agent run event to the corresponding run state.
+ *
+ * @param runs - The current Agent runs.
+ * @param runId - The identifier of the run receiving incremental updates.
+ * @param event - The streamed event to merge.
+ * @param placeholderId - The temporary run identifier replaced by initial run metadata.
+ * @returns The updated Agent runs.
+ */
 export function mergePublicRunEvent(
   runs: ExternalAgentRun[],
   runId: string,
@@ -568,6 +585,11 @@ export function mergePublicRunEvent(
   )
 }
 
+/**
+ * Cancels the active public Agent stream.
+ *
+ * @param streamControllerRef - A reference containing the active stream controller.
+ */
 export function cancelPublicAgentStream(streamControllerRef: {
   current: AbortController | null
 }) {
@@ -576,6 +598,15 @@ export function cancelPublicAgentStream(streamControllerRef: {
   activeController?.abort()
 }
 
+/**
+ * Renders the Agent identity, conversation controls, and conversation history.
+ *
+ * @param profile - The public Agent profile displayed in the history header.
+ * @param conversations - The conversations available for selection.
+ * @param activeConversationId - The identifier of the currently selected conversation.
+ * @param onNew - Called when a new conversation is requested.
+ * @param onSelect - Called with the identifier of the selected conversation.
+ */
 function ConversationHistory({
   profile,
   conversations,
@@ -653,6 +684,12 @@ function ConversationHistory({
   )
 }
 
+/**
+ * Renders the public Agent chat interface with conversation history, streaming responses, tool approvals, attachments, feedback, and run regeneration.
+ *
+ * @param agentId - The identifier of the public Agent to display
+ * @param initialConversationId - The conversation to open initially, if provided
+ */
 export function PublicAgentChat({
   agentId,
   initialConversationId = null,

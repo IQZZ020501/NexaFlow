@@ -33,6 +33,11 @@ type EndpointDocumentation = {
   example: string
 }
 
+/**
+ * Renders a documented API endpoint with its request details and example.
+ *
+ * @param endpoint - The endpoint metadata and formatted example to display
+ */
 function EndpointSection({ endpoint }: { endpoint: EndpointDocumentation }) {
   return (
     <section className="border-b py-7 last:border-b-0">
@@ -61,6 +66,11 @@ function EndpointSection({ endpoint }: { endpoint: EndpointDocumentation }) {
   )
 }
 
+/**
+ * Displays authenticated API documentation for an agent.
+ *
+ * @param agentId - The identifier of the agent whose API documentation is displayed.
+ */
 export function AgentApiDocumentation({
   agentId,
 }: AgentApiDocumentationProps) {

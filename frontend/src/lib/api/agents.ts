@@ -541,6 +541,15 @@ export function uploadAgentFiles(
   )
 }
 
+/**
+ * Retrieves a specific run for an agent.
+ *
+ * @param token - The authentication token
+ * @param workspaceId - The workspace identifier
+ * @param agentId - The agent identifier
+ * @param runId - The run identifier
+ * @returns The requested agent run
+ */
 export function getAgentRun(
   token: string,
   workspaceId: string,
@@ -553,6 +562,12 @@ export function getAgentRun(
   )
 }
 
+/**
+ * Creates a new run by regenerating an existing agent run.
+ *
+ * @param runId - The identifier of the run to regenerate
+ * @returns The regenerated agent run
+ */
 export function regenerateAgentRun(
   token: string,
   workspaceId: string,
@@ -565,6 +580,12 @@ export function regenerateAgentRun(
   )
 }
 
+/**
+ * Sets or clears feedback for an agent run.
+ *
+ * @param value - The feedback value, or `null` to clear existing feedback
+ * @returns The updated agent run
+ */
 export function setAgentRunFeedback(
   token: string,
   workspaceId: string,
@@ -578,6 +599,12 @@ export function setAgentRunFeedback(
   )
 }
 
+/**
+ * Retrieves the tool calls associated with an agent run.
+ *
+ * @param runId - The identifier of the run whose tool calls to retrieve
+ * @returns The run's tool calls
+ */
 export function listAgentRunToolCalls(
   token: string,
   workspaceId: string,

@@ -13,6 +13,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """
+    Create the workspace invitations table and its supporting constraints and indexes.
+    """
     op.create_table(
         "workspace_invitations",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -43,6 +46,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove the workspace invitations table and its indexes."""
     op.drop_index("ix_workspace_invitations_expires_at", table_name="workspace_invitations")
     op.drop_index("ix_workspace_invitations_invited_by_user_id", table_name="workspace_invitations")
     op.drop_index("ix_workspace_invitations_token_hash", table_name="workspace_invitations")

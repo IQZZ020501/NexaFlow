@@ -365,6 +365,11 @@ type AgentsPageProps = {
   workflowCanvasMode?: boolean
 }
 
+/**
+ * Renders the workspace application list or the selected Agent or workflow workspace.
+ *
+ * @returns The application management interface, or `null` when session data is unavailable.
+ */
 export function AgentsPage({
   initialConversationId = null,
   initialView = "overview",

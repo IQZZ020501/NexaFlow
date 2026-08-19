@@ -72,6 +72,13 @@ import {
 
 export type SystemTab = "workspaces" | "teams" | "users" | "audit"
 
+/**
+ * Renders the system administration interface for the active tab when the current user has access.
+ *
+ * Redirects unauthorized users to an appropriate application or system page and renders nothing when the session is unavailable.
+ *
+ * @param activeTab - The system administration tab to display
+ */
 export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
   const session = useSession()
   const router = useRouter()
@@ -146,6 +153,14 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
   )
 }
 
+/**
+ * Renders the system administration page and coordinates workspace, team, user, membership, and audit-log management.
+ *
+ * @param me - The authenticated user's profile and permissions
+ * @param selectedWorkspaceId - The currently selected workspace
+ * @param activeTab - The active system administration tab
+ * @param onNotify - Callback for displaying operation notifications
+ */
 function SystemPageContent({
   me,
   token,

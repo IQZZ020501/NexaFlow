@@ -36,6 +36,9 @@ export {
   type McpForm,
 } from "@/components/tools/mcp-form"
 
+/**
+ * Provides an interface for managing workspace MCP servers and their tools.
+ */
 export function McpToolsPage() {
   const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()

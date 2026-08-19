@@ -27,6 +27,14 @@ const LanguageProviderContext = React.createContext<
   LanguageProviderState | undefined
 >(undefined)
 
+/**
+ * Provides language state and translation access to descendant components.
+ *
+ * @param children - The components rendered within the language context
+ * @param defaultLanguage - The language used when no valid stored language exists
+ * @param storageKey - The local-storage key used to persist the language
+ * @returns The language context provider containing `children`
+ */
 export function LanguageProvider({
   children,
   defaultLanguage = DEFAULT_LANGUAGE,

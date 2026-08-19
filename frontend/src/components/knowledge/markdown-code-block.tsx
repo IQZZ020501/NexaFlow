@@ -15,6 +15,12 @@ type CopyState = "idle" | "copied" | "failed"
 type HighlightedCode = { code: string; language: string; html: string }
 type MermaidRender = { code: string; isDark: boolean; svg: string | null }
 
+/**
+ * Observes theme-related class changes on the document root.
+ *
+ * @param onChange - Callback invoked when the document root's class attribute changes
+ * @returns A function that stops observing theme changes
+ */
 function subscribeToTheme(onChange: () => void) {
   const observer = new MutationObserver(onChange)
   observer.observe(document.documentElement, {
@@ -24,6 +30,11 @@ function subscribeToTheme(onChange: () => void) {
   return () => observer.disconnect()
 }
 
+/**
+ * Determines whether the document is using the dark theme.
+ *
+ * @returns `true` if the document root has the `dark` class, `false` otherwise.
+ */
 function isDarkTheme() {
   return document.documentElement.classList.contains("dark")
 }
@@ -45,6 +56,11 @@ function CopyFeedback({ state }: { state: CopyState }) {
   )
 }
 
+/**
+ * Tracks the status of an asynchronous copy operation.
+ *
+ * @returns The current copy state and a function that marks the operation as copied or failed.
+ */
 function useCopyState() {
   const [state, setState] = React.useState<CopyState>("idle")
   const copy = React.useCallback(async (operation: () => Promise<void>) => {
@@ -58,6 +74,13 @@ function useCopyState() {
   return { state, copy }
 }
 
+/**
+ * Provides a bordered layout for rendered code blocks with a language label and action controls.
+ *
+ * @param language - The language displayed for the code block
+ * @param actions - Controls rendered alongside the language label
+ * @param children - The rendered code-block content
+ */
 function CodeFrame({
   language,
   actions,
@@ -78,6 +101,13 @@ function CodeFrame({
   )
 }
 
+/**
+ * Renders a code block with optional syntax highlighting and copy controls.
+ *
+ * @param code - The source code to display.
+ * @param language - The code language used for labeling and syntax highlighting.
+ * @returns A rendered code block.
+ */
 function SourceCodeBlock({ code, language }: MarkdownCodeBlockProps) {
   const { t } = useLanguage()
   const { state, copy } = useCopyState()
@@ -143,6 +173,11 @@ function SourceCodeBlock({ code, language }: MarkdownCodeBlockProps) {
   )
 }
 
+/**
+ * Copies SVG markup to the clipboard as an SVG image.
+ *
+ * @param svg - The SVG markup to copy
+ */
 async function copySvg(svg: string) {
   if (
     typeof navigator === "undefined" ||
@@ -157,6 +192,11 @@ async function copySvg(svg: string) {
   ])
 }
 
+/**
+ * Renders a Mermaid diagram with source-code fallback and copy controls.
+ *
+ * @param code - Mermaid source code to render
+ */
 function MermaidCodeBlock({ code }: MarkdownCodeBlockProps) {
   const { t } = useLanguage()
   const { state, copy } = useCopyState()
@@ -287,6 +327,11 @@ type MarkdownCodeBlockProps = {
   language: string
 }
 
+/**
+ * Renders a Markdown code block with language-specific formatting.
+ *
+ * @param props - The code content and language to render
+ */
 export function MarkdownCodeBlock(props: MarkdownCodeBlockProps) {
   return props.language === "mermaid" ? (
     <MermaidCodeBlock {...props} />

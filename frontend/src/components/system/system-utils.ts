@@ -91,6 +91,13 @@ export function getUserRoleClass(user: User) {
   return "border-border bg-muted text-muted-foreground"
 }
 
+/**
+ * Formats audit detail fields into a localized, delimiter-separated string.
+ *
+ * @param details - The audit detail fields and their values
+ * @param t - The localization function used for labels and delimiters
+ * @returns A localized representation of the populated details, or `"-"` when no values remain
+ */
 export function formatAuditDetails(
   details: Record<string, unknown>,
   t: TFunction

@@ -50,6 +50,23 @@ type CreateUserDialogProps = {
   handleUserCreateWorkspaceChange: (workspaceId: string) => void
 }
 
+/**
+ * Renders a dialog for creating a user and configuring their workspace, teams, and global administrator privileges.
+ *
+ * @param isUserCreateDialogOpen - Whether the dialog is open.
+ * @param setIsUserCreateDialogOpen - Updates the dialog's open state.
+ * @param userCreateForm - Form values for the new user.
+ * @param setUserCreateForm - Updates the new user form values.
+ * @param userCreateWorkspace - Workspace currently selected for the new user.
+ * @param userCreateTeams - Teams available in the selected workspace.
+ * @param isUserCreateTeamsLoading - Whether teams for the selected workspace are loading.
+ * @param activeWorkspaces - Workspaces available for selection.
+ * @param me - Current user and their administrative permissions.
+ * @param selectedWorkspaceId - Current administrator's workspace identifier.
+ * @param isCreatingUser - Whether user creation is in progress.
+ * @param handleCreateUser - Handles submission of the new user form.
+ * @param handleUserCreateWorkspaceChange - Updates the selected workspace.
+ */
 export function CreateUserDialog({
   isUserCreateDialogOpen,
   setIsUserCreateDialogOpen,
@@ -300,6 +317,13 @@ type EditUserDialogProps = {
   handleUpdateUser: React.FormEventHandler<HTMLFormElement>
 }
 
+/**
+ * Provides a dialog for editing a user's account information and global administrator privileges.
+ *
+ * @param userForm - The user's editable account details, or `null` when the dialog is closed
+ * @param canManageGlobalAdmin - Whether the current user can change global administrator privileges
+ * @param isSavingUser - Whether the user changes are being saved
+ */
 export function EditUserDialog({
   userForm,
   setUserForm,

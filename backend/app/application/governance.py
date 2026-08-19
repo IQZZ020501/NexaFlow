@@ -23,6 +23,14 @@ from app.shareddomain.audit.services import record_audit_log
 
 
 def _governance_response(entity: WorkspaceGovernance) -> WorkspaceGovernanceResponse:
+    """Convert workspace governance settings into their response representation.
+    
+    Parameters:
+    	entity (WorkspaceGovernance): Governance settings to convert.
+    
+    Returns:
+    	WorkspaceGovernanceResponse: The workspace governance response.
+    """
     return WorkspaceGovernanceResponse(
         workspace_id=entity.workspace_id,
         daily_run_limit=entity.daily_run_limit,
@@ -38,6 +46,15 @@ async def get_workspace_governance(
     db: AsyncSession,
     workspace_id: str,
 ) -> WorkspaceGovernanceResponse:
+    """
+    Retrieve governance settings for a workspace.
+    
+    Parameters:
+    	workspace_id (str): Identifier of the workspace whose governance settings to retrieve.
+    
+    Returns:
+    	WorkspaceGovernanceResponse: The workspace governance settings, including defaults when no persisted settings exist.
+    """
     entity = await workspace_governance_repository.get(db, workspace_id)
     return _governance_response(entity or WorkspaceGovernance(workspace_id=workspace_id))
 
@@ -48,6 +65,17 @@ async def update_workspace_governance(
     actor: User,
     payload: WorkspaceGovernanceUpdateRequest,
 ) -> WorkspaceGovernanceResponse:
+    """
+    Apply governance settings to a workspace and record the update.
+    
+    Parameters:
+        workspace (Workspace): Workspace whose governance settings are updated.
+        actor (User): User responsible for the update.
+        payload (WorkspaceGovernanceUpdateRequest): Governance values to apply.
+    
+    Returns:
+        WorkspaceGovernanceResponse: The updated workspace governance settings.
+    """
     entity = await workspace_governance_repository.get(db, workspace.id)
     if entity is None:
         entity = WorkspaceGovernance(workspace_id=workspace.id)
@@ -73,6 +101,15 @@ async def get_workspace_inventory(
     db: AsyncSession,
     workspace_id: str,
 ) -> WorkspaceInventoryResponse:
+    """
+    Retrieve workspace inventory counts for the previous 24 hours.
+    
+    Parameters:
+    	workspace_id (str): Identifier of the workspace whose inventory is retrieved.
+    
+    Returns:
+    	WorkspaceInventoryResponse: Inventory counts for the workspace, including the current timestamp.
+    """
     now = utc_now()
     day_ago = now - timedelta(days=1)
     counts = await governance_repository.workspace_inventory_counts(db, workspace_id, day_ago)
@@ -87,6 +124,16 @@ async def get_admin_health(
     db: AsyncSession,
     settings: Settings,
 ) -> AdminHealthResponse:
+    """
+    Assess system health and summarize component status and recent operational counts.
+    
+    Parameters:
+    	db (AsyncSession): Database session used to check connectivity and retrieve health counts.
+    	settings (Settings): Application configuration used to assess infrastructure readiness.
+    
+    Returns:
+    	AdminHealthResponse: Health status, component details, pending task count, failed log count from the previous 24 hours, and check timestamp.
+    """
     checked_at = utc_now()
     components: dict[str, HealthComponent] = {}
     try:
@@ -121,6 +168,16 @@ async def enforce_workspace_run_quota(
     db: AsyncSession,
     workspace_id: str,
 ) -> None:
+    """
+    Enforce the workspace's configured daily run quota.
+    
+    Parameters:
+    	db (AsyncSession): Database session used to retrieve governance settings and run usage.
+    	workspace_id (str): Identifier of the workspace whose quota should be enforced.
+    
+    Raises:
+    	HTTPException: If the workspace has reached or exceeded its configured daily run limit.
+    """
     governance = await workspace_governance_repository.get(db, workspace_id)
     if governance is None or governance.daily_run_limit is None:
         return

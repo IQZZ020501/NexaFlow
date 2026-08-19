@@ -86,6 +86,14 @@ const navItems: Array<{
   { href: "/system/security", label: "会话安全", icon: KeyRoundIcon },
 ]
 
+/**
+ * Renders the system governance section authorized for the current user.
+ *
+ * Redirects users without access to the application page and restricts operations
+ * and workspace governance to users with the required administrative permissions.
+ *
+ * @param section - The governance section to display.
+ */
 export function SystemGovernancePage({ section }: Props) {
   const session = useSession()
   const router = useRouter()
@@ -128,6 +136,12 @@ export function SystemGovernancePage({ section }: Props) {
   )
 }
 
+/**
+ * Renders localized navigation links for the system administration sections available to the current user.
+ *
+ * @param section - The currently active system administration section
+ * @param me - The authenticated user and membership data used to determine visible links
+ */
 function SystemGovernanceNav({
   section,
   me,
@@ -179,6 +193,11 @@ function SystemGovernanceNav({
   )
 }
 
+/**
+ * Provides workspace governance state and localized error reporting for the current session.
+ *
+ * @returns The session, active workspaces, manageable workspaces, selected workspace, and error reporter
+ */
 function useGovernanceContext() {
   const { t } = useLanguage()
   const session = useSession()
@@ -211,6 +230,11 @@ function useGovernanceContext() {
   }
 }
 
+/**
+ * Displays system health metrics and filtered operation logs for administrators.
+ *
+ * @returns The operations dashboard with health status, log filters, and CSV export controls.
+ */
 function OperationsPanel() {
   const { t, language } = useLanguage()
   const { session, reportError } = useGovernanceContext()
@@ -340,6 +364,9 @@ function OperationsPanel() {
   )
 }
 
+/**
+ * Manages governance settings, inventory, and invitations for the selected workspace.
+ */
 function GovernancePanel() {
   const { t, language } = useLanguage()
   const { session, manageableWorkspaces, selectedWorkspaceId, selectedWorkspace, reportError } = useGovernanceContext()
@@ -409,6 +436,11 @@ function GovernancePanel() {
   </div>
 }
 
+/**
+ * Displays the current user's active sessions and allows administrators to revoke them.
+ *
+ * Global administrators can inspect and manage sessions for other users.
+ */
 function SecurityPanel() {
   const { t, language } = useLanguage()
   const { session, reportError } = useGovernanceContext()
@@ -460,6 +492,16 @@ function SecurityPanel() {
   return <><Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><KeyRoundIcon className="size-4" />{t("会话安全")}</CardTitle><CardDescription>{t("查看登录设备并及时撤销异常会话")}</CardDescription></div><div className="flex flex-wrap gap-2">{isGlobal ? <FilterDropdown className="h-9 w-56" value={targetUserId} onChange={setTargetUserId} ariaLabel={t("选择用户")} options={users.map((user) => ({ value: user.id, label: `${user.name} (${user.username})` }))} /> : null}<Button variant="outline" size="sm" onClick={() => void revokeAll()} disabled={loading}><XCircleIcon className="size-4" />{t("撤销其他会话")}</Button><Button variant="outline" size="icon" onClick={() => void load()} disabled={loading} aria-label={t("刷新")}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent>{loading ? <LoaderCircleIcon className="mx-auto my-10 animate-spin" /> : sessions.length ? <div className="grid gap-2">{sessions.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"><div className="flex min-w-0 items-center gap-3"><div className="flex size-9 items-center justify-center rounded-full bg-muted"><KeyRoundIcon className="size-4" /></div><div className="min-w-0"><div className="truncate text-sm font-medium" title={item.user_agent || item.ip_address || t("未知设备")}>{item.user_agent || item.ip_address || t("未知设备")}</div><div className="text-xs text-muted-foreground">{item.user_agent ? item.ip_address || "—" : "—"} · {t("最近使用")} {formatDateTime(item.last_used_at, dateLocale)}</div></div></div><div className="flex items-center gap-2">{item.is_current ? <Badge><CheckCircle2Icon className="mr-1 size-3" />{t("当前会话")}</Badge> : null}<Button variant="destructive" size="sm" onClick={() => void revoke(item)}>{t("撤销")}</Button></div></div>)}</div> : <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{t("暂无会话")}</div>}</CardContent></Card>{confirmDialog}</>
 }
 
+/**
+ * Renders a labeled controlled input field.
+ *
+ * @param label - The text displayed above the input
+ * @param value - The input's current value
+ * @param onChange - Called with the updated input value
+ * @param placeholder - Optional placeholder text
+ * @param type - The input type
+ * @param required - Whether the input requires a value
+ */
 function Field({
   label,
   value,
@@ -478,6 +520,11 @@ function Field({
   return <label className="grid gap-1 text-sm"><span>{label}</span><Input type={type} value={value} placeholder={placeholder} required={required} onChange={(event) => onChange(event.target.value)} /></label>
 }
 
+/**
+ * Renders a centered message for an empty content area.
+ *
+ * @param text - The message to display
+ */
 function EmptyState({ text }: { text: string }) {
   return <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">{text}</div>
 }

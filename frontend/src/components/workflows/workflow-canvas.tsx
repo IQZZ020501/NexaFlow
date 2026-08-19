@@ -752,6 +752,11 @@ function CanvasInner(props: WorkflowCanvasProps) {
   )
 }
 
+/**
+ * Renders the workflow canvas with the React Flow context required by its editor features.
+ *
+ * @param props - Configuration and callbacks for the workflow canvas
+ */
 export default function WorkflowCanvas(props: WorkflowCanvasProps) {
   return (
     <ReactFlowProvider>

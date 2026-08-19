@@ -76,6 +76,12 @@ const EMPTY_FORM: PythonForm = {
   testArguments: "{}",
 }
 
+/**
+ * Creates editable form data from the current tool details.
+ *
+ * @param detail - The tool details used to populate the form.
+ * @returns Form data containing the tool's editable values and empty test arguments.
+ */
 function formFromDetail(detail: ToolDetail): PythonForm {
   const editable = detail.draft
   return {
@@ -96,6 +102,12 @@ function formFromDetail(detail: ToolDetail): PythonForm {
   }
 }
 
+/**
+ * Parses a JSON string into an object value.
+ *
+ * @param value - The JSON string to parse
+ * @returns The parsed object, or `null` if the string is invalid or does not contain a JSON object
+ */
 function parseObject(value: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(value)
@@ -107,6 +119,12 @@ function parseObject(value: string): Record<string, unknown> | null {
   }
 }
 
+/**
+ * Builds a Python tool payload from form values when all required fields and schemas are valid.
+ *
+ * @param form - The editable Python tool form values
+ * @returns The normalized tool payload, or `null` when required values or schemas are invalid
+ */
 function payloadFromForm(form: PythonForm): PythonToolPayload | null {
   const inputSchema = parseObject(form.inputSchema)
   const outputSchema = parseObject(form.outputSchema)
@@ -130,6 +148,13 @@ const TERMINAL_INVOCATION_STATUSES = new Set<ToolInvocation["status"]>([
   "cancelled",
 ])
 
+/**
+ * Converts a tool status value into its localized display label.
+ *
+ * @param status - The tool status to label
+ * @param t - The localization function used to translate recognized statuses
+ * @returns The localized label for a recognized status, or the original status
+ */
 function toolStatusLabel(
   status: string,
   t: ReturnType<typeof useLanguage>["t"]
@@ -140,6 +165,13 @@ function toolStatusLabel(
   return status
 }
 
+/**
+ * Provides a localized label for a tool invocation status.
+ *
+ * @param status - The invocation status to label
+ * @param t - The localization function used to translate the label
+ * @returns The localized status label
+ */
 function invocationStatusLabel(
   status: ToolInvocation["status"],
   t: ReturnType<typeof useLanguage>["t"]
@@ -155,6 +187,18 @@ function invocationStatusLabel(
   return t("已取消")
 }
 
+/**
+ * Renders a dialog for creating, editing, testing, publishing, enabling, disabling, and archiving a Python tool.
+ *
+ * @param open - Whether the dialog is open
+ * @param onOpenChange - Handles changes to the dialog's open state
+ * @param token - Authentication token used for tool operations
+ * @param workspaceId - Workspace containing the tool
+ * @param tool - Tool summary to load, or `null` when creating a tool
+ * @param onChanged - Called with the updated tool details after a change
+ * @param onArchived - Called with the identifier of an archived tool
+ * @param onMessage - Reports operation success and error messages
+ */
 export function PythonToolDialog({
   open,
   onOpenChange,

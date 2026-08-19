@@ -3,6 +3,11 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import { Label } from "@/components/ui/label"
 
+/**
+ * Groups related field components in a vertically spaced layout.
+ *
+ * @param className - Additional CSS classes to apply to the group
+ */
 function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -13,6 +18,11 @@ function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/**
+ * Renders a field container with vertical layout and spacing.
+ *
+ * @param className - Additional classes to apply to the container
+ */
 function Field({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -23,6 +33,11 @@ function Field({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/**
+ * Renders a styled label for a field.
+ *
+ * @returns A label element with field-specific styling.
+ */
 function FieldLabel({
   className,
   ...props
@@ -36,6 +51,12 @@ function FieldLabel({
   )
 }
 
+/**
+ * Renders descriptive text associated with a form field.
+ *
+ * @param className - Additional CSS classes to apply to the description
+ * @returns The field description paragraph element
+ */
 function FieldDescription({
   className,
   ...props
