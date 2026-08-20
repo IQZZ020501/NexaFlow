@@ -31,6 +31,8 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphClaim as GraphClaimRecord,
     KnowledgeGraphClaimEvidence as GraphEvidenceRecord,
     KnowledgeGraphEntity as GraphEntityRecord,
+    KnowledgeGraphMention as GraphMentionRecord,
+    KnowledgeGraphReviewItem as GraphReviewRecord,
 )
 from app.entities.user import User
 from app.entities.workspace import Workspace
@@ -40,6 +42,7 @@ from app.shareddomain.knowledge_graph.schema import (
     graph_schema_hash,
 )
 from app.schemas.knowledge import KnowledgeQueryRequest
+from app.schemas.knowledge_graph import KnowledgeGraphReviewDecisionRequest
 from app.shareddomain.knowledge_graph import revisions as graph_revisions
 from app.shareddomain.knowledge_graph.revisions import GraphRevisionConflict
 from app.shareddomain.knowledge_graph.resolution import claim_fingerprint
@@ -1066,6 +1069,436 @@ async def test_revision_publish_is_atomic() -> None:
             )
         )
         assert list(names.all()) == ["制度 A"]
+
+
+async def test_review_decisions_publish_atomically_and_reset_on_failure() -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_user_by_id(db, "graph-user")
+        assert actor is not None
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-review-kb",
+                workspace_id="graph-workspace",
+                name="Graph Review KB",
+                graph_enabled=True,
+                created_by_user_id=actor.id,
+            ),
+        )
+        schema = await create_graph_schema(
+            db,
+            knowledge_base,
+            default_policy_graph_schema(),
+            actor,
+        )
+        initial = await graph_revisions.create_revision(
+            db,
+            knowledge_base,
+            schema,
+            actor.id,
+            "review-initial",
+        )
+        await db.commit()
+        initial = await graph_revisions.publish_revision(
+            db,
+            knowledge_base,
+            initial,
+        )
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            knowledge_base.id,
+        )
+        assert knowledge_base is not None
+        document = await knowledge_repository.create_knowledge_document(
+            db,
+            KnowledgeDocument(
+                id="graph-review-document",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                filename="review.txt",
+                content_type="text/plain",
+                size_bytes=20,
+                status="indexed",
+                created_by_user_id=actor.id,
+            ),
+        )
+        chunk = KnowledgeDocumentChunk(
+            id="graph-review-chunk",
+            workspace_id=knowledge_base.workspace_id,
+            knowledge_base_id=knowledge_base.id,
+            document_id=document.id,
+            content="旧制度、目标制度与拆分制度。",
+            search_text="旧制度 目标制度 拆分制度",
+            char_count=14,
+            token_count=8,
+            status="indexed",
+        )
+        await knowledge_repository.save_knowledge_document_chunk(db, chunk)
+
+        entity_names = {
+            "review-merge-source": "旧制度",
+            "review-merge-target": "目标制度",
+            "review-object": "对象",
+            "review-split-source": "待拆分制度",
+        }
+        for entity_id, name in entity_names.items():
+            await graph_repository.create_entity(
+                db,
+                GraphEntityRecord(
+                    id=entity_id,
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    entity_type="Document",
+                    canonical_name=name,
+                    normalized_name=name,
+                    search_text=name,
+                    created_revision_id=initial.id,
+                    last_published_revision_id=initial.id,
+                ),
+            )
+        await graph_repository.create_alias(
+            db,
+            GraphAliasRecord(
+                id="review-source-alias",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                entity_id="review-merge-source",
+                alias="旧规",
+                normalized_alias="旧规",
+                created_revision_id=initial.id,
+                last_published_revision_id=initial.id,
+            ),
+        )
+        for mention_id, entity_id, start_offset in (
+            ("review-merge-mention", "review-merge-source", 0),
+            ("review-split-move-mention", "review-split-source", 4),
+            ("review-split-keep-mention", "review-split-source", 8),
+        ):
+            await graph_repository.create_mention(
+                db,
+                GraphMentionRecord(
+                    id=mention_id,
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    entity_id=entity_id,
+                    document_id=document.id,
+                    chunk_id=chunk.id,
+                    surface_text=entity_names[entity_id],
+                    start_offset=start_offset,
+                    end_offset=start_offset + 2,
+                    quote=chunk.content,
+                    resolution_method="exact",
+                    created_revision_id=initial.id,
+                    last_published_revision_id=initial.id,
+                ),
+            )
+
+        claim_specs = (
+            (
+                "review-merge-claim",
+                "review-merge-source",
+                "applies_to",
+                "active",
+            ),
+            (
+                "review-approve-claim",
+                "review-merge-target",
+                "defines",
+                "candidate",
+            ),
+            (
+                "review-split-move-claim",
+                "review-split-source",
+                "contains",
+                "active",
+            ),
+            (
+                "review-split-keep-claim",
+                "review-split-source",
+                "references",
+                "active",
+            ),
+        )
+        for claim_id, subject_id, predicate, claim_status in claim_specs:
+            await graph_repository.create_claim(
+                db,
+                GraphClaimRecord(
+                    id=claim_id,
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    subject_entity_id=subject_id,
+                    predicate=predicate,
+                    object_entity_id="review-object",
+                    status=claim_status,
+                    source_kind="explicit_text",
+                    quality_score=0.9,
+                    fingerprint=claim_fingerprint(
+                        subject_id,
+                        predicate,
+                        "review-object",
+                        None,
+                        None,
+                        None,
+                    ),
+                    created_revision_id=initial.id,
+                    last_published_revision_id=initial.id,
+                ),
+            )
+        retired_fingerprint = claim_fingerprint(
+            "review-merge-target",
+            "applies_to",
+            "review-object",
+            None,
+            None,
+            None,
+        )
+        await graph_repository.create_claim(
+            db,
+            GraphClaimRecord(
+                id="review-retired-duplicate",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                subject_entity_id="review-merge-target",
+                predicate="applies_to",
+                object_entity_id="review-object",
+                status="superseded",
+                source_kind="explicit_text",
+                quality_score=0.8,
+                fingerprint=retired_fingerprint,
+                created_revision_id=initial.id,
+                last_published_revision_id=initial.id,
+                retired_revision_id=initial.id,
+            ),
+        )
+
+        reviewed_at = utc_now()
+        review_specs = (
+            ("review-merge", "possible_duplicate", "approved"),
+            ("review-approve", "conflict", "approved"),
+            ("review-split", "ambiguous_entity", "approved"),
+            ("review-reset", "conflict", "rejected"),
+        )
+        for review_id, kind, review_status in review_specs:
+            await graph_repository.create_review_item(
+                db,
+                GraphReviewRecord(
+                    id=review_id,
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    kind=kind,
+                    status=review_status,
+                    decision_json={"action": "reject_claim"},
+                    revision_id=initial.id,
+                    created_by_user_id=actor.id,
+                    reviewed_by_user_id=actor.id,
+                    reviewed_at=reviewed_at,
+                ),
+            )
+        revision = await graph_revisions.create_revision(
+            db,
+            knowledge_base,
+            schema,
+            actor.id,
+            "review-decisions",
+        )
+        try:
+            await knowledge_graph._normalize_review_decision(
+                db,
+                knowledge_base,
+                "review-split",
+                "ambiguous_entity",
+                {"entity_id": "review-split-source"},
+                KnowledgeGraphReviewDecisionRequest(
+                    action="split_entity",
+                    canonical_name="非法拆分",
+                    entity_type="Unknown",
+                    mention_ids=["review-split-move-mention"],
+                ),
+                actor,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 422
+        else:
+            raise AssertionError("split entity types must follow the active schema")
+        decisions = (
+            {
+                "action": "merge_entities",
+                "review_id": "review-merge",
+                "source_entity_id": "review-merge-source",
+                "target_entity_id": "review-merge-target",
+                "reviewed_by_user_id": actor.id,
+            },
+            {
+                "action": "approve_claim",
+                "review_id": "review-approve",
+                "claim_ids": ["review-approve-claim"],
+                "reviewed_by_user_id": actor.id,
+            },
+            {
+                "action": "split_entity",
+                "review_id": "review-split",
+                "source_entity_id": "review-split-source",
+                "new_entity_id": "review-split-new",
+                "canonical_name": "拆分制度",
+                "entity_type": "Document",
+                "mention_ids": ["review-split-move-mention"],
+                "claim_ids": ["review-split-move-claim"],
+                "reviewed_by_user_id": actor.id,
+            },
+        )
+        affected: set[str] = set()
+        for decision in decisions:
+            affected.update(
+                await knowledge_graph.stage_review_decision(
+                    db,
+                    knowledge_base,
+                    revision,
+                    decision,
+                )
+            )
+        assert {
+            "review-merge-source",
+            "review-merge-target",
+            "review-object",
+            "review-split-source",
+            "review-split-new",
+        } <= affected
+        for review_id in ("review-merge", "review-approve", "review-split"):
+            review = await graph_repository.get_review_item(db, revision, review_id)
+            assert review is not None
+            assert review.status == "approved"
+        await db.commit()
+
+        revision = await graph_repository.get_revision(
+            db,
+            knowledge_base,
+            revision.id,
+        )
+        assert revision is not None
+        published = await graph_revisions.publish_revision(
+            db,
+            knowledge_base,
+            revision,
+        )
+
+        merge_source = await graph_repository.get_entity(
+            db,
+            published,
+            "review-merge-source",
+        )
+        split_entity = await graph_repository.get_entity(
+            db,
+            published,
+            "review-split-new",
+        )
+        assert merge_source is not None and merge_source.state == "merged"
+        assert split_entity is not None and split_entity.canonical_name == "拆分制度"
+        aliases = await graph_repository.list_active_aliases_for_entity_ids(
+            db,
+            knowledge_base,
+            {"review-merge-target"},
+        )
+        assert {item.alias for item in aliases} >= {"旧制度", "旧规"}
+
+        merge_mention = await graph_repository.get_mention(
+            db,
+            published,
+            "review-merge-mention",
+        )
+        split_move_mention = await graph_repository.get_mention(
+            db,
+            published,
+            "review-split-move-mention",
+        )
+        split_keep_mention = await graph_repository.get_mention(
+            db,
+            published,
+            "review-split-keep-mention",
+        )
+        assert merge_mention is not None
+        assert merge_mention.entity_id == "review-merge-target"
+        assert merge_mention.resolution_method == "human"
+        assert split_move_mention is not None
+        assert split_move_mention.entity_id == "review-split-new"
+        assert split_keep_mention is not None
+        assert split_keep_mention.entity_id == "review-split-source"
+
+        merge_claim = await graph_repository.get_claim(
+            db,
+            published,
+            "review-merge-claim",
+        )
+        merged_duplicate = await graph_repository.get_claim(
+            db,
+            published,
+            "review-retired-duplicate",
+        )
+        approve_claim = await graph_repository.get_claim(
+            db,
+            published,
+            "review-approve-claim",
+        )
+        split_move_claim = await graph_repository.get_claim(
+            db,
+            published,
+            "review-split-move-claim",
+        )
+        split_keep_claim = await graph_repository.get_claim(
+            db,
+            published,
+            "review-split-keep-claim",
+        )
+        assert merge_claim is not None
+        assert merge_claim.status == "superseded"
+        assert merge_claim.retired_revision_id == published.id
+        assert merged_duplicate is not None
+        assert merged_duplicate.subject_entity_id == "review-merge-target"
+        assert merged_duplicate.status == "active"
+        assert merged_duplicate.source_kind == "human"
+        assert merged_duplicate.retired_revision_id is None
+        assert approve_claim is not None
+        assert approve_claim.status == "active"
+        assert approve_claim.source_kind == "human"
+        assert split_move_claim is not None
+        assert split_move_claim.subject_entity_id == "review-split-new"
+        assert split_keep_claim is not None
+        assert split_keep_claim.subject_entity_id == "review-split-source"
+
+        for review_id in ("review-merge", "review-approve", "review-split"):
+            review = await graph_repository.get_review_item(
+                db,
+                published,
+                review_id,
+            )
+            assert review is not None
+            assert review.status == "resolved"
+            assert review.revision_id == published.id
+
+        await knowledge_graph.reset_review_decision(
+            db,
+            knowledge_base,
+            {"review_id": "review-reset"},
+        )
+        reset_review = await graph_repository.get_review_item(
+            db,
+            published,
+            "review-reset",
+        )
+        assert reset_review is not None
+        assert reset_review.status == "open"
+        assert reset_review.decision_json == {}
+        assert reset_review.reviewed_by_user_id is None
+        try:
+            await knowledge_graph.stage_review_decision(
+                db,
+                knowledge_base,
+                published,
+                ["invalid"],  # type: ignore[arg-type]
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("non-object review decisions must fail")
 
 
 async def test_entity_identity_candidates_are_scoped_and_ambiguous() -> None:
@@ -2184,6 +2617,7 @@ async def main() -> None:
     await test_graph_database_constraints()
     await test_versioned_graph_schemas()
     await test_revision_publish_is_atomic()
+    await test_review_decisions_publish_atomically_and_reset_on_failure()
     await test_entity_identity_candidates_are_scoped_and_ambiguous()
     await test_stale_revision_cannot_overwrite_newer_graph()
     await test_claim_fingerprint_dedupes_without_reactivating_rejection()

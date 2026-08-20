@@ -10,6 +10,7 @@ from uuid import NAMESPACE_URL, uuid5
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application import knowledge_graph as knowledge_graph_application
 from app.entities.knowledge import (
     TASK_GRAPH_REBUILD,
     TASK_GRAPH_SYNC,
@@ -1204,6 +1205,7 @@ async def run_graph_build_task(
     await db.commit()
     affected_entities: set[str] = set()
     published = False
+    review_decision = (task.options or {}).get("review_decision")
     try:
         affected_entities.update(
             await stage_changed_document_retirements(
@@ -1256,6 +1258,14 @@ async def run_graph_build_task(
                 knowledge_base,
                 revision,
                 schema,
+            )
+        )
+        affected_entities.update(
+            await knowledge_graph_application.stage_review_decision(
+                db,
+                knowledge_base,
+                revision,
+                review_decision,
             )
         )
         affected_entities.update(
@@ -1324,6 +1334,11 @@ async def run_graph_build_task(
     except Exception as exc:
         if not published:
             await db.rollback()
+            await knowledge_graph_application.reset_review_decision(
+                db,
+                knowledge_base,
+                review_decision,
+            )
             await mark_revision_failed(
                 db,
                 revision.id,

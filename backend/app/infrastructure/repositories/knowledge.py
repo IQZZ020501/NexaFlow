@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.entities.knowledge import (
     CHUNK_INDEXED_STATUS,
     DOCUMENT_DELETED_STATUS,
+    DOCUMENT_INDEXED_STATUS,
     DOCUMENT_STAGED_META_KEY,
     TASK_FAILED_STATUS,
     TASK_QUEUED_STATUS,
@@ -328,6 +329,23 @@ async def list_knowledge_documents(
     )
     result = await db.scalars(statement.limit(limit).offset(offset))
     return [to_entity(KnowledgeDocument, row) for row in result]
+
+
+async def has_indexed_knowledge_document(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> bool:
+    count = await db.scalar(
+        select(func.count())
+        .select_from(KnowledgeDocumentORM)
+        .where(
+            KnowledgeDocumentORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocumentORM.status == DOCUMENT_INDEXED_STATUS,
+            KnowledgeDocumentORM.is_active.is_(True),
+        )
+    )
+    return bool(count)
 
 
 async def get_knowledge_document_by_id(

@@ -365,6 +365,19 @@ def test_graph_review_decision_request_is_bounded() -> None:
         pass
     else:
         raise AssertionError("oversized graph review decision must fail")
+    try:
+        KnowledgeGraphReviewDecisionRequest.model_validate(
+            {
+                "action": "split_entity",
+                "canonical_name": " ",
+                "entity_type": "Document",
+                "mention_ids": ["mention"],
+            }
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("blank split names must fail")
 
 
 def test_graph_import_record_requires_one_object_kind() -> None:

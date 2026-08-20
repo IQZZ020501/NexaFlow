@@ -9,6 +9,7 @@ from app.entities.knowledge_graph import (
     GRAPH_CLAIM_REJECTED,
     GRAPH_CLAIM_SUPERSEDED,
     GRAPH_ENTITY_ACTIVE,
+    GRAPH_ENTITY_MERGED,
     GRAPH_ENTITY_RETIRED,
     GRAPH_EVIDENCE_ACTIVE,
     GRAPH_EVIDENCE_DELETED,
@@ -234,6 +235,10 @@ async def _upsert_review(
     existing = await graph_repository.get_review_item(db, revision, change.record_key)
     values = _upsert_values(revision, change, existing, versioned=False)
     values["revision_id"] = revision.id
+    if isinstance(values.get("reviewed_at"), str):
+        values["reviewed_at"] = datetime.fromisoformat(
+            values["reviewed_at"].replace("Z", "+00:00")
+        )
     await graph_repository.save_review_item(db, KnowledgeGraphReviewItem(**values))
 
 
@@ -246,7 +251,12 @@ async def _retire_revision_change(
     if change.record_kind == "entity":
         entity = await graph_repository.get_entity(db, revision, change.record_key)
         if entity is not None:
-            entity.state = GRAPH_ENTITY_RETIRED
+            requested_state = (change.after_json or {}).get("state")
+            entity.state = (
+                requested_state
+                if requested_state in {GRAPH_ENTITY_MERGED, GRAPH_ENTITY_RETIRED}
+                else GRAPH_ENTITY_RETIRED
+            )
             entity.last_published_revision_id = revision.id
             entity.retired_revision_id = revision.id
             entity.updated_at = now

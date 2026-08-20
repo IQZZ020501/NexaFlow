@@ -63,6 +63,7 @@ from app.shareddomain.knowledge.models import (
     KnowledgeDocumentParentChunk,
 )
 from app.api.v1.endpoints import knowledge as knowledge_api
+from app.application import knowledge_graph as graph_application
 from app.api.v1.endpoints import knowledge_lifecycle as knowledge_lifecycle_api
 from app.api.v1.endpoints import knowledge_retrieval as knowledge_retrieval_api
 from app.application import knowledge as knowledge_application
@@ -73,6 +74,7 @@ from app.capabilities.embedding import pipeline as knowledge_pipeline
 from app.capabilities.llm.runtime import ModelProviderError
 from app.capabilities.rag.vector_store import VectorChunk, VectorHit
 from app.infrastructure.repositories import knowledge as knowledge_repository
+from app.infrastructure.repositories import knowledge_graph as graph_repository
 from app.infrastructure.repositories import user as user_repository
 from app.schemas.knowledge import (
     KnowledgeBaseOwnerTransferRequest,
@@ -86,6 +88,14 @@ from app.schemas.knowledge import (
 from app.shareddomain.knowledge.orchestration import (
     enqueue_parse_knowledge_document,
 )
+from app.shareddomain.knowledge_graph.resolution import claim_fingerprint
+from app.shareddomain.knowledge_graph.revisions import (
+    create_revision as create_graph_revision,
+    publish_revision as publish_graph_revision,
+    stage_revision_change as stage_graph_revision_change,
+)
+from app.shareddomain.knowledge_graph.schema import default_policy_graph_schema
+from app.shareddomain.knowledge_graph.services import create_graph_schema
 from app.shareddomain.knowledge.task_runner import recover_knowledge_tasks
 from sqlalchemy import select, text
 
@@ -94,6 +104,215 @@ MEMBER_PASSWORD = "Member@12345."
 
 def knowledge_url(workspace_id: str, suffix: str = "") -> str:
     return f"/api/v1/workspaces/{workspace_id}/knowledge-bases{suffix}"
+
+
+def graph_url(
+    workspace_id: str,
+    knowledge_base_id: str,
+    suffix: str = "",
+) -> str:
+    return knowledge_url(
+        workspace_id,
+        f"/{knowledge_base_id}/graph{suffix}",
+    )
+
+
+async def seed_graph_api_fixture(
+    workspace_id: str,
+    knowledge_base_id: str,
+    actor_id: str,
+    prefix: str,
+    *,
+    publish_graph: bool = True,
+) -> dict[str, str]:
+    document_id = f"{prefix}-document"
+    chunk_id = f"{prefix}-chunk"
+    source_id = f"{prefix}-source"
+    target_id = f"{prefix}-target"
+    claim_id = f"{prefix}-claim"
+    evidence_id = f"{prefix}-evidence"
+    review_id = f"{prefix}-review"
+    async with get_session_factory()() as db:
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            knowledge_base_id,
+        )
+        actor = await user_repository.get_user_by_id(db, actor_id)
+        assert knowledge_base is not None
+        assert actor is not None
+        if publish_graph:
+            knowledge_base.graph_enabled = True
+            await knowledge_repository.save_knowledge_base(db, knowledge_base)
+        if await db.get(KnowledgeDocument, document_id) is None:
+            db.add(
+                KnowledgeDocument(
+                    id=document_id,
+                    workspace_id=workspace_id,
+                    knowledge_base_id=knowledge_base_id,
+                    filename=f"{prefix}.md",
+                    content_type="text/markdown",
+                    size_bytes=16,
+                    storage_path=f"{prefix}.md",
+                    meta={},
+                    status="indexed",
+                    is_active=True,
+                    created_by_user_id=actor_id,
+                )
+            )
+            db.add(
+                KnowledgeDocumentChunk(
+                    id=chunk_id,
+                    workspace_id=workspace_id,
+                    knowledge_base_id=knowledge_base_id,
+                    document_id=document_id,
+                    chunk_index=0,
+                    content="制度 A 引用账号管理办法。",
+                    search_text="制度 A 引用账号管理办法。",
+                    char_count=14,
+                    token_count=8,
+                    status="indexed",
+                )
+            )
+        await db.commit()
+
+        if not publish_graph:
+            return {
+                "source_id": source_id,
+                "target_id": target_id,
+                "claim_id": claim_id,
+                "review_id": review_id,
+            }
+
+        schema = await graph_repository.get_latest_draft_or_active_schema(
+            db,
+            knowledge_base,
+        )
+        if schema is None:
+            schema = await create_graph_schema(
+                db,
+                knowledge_base,
+                default_policy_graph_schema(),
+                actor,
+            )
+        revision = await create_graph_revision(
+            db,
+            knowledge_base,
+            schema,
+            actor.id,
+            f"{prefix}-watermark",
+        )
+        await stage_graph_revision_change(
+            db,
+            revision,
+            record_kind="entity",
+            record_key=source_id,
+            operation="upsert",
+            before_json=None,
+            after_json={
+                "id": source_id,
+                "entity_type": "Document",
+                "canonical_name": "制度 A",
+                "normalized_name": "制度 a",
+                "search_text": "制度 A",
+            },
+        )
+        await stage_graph_revision_change(
+            db,
+            revision,
+            record_kind="entity",
+            record_key=target_id,
+            operation="upsert",
+            before_json=None,
+            after_json={
+                "id": target_id,
+                "entity_type": "Document",
+                "canonical_name": "账号管理办法",
+                "normalized_name": "账号管理办法",
+                "search_text": "账号管理办法",
+            },
+        )
+        fingerprint = claim_fingerprint(
+            source_id,
+            "references",
+            target_id,
+            None,
+            None,
+            None,
+        )
+        await stage_graph_revision_change(
+            db,
+            revision,
+            record_kind="claim",
+            record_key=fingerprint,
+            operation="upsert",
+            before_json=None,
+            after_json={
+                "id": claim_id,
+                "subject_entity_id": source_id,
+                "predicate": "references",
+                "object_entity_id": target_id,
+                "object_value_json": None,
+                "status": "active",
+                "source_kind": "explicit_text",
+                "quality_score": 0.9,
+                "fingerprint": fingerprint,
+            },
+        )
+        await stage_graph_revision_change(
+            db,
+            revision,
+            record_kind="evidence",
+            record_key=evidence_id,
+            operation="upsert",
+            before_json=None,
+            after_json={
+                "id": evidence_id,
+                "claim_id": claim_id,
+                "document_id": document_id,
+                "chunk_id": chunk_id,
+                "quote": "制度 A 引用账号管理办法。",
+                "start_offset": 0,
+                "end_offset": 14,
+                "extractor_type": "llm",
+                "model_name": "test",
+                "prompt_hash": "test",
+                "schema_hash": schema.schema_hash,
+            },
+        )
+        await stage_graph_revision_change(
+            db,
+            revision,
+            record_kind="review",
+            record_key=review_id,
+            operation="upsert",
+            before_json=None,
+            after_json={
+                "id": review_id,
+                "kind": "implicit_relation",
+                "payload_json": {"claim_id": claim_id},
+                "status": "open",
+                "decision_json": {},
+                "revision_id": revision.id,
+                "created_by_user_id": actor.id,
+            },
+        )
+        await db.commit()
+        await publish_graph_revision(db, knowledge_base, revision)
+    return {
+        "source_id": source_id,
+        "target_id": target_id,
+        "claim_id": claim_id,
+        "review_id": review_id,
+    }
+
+
+async def finish_graph_task(task_id: str) -> None:
+    async with get_session_factory()() as db:
+        task = await knowledge_repository.get_knowledge_task_by_id(db, task_id)
+        assert task is not None
+        task.status = "succeeded"
+        await knowledge_repository.save_knowledge_task(db, task)
+        await db.commit()
 
 
 def create_workspace_user(client, token: str, workspace_id: str, username: str) -> tuple[str, str]:
@@ -594,6 +813,7 @@ def exercise_direct_endpoint_calls(
                         document_id,
                         KnowledgeDocumentStatusUpdateRequest(is_active=False),
                         alice_ctx,
+                        settings,
                         db,
                     )
                 )
@@ -604,6 +824,7 @@ def exercise_direct_endpoint_calls(
                         document_id,
                         KnowledgeDocumentStatusUpdateRequest(is_active=True),
                         alice_ctx,
+                        settings,
                         db,
                     )
                 )
@@ -2218,12 +2439,376 @@ def test_knowledge_api_flow() -> None:
             )
 
 
+def test_graph_api_permissions_and_scoping() -> None:
+    with test_client() as client, model_test_server() as model_base_url:
+        admin_token, workspace_id = activate_admin(client)
+        alice_id, alice_password = create_workspace_user(
+            client,
+            admin_token,
+            workspace_id,
+            "graph-alice",
+        )
+        bob_id, bob_password = create_workspace_user(
+            client,
+            admin_token,
+            workspace_id,
+            "graph-bob",
+        )
+        alice_token = activate_user(
+            client,
+            "graph-alice",
+            alice_password,
+            MEMBER_PASSWORD,
+        )
+        bob_token = activate_user(
+            client,
+            "graph-bob",
+            bob_password,
+            MEMBER_PASSWORD,
+        )
+
+        embedding_model = client.post(
+            models_url(workspace_id),
+            headers=auth_headers(admin_token),
+            json={
+                **model_payload(model_base_url),
+                "name": "Graph API Embedding",
+                "provider": "model_openai_provider",
+                "provider_type": "openai_compatible",
+                "model_type": "EMBEDDING",
+                "model_name": "text-embedding-3-small",
+            },
+        )
+        assert embedding_model.status_code == 201, embedding_model.text
+        llm_model = client.post(
+            models_url(workspace_id),
+            headers=auth_headers(admin_token),
+            json={
+                **model_payload(model_base_url),
+                "name": "Graph API LLM",
+                "provider": "model_openai_provider",
+                "provider_type": "openai_compatible",
+                "model_type": "LLM",
+                "model_name": "gpt-test",
+            },
+        )
+        assert llm_model.status_code == 201, llm_model.text
+
+        knowledge_base = client.post(
+            knowledge_url(workspace_id),
+            headers=auth_headers(alice_token),
+            json={
+                "name": "Graph API KB",
+                "embedding_model_id": embedding_model.json()["id"],
+            },
+        )
+        assert knowledge_base.status_code == 201, knowledge_base.text
+        knowledge_base_id = knowledge_base.json()["id"]
+        asyncio.run(
+            seed_graph_api_fixture(
+                workspace_id,
+                knowledge_base_id,
+                alice_id,
+                "graph-api",
+                publish_graph=False,
+            )
+        )
+
+        settings_url = graph_url(workspace_id, knowledge_base_id, "/settings")
+        settings_response = client.get(
+            settings_url,
+            headers=auth_headers(alice_token),
+        )
+        assert settings_response.status_code == 200, settings_response.text
+        assert settings_response.json()["enabled"] is False
+        denied_settings = client.get(
+            settings_url,
+            headers=auth_headers(bob_token),
+        )
+        assert denied_settings.status_code == 403, denied_settings.text
+
+        disabled_path = client.post(
+            graph_url(workspace_id, knowledge_base_id, "/path"),
+            headers=auth_headers(alice_token),
+            json={
+                "source_entity": "制度 A",
+                "target_entity": "账号管理办法",
+            },
+        )
+        assert disabled_path.status_code == 409, disabled_path.text
+        blank_path = client.post(
+            graph_url(workspace_id, knowledge_base_id, "/path"),
+            headers=auth_headers(alice_token),
+            json={"source_entity": " ", "target_entity": "账号管理办法"},
+        )
+        assert blank_path.status_code == 422, blank_path.text
+        missing_model = client.patch(
+            settings_url,
+            headers=auth_headers(alice_token),
+            json={"enabled": True, "extraction_model_id": None},
+        )
+        assert missing_model.status_code == 422, missing_model.text
+        enabled = client.patch(
+            settings_url,
+            headers=auth_headers(alice_token),
+            json={
+                "enabled": True,
+                "extraction_model_id": llm_model.json()["id"],
+            },
+        )
+        assert enabled.status_code == 200, enabled.text
+        assert enabled.json()["enabled"] is True
+
+        missing_revision = client.post(
+            graph_url(workspace_id, knowledge_base_id, "/path"),
+            headers=auth_headers(alice_token),
+            json={
+                "source_entity": "制度 A",
+                "target_entity": "账号管理办法",
+            },
+        )
+        assert missing_revision.status_code == 409, missing_revision.text
+
+        schema_payload = default_policy_graph_schema().model_dump(mode="json")
+        schema_response = client.put(
+            graph_url(workspace_id, knowledge_base_id, "/schema"),
+            headers=auth_headers(alice_token),
+            json={"schema_json": schema_payload},
+        )
+        assert schema_response.status_code == 200, schema_response.text
+        assert schema_response.json()["schema_json"] == schema_payload
+        fixture = asyncio.run(
+            seed_graph_api_fixture(
+                workspace_id,
+                knowledge_base_id,
+                alice_id,
+                "graph-api",
+            )
+        )
+
+        status_response = client.get(
+            graph_url(workspace_id, knowledge_base_id, "/status"),
+            headers=auth_headers(alice_token),
+        )
+        assert status_response.status_code == 200, status_response.text
+        assert status_response.json()["active_revision_id"]
+        entities = client.get(
+            graph_url(
+                workspace_id,
+                knowledge_base_id,
+                "/entities?query=%E5%88%B6%E5%BA%A6",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert entities.status_code == 200, entities.text
+        assert entities.json()["total"] == 1
+        detail = client.get(
+            graph_url(
+                workspace_id,
+                knowledge_base_id,
+                f"/entities/{fixture['source_id']}",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["claims"][0]["evidence_ids"]
+        assert detail.json()["evidence"][0]["document_filename"] == "graph-api.md"
+
+        unknown_relation = client.post(
+            graph_url(workspace_id, knowledge_base_id, "/path"),
+            headers=auth_headers(alice_token),
+            json={
+                "source_entity": "制度 A",
+                "target_entity": "账号管理办法",
+                "relation_filters": ["drop_table"],
+            },
+        )
+        assert unknown_relation.status_code == 422, unknown_relation.text
+        oversized_import = client.post(
+            graph_url(workspace_id, knowledge_base_id, "/import"),
+            headers=auth_headers(alice_token),
+            files={
+                "file": (
+                    "records.json",
+                    b"x" * (10 * 1024 * 1024 + 1),
+                    "application/json",
+                )
+            },
+        )
+        assert oversized_import.status_code == 413, oversized_import.text
+
+        research_admin_id, research_token = create_active_user(
+            client,
+            admin_token,
+            "graph-research-admin",
+        )
+        research_workspace = client.post(
+            "/api/v1/workspaces",
+            headers=auth_headers(admin_token),
+            json={
+                "name": "Graph Research",
+                "admin_user_id": research_admin_id,
+            },
+        )
+        assert research_workspace.status_code == 201, research_workspace.text
+        research_workspace_id = research_workspace.json()["workspace"]["id"]
+        other_knowledge_base = client.post(
+            knowledge_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={"name": "Other Graph KB"},
+        )
+        assert other_knowledge_base.status_code == 201, other_knowledge_base.text
+        other_fixture = asyncio.run(
+            seed_graph_api_fixture(
+                research_workspace_id,
+                other_knowledge_base.json()["id"],
+                research_admin_id,
+                "other-graph-api",
+            )
+        )
+        foreign_entity = client.get(
+            graph_url(
+                workspace_id,
+                knowledge_base_id,
+                f"/entities/{other_fixture['source_id']}",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert foreign_entity.status_code == 404, foreign_entity.text
+        foreign_review = client.post(
+            graph_url(
+                workspace_id,
+                knowledge_base_id,
+                f"/reviews/{other_fixture['review_id']}/resolve",
+            ),
+            headers=auth_headers(alice_token),
+            json={"action": "approve_claim"},
+        )
+        assert foreign_review.status_code == 404, foreign_review.text
+
+        before_disable = client.get(
+            settings_url,
+            headers=auth_headers(alice_token),
+        )
+        assert before_disable.status_code == 200, before_disable.text
+        disabled = client.patch(
+            settings_url,
+            headers=auth_headers(alice_token),
+            json={"enabled": False},
+        )
+        assert disabled.status_code == 200, disabled.text
+        assert disabled.json()["extraction_model_id"] == llm_model.json()["id"]
+        assert disabled.json()["active_schema_id"] == before_disable.json()[
+            "active_schema_id"
+        ]
+        assert disabled.json()["active_revision_id"] == before_disable.json()[
+            "active_revision_id"
+        ]
+        reenabled = client.patch(
+            settings_url,
+            headers=auth_headers(alice_token),
+            json={"enabled": True},
+        )
+        assert reenabled.status_code == 200, reenabled.text
+
+        granted_edit = client.put(
+            knowledge_url(
+                workspace_id,
+                f"/{knowledge_base_id}/permissions/{bob_id}",
+            ),
+            headers=auth_headers(alice_token),
+            json={"permission": "edit"},
+        )
+        assert granted_edit.status_code == 200, granted_edit.text
+        edit_can_manage = client.patch(
+            settings_url,
+            headers=auth_headers(bob_token),
+            json={"enabled": True},
+        )
+        assert edit_can_manage.status_code == 200, edit_can_manage.text
+        granted = client.put(
+            knowledge_url(
+                workspace_id,
+                f"/{knowledge_base_id}/permissions/{bob_id}",
+            ),
+            headers=auth_headers(alice_token),
+            json={"permission": "view"},
+        )
+        assert granted.status_code == 200, granted.text
+        view_status = client.get(
+            graph_url(workspace_id, knowledge_base_id, "/status"),
+            headers=auth_headers(bob_token),
+        )
+        assert view_status.status_code == 200, view_status.text
+        view_cannot_edit = client.patch(
+            settings_url,
+            headers=auth_headers(bob_token),
+            json={
+                "enabled": True,
+                "extraction_model_id": llm_model.json()["id"],
+            },
+        )
+        assert view_cannot_edit.status_code == 403, view_cannot_edit.text
+        revoked = client.delete(
+            knowledge_url(
+                workspace_id,
+                f"/{knowledge_base_id}/permissions/{bob_id}",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert revoked.status_code == 204, revoked.text
+        denied_again = client.get(
+            graph_url(workspace_id, knowledge_base_id, "/status"),
+            headers=auth_headers(bob_token),
+        )
+        assert denied_again.status_code == 403, denied_again.text
+
+        with patch.object(
+            graph_application,
+            "_dispatch_graph_task",
+            new=AsyncMock(),
+        ):
+            rebuild = client.post(
+                graph_url(workspace_id, knowledge_base_id, "/rebuild"),
+                headers=auth_headers(alice_token),
+            )
+        assert rebuild.status_code == 202, rebuild.text
+        asyncio.run(finish_graph_task(rebuild.json()["id"]))
+
+        with patch.object(
+            graph_application,
+            "_dispatch_graph_task",
+            new=AsyncMock(),
+        ):
+            resolved = client.post(
+                graph_url(
+                    workspace_id,
+                    knowledge_base_id,
+                    f"/reviews/{fixture['review_id']}/resolve",
+                ),
+                headers=auth_headers(alice_token),
+                json={"action": "approve_claim"},
+            )
+            repeated = client.post(
+                graph_url(
+                    workspace_id,
+                    knowledge_base_id,
+                    f"/reviews/{fixture['review_id']}/resolve",
+                ),
+                headers=auth_headers(alice_token),
+                json={"action": "approve_claim"},
+            )
+        assert resolved.status_code == 202, resolved.text
+        assert repeated.status_code == 409, repeated.text
+
+
 def main() -> None:
     test_rerank_child_hits_edge_paths()
     test_query_application_vector_only_branch()
     test_vector_store_edge_paths()
     test_embedding_pipeline_edge_paths()
     test_knowledge_api_flow()
+    test_graph_api_permissions_and_scoping()
     print("KNOWLEDGE_API_COVERAGE_SUITE_OK")
 
 

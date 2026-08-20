@@ -649,7 +649,10 @@ async def create_knowledge_task(
                 if str(item)
             )
         )
-        if not changed_document_ids:
+        if not changed_document_ids and not isinstance(
+            task_options.get("review_decision"),
+            dict,
+        ):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Graph sync requires changed documents.",
