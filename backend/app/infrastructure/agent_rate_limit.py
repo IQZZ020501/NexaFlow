@@ -56,6 +56,18 @@ class LoginRateLimitUnavailable(Exception):
     pass
 
 
+class PasswordResetRateLimitExceeded(Exception):
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(
+            f"Password reset rate limit exceeded; retry after {retry_after}s."
+        )
+        self.retry_after = retry_after
+
+
+class PasswordResetRateLimitUnavailable(Exception):
+    pass
+
+
 async def enforce_login_rate_limit(
     settings: Settings,
     username: str,
@@ -79,6 +91,31 @@ async def enforce_login_rate_limit(
     account_count, source_count, account_ttl, source_ttl = map(int, values)
     if account_count > 10 or source_count > 300:
         raise LoginRateLimitExceeded(max(1, account_ttl, source_ttl))
+
+
+async def enforce_password_reset_rate_limit(
+    settings: Settings,
+    email: str,
+    source_ip: str | None,
+) -> None:
+    window_seconds = 3600
+    window = int(time.time()) // window_seconds
+    account_key = hashlib.sha256(email.encode("utf-8")).hexdigest()
+    source_key = hashlib.sha256((source_ip or "unknown").encode("utf-8")).hexdigest()
+    try:
+        values = await _rate_limit_redis(settings.celery_broker_url).eval(
+            _FIXED_WINDOW_SCRIPT,
+            2,
+            f"nexaflow:password-reset-rate:account:{account_key}:{window}",
+            f"nexaflow:password-reset-rate:source:{source_key}:{window}",
+            window_seconds,
+        )
+    except (RedisError, OSError, TimeoutError, ValueError) as exc:
+        raise PasswordResetRateLimitUnavailable from exc
+
+    account_count, source_count, account_ttl, source_ttl = map(int, values)
+    if account_count > 3 or source_count > 20:
+        raise PasswordResetRateLimitExceeded(max(1, account_ttl, source_ttl))
 
 
 async def enforce_external_agent_rate_limit(

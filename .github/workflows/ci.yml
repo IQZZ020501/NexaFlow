@@ -62,6 +62,15 @@ jobs:
       - name: Run logger tests
         run: uv run python -m tests.logger
 
+      - name: Run SMTP tests
+        run: uv run python -m tests.smtp
+
+      - name: Run email tests
+        run: uv run python -m tests.email
+
+      - name: Run system governance tests
+        run: uv run python -m tests.system_governance
+
       - name: Run identity tests
         run: uv run python -m tests.identity
 

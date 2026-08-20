@@ -127,8 +127,12 @@ export function mockNextNavigation(options: {
 export function mockNextImage() {
   /* eslint-disable @next/next/no-img-element -- test stub for next/image */
   mock.module("next/image", () => ({
-    default: (props: Record<string, unknown>) => (
-      <img {...(props as object)} alt={(props.alt as string) ?? ""} />
+    default: ({ priority, ...props }: Record<string, unknown>) => (
+      <img
+        {...(props as object)}
+        alt={(props.alt as string) ?? ""}
+        data-priority={priority ? "true" : undefined}
+      />
     ),
   }))
   /* eslint-enable @next/next/no-img-element */

@@ -11,6 +11,8 @@ from app.schemas.user import (
     ChangePasswordRequest,
     LoginRequest,
     MeResponse,
+    PasswordResetConfirmRequest,
+    PasswordResetRequest,
     TokenResponse,
     RefreshSessionResponse,
     UserResponse,
@@ -28,6 +30,10 @@ from app.application.sessions import (
     revoke_user_session,
 )
 from app.application.invitations import accept_workspace_invitation
+from app.application.password_reset import (
+    confirm_password_reset,
+    request_password_reset,
+)
 from app.schemas.invitation import WorkspaceInvitationAcceptRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -35,9 +41,42 @@ REFRESH_TOKEN_COOKIE = "nexaflow_refresh_token"
 REFRESH_TOKEN_COOKIE_PATH = "/api/v1/auth"
 
 
+@router.post(
+    "/password-reset/request",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def request_reset(
+    payload: PasswordResetRequest,
+    request: Request,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    await request_password_reset(
+        db,
+        payload.email,
+        settings,
+        get_request_ip(request),
+    )
+    return Response(status_code=status.HTTP_202_ACCEPTED)
+
+
+@router.post(
+    "/password-reset/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def confirm_reset(
+    payload: PasswordResetConfirmRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    await confirm_password_reset(db, payload.token, payload.new_password, settings)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/invitations/accept", response_model=UserResponse)
 async def accept_invitation(
     payload: WorkspaceInvitationAcceptRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserResponse:
     """
@@ -50,7 +89,7 @@ async def accept_invitation(
     Returns:
     	UserResponse: The user associated with the accepted invitation.
     """
-    return await accept_workspace_invitation(db, payload)
+    return await accept_workspace_invitation(db, payload, settings)
 
 
 def set_refresh_cookie(response: Response, token: str, settings: Settings) -> None:

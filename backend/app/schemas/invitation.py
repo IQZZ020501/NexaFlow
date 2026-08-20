@@ -37,6 +37,11 @@ class WorkspaceInvitationResponse(BaseModel):
     created_at: datetime
     token: str | None = None
     invite_url: str | None = None
+    email_delivery_status: Literal[
+        "queued",
+        "not_configured",
+        "not_applicable",
+    ] | None = None
 
 
 class WorkspaceInvitationAcceptRequest(BaseModel):

@@ -860,7 +860,11 @@ async def exercise_direct_identity_edges() -> None:
         # change_user_password: success path.
         password_holder = await make_user("direct-pw-holder")
         changed_pw = await change_user_password(
-            db, password_holder, admin_user, "ManagedDirect@123"
+            db,
+            password_holder,
+            admin_user,
+            "ManagedDirect@123",
+            settings(),
         )
         assert changed_pw.must_change_password is False
         pw_row = await user_repo.get_user_by_id(db, password_holder.id)

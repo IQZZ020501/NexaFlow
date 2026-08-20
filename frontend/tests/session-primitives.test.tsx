@@ -598,6 +598,87 @@ describe("SessionProvider", () => {
     expect(localStorage.getItem(LEGACY_TOKEN_KEY)).toBeNull()
   })
 
+  test("does not retry session restoration after logout and reload", async () => {
+    let refreshCalls = 0
+    let loggedOut = false
+    handler = (url) => {
+      if (url.endsWith("/api/v1/auth/refresh")) {
+        refreshCalls++
+        return loggedOut
+          ? jsonResponse({ detail: "no session" }, 401)
+          : jsonResponse(refreshPayload)
+      }
+      if (url.endsWith("/api/v1/auth/me")) return jsonResponse(memberMe)
+      if (url.endsWith("/api/v1/workspaces")) return jsonResponse([ws1, ws2])
+      if (url.includes("/teams")) return jsonResponse([team1])
+      if (url.endsWith("/api/v1/auth/logout")) {
+        loggedOut = true
+        return jsonResponse(null, 204)
+      }
+      return jsonResponse(null, 404)
+    }
+
+    const firstRender = renderSession()
+    await waitFor(() =>
+      expect(screen.getByTestId("teams").textContent).toBe("1")
+    )
+    expect(refreshCalls).toBe(1)
+
+    fireEvent.click(screen.getByText("logout"))
+    await waitFor(() => expect(loggedOut).toBe(true))
+    firstRender.unmount()
+
+    renderSession()
+    await waitFor(() =>
+      expect(screen.getByTestId("restored").textContent).toBe("true")
+    )
+    expect(refreshCalls).toBe(1)
+  })
+
+  test("does not refresh when a pending session load finishes after logout", async () => {
+    let refreshCalls = 0
+    let resolveMe: ((response: Response) => void) | null = null
+    handler = (url) => {
+      if (url.endsWith("/api/v1/auth/refresh")) {
+        refreshCalls++
+        return jsonResponse(refreshPayload)
+      }
+      if (url.endsWith("/api/v1/auth/me")) {
+        return new Promise<Response>((resolve) => {
+          resolveMe = resolve
+        })
+      }
+      if (url.endsWith("/api/v1/workspaces")) return jsonResponse([ws1, ws2])
+      if (url.includes("/teams")) return jsonResponse([team1])
+      if (url.endsWith("/api/v1/auth/logout")) return jsonResponse(null, 204)
+      return jsonResponse(null, 404)
+    }
+
+    renderSession()
+    await waitFor(() => expect(resolveMe).not.toBeNull())
+    fireEvent.click(screen.getByText("logout"))
+    resolveMe!(jsonResponse({ detail: "expired" }, 401))
+
+    await waitFor(() => expect(screen.getByTestId("token").textContent).toBe("null"))
+    expect(refreshCalls).toBe(1)
+  })
+
+  test("does not probe refresh on the login route", async () => {
+    navPathname = "/login"
+    let refreshCalls = 0
+    handler = (url) => {
+      if (url.endsWith("/api/v1/auth/refresh")) {
+        refreshCalls++
+      }
+      return jsonResponse(null, 404)
+    }
+
+    renderSession()
+    await waitFor(() => expect(screen.getByTestId("restored").textContent).toBe("true"))
+    expect(refreshCalls).toBe(0)
+    navPathname = "/app/dashboard"
+  })
+
   test("workspaceCreated appends the workspace and membership", async () => {
     restoreHandler()
     renderSession()

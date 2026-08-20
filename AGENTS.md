@@ -107,6 +107,10 @@ Correctness, safety, evidence, and validation take priority over speed.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
   intent is persisted in `workflow_upload_storage_cleanups` and recovered by
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
+- Identity email uses the global administrator SMTP settings and trusted site
+  URL. Invitation, welcome, and password-change messages are persisted as
+  encrypted `email_deliveries` and recovered by Celery Beat; password-reset
+  links store only a token hash and expire after 30 minutes.
 - Knowledge parsing uses MarkItDown for DOCX, PPTX, XLSX, and XLS; PDF Markdown
   conversion uses PyMuPDF4LLM/PyMuPDF with native text first and page-level OCR
   fallback. The upload UI and parser accept DOCX, PDF, Markdown, text, PPTX,
@@ -304,9 +308,10 @@ broad. Never claim a check passed unless it completed successfully.
   Next.js 16 configures `tsconfig.json` with the `react-jsx` runtime.
 - `backend/` changes: use the project's Python tooling. Run `compileall` over the
   touched packages, then run the affected suite from `backend/` with
-  `uv run python -m tests.<suite>` (unit, logger, identity, workspaces, teams,
-  knowledge, llm, agents, workflows, mcp_transports, test_main, agent_access,
-  workflow_run_coverage, workflow_node_coverage, workspace_admin_coverage,
+  `uv run python -m tests.<suite>` (unit, logger, smtp, email, system_governance,
+  identity, workspaces, teams, knowledge, llm, agents, workflows, mcp_transports, test_main,
+  agent_access, workflow_run_coverage, workflow_node_coverage,
+  workspace_admin_coverage,
   knowledge_domain_coverage, knowledge_api_coverage, agent_services_coverage,
   agent_runtime_coverage, infra_unit_coverage). For migration changes,
   run Alembic against the target database or a temporary explicit test
@@ -315,8 +320,9 @@ broad. Never claim a check passed unless it completed successfully.
 - Coverage gates (do not claim a percentage unless measured):
   - Backend: `make coverage` / `backend/scripts/coverage.sh` — both use the
     cross-platform `backend/scripts/coverage.py` runner to execute all suites
-    in parallel (each with an isolated `KNOWLEDGE_STORAGE_DIR`) and merge with
-    coverage.py. Backend coverage is at 97%+.
+    in parallel (each with an isolated `KNOWLEDGE_STORAGE_DIR`), trace TestClient
+    threads and SQLAlchemy greenlets, and merge with coverage.py. Backend coverage
+    is at 97%+.
   - Sandbox: `sandbox/run_coverage.sh` — `sandbox/tests.py` extends
     `self_check.py`; `sandbox/child.py` is excluded from measurement because
     `os.execve(..., "-S")` cannot host a coverage tracer (its rlimits are

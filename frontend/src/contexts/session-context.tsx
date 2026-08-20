@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { usePathname } from "next/navigation"
 
 import { useLanguage } from "@/contexts/language-provider"
 import { ApiError } from "@/lib/api-client"
@@ -21,7 +22,7 @@ import {
 import { displayWorkspaceName, hasWorkspaceMembership } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import type { AppNotification } from "@/lib/notifications"
-import { LEGACY_TOKEN_KEY, WORKSPACE_KEY } from "@/lib/storage"
+import { LEGACY_TOKEN_KEY, LOGGED_OUT_KEY, WORKSPACE_KEY } from "@/lib/storage"
 
 const ACCESS_TOKEN_REFRESH_EARLY_SECONDS = 60
 const REFRESH_RETRY_MILLISECONDS = 60_000
@@ -180,6 +181,8 @@ export function getInitialWorkspaceId(
  */
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { t } = useLanguage()
+  const pathname = usePathname()
+  const initialPathnameRef = React.useRef(pathname)
   const tRef = React.useRef(t)
   const [token, setToken] = React.useState<string | null>(null)
   const [mustChangePassword, setMustChangePassword] = React.useState(false)
@@ -225,6 +228,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const applyAccessToken = React.useCallback(
     (nextToken: string, nextMustChangePassword: boolean, expiresIn: number) => {
+      localStorage.removeItem(LOGGED_OUT_KEY)
       setSessionError(null)
       setIsSessionLoading(true)
       setToken(nextToken)
@@ -238,15 +242,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   )
 
   const renewAccessToken = React.useCallback(async () => {
+    if (localStorage.getItem(LOGGED_OUT_KEY)) {
+      return false
+    }
+
     const payload = await refreshAccessToken()
+    if (localStorage.getItem(LOGGED_OUT_KEY)) {
+      return false
+    }
+
     applyAccessToken(
       payload.access_token,
       payload.must_change_password,
       payload.expires_in
     )
+    return true
   }, [applyAccessToken])
 
   const logout = React.useCallback(() => {
+    localStorage.setItem(LOGGED_OUT_KEY, "1")
     void endSession().catch(() => undefined)
     clearSession()
   }, [clearSession])
@@ -255,12 +269,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     let isCurrent = true
     let restoredToken = false
     localStorage.removeItem(LEGACY_TOKEN_KEY)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // Login is anonymous; probing an HttpOnly cookie here only creates expected 401 noise.
+    if (
+      initialPathnameRef.current === "/login" ||
+      localStorage.getItem(LOGGED_OUT_KEY)
+    ) {
+      setIsSessionRestored(true)
+      return
+    }
     setIsSessionLoading(true)
 
     refreshAccessToken()
       .then((payload) => {
-        if (!isCurrent) {
+        if (!isCurrent || localStorage.getItem(LOGGED_OUT_KEY)) {
           return
         }
         restoredToken = true
@@ -330,7 +351,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
           try {
-            await renewAccessToken()
+            const renewed = await renewAccessToken()
+            if (!renewed) {
+              clearSession()
+            }
           } catch {
             clearSession()
           }

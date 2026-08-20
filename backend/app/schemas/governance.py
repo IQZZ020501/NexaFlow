@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -52,12 +53,12 @@ class WorkspaceInventoryResponse(BaseModel):
 
 
 class HealthComponent(BaseModel):
-    status: str
+    status: Literal["ok", "error", "not_configured"]
     detail: str | None = None
 
 
 class AdminHealthResponse(BaseModel):
-    status: str
+    status: Literal["ok", "degraded"]
     components: dict[str, HealthComponent]
     pending_tasks: int
     failed_logs_24h: int

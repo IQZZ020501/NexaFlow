@@ -70,6 +70,31 @@ export function acceptWorkspaceInvitation(
 }
 
 /**
+ * Requests a password-reset email without revealing whether the account exists.
+ *
+ * @param email - The email address associated with the account
+ */
+export function requestPasswordReset(email: string) {
+  return request<void>("/api/v1/auth/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  })
+}
+
+/**
+ * Sets a new password using a password-reset token.
+ *
+ * @param token - The one-time password-reset token
+ * @param newPassword - The new account password
+ */
+export function confirmPasswordReset(token: string, newPassword: string) {
+  return request<void>("/api/v1/auth/password-reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token, new_password: newPassword }),
+  })
+}
+
+/**
  * Authenticates a user with their username and password.
  *
  * @param username - The user's username

@@ -193,6 +193,7 @@ async def list_invitations(
 async def create_invitation(
     payload: WorkspaceInvitationCreateRequest,
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceInvitationResponse:
     """
@@ -205,7 +206,13 @@ async def create_invitation(
     Returns:
     	WorkspaceInvitationResponse: The created workspace invitation.
     """
-    return await create_workspace_invitation(db, context.workspace.id, context.user, payload)
+    return await create_workspace_invitation(
+        db,
+        context.workspace.id,
+        context.user,
+        payload,
+        settings,
+    )
 
 
 @router.delete(

@@ -18,6 +18,16 @@ export const AUDIT_DETAIL_LABEL_KEYS: Record<string, TranslationKey> = {
   to_date: "结束日期",
   timezone: "时区",
   interval_days: "统计天数",
+  host: "SMTP 主机",
+  port: "端口",
+  security: "加密方式",
+  from_email: "发件人邮箱",
+  from_name: "发件人名称",
+  recipient: "收件人邮箱",
+  enabled: "启用 SMTP",
+  timeout_seconds: "连接超时（秒）",
+  password_updated: "SMTP 密码已更新",
+  clear_password: "清除已保存的密码",
   username: "用户名",
   workspace_id: "工作空间 ID",
   knowledge_base_id: "知识库 ID",
@@ -100,6 +110,8 @@ export const AUDIT_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
   "workspace.invitation.create": "创建工作空间邀请",
   "workspace.invitation.accept": "接受工作空间邀请",
   "workspace.invitation.revoke": "撤销工作空间邀请",
+  "smtp.settings.update": "更新 SMTP 配置",
+  "smtp.test": "发送 SMTP 测试邮件",
 }
 
 export const SYSTEM_LOG_LEVEL_LABEL_KEYS: Record<string, TranslationKey> = {

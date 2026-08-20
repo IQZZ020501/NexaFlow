@@ -70,6 +70,16 @@ async def get_active_user_by_username(db: AsyncSession, username: str) -> User |
     return mapping.to_entity(User, row) if row is not None else None
 
 
+async def get_active_user_by_email(db: AsyncSession, email: str) -> User | None:
+    row = await db.scalar(
+        select(UserOrm).where(
+            UserOrm.email == email,
+            UserOrm.is_active.is_(True),
+        )
+    )
+    return mapping.to_entity(User, row) if row is not None else None
+
+
 async def get_active_refresh_session(
     db: AsyncSession,
     token_hash: str,

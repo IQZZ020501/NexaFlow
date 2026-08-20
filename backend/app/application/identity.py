@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from app.shareddomain.audit.services import record_audit_log
+from app.application.email import dispatch_email_deliveries, queue_identity_email
 from app.infrastructure.config import Settings
 from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.agent_rate_limit import (
@@ -23,6 +24,7 @@ from app.infrastructure.repositories import tools as tools_repository
 from app.infrastructure.repositories import team as team_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.infrastructure.repositories import workflow as workflow_repository
+from app.infrastructure.repositories import email as email_repository
 from app.schemas.user import (
     MembershipResponse,
     MeResponse,
@@ -303,6 +305,12 @@ async def update_user(
     actor: User,
     payload: UserUpdateRequest,
 ) -> UserResponse:
+    locked_user = await user_repository.lock_user(db, user.id)
+    if locked_user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    user = locked_user
+    previous_email = user.email
+    was_active = user.is_active
     details = payload.model_dump(exclude_none=True)
     if payload.username is not None:
         user.username = normalize_username(payload.username)
@@ -328,6 +336,11 @@ async def update_user(
             await user_repository.delete_refresh_sessions_for_user(db, user.id)
         user.is_active = payload.is_active
 
+    if user.email != previous_email or (was_active and not user.is_active):
+        now = utc_now()
+        await email_repository.invalidate_password_reset_tokens(db, user.id, now)
+        await email_repository.delete_password_reset_deliveries(db, user.id)
+
     record_audit_log(db, actor, "user.update", "user", user.id, user.name, details)
 
     try:
@@ -349,13 +362,40 @@ async def change_user_password(
     user: User,
     actor: User,
     new_password: str,
+    settings: Settings,
 ) -> UserResponse:
+    locked_user = await user_repository.lock_user(db, user.id)
+    if locked_user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+    user = locked_user
+    now = utc_now()
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
+    await email_repository.invalidate_password_reset_tokens(db, user.id, now)
+    await email_repository.delete_password_reset_deliveries(db, user.id)
     user = await user_repository.save_user(db, user)
     record_audit_log(db, actor, "user.change_password", "user", user.id, user.name)
+    delivery_id = await queue_identity_email(
+        db,
+        settings,
+        kind="password_changed",
+        recipient=user.email,
+        payload={
+            "name": user.name,
+            "changed_by": "system administrator",
+            "changed_at": now.isoformat(),
+        },
+        expires_at=now + timedelta(days=7),
+        user_id=user.id,
+        source_type="user",
+        source_id=user.id,
+    )
     await db.commit()
+    await dispatch_email_deliveries(
+        [delivery_id] if delivery_id is not None else [],
+        settings,
+    )
     user = await user_repository.refresh_user(db, user)
     return await user_to_response_with_scopes(db, user)
 
@@ -564,14 +604,21 @@ async def change_password(
     Raises:
     	HTTPException: If the current password is invalid or the new password matches the existing password.
     """
+    locked_user = await user_repository.lock_user(db, user.id)
+    if locked_user is None or not locked_user.is_active:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token.")
+    user = locked_user
     if not current_password or not verify_password(current_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is invalid.")
     if verify_password(new_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "New password must be different.")
 
+    now = utc_now()
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
+    await email_repository.invalidate_password_reset_tokens(db, user.id, now)
+    await email_repository.delete_password_reset_deliveries(db, user.id)
     user = await user_repository.save_user(db, user)
     refresh_token = await issue_refresh_session(
         db,
@@ -580,7 +627,35 @@ async def change_password(
         ip_address=ip_address,
         user_agent=user_agent,
     )
+    delivery_id = await queue_identity_email(
+        db,
+        settings,
+        kind="password_changed",
+        recipient=user.email,
+        payload={
+            "name": user.name,
+            "changed_by": "account settings",
+            "changed_at": now.isoformat(),
+        },
+        expires_at=now + timedelta(days=7),
+        user_id=user.id,
+        source_type="user",
+        source_id=user.id,
+    )
+    record_audit_log(
+        db,
+        user,
+        "user.change_password",
+        "user",
+        user.id,
+        user.name,
+        {"sessions_revoked": True},
+    )
     await db.commit()
+    await dispatch_email_deliveries(
+        [delivery_id] if delivery_id is not None else [],
+        settings,
+    )
     log_event(
         logger,
         logging.INFO,
