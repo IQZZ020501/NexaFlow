@@ -15,7 +15,15 @@ from app.infrastructure.repositories import knowledge_graph as graph_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.infrastructure.session import get_engine, get_session_factory
-from app.entities.knowledge import KnowledgeBase
+from app.entities.knowledge import (
+    KnowledgeBase,
+    KnowledgeDocument,
+    KnowledgeDocumentChunk,
+)
+from app.entities.knowledge_graph import (
+    KnowledgeGraphAlias as GraphAliasRecord,
+    KnowledgeGraphEntity as GraphEntityRecord,
+)
 from app.entities.user import User
 from app.entities.workspace import Workspace
 from app.shareddomain.knowledge_graph.schema import (
@@ -25,6 +33,7 @@ from app.shareddomain.knowledge_graph.schema import (
 )
 from app.shareddomain.knowledge_graph import revisions as graph_revisions
 from app.shareddomain.knowledge_graph.revisions import GraphRevisionConflict
+from app.shareddomain.knowledge_graph.resolution import claim_fingerprint
 from app.shareddomain.knowledge_graph.services import create_graph_schema
 from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphClaim,
@@ -194,6 +203,137 @@ async def test_revision_publish_is_atomic() -> None:
         assert list(names.all()) == ["制度 A"]
 
 
+async def test_entity_identity_candidates_are_scoped_and_ambiguous() -> None:
+    async with get_session_factory()() as db:
+        knowledge_base, actor, schema = await _graph_fixture(db)
+        revision = await graph_repository.get_active_revision(db, knowledge_base)
+        assert revision is not None
+        records = [
+            GraphEntityRecord(
+                id="identity-external",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                entity_type="Account",
+                canonical_name="账户 A",
+                normalized_name="账户 a",
+                external_key="acct-1",
+                created_revision_id=revision.id,
+                last_published_revision_id=revision.id,
+            ),
+            GraphEntityRecord(
+                id="identity-name-1",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                entity_type="Person",
+                canonical_name="张三",
+                normalized_name="张三",
+                created_revision_id=revision.id,
+                last_published_revision_id=revision.id,
+            ),
+            GraphEntityRecord(
+                id="identity-name-2",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                entity_type="Person",
+                canonical_name="张三",
+                normalized_name="张三",
+                created_revision_id=revision.id,
+                last_published_revision_id=revision.id,
+            ),
+        ]
+        for record in records:
+            await graph_repository.create_entity(db, record)
+        await graph_repository.create_alias(
+            db,
+            GraphAliasRecord(
+                id="identity-human-alias",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                entity_id="identity-external",
+                alias="HR",
+                normalized_alias="hr",
+                source="human",
+                created_revision_id=revision.id,
+                last_published_revision_id=revision.id,
+            ),
+        )
+
+        other_knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-other-kb",
+                workspace_id=knowledge_base.workspace_id,
+                name="Other Graph KB",
+                created_by_user_id=actor.id,
+            ),
+        )
+        other_schema = await create_graph_schema(
+            db,
+            other_knowledge_base,
+            GraphSchemaDefinition.model_validate(schema.schema_json),
+            actor,
+        )
+        other_revision = await graph_revisions.create_revision(
+            db,
+            other_knowledge_base,
+            other_schema,
+            actor.id,
+            "identity-other",
+        )
+        await graph_repository.create_entity(
+            db,
+            GraphEntityRecord(
+                id="identity-other",
+                workspace_id=other_knowledge_base.workspace_id,
+                knowledge_base_id=other_knowledge_base.id,
+                entity_type="Account",
+                canonical_name="账户 A",
+                normalized_name="账户 a",
+                external_key="acct-1",
+                created_revision_id=other_revision.id,
+                last_published_revision_id=other_revision.id,
+            ),
+        )
+        await db.commit()
+
+    async with get_session_factory()() as db:
+        knowledge_base, _, _ = await _graph_fixture(db)
+        external = await graph_repository.list_entity_identity_candidates(
+            db,
+            knowledge_base,
+            "Account",
+            "acct-1",
+            {"账户 a"},
+        )
+        ambiguous = await graph_repository.list_entity_identity_candidates(
+            db,
+            knowledge_base,
+            "Person",
+            None,
+            {"张三"},
+        )
+        alias_candidates = await graph_repository.list_entity_identity_candidates(
+            db,
+            knowledge_base,
+            "Account",
+            None,
+            {"hr"},
+        )
+        human_alias_ids = await graph_repository.list_human_alias_entity_ids(
+            db,
+            knowledge_base,
+            "Account",
+            {"hr"},
+        )
+        assert [item.id for item in external] == ["identity-external"]
+        assert {item.id for item in ambiguous} == {
+            "identity-name-1",
+            "identity-name-2",
+        }
+        assert [item.id for item in alias_candidates] == ["identity-external"]
+        assert human_alias_ids == {"identity-external"}
+
+
 async def test_stale_revision_cannot_overwrite_newer_graph() -> None:
     async with get_session_factory()() as db:
         knowledge_base, actor, schema = await _graph_fixture(db)
@@ -223,11 +363,158 @@ async def test_stale_revision_cannot_overwrite_newer_graph() -> None:
             raise AssertionError("stale revision must not publish")
 
 
+async def test_claim_fingerprint_dedupes_without_reactivating_rejection() -> None:
+    fingerprint = claim_fingerprint(
+        "entity-a",
+        "has_value",
+        None,
+        "value-a",
+        None,
+        None,
+    )
+    async with get_session_factory()() as db:
+        knowledge_base, actor, schema = await _graph_fixture(db)
+        await knowledge_repository.create_knowledge_document(
+            db,
+            KnowledgeDocument(
+                id="graph-evidence-doc",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                filename="evidence.md",
+                content_type="text/markdown",
+                size_bytes=7,
+                status="indexed",
+                created_by_user_id=actor.id,
+            ),
+        )
+        await knowledge_repository.save_knowledge_document_chunk(
+            db,
+            KnowledgeDocumentChunk(
+                id="graph-evidence-chunk",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                document_id="graph-evidence-doc",
+                content="value-a",
+                search_text="value-a",
+                char_count=7,
+                token_count=2,
+                status="indexed",
+            ),
+        )
+        rejected_revision = await graph_revisions.create_revision(
+            db,
+            knowledge_base,
+            schema,
+            actor.id,
+            "claim-rejected",
+        )
+        await graph_revisions.stage_revision_change(
+            db,
+            rejected_revision,
+            record_kind="claim",
+            record_key=fingerprint,
+            operation="upsert",
+            before_json=None,
+            after_json={
+                "id": "claim-original",
+                "subject_entity_id": "entity-a",
+                "predicate": "has_value",
+                "object_value_json": "value-a",
+                "status": "rejected",
+                "source_kind": "explicit_text",
+                "fingerprint": fingerprint,
+            },
+        )
+        await db.commit()
+
+    async with get_session_factory()() as db:
+        knowledge_base, _, _ = await _graph_fixture(db)
+        revision = await graph_repository.get_revision(
+            db,
+            knowledge_base,
+            rejected_revision.id,
+        )
+        assert revision is not None
+        await graph_revisions.publish_revision(db, knowledge_base, revision)
+
+    async with get_session_factory()() as db:
+        knowledge_base, actor, schema = await _graph_fixture(db)
+        retry_revision = await graph_revisions.create_revision(
+            db,
+            knowledge_base,
+            schema,
+            actor.id,
+            "claim-retry",
+        )
+        await graph_revisions.stage_revision_change(
+            db,
+            retry_revision,
+            record_kind="claim",
+            record_key=fingerprint,
+            operation="upsert",
+            before_json=None,
+            after_json={
+                "id": "claim-duplicate",
+                "subject_entity_id": "entity-a",
+                "predicate": "has_value",
+                "object_value_json": "value-a",
+                "status": "active",
+                "source_kind": "explicit_text",
+                "fingerprint": fingerprint,
+            },
+        )
+        await graph_revisions.stage_revision_change(
+            db,
+            retry_revision,
+            record_kind="evidence",
+            record_key="claim-original-evidence",
+            operation="upsert",
+            before_json=None,
+            after_json={
+                "claim_id": "claim-original",
+                "document_id": "graph-evidence-doc",
+                "chunk_id": "graph-evidence-chunk",
+                "quote": "value-a",
+                "start_offset": 0,
+                "end_offset": 7,
+                "extractor_type": "llm",
+            },
+        )
+        await db.commit()
+
+    async with get_session_factory()() as db:
+        knowledge_base, _, _ = await _graph_fixture(db)
+        revision = await graph_repository.get_revision(
+            db,
+            knowledge_base,
+            retry_revision.id,
+        )
+        assert revision is not None
+        await graph_revisions.publish_revision(db, knowledge_base, revision)
+
+    async with get_session_factory()() as db:
+        claims = list(
+            (
+                await db.scalars(
+                    select(KnowledgeGraphClaim).where(
+                        KnowledgeGraphClaim.fingerprint == fingerprint
+                    )
+                )
+            ).all()
+        )
+        assert len(claims) == 1
+        assert claims[0].id == "claim-original"
+        assert claims[0].status == "rejected"
+        assert claims[0].support_count == 1
+
+
 async def main() -> None:
     await test_graph_database_constraints()
     await test_versioned_graph_schemas()
     await test_revision_publish_is_atomic()
+    await test_entity_identity_candidates_are_scoped_and_ambiguous()
     await test_stale_revision_cannot_overwrite_newer_graph()
+    await test_claim_fingerprint_dedupes_without_reactivating_rejection()
     print("OK: knowledge_graph")
 
 

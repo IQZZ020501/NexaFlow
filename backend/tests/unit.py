@@ -36,6 +36,7 @@ from app.entities.agents import Agent
 from app.entities.knowledge import KnowledgeBase
 from app.entities.resource_permission import ResourcePermission
 from app.entities.user import User
+from app.schemas.knowledge_graph import KnowledgeGraphReviewDecisionRequest
 from app.shareddomain.agents.permissions import (
     effective_agent_permission,
     validate_agent_permission,
@@ -60,6 +61,11 @@ from app.shareddomain.knowledge_graph.extraction import (
     GraphExtractionBatch,
     extract_graph_batch,
     validate_extraction_batch,
+)
+from app.shareddomain.knowledge_graph.resolution import (
+    claim_fingerprint,
+    choose_automatic_entity_match,
+    initial_claim_status,
 )
 
 
@@ -267,6 +273,95 @@ def test_graph_extractor_parses_bounded_json_only_response() -> None:
     assert result.model_usage["total_tokens"] == 20
     assert provider.prompt is not None
     assert "chunk-5" not in provider.prompt[1]["content"]
+
+
+def test_graph_entity_auto_match_requires_deterministic_identity() -> None:
+    candidates = [
+        SimpleNamespace(id="e1", external_key=None, normalized_name="张三"),
+        SimpleNamespace(id="e2", external_key=None, normalized_name="张三"),
+    ]
+    assert choose_automatic_entity_match(None, "张三", candidates) is None
+    match = choose_automatic_entity_match(
+        "acct-1",
+        "账户 A",
+        [
+            SimpleNamespace(
+                id="e3",
+                external_key="acct-1",
+                normalized_name="账户 a",
+            )
+        ],
+    )
+    assert match is not None
+    assert match.id == "e3"
+    assert (
+        choose_automatic_entity_match(
+            "missing-key",
+            "账户 A",
+            [
+                SimpleNamespace(
+                    id="e4",
+                    external_key=None,
+                    normalized_name="账户 a",
+                )
+            ],
+        )
+        is None
+    )
+    alias_match = choose_automatic_entity_match(
+        None,
+        "HR",
+        [
+            SimpleNamespace(
+                id="name-match",
+                external_key=None,
+                normalized_name="hr",
+            ),
+            SimpleNamespace(
+                id="human-alias-match",
+                external_key=None,
+                normalized_name="人力资源部",
+            ),
+        ],
+        {"human-alias-match"},
+    )
+    assert alias_match is not None
+    assert alias_match.id == "human-alias-match"
+
+
+def test_graph_claim_fingerprint_and_initial_status_are_deterministic() -> None:
+    forward = claim_fingerprint("a", "owns", "b", None, None, None)
+    reverse = claim_fingerprint("b", "owns", "a", None, None, None)
+    assert forward != reverse
+    assert initial_claim_status(
+        source_kind="explicit_text",
+        relation_review_required=False,
+        subject_resolved=True,
+        object_resolved=True,
+        evidence_verified=True,
+    ) == ("active", None)
+    assert initial_claim_status(
+        source_kind="explicit_text",
+        relation_review_required=False,
+        subject_resolved=False,
+        object_resolved=True,
+        evidence_verified=True,
+    ) == ("candidate", "ambiguous_entity")
+
+
+def test_graph_review_decision_request_is_bounded() -> None:
+    request = KnowledgeGraphReviewDecisionRequest.model_validate(
+        {"action": "merge_entities", "target_entity_id": "entity-1"}
+    )
+    assert request.mention_ids == []
+    try:
+        KnowledgeGraphReviewDecisionRequest.model_validate(
+            {"action": "split_entity", "mention_ids": ["mention"] * 501}
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("oversized graph review decision must fail")
 
 
 def test_effective_agent_permission_matrix() -> None:
@@ -5787,6 +5882,9 @@ def main() -> None:
     test_normalized_document_artifact_is_content_addressed()
     test_graph_extraction_requires_exact_chunk_evidence()
     test_graph_extractor_parses_bounded_json_only_response()
+    test_graph_entity_auto_match_requires_deterministic_identity()
+    test_graph_claim_fingerprint_and_initial_status_are_deterministic()
+    test_graph_review_decision_request_is_bounded()
     test_tool_ref_requires_stable_ids()
     test_agent_publication_snapshot_is_canonical_and_tool_versioned()
     test_agent_tool_binding_requires_current_available_policy()

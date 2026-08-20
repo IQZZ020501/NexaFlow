@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import KnowledgeBase
 from app.entities.knowledge_graph import (
+    GRAPH_CLAIM_REJECTED,
     GRAPH_CLAIM_SUPERSEDED,
     GRAPH_ENTITY_ACTIVE,
     GRAPH_ENTITY_RETIRED,
@@ -173,6 +174,12 @@ async def _upsert_claim(
     existing = await graph_repository.get_claim(db, revision, change.record_key)
     values = _upsert_values(revision, change, existing)
     values.setdefault("fingerprint", change.record_key)
+    if (
+        existing is not None
+        and existing.status == GRAPH_CLAIM_REJECTED
+        and values.get("source_kind") != "human"
+    ):
+        values["status"] = GRAPH_CLAIM_REJECTED
     await graph_repository.save_claim(db, KnowledgeGraphClaim(**values))
 
 
@@ -184,7 +191,28 @@ async def _upsert_evidence(
     existing = await graph_repository.get_evidence(db, revision, change.record_key)
     values = _upsert_values(revision, change, existing)
     values["evidence_state"] = GRAPH_EVIDENCE_ACTIVE
-    await graph_repository.save_evidence(db, KnowledgeGraphClaimEvidence(**values))
+    evidence = await graph_repository.save_evidence(
+        db,
+        KnowledgeGraphClaimEvidence(**values),
+    )
+    await _refresh_claim_support_count(db, revision, evidence.claim_id)
+
+
+async def _refresh_claim_support_count(
+    db: AsyncSession,
+    revision: KnowledgeGraphRevision,
+    claim_id: str,
+) -> None:
+    claim = await graph_repository.get_claim(db, revision, claim_id)
+    if claim is None:
+        return
+    claim.support_count = await graph_repository.count_active_claim_evidence(
+        db,
+        revision,
+        claim_id,
+    )
+    claim.updated_at = utc_now()
+    await graph_repository.save_claim(db, claim)
 
 
 async def _upsert_review(
@@ -242,6 +270,7 @@ async def _retire_revision_change(
             evidence.retired_revision_id = revision.id
             evidence.updated_at = now
             await graph_repository.save_evidence(db, evidence)
+            await _refresh_claim_support_count(db, revision, evidence.claim_id)
     else:
         review = await graph_repository.get_review_item(db, revision, change.record_key)
         if review is not None:
@@ -264,7 +293,10 @@ async def _delete_revision_change(
     elif change.record_kind == "claim":
         await graph_repository.delete_claim(db, revision, change.record_key)
     elif change.record_kind == "evidence":
+        evidence = await graph_repository.get_evidence(db, revision, change.record_key)
         await graph_repository.delete_evidence(db, revision, change.record_key)
+        if evidence is not None:
+            await _refresh_claim_support_count(db, revision, evidence.claim_id)
     else:
         await graph_repository.delete_review_item(db, revision, change.record_key)
 

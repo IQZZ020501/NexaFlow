@@ -69,3 +69,8 @@ from app.shareddomain.knowledge_graph.extraction import (  # noqa: E402,F401
     extract_graph_batch,
     validate_extraction_batch,
 )
+from app.shareddomain.knowledge_graph.resolution import (  # noqa: E402,F401
+    claim_fingerprint,
+    choose_automatic_entity_match,
+    initial_claim_status,
+)

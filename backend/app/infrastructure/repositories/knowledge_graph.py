@@ -1,4 +1,4 @@
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import KnowledgeBase
@@ -293,6 +293,76 @@ async def create_entity(
     return to_entity(KnowledgeGraphEntity, row)
 
 
+async def list_entity_identity_candidates(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    entity_type: str,
+    external_key: str | None,
+    normalized_names: set[str],
+) -> list[KnowledgeGraphEntity]:
+    human_alias_match = (
+        select(KnowledgeGraphAliasORM.id)
+        .where(
+            KnowledgeGraphAliasORM.workspace_id
+            == KnowledgeGraphEntityORM.workspace_id,
+            KnowledgeGraphAliasORM.knowledge_base_id
+            == KnowledgeGraphEntityORM.knowledge_base_id,
+            KnowledgeGraphAliasORM.entity_id == KnowledgeGraphEntityORM.id,
+            KnowledgeGraphAliasORM.source == "human",
+            KnowledgeGraphAliasORM.retired_revision_id.is_(None),
+            KnowledgeGraphAliasORM.normalized_alias.in_(sorted(normalized_names)),
+        )
+        .exists()
+    )
+    rows = await db.scalars(
+        select(KnowledgeGraphEntityORM).where(
+            KnowledgeGraphEntityORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphEntityORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphEntityORM.entity_type == entity_type,
+            KnowledgeGraphEntityORM.state == "active",
+            or_(
+                KnowledgeGraphEntityORM.external_key == external_key
+                if external_key is not None
+                else false(),
+                KnowledgeGraphEntityORM.normalized_name.in_(
+                    sorted(normalized_names)
+                ),
+                human_alias_match,
+            ),
+        )
+    )
+    return [to_entity(KnowledgeGraphEntity, row) for row in rows.all()]
+
+
+async def list_human_alias_entity_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    entity_type: str,
+    normalized_names: set[str],
+) -> set[str]:
+    if not normalized_names:
+        return set()
+    rows = await db.scalars(
+        select(KnowledgeGraphAliasORM.entity_id).where(
+            KnowledgeGraphAliasORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphAliasORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphAliasORM.source == "human",
+            KnowledgeGraphAliasORM.retired_revision_id.is_(None),
+            KnowledgeGraphAliasORM.normalized_alias.in_(sorted(normalized_names)),
+            KnowledgeGraphAliasORM.entity_id.in_(
+                select(KnowledgeGraphEntityORM.id).where(
+                    KnowledgeGraphEntityORM.workspace_id
+                    == knowledge_base.workspace_id,
+                    KnowledgeGraphEntityORM.knowledge_base_id == knowledge_base.id,
+                    KnowledgeGraphEntityORM.entity_type == entity_type,
+                    KnowledgeGraphEntityORM.state == "active",
+                )
+            ),
+        )
+    )
+    return set(rows.all())
+
+
 async def get_entity(
     db: AsyncSession,
     revision: KnowledgeGraphRevision,
@@ -485,6 +555,25 @@ async def save_evidence(
 ) -> KnowledgeGraphClaimEvidence:
     row = await save(db, KnowledgeGraphClaimEvidenceORM, entity)
     return to_entity(KnowledgeGraphClaimEvidence, row)
+
+
+async def count_active_claim_evidence(
+    db: AsyncSession,
+    revision: KnowledgeGraphRevision,
+    claim_id: str,
+) -> int:
+    count = await db.scalar(
+        select(func.count())
+        .select_from(KnowledgeGraphClaimEvidenceORM)
+        .where(
+            KnowledgeGraphClaimEvidenceORM.workspace_id == revision.workspace_id,
+            KnowledgeGraphClaimEvidenceORM.knowledge_base_id
+            == revision.knowledge_base_id,
+            KnowledgeGraphClaimEvidenceORM.claim_id == claim_id,
+            KnowledgeGraphClaimEvidenceORM.evidence_state == "active",
+        )
+    )
+    return int(count or 0)
 
 
 async def get_evidence(
