@@ -287,13 +287,23 @@ export function ToolPicker({
                 )
                 const disabled = !checked && value.length >= maxItems
                 return (
-                  <label
+                  <div
                     key={tool.id}
                     className={`group flex items-start gap-3 rounded-xl border p-3.5 transition-[border-color,background-color,box-shadow] focus-within:ring-2 focus-within:ring-ring ${
                       checked
                         ? "border-foreground/20 bg-muted/70 shadow-xs"
                         : "border-border/70 hover:border-foreground/20 hover:bg-muted/35"
                     } ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                    onClick={(event) => {
+                      if (
+                        disabled ||
+                        (event.target instanceof Element &&
+                          event.target.closest("button, input"))
+                      ) {
+                        return
+                      }
+                      toggle(tool)
+                    }}
                   >
                     <input
                       ref={(element) => {
@@ -360,7 +370,7 @@ export function ToolPicker({
                           size="sm"
                           className="mt-1 h-auto p-0 text-xs"
                           onClick={(event) => {
-                            event.preventDefault()
+                            event.stopPropagation()
                             upgrade(tool)
                           }}
                         >
@@ -368,7 +378,7 @@ export function ToolPicker({
                         </Button>
                       ) : null}
                     </span>
-                  </label>
+                  </div>
                 )
               })}
 
