@@ -13,6 +13,15 @@ export type FilterDropdownOption = {
   label: string
 }
 
+/**
+ * Renders a dropdown for selecting a value from a list of labeled options.
+ *
+ * @param ariaLabel - Accessible label for the dropdown trigger
+ * @param value - Currently selected option value
+ * @param options - Available dropdown options
+ * @param onChange - Called with the selected option value
+ * @returns The rendered filter dropdown
+ */
 export function FilterDropdown({
   id,
   ariaLabel,

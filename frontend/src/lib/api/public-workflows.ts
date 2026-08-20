@@ -82,10 +82,24 @@ export type WorkflowApiDocumentation = {
 const path = (workflowId: string, suffix = "") =>
   `/api/v1/public/workflows/${workflowId}${suffix}`
 
+/**
+ * Fetches the public profile for a workflow.
+ *
+ * @param workflowId - The workflow identifier
+ * @param token - The access token for the workflow
+ * @returns The workflow's public profile
+ */
 export function getPublicWorkflowProfile(workflowId: string, token: string) {
   return request<PublicWorkflowProfile>(path(workflowId, "/profile"), { token })
 }
 
+/**
+ * Initializes a public workflow with its profile and conversations.
+ *
+ * @param workflowId - The identifier of the workflow to initialize
+ * @param token - The access token for the workflow
+ * @returns The workflow profile and its conversations
+ */
 export async function initializePublicWorkflow(
   workflowId: string,
   token: string
@@ -100,6 +114,14 @@ export async function initializePublicWorkflow(
   return { profile, conversations }
 }
 
+/**
+ * Lists runs for a public workflow conversation.
+ *
+ * @param workflowId - The workflow identifier
+ * @param conversationId - The conversation whose runs to list
+ * @param token - The authentication token
+ * @returns The conversation's workflow runs
+ */
 export function listPublicWorkflowRuns(
   workflowId: string,
   conversationId: string,
@@ -113,6 +135,16 @@ export function listPublicWorkflowRuns(
   )
 }
 
+/**
+ * Creates a run for a public workflow.
+ *
+ * @param workflowId - The workflow identifier
+ * @param token - The authentication token
+ * @param question - The question submitted to the workflow
+ * @param conversationId - The conversation to continue, if applicable
+ * @param fileIds - The identifiers of files attached to the run
+ * @returns The created workflow run
+ */
 export function createPublicWorkflowRun(
   workflowId: string,
   token: string,
@@ -131,6 +163,14 @@ export function createPublicWorkflowRun(
   })
 }
 
+/**
+ * Uploads files for a public workflow.
+ *
+ * @param workflowId - The workflow identifier
+ * @param token - The access token for the workflow
+ * @param files - The files to upload
+ * @returns The uploaded file records
+ */
 export function uploadPublicWorkflowFiles(
   workflowId: string,
   token: string,
@@ -145,6 +185,15 @@ export function uploadPublicWorkflowFiles(
   })
 }
 
+/**
+ * Submits form data for a runtime node in a workflow run.
+ *
+ * @param workflowId - The workflow containing the run
+ * @param runId - The run receiving the form submission
+ * @param runtimeNodeId - The runtime node associated with the form
+ * @param formData - The values submitted for the form
+ * @returns The updated workflow run
+ */
 export function submitPublicWorkflowForm(
   workflowId: string,
   token: string,
@@ -162,6 +211,14 @@ export function submitPublicWorkflowForm(
   })
 }
 
+/**
+ * Requests regeneration of an existing public workflow run.
+ *
+ * @param workflowId - The workflow identifier
+ * @param token - The authentication token
+ * @param runId - The run identifier
+ * @returns The regenerated workflow run
+ */
 export function regeneratePublicWorkflowRun(
   workflowId: string,
   token: string,
@@ -173,6 +230,12 @@ export function regeneratePublicWorkflowRun(
   )
 }
 
+/**
+ * Sets or clears feedback for a public workflow run.
+ *
+ * @param value - The feedback value, or `null` to clear existing feedback.
+ * @returns The updated workflow run.
+ */
 export function setPublicWorkflowRunFeedback(
   workflowId: string,
   token: string,
@@ -185,6 +248,16 @@ export function setPublicWorkflowRunFeedback(
   )
 }
 
+/**
+ * Observes events emitted for a public workflow run.
+ *
+ * @param workflowId - The workflow identifier.
+ * @param token - The bearer token used to authenticate the request.
+ * @param runId - The run identifier.
+ * @param onEvent - Callback invoked for each received stream event.
+ * @param signal - Optional signal used to abort observation.
+ * @returns Completion of the run event stream.
+ */
 export function observePublicWorkflowRun(
   workflowId: string,
   token: string,
@@ -212,6 +285,13 @@ export function observePublicWorkflowRun(
   )
 }
 
+/**
+ * Fetches API documentation for a workflow.
+ *
+ * @param workflowId - The identifier of the workflow
+ * @param apiKey - The API key used to authenticate the request
+ * @returns The workflow's API documentation
+ */
 export function getWorkflowApiDocumentation(
   workflowId: string,
   apiKey: string

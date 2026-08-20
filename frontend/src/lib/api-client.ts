@@ -16,10 +16,22 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Builds an API URL by prefixing a path with the configured base URL.
+ *
+ * @param path - The API path to append
+ * @returns The complete API URL
+ */
 export function apiUrl(path: string) {
   return `${API_BASE_URL}${path}`
 }
 
+/**
+ * Builds a query string from optional pagination parameters.
+ *
+ * @param options - Pagination values to include in the query string
+ * @returns A query string beginning with `?`, or an empty string when no parameters are provided
+ */
 export function listQuery(options: { limit?: number; offset?: number }): string {
   const params = new URLSearchParams()
   if (options.limit !== undefined) {
@@ -32,6 +44,13 @@ export function listQuery(options: { limit?: number; offset?: number }): string 
   return query ? `?${query}` : ""
 }
 
+/**
+ * Extracts a readable error message from an API response payload.
+ *
+ * @param payload - The response payload that may contain error details
+ * @param fallback - The message to use when the payload has no readable error
+ * @returns The extracted error message or the fallback message
+ */
 function errorMessage(payload: unknown, fallback: string) {
   if (typeof payload === "string" && payload) {
     return payload
@@ -59,6 +78,14 @@ function errorMessage(payload: unknown, fallback: string) {
   return fallback
 }
 
+/**
+ * Sends an API request and parses the successful response.
+ *
+ * @param path - The API path to request
+ * @param options - Request settings, including an optional bearer token
+ * @returns The parsed response value, `undefined` for a successful 204 response, or `null` for an empty response body
+ * @throws `ApiError` when the response has an unsuccessful HTTP status
+ */
 export async function request<T>(path: string, options: RequestOptions = {}) {
   const headers = new Headers(options.headers)
 
@@ -104,6 +131,13 @@ export async function request<T>(path: string, options: RequestOptions = {}) {
 }
 
 
+/**
+ * Requests a resource and provides its successful response as a blob.
+ *
+ * @param path - The API path to request
+ * @param options - Request configuration, including an optional bearer token
+ * @returns The response body as a `Blob`
+ */
 export async function requestBlob(
   path: string,
   options: RequestOptions = {},

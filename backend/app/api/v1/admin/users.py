@@ -77,6 +77,16 @@ async def change_managed_user_password(
     actor: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserResponse:
+    """Change the password for a managed user.
+    
+    Parameters:
+    	user_id (str): Identifier of the user whose password is changed.
+    	payload (ChangePasswordRequest): Request containing the new password.
+    	actor (User): Global administrator authorizing the change.
+    
+    Returns:
+    	UserResponse: The updated user.
+    """
     user = await get_user(db, user_id)
     return await change_user_password(db, user, actor, payload.new_password)
 
@@ -87,6 +97,14 @@ async def list_managed_user_sessions(
     _: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[RefreshSessionResponse]:
+    """List all active sessions for a managed user.
+    
+    Parameters:
+    	user_id (str): The identifier of the user whose sessions to retrieve.
+    
+    Returns:
+    	list[RefreshSessionResponse]: The user's refresh sessions.
+    """
     user = await get_user(db, user_id)
     return await list_user_sessions(db, user)
 
@@ -98,6 +116,12 @@ async def revoke_managed_user_session(
     _: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
+    """Revoke a specific session belonging to a managed user.
+    
+    Parameters:
+        user_id (str): Identifier of the user whose session is revoked.
+        session_id (str): Identifier of the session to revoke.
+    """
     user = await get_user(db, user_id)
     await revoke_user_session(db, user.id, session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -109,6 +133,11 @@ async def revoke_managed_user_sessions(
     _: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
+    """Revoke all active sessions for a managed user.
+    
+    Parameters:
+    	user_id (str): Identifier of the user whose sessions are revoked.
+    """
     user = await get_user(db, user_id)
     await revoke_all_user_sessions(db, user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -120,6 +149,15 @@ async def delete_user(
     actor: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
+    """Permanently delete a user authorized by a global administrator.
+    
+    Parameters:
+    	user_id (str): Identifier of the user to delete
+    	actor (User): Global administrator authorizing the deletion
+    
+    Returns:
+    	Response: An HTTP 204 response
+    """
     user = await get_user(db, user_id)
     await delete_user_permanently(db, user, actor)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

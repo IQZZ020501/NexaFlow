@@ -52,17 +52,35 @@ const DOCUMENT_FILE_ICON_COLORS: Record<string, string> = {
   ".webp": "!text-violet-600 dark:!text-violet-400",
 }
 
+/**
+ * Extracts the lowercase extension from a filename.
+ *
+ * @param filename - The filename to inspect
+ * @returns The extension beginning with `.`, or an empty string when the filename has no period
+ */
 function documentFileExtension(filename: string) {
   return filename.includes(".")
     ? filename.slice(filename.lastIndexOf(".")).toLowerCase()
     : ""
 }
 
+/**
+ * Selects the icon associated with a document filename.
+ *
+ * @param filename - The document filename
+ * @returns The icon mapped to the filename's extension, or the unknown-file icon when no mapping exists
+ */
 export function getDocumentFileIcon(filename: string): DocumentFileIcon {
   const extension = documentFileExtension(filename)
   return DOCUMENT_FILE_ICONS[extension] ?? FileUnknownOutlined
 }
 
+/**
+ * Gets the color classes associated with a document filename's extension.
+ *
+ * @param filename - The document filename
+ * @returns The extension-specific color classes, or the muted foreground color for unsupported extensions
+ */
 export function getDocumentFileIconColor(filename: string) {
   return (
     DOCUMENT_FILE_ICON_COLORS[documentFileExtension(filename)] ??

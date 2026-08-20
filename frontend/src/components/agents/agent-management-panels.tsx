@@ -154,6 +154,13 @@ function sourceLabel(source: AgentLog["access_source"], t: TFunction) {
   return t("控制台")
 }
 
+/**
+ * Resolves a localized label for a run status.
+ *
+ * @param status - The run status to label
+ * @param t - The translation function used to localize recognized statuses
+ * @returns The localized status label, or the original status when no label is defined
+ */
 function statusLabel(status: string, t: TFunction) {
   const labels: Record<string, string> = {
     queued: t("排队中"),
@@ -166,6 +173,12 @@ function statusLabel(status: string, t: TFunction) {
   return labels[status] ?? status
 }
 
+/**
+ * Renders a localized indicator for positive, negative, or absent feedback.
+ *
+ * @param value - The feedback classification to display
+ * @param t - The translation function used for feedback labels
+ */
 function FeedbackIndicator({
   value,
   t,
@@ -203,6 +216,14 @@ function FeedbackIndicator({
   )
 }
 
+/**
+ * Displays a labeled metric with an icon and styling tone.
+ *
+ * @param icon - The icon component to display
+ * @param label - The metric label
+ * @param value - The numeric metric value
+ * @param tone - CSS classes that define the icon background styling
+ */
 function MetricCard({
   icon: Icon,
   label,
@@ -708,6 +729,15 @@ function Pagination({
   )
 }
 
+/**
+ * Displays paginated conversation logs for an agent and provides detailed log views.
+ *
+ * @param agent - The agent whose conversation logs are displayed
+ * @param token - The authentication token used to load logs
+ * @param workspaceId - The workspace containing the agent
+ * @param t - The translation function for localized text
+ * @param notify - The function used to report loading errors
+ */
 export function AgentLogsPanel({
   agent,
   token,

@@ -27,10 +27,28 @@ from app.shareddomain.audit.services import record_audit_log
 
 
 def _hash_token(token: str) -> str:
+    """Create a SHA-256 hexadecimal digest from an invitation token.
+    
+    Parameters:
+    	token (str): The invitation token to hash.
+    
+    Returns:
+    	str: The token's SHA-256 hexadecimal digest.
+    """
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _response(entity: WorkspaceInvitation, token: str | None = None) -> WorkspaceInvitationResponse:
+    """
+    Convert a workspace invitation entity into an API response.
+    
+    Parameters:
+        entity (WorkspaceInvitation): Invitation entity to represent.
+        token (str | None): Optional raw invitation token to include in the response.
+    
+    Returns:
+        WorkspaceInvitationResponse: Response containing the invitation details and, when provided, its token and invite URL.
+    """
     return WorkspaceInvitationResponse(
         id=entity.id,
         workspace_id=entity.workspace_id,
@@ -52,6 +70,17 @@ async def create_workspace_invitation(
     actor: User,
     payload: WorkspaceInvitationCreateRequest,
 ) -> WorkspaceInvitationResponse:
+    """
+    Create an invitation for a workspace member.
+    
+    Parameters:
+        workspace_id (str): Identifier of the workspace receiving the invitation.
+        actor (User): User creating the invitation.
+        payload (WorkspaceInvitationCreateRequest): Invitation recipient and role details.
+    
+    Returns:
+        WorkspaceInvitationResponse: The created invitation, including its raw invitation token.
+    """
     if payload.role == "admin" and not actor.is_global_admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only a system admin can invite workspace admins.")
     workspace = await workspace_repository.get_workspace_by_id(db, workspace_id)
@@ -91,6 +120,15 @@ async def list_workspace_invitations(
     db: AsyncSession,
     workspace_id: str,
 ) -> list[WorkspaceInvitationResponse]:
+    """
+    List all invitations associated with a workspace.
+    
+    Parameters:
+    	workspace_id (str): Identifier of the workspace whose invitations are retrieved.
+    
+    Returns:
+    	list[WorkspaceInvitationResponse]: Invitation responses without raw invitation tokens.
+    """
     return [_response(item) for item in await invitation_repository.list_for_workspace(db, workspace_id)]
 
 
@@ -100,6 +138,17 @@ async def revoke_workspace_invitation(
     invitation_id: str,
     actor: User,
 ) -> None:
+    """
+    Revoke a workspace invitation.
+    
+    Parameters:
+    	workspace_id (str): Identifier of the workspace containing the invitation.
+    	invitation_id (str): Identifier of the invitation to revoke.
+    	actor (User): User performing the revocation.
+    
+    Raises:
+    	HTTPException: If the invitation does not exist in the workspace.
+    """
     invitation = await invitation_repository.get_by_id(db, workspace_id, invitation_id)
     if invitation is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Invitation not found.")
@@ -122,6 +171,15 @@ async def accept_workspace_invitation(
     db: AsyncSession,
     payload: WorkspaceInvitationAcceptRequest,
 ) -> UserResponse:
+    """
+    Accept a workspace invitation and create the invited user's account and membership.
+    
+    Parameters:
+    	payload (WorkspaceInvitationAcceptRequest): Invitation token and password used to create the account.
+    
+    Returns:
+    	UserResponse: The created user with workspace scope information.
+    """
     invitation = await invitation_repository.get_by_token_hash(
         db, _hash_token(payload.token), utc_now()
     )

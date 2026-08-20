@@ -50,6 +50,13 @@ export type UserPasswordResetResponse = {
   initial_password: string
 }
 
+/**
+ * Accepts a workspace invitation with a token and password.
+ *
+ * @param token - The workspace invitation token
+ * @param password - The password for the new user account
+ * @returns The created user
+ */
 export function acceptWorkspaceInvitation(token: string, password: string) {
   return request<User>("/api/v1/auth/invitations/accept", {
     method: "POST",
@@ -57,6 +64,13 @@ export function acceptWorkspaceInvitation(token: string, password: string) {
   })
 }
 
+/**
+ * Authenticates a user with their username and password.
+ *
+ * @param username - The user's username
+ * @param password - The user's password
+ * @returns The access token, token type, expiration, and password-change requirement
+ */
 export function login(username: string, password: string) {
   return request<LoginResponse>("/api/v1/auth/login", {
     method: "POST",
@@ -67,14 +81,29 @@ export function login(username: string, password: string) {
   })
 }
 
+/**
+ * Refreshes the current authentication credentials.
+ *
+ * @returns The refreshed login credentials
+ */
 export function refreshAccessToken() {
   return request<LoginResponse>("/api/v1/auth/refresh", { method: "POST" })
 }
 
+/**
+ * Ends the authenticated session.
+ */
 export function logout() {
   return request<void>("/api/v1/auth/logout", { method: "POST" })
 }
 
+/**
+ * Changes the password associated with an authenticated account.
+ *
+ * @param token - Authentication token for the account
+ * @param newPassword - Password to set for the account
+ * @param currentPassword - Existing password when required
+ */
 export function changePassword(
   token: string,
   newPassword: string,
@@ -90,6 +119,12 @@ export function changePassword(
   })
 }
 
+/**
+ * Retrieves the authenticated user's profile and memberships.
+ *
+ * @param token - The access token used to authenticate the request
+ * @returns The authenticated user's details and memberships
+ */
 export function getMe(token: string) {
   return request<MeResponse>("/api/v1/auth/me", { token })
 }

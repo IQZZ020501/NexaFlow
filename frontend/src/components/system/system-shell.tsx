@@ -72,6 +72,13 @@ import {
 
 export type SystemTab = "workspaces" | "teams" | "users" | "audit"
 
+/**
+ * Renders the system administration interface for the active tab when the current user has access.
+ *
+ * Redirects unauthorized users to an appropriate application or system page and renders nothing when the session is unavailable.
+ *
+ * @param activeTab - The system administration tab to display
+ */
 export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
   const session = useSession()
   const router = useRouter()
@@ -146,6 +153,14 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
   )
 }
 
+/**
+ * Renders the system administration page and coordinates workspace, team, user, membership, and audit-log management.
+ *
+ * @param me - The authenticated user's profile and permissions
+ * @param selectedWorkspaceId - The currently selected workspace
+ * @param activeTab - The active system administration tab
+ * @param onNotify - Callback for displaying operation notifications
+ */
 function SystemPageContent({
   me,
   token,
@@ -224,6 +239,7 @@ function SystemPageContent({
   >([])
   const [auditLogs, setAuditLogs] = React.useState<AuditLog[]>([])
   const [auditSearch, setAuditSearch] = React.useState("")
+  const [debouncedAuditSearch, setDebouncedAuditSearch] = React.useState("")
   const [auditAction, setAuditAction] = React.useState("")
   const [auditOffset, setAuditOffset] = React.useState(0)
   const [auditHasMore, setAuditHasMore] = React.useState(false)
@@ -270,6 +286,14 @@ function SystemPageContent({
   const teamAdminCandidatesRequestId = React.useRef(0)
   const workspaceMembersRequestId = React.useRef(0)
   const teamMembersRequestId = React.useRef(0)
+  const auditRequestId = React.useRef(0)
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedAuditSearch(auditSearch)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [auditSearch])
 
   const selectedWorkspace =
     workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null
@@ -412,13 +436,15 @@ function SystemPageContent({
   )
 
   const loadAuditLogs = React.useCallback(async () => {
+    const requestId = auditRequestId.current + 1
+    auditRequestId.current = requestId
     setIsAuditLoading(true)
 
     try {
       const filters: AuditFilters = {
         limit: 100,
         offset: auditOffset,
-        search: auditSearch || undefined,
+        search: debouncedAuditSearch || undefined,
         action: auditAction || undefined,
       }
       const nextLogs = me.user.is_global_admin
@@ -426,15 +452,19 @@ function SystemPageContent({
         : selectedWorkspaceId
           ? await listWorkspaceAuditLogs(token, selectedWorkspaceId, filters)
           : []
+      if (requestId !== auditRequestId.current) return
       setAuditLogs((current) => (auditOffset ? [...current, ...nextLogs] : nextLogs))
       setAuditHasMore(nextLogs.length === 100)
     } catch (error) {
+      if (requestId !== auditRequestId.current) return
       setAuditLogs([])
       reportError(error)
     } finally {
-      setIsAuditLoading(false)
+      if (requestId === auditRequestId.current) {
+        setIsAuditLoading(false)
+      }
     }
-  }, [auditAction, auditOffset, auditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
+  }, [auditAction, auditOffset, debouncedAuditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
 
   const loadUserCreateTeams = React.useCallback(
     async (workspaceId: string) => {

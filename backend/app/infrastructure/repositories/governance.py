@@ -17,6 +17,17 @@ from app.shareddomain.workflows.models import WorkflowDefinition as WorkflowDefi
 
 
 async def _count(db: AsyncSession, model: type, workspace_id: str, *conditions) -> int:
+    """Count records for a model within a workspace, optionally applying additional conditions.
+    
+    Parameters:
+    	db (AsyncSession): Database session used to execute the count query.
+    	model (type): Model whose workspace records are counted.
+    	workspace_id (str): Identifier of the workspace to filter by.
+    	*conditions: Additional query conditions to apply.
+    
+    Returns:
+    	int: The number of matching records.
+    """
     statement = select(func.count()).select_from(model).where(model.workspace_id == workspace_id)
     if conditions:
         statement = statement.where(*conditions)
@@ -28,6 +39,16 @@ async def workspace_inventory_counts(
     workspace_id: str,
     day_ago: datetime,
 ) -> dict[str, int]:
+    """
+    Aggregate workspace inventory, activity, and recent failure metrics.
+    
+    Parameters:
+        workspace_id (str): Identifier of the workspace to summarize.
+        day_ago (datetime): Lower time boundary for failures counted from the previous 24-hour interval.
+    
+    Returns:
+        dict[str, int]: Workspace metrics, including member, team, resource, active-run, and recent failure counts.
+    """
     member_row = (
         await db.execute(
             select(
@@ -67,6 +88,15 @@ async def workspace_inventory_counts(
 
 
 async def health_counts(db: AsyncSession, since: datetime) -> tuple[int, int]:
+    """
+    Count pending knowledge tasks and agent runs, along with recent error and critical system logs.
+    
+    Parameters:
+        since (datetime): Start time for counting system logs.
+    
+    Returns:
+        tuple[int, int]: The number of pending tasks and runs, followed by the number of error or critical logs created since ``since``.
+    """
     pending = int(
         await db.scalar(
             select(func.count()).select_from(KnowledgeTaskOrm).where(
@@ -96,6 +126,16 @@ async def health_counts(db: AsyncSession, since: datetime) -> tuple[int, int]:
 
 
 async def daily_run_count(db: AsyncSession, workspace_id: str, since: datetime) -> int:
+    """
+    Count agent runs created within a workspace from the specified time onward.
+    
+    Parameters:
+        workspace_id (str): Identifier of the workspace.
+        since (datetime): Start of the counting period.
+    
+    Returns:
+        int: Number of matching agent runs.
+    """
     return int(
         await db.scalar(
             select(func.count()).select_from(AgentRunOrm).where(

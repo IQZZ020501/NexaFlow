@@ -2,6 +2,9 @@ from tests.support import ADMIN_PASSWORD, auth_headers, activate_admin, login, t
 
 
 def main() -> None:
+    """
+    Run the end-to-end governance and access-control integration test.
+    """
     with test_client() as client:
         admin_token, workspace_id = activate_admin(client)
         admin_headers = auth_headers(admin_token)

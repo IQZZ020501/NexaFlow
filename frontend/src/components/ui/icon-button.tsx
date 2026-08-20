@@ -9,6 +9,12 @@ type IconButtonProps = Omit<
   children: React.ReactNode
 }
 
+/**
+ * Renders an icon button with an accessible label.
+ *
+ * @param label - The accessible text and tooltip for the button
+ * @param children - The icon or content displayed in the button
+ */
 export function IconButton({
   label,
   children,

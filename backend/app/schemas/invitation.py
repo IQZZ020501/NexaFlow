@@ -31,6 +31,17 @@ class WorkspaceInvitationAcceptRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, value: str) -> str:
+        """Validate that a password contains at least one uppercase letter.
+        
+        Parameters:
+        	value (str): The password to validate.
+        
+        Returns:
+        	str: The unchanged password.
+        
+        Raises:
+        	ValueError: If the password contains no uppercase letters.
+        """
         if not any(character.isupper() for character in value):
             raise ValueError("Password must contain at least one uppercase letter.")
         return value

@@ -24,6 +24,12 @@ const ThemeProviderContext = React.createContext<
   ThemeProviderState | undefined
 >(undefined)
 
+/**
+ * Determines whether a value identifies a supported theme.
+ *
+ * @param value - The value to validate
+ * @returns `true` if the value is a supported theme, `false` otherwise.
+ */
 function isTheme(value: string | null): value is Theme {
   if (value === null) {
     return false
@@ -32,6 +38,13 @@ function isTheme(value: string | null): value is Theme {
   return THEME_VALUES.includes(value as Theme)
 }
 
+/**
+ * Reads the configured theme from local storage, falling back to the default theme when unavailable or invalid.
+ *
+ * @param defaultTheme - The theme to use when no valid stored theme is available
+ * @param storageKey - The local storage key containing the theme
+ * @returns The stored theme when valid; otherwise, `defaultTheme`
+ */
 function getInitialTheme(defaultTheme: Theme, storageKey: string) {
   if (typeof window === "undefined") {
     return defaultTheme
@@ -45,6 +58,11 @@ function getInitialTheme(defaultTheme: Theme, storageKey: string) {
   }
 }
 
+/**
+ * Determines the operating system's preferred color theme.
+ *
+ * @returns `"dark"` if the operating system prefers dark mode, `"light"` otherwise.
+ */
 function getSystemTheme(): ResolvedTheme {
   if (window.matchMedia(COLOR_SCHEME_QUERY).matches) {
     return "dark"
@@ -53,6 +71,11 @@ function getSystemTheme(): ResolvedTheme {
   return "light"
 }
 
+/**
+ * Temporarily disables CSS transitions to allow immediate visual updates.
+ *
+ * @returns A function that removes the temporary transition override after two animation frames.
+ */
 function disableTransitionsTemporarily() {
   const style = document.createElement("style")
   style.appendChild(
@@ -72,6 +95,12 @@ function disableTransitionsTemporarily() {
   }
 }
 
+/**
+ * Determines whether an event target is an editable element or contained within one.
+ *
+ * @param target - The event target to inspect
+ * @returns `true` if the target is editable or inside an editable element, `false` otherwise.
+ */
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false
@@ -91,6 +120,15 @@ function isEditableTarget(target: EventTarget | null) {
   return false
 }
 
+/**
+ * Provides theme state and controls to descendant components.
+ *
+ * @param children - The components that receive the theme context
+ * @param defaultTheme - The theme used when no valid stored preference exists
+ * @param storageKey - The key used to persist and synchronize the theme preference
+ * @param disableTransitionOnChange - Whether to temporarily disable transitions when applying a theme
+ * @returns A provider element containing the theme context
+ */
 export function ThemeProvider({
   children,
   defaultTheme = "system",

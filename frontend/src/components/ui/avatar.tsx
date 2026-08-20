@@ -3,6 +3,11 @@ import { Avatar as AvatarPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Renders a circular avatar container with default sizing and layout styles.
+ *
+ * @param className - Additional classes to merge with the default avatar styles
+ */
 function Avatar({
   className,
   ...props
@@ -19,6 +24,11 @@ function Avatar({
   )
 }
 
+/**
+ * Renders an avatar image with full-size square styling.
+ *
+ * @param className - Additional CSS classes to apply to the image
+ */
 function AvatarImage({
   className,
   ...props
@@ -32,6 +42,11 @@ function AvatarImage({
   )
 }
 
+/**
+ * Displays fallback content when the avatar image is unavailable.
+ *
+ * @param className - Additional classes to merge with the default fallback styling
+ */
 function AvatarFallback({
   className,
   ...props

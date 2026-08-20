@@ -30,6 +30,12 @@ type AuditPanelProps = {
   workspaceScope?: string | null
 }
 
+/**
+ * Renders a localized panel for reviewing, filtering, refreshing, paginating, and exporting audit logs.
+ *
+ * @param workspaceScope - Optional workspace scope displayed in the panel header.
+ * @returns The localized audit-log management panel.
+ */
 export function AuditPanel({
   auditLogs,
   isAuditLoading,

@@ -28,6 +28,24 @@ async def list_logs(
     to_date: Annotated[datetime | None, Query(alias="to")] = None,
     include_stack: Annotated[bool, Query()] = False,
 ) -> list[SystemLogResponse]:
+    """
+    List system logs with pagination and optional filtering.
+    
+    Parameters:
+        limit (int): Maximum number of logs to return.
+        offset (int): Number of logs to skip.
+        level (str | None): Log level filter.
+        event (str | None): Event filter.
+        status_code (int | None): HTTP status code filter.
+        user_id (str | None): User identifier filter.
+        search (str | None): Text to search for in log entries.
+        from_date (datetime | None): Inclusive start of the date range.
+        to_date (datetime | None): Exclusive end of the date range.
+        include_stack (bool): Whether to include stack traces.
+    
+    Returns:
+        list[SystemLogResponse]: The matching system logs.
+    """
     return await list_system_logs(
         db,
         limit,

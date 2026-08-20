@@ -65,6 +65,17 @@ def _external_run_response(
     detail,
     progress: list[ExternalWorkflowProgressEventResponse] | None = None,
 ) -> ExternalWorkflowRunResponse:
+    """
+    Build an external workflow run response from run details and optional progress events.
+    
+    Parameters:
+    	run (AgentRun): The workflow run to serialize.
+    	detail: The run's input and output details.
+    	progress (list[ExternalWorkflowProgressEventResponse] | None): Progress events to include.
+    
+    Returns:
+    	ExternalWorkflowRunResponse: The serialized run status, timestamps, inputs, outputs, progress, pending form, and feedback.
+    """
     display_status = agent_run_display_status(run.status)
     return ExternalWorkflowRunResponse(
         id=run.id,
@@ -86,6 +97,15 @@ def _external_run_response(
 
 
 def _external_run_from_payload(payload: dict[str, Any]) -> ExternalWorkflowRunResponse:
+    """
+    Create an external workflow run response from a payload.
+    
+    Parameters:
+        payload (dict[str, Any]): Run data containing identifiers, timestamps, status, inputs, outputs, and optional feedback or form information.
+    
+    Returns:
+        ExternalWorkflowRunResponse: The external representation of the workflow run.
+    """
     return ExternalWorkflowRunResponse(
         id=str(payload["id"]),
         conversation_id=str(payload.get("conversation_id") or ""),
@@ -246,6 +266,18 @@ async def get_external_workflow_run(
     source: ExternalAccessSource,
     consumer_id: str,
 ) -> ExternalWorkflowRunResponse:
+    """
+    Retrieve the current state and progress of an externally accessible workflow run.
+    
+    Parameters:
+    	workflow_id (str): The workflow identifier.
+    	run_id (str): The workflow run identifier.
+    	source (ExternalAccessSource): The access source associated with the run.
+    	consumer_id (str): The consumer identifier associated with the run.
+    
+    Returns:
+    	ExternalWorkflowRunResponse: The run status, outputs, pending forms, feedback, and node progress.
+    """
     run, detail = await _external_run(db, workflow_id, run_id, source, consumer_id)
     executions = await workflow_repository.list_node_executions(db, run.id)
     return _external_run_response(
@@ -274,6 +306,20 @@ async def regenerate_external_workflow_run(
     actor: User,
     settings: Settings,
 ) -> ExternalWorkflowRunResponse:
+    """
+    Regenerates a public external workflow run.
+    
+    Parameters:
+        workflow_id (str): Identifier of the workflow.
+        run_id (str): Identifier of the run to regenerate.
+        source (ExternalAccessSource): Access source for the run.
+        consumer_id (str): Identifier of the consumer requesting the regeneration.
+        actor (User): User performing the regeneration.
+        settings (Settings): Application settings used during regeneration.
+    
+    Returns:
+        ExternalWorkflowRunResponse: The regenerated workflow run.
+    """
     if source != "public":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
     run, detail = await _external_run(db, workflow_id, run_id, source, consumer_id)
@@ -291,6 +337,18 @@ async def set_external_workflow_run_feedback(
     consumer_id: str,
     value: str | None,
 ) -> ExternalWorkflowRunResponse:
+    """
+    Update the feedback associated with a public external workflow run.
+    
+    Parameters:
+        value (str | None): Feedback text, or `None` to clear the existing feedback.
+    
+    Returns:
+        ExternalWorkflowRunResponse: The updated external workflow run.
+    
+    Raises:
+        HTTPException: If the run is not public or cannot be found.
+    """
     if source != "public":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
     run, detail = await _external_run(db, workflow_id, run_id, source, consumer_id)
@@ -307,6 +365,15 @@ async def submit_external_workflow_form(
     payload: WorkflowFormSubmitRequest,
     settings: Settings,
 ) -> ExternalWorkflowRunResponse:
+    """
+    Resume an external workflow run with submitted form data.
+    
+    Parameters:
+        payload (WorkflowFormSubmitRequest): Form data submitted for the workflow run.
+    
+    Returns:
+        ExternalWorkflowRunResponse: The resumed workflow run.
+    """
     run, detail = await _external_run(db, workflow_id, run_id, source, consumer_id)
     resumed = await resume_workflow_form(db, run, detail, payload, settings)
     return _external_run_from_payload(resumed.model_dump(mode="json"))
@@ -321,6 +388,20 @@ async def list_external_workflow_runs(
     offset: int,
     conversation_id: str | None = None,
 ) -> ExternalWorkflowRunListResponse:
+    """
+    List the latest external workflow runs available to a consumer.
+    
+    Parameters:
+        workflow_id (str): Identifier of the workflow.
+        source (ExternalAccessSource): External access source used to access the runs.
+        consumer_id (str): Identifier of the consumer whose runs are listed.
+        limit (int): Maximum number of runs to include.
+        offset (int): Number of runs to skip before listing results.
+        conversation_id (str | None): Optional conversation identifier used to filter runs.
+    
+    Returns:
+        ExternalWorkflowRunListResponse: Paginated workflow runs and the total number of matching runs.
+    """
     await get_published_workflow_context(db, workflow_id)
     runs = await agent_repository.list_agent_runs(
         db,

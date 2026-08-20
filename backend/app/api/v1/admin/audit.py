@@ -28,6 +28,24 @@ async def list_logs(
     from_date: Annotated[datetime | None, Query(alias="from")] = None,
     to_date: Annotated[datetime | None, Query(alias="to")] = None,
 ) -> list[AuditLogResponse]:
+    """
+    List audit logs with pagination and optional filtering criteria.
+    
+    Parameters:
+        limit (int): Maximum number of logs to return.
+        offset (int): Number of logs to skip.
+        workspace_id (str | None): Filter by workspace identifier.
+        actor (str | None): Filter by actor.
+        action (str | None): Filter by action.
+        resource_type (str | None): Filter by resource type.
+        resource_id (str | None): Filter by resource identifier.
+        search (str | None): Filter by matching search text.
+        from_date (datetime | None): Include logs from this date and time onward.
+        to_date (datetime | None): Include logs up to this date and time.
+    
+    Returns:
+        list[AuditLogResponse]: The matching audit log records.
+    """
     return await list_audit_logs(
         db,
         limit,

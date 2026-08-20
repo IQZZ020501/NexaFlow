@@ -7,6 +7,11 @@ const START_ANIMATION_MS = 250
 const HOLD_AT_90_MS = 120
 const COMPLETE_ANIMATION_MS = 180
 
+/**
+ * Renders a fixed loading bar at the top of the viewport.
+ *
+ * @param progress - The bar width as a percentage.
+ */
 export function TopLoadingBar({ progress = 35 }: { progress?: number }) {
   return (
     <div
@@ -23,6 +28,11 @@ export function TopLoadingBar({ progress = 35 }: { progress?: number }) {
   )
 }
 
+/**
+ * Displays a top loading bar when the application pathname changes.
+ *
+ * @returns The loading bar while navigation is in progress, or `null` when hidden.
+ */
 export function TopProgress() {
   const pathname = usePathname()
   const [visible, setVisible] = React.useState(false)

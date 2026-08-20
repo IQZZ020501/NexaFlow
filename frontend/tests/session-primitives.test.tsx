@@ -226,6 +226,7 @@ function restoreHandler(options: {
 
 function SessionProbe() {
   const session = useSession()
+  const { setLanguage } = useLanguage()
   const wsName = useCurrentWorkspaceName()
   return (
     <div>
@@ -350,6 +351,9 @@ function SessionProbe() {
       <button type="button" onClick={() => session.notify("success", "hello")}>
         notify
       </button>
+      <button type="button" onClick={() => setLanguage("en")}>
+        language-en
+      </button>
       <button type="button" onClick={() => session.dismissNotification()}>
         dismiss
       </button>
@@ -400,6 +404,19 @@ describe("SessionProvider", () => {
     expect(calls).toContain("me")
     expect(calls).toContain("workspaces")
     expect(calls).toContain("teams")
+  })
+
+  test("does not reload session data when the language changes", async () => {
+    const calls = restoreHandler()
+    renderSession()
+    await waitFor(() => expect(screen.getByTestId("teams").textContent).toBe("1"))
+    const requestsBeforeLanguageChange = [...calls]
+
+    fireEvent.click(screen.getByText("language-en"))
+    await waitFor(() => expect(document.documentElement.lang).toBe("en"))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(calls).toEqual(requestsBeforeLanguageChange)
   })
 
   test("prefers the stored workspace when restoring", async () => {

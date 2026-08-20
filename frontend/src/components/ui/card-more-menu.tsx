@@ -9,9 +9,10 @@ import {
 import { IconButton } from "@/components/ui/icon-button"
 
 /**
- * "..." trigger for a card's bottom-right action menu. Both the trigger and
- * portalled content stop click propagation so menu actions stay inside the
- * card; pass the menu items as children.
+ * Renders a labeled more-actions menu for a card.
+ *
+ * @param label - Accessible label for the menu trigger
+ * @param children - Menu items to render
  */
 export function CardMoreMenu({
   label,

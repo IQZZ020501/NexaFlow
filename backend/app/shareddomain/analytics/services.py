@@ -224,6 +224,16 @@ def _build_trends(
     runs: list[WorkspaceAnalyticsRun],
     period: AnalyticsPeriod,
 ) -> list[WorkspaceAnalyticsTrendPoint]:
+    """
+    Build daily run and token usage trends for an analytics period.
+    
+    Parameters:
+    	runs (list[WorkspaceAnalyticsRun]): Runs to aggregate by their UTC creation date.
+    	period (AnalyticsPeriod): Date range for the trend.
+    
+    Returns:
+    	list[WorkspaceAnalyticsTrendPoint]: One trend point per day in the period, including run count and token totals.
+    """
     days = (period.to_date - period.from_date).days
     values = {
         period.from_date + timedelta(days=index): {
@@ -254,6 +264,14 @@ def _build_trends(
 def _build_hourly_runs(
     runs: list[WorkspaceAnalyticsRun],
 ) -> list[WorkspaceAnalyticsHourlyPoint]:
+    """Count runs by UTC hour across a full 24-hour day.
+    
+    Parameters:
+    	runs (list[WorkspaceAnalyticsRun]): Runs to include in the hourly counts.
+    
+    Returns:
+    	list[WorkspaceAnalyticsHourlyPoint]: One point for each UTC hour, including hours with no runs.
+    """
     values = [0] * 24
     for run in runs:
         if run.created_at is not None:
@@ -268,6 +286,15 @@ def _build_rankings(
     runs: list[WorkspaceAnalyticsRun],
     team_members: list[WorkspaceAnalyticsTeamMember],
 ) -> WorkspaceAnalyticsRankings:
+    """Build top-ten usage rankings for users, applications, and teams.
+    
+    Parameters:
+    	runs (list[WorkspaceAnalyticsRun]): Runs to aggregate into the rankings.
+    	team_members (list[WorkspaceAnalyticsTeamMember]): Team memberships used to attribute console runs to teams.
+    
+    Returns:
+    	WorkspaceAnalyticsRankings: Ranked users, applications, and teams, along with anonymous usage totals.
+    """
     users: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"name": "", "run_count": 0, "total_tokens": 0}
     )
@@ -425,6 +452,18 @@ async def get_workspace_analytics(
     from_date: date | None,
     to_date: date | None,
 ) -> WorkspaceAnalyticsResponse:
+    """
+    Build workspace usage analytics for a specified date range and record the viewing event.
+    
+    Parameters:
+        actor (User): User responsible for viewing the analytics.
+        from_date (date | None): Inclusive start date of the analytics period.
+        to_date (date | None): Exclusive end date of the analytics period.
+    
+    Returns:
+        WorkspaceAnalyticsResponse: Aggregated workspace metrics, trends, distributions,
+        rankings, frequent questions, and period metadata.
+    """
     period = resolve_analytics_period(from_date, to_date)
     counts = await analytics_repository.get_workspace_analytics_counts(db, workspace.id)
     team_members = await analytics_repository.list_workspace_analytics_team_members(

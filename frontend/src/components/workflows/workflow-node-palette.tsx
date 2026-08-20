@@ -46,10 +46,22 @@ type WorkflowNodePaletteProps = {
   onRetryTools?: () => void
 }
 
+/**
+ * Gets the published version identifier for an agent.
+ *
+ * @param agent - The agent whose published version identifier is retrieved
+ * @returns The published version identifier, or `null` when none is available
+ */
 function publishedVersionId(agent: Agent) {
   return agent.current_published_version_id ?? null
 }
 
+/**
+ * Determines why a tool cannot be added to a workflow.
+ *
+ * @param tool - The tool whose workflow availability is evaluated
+ * @returns The localized reason the tool is disabled, or `null` when the tool can be added
+ */
 function workflowToolDisabledReason(tool: ToolDetail): TranslationKey | null {
   if (!tool.can_use) return "没有使用权限"
   if (
@@ -65,6 +77,20 @@ function workflowToolDisabledReason(tool: ToolDetail): TranslationKey | null {
   return null
 }
 
+/**
+ * Provides a popover for adding workflow nodes, tools, Python code, and agents.
+ *
+ * @param tools - Tools available for selection
+ * @param agents - Agents available for selection
+ * @param graph - Current workflow graph used to determine node availability and references
+ * @param onAdd - Callback invoked when a node is selected
+ * @param t - Translation function for localized labels and descriptions
+ * @param readOnly - Whether the palette should be hidden
+ * @param disabled - Whether node selection is disabled
+ * @param isToolsLoading - Whether tools are currently loading
+ * @param toolsError - Error message from loading tools, if any
+ * @param onRetryTools - Callback for retrying a failed tool load
+ */
 export function WorkflowNodePalette({
   tools,
   agents,

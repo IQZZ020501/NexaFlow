@@ -43,6 +43,19 @@ def record_system_log(
     details: dict[str, Any] | None = None,
     stack_trace: str | None = None,
 ) -> None:
+    """
+    Record a system log entry in the database session.
+    
+    Messages longer than 1,000 characters are truncated, and omitted details are stored as
+    an empty object. The session is updated without being committed.
+    
+    Parameters:
+        db (AsyncSession): Database session to which the log entry is added.
+        level (str): Severity level of the log entry.
+        event (str): Event associated with the log entry.
+        message (str): Log message.
+        details (dict[str, Any] | None): Additional structured information for the entry.
+    """
     db.add(
         SystemLog(
             level=level,

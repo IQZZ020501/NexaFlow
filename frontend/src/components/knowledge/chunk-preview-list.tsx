@@ -15,6 +15,11 @@ const CHUNK_OVERLAP_HIGHLIGHT_STYLE = `::highlight(${CHUNK_OVERLAP_HIGHLIGHT_NAM
   color: inherit;
 }`
 
+/**
+ * Displays a knowledge asset image with loading and failure states.
+ *
+ * @param asset - The asset to load and display.
+ */
 function AssetImage({
   token,
   workspaceId,
@@ -85,6 +90,13 @@ function AssetImage({
   )
 }
 
+/**
+ * Creates a text range covering the leading characters within an element.
+ *
+ * @param root - The element whose text nodes provide the range contents
+ * @param charCount - The number of leading characters to include
+ * @returns A range covering the requested characters, or `null` when the element contains no text
+ */
 function createLeadingTextRange(root: HTMLElement, charCount: number) {
   const walker = window.document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   const firstNode = walker.nextNode() as Text | null
@@ -114,6 +126,15 @@ function createLeadingTextRange(root: HTMLElement, charCount: number) {
   return null
 }
 
+/**
+ * Renders document chunks as standard previews or question-and-answer cards.
+ *
+ * @param chunks - The document chunks to display
+ * @param fileName - The document name used for chunks without a parent section
+ * @param token - The authentication token used to load chunk images
+ * @param workspaceId - The workspace containing the document
+ * @param knowledgeBaseId - The knowledge base containing the document
+ */
 export function ChunkPreviewList({
   chunks,
   fileName,

@@ -12,6 +12,11 @@ const KnowledgeUploadStateContext = React.createContext<{
   startUpload: () => Promise<KnowledgeDocument[]> | null
 } | null>(null)
 
+/**
+ * Provides shared state and upload controls for knowledge-file uploads.
+ *
+ * @param children - The descendant components that can access the upload state
+ */
 export function KnowledgeUploadStateProvider({
   children,
 }: {
@@ -54,6 +59,12 @@ export function KnowledgeUploadStateProvider({
   )
 }
 
+/**
+ * Retrieves the knowledge-upload state from the nearest provider.
+ *
+ * @returns The current knowledge-upload state
+ * @throws If called outside a `KnowledgeUploadStateProvider`
+ */
 export function useKnowledgeUploadState() {
   const state = React.useContext(KnowledgeUploadStateContext)
   if (!state) {

@@ -41,6 +41,20 @@ type TeamMembersDialogProps = {
   onRemoveMember: (userId: string) => Promise<void>
 }
 
+/**
+ * Manages the members and roles of the selected team.
+ *
+ * @param team - The team whose members are managed, or `null` when the dialog is closed
+ * @param setTeam - Updates the selected team and closes the dialog when set to `null`
+ * @param members - The current members of the selected team
+ * @param workspaceMembers - Members available from the current workspace
+ * @param isLoading - Whether team members are loading
+ * @param isMutating - Whether a member mutation is in progress
+ * @param canManageTeamAdmins - Whether the user can assign and manage administrator roles
+ * @param onAddMember - Adds a workspace member to the team with the selected role
+ * @param onUpdateMemberRole - Updates a team member's role
+ * @param onRemoveMember - Removes a member from the team
+ */
 export function TeamMembersDialog({
   team,
   setTeam,

@@ -19,4 +19,13 @@ async def health(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AdminHealthResponse:
+    """Retrieve the application's administrative health status.
+    
+    Parameters:
+    	settings (Settings): Application settings used to assess health.
+    	db (AsyncSession): Database session used to assess health.
+    
+    Returns:
+    	AdminHealthResponse: The current administrative health status.
+    """
     return await get_admin_health(db, settings)

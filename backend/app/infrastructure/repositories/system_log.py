@@ -21,6 +21,23 @@ async def list_system_logs(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
 ) -> list[SystemLogEntity]:
+    """
+    Retrieve system logs with pagination and optional filtering criteria.
+    
+    Parameters:
+        limit (int): Maximum number of logs to return.
+        offset (int): Number of logs to skip before collecting results.
+        level (str | None): Log level to filter by.
+        event (str | None): Event name to filter by.
+        status_code (int | None): HTTP status code to filter by.
+        user_id (str | None): User identifier to filter by.
+        search (str | None): Case-insensitive text to search for in event, message, path, or username.
+        from_date (datetime | None): Inclusive lower bound for the log creation date.
+        to_date (datetime | None): Exclusive upper bound for the log creation date.
+    
+    Returns:
+        list[SystemLogEntity]: Matching logs ordered from newest to oldest.
+    """
     statement = select(SystemLog)
     if level:
         statement = statement.where(SystemLog.level == level)

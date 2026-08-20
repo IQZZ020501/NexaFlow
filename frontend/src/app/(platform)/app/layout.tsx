@@ -5,6 +5,11 @@ import * as React from "react"
 import { SessionGate } from "@/components/app/session-gate"
 import { TopBar } from "@/components/app/top-bar"
 
+/**
+ * Provides the shared layout for platform pages.
+ *
+ * @param children - The platform page content to render.
+ */
 export default function PlatformLayout({
   children,
 }: {

@@ -150,6 +150,11 @@ function runStatusLabel(run: WorkflowRun, t: TFunction) {
   return t("运行失败")
 }
 
+/**
+ * Renders a value as formatted JSON in a scrollable code block.
+ *
+ * @param value - The value to serialize and display
+ */
 function JsonBlock({ value }: { value: unknown }) {
   return (
     <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
@@ -158,6 +163,36 @@ function JsonBlock({ value }: { value: unknown }) {
   )
 }
 
+/**
+ * Provides a workspace for viewing, editing, publishing, running, and monitoring a workflow.
+ *
+ * @param agent - The workflow agent and its permissions
+ * @param form - The workflow application configuration
+ * @param setForm - Updates the workflow application configuration
+ * @param models - Models available for workflow configuration
+ * @param knowledgeBases - Knowledge bases available for workflow configuration
+ * @param mcpServers - MCP servers available to workflow nodes
+ * @param tools - Tools available to workflow nodes
+ * @param agents - Agents available to workflow nodes
+ * @param isToolsLoading - Whether available tools are loading
+ * @param toolsError - Error encountered while loading tools
+ * @param onRetryTools - Retries loading available tools
+ * @param token - Authentication token for workflow API requests
+ * @param workspaceId - Workspace containing the workflow
+ * @param canManagePublishing - Whether the current user can publish workflow versions
+ * @param isAppDirty - Whether application configuration has unsaved changes
+ * @param isSavingApp - Whether application configuration is being saved
+ * @param onDiscardAppChanges - Discards unsaved application configuration changes
+ * @param activeView - Currently selected workspace view
+ * @param standalone - Whether to render without the surrounding workspace navigation
+ * @param onBack - Handles navigation away from the workspace
+ * @param onDelete - Handles workflow deletion
+ * @param onManagePermissions - Opens workflow permission management
+ * @param onSaveApp - Saves the application configuration
+ * @param onViewChange - Changes the active workspace view
+ * @param notify - Reports operation results to the user
+ * @param t - Translates interface text
+ */
 export function WorkflowDetailWorkspace({
   agent,
   form,

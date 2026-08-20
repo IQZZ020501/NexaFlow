@@ -13,6 +13,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """
+    Add device metadata and revocation tracking columns to the refresh sessions table.
+    """
     op.add_column("refresh_sessions", sa.Column("user_agent", sa.String(length=512), nullable=True))
     op.add_column("refresh_sessions", sa.Column("ip_address", sa.String(length=64), nullable=True))
     op.add_column(
@@ -30,6 +33,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove refresh-session device metadata and revocation tracking columns."""
     with op.batch_alter_table("refresh_sessions") as batch:
         batch.drop_column("revoked_at")
         batch.drop_column("last_used_at")

@@ -36,6 +36,22 @@ type TeamsPanelProps = {
   handleDeleteTeam: (team: Team) => void | Promise<void>
 }
 
+/**
+ * Renders the team management panel for the selected workspace.
+ *
+ * @param selectedWorkspace - The workspace whose teams are displayed
+ * @param teams - Teams available in the selected workspace
+ * @param isTeamsLoading - Whether team data is still loading
+ * @param canCreateTeam - Whether the create-team action is available
+ * @param canManageWorkspace - Whether workspace-level team actions are available
+ * @param canManageTeamMembers - Determines whether team member management is available for a team
+ * @param handleOpenCreateTeam - Opens the team creation interface
+ * @param handleOpenTeamMembers - Opens member management for a team
+ * @param handleOpenEditTeam - Opens the team editing interface
+ * @param handleArchiveTeam - Archives or restores a team
+ * @param handleDeleteTeam - Permanently deletes a team
+ * @returns The rendered team management panel
+ */
 export function TeamsPanel({
   selectedWorkspace,
   teams,

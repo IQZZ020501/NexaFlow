@@ -8,6 +8,12 @@ export const AGENT_DETAIL_VIEWS = [
 
 export type AgentDetailView = (typeof AGENT_DETAIL_VIEWS)[number]
 
+/**
+ * Parses an agent detail view value and falls back to the overview view when invalid or absent.
+ *
+ * @param value - The view value or an array whose first element contains the view value
+ * @returns The matching agent detail view, or `"overview"` when the value is invalid or absent
+ */
 export function parseAgentDetailView(
   value: string | string[] | undefined
 ): AgentDetailView {
@@ -17,6 +23,15 @@ export function parseAgentDetailView(
     : "overview"
 }
 
+/**
+ * Builds the URL for an agent or workflow view.
+ *
+ * @param appId - The application identifier to encode in the URL
+ * @param appType - The application type
+ * @param view - The detail view to include in the URL
+ * @param conversationId - An optional conversation identifier to append as a query parameter
+ * @returns The URL for the specified application view
+ */
 export function appViewPath(
   appId: string,
   appType: "agent" | "workflow",

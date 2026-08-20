@@ -39,6 +39,14 @@ type AgentPermissionsDialogProps = {
   onRevoke: (userId: string) => void | Promise<void>
 }
 
+/**
+ * Identifies workspace members who can be granted access to an agent.
+ *
+ * @param members - Workspace members to evaluate
+ * @param agent - Agent whose creator is excluded
+ * @param permissions - Existing agent permissions used to exclude authorized users
+ * @returns Workspace members who are neither the agent creator nor already authorized
+ */
 export function availableAgentPermissionTargets(
   members: WorkspaceMember[],
   agent: Agent,
@@ -54,6 +62,18 @@ export function availableAgentPermissionTargets(
   )
 }
 
+/**
+ * Displays a dialog for granting and revoking an agent's view access for workspace members.
+ *
+ * @param agent - The agent whose permissions are managed, or `null` when the dialog is closed
+ * @param members - Workspace members eligible for permission management
+ * @param permissions - Existing permissions granted for the agent
+ * @param isLoading - Whether permission data is being loaded
+ * @param isSaving - Whether a grant or revoke operation is in progress
+ * @param onClose - Called when the dialog closes
+ * @param onGrant - Grants view access to the specified user
+ * @param onRevoke - Revokes access from the specified user
+ */
 export function AgentPermissionsDialog({
   agent,
   members,

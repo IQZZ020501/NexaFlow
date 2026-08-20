@@ -8,6 +8,11 @@ const SYSTEM_TABS = ["workspaces", "teams", "users", "audit"] as const
 
 export type SystemTab = (typeof SYSTEM_TABS)[number]
 
+/**
+ * Renders the system page for the requested tab.
+ *
+ * Invalid tab values redirect to the workspaces tab.
+ */
 export default function SystemTabPage() {
   const params = useParams<{ tab: string }>()
   const tab = params.tab

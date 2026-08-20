@@ -14,12 +14,24 @@ type MarkdownContentProps = {
   className?: string
 }
 
+/**
+ * Removes the Markdown parser's internal node property from component props.
+ *
+ * @param props - Component props that may include a Markdown parser node
+ * @returns A copy of the props without the `node` property
+ */
 function omitMarkdownNode<T extends { node?: unknown }>(props: T) {
   const nextProps = { ...props }
   delete nextProps.node
   return nextProps
 }
 
+/**
+ * Renders a Markdown image or a localized placeholder for unsupported image sources.
+ *
+ * @param props - Image attributes parsed from the Markdown content.
+ * @returns An image element for allowed sources, or placeholder text for empty, data, custom asset, or blob sources.
+ */
 function MarkdownImage(
   props: React.ImgHTMLAttributes<HTMLImageElement> & { node?: unknown },
 ) {
@@ -51,6 +63,13 @@ function MarkdownImage(
   )
 }
 
+/**
+ * Renders Markdown code blocks with extracted language metadata and source text.
+ *
+ * Falls back to a standard `<pre>` element when the expected code child is absent.
+ *
+ * @returns A rendered code block or preformatted element.
+ */
 function MarkdownPre(
   props: React.HTMLAttributes<HTMLPreElement> & { node?: unknown },
 ) {
@@ -192,6 +211,12 @@ const markdownComponents: Components = {
   },
 }
 
+/**
+ * Renders Markdown content with styled elements and localized empty-content messaging.
+ *
+ * @param content - The Markdown content to render
+ * @param className - Optional CSS class name applied to the rendered content
+ */
 export function MarkdownContent({ content, className }: MarkdownContentProps) {
   const { t } = useLanguage()
   const value = content.trim()

@@ -23,6 +23,12 @@ type LoginForm = {
   password: string
 }
 
+/**
+ * Renders a localized login form and provides access to password changes.
+ *
+ * @param onLogin - Called with the access token, password-change requirement, and expiration time after a successful login.
+ * @param onNotify - Called with the notification kind and message for user-facing feedback.
+ */
 export function LoginScreen({
   onLogin,
   onNotify,

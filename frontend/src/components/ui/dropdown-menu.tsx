@@ -3,12 +3,22 @@ import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Provides the root context for a dropdown menu.
+ *
+ * @param props - Properties forwarded to the Radix dropdown menu root.
+ */
 function DropdownMenu({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
 }
 
+/**
+ * Renders a trigger for opening the dropdown menu.
+ *
+ * @returns The dropdown menu trigger element.
+ */
 function DropdownMenuTrigger({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
@@ -20,6 +30,13 @@ function DropdownMenuTrigger({
   )
 }
 
+/**
+ * Renders dropdown menu content in a portal with bounded wheel scrolling.
+ *
+ * @param onWheelCapture - Optional handler invoked before the built-in wheel scrolling behavior.
+ * Preventing the event skips the built-in behavior.
+ * @param sideOffset - Distance between the menu content and its trigger.
+ */
 function DropdownMenuContent({
   className,
   onWheelCapture,
@@ -65,6 +82,9 @@ function DropdownMenuContent({
   )
 }
 
+/**
+ * Groups related dropdown menu items.
+ */
 function DropdownMenuGroup({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Group>) {
@@ -76,6 +96,12 @@ function DropdownMenuGroup({
   )
 }
 
+/**
+ * Renders an item within a dropdown menu with optional inset layout and visual variant styling.
+ *
+ * @param inset - Whether to apply inset spacing for the item.
+ * @param variant - The visual style of the item.
+ */
 function DropdownMenuItem({
   className,
   inset,
@@ -99,6 +125,11 @@ function DropdownMenuItem({
   )
 }
 
+/**
+ * Renders a styled label within a dropdown menu.
+ *
+ * @param inset - Whether to apply inset positioning to the label.
+ */
 function DropdownMenuLabel({
   className,
   inset,
@@ -116,6 +147,9 @@ function DropdownMenuLabel({
   )
 }
 
+/**
+ * Renders a horizontal separator within a dropdown menu.
+ */
 function DropdownMenuSeparator({
   className,
   ...props

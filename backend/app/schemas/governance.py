@@ -23,6 +23,14 @@ class WorkspaceGovernanceUpdateRequest(BaseModel):
     @field_validator("timezone")
     @classmethod
     def normalize_timezone(cls, value: str) -> str:
+        """Normalize a timezone value by removing surrounding whitespace and defaulting blank values to `"UTC"`.
+        
+        Parameters:
+            value (str): The timezone value to normalize.
+        
+        Returns:
+            str: The trimmed timezone value, or `"UTC"` when the value is blank.
+        """
         return value.strip() or "UTC"
 
 

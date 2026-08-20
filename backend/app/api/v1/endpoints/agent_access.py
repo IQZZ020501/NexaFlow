@@ -161,6 +161,16 @@ async def get_public_agent_run(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_password_changed)],
 ) -> ExternalAgentRunResponse:
+    """
+    Retrieve a public agent run for the authenticated user.
+    
+    Parameters:
+        agent_id (str): The published agent identifier.
+        run_id (str): The run identifier.
+    
+    Returns:
+        ExternalAgentRunResponse: The public agent run response.
+    """
     await get_workspace_published_agent_context(db, agent_id, user)
     run = await get_external_agent_run(
         db,
@@ -183,6 +193,16 @@ async def regenerate_public_agent_run(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_password_changed)],
 ) -> ExternalAgentRunResponse:
+    """
+    Regenerate a public agent run.
+    
+    Parameters:
+        agent_id (str): Identifier of the published agent.
+        run_id (str): Identifier of the run to regenerate.
+    
+    Returns:
+        ExternalAgentRunResponse: The regenerated public agent run.
+    """
     context = await get_workspace_published_agent_context(db, agent_id, user)
     return await regenerate_external_agent_run(
         db,
@@ -205,6 +225,17 @@ async def set_public_agent_run_feedback(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_password_changed)],
 ) -> ExternalAgentRunResponse:
+    """
+    Set feedback for a public agent run.
+    
+    Parameters:
+        agent_id (str): Identifier of the published agent.
+        run_id (str): Identifier of the run receiving feedback.
+        payload (RunFeedbackRequest): Feedback value to apply.
+    
+    Returns:
+        ExternalAgentRunResponse: The updated public agent run.
+    """
     await get_workspace_published_agent_context(db, agent_id, user)
     return await set_external_agent_run_feedback(
         db,
@@ -226,6 +257,16 @@ async def stream_public_agent_run(
     after: Annotated[int, Query(ge=0)] = 0,
     live_after: Annotated[str, Query(pattern=r"^[0-9]+-[0-9]+$")] = "0-0",
 ) -> StreamingResponse:
+    """
+    Stream events for a public agent run.
+    
+    Parameters:
+        after (int): Event sequence number from which historical events are included.
+        live_after (str): Live event cursor in `partition-sequence` format.
+    
+    Returns:
+        StreamingResponse: A newline-delimited JSON event stream for the run.
+    """
     context = await get_workspace_published_agent_context(db, agent_id, user)
     run = await get_external_agent_run(db, agent_id, run_id, "public", user.id)
     await db.rollback()

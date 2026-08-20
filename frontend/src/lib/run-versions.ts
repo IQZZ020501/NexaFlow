@@ -1,3 +1,9 @@
+/**
+ * Removes failed or cancelled regenerations and originals superseded by valid regenerations.
+ *
+ * @param runs - The runs to filter.
+ * @returns The runs excluding failed or cancelled regenerations and originals superseded by non-failed, non-cancelled regenerations.
+ */
 export function latestRunVersions<
   T extends {
     id: string

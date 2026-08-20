@@ -73,16 +73,36 @@ const PRESET_OPTIONS: Array<{
   { value: 90, label: "最近 90 天" },
 ]
 
+/**
+ * Formats a date as a UTC calendar date.
+ *
+ * @param value - The date to format
+ * @returns The date in `YYYY-MM-DD` format
+ */
 function utcDate(value: Date) {
   return value.toISOString().slice(0, 10)
 }
 
+/**
+ * Shifts a UTC calendar date by the specified number of days.
+ *
+ * @param value - The date to shift in `YYYY-MM-DD` format
+ * @param days - The number of days to add; negative values shift the date earlier
+ * @returns The shifted date in `YYYY-MM-DD` format
+ */
 function shiftUtcDate(value: string, days: number) {
   const date = new Date(`${value}T00:00:00Z`)
   date.setUTCDate(date.getUTCDate() + days)
   return utcDate(date)
 }
 
+/**
+ * Creates a preset analytics date range ending on the day after the current UTC date.
+ *
+ * @param days - The number of preceding days to include.
+ * @param now - The date used to determine the current UTC day.
+ * @returns An analytics range with UTC date strings for the start and exclusive end dates.
+ */
 export function getPresetAnalyticsRange(
   days: 7 | 30 | 90,
   now = new Date()
@@ -97,6 +117,13 @@ export function getPresetAnalyticsRange(
   return { from: utcDate(from), to: utcDate(to) }
 }
 
+/**
+ * Selects active workspaces that the user can administer for analytics.
+ *
+ * @param me - The current user's account and workspace membership information
+ * @param workspaces - Workspaces to filter
+ * @returns The active workspaces accessible to global or workspace administrators
+ */
 export function getAnalyticsWorkspaceOptions(
   me: MeResponse,
   workspaces: Workspace[]
@@ -109,10 +136,24 @@ export function getAnalyticsWorkspaceOptions(
   )
 }
 
+/**
+ * Formats a number according to the specified locale.
+ *
+ * @param value - The number to format
+ * @param locale - The locale used for formatting
+ * @returns The locale-formatted number
+ */
 function formatNumber(value: number, locale: string) {
   return new Intl.NumberFormat(locale).format(value)
 }
 
+/**
+ * Formats a number using compact notation for the specified locale.
+ *
+ * @param value - The number to format
+ * @param locale - The locale used for formatting
+ * @returns The locale-formatted compact number
+ */
 function formatCompactNumber(value: number, locale: string) {
   return new Intl.NumberFormat(locale, {
     notation: "compact",
@@ -120,6 +161,16 @@ function formatCompactNumber(value: number, locale: string) {
   }).format(value)
 }
 
+/**
+ * Displays a localized area chart for daily workspace runs or token consumption.
+ *
+ * @param title - The chart title
+ * @param description - The chart description
+ * @param data - The daily trend data to visualize
+ * @param dataKey - The metric to plot: `runs` or `total_tokens`
+ * @param locale - The locale used to format axis and tooltip values
+ * @param color - The chart's stroke and gradient color
+ */
 function TrendChart({
   title,
   description,
@@ -207,6 +258,13 @@ function TrendChart({
   )
 }
 
+/**
+ * Displays hourly run activity for the selected analytics period.
+ *
+ * @param data - Hourly run counts to visualize
+ * @param locale - Locale used to format chart values
+ * @param color - Color used for the chart area and line
+ */
 function HourlyTrendChart({
   data,
   locale,
@@ -297,6 +355,11 @@ function HourlyTrendChart({
   )
 }
 
+/**
+ * Displays workspace usage, activity, and resource-consumption analytics with selectable date ranges.
+ *
+ * @returns The workspace analytics page.
+ */
 export function WorkspaceAnalyticsPage() {
   const router = useRouter()
   const session = useSession()

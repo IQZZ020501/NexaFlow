@@ -65,6 +65,22 @@ async def list_audit_logs(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
 ) -> list[AuditLogResponse]:
+    """
+    Retrieve audit logs with pagination and optional filtering criteria.
+    
+    Parameters:
+        workspace_id (str | None): Restricts results to a workspace.
+        actor (str | None): Restricts results to the specified actor.
+        action (str | None): Restricts results to the specified action.
+        resource_type (str | None): Restricts results to the specified resource type.
+        resource_id (str | None): Restricts results to the specified resource.
+        search (str | None): Filters results by text search.
+        from_date (datetime | None): Includes logs created on or after this date.
+        to_date (datetime | None): Excludes logs created on or after this date.
+    
+    Returns:
+        list[AuditLogResponse]: The matching audit logs as response objects.
+    """
     logs = await audit_repository.list_audit_logs(
         db,
         limit,
@@ -95,6 +111,24 @@ async def list_workspace_audit_logs(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
 ) -> list[AuditLogResponse]:
+    """
+    Retrieve audit logs for a workspace with optional filtering and pagination.
+    
+    Parameters:
+        workspace_id (str): Identifier of the workspace whose logs are retrieved.
+        limit (int): Maximum number of logs to return.
+        offset (int): Number of logs to skip before collecting results.
+        actor (str | None): Filter by the acting user.
+        action (str | None): Filter by action type.
+        resource_type (str | None): Filter by resource type.
+        resource_id (str | None): Filter by resource identifier.
+        search (str | None): Search log content.
+        from_date (datetime | None): Include logs created on or after this date.
+        to_date (datetime | None): Exclude logs created on or after this date.
+    
+    Returns:
+        list[AuditLogResponse]: Audit log responses matching the workspace and filters.
+    """
     logs = await audit_repository.list_workspace_audit_logs(
         db,
         workspace_id,

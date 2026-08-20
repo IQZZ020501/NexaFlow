@@ -13,6 +13,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Create the workspace governance settings table."""
     op.create_table(
         "workspace_governance",
         sa.Column("workspace_id", sa.String(length=36), nullable=False),
@@ -31,4 +32,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Remove the workspace governance table from the database schema."""
     op.drop_table("workspace_governance")

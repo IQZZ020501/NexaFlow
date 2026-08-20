@@ -39,10 +39,28 @@ type ToolPickerProps = {
   maxItems?: number
 }
 
+/**
+ * Determines whether two tool references identify the same tool version.
+ *
+ * @param left - The first tool reference.
+ * @param right - The second tool reference.
+ * @returns `true` if both references have the same tool and version identifiers, `false` otherwise.
+ */
 function sameTool(left: ToolRef, right: ToolRef) {
   return left.tool_id === right.tool_id && left.version_id === right.version_id
 }
 
+/**
+ * Provides a dialog for selecting, removing, and upgrading workspace tools.
+ *
+ * @param open - Whether the tool picker dialog is open
+ * @param onOpenChange - Callback invoked when the dialog visibility changes
+ * @param token - Authentication token used to load tools
+ * @param workspaceId - Workspace whose tools are loaded
+ * @param value - Currently selected tool references
+ * @param onChange - Callback invoked with the updated tool references
+ * @param maxItems - Maximum number of tools that can be selected
+ */
 export function ToolPicker({
   open,
   onOpenChange,

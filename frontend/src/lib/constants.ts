@@ -117,16 +117,37 @@ export const SYSTEM_LOG_EVENT_LABEL_KEYS: Record<string, TranslationKey> = {
   "workflow.execution_failed": "工作流执行失败",
 }
 
+/**
+ * Translates an audit action into its localized label.
+ *
+ * @param action - The audit action identifier to translate
+ * @param t - The translation function
+ * @returns The localized action label, or a generic label for unrecognized actions
+ */
 export function auditActionLabel(action: string, t: TFunction) {
   const labelKey = AUDIT_ACTION_LABEL_KEYS[action]
   return labelKey ? t(labelKey) : t("其他操作")
 }
 
+/**
+ * Translates a system log level into its localized label.
+ *
+ * @param level - The system log level identifier
+ * @param t - The translation function
+ * @returns The localized label for the level, or a generic label for unrecognized levels
+ */
 export function systemLogLevelLabel(level: string, t: TFunction) {
   const labelKey = SYSTEM_LOG_LEVEL_LABEL_KEYS[level]
   return labelKey ? t(labelKey) : t("其他级别")
 }
 
+/**
+ * Translates a system log event identifier into a localized label.
+ *
+ * @param event - The system log event identifier
+ * @param t - The translation function
+ * @returns The localized event label, or a generic label for unrecognized events
+ */
 export function systemLogEventLabel(event: string, t: TFunction) {
   const labelKey = SYSTEM_LOG_EVENT_LABEL_KEYS[event]
   return labelKey ? t(labelKey) : t("其他系统事件")

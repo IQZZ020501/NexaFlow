@@ -212,10 +212,25 @@ export type WorkflowRunStreamEvent =
       run: WorkflowRun
     }
 
+/**
+ * Builds the API path for a workspace's workflows.
+ *
+ * @param workspaceId - The workspace identifier.
+ * @param suffix - An optional path suffix.
+ * @returns The workspace-scoped workflows API path.
+ */
 function workflowPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/workflows${suffix}`
 }
 
+/**
+ * Retrieves the definition of a workflow.
+ *
+ * @param token - Authentication token for the request
+ * @param workspaceId - Identifier of the workspace containing the workflow
+ * @param workflowId - Identifier of the workflow
+ * @returns The workflow definition
+ */
 export function getWorkflowDefinition(
   token: string,
   workspaceId: string,
@@ -227,6 +242,13 @@ export function getWorkflowDefinition(
   )
 }
 
+/**
+ * Updates a workflow definition with the supplied graph.
+ *
+ * @param expectedRevision - The revision that must match the current workflow definition.
+ * @param graph - The workflow graph to save.
+ * @returns The updated workflow definition.
+ */
 export function updateWorkflowDefinition(
   token: string,
   workspaceId: string,
@@ -244,6 +266,12 @@ export function updateWorkflowDefinition(
   )
 }
 
+/**
+ * Validates a workflow graph and computes its content hash.
+ *
+ * @param graph - The workflow graph to validate
+ * @returns An object confirming validity and containing the graph hash
+ */
 export function validateWorkflowDefinition(
   token: string,
   workspaceId: string,
@@ -256,6 +284,11 @@ export function validateWorkflowDefinition(
   )
 }
 
+/**
+ * Publishes the current workflow definition.
+ *
+ * @returns The published workflow version.
+ */
 export function publishWorkflow(
   token: string,
   workspaceId: string,
@@ -267,6 +300,14 @@ export function publishWorkflow(
   )
 }
 
+/**
+ * Lists the published versions of a workflow.
+ *
+ * @param token - Authentication token
+ * @param workspaceId - Workspace containing the workflow
+ * @param workflowId - Workflow whose versions are requested
+ * @returns An object containing the workflow versions
+ */
 export function listWorkflowVersions(
   token: string,
   workspaceId: string,
@@ -278,6 +319,13 @@ export function listWorkflowVersions(
   )
 }
 
+/**
+ * Restores a published workflow version as the current definition.
+ *
+ * @param versionNumber - The published version to restore
+ * @param expectedRevision - The current revision expected by the restore operation
+ * @returns The restored workflow definition
+ */
 export function restoreWorkflowVersion(
   token: string,
   workspaceId: string,
@@ -298,6 +346,15 @@ export function restoreWorkflowVersion(
   )
 }
 
+/**
+ * Starts a workflow run using a draft or published workflow.
+ *
+ * @param question - The question or input to process
+ * @param source - Whether to run the draft or published workflow
+ * @param versionNumber - The published workflow version to run
+ * @param fileIds - IDs of files to include in the run
+ * @returns The created workflow run
+ */
 export function createWorkflowRun(
   token: string,
   workspaceId: string,
@@ -322,6 +379,12 @@ export function createWorkflowRun(
   )
 }
 
+/**
+ * Uploads files for a workflow.
+ *
+ * @param files - The files to upload.
+ * @returns The uploaded file metadata.
+ */
 export function uploadWorkflowFiles(
   token: string,
   workspaceId: string,
@@ -340,6 +403,13 @@ export function uploadWorkflowFiles(
   )
 }
 
+/**
+ * Submits data for a pending workflow runtime form.
+ *
+ * @param runtimeNodeId - The identifier of the runtime node whose form is being submitted
+ * @param formData - The form values to submit
+ * @returns The updated workflow run
+ */
 export function submitWorkflowForm(
   token: string,
   workspaceId: string,
@@ -361,6 +431,15 @@ export function submitWorkflowForm(
   )
 }
 
+/**
+ * Regenerates an existing workflow run.
+ *
+ * @param token - Authentication token
+ * @param workspaceId - Workspace containing the workflow
+ * @param workflowId - Workflow whose run should be regenerated
+ * @param runId - Run to regenerate
+ * @returns The regenerated workflow run
+ */
 export function regenerateWorkflowRun(
   token: string,
   workspaceId: string,
@@ -373,6 +452,12 @@ export function regenerateWorkflowRun(
   )
 }
 
+/**
+ * Sets or clears feedback for a workflow run.
+ *
+ * @param value - The feedback value, or `null` to clear existing feedback
+ * @returns The updated workflow run
+ */
 export function setWorkflowRunFeedback(
   token: string,
   workspaceId: string,
@@ -386,6 +471,12 @@ export function setWorkflowRunFeedback(
   )
 }
 
+/**
+ * Lists runs for a workflow.
+ *
+ * @param options - Optional pagination settings for limiting and offsetting the results.
+ * @returns The workflow runs matching the requested pagination settings.
+ */
 export function listWorkflowRuns(
   token: string,
   workspaceId: string,
@@ -398,6 +489,14 @@ export function listWorkflowRuns(
   )
 }
 
+/**
+ * Retrieves the node executions for a workflow run.
+ *
+ * @param workspaceId - The workspace containing the workflow
+ * @param workflowId - The workflow whose run is being queried
+ * @param runId - The run whose node executions are retrieved
+ * @returns An object containing the workflow node executions
+ */
 export function listWorkflowNodeExecutions(
   token: string,
   workspaceId: string,
@@ -410,6 +509,13 @@ export function listWorkflowNodeExecutions(
   )
 }
 
+/**
+ * Observes workflow run events from the authenticated event stream.
+ *
+ * @param onEvent - Callback invoked for each received workflow event
+ * @param after - Event cursor from which to resume observation
+ * @returns Completion of stream observation
+ */
 export function observeWorkflowRun(
   token: string,
   workspaceId: string,

@@ -3335,6 +3335,17 @@ async def assert_durable_execution_paths(
     knowledge_base_id: str,
     holder: SimpleNamespace,
 ) -> None:
+    """
+    Exercise durable agent execution paths, including successful runs, tool calls, approvals, failures, lease handling, recovery, and security-sensitive behavior.
+    
+    Parameters:
+    	workspace_id (str): Identifier of the workspace containing the test resources.
+    	agent_id (str): Identifier of the agent used by the test runs.
+    	mcp_server_id (str): Identifier of the MCP server used for tool execution checks.
+    	knowledge_base_id (str): Identifier of the knowledge base used for retrieval checks.
+    	holder (SimpleNamespace): Mutable test state containing the model stub.
+    
+    """
     settings = test_settings()
 
     # -- happy path with required knowledge and MCP tools in scope --

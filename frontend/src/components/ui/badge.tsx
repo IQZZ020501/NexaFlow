@@ -23,6 +23,12 @@ const badgeVariants = cva(
   }
 )
 
+/**
+ * Renders a styled badge with a configurable visual variant.
+ *
+ * @param variant - The badge style variant.
+ * @returns A styled `<span>` element containing the badge content.
+ */
 function Badge({
   className,
   variant,

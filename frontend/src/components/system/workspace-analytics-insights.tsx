@@ -62,10 +62,24 @@ const STATUS_LABELS: Record<string, TranslationKey> = {
   cancelled: "已取消",
 }
 
+/**
+ * Formats a number according to the specified locale.
+ *
+ * @param value - The number to format
+ * @param locale - The locale used for formatting
+ * @returns The locale-formatted number
+ */
 function formatNumber(value: number, locale: string) {
   return new Intl.NumberFormat(locale).format(value)
 }
 
+/**
+ * Formats a fractional value as a localized percentage.
+ *
+ * @param value - The fractional value, or `null` when unavailable
+ * @param locale - The locale used for formatting
+ * @returns The localized percentage with up to one decimal place, or an em dash when `value` is `null`
+ */
 function formatPercent(value: number | null, locale: string) {
   return value === null
     ? "—"
@@ -75,6 +89,13 @@ function formatPercent(value: number | null, locale: string) {
       }).format(value)
 }
 
+/**
+ * Formats a date-time value for the specified locale using UTC.
+ *
+ * @param value - The date-time value to format
+ * @param locale - The locale used for date and time formatting
+ * @returns The localized date and time string
+ */
 function formatDateTime(value: string, locale: string) {
   return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
@@ -83,6 +104,13 @@ function formatDateTime(value: string, locale: string) {
   }).format(new Date(value))
 }
 
+/**
+ * Resolves a localized label for a distribution item.
+ *
+ * @param key - The distribution item identifier
+ * @param kind - The distribution category
+ * @returns The localized label, or the original key when no status label is defined
+ */
 function distributionLabel(
   key: string,
   kind: DistributionKind,
@@ -98,6 +126,12 @@ function distributionLabel(
   return label ? t(label) : key
 }
 
+/**
+ * Identifies the distribution item with the highest count.
+ *
+ * @param items - The distribution items to compare
+ * @returns The item with the highest count, or `null` when the collection is empty
+ */
 function dominantItem(items: DistributionItem[]) {
   return items.reduce<DistributionItem | null>(
     (current, item) =>
@@ -106,6 +140,14 @@ function dominantItem(items: DistributionItem[]) {
   )
 }
 
+/**
+ * Selects the palette color for a distribution item.
+ *
+ * @param kind - The distribution category, such as type, source, or status
+ * @param key - The item's category key
+ * @param index - The item's position, used to select a fallback status color
+ * @returns The color assigned to the distribution item
+ */
 function itemColor(kind: DistributionKind, key: string, index: number) {
   if (kind === "type") {
     return key === "workflow" ? COLORS.type[1] : COLORS.type[0]
@@ -121,6 +163,13 @@ function itemColor(kind: DistributionKind, key: string, index: number) {
   return COLORS.status[index % COLORS.status.length]
 }
 
+/**
+ * Renders a donut chart with localized labels, percentages, and a summary value for distribution data.
+ *
+ * @param items - Distribution categories and their counts
+ * @param kind - Distribution category type used for labels and colors
+ * @param locale - Locale used to format numbers and percentages
+ */
 function DonutChart({
   items,
   kind,
@@ -214,6 +263,12 @@ function DonutChart({
   )
 }
 
+/**
+ * Displays run distributions by type, access source, and status.
+ *
+ * @param data - Distribution data for run types, access sources, and statuses
+ * @param locale - Locale used to format chart labels and values
+ */
 export function RunDistributionPanel({
   data,
   locale,
@@ -248,6 +303,12 @@ export function RunDistributionPanel({
 
 type RankingView = "applications" | "users" | "teams"
 
+/**
+ * Displays usage rankings for applications and workflows, users, or teams.
+ *
+ * @param data - Ranking data for each available view
+ * @param locale - Locale used to format counts, token totals, and percentages
+ */
 export function AnalyticsRankingPanel({
   data,
   locale,
@@ -378,6 +439,12 @@ export function AnalyticsRankingPanel({
   )
 }
 
+/**
+ * Displays frequently asked workspace questions with occurrence counts and latest occurrence times.
+ *
+ * @param items - Questions that meet the reporting threshold
+ * @param locale - Locale used to format counts and timestamps
+ */
 export function FrequentQuestionsPanel({
   items,
   locale,

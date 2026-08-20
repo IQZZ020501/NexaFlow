@@ -13,6 +13,12 @@ import { ApiError } from "@/lib/api-client"
 import { getPublicAgentProfile } from "@/lib/api/public-agents"
 import { getPublicWorkflowProfile } from "@/lib/api/public-workflows"
 
+/**
+ * Loads and renders the public chat for an agent or workflow application.
+ *
+ * @param applicationId - The application identifier
+ * @param initialConversationId - The conversation to open initially, if provided
+ */
 export function PublicApplicationChat({
   applicationId,
   initialConversationId,
