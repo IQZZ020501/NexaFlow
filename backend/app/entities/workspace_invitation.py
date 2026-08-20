@@ -8,9 +8,9 @@ from app.infrastructure.model_utils import new_id, utc_now
 class WorkspaceInvitation:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""
-    username: str = ""
-    email: str = ""
-    name: str = ""
+    username: str | None = None
+    email: str | None = None
+    name: str | None = None
     role: str = "member"
     token_hash: str = ""
     invited_by_user_id: str = ""

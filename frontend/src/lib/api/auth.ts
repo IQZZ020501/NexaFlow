@@ -55,12 +55,17 @@ export type UserPasswordResetResponse = {
  *
  * @param token - The workspace invitation token
  * @param password - The password for the new user account
+ * @param identity - Account details required when accepting a generic invitation
  * @returns The created user
  */
-export function acceptWorkspaceInvitation(token: string, password: string) {
+export function acceptWorkspaceInvitation(
+  token: string,
+  password: string,
+  identity?: { username: string; email: string; name: string }
+) {
   return request<User>("/api/v1/auth/invitations/accept", {
     method: "POST",
-    body: JSON.stringify({ token, password }),
+    body: JSON.stringify({ token, password, ...identity }),
   })
 }
 

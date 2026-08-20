@@ -52,6 +52,7 @@ def _response(entity: WorkspaceInvitation, token: str | None = None) -> Workspac
     return WorkspaceInvitationResponse(
         id=entity.id,
         workspace_id=entity.workspace_id,
+        kind="generic" if entity.username is None else "personal",
         username=entity.username,
         email=entity.email,
         name=entity.name,
@@ -60,7 +61,11 @@ def _response(entity: WorkspaceInvitation, token: str | None = None) -> Workspac
         accepted_at=entity.accepted_at,
         created_at=entity.created_at,
         token=token,
-        invite_url=f"/invite/{token}" if token else None,
+        invite_url=(
+            f"/invite/{token}{'?mode=generic' if entity.username is None else ''}"
+            if token
+            else None
+        ),
     )
 
 
@@ -71,12 +76,12 @@ async def create_workspace_invitation(
     payload: WorkspaceInvitationCreateRequest,
 ) -> WorkspaceInvitationResponse:
     """
-    Create an invitation for a workspace member.
+    Create a personal or reusable generic workspace invitation.
     
     Parameters:
         workspace_id (str): Identifier of the workspace receiving the invitation.
         actor (User): User creating the invitation.
-        payload (WorkspaceInvitationCreateRequest): Invitation recipient and role details.
+        payload (WorkspaceInvitationCreateRequest): Invitation kind, optional recipient, and role.
     
     Returns:
         WorkspaceInvitationResponse: The created invitation, including its raw invitation token.
@@ -89,9 +94,17 @@ async def create_workspace_invitation(
     token = secrets.token_urlsafe(32)
     entity = WorkspaceInvitation(
         workspace_id=workspace_id,
-        username=normalize_username(payload.username),
-        email=normalize_email(payload.email),
-        name=normalize_name(payload.name),
+        username=(
+            normalize_username(payload.username)
+            if payload.username is not None
+            else None
+        ),
+        email=(
+            normalize_email(payload.email)
+            if payload.email is not None
+            else None
+        ),
+        name=normalize_name(payload.name) if payload.name is not None else None,
         role=payload.role,
         token_hash=_hash_token(token),
         invited_by_user_id=actor.id,
@@ -105,8 +118,12 @@ async def create_workspace_invitation(
             "workspace.invitation.create",
             "workspace_invitation",
             entity.id,
-            entity.email,
-            {"role": entity.role, "username": entity.username},
+            entity.email or "Generic invitation",
+            {
+                "role": entity.role,
+                "username": entity.username,
+                "kind": payload.kind,
+            },
             workspace_id=workspace_id,
         )
         await db.commit()
@@ -160,7 +177,7 @@ async def revoke_workspace_invitation(
         "workspace.invitation.revoke",
         "workspace_invitation",
         invitation.id,
-        invitation.email,
+        invitation.email or "Generic invitation",
         {},
         workspace_id=workspace_id,
     )
@@ -172,10 +189,10 @@ async def accept_workspace_invitation(
     payload: WorkspaceInvitationAcceptRequest,
 ) -> UserResponse:
     """
-    Accept a workspace invitation and create the invited user's account and membership.
+    Accept an invitation and create the user's account and workspace membership.
     
     Parameters:
-    	payload (WorkspaceInvitationAcceptRequest): Invitation token and password used to create the account.
+	payload (WorkspaceInvitationAcceptRequest): Token, password, and generic-invite account details.
     
     Returns:
     	UserResponse: The created user with workspace scope information.
@@ -185,15 +202,31 @@ async def accept_workspace_invitation(
     )
     if invitation is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invitation is invalid or expired.")
-    if await user_repository.find_users_by_identity(db, invitation.username, invitation.email):
+    is_generic = invitation.username is None
+    if is_generic:
+        if payload.username is None or payload.email is None or payload.name is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Generic invitations require username, email, and name.",
+            )
+        username = normalize_username(payload.username)
+        email = normalize_email(payload.email)
+        name = normalize_name(payload.name)
+    else:
+        username = invitation.username
+        email = invitation.email
+        name = invitation.name
+    if username is None or email is None or name is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invitation is invalid or expired.")
+    if await user_repository.find_users_by_identity(db, username, email):
         raise HTTPException(status.HTTP_409_CONFLICT, "Username or email already exists.")
     workspace = await workspace_repository.get_workspace_by_id(db, invitation.workspace_id)
     if workspace is None or workspace.status != "active":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
     user = User(
-        username=invitation.username,
-        email=invitation.email,
-        name=invitation.name,
+        username=username,
+        email=email,
+        name=name,
         password_hash=hash_password(payload.password),
         must_change_password=False,
     )
@@ -207,8 +240,9 @@ async def accept_workspace_invitation(
                 role=invitation.role,
             ),
         )
-        invitation.accepted_at = utc_now()
-        await invitation_repository.save(db, invitation)
+        if not is_generic:
+            invitation.accepted_at = utc_now()
+            await invitation_repository.save(db, invitation)
         inviter = await user_repository.get_user_by_id(db, invitation.invited_by_user_id)
         if inviter is not None:
             record_audit_log(
@@ -218,7 +252,10 @@ async def accept_workspace_invitation(
                 "user",
                 user.id,
                 user.name,
-                {"invitation_id": invitation.id},
+                {
+                    "invitation_id": invitation.id,
+                    "kind": "generic" if is_generic else "personal",
+                },
                 workspace_id=invitation.workspace_id,
             )
         await db.commit()

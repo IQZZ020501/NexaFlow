@@ -44,7 +44,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/app/(dashboard)/system/operations/page.tsx` — 系统运行、健康状态和脱敏运行日志
 - `frontend/src/app/(dashboard)/system/governance/page.tsx` — 工作空间资源盘点、配额策略和成员邀请
 - `frontend/src/app/(dashboard)/system/security/page.tsx` — 当前用户/系统管理员的会话设备撤销
-- `frontend/src/app/(public)/invite/[token]/page.tsx` — 一次性工作空间邀请接受页
+- `frontend/src/app/(public)/invite/[token]/page.tsx` — 工作空间邀请接受页：指定成员链接一次性领取，通用链接 7 天内可重复注册
 
 ### components/（按功能分组）
 

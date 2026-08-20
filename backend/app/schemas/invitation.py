@@ -1,21 +1,34 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class WorkspaceInvitationCreateRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=80)
-    email: str = Field(min_length=3, max_length=255)
-    name: str = Field(min_length=1, max_length=120)
+    kind: Literal["personal", "generic"] = "personal"
+    username: str | None = Field(default=None, min_length=1, max_length=80)
+    email: str | None = Field(default=None, min_length=3, max_length=255)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
     role: str = Field(default="member", pattern="^(admin|member)$")
+
+    @model_validator(mode="after")
+    def validate_recipient(self) -> "WorkspaceInvitationCreateRequest":
+        """Require recipient details only for personal invitations."""
+        details = (self.username, self.email, self.name)
+        if self.kind == "personal" and any(value is None for value in details):
+            raise ValueError("Personal invitations require username, email, and name.")
+        if self.kind == "generic" and any(value is not None for value in details):
+            raise ValueError("Generic invitations cannot specify a recipient.")
+        return self
 
 
 class WorkspaceInvitationResponse(BaseModel):
     id: str
     workspace_id: str
-    username: str
-    email: str
-    name: str
+    kind: Literal["personal", "generic"]
+    username: str | None = None
+    email: str | None = None
+    name: str | None = None
     role: str
     expires_at: datetime
     accepted_at: datetime | None
@@ -26,6 +39,9 @@ class WorkspaceInvitationResponse(BaseModel):
 
 class WorkspaceInvitationAcceptRequest(BaseModel):
     token: str = Field(min_length=20, max_length=255)
+    username: str | None = Field(default=None, min_length=1, max_length=80)
+    email: str | None = Field(default=None, min_length=3, max_length=255)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
     password: str = Field(min_length=6, max_length=255)
 
     @field_validator("password")
