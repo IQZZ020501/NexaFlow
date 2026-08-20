@@ -15,6 +15,7 @@ import {
   mergeInitialAgentRun,
   type AgentFormState,
 } from "@/components/agents/agents-page"
+import { LanguageProvider } from "@/contexts/language-provider"
 import type {
   Agent,
   AgentRun,
@@ -511,6 +512,7 @@ async function renderDetail(
     agents?: Agent[]
     tools?: ToolSummary[]
     extraRoutes?: FetchCase[]
+    initialConversationId?: string | null
   } = {}
 ) {
   const agent = opts.agent ?? makeAgent()
@@ -528,10 +530,13 @@ async function renderDetail(
   const viewProps = {
     ...(opts.initialView ? { initialView: opts.initialView as never } : {}),
     ...(opts.hasLegacyView ? { hasLegacyView: true } : {}),
+    ...(opts.initialConversationId
+      ? { initialConversationId: opts.initialConversationId }
+      : {}),
   }
-  renderPage(<AgentsPage {...viewProps} />)
+  const rendered = renderPage(<AgentsPage {...viewProps} />)
   await waitFor(() => expect(screen.getByText(agent.name)).toBeTruthy())
-  return agent
+  return rendered
 }
 
 async function expectWorkflowStub(name = "Weekly Digest") {
@@ -2864,19 +2869,30 @@ describe("AgentsPage run flows", () => {
     expect(screen.queryByText("Late answer")).toBeNull()
   })
 
-  test("ignores stale regeneration after switching conversations", async () => {
+  test("clears stale regeneration when navigating to an existing conversation", async () => {
     const agent = makeAgent()
     const succeededRun = makeRun({ result: "Original answer" })
+    const nextRun = makeRun({
+      id: "run-2",
+      conversation_id: "conversation-2",
+      result: "Existing conversation answer",
+    })
     let resolveRegeneration: (value: Response) => void = () => undefined
-    await renderDetail({
+    const rendered = await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
           exact: true,
-          respond: () => jsonResponse([succeededRun]),
+          respond: (_init, _path, query) =>
+            jsonResponse(
+              query?.get("conversation_id") === "conversation-2"
+                ? [nextRun]
+                : [succeededRun]
+            ),
         },
         {
           method: "POST",
@@ -2892,10 +2908,21 @@ describe("AgentsPage run flows", () => {
     await waitFor(() => expect(screen.getByText("Original answer")).toBeTruthy())
 
     fireEvent.click(screen.getByRole("button", { name: "重新生成" }))
-    fireEvent.click(screen.getByLabelText("新建对话"))
-    await waitFor(() =>
-      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    rendered.rerender(
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <AgentsPage
+          initialView="settings"
+          initialConversationId="conversation-2"
+        />
+      </LanguageProvider>
     )
+    await waitFor(() =>
+      expect(screen.getByText("Existing conversation answer")).toBeTruthy()
+    )
+    expect(
+      (screen.getByRole("button", { name: "重新生成" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false)
     resolveRegeneration!(
       jsonResponse(
         makeRun({

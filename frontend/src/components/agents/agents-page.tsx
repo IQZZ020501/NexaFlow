@@ -737,6 +737,9 @@ export function AgentsPage({
 
   React.useEffect(() => {
     activeConversationIdRef.current = initialConversationId
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRegeneratingRunId(null)
+    setFeedbackPendingRunId(null)
   }, [initialConversationId, selectedAgentId])
 
   React.useEffect(() => {
