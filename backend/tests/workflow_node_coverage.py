@@ -1026,8 +1026,10 @@ def test_nodes_template_classifier_reranker_document_knowledge() -> None:
     class FakeKnowledgeTool:
         def __init__(self, *, error: bool = False) -> None:
             self.error = error
+            self.arguments = None
 
         async def ainvoke(self, arguments):
+            self.arguments = arguments
             if self.error:
                 return SimpleNamespace(
                     is_error=True, summary="search exploded", content="", output=None
@@ -1038,9 +1040,21 @@ def test_nodes_template_classifier_reranker_document_knowledge() -> None:
                 content="",
                 output={
                     "hits": [
-                        {"content": "alpha", "distance": 0.2},
+                        {
+                            "content": "alpha",
+                            "distance": 0.2,
+                            "sources": ["graph"],
+                            "graph_claim_ids": ["claim-1"],
+                            "graph_hops": 2,
+                        },
                         {"content": "beta", "distance": 0.9},
                     ],
+                    "graph": {
+                        "revision_id": "revision-1",
+                        "operation": "path",
+                        "paths": [{"steps": [{"claim_id": "claim-1"}]}],
+                        "truncated": False,
+                    },
                     "evidence_status": "found",
                 },
             )
@@ -1196,6 +1210,11 @@ def test_nodes_template_classifier_reranker_document_knowledge() -> None:
                 "knowledge_base_ids": ["base-1"],
                 "query": "question",
                 "limit": 2,
+                "graph_mode": "path",
+                "source_entity": "{{start.question}}",
+                "target_entity": "Policy B",
+                "max_hops": 4,
+                "relation_filters": ["references"],
             },
         )
         try:
@@ -1226,9 +1245,10 @@ def test_nodes_template_classifier_reranker_document_knowledge() -> None:
             else:
                 raise AssertionError("knowledge search error was swallowed")
 
+        fake_knowledge_tool = FakeKnowledgeTool()
         with patch(
             "app.application.workflow_nodes.build_knowledge_search_tool",
-            return_value=FakeKnowledgeTool(),
+            return_value=fake_knowledge_tool,
         ):
             knowledge = await execute_workflow_node(
                 _node_scope(
@@ -1238,10 +1258,37 @@ def test_nodes_template_classifier_reranker_document_knowledge() -> None:
                 _context(),
             )
         assert knowledge.outputs["hits"] == [
-            {"content": "alpha", "distance": 0.2},
+            {
+                "content": "alpha",
+                "distance": 0.2,
+                "sources": ["graph"],
+                "graph_claim_ids": ["claim-1"],
+                "graph_hops": 2,
+            },
             {"content": "beta", "distance": 0.9},
         ]
         assert knowledge.outputs["content"] == "alpha\n\nbeta"
+        assert knowledge.outputs["paragraph_list"][0]["sources"] == ["graph"]
+        assert knowledge.outputs["paragraph_list"][0]["graph_claim_ids"] == [
+            "claim-1"
+        ]
+        assert knowledge.outputs["graph_revision_id"] == "revision-1"
+        assert knowledge.outputs["graph_paths"] == [
+            {"steps": [{"claim_id": "claim-1"}]}
+        ]
+        assert fake_knowledge_tool.arguments == {
+            "query": "question",
+            "limit": 2,
+            "search_mode": "embedding",
+            "similarity": 0.6,
+            "graph_mode": "path",
+            "source_entity": "hi",
+            "target_entity": "Policy B",
+            "max_hops": 4,
+            "relation_filters": ["references"],
+        }
+        assert knowledge.inputs["graph_mode"] == "path"
+        assert knowledge.inputs["source_entity"] == "hi"
 
     asyncio.run(run())
 

@@ -173,6 +173,9 @@ const KNOWLEDGE_OUTPUT_FIELDS: Array<{
   },
   { field: "data", label: "检索结果" },
   { field: "directly_return", label: "满足直接回答的分段内容" },
+  { field: "graph", label: "图谱结果" },
+  { field: "graph_revision_id", label: "图谱修订 ID" },
+  { field: "graph_paths", label: "图谱路径" },
 ]
 
 const LLM_OUTPUT_FIELDS: Array<{
@@ -297,6 +300,16 @@ const KNOWLEDGE_SEARCH_MODES: Array<{
   { value: "embedding", label: "向量检索" },
   { value: "keywords", label: "关键词检索" },
   { value: "blend", label: "混合检索" },
+]
+
+const KNOWLEDGE_GRAPH_MODES: Array<{
+  value: string
+  label: TranslationKey
+}> = [
+  { value: "off", label: "关闭图谱检索" },
+  { value: "auto", label: "自动图谱检索" },
+  { value: "path", label: "路径图谱检索" },
+  { value: "neighborhood", label: "邻域图谱检索" },
 ]
 
 const CONDITION_COMPARE_OPTIONS: Array<{
@@ -610,11 +623,15 @@ function FormOptionsInput({
   readOnly,
   onChange,
   t,
+  ariaLabel = "选项",
+  placeholder = "用逗号分隔选项",
 }: {
   value: string[]
   readOnly: boolean
   onChange: (value: string[]) => void
   t: TFunction
+  ariaLabel?: TranslationKey
+  placeholder?: TranslationKey
 }) {
   const [draft, setDraft] = React.useState("")
   const [editing, setEditing] = React.useState(false)
@@ -624,8 +641,8 @@ function FormOptionsInput({
     <Input
       value={displayValue}
       readOnly={readOnly}
-      aria-label={t("选项")}
-      placeholder={t("用逗号分隔选项")}
+      aria-label={t(ariaLabel)}
+      placeholder={t(placeholder)}
       onFocus={(event) => {
         setDraft(event.currentTarget.value)
         setEditing(true)
@@ -1670,6 +1687,13 @@ function NodeConfigFields({
   const searchModeLabel =
     KNOWLEDGE_SEARCH_MODES.find((item) => item.value === searchMode)?.label ??
     "向量检索"
+  const graphMode = String(config.graph_mode ?? "auto")
+  const graphModeLabel =
+    KNOWLEDGE_GRAPH_MODES.find((item) => item.value === graphMode)?.label ??
+    "自动图谱检索"
+  const relationFilters = Array.isArray(config.relation_filters)
+    ? config.relation_filters.map(String)
+    : []
   const toggleKnowledgeBase = (knowledgeBaseId: string) =>
     updateConfig({
       knowledge_base_id: null,
@@ -2520,6 +2544,120 @@ function NodeConfigFields({
                   t={t}
                 />
               </div>
+            </fieldset>
+
+            <fieldset className="grid gap-2">
+              <legend className="text-xs font-medium">{t("Graph RAG")}</legend>
+              <div className="grid grid-cols-[minmax(0,1fr)_7.5rem] items-center gap-3 text-xs">
+                <span
+                  id={`${nodeId}-knowledge-graph-mode-label`}
+                  className="text-muted-foreground"
+                >
+                  {t("图谱检索模式")}
+                </span>
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      id={`${nodeId}-knowledge-graph-mode`}
+                      type="button"
+                      variant="outline"
+                      className="h-7 w-full justify-between px-2 text-[11px] font-normal"
+                      aria-labelledby={`${nodeId}-knowledge-graph-mode-label`}
+                      disabled={readOnly}
+                    >
+                      <span className="truncate">{t(graphModeLabel)}</span>
+                      <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    side="bottom"
+                    sideOffset={4}
+                    className="w-(--radix-dropdown-menu-trigger-width) min-w-32"
+                  >
+                    {KNOWLEDGE_GRAPH_MODES.map((item) => (
+                      <DropdownMenuItem
+                        key={item.value}
+                        className="justify-between"
+                        onSelect={() =>
+                          updateConfig({ graph_mode: item.value })
+                        }
+                      >
+                        {t(item.label)}
+                        {graphMode === item.value ? (
+                          <CheckIcon className="size-4 text-primary" />
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              {graphMode === "path" || graphMode === "neighborhood" ? (
+                <div className="grid gap-3 rounded-md border border-border/70 p-2.5">
+                  <TextEditor
+                    id={`${nodeId}-knowledge-graph-source`}
+                    label={t(graphMode === "path" ? "起点实体" : "中心实体")}
+                    value={config.source_entity ?? ""}
+                    readOnly={readOnly}
+                    rows={2}
+                    onChange={(sourceEntity) =>
+                      updateConfig({ source_entity: sourceEntity })
+                    }
+                    node={node}
+                    nodeId={nodeId}
+                    t={t}
+                    insertVariables
+                  />
+                  {graphMode === "path" ? (
+                    <TextEditor
+                      id={`${nodeId}-knowledge-graph-target`}
+                      label={t("终点实体")}
+                      value={config.target_entity ?? ""}
+                      readOnly={readOnly}
+                      rows={2}
+                      onChange={(targetEntity) =>
+                        updateConfig({ target_entity: targetEntity })
+                      }
+                      node={node}
+                      nodeId={nodeId}
+                      t={t}
+                      insertVariables
+                    />
+                  ) : null}
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs">
+                    <label
+                      className="text-muted-foreground"
+                      htmlFor={`${nodeId}-knowledge-graph-max-hops`}
+                    >
+                      {t("最大图谱跳数")}
+                    </label>
+                    <NumberStepper
+                      id={`${nodeId}-knowledge-graph-max-hops`}
+                      min={1}
+                      max={8}
+                      value={Number(config.max_hops ?? 6)}
+                      readOnly={readOnly}
+                      onChange={(maxHops) =>
+                        updateConfig({ max_hops: maxHops })
+                      }
+                      t={t}
+                    />
+                  </div>
+                  <label className="grid gap-1.5 text-xs font-medium">
+                    {t("关系类型过滤")}
+                    <FormOptionsInput
+                      value={relationFilters}
+                      readOnly={readOnly}
+                      onChange={(relationFiltersValue) =>
+                        updateConfig({ relation_filters: relationFiltersValue })
+                      }
+                      t={t}
+                      ariaLabel="关系类型过滤"
+                      placeholder="用逗号分隔关系类型"
+                    />
+                  </label>
+                </div>
+              ) : null}
             </fieldset>
 
             <TextEditor

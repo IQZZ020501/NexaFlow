@@ -906,6 +906,11 @@ describe("WorkflowNodeCard", () => {
         config: {
           search_mode: "embedding",
           knowledge_base_ids: ["kb-1", "kb-2"],
+          graph_mode: "path",
+          source_entity: "Policy A",
+          target_entity: "Policy B",
+          max_hops: 3,
+          relation_filters: ["references"],
         },
       })
     )
@@ -943,6 +948,35 @@ describe("WorkflowNodeCard", () => {
       target: { value: "what is X" },
     })
     expect(updates.at(-1)?.config.query).toBe("what is X")
+    // Graph mode and bounded traversal parameters.
+    const graphModeTrigger = screen.getByLabelText("图谱检索模式")
+    fireEvent.pointerDown(graphModeTrigger)
+    fireEvent.click(graphModeTrigger)
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "邻域图谱检索" })
+    )
+    expect(updates.at(-1)?.config.graph_mode).toBe("neighborhood")
+    fireEvent.change(screen.getByLabelText("起点实体"), {
+      target: { value: "{{start.question}}" },
+    })
+    expect(updates.at(-1)?.config.source_entity).toBe("{{start.question}}")
+    fireEvent.change(screen.getByLabelText("终点实体"), {
+      target: { value: "Policy C" },
+    })
+    expect(updates.at(-1)?.config.target_entity).toBe("Policy C")
+    fireEvent.change(screen.getByRole("spinbutton", { name: "最大图谱跳数" }), {
+      target: { value: "5" },
+    })
+    expect(updates.at(-1)?.config.max_hops).toBe(5)
+    fireEvent.change(screen.getByLabelText("关系类型过滤"), {
+      target: { value: "references, defines" },
+    })
+    expect(updates.at(-1)?.config.relation_filters).toEqual([
+      "references",
+      "defines",
+    ])
+    expect(screen.getByText("图谱修订 ID")).toBeTruthy()
+    expect(screen.getByText("图谱路径")).toBeTruthy()
   })
 
   test("knowledge node without bases shows the empty state", () => {

@@ -151,6 +151,11 @@ describe("workflow graph", () => {
       limit: 3,
       similarity: 0.6,
       search_mode: "embedding",
+      graph_mode: "auto",
+      source_entity: null,
+      target_entity: null,
+      max_hops: 6,
+      relation_filters: [],
       max_paragraph_char_number: 5000,
     })
     expect(defaultNodeConfig("start")).toEqual({})

@@ -150,6 +150,11 @@ class KnowledgeNodeConfig(BaseModel):
     limit: int = Field(default=3, ge=1, le=8)
     similarity: float = Field(default=0.6, ge=0, le=1)
     search_mode: Literal["embedding", "keywords", "blend"] = "embedding"
+    graph_mode: Literal["off", "auto", "path", "neighborhood"] = "auto"
+    source_entity: Any | None = None
+    target_entity: Any | None = None
+    max_hops: int = Field(default=6, ge=1, le=8)
+    relation_filters: list[str] = Field(default_factory=list, max_length=32)
     max_paragraph_char_number: int = Field(default=5000, ge=1, le=20000)
     # 内部维护，发布时由资源校验反向解析；前端不手填
     source_dataset_id_list: list[

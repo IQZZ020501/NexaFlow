@@ -750,6 +750,22 @@ async def execute_workflow_node(
     if node_type == "knowledge":
         parsed = KnowledgeNodeConfig.model_validate(config)
         query = str(resolve_value(parsed.query, context))
+        source_value = (
+            resolve_value(parsed.source_entity, context)
+            if parsed.source_entity is not None
+            else None
+        )
+        target_value = (
+            resolve_value(parsed.target_entity, context)
+            if parsed.target_entity is not None
+            else None
+        )
+        source_entity = (
+            str(source_value).strip() if source_value is not None else None
+        )
+        target_entity = (
+            str(target_value).strip() if target_value is not None else None
+        )
         knowledge_bases = [
             scope.knowledge_bases[knowledge_base_id]
             for knowledge_base_id in parsed.resolved_knowledge_base_ids
@@ -770,6 +786,11 @@ async def execute_workflow_node(
                 "limit": parsed.limit,
                 "search_mode": parsed.search_mode,
                 "similarity": parsed.similarity,
+                "graph_mode": parsed.graph_mode,
+                "source_entity": source_entity or None,
+                "target_entity": target_entity or None,
+                "max_hops": parsed.max_hops,
+                "relation_filters": parsed.relation_filters,
             }
         )
         if result.is_error:
@@ -801,7 +822,7 @@ async def execute_workflow_node(
                 paragraph["sources"] = [
                     source
                     for source in sources[:3]
-                    if source in {"vector", "keywords", "reference"}
+                    if source in {"vector", "keywords", "reference", "graph"}
                 ]
             reference_hops = item.get("reference_hops")
             if (
@@ -810,6 +831,20 @@ async def execute_workflow_node(
                 and 0 <= reference_hops <= 1
             ):
                 paragraph["reference_hops"] = reference_hops
+            graph_claim_ids = item.get("graph_claim_ids")
+            if isinstance(graph_claim_ids, list):
+                paragraph["graph_claim_ids"] = [
+                    claim_id
+                    for claim_id in graph_claim_ids[:400]
+                    if isinstance(claim_id, str) and claim_id
+                ]
+            graph_hops = item.get("graph_hops")
+            if (
+                isinstance(graph_hops, int)
+                and not isinstance(graph_hops, bool)
+                and 0 <= graph_hops <= 8
+            ):
+                paragraph["graph_hops"] = graph_hops
             paragraph_list.append(paragraph)
         # 达到检索相似度阈值的向量命中视为可直接回答（MaxKB 的分段级
         # hit_handling_method 元数据在 NexaFlow 中不存在，故以节点阈值为准）
@@ -828,6 +863,12 @@ async def execute_workflow_node(
             for item in is_hit_handling_method_list
             if item["content"]
         )
+        graph = (
+            output.get("graph")
+            if isinstance(output.get("graph"), dict)
+            else {}
+        )
+        graph_paths = graph.get("paths")
         outputs = {
             **output,
             "hits": selected_hits,
@@ -836,6 +877,9 @@ async def execute_workflow_node(
             "data": joined[: parsed.max_paragraph_char_number],
             "directly_return": direct_joined,
             "content": joined,
+            "graph": graph,
+            "graph_revision_id": str(graph.get("revision_id") or ""),
+            "graph_paths": graph_paths if isinstance(graph_paths, list) else [],
         }
         return NodeResult(
             inputs={
@@ -844,6 +888,11 @@ async def execute_workflow_node(
                 "limit": parsed.limit,
                 "search_mode": parsed.search_mode,
                 "similarity": parsed.similarity,
+                "graph_mode": parsed.graph_mode,
+                "source_entity": source_entity or None,
+                "target_entity": target_entity or None,
+                "max_hops": parsed.max_hops,
+                "relation_filters": parsed.relation_filters,
             },
             outputs=outputs,
         )
