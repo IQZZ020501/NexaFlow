@@ -152,6 +152,7 @@ async def update_workspace_knowledge_base_document_status(
     document_id: str,
     payload: KnowledgeDocumentStatusUpdateRequest,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> KnowledgeDocumentResponse:
     knowledge_base = await get_knowledge_base(
@@ -173,6 +174,7 @@ async def update_workspace_knowledge_base_document_status(
         document,
         context.user,
         payload.is_active,
+        settings,
     )
     return await document_response_with_chunk_count(
         db,

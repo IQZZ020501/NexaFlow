@@ -228,6 +228,7 @@ async def run_index_task(
         document.id if document else None,
         {CHUNK_INDEXED_STATUS} if task.task_type == TASK_REBUILD_INDEX else None,
     )
+    chunks = [chunk for chunk in chunks if chunk.kind != "graph_record"]
     if not chunks:
         raise KnowledgePipelineError("Knowledge task has no chunks to index.")
 

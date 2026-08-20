@@ -578,6 +578,15 @@ async def create_knowledge_task(
     document_id = document.id if document else None
     if await get_conflicting_open_task(db, knowledge_base, task_type, document_id) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
+    if (
+        task_type == TASK_INDEX
+        and document is not None
+        and (document.meta or {}).get("import_mode") == "graph"
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Graph import documents do not use the chunk vector index.",
+        )
 
     if task_type in {TASK_INDEX, TASK_REBUILD_INDEX}:
         had_embedding_model = knowledge_base.embedding_model_id is not None
@@ -611,7 +620,15 @@ async def create_knowledge_task(
         document.status = DOCUMENT_PARSE_QUEUED_STATUS
         document.last_error = None
     elif task_type == TASK_REBUILD_INDEX:
-        chunks = await knowledge_base_repository.list_indexable_chunks(db, knowledge_base, statuses={CHUNK_INDEXED_STATUS})
+        chunks = [
+            chunk
+            for chunk in await knowledge_base_repository.list_indexable_chunks(
+                db,
+                knowledge_base,
+                statuses={CHUNK_INDEXED_STATUS},
+            )
+            if chunk.kind != "graph_record"
+        ]
         if not chunks:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Knowledge base has no indexed chunks.")
         total_items = len(chunks)
@@ -774,16 +791,26 @@ async def enqueue_graph_sync(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
     queued = await knowledge_base_repository.get_queued_graph_sync(db, locked)
     if queued is not None:
+        queued_options = queued.options or {}
+        incoming_options = options or {}
         queued.options = {
-            **(queued.options or {}),
-            **(options or {}),
+            **queued_options,
+            **incoming_options,
             "changed_document_ids": sorted(
                 {
-                    *(queued.options or {}).get("changed_document_ids", []),
+                    *queued_options.get("changed_document_ids", []),
                     *changed_document_ids,
                 }
             ),
         }
+        structured_document_ids = {
+            *queued_options.get("structured_document_ids", []),
+            *incoming_options.get("structured_document_ids", []),
+        }
+        if structured_document_ids:
+            queued.options["structured_document_ids"] = sorted(
+                structured_document_ids
+            )
         await knowledge_base_repository.save_knowledge_task(db, queued)
         await db.commit()
         return await knowledge_base_repository.refresh_knowledge_task(db, queued)

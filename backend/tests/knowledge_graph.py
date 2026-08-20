@@ -5,11 +5,13 @@ Run from backend/: uv run python -m tests.knowledge_graph
 
 import asyncio
 from datetime import timedelta
+from io import BytesIO
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import tests.support  # noqa: F401
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import select, text
 
 from app.infrastructure.base import Base
@@ -26,6 +28,8 @@ from app.entities.knowledge import (
 )
 from app.entities.knowledge_graph import (
     KnowledgeGraphAlias as GraphAliasRecord,
+    KnowledgeGraphClaim as GraphClaimRecord,
+    KnowledgeGraphClaimEvidence as GraphEvidenceRecord,
     KnowledgeGraphEntity as GraphEntityRecord,
 )
 from app.entities.user import User
@@ -46,9 +50,92 @@ from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphRevision,
 )
 from app.infrastructure.model_utils import utc_now
-from app.shareddomain.knowledge.orchestration import enqueue_graph_sync
-from app.application import knowledge_graph_build
+from app.shareddomain.knowledge.orchestration import (
+    enqueue_graph_sync,
+    enqueue_index_knowledge_document,
+)
+from app.application import knowledge_graph, knowledge_graph_build
+from app.shareddomain.knowledge import lifecycle as knowledge_lifecycle
 from app.shareddomain.knowledge import task_runner as knowledge_task_runner
+
+
+GRAPH_IMPORT_RECORD = {
+    "subject": {
+        "entity_type": "Document",
+        "canonical_name": "制度 A",
+        "external_key": "policy-a",
+    },
+    "predicate": "defines",
+    "object": {
+        "entity_type": "Concept",
+        "canonical_name": "术语 A",
+        "external_key": "term-a",
+    },
+    "evidence": "制度 A 定义术语 A。",
+}
+
+
+def test_graph_import_parser_is_atomic_and_bounded() -> None:
+    content = (
+        json.dumps(GRAPH_IMPORT_RECORD, ensure_ascii=False)
+        + "\n"
+        + json.dumps(
+            {
+                **GRAPH_IMPORT_RECORD,
+                "subject": {
+                    **GRAPH_IMPORT_RECORD["subject"],
+                    "canonical_name": "制度 B",
+                    "external_key": "policy-b",
+                },
+            },
+            ensure_ascii=False,
+        )
+    ).encode()
+    records = knowledge_graph.parse_graph_import_records("records.jsonl", content)
+    assert [item.subject.canonical_name for item in records] == ["制度 A", "制度 B"]
+
+    invalid = content + b"\n{}"
+    try:
+        knowledge_graph.parse_graph_import_records("records.jsonl", invalid)
+    except HTTPException as exc:
+        assert exc.status_code == 422
+    else:
+        raise AssertionError("one invalid record must reject the entire import")
+
+    try:
+        knowledge_graph.parse_graph_import_records("records.txt", content)
+    except HTTPException as exc:
+        assert exc.status_code == 422
+    else:
+        raise AssertionError("unsupported graph import extensions must fail")
+
+    try:
+        knowledge_graph.parse_graph_import_records(
+            "records.json",
+            b"x" * (knowledge_graph.MAX_GRAPH_IMPORT_BYTES + 1),
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 413
+    else:
+        raise AssertionError("oversized graph imports must fail")
+
+
+def test_graph_source_batches_keep_structured_and_text_chunks_separate() -> None:
+    chunks = [
+        KnowledgeDocumentChunk(id="text-1", kind="document"),
+        KnowledgeDocumentChunk(id="graph-1", kind="graph_record"),
+        KnowledgeDocumentChunk(id="graph-2", kind="graph_record"),
+        KnowledgeDocumentChunk(id="text-2", kind="document"),
+    ]
+    batches = knowledge_graph_build._graph_source_batches(chunks)
+    assert [
+        (structured, [item.id for item in batch])
+        for structured, batch in batches
+    ] == [
+        (False, ["text-1"]),
+        (True, ["graph-1", "graph-2"]),
+        (False, ["text-2"]),
+    ]
 
 
 def test_graph_profile_collection_is_knowledge_base_scoped() -> None:
@@ -650,6 +737,10 @@ async def test_graph_sync_coalesces_behind_running_build() -> None:
             knowledge_base,
             actor,
             ["graph-task-doc-2"],
+            options={
+                "trusted_structured_import": True,
+                "structured_document_ids": ["graph-task-doc-2"],
+            },
         )
         follower_b = await enqueue_graph_sync(
             db,
@@ -662,6 +753,9 @@ async def test_graph_sync_coalesces_behind_running_build() -> None:
         assert follower_b.options["changed_document_ids"] == [
             "graph-task-doc-2",
             "graph-task-doc-3",
+        ]
+        assert follower_b.options["structured_document_ids"] == [
+            "graph-task-doc-2"
         ]
 
         claimed = await knowledge_repository.claim_knowledge_task(
@@ -1044,7 +1138,347 @@ async def test_failed_profile_write_keeps_revision_unpublished_for_repair() -> N
         assert revision.stats_json["profile_repair_entity_ids"]
 
 
+async def test_graph_import_persists_immutable_records_and_queues_sync() -> None:
+    content = (
+        json.dumps(GRAPH_IMPORT_RECORD, ensure_ascii=False)
+        + "\n"
+        + json.dumps(
+            {
+                **GRAPH_IMPORT_RECORD,
+                "subject": {
+                    **GRAPH_IMPORT_RECORD["subject"],
+                    "canonical_name": "制度 B",
+                    "external_key": "policy-b",
+                },
+            },
+            ensure_ascii=False,
+        )
+    ).encode()
+    settings = tests.support.settings()
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_user_by_id(db, "graph-user")
+        assert actor is not None
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-import-kb",
+                workspace_id="graph-workspace",
+                name="Graph Import KB",
+                graph_enabled=True,
+                created_by_user_id=actor.id,
+            ),
+        )
+        await db.commit()
+        task_response = await knowledge_graph.import_graph_records(
+            db,
+            knowledge_base,
+            UploadFile(BytesIO(content), filename="records.jsonl"),
+            actor,
+            settings,
+        )
+        task = await knowledge_repository.get_knowledge_task_by_id(
+            db,
+            task_response.id,
+        )
+        assert task is not None
+        assert task.task_type == "graph_sync"
+        assert task.options["trusted_structured_import"] is True
+
+        documents = await knowledge_repository.list_knowledge_documents(
+            db,
+            knowledge_base,
+            include_staged=True,
+        )
+        assert len(documents) == 1
+        document = documents[0]
+        assert document.status == "indexed"
+        assert document.meta["import_mode"] == "graph"
+        assert document.meta["document_version"] == 1
+        attachment = await knowledge_repository.get_knowledge_attachment_by_id(
+            db,
+            document.attachment_id or "",
+        )
+        assert attachment is not None
+        assert attachment.status == "consumed"
+        assert settings.knowledge_storage_dir.joinpath(document.storage_path).read_bytes() == content
+        chunks = await knowledge_repository.list_document_chunks(
+            db,
+            knowledge_base,
+            document.id,
+        )
+        assert len(chunks) == 2
+        assert all(item.kind == "graph_record" for item in chunks)
+        assert all(item.status == "indexed" for item in chunks)
+        assert all(item.vector_id is None for item in chunks)
+        assert "制度 A\ndefines\n术语 A" in chunks[0].search_text
+        try:
+            await enqueue_index_knowledge_document(
+                db,
+                knowledge_base,
+                document,
+                actor,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError("graph records must not enter the chunk vector index")
+
+
+async def test_claim_survives_until_last_evidence_is_deleted() -> None:
+    quote = "制度 A 定义术语 A。"
+    settings = tests.support.settings()
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_user_by_id(db, "graph-user")
+        assert actor is not None
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-evidence-lifecycle-kb",
+                workspace_id="graph-workspace",
+                name="Graph Evidence Lifecycle KB",
+                graph_enabled=True,
+                created_by_user_id=actor.id,
+            ),
+        )
+        schema = await create_graph_schema(
+            db,
+            knowledge_base,
+            default_policy_graph_schema(),
+            actor,
+        )
+        revision = await graph_revisions.create_revision(
+            db,
+            knowledge_base,
+            schema,
+            actor.id,
+            "evidence-lifecycle",
+        )
+        await db.commit()
+        revision = await graph_revisions.publish_revision(
+            db,
+            knowledge_base,
+            revision,
+        )
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            knowledge_base.id,
+        )
+        assert knowledge_base is not None
+
+        documents: list[KnowledgeDocument] = []
+        chunks: list[KnowledgeDocumentChunk] = []
+        for suffix in ("a", "b"):
+            document = await knowledge_repository.create_knowledge_document(
+                db,
+                KnowledgeDocument(
+                    id=f"graph-evidence-document-{suffix}",
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    filename=f"evidence-{suffix}.txt",
+                    content_type="text/plain",
+                    size_bytes=len(quote.encode()),
+                    storage_path=f"missing/evidence-{suffix}.txt",
+                    status="indexed",
+                    created_by_user_id=actor.id,
+                ),
+            )
+            chunk = KnowledgeDocumentChunk(
+                id=f"graph-evidence-chunk-{suffix}",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                document_id=document.id,
+                content=quote,
+                search_text=quote,
+                char_count=len(quote),
+                token_count=8,
+                status="indexed",
+            )
+            await knowledge_repository.save_knowledge_document_chunk(db, chunk)
+            documents.append(document)
+            chunks.append(chunk)
+
+        subject_id = "graph-evidence-subject"
+        object_id = "graph-evidence-object"
+        for entity_id, entity_type, name in (
+            (subject_id, "Document", "制度 A"),
+            (object_id, "Concept", "术语 A"),
+        ):
+            await graph_repository.create_entity(
+                db,
+                GraphEntityRecord(
+                    id=entity_id,
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    entity_type=entity_type,
+                    canonical_name=name,
+                    normalized_name=name.casefold(),
+                    state="active",
+                    created_revision_id=revision.id,
+                    last_published_revision_id=revision.id,
+                ),
+            )
+        fingerprint = claim_fingerprint(
+            subject_id,
+            "defines",
+            object_id,
+            None,
+            None,
+            None,
+        )
+        claim = await graph_repository.create_claim(
+            db,
+            GraphClaimRecord(
+                id="graph-evidence-claim",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                subject_entity_id=subject_id,
+                predicate="defines",
+                object_entity_id=object_id,
+                status="active",
+                source_kind="structured_import",
+                quality_score=1.0,
+                support_count=2,
+                fingerprint=fingerprint,
+                created_revision_id=revision.id,
+                last_published_revision_id=revision.id,
+            ),
+        )
+        for index, (document, chunk) in enumerate(zip(documents, chunks, strict=True)):
+            await graph_repository.create_evidence(
+                db,
+                GraphEvidenceRecord(
+                    id=f"graph-evidence-{index}",
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    claim_id=claim.id,
+                    document_id=document.id,
+                    chunk_id=chunk.id,
+                    quote=quote,
+                    start_offset=0,
+                    end_offset=len(quote),
+                    extractor_type="structured",
+                    prompt_hash="structured-import",
+                    schema_hash=graph_schema_hash(default_policy_graph_schema()),
+                    created_revision_id=revision.id,
+                    last_published_revision_id=revision.id,
+                ),
+            )
+        await db.commit()
+        assert await graph_repository.list_traversable_claim_ids(
+            db,
+            knowledge_base,
+        ) == [claim.id]
+
+    for index, document_id in enumerate(
+        ["graph-evidence-document-a", "graph-evidence-document-b"]
+    ):
+        async with get_session_factory()() as db:
+            knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+                db,
+                "graph-evidence-lifecycle-kb",
+            )
+            actor = await user_repository.get_user_by_id(db, "graph-user")
+            document = await knowledge_repository.get_knowledge_document_by_id(
+                db,
+                document_id,
+            )
+            assert knowledge_base is not None
+            assert actor is not None
+            assert document is not None
+            await knowledge_lifecycle.set_knowledge_document_active(
+                db,
+                knowledge_base,
+                document,
+                actor,
+                False,
+            )
+            traversable = await graph_repository.list_traversable_claim_ids(
+                db,
+                knowledge_base,
+            )
+            assert traversable == (["graph-evidence-claim"] if index == 0 else [])
+
+    for document_id in (
+        "graph-evidence-document-a",
+        "graph-evidence-document-b",
+    ):
+        async with get_session_factory()() as db:
+            knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+                db,
+                "graph-evidence-lifecycle-kb",
+            )
+            actor = await user_repository.get_user_by_id(db, "graph-user")
+            document = await knowledge_repository.get_knowledge_document_by_id(
+                db,
+                document_id,
+            )
+            assert knowledge_base is not None
+            assert actor is not None
+            assert document is not None
+            await knowledge_lifecycle.set_knowledge_document_active(
+                db,
+                knowledge_base,
+                document,
+                actor,
+                True,
+            )
+    async with get_session_factory()() as db:
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            "graph-evidence-lifecycle-kb",
+        )
+        assert knowledge_base is not None
+        assert await graph_repository.list_traversable_claim_ids(
+            db,
+            knowledge_base,
+        ) == ["graph-evidence-claim"]
+
+    for index, document_id in enumerate(
+        ["graph-evidence-document-a", "graph-evidence-document-b"]
+    ):
+        async with get_session_factory()() as db:
+            knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+                db,
+                "graph-evidence-lifecycle-kb",
+            )
+            actor = await user_repository.get_user_by_id(db, "graph-user")
+            document = await knowledge_repository.get_knowledge_document_by_id(
+                db,
+                document_id,
+            )
+            assert knowledge_base is not None
+            assert actor is not None
+            assert document is not None
+            await knowledge_lifecycle.delete_knowledge_document(
+                db,
+                knowledge_base,
+                document,
+                actor,
+                settings,
+            )
+            traversable = await graph_repository.list_traversable_claim_ids(
+                db,
+                knowledge_base,
+            )
+            assert traversable == (["graph-evidence-claim"] if index == 0 else [])
+
+    async with get_session_factory()() as db:
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            "graph-evidence-lifecycle-kb",
+        )
+        assert knowledge_base is not None
+        queued = await knowledge_repository.get_queued_graph_sync(db, knowledge_base)
+        assert queued is not None
+        assert queued.options["changed_document_ids"] == [
+            "graph-evidence-document-a",
+            "graph-evidence-document-b",
+        ]
+
+
 async def main() -> None:
+    test_graph_import_parser_is_atomic_and_bounded()
+    test_graph_source_batches_keep_structured_and_text_chunks_separate()
     test_graph_profile_collection_is_knowledge_base_scoped()
     test_graph_profile_vectors_use_an_isolated_collection()
     await test_graph_database_constraints()
@@ -1057,6 +1491,8 @@ async def main() -> None:
     await test_structured_graph_build_publishes_evidence_and_profiles()
     await test_index_success_queues_graph_sync_when_enabled()
     await test_failed_profile_write_keeps_revision_unpublished_for_repair()
+    await test_graph_import_persists_immutable_records_and_queues_sync()
+    await test_claim_survives_until_last_evidence_is_deleted()
     print("OK: knowledge_graph")
 
 

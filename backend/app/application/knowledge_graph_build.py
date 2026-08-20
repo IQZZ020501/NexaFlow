@@ -1082,6 +1082,9 @@ def build_structured_graph_result(
             )
         quote = record.evidence or chunk.content
         start_offset = chunk.content.find(quote)
+        if start_offset < 0 and record.evidence:
+            quote = json.dumps(record.evidence, ensure_ascii=False)[1:-1]
+            start_offset = chunk.content.find(quote)
         if start_offset < 0:
             raise ValueError(
                 "Structured graph evidence is not present in the source chunk."
@@ -1115,6 +1118,25 @@ def build_structured_graph_result(
     )
 
 
+def _graph_source_batches(
+    chunks: list[KnowledgeDocumentChunk],
+) -> list[tuple[bool, list[KnowledgeDocumentChunk]]]:
+    result: list[tuple[bool, list[KnowledgeDocumentChunk]]] = []
+    offset = 0
+    while offset < len(chunks):
+        structured = chunks[offset].kind == "graph_record"
+        end = offset
+        while (
+            end < len(chunks)
+            and end - offset < 4
+            and (chunks[end].kind == "graph_record") == structured
+        ):
+            end += 1
+        result.append((structured, chunks[offset:end]))
+        offset = end
+    return result
+
+
 async def run_graph_build_task(
     db: AsyncSession,
     task: KnowledgeTask,
@@ -1141,19 +1163,6 @@ async def run_graph_build_task(
         for item in (task.options or {}).get("changed_document_ids", [])
         if str(item)
     }
-    structured = (task.options or {}).get("trusted_structured_import") is True
-    model = None
-    provider = None
-    if not structured:
-        model = await get_knowledge_model(
-            db,
-            knowledge_base.workspace_id,
-            knowledge_base.graph_extraction_model_id,
-            "LLM",
-        )
-        if model is None:
-            raise KnowledgePipelineError("Graph extraction model is required.")
-        provider = build_chat_model(settings, model)
     active_revision = await graph_repository.get_active_revision(db, knowledge_base)
     active_profile_model_id = (
         str((active_revision.stats_json or {}).get("profile_embedding_model_id") or "")
@@ -1167,6 +1176,18 @@ async def run_graph_build_task(
             changed_document_ids if task.task_type == TASK_GRAPH_SYNC else None
         ),
     )
+    model = None
+    provider = None
+    if any(chunk.kind != "graph_record" for chunk in chunks):
+        model = await get_knowledge_model(
+            db,
+            knowledge_base.workspace_id,
+            knowledge_base.graph_extraction_model_id,
+            "LLM",
+        )
+        if model is None:
+            raise KnowledgePipelineError("Graph extraction model is required.")
+        provider = build_chat_model(settings, model)
     revision = await create_revision(
         db,
         knowledge_base,
@@ -1192,9 +1213,8 @@ async def run_graph_build_task(
                 changed_document_ids if task.task_type == TASK_GRAPH_SYNC else None,
             )
         )
-        for offset in range(0, len(chunks), 4):
+        for structured, batch_chunks in _graph_source_batches(chunks):
             ensure_knowledge_task_lease(lease_lost)
-            batch_chunks = chunks[offset : offset + 4]
             extraction = (
                 build_structured_graph_result(schema, batch_chunks, task.options)
                 if structured
@@ -1213,7 +1233,7 @@ async def run_graph_build_task(
                     knowledge_base,
                     revision,
                     schema,
-                    model,
+                    None if structured else model,
                     extraction.prompt_hash,
                     batch_chunks,
                     extraction.batch,
@@ -1246,7 +1266,11 @@ async def run_graph_build_task(
             knowledge_base,
             revision,
             schema,
-            provider,
+            (
+                None
+                if (task.options or {}).get("trusted_structured_import") is True
+                else provider
+            ),
             affected_entities,
         )
         revision.model_usage_json = merge_usage(

@@ -1,7 +1,11 @@
 from sqlalchemy import delete, exists, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.knowledge import KnowledgeBase, KnowledgeDocumentChunk
+from app.entities.knowledge import (
+    DOCUMENT_DELETED_STATUS,
+    KnowledgeBase,
+    KnowledgeDocumentChunk,
+)
 from app.entities.knowledge_graph import (
     GRAPH_SCHEMA_ACTIVE,
     GRAPH_SCHEMA_RETIRED,
@@ -608,6 +612,53 @@ async def list_current_claims(
         )
     )
     return [to_entity(KnowledgeGraphClaim, row) for row in rows.all()]
+
+
+async def list_traversable_claim_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> list[str]:
+    accessible_evidence = exists(
+        select(KnowledgeGraphClaimEvidenceORM.id)
+        .join(
+            KnowledgeDocumentORM,
+            (
+                KnowledgeDocumentORM.workspace_id
+                == KnowledgeGraphClaimEvidenceORM.workspace_id
+            )
+            & (
+                KnowledgeDocumentORM.knowledge_base_id
+                == KnowledgeGraphClaimEvidenceORM.knowledge_base_id
+            )
+            & (
+                KnowledgeDocumentORM.id
+                == KnowledgeGraphClaimEvidenceORM.document_id
+            ),
+        )
+        .where(
+            KnowledgeGraphClaimEvidenceORM.workspace_id
+            == KnowledgeGraphClaimORM.workspace_id,
+            KnowledgeGraphClaimEvidenceORM.knowledge_base_id
+            == KnowledgeGraphClaimORM.knowledge_base_id,
+            KnowledgeGraphClaimEvidenceORM.claim_id == KnowledgeGraphClaimORM.id,
+            KnowledgeGraphClaimEvidenceORM.evidence_state == "active",
+            KnowledgeGraphClaimEvidenceORM.retired_revision_id.is_(None),
+            KnowledgeDocumentORM.status != DOCUMENT_DELETED_STATUS,
+            KnowledgeDocumentORM.is_active.is_(True),
+        )
+    )
+    rows = await db.scalars(
+        select(KnowledgeGraphClaimORM.id)
+        .where(
+            KnowledgeGraphClaimORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphClaimORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphClaimORM.status == "active",
+            KnowledgeGraphClaimORM.retired_revision_id.is_(None),
+            accessible_evidence,
+        )
+        .order_by(KnowledgeGraphClaimORM.id)
+    )
+    return list(rows)
 
 
 async def list_active_claims_without_evidence_outside_documents(
