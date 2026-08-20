@@ -569,6 +569,41 @@ def main() -> None:
         with patch(
             "app.application.invitations.dispatch_email_deliveries",
             new=AsyncMock(),
+        ) as deletable_dispatch:
+            deletable = client.post(
+                f"/api/v1/workspaces/{workspace_id}/invitations",
+                headers=admin_headers,
+                json={
+                    "kind": "personal",
+                    "username": "deleted-member",
+                    "email": "deleted-member@example.com",
+                    "name": "Deleted Member",
+                    "role": "member",
+                },
+            )
+        assert deletable.status_code == 201, deletable.text
+        deletable_payload = deletable.json()
+        deletable_delivery_id = deletable_dispatch.await_args.args[0][0]
+        deleted = client.delete(
+            f"/api/v1/workspaces/{workspace_id}/invitations/{deletable_payload['id']}",
+            headers=admin_headers,
+        )
+        assert deleted.status_code == 204, deleted.text
+        assert all(
+            row.id != deletable_delivery_id for row in asyncio.run(delivery_rows())
+        )
+        deleted_acceptance = client.post(
+            "/api/v1/auth/invitations/accept",
+            json={
+                "token": deletable_payload["token"],
+                "password": "Deleted@123",
+            },
+        )
+        assert deleted_acceptance.status_code == 400, deleted_acceptance.text
+
+        with patch(
+            "app.application.invitations.dispatch_email_deliveries",
+            new=AsyncMock(),
         ):
             generic = client.post(
                 f"/api/v1/workspaces/{workspace_id}/invitations",
@@ -658,16 +693,21 @@ def main() -> None:
             json={"kind": "generic", "role": "member"},
         )
         assert revokable.status_code == 201, revokable.text
-        revoked = client.delete(
-            f"/api/v1/workspaces/{workspace_id}/invitations/{revokable.json()['id']}",
+        revoked = client.post(
+            f"/api/v1/workspaces/{workspace_id}/invitations/{revokable.json()['id']}/revoke",
             headers=admin_headers,
         )
         assert revoked.status_code == 204, revoked.text
-        missing_revoke = client.delete(
-            f"/api/v1/workspaces/{workspace_id}/invitations/missing-invitation",
+        missing_revoke = client.post(
+            f"/api/v1/workspaces/{workspace_id}/invitations/missing-invitation/revoke",
             headers=admin_headers,
         )
         assert missing_revoke.status_code == 404, missing_revoke.text
+        missing_delete = client.delete(
+            f"/api/v1/workspaces/{workspace_id}/invitations/missing-invitation",
+            headers=admin_headers,
+        )
+        assert missing_delete.status_code == 404, missing_delete.text
 
         member_token = login(client, "mail-member", "Member@123")["access_token"]
         with patch(

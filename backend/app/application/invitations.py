@@ -222,6 +222,31 @@ async def revoke_workspace_invitation(
     await db.commit()
 
 
+async def delete_workspace_invitation(
+    db: AsyncSession,
+    workspace_id: str,
+    invitation_id: str,
+    actor: User,
+) -> None:
+    """Delete a workspace invitation and cancel its queued email."""
+    invitation = await invitation_repository.get_by_id(db, workspace_id, invitation_id)
+    if invitation is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invitation not found.")
+    await cancel_source_emails(db, "workspace_invitation", invitation.id)
+    await invitation_repository.delete(db, invitation)
+    record_audit_log(
+        db,
+        actor,
+        "workspace.invitation.delete",
+        "workspace_invitation",
+        invitation.id,
+        invitation.email or "Generic invitation",
+        {},
+        workspace_id=workspace_id,
+    )
+    await db.commit()
+
+
 async def accept_workspace_invitation(
     db: AsyncSession,
     payload: WorkspaceInvitationAcceptRequest,

@@ -340,8 +340,8 @@ def main() -> None:
         )
         assert generic_invitation["accepted_at"] is None
 
-        revoked = client.delete(
-            f"/api/v1/workspaces/{workspace_id}/invitations/{generic_payload['id']}",
+        revoked = client.post(
+            f"/api/v1/workspaces/{workspace_id}/invitations/{generic_payload['id']}/revoke",
             headers=admin_headers,
         )
         assert revoked.status_code == 204, revoked.text
@@ -356,6 +356,20 @@ def main() -> None:
             },
         )
         assert after_revoke.status_code == 400, after_revoke.text
+
+        deleted = client.delete(
+            f"/api/v1/workspaces/{workspace_id}/invitations/{generic_payload['id']}",
+            headers=admin_headers,
+        )
+        assert deleted.status_code == 204, deleted.text
+        remaining_invitations = client.get(
+            f"/api/v1/workspaces/{workspace_id}/invitations",
+            headers=admin_headers,
+        )
+        assert remaining_invitations.status_code == 200, remaining_invitations.text
+        assert generic_payload["id"] not in {
+            item["id"] for item in remaining_invitations.json()
+        }
 
         workspace_admin_token = login(
             client, "workspace-admin", ADMIN_PASSWORD

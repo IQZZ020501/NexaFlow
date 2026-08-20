@@ -16,6 +16,7 @@ import {
   MailIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
+  Trash2Icon,
   UserPlusIcon,
   UsersIcon,
   XCircleIcon,
@@ -27,6 +28,7 @@ import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { languageLocales } from "@/i18n"
 import {
   createWorkspaceInvitation,
+  deleteWorkspaceInvitation,
   getAdminHealth,
   getWorkspaceGovernance,
   getWorkspaceInventory,
@@ -505,6 +507,21 @@ function GovernancePanel() {
     try { await revokeWorkspaceInvitation(session.token, selectedWorkspaceId, id); setInvitations((current) => current.map((item) => item.id === id ? { ...item, accepted_at: new Date().toISOString() } : item)); session.notify("success", t("邀请已撤销")) } catch (error) { reportError(error) }
   }
 
+  async function deleteInvite(id: string) {
+    if (!session.token || !selectedWorkspaceId) return
+    if (!(await confirmAction({
+      description: t("确认删除邀请"),
+      confirmLabel: t("删除"),
+      destructive: true,
+    }))) return
+    try {
+      await deleteWorkspaceInvitation(session.token, selectedWorkspaceId, id)
+      setInvitations((current) => current.filter((item) => item.id !== id))
+      setInviteResult((current) => current?.id === id ? null : current)
+      session.notify("success", t("邀请已删除"))
+    } catch (error) { reportError(error) }
+  }
+
   async function copyInviteLink() {
     try {
       await copyText(inviteResult?.invite_url ?? inviteResult?.token ?? "")
@@ -601,7 +618,27 @@ function GovernancePanel() {
             ) : null}
           </div>
         ) : null}
-        <div className="mt-4 grid gap-2">{invitations.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"><div><div className="font-medium">{item.kind === "generic" ? t("通用邀请") : `${item.name} · ${item.email}`}</div><div className="text-xs text-muted-foreground">{item.role} · {formatDateTime(item.expires_at, dateLocale)}</div></div>{item.accepted_at ? <Badge variant="secondary">{t("已撤销或已接受")}</Badge> : <Button type="button" variant="outline" size="sm" onClick={() => void revokeInvite(item.id)}>{t("撤销")}</Button>}</div>)}</div>
+        <div className="mt-4 grid gap-2">
+          {invitations.map((item) => (
+            <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+              <div>
+                <div className="font-medium">{item.kind === "generic" ? t("通用邀请") : `${item.name} · ${item.email}`}</div>
+                <div className="text-xs text-muted-foreground">{item.role} · {formatDateTime(item.expires_at, dateLocale)}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {item.accepted_at ? (
+                  <Badge variant="secondary">{t("已撤销或已接受")}</Badge>
+                ) : (
+                  <Button type="button" variant="outline" size="sm" onClick={() => void revokeInvite(item.id)}>{t("撤销")}</Button>
+                )}
+                <Button type="button" variant="outline" size="sm" onClick={() => void deleteInvite(item.id)}>
+                  <Trash2Icon className="size-4" />
+                  {t("删除")}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
     </div>

@@ -882,6 +882,24 @@ export function revokeWorkspaceInvitation(
   invitationId: string
 ) {
   return request<void>(
+    `/api/v1/workspaces/${workspaceId}/invitations/${invitationId}/revoke`,
+    { method: "POST", token }
+  )
+}
+
+/**
+ * Permanently deletes a workspace invitation.
+ *
+ * @param token - The authentication token
+ * @param workspaceId - The workspace containing the invitation
+ * @param invitationId - The invitation to delete
+ */
+export function deleteWorkspaceInvitation(
+  token: string,
+  workspaceId: string,
+  invitationId: string
+) {
+  return request<void>(
     `/api/v1/workspaces/${workspaceId}/invitations/${invitationId}`,
     { method: "DELETE", token }
   )

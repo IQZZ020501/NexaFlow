@@ -10,6 +10,7 @@ import {
   createWorkspace,
   createWorkspaceInvitation,
   createWorkspaceUser,
+  deleteWorkspaceInvitation,
   deleteTeam,
   deleteUser,
   deleteWorkspace,
@@ -581,9 +582,15 @@ describe("workspace governance and invitations", () => {
     expectCall("/api/v1/workspaces/ws-1/invitations", "POST", payload)
   })
 
-  test("revokeWorkspaceInvitation issues a DELETE", async () => {
+  test("revokeWorkspaceInvitation posts to the revoke action", async () => {
     install(() => noContent())
     await revokeWorkspaceInvitation(TOKEN, "ws-1", "inv-1")
+    expectCall("/api/v1/workspaces/ws-1/invitations/inv-1/revoke", "POST")
+  })
+
+  test("deleteWorkspaceInvitation issues a DELETE", async () => {
+    install(() => noContent())
+    await deleteWorkspaceInvitation(TOKEN, "ws-1", "inv-1")
     expectCall("/api/v1/workspaces/ws-1/invitations/inv-1", "DELETE")
   })
 })

@@ -79,6 +79,15 @@ const pendingInvitation = {
   created_at: "2026-08-20T00:00:00Z",
 }
 
+const completedInvitation = {
+  ...pendingInvitation,
+  id: "inv-2",
+  username: "bob",
+  email: "bob@example.com",
+  name: "Bob",
+  accepted_at: "2026-08-21T00:00:00Z",
+}
+
 const degradedHealth = {
   status: "degraded",
   components: {
@@ -461,12 +470,12 @@ describe("workspace governance settings", () => {
   })
 
   test("revokes a pending invitation after confirmation", async () => {
-    let deleted = 0
+    let revoked = 0
     withFetch((url, init) => {
       if (url.endsWith("/inventory")) return jsonResponse(inventory)
       if (url.endsWith("/governance")) return jsonResponse(governance)
-      if (url.endsWith("/invitations/inv-1") && init?.method === "DELETE") {
-        deleted += 1
+      if (url.endsWith("/invitations/inv-1/revoke") && init?.method === "POST") {
+        revoked += 1
         return jsonResponse(null, 204)
       }
       if (url.endsWith("/invitations")) return jsonResponse([pendingInvitation])
@@ -480,9 +489,36 @@ describe("workspace governance settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "撤销" }))
     respondToConfirm("撤销")
 
-    await waitFor(() => expect(deleted).toBe(1))
+    await waitFor(() => expect(revoked).toBe(1))
     expect(notifications).toContainEqual(["success", "邀请已撤销"])
     await waitFor(() => expect(screen.getByText("已撤销或已接受")).toBeTruthy())
+  })
+
+  test("deletes an invitation after confirmation", async () => {
+    let deleted = 0
+    withFetch((url, init) => {
+      if (url.endsWith("/inventory")) return jsonResponse(inventory)
+      if (url.endsWith("/governance")) return jsonResponse(governance)
+      if (url.endsWith("/invitations/inv-2") && init?.method === "DELETE") {
+        deleted += 1
+        return jsonResponse(null, 204)
+      }
+      if (url.endsWith("/invitations")) return jsonResponse([completedInvitation])
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    renderPage(<SystemGovernancePage section="governance" />)
+    await waitFor(() =>
+      expect(screen.getByText("Bob · bob@example.com")).toBeTruthy()
+    )
+    fireEvent.click(screen.getByRole("button", { name: "删除" }))
+    respondToConfirm("删除")
+
+    await waitFor(() => expect(deleted).toBe(1))
+    expect(notifications).toContainEqual(["success", "邀请已删除"])
+    await waitFor(() =>
+      expect(screen.queryByText("Bob · bob@example.com")).toBeNull()
+    )
   })
 
   test("shows an empty state without manageable workspaces", async () => {
