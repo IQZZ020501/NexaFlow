@@ -742,6 +742,9 @@ export function AgentsPage({
 
   React.useEffect(() => {
     activeConversationIdRef.current = initialConversationId
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRegeneratingRunId(null)
+    setFeedbackPendingRunId(null)
   }, [initialConversationId, selectedAgentId])
 
   React.useEffect(() => {
@@ -1468,6 +1471,7 @@ export function AgentsPage({
     ) {
       return
     }
+    const conversationId = activeConversationIdRef.current
     setRegeneratingRunId(runId)
     const previous = runs.find((run) => run.id === runId)
     try {
@@ -1477,7 +1481,14 @@ export function AgentsPage({
         selectedAgent.id,
         runId
       )
-      const conversationId = activeConversationIdRef.current
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       setRuns((current) =>
         current.map((run) => (run.id === runId ? regenerated : run))
       )
@@ -1497,6 +1508,10 @@ export function AgentsPage({
           (event) => {
             applyStreamEvent(conversationId, regenerated.id, event)
             if (
+              isCurrentAgentConversation(
+                activeConversationIdRef.current,
+                conversationId
+              ) &&
               (event.type === "error" || event.type === "complete") &&
               ["failed", "cancelled"].includes(event.run.status)
             ) {
@@ -1505,16 +1520,37 @@ export function AgentsPage({
           },
           controller.signal
         ).catch((error: unknown) => {
-          if (!controller.signal.aborted) {
+          if (
+            !controller.signal.aborted &&
+            isCurrentAgentConversation(
+              activeConversationIdRef.current,
+              conversationId
+            )
+          ) {
             restorePrevious()
             reportError(error)
           }
         })
       }
     } catch (error) {
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       reportError(error)
     } finally {
-      setRegeneratingRunId(null)
+      if (
+        isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        setRegeneratingRunId(null)
+      }
     }
   }
 
@@ -1530,6 +1566,7 @@ export function AgentsPage({
     ) {
       return
     }
+    const conversationId = activeConversationIdRef.current
     const previous = runs.find((run) => run.id === runId)?.feedback ?? null
     setRuns((current) =>
       current.map((run) =>
@@ -1545,8 +1582,24 @@ export function AgentsPage({
         runId,
         value
       )
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       setRuns((current) => mergeAgentRunSnapshot(current, updated))
     } catch (error) {
+      if (
+        !isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        return
+      }
       setRuns((current) =>
         current.map((run) =>
           run.id === runId ? { ...run, feedback: previous } : run
@@ -1554,7 +1607,14 @@ export function AgentsPage({
       )
       reportError(error)
     } finally {
-      setFeedbackPendingRunId(null)
+      if (
+        isCurrentAgentConversation(
+          activeConversationIdRef.current,
+          conversationId
+        )
+      ) {
+        setFeedbackPendingRunId(null)
+      }
     }
   }
 
@@ -1571,6 +1631,8 @@ export function AgentsPage({
     setAskAbortController(null)
     setIsAsking(false)
     setIsRunsLoading(false)
+    setRegeneratingRunId(null)
+    setFeedbackPendingRunId(null)
     setResolvingCallId(null)
     router.push(
       appViewPath(selectedAgentId, "agent", "settings", conversationId)

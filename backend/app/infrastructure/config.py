@@ -2,8 +2,52 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import ArgumentError
 
-ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+
+
+def _database_url_from_env() -> str:
+    configured_url = os.getenv("DATABASE_URL", "").strip()
+    if configured_url:
+        try:
+            parsed_url = make_url(configured_url)
+        except ArgumentError as exc:
+            raise RuntimeError("Invalid DATABASE_URL.") from exc
+        if parsed_url.drivername.startswith("postgresql"):
+            expected = {
+                "POSTGRES_USER": parsed_url.username,
+                "POSTGRES_PASSWORD": parsed_url.password,
+                "POSTGRES_DB": parsed_url.database,
+            }
+            mismatched = [
+                key
+                for key, actual in expected.items()
+                if key in os.environ and os.environ[key] != actual
+            ]
+            if mismatched:
+                raise RuntimeError(
+                    "DATABASE_URL must match the configured PostgreSQL components: "
+                    f"{', '.join(mismatched)}."
+                )
+        return configured_url
+
+    try:
+        port = int(os.getenv("POSTGRES_PORT", "5432"))
+    except ValueError as exc:
+        raise RuntimeError("POSTGRES_PORT must be an integer.") from exc
+    if not 1 <= port <= 65535:
+        raise RuntimeError("POSTGRES_PORT must be between 1 and 65535.")
+    return URL.create(
+        "postgresql+psycopg",
+        username=os.getenv("POSTGRES_USER", "nexaflow"),
+        password=os.getenv("POSTGRES_PASSWORD", "nexaflow"),
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=port,
+        database=os.getenv("POSTGRES_DB", "nexaflow"),
+    ).render_as_string(hide_password=False)
 
 
 def load_env_file(path: Path = ENV_FILE) -> None:
@@ -63,10 +107,7 @@ class Settings:
             if origin.strip()
         )
         settings = cls(
-            database_url=os.getenv(
-                "DATABASE_URL",
-                "postgresql+psycopg://nexaflow:nexaflow@localhost:5432/nexaflow",
-            ),
+            database_url=_database_url_from_env(),
             jwt_secret_key=os.getenv("JWT_SECRET_KEY", ""),
             bootstrap_admin_username=os.getenv("BOOTSTRAP_ADMIN_USERNAME", ""),
             bootstrap_admin_email=os.getenv("BOOTSTRAP_ADMIN_EMAIL", ""),

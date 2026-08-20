@@ -8,7 +8,7 @@
 
 ### app/infrastructure/
 
-- `backend/app/infrastructure/config.py` — Settings 配置 dataclass：.env 加载、数据库/JWT/Qdrant/Celery、Agent 外部请求限流等全部环境配置与生产强校验
+- `backend/app/infrastructure/config.py` — Settings 配置 dataclass：加载仓库根 `.env`、从 PostgreSQL 组件安全构造连接串、数据库/JWT/Qdrant/Celery、Agent 外部请求限流等全部环境配置与生产强校验
 - `backend/app/infrastructure/session.py` — 异步数据库引擎与会话工厂，提供 FastAPI 依赖 `get_db`
 - `backend/app/infrastructure/security.py` — 密码哈希（pwdlib）、JWT access token 签发/校验、refresh token 生成与哈希
 - `backend/app/infrastructure/errors.py` — 错误日志入口 `log_error`：内部/外部（上游服务）错误来源分类与 `ExternalServiceError` 基类
@@ -84,10 +84,10 @@
   - `202608170002_workflow_tool_resources.py` — Workflow 发布版本冻结 canonical Tool 资源快照
   - `202608170003_workflow_agent_children.py` — Workflow Agent 节点的 root/parent/depth lineage 与等待子 Run 状态
 
-## backend 根配置
+## 仓库与 backend 配置
 
+- `.env.example` — 唯一环境变量模板：PostgreSQL 组件、环境/日志/JWT/模型密钥/知识存储/Qdrant/Redis/MCP/CORS/Agent 外部请求限流与引导管理员；宿主机与 Compose 共用根 `.env`
 - `backend/pyproject.toml` — 项目元数据与依赖声明（FastAPI/Celery/LangChain/LangGraph/MCP/Qdrant/Alembic 等）
-- `backend/.env.example` — 环境变量模板：环境/日志/数据库/JWT/模型密钥/知识存储/Qdrant/Redis/MCP/CORS/Agent 外部请求限流/引导管理员与默认工作区
 - `backend/README.md` — 后台 worker 运行说明（Celery 命令与共享 `KNOWLEDGE_STORAGE_DIR`/`QDRANT_URL` 要求）
 - `backend/Makefile` — 跨平台开发入口；`make worker-compose` 启动带 sandbox socket 的 Compose worker，host `make worker` 不支持 Python Tool/Workflow Code 执行
 - `backend/scripts/dev.py` — `make dev` 的跨平台 Uvicorn 与 Compose Worker 日志编排
