@@ -17,6 +17,12 @@ import { Button } from "@/components/ui/button"
 import { useLanguage } from "@/contexts/language-provider"
 import { type FeaturePageConfig } from "@/lib/pages"
 
+/**
+ * Renders a configurable placeholder feature page with search controls, empty-state actions, and an entry dialog.
+ *
+ * @param page - Configuration for the page content, icon, actions, and dialog fields
+ * @returns The rendered placeholder feature page
+ */
 export function PlaceholderPage({ page }: { page: FeaturePageConfig }) {
   const { t } = useLanguage()
   const Icon = page.icon

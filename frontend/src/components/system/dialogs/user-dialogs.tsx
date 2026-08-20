@@ -50,6 +50,23 @@ type CreateUserDialogProps = {
   handleUserCreateWorkspaceChange: (workspaceId: string) => void
 }
 
+/**
+ * Renders a dialog for creating a user and configuring their workspace, teams, and global administrator privileges.
+ *
+ * @param isUserCreateDialogOpen - Whether the dialog is open.
+ * @param setIsUserCreateDialogOpen - Updates the dialog's open state.
+ * @param userCreateForm - Form values for the new user.
+ * @param setUserCreateForm - Updates the new user form values.
+ * @param userCreateWorkspace - Workspace currently selected for the new user.
+ * @param userCreateTeams - Teams available in the selected workspace.
+ * @param isUserCreateTeamsLoading - Whether teams for the selected workspace are loading.
+ * @param activeWorkspaces - Workspaces available for selection.
+ * @param me - Current user and their administrative permissions.
+ * @param selectedWorkspaceId - Current administrator's workspace identifier.
+ * @param isCreatingUser - Whether user creation is in progress.
+ * @param handleCreateUser - Handles submission of the new user form.
+ * @param handleUserCreateWorkspaceChange - Updates the selected workspace.
+ */
 export function CreateUserDialog({
   isUserCreateDialogOpen,
   setIsUserCreateDialogOpen,
@@ -197,6 +214,27 @@ export function CreateUserDialog({
               </Field>
             ) : null}
             {me.user.is_global_admin ? (
+              <label className="flex items-start gap-3 rounded-lg border p-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4"
+                  checked={userCreateForm.isGlobalAdmin}
+                  onChange={(event) =>
+                    setUserCreateForm((current) => ({
+                      ...current,
+                      isGlobalAdmin: event.target.checked,
+                    }))
+                  }
+                />
+                <span className="grid gap-1">
+                  <span className="font-medium">{t("全局管理员权限")}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("可治理全部工作空间")}
+                  </span>
+                </span>
+              </label>
+            ) : null}
+            {me.user.is_global_admin ? (
               <Field>
                 <FieldLabel>{t("团队")}</FieldLabel>
                 {!userCreateForm.workspaceId ? (
@@ -274,13 +312,24 @@ export function CreateUserDialog({
 type EditUserDialogProps = {
   userForm: UserForm | null
   setUserForm: React.Dispatch<React.SetStateAction<UserForm | null>>
+  canManageGlobalAdmin: boolean
   isSavingUser: boolean
   handleUpdateUser: React.FormEventHandler<HTMLFormElement>
 }
 
+/**
+ * Provides a dialog for editing a user's account information and global administrator privileges.
+ *
+ * @param userForm - The user's editable account details, or `null` when the dialog is closed
+ * @param setUserForm - Updates the editable user state and closes the dialog when set to `null`
+ * @param canManageGlobalAdmin - Whether the current user can change global administrator privileges
+ * @param isSavingUser - Whether the user changes are being saved
+ * @param handleUpdateUser - Submits the edited user details
+ */
 export function EditUserDialog({
   userForm,
   setUserForm,
+  canManageGlobalAdmin,
   isSavingUser,
   handleUpdateUser,
 }: EditUserDialogProps) {
@@ -345,6 +394,31 @@ export function EditUserDialog({
                   required
                 />
               </Field>
+              {canManageGlobalAdmin ? (
+                <label className="flex items-start gap-3 rounded-lg border p-3 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4"
+                    checked={userForm.isGlobalAdmin}
+                    onChange={(event) =>
+                      setUserForm((current) =>
+                        current
+                          ? {
+                              ...current,
+                              isGlobalAdmin: event.target.checked,
+                            }
+                          : current
+                      )
+                    }
+                  />
+                  <span className="grid gap-1">
+                    <span className="font-medium">{t("全局管理员权限")}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t("可治理全部工作空间")}
+                    </span>
+                  </span>
+                </label>
+              ) : null}
             </FieldGroup>
             <DialogFooter className="pt-5">
               <Button

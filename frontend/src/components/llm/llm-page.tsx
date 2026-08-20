@@ -188,6 +188,9 @@ const EMPTY_MODEL_FORM: ModelForm = {
   status: "active",
 }
 
+/**
+ * Manages workspace-registered language models, including browsing, searching, creating, editing, and deleting models.
+ */
 export function LlmPage() {
   const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
@@ -854,6 +857,15 @@ export function LlmPage() {
   )
 }
 
+/**
+ * Displays available model providers and lets the user select one.
+ *
+ * @param providers - The available provider catalog entries
+ * @param open - Whether the dialog is open
+ * @param isLoading - Whether provider data is loading
+ * @param onOpenChange - Called when the dialog open state changes
+ * @param onSelect - Called with the selected provider identifier
+ */
 function ProviderPickerDialog({
   providers,
   open,
@@ -913,6 +925,14 @@ function ProviderPickerDialog({
   )
 }
 
+/**
+ * Renders a provider icon using a mapped brand icon, provider image, or label fallback.
+ *
+ * @param provider - Provider catalog data used to select the icon.
+ * @param label - Text used for the fallback icon.
+ * @param frameClassName - CSS classes applied to the icon frame.
+ * @param imageClassName - CSS classes applied to the provider image.
+ */
 function ProviderIcon({
   provider,
   label,
@@ -969,6 +989,23 @@ function ProviderIcon({
   )
 }
 
+/**
+ * Renders a form for creating or editing a registered model.
+ *
+ * @param form - The model configuration being edited or submitted
+ * @param providerCatalog - Available providers and their supported model types
+ * @param baseModels - Base models available for the selected provider
+ * @param credentialFields - Credential fields required by the selected provider
+ * @param open - Whether the dialog is visible
+ * @param isSaving - Whether the form submission is in progress
+ * @param isBaseModelsLoading - Whether base models are being loaded
+ * @param isCredentialFieldsLoading - Whether credential fields are being loaded
+ * @param onOpenChange - Handles changes to the dialog visibility
+ * @param onFormChange - Updates the model form
+ * @param onProviderChange - Selects a provider
+ * @param onModelTypeChange - Selects a model type
+ * @param onSubmit - Handles form submission
+ */
 function ModelDialog({
   form,
   providerCatalog,
@@ -1254,6 +1291,14 @@ function ModelDialog({
   )
 }
 
+/**
+ * Renders a centered empty-state message with an icon and optional action.
+ *
+ * @param icon - The icon component displayed above the message
+ * @param title - The empty-state heading
+ * @param description - The explanatory text
+ * @param action - Optional content displayed below the description
+ */
 function EmptyState({
   icon: Icon,
   title,
@@ -1281,6 +1326,12 @@ function EmptyState({
   )
 }
 
+/**
+ * Displays an enabled or disabled badge for a model status.
+ *
+ * @param status - The model status; `active` indicates that the model is enabled.
+ * @returns A status badge with the corresponding label and visual variant.
+ */
 function StatusBadge({ status }: { status: string }) {
   const { t } = useLanguage()
   return (
@@ -1290,17 +1341,37 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+/**
+ * Resolves a provider code to its catalog name.
+ *
+ * @param providers - The available provider catalog entries
+ * @param value - The provider code to resolve
+ * @returns The catalog name for the provider, or the original code when no matching provider exists
+ */
 function providerLabel(providers: ModelProviderCatalog[], value: string) {
   return (
     providers.find((provider) => provider.provider === value)?.name ?? value
   )
 }
 
+/**
+ * Resolves a model type to its translated label.
+ *
+ * @param value - The model type value to translate
+ * @param t - The translation function
+ * @returns The translated model type label, or the original value when no translation is defined
+ */
 function modelTypeLabel(value: string, t: TFunction) {
   const labelKey = MODEL_TYPE_LABELS[value]
   return labelKey ? t(labelKey) : value
 }
 
+/**
+ * Determines the display-order index for a provider.
+ *
+ * @param provider - The provider identifier to locate
+ * @returns The provider's configured index, or the length of the display-order list when the provider is not configured
+ */
 function providerDisplayIndex(provider: string) {
   const index = PROVIDER_DISPLAY_ORDER.indexOf(provider)
   return index === -1 ? PROVIDER_DISPLAY_ORDER.length : index

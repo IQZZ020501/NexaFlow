@@ -2,6 +2,13 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Renders a styled text input that forwards standard input properties.
+ *
+ * @param className - Additional CSS classes to apply to the input
+ * @param type - The input control type
+ * @returns A styled input element
+ */
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (
     <input

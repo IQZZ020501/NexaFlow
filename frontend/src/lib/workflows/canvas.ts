@@ -12,6 +12,14 @@ type CanvasSize = { width: number; height: number }
 export type CanvasRect = CanvasPosition & CanvasSize
 const CANVAS_CARD_GAP = 24
 
+/**
+ * Computes a canvas position after applying pointer movement from the drag start.
+ *
+ * @param position - The position before dragging
+ * @param dragStart - The pointer position when dragging began
+ * @param pointer - The current pointer position
+ * @returns The updated canvas position
+ */
 export function draggedCanvasPosition(
   position: CanvasPosition,
   dragStart: CanvasPosition,
@@ -23,6 +31,15 @@ export function draggedCanvasPosition(
   }
 }
 
+/**
+ * Finds a position that avoids overlapping canvas obstacles.
+ *
+ * @param position - The proposed canvas position.
+ * @param size - The dimensions of the item being positioned.
+ * @param obstacles - Rectangles that the item must avoid.
+ * @param gap - Minimum spacing required between the item and each obstacle.
+ * @returns The proposed position when clear, or the nearest non-overlapping candidate found by the placement heuristic; the proposed position if no candidate is available.
+ */
 export function nonOverlappingCanvasPosition(
   position: CanvasPosition,
   size: CanvasSize,
@@ -57,6 +74,14 @@ export function nonOverlappingCanvasPosition(
     )[0] ?? position
 }
 
+/**
+ * Positions a canvas item immediately to the left of an anchor rectangle.
+ *
+ * @param anchor - The rectangle that determines the item's vertical position.
+ * @param size - The dimensions of the item to position.
+ * @param gap - The space to leave between the item and the anchor.
+ * @returns The item's position to the left of the anchor.
+ */
 export function canvasPositionLeftOf(
   anchor: CanvasRect,
   size: CanvasSize,
@@ -65,6 +90,14 @@ export function canvasPositionLeftOf(
   return { x: anchor.x - size.width - gap, y: anchor.y }
 }
 
+/**
+ * Adjusts the viewport so a canvas X coordinate remains within the specified left padding.
+ *
+ * @param viewport - The current workflow viewport
+ * @param x - The canvas X coordinate to include
+ * @param padding - The minimum screen-space distance from the left edge
+ * @returns The adjusted viewport
+ */
 export function viewportIncludingCanvasX(
   viewport: WorkflowGraph["viewport"],
   x: number,
@@ -75,6 +108,13 @@ export function viewportIncludingCanvasX(
   return { ...viewport, x: viewport.x + padding - screenX }
 }
 
+/**
+ * Adjusts the viewport so a canvas Y coordinate appears at or below the top padding.
+ *
+ * @param y - The canvas Y coordinate to bring into view
+ * @param padding - The minimum screen-space distance from the top edge
+ * @returns The adjusted viewport
+ */
 export function viewportIncludingCanvasY(
   viewport: WorkflowGraph["viewport"],
   y: number,
@@ -85,6 +125,12 @@ export function viewportIncludingCanvasY(
   return { ...viewport, y: viewport.y + padding - screenY }
 }
 
+/**
+ * Converts workflow nodes into canvas rectangles using their positions and available dimensions.
+ *
+ * @param nodes - The workflow nodes to convert
+ * @returns A canvas rectangle for each workflow node
+ */
 export function workflowNodeRects(nodes: WorkflowNode[]): CanvasRect[] {
   return nodes.map((node) => {
     const runtimeNode = node as WorkflowNode & {
@@ -101,6 +147,12 @@ export function workflowNodeRects(nodes: WorkflowNode[]): CanvasRect[] {
   })
 }
 
+/**
+ * Applies workflow node changes, limiting read-only updates to dimensions and selection.
+ *
+ * @param readOnly - Whether to restrict changes to dimensions and selection updates.
+ * @returns The workflow nodes after applying the permitted changes.
+ */
 export function applyWorkflowNodeChanges(
   nodes: WorkflowNode[],
   changes: NodeChange[],
@@ -112,6 +164,12 @@ export function applyWorkflowNodeChanges(
   return applyNodeChanges(allowed, nodes) as WorkflowNode[]
 }
 
+/**
+ * Applies workflow edge changes, limiting read-only updates to edge selection changes.
+ *
+ * @param readOnly - Whether to restrict changes to selection updates
+ * @returns The updated workflow edges
+ */
 export function applyWorkflowEdgeChanges(
   edges: WorkflowEdge[],
   changes: EdgeChange[],
@@ -123,6 +181,14 @@ export function applyWorkflowEdgeChanges(
   return applyEdgeChanges(allowed, edges) as WorkflowEdge[]
 }
 
+/**
+ * Selects the viewport state to persist based on the workflow's editing mode.
+ *
+ * @param current - The currently persisted viewport
+ * @param next - The proposed viewport
+ * @param readOnly - Whether the workflow is read-only
+ * @returns The current viewport when read-only, otherwise the proposed viewport
+ */
 export function persistedWorkflowViewport(
   current: WorkflowGraph["viewport"],
   next: WorkflowGraph["viewport"],

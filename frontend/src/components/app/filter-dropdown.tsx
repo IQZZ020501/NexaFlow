@@ -13,6 +13,15 @@ export type FilterDropdownOption = {
   label: string
 }
 
+/**
+ * Renders a dropdown for selecting a value from a list of labeled options.
+ *
+ * @param ariaLabel - Accessible label for the dropdown trigger
+ * @param value - Currently selected option value
+ * @param options - Available dropdown options
+ * @param onChange - Called with the selected option value
+ * @returns The rendered filter dropdown
+ */
 export function FilterDropdown({
   id,
   ariaLabel,
@@ -45,6 +54,7 @@ export function FilterDropdown({
             className,
           )}
           aria-label={ariaLabel}
+          title={selectedOption?.label ?? value}
           disabled={disabled}
         >
           <span className="truncate">{selectedOption?.label ?? value}</span>
@@ -53,7 +63,9 @@ export function FilterDropdown({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="min-w-[var(--radix-dropdown-menu-trigger-width)]"
+        sideOffset={6}
+        collisionPadding={8}
+        className="max-h-80 min-w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto overscroll-contain"
       >
         <DropdownMenuGroup>
           {options.map((option) => (
@@ -61,6 +73,7 @@ export function FilterDropdown({
               key={option.value}
               onSelect={() => onChange(option.value)}
               className="justify-between"
+              title={option.label}
             >
               <span className="truncate">{option.label}</span>
               {option.value === value ? (

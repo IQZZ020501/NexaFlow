@@ -30,10 +30,22 @@ export const languageLocales: Record<Language, string> = {
   en: "en-US",
 }
 
+/**
+ * Determines whether a value is a supported language identifier.
+ *
+ * @param value - The value to check
+ * @returns `true` if the value identifies a supported language, `false` otherwise
+ */
 export function isLanguage(value: string | null): value is Language {
   return languageOptions.some((option) => option.value === value)
 }
 
+/**
+ * Resolves a translation message and replaces its named placeholders.
+ *
+ * @param values - Values used to replace `{name}`-style placeholders; unmatched placeholders are preserved.
+ * @returns The translated message, falling back to Simplified Chinese or the translation key when necessary.
+ */
 export function translate(
   language: Language,
   key: TranslationKey,

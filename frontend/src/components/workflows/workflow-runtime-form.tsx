@@ -9,6 +9,13 @@ import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/contexts/language-provider"
 import type { WorkflowPendingForm } from "@/lib/api/workflows"
 
+/**
+ * Renders a pending workflow form and submits its field values.
+ *
+ * @param form - The workflow form definition and field configuration
+ * @param submitting - Whether form submission is in progress
+ * @param onSubmit - Callback invoked with the collected field values
+ */
 export function WorkflowRuntimeForm({
   form,
   submitting,

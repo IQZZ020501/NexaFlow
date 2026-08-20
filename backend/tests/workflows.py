@@ -1650,6 +1650,9 @@ async def assert_first_claim_sets_deadline_once(run_id: str) -> None:
 
 
 def test_workflow_api_definition_publish_run_and_audit() -> None:
+    """
+    Exercise the workflow API lifecycle, including definition revisions, publication, runs, permissions, feedback, regeneration, uploads, and audit events.
+    """
     from tests.agents import agent_model_server, create_workspace_user, model_payload
 
     with test_client() as client, agent_model_server() as model_base_url:

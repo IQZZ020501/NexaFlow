@@ -26,6 +26,7 @@ from app.infrastructure.agent_live_stream import (
     AgentLiveStreamReader,
 )
 from app.infrastructure.config import Settings
+from app.application.governance import enforce_workspace_run_quota
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import tools as tool_repository
@@ -207,6 +208,21 @@ async def list_agent_runs(
     offset: int = 0,
     conversation_id: str | None = None,
 ) -> list[AgentRunResponse]:
+    """
+    List the actor's console runs for an agent.
+    
+    Parameters:
+    	workspace_id (str): Identifier of the workspace containing the agent.
+    	agent_id (str): Identifier of the agent whose runs are listed.
+    	actor (User): User requesting access to the runs.
+    	workspace_role (str | None): Actor's role in the workspace.
+    	limit (int | None): Maximum number of runs to return.
+    	offset (int): Number of runs to skip.
+    	conversation_id (str | None): Restricts results to a conversation.
+    
+    Returns:
+    	list[AgentRunResponse]: The actor's accessible agent runs.
+    """
     agent = await get_agent(db, workspace_id, agent_id)
     await require_agent_view(db, agent, actor, workspace_role)
     _require_agent_run_application(agent)
@@ -285,6 +301,18 @@ async def get_agent_run_entity(
     actor: User,
     workspace_role: str | None,
 ) -> AgentRun:
+    """
+    Retrieve a console run belonging to the specified agent and actor.
+    
+    Parameters:
+        actor (User): User whose access and ownership are validated.
+    
+    Returns:
+        AgentRun: The requested agent run.
+    
+    Raises:
+        HTTPException: If the run is inaccessible or does not belong to the specified agent, workspace, or actor.
+    """
     agent = await get_agent(db, workspace_id, agent_id)
     await require_agent_view(db, agent, actor, workspace_role)
     _require_agent_run_application(agent)
@@ -307,6 +335,16 @@ async def validate_regeneration_source(
     *,
     origin: str,
 ) -> None:
+    """
+    Validate that a completed agent run can be regenerated.
+    
+    Parameters:
+    	source (AgentRun): The completed run to validate.
+    	origin (str): The execution origin used when checking tool availability.
+    
+    Raises:
+    	HTTPException: If the run is incomplete, its conversation is active, or its publication, model, or tool snapshots are unavailable, invalid, or no longer executable.
+    """
     if source.status != AGENT_RUN_SUCCEEDED_STATUS:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -384,7 +422,16 @@ async def validate_regeneration_source(
 
 
 def build_regenerated_agent_run(source: AgentRun, actor: User) -> AgentRun:
-    """Create a fresh root run from an immutable source snapshot."""
+    """
+    Create a queued root run from an immutable source run snapshot.
+    
+    Parameters:
+    	source (AgentRun): The completed run whose configuration and execution context are copied.
+    	actor (User): The user associated with the regenerated run.
+    
+    Returns:
+    	AgentRun: A new queued run linked to the source run.
+    """
     return AgentRun(
         workspace_id=source.workspace_id,
         agent_id=source.agent_id,
@@ -424,6 +471,19 @@ async def regenerate_agent_run_from_source(
     *,
     origin: str = "agent",
 ) -> AgentRun:
+    """
+    Create and enqueue a new agent run from a completed source run.
+    
+    Parameters:
+    	source (AgentRun): The completed run whose configuration and conversation metadata are regenerated.
+    	origin (str): The source of the regeneration request.
+    
+    Returns:
+    	AgentRun: The newly queued agent run.
+    
+    Raises:
+    	HTTPException: If the conversation already has an active run or the source fails regeneration validation.
+    """
     await validate_regeneration_source(db, source, origin=origin)
     regenerated = build_regenerated_agent_run(source, actor)
     try:
@@ -450,6 +510,19 @@ async def update_run_feedback(
     run: AgentRun,
     value: str | None,
 ) -> AgentRun:
+    """
+    Update the feedback value for a completed agent run.
+    
+    Parameters:
+    	run (AgentRun): The completed run to update.
+    	value (str | None): The feedback value, either `"positive"`, `"negative"`, or `None` to clear existing feedback.
+    
+    Returns:
+    	AgentRun: The refreshed agent run with the updated feedback.
+    
+    Raises:
+    	HTTPException: If the run has no completed result or the feedback value is invalid.
+    """
     if run.status != AGENT_RUN_SUCCEEDED_STATUS or not run.result:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -477,6 +550,18 @@ async def regenerate_agent_run(
     workspace_role: str | None,
     settings: Settings,
 ) -> AgentRunResponse:
+    """
+    Regenerate an agent run from a completed source run.
+    
+    Parameters:
+        workspace_id (str): Identifier of the workspace containing the agent.
+        agent_id (str): Identifier of the agent.
+        run_id (str): Identifier of the source run.
+        workspace_role (str | None): Actor's role in the workspace.
+    
+    Returns:
+        AgentRunResponse: The newly queued regenerated run.
+    """
     source = await get_agent_run_entity(
         db,
         workspace_id,
@@ -506,6 +591,15 @@ async def set_agent_run_feedback(
     workspace_role: str | None,
     value: str | None,
 ) -> AgentRunResponse:
+    """
+    Update feedback for an agent run and return its API representation.
+    
+    Parameters:
+        value (str | None): Feedback value: `None`, `"positive"`, or `"negative"`.
+    
+    Returns:
+        AgentRunResponse: The updated agent run response.
+    """
     source = await get_agent_run_entity(
         db,
         workspace_id,
@@ -519,6 +613,15 @@ async def set_agent_run_feedback(
 
 
 def tool_call_to_response(call: Any) -> AgentToolCallResponse:
+    """
+    Convert an agent tool-call entity into its API response representation.
+    
+    Parameters:
+    	call (Any): The tool-call entity to convert.
+    
+    Returns:
+    	AgentToolCallResponse: The response containing the tool call's details and execution state.
+    """
     return AgentToolCallResponse(
         call_id=call.call_id,
         turn=call.turn,
@@ -856,12 +959,31 @@ async def prepare_agent_run(
     allow_pinned_publication: bool = False,
     authorized_by_parent: bool = False,
 ) -> tuple[AgentRun, Any]:
+    """
+    Prepare a queued agent run using the selected agent configuration, resources, model, tools, and conversation.
+    
+    Parameters:
+    	goal (str): The user-provided objective for the run.
+    	persist (bool): Whether to commit and refresh the created run.
+    	conversation_id (str | None): Conversation to associate with the run.
+    	access_source (str): Run access origin, such as `"console"`, `"public"`, or `"api"`.
+    	consumer_id (str | None): External consumer identifier for non-console runs.
+    	publication (AgentPublication | None): Publication configuration to use.
+    	publication_version (AgentPublicationVersion | None): Specific publication version to use.
+    	attachment_context (str): Context derived from attached files.
+    	allow_pinned_publication (bool): Whether external access may use a publication version that is not currently published.
+    	authorized_by_parent (bool): Whether console access was authorized by a parent operation.
+    
+    Returns:
+    	tuple[AgentRun, Any]: The prepared agent run and its resolved model.
+    """
     if access_source not in {"console", "public", "api"}:
         raise ValueError("Invalid Agent run access source.")
     if access_source == "console":
         consumer_id = actor.id
     elif not consumer_id:
         raise ValueError("External Agent runs require a consumer id.")
+    await enforce_workspace_run_quota(db, workspace_id)
     agent = await agent_repository.lock_agent(db, agent_id)
     if agent is None or agent.workspace_id != workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent not found.")

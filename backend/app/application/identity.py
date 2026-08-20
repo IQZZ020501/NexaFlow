@@ -62,7 +62,20 @@ async def issue_refresh_session(
     db: AsyncSession,
     user: User,
     settings: Settings,
+    *,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
 ) -> str:
+    """
+    Create a refresh session and return its plaintext token.
+    
+    Parameters:
+    	user_agent (str | None): Optional client user-agent metadata.
+    	ip_address (str | None): Optional client IP address.
+    
+    Returns:
+    	str: The plaintext refresh token.
+    """
     now = utc_now()
     await user_repository.delete_expired_refresh_sessions(db, now)
     token = create_refresh_token()
@@ -72,6 +85,9 @@ async def issue_refresh_session(
             user_id=user.id,
             token_hash=hash_refresh_token(token),
             expires_at=now + timedelta(days=settings.refresh_token_expires_days),
+            user_agent=user_agent[:512] if user_agent else None,
+            ip_address=ip_address,
+            last_used_at=now,
         ),
     )
     return token
@@ -393,7 +409,21 @@ async def authenticate_user(
     password: str,
     settings: Settings,
     ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> tuple[TokenResponse, str]:
+    """
+    Authenticate an active user and issue access and refresh tokens.
+    
+    Parameters:
+    	ip_address (str | None): Client IP address used for rate limiting and session metadata.
+    	user_agent (str | None): Client user-agent string stored with the refresh session.
+    
+    Returns:
+    	tuple[TokenResponse, str]: The access-token response and raw refresh token.
+    
+    Raises:
+    	HTTPException: If login attempts are rate-limited, the rate limiter is unavailable, or the credentials are invalid.
+    """
     username = normalize_username(username)
     try:
         await enforce_login_rate_limit(settings, username, ip_address)
@@ -434,7 +464,13 @@ async def authenticate_user(
         await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials.")
 
-    refresh_token = await issue_refresh_session(db, user, settings)
+    refresh_token = await issue_refresh_session(
+        db,
+        user,
+        settings,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
     await db.commit()
     log_event(
         logger,
@@ -452,6 +488,19 @@ async def refresh_access_token(
     refresh_token: str,
     settings: Settings,
 ) -> TokenResponse:
+    """
+    Issue a new access token for a valid refresh token and active user.
+    
+    Parameters:
+        refresh_token (str): Refresh token to validate.
+        settings (Settings): Application settings used to configure the access token.
+    
+    Returns:
+        TokenResponse: Access token response for the authenticated user.
+    
+    Raises:
+        HTTPException: With status 401 when the refresh token is invalid or the user is inactive.
+    """
     session = await user_repository.get_active_refresh_session(
         db,
         hash_refresh_token(refresh_token),
@@ -471,6 +520,9 @@ async def refresh_access_token(
             user_id=session.user_id,
         )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token.")
+    session.last_used_at = utc_now()
+    await user_repository.save_refresh_session(db, session)
+    await db.commit()
     log_event(
         logger,
         logging.INFO,
@@ -493,7 +545,25 @@ async def change_password(
     new_password: str,
     settings: Settings,
     current_password: str | None = None,
+    *,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> str:
+    """
+    Change the user's password and issue a new refresh token.
+    
+    Parameters:
+    	current_password (str | None): The user's existing password for verification.
+    	new_password (str): The replacement password.
+    	ip_address (str | None): The client IP address associated with the new session.
+    	user_agent (str | None): The client user agent associated with the new session.
+    
+    Returns:
+    	str: The newly issued refresh token.
+    
+    Raises:
+    	HTTPException: If the current password is invalid or the new password matches the existing password.
+    """
     if not current_password or not verify_password(current_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is invalid.")
     if verify_password(new_password, user.password_hash):
@@ -503,7 +573,13 @@ async def change_password(
     user.must_change_password = False
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
     user = await user_repository.save_user(db, user)
-    refresh_token = await issue_refresh_session(db, user, settings)
+    refresh_token = await issue_refresh_session(
+        db,
+        user,
+        settings,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
     await db.commit()
     log_event(
         logger,

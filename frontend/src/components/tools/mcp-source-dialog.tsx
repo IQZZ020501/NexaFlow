@@ -47,6 +47,14 @@ import { getErrorMessage } from "@/lib/errors"
 const TEXTAREA_CLASS =
   "min-h-24 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
 
+/**
+ * Provides a dialog for configuring and submitting an MCP server connection.
+ *
+ * @param canUsePrivileged - Whether privileged transports and private network URLs are available
+ * @param returnFocusRef - Element to refocus when the dialog closes
+ * @param onSubmit - Handles the validated MCP server configuration
+ * @param onError - Reports submission errors
+ */
 export function McpConnectionDialog({
   open,
   onOpenChange,
@@ -359,6 +367,14 @@ export function McpConnectionDialog({
   )
 }
 
+/**
+ * Provides a dialog for creating an MCP source in a workspace.
+ *
+ * @param token - Authentication token used to create the source
+ * @param workspaceId - Workspace where the source is created
+ * @param onCreated - Callback invoked with the created source
+ * @param onError - Callback invoked with a formatted error message
+ */
 export function McpSourceDialog({
   open,
   onOpenChange,

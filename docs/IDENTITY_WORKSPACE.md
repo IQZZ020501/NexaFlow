@@ -54,7 +54,7 @@ api/{auth,workspaces,teams,tool_sources,tools,mcp_servers,admin/users,admin/audi
 
 ## 关键约定
 
-- 全局管理员（`is_global_admin`）是平台超管：创建/管理工作空间生命周期，不穿透工作空间成员/知识库/工具权限。
+- 系统管理员（`is_global_admin`）是平台级治理者：可创建、管理和审计所有工作空间，并治理跨工作空间的成员、团队、运行与安全策略；工作空间管理员负责本空间成员、全部团队及空间级策略。资源级授权仍按工作空间隔离并记录审计。
 - 角色只有 `admin`/`member` 两级；资源级授权通过 `ResourcePermission`。知识库使用 `view/edit`，Agent 使用 `view`，Tool 使用不可转授的 `view/use`。
 - 团队是组织标签：支持成员管理（添加/列表/改角色/移除，需工作区管理员），不参与资源授权；团队成员必须是工作区成员。
 - 知识库 owner（`created_by_user_id`）可通过 owner 转移接口变更；创建者与工作区管理员可管理资源权限。

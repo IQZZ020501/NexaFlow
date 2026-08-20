@@ -130,14 +130,34 @@ export type ToolPermission = {
 
 export type ToolPolicyMode = "approval_required" | "read_only" | "disabled"
 
+/**
+ * Builds the workspace-scoped API path for tool operations.
+ *
+ * @param workspaceId - The workspace identifier
+ * @param suffix - An optional path suffix
+ * @returns The workspace tool API path
+ */
 function toolsPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/tools${suffix}`
 }
 
+/**
+ * Builds the workspace-scoped API path for tool sources.
+ *
+ * @param workspaceId - The workspace identifier
+ * @param suffix - An optional path suffix
+ * @returns The tool-sources API path
+ */
 function toolSourcesPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/tool-sources${suffix}`
 }
 
+/**
+ * Retrieves a page of tools for a workspace.
+ *
+ * @param options - Optional pagination settings.
+ * @returns The requested page of tool summaries.
+ */
 export function listTools(
   token: string,
   workspaceId: string,
@@ -151,6 +171,11 @@ export function listTools(
 
 const TOOL_PAGE_SIZE = 200
 
+/**
+ * Retrieves all tools available in a workspace.
+ *
+ * @returns The complete list of tools in the workspace
+ */
 export async function listAllTools(token: string, workspaceId: string) {
   const tools: ToolSummary[] = []
   let offset = 0
@@ -166,10 +191,26 @@ export async function listAllTools(token: string, workspaceId: string) {
   }
 }
 
+/**
+ * Retrieves detailed information about a workspace tool.
+ *
+ * @param token - Authentication token for the request
+ * @param workspaceId - Workspace containing the tool
+ * @param toolId - The identifier of the tool to retrieve
+ * @returns The tool details
+ */
 export function getTool(token: string, workspaceId: string, toolId: string) {
   return request<ToolDetail>(toolsPath(workspaceId, `/${toolId}`), { token })
 }
 
+/**
+ * Retrieves a paginated list of tool sources for a workspace.
+ *
+ * @param token - Authentication token for the request
+ * @param workspaceId - Workspace containing the tool sources
+ * @param options - Optional pagination settings.
+ * @returns The matching tool source details.
+ */
 export function listToolSources(
   token: string,
   workspaceId: string,
@@ -181,6 +222,11 @@ export function listToolSources(
   )
 }
 
+/**
+ * Retrieves all tool sources in a workspace.
+ *
+ * @returns The complete list of tool source details.
+ */
 export async function listAllToolSources(token: string, workspaceId: string) {
   const sources: ToolSourceDetail[] = []
   let offset = 0
@@ -196,6 +242,12 @@ export async function listAllToolSources(token: string, workspaceId: string) {
   }
 }
 
+/**
+ * Creates an MCP tool source for a workspace.
+ *
+ * @param payload - The MCP source configuration and connection details.
+ * @returns Details of the created MCP tool source.
+ */
 export function createMcpSource(
   token: string,
   workspaceId: string,
@@ -208,6 +260,12 @@ export function createMcpSource(
   })
 }
 
+/**
+ * Refreshes an MCP tool source and retrieves its updated details.
+ *
+ * @param sourceId - The identifier of the tool source to refresh
+ * @returns The refreshed tool source details
+ */
 export function refreshToolSource(
   token: string,
   workspaceId: string,
@@ -219,6 +277,13 @@ export function refreshToolSource(
   )
 }
 
+/**
+ * Enables or disables an MCP tool source.
+ *
+ * @param sourceId - The identifier of the tool source to update
+ * @param enabled - Whether the tool source should be enabled
+ * @returns The updated tool source details
+ */
 export function setToolSourceEnabled(
   token: string,
   workspaceId: string,
@@ -234,6 +299,13 @@ export function setToolSourceEnabled(
   )
 }
 
+/**
+ * Deletes a tool source from a workspace.
+ *
+ * @param token - Authentication token for the request
+ * @param workspaceId - Workspace containing the tool source
+ * @param sourceId - Identifier of the tool source to delete
+ */
 export function deleteToolSource(
   token: string,
   workspaceId: string,
@@ -245,6 +317,12 @@ export function deleteToolSource(
   })
 }
 
+/**
+ * Creates a Python tool in a workspace.
+ *
+ * @param payload - The Python tool configuration
+ * @returns Details of the created tool
+ */
 export function createPythonTool(
   token: string,
   workspaceId: string,
@@ -257,6 +335,13 @@ export function createPythonTool(
   })
 }
 
+/**
+ * Updates a Python tool draft using an expected revision.
+ *
+ * @param toolId - The identifier of the Python tool to update
+ * @param payload - The draft data and revision expected by the update
+ * @returns The updated Python tool draft
+ */
 export function updatePythonToolDraft(
   token: string,
   workspaceId: string,
@@ -270,6 +355,12 @@ export function updatePythonToolDraft(
   })
 }
 
+/**
+ * Starts a test invocation of a Python tool.
+ *
+ * @param argumentsValue - Arguments supplied to the tool invocation
+ * @returns The resulting tool invocation
+ */
 export function testPythonTool(
   token: string,
   workspaceId: string,
@@ -283,6 +374,13 @@ export function testPythonTool(
   })
 }
 
+/**
+ * Retrieves the result of a Python tool test invocation.
+ *
+ * @param toolId - The identifier of the Python tool
+ * @param invocationId - The identifier of the test invocation
+ * @returns The test invocation details
+ */
 export function getPythonToolTest(
   token: string,
   workspaceId: string,
@@ -295,6 +393,12 @@ export function getPythonToolTest(
   )
 }
 
+/**
+ * Publishes a Python tool.
+ *
+ * @param toolId - The identifier of the Python tool to publish
+ * @returns The published tool details
+ */
 export function publishPythonTool(
   token: string,
   workspaceId: string,
@@ -306,6 +410,13 @@ export function publishPythonTool(
   })
 }
 
+/**
+ * Enables or disables a Python tool.
+ *
+ * @param toolId - The identifier of the Python tool
+ * @param enabled - Whether the tool should be enabled
+ * @returns The updated tool details
+ */
 export function setPythonToolEnabled(
   token: string,
   workspaceId: string,
@@ -318,6 +429,13 @@ export function setPythonToolEnabled(
   )
 }
 
+/**
+ * Archives a Python tool.
+ *
+ * @param token - Authentication token for the request
+ * @param workspaceId - Workspace containing the tool
+ * @param toolId - Identifier of the tool to archive
+ */
 export function archivePythonTool(
   token: string,
   workspaceId: string,
@@ -329,6 +447,12 @@ export function archivePythonTool(
   })
 }
 
+/**
+ * Updates the policy mode for a workspace tool.
+ *
+ * @param mode - The policy mode to apply to the tool
+ * @returns The updated tool details
+ */
 export function updateToolPolicy(
   token: string,
   workspaceId: string,
@@ -342,6 +466,13 @@ export function updateToolPolicy(
   })
 }
 
+/**
+ * Lists users who have permission to access a tool.
+ *
+ * @param toolId - The identifier of the tool whose permissions are listed
+ * @param options - Pagination options for limiting and offsetting the results
+ * @returns The tool's user permissions
+ */
 export function listToolPermissions(
   token: string,
   workspaceId: string,
@@ -354,6 +485,12 @@ export function listToolPermissions(
   )
 }
 
+/**
+ * Retrieves all user permissions for a tool across paginated results.
+ *
+ * @param toolId - The identifier of the tool whose permissions are retrieved
+ * @returns The complete list of user permissions for the tool
+ */
 export async function listAllToolPermissions(
   token: string,
   workspaceId: string,
@@ -373,6 +510,12 @@ export async function listAllToolPermissions(
   }
 }
 
+/**
+ * Assigns a permission level to a user for a tool.
+ *
+ * @param permission - The access level to assign: `view` or `use`
+ * @returns The assigned tool permission
+ */
 export function setToolPermission(
   token: string,
   workspaceId: string,
@@ -390,6 +533,11 @@ export function setToolPermission(
   )
 }
 
+/**
+ * Removes a user's permission to access a tool.
+ *
+ * @param userId - The user whose tool permission is removed
+ */
 export function revokeToolPermission(
   token: string,
   workspaceId: string,

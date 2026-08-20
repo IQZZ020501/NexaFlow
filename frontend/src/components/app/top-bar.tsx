@@ -44,6 +44,11 @@ const PAGE_LINKS: Record<string, string> = {
   tools: "/app/tools",
 }
 
+/**
+ * Renders the authenticated user's application navigation bar.
+ *
+ * @returns The top navigation bar, or `null` when no authenticated user is available.
+ */
 export function TopBar() {
   const { language, setLanguage, t } = useLanguage()
   const { theme, setTheme } = useTheme()
@@ -119,7 +124,13 @@ export function TopBar() {
                 <ChevronDownIcon className="size-3.5 shrink-0" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="min-w-56">
+            <DropdownMenuContent
+              align="start"
+              side="bottom"
+              sideOffset={6}
+              collisionPadding={8}
+              className="max-h-72 min-w-56 overflow-y-auto"
+            >
               <DropdownMenuLabel>{t("其他工作空间")}</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>

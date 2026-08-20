@@ -43,6 +43,18 @@ type WorkspaceMembersDialogProps = {
   onRemoveMember: (userId: string) => Promise<void>
 }
 
+/**
+ * Displays and manages the members of a workspace.
+ *
+ * @param workspace - The workspace whose members are displayed, or `null` when the dialog is closed
+ * @param members - The workspace members to display
+ * @param users - The users available for membership
+ * @param canAddMembers - Whether members can be added to the workspace
+ * @param canManageAdmins - Whether administrator roles and administrator membership can be managed
+ * @param onAddMember - Adds a user to the workspace with the selected role
+ * @param onUpdateMemberRole - Updates a workspace member's role
+ * @param onRemoveMember - Removes a user from the workspace
+ */
 export function WorkspaceMembersDialog({
   workspace,
   setWorkspace,

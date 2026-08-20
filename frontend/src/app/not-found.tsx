@@ -5,6 +5,9 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { useLanguage } from "@/contexts/language-provider"
 
+/**
+ * Renders the localized 404 page with a link to the applications list.
+ */
 export default function NotFound() {
   const { t } = useLanguage()
 

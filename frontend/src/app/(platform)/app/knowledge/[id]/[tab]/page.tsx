@@ -6,6 +6,13 @@ import {
   parseKnowledgeBaseDetailTab,
 } from "@/lib/knowledge-views"
 
+/**
+ * Renders the knowledge base detail page for a valid non-documents tab.
+ *
+ * Redirects invalid tabs and the documents tab to the documents route.
+ *
+ * @param params - The route parameters containing the knowledge base ID and requested tab
+ */
 export default async function KnowledgeBaseDetailTabPage({
   params,
 }: {

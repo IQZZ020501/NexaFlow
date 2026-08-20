@@ -20,6 +20,11 @@ type ConfirmDialogOptions = {
   destructive?: boolean
 }
 
+/**
+ * Provides a promise-based confirmation dialog and its control function.
+ *
+ * @returns A tuple containing a function that opens the dialog and a dialog element to render
+ */
 export function useConfirmDialog() {
   const { t } = useLanguage()
   const [options, setOptions] = React.useState<ConfirmDialogOptions | null>(null)

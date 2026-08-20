@@ -17,6 +17,12 @@ import {
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 
+/**
+ * Controls access to session-dependent content and renders the appropriate loading, authentication, or account state.
+ *
+ * @param children - Content to render when the session is authenticated and the account is available
+ * @returns Loading, authentication, authenticated account content, an account error view, or `null`
+ */
 export function SessionGate({ children }: { children: React.ReactNode }) {
   const { t } = useLanguage()
   const router = useRouter()

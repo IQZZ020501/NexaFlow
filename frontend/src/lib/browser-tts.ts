@@ -6,6 +6,12 @@ const speechLocales: Record<Language, string> = {
   en: "en-US",
 }
 
+/**
+ * Converts workflow outputs into text suitable for speech.
+ *
+ * @param outputs - The workflow output values, preferring `result` and then `text`
+ * @returns The selected string value, or a JSON representation of the selected value or full outputs
+ */
 export function workflowSpeechText(outputs: Record<string, unknown>) {
   const preferred = outputs.result ?? outputs.text
   return typeof preferred === "string"
@@ -13,6 +19,12 @@ export function workflowSpeechText(outputs: Record<string, unknown>) {
     : JSON.stringify(preferred ?? outputs)
 }
 
+/**
+ * Speaks text using the browser's speech synthesis service.
+ *
+ * @param text - The text to speak
+ * @param language - The language used for speech synthesis
+ */
 export function speakBrowserText(text: string, language: Language) {
   if (
     !text.trim() ||

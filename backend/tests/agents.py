@@ -3183,6 +3183,9 @@ def assert_external_agent_access() -> None:
 
 
 def main() -> None:
+    """
+    Run the comprehensive agent, workflow, knowledge, MCP, streaming, persistence, authorization, and public-access integration assertions.
+    """
     asyncio.run(assert_hanging_model_stream_times_out())
     asyncio.run(assert_required_knowledge_timeout_is_unavailable())
     asyncio.run(assert_truncated_tool_call_is_not_executed())

@@ -110,16 +110,37 @@ export type PublicAgentRunList = {
   limit: number
 }
 
+/**
+ * Builds the API path for a public agent resource.
+ *
+ * @param agentId - The public agent identifier
+ * @param suffix - The optional resource path suffix
+ * @returns The public agent API path
+ */
 function publicAgentPath(agentId: string, suffix = "") {
   return `/api/v1/public/agents/${agentId}${suffix}`
 }
 
+/**
+ * Retrieves the public profile for an agent.
+ *
+ * @param agentId - The identifier of the agent
+ * @param token - The authentication token
+ * @returns The agent's public profile
+ */
 export function getPublicAgentProfile(agentId: string, token: string) {
   return request<PublicAgentProfile>(publicAgentPath(agentId, "/profile"), {
     token,
   })
 }
 
+/**
+ * Lists the conversations available for a public agent.
+ *
+ * @param agentId - The public agent identifier
+ * @param token - The authentication token
+ * @returns The agent's conversations
+ */
 export function listPublicAgentConversations(agentId: string, token: string) {
   return request<{ items: PublicAgentConversation[] }>(
     publicAgentPath(agentId, "/conversations"),
@@ -127,6 +148,13 @@ export function listPublicAgentConversations(agentId: string, token: string) {
   )
 }
 
+/**
+ * Loads a public agent's profile and conversations.
+ *
+ * @param agentId - The public agent identifier
+ * @param token - The authentication token
+ * @returns The agent profile and its conversations
+ */
 export async function initializePublicAgent(agentId: string, token: string) {
   const [profile, conversations] = await Promise.all([
     getPublicAgentProfile(agentId, token),
@@ -135,6 +163,15 @@ export async function initializePublicAgent(agentId: string, token: string) {
   return { profile, conversations }
 }
 
+/**
+ * Lists runs for a public agent conversation.
+ *
+ * @param agentId - The public agent identifier
+ * @param conversationId - The conversation identifier
+ * @param token - The authentication token
+ * @param options - Optional pagination settings
+ * @returns The paginated list of runs
+ */
 export function listPublicAgentRuns(
   agentId: string,
   conversationId: string,
@@ -149,6 +186,17 @@ export function listPublicAgentRuns(
   )
 }
 
+/**
+ * Starts a run for a public agent with the specified goal and optional conversation and file context.
+ *
+ * @param agentId - The public agent identifier
+ * @param token - The authentication token
+ * @param goal - The objective for the run
+ * @param conversationId - The conversation to associate with the run
+ * @param signal - The signal used to cancel the request
+ * @param fileIds - The identifiers of files to include in the run
+ * @returns The created agent run
+ */
 export function createPublicAgentRun(
   agentId: string,
   token: string,
@@ -169,6 +217,14 @@ export function createPublicAgentRun(
   })
 }
 
+/**
+ * Uploads files for a public agent.
+ *
+ * @param agentId - The public agent identifier
+ * @param token - The authentication token
+ * @param files - The files to upload
+ * @returns The uploaded file records
+ */
 export function uploadPublicAgentFiles(
   agentId: string,
   token: string,
@@ -183,6 +239,11 @@ export function uploadPublicAgentFiles(
   })
 }
 
+/**
+ * Retrieves a public agent run.
+ *
+ * @returns The requested public agent run.
+ */
 export function getPublicAgentRun(
   agentId: string,
   token: string,
@@ -193,6 +254,14 @@ export function getPublicAgentRun(
   })
 }
 
+/**
+ * Regenerates a public agent run.
+ *
+ * @param agentId - The public agent identifier
+ * @param token - The authentication token
+ * @param runId - The run identifier
+ * @returns The regenerated agent run
+ */
 export function regeneratePublicAgentRun(
   agentId: string,
   token: string,
@@ -204,6 +273,15 @@ export function regeneratePublicAgentRun(
   )
 }
 
+/**
+ * Sets or clears feedback for a public agent run.
+ *
+ * @param agentId - The public agent identifier
+ * @param token - The authentication token
+ * @param runId - The run identifier
+ * @param value - The feedback value, or `null` to clear existing feedback
+ * @returns The updated agent run
+ */
 export function setPublicAgentRunFeedback(
   agentId: string,
   token: string,
@@ -216,6 +294,14 @@ export function setPublicAgentRunFeedback(
   )
 }
 
+/**
+ * Lists tool calls associated with a public agent run.
+ *
+ * @param agentId - The public agent identifier
+ * @param token - The authentication token
+ * @param runId - The run identifier
+ * @returns The run's tool calls
+ */
 export function listPublicAgentRunToolCalls(
   agentId: string,
   token: string,
@@ -227,6 +313,12 @@ export function listPublicAgentRunToolCalls(
   )
 }
 
+/**
+ * Resolves a pending tool call for a public agent run.
+ *
+ * @param decision - Whether to approve or reject the tool call
+ * @returns The updated agent run
+ */
 export function resolvePublicAgentRunToolCall(
   agentId: string,
   token: string,
@@ -243,6 +335,14 @@ export function resolvePublicAgentRunToolCall(
   )
 }
 
+/**
+ * Observes events emitted by a public agent run.
+ *
+ * @param onEvent - Callback invoked for each stream event
+ * @param after - Event cursor from which to resume
+ * @param liveAfter - Live stream cursor from which to resume
+ * @returns A promise that settles when stream observation ends
+ */
 export function observePublicAgentRun(
   agentId: string,
   token: string,
@@ -274,6 +374,14 @@ export function observePublicAgentRun(
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"])
 
+/**
+ * Creates a public agent run and streams its progress events.
+ *
+ * @param goal - The objective for the agent run
+ * @param onEvent - Callback invoked for each run stream event
+ * @param conversationId - Optional conversation to associate with the run
+ * @param fileIds - IDs of files to provide to the run
+ */
 export async function streamPublicAgentRun(
   agentId: string,
   token: string,

@@ -253,6 +253,15 @@ async def cancel_run(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkflowRunResponse:
+    """Cancel a workflow run.
+    
+    Parameters:
+        agent_id (str): Identifier of the agent associated with the run.
+        run_id (str): Identifier of the workflow run to cancel.
+    
+    Returns:
+        WorkflowRunResponse: The canceled workflow run.
+    """
     return await cancel_workflow_run(
         db,
         context.workspace.id,
@@ -274,6 +283,18 @@ async def regenerate_workspace_workflow_run(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkflowRunResponse:
+    """Regenerate a workflow run for an agent.
+    
+    Parameters:
+        agent_id (str): Identifier of the agent whose workflow run is regenerated.
+        run_id (str): Identifier of the workflow run to regenerate.
+        context (WorkspaceContext): Workspace and authorization context.
+        settings (Settings): Application settings used for regeneration.
+        db (AsyncSession): Database session.
+    
+    Returns:
+        WorkflowRunResponse: The regenerated workflow run.
+    """
     return await regenerate_workflow_run(
         db,
         context.workspace.id,
@@ -296,6 +317,15 @@ async def set_workspace_workflow_run_feedback(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkflowRunResponse:
+    """
+    Apply feedback to a workflow run.
+    
+    Parameters:
+        payload (RunFeedbackRequest): Feedback value to apply to the run.
+    
+    Returns:
+        WorkflowRunResponse: The updated workflow run.
+    """
     return await set_workflow_run_feedback(
         db,
         context.workspace.id,

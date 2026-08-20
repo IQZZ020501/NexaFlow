@@ -7,8 +7,11 @@
  * all backend traffic goes through globalThis.fetch stubbed by withFetch.
  */
 import { beforeEach, describe, expect, test } from "bun:test"
+import { act } from "react"
 
 import { McpToolsPage, buildMcpServerCreatePayload, type McpForm } from "@/components/tools/mcp-tools-page"
+import { SystemShell } from "@/components/system/system-shell"
+import { LanguageProvider } from "@/contexts/language-provider"
 import {
   canManageTeamMembers,
   formatAuditDetails,
@@ -55,6 +58,7 @@ import {
   fireEvent,
   jsonResponse,
   makeSession,
+  mockNextNavigation,
   mockUseSession,
   renderPage,
   screen,
@@ -69,6 +73,7 @@ import {
 
 const session = makeSession()
 mockUseSession(session)
+mockNextNavigation()
 
 // makeSession types these fields as non-null/no-arg; the mock's useSession
 // returns the same object, so mutations through this wider view are observed.
@@ -76,6 +81,7 @@ const sessionState = session as unknown as {
   me: MeResponse | null
   token: string | null
   selectedWorkspaceId: string | null
+  workspaces: Workspace[]
   notify: (kind: "success" | "error", message: string) => void
 }
 
@@ -1123,6 +1129,124 @@ describe("system API client", () => {
   })
 })
 
+describe("SystemShell audit loading", () => {
+  test("debounces search and ignores an older response", async () => {
+    setSession()
+    const searches: string[] = []
+    let resolveOldSearch: (response: Response) => void = () => undefined
+    handler = (url) => {
+      const parsed = new URL(url, "http://localhost")
+      if (parsed.pathname !== "/api/v1/admin/audit-logs") {
+        return jsonResponse([])
+      }
+      const search = parsed.searchParams.get("search") ?? ""
+      searches.push(search)
+      if (search === "old") {
+        return new Promise<Response>((resolve) => {
+          resolveOldSearch = resolve
+        })
+      }
+      if (search === "new") {
+        return jsonResponse([
+          { ...auditLog, id: "audit-new", resource_name: "Newest result" },
+        ])
+      }
+      return jsonResponse([])
+    }
+
+    renderPage(<SystemShell activeTab="audit" />)
+    const searchInput = await screen.findByLabelText("搜索审计")
+    fireEvent.change(searchInput, { target: { value: "o" } })
+    fireEvent.change(searchInput, { target: { value: "ol" } })
+    fireEvent.change(searchInput, { target: { value: "old" } })
+    await waitFor(() => expect(searches).toContain("old"))
+    expect(searches).not.toContain("o")
+    expect(searches).not.toContain("ol")
+
+    fireEvent.change(searchInput, { target: { value: "new" } })
+    await waitFor(() => expect(screen.getByText("Newest result")).toBeTruthy())
+    await act(async () => {
+      resolveOldSearch(
+        jsonResponse([
+          { ...auditLog, id: "audit-old", resource_name: "Stale result" },
+        ])
+      )
+    })
+
+    expect(screen.queryByText("Stale result")).toBeNull()
+    expect(screen.getByText("Newest result")).toBeTruthy()
+  })
+
+  test("resets pagination on refresh and workspace changes", async () => {
+    const workspaceOne = { ...workspace, id: "ws-1", name: "Workspace One" }
+    const workspaceTwo = { ...workspace, id: "ws-2", name: "Workspace Two" }
+    const workspaceAdmin: MeResponse = {
+      user: {
+        ...adminUser,
+        is_global_admin: false,
+        workspaces: [
+          { id: "ws-1", name: "Workspace One", is_default: true, role: "admin" },
+          { id: "ws-2", name: "Workspace Two", is_default: false, role: "admin" },
+        ],
+      },
+      memberships: [
+        { workspace_id: "ws-1", role: "admin" },
+        { workspace_id: "ws-2", role: "admin" },
+      ],
+    }
+    setSession({ me: workspaceAdmin, selectedWorkspaceId: "ws-1" })
+    sessionState.workspaces = [workspaceOne, workspaceTwo]
+    const requests: string[] = []
+    handler = (url) => {
+      const parsed = new URL(url, "http://localhost")
+      const offset = parsed.searchParams.get("offset") ?? "0"
+      requests.push(`${parsed.pathname}?offset=${offset}`)
+      if (parsed.pathname.endsWith("/ws-2/audit-logs")) {
+        return jsonResponse([
+          { ...auditLog, id: "ws-2-page-1", resource_name: "Workspace two page one" },
+        ])
+      }
+      if (offset === "100") {
+        return jsonResponse([
+          { ...auditLog, id: "ws-1-page-2", resource_name: "Workspace one page two" },
+        ])
+      }
+      return jsonResponse(
+        Array.from({ length: 100 }, (_, index) => ({
+          ...auditLog,
+          id: `ws-1-page-1-${index}`,
+          resource_name: `Workspace one page one ${index}`,
+        }))
+      )
+    }
+
+    const view = renderPage(<SystemShell activeTab="audit" />)
+    await screen.findByText("Workspace one page one 0")
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }))
+    await screen.findByText("Workspace one page two")
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }))
+    await waitFor(() => expect(screen.queryByText("Workspace one page two")).toBeNull())
+    expect(
+      requests.filter((request) => request === "/api/v1/workspaces/ws-1/audit-logs?offset=0")
+    ).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }))
+    await screen.findByText("Workspace one page two")
+    sessionState.selectedWorkspaceId = "ws-2"
+    view.rerender(
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <SystemShell activeTab="audit" />
+      </LanguageProvider>
+    )
+
+    await screen.findByText("Workspace two page one")
+    expect(screen.queryByText("Workspace one page two")).toBeNull()
+    expect(requests).toContain("/api/v1/workspaces/ws-2/audit-logs?offset=0")
+    expect(requests).not.toContain("/api/v1/workspaces/ws-2/audit-logs?offset=100")
+  })
+})
+
 // ---------------------------------------------------------------------------
 // system-utils display helpers
 // ---------------------------------------------------------------------------
@@ -1245,8 +1369,8 @@ describe("system-utils", () => {
       "启用状态: 是；全局管理员: 否"
     )
     expect(formatAuditDetails({ roles: ["a", "b"], flags: [true, false] }, t)).toBe(
-      "roles: a、b；flags: 是、否"
+      "其他字段: a、b；其他字段: 是、否"
     )
-    expect(formatAuditDetails({ slug_x: "v" }, t)).toBe("slug_x: v")
+    expect(formatAuditDetails({ slug_x: "v" }, t)).toBe("其他字段: v")
   })
 })

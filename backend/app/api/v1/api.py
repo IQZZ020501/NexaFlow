@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.admin import audit, users
+from app.api.v1.admin import audit, governance, system_logs, users
 from app.api.v1.endpoints import (
     agent_access,
     agents,
@@ -24,6 +24,8 @@ api_router = APIRouter(prefix="/api/v1")
 admin_router = APIRouter(prefix="/admin")
 admin_router.include_router(users.router)
 admin_router.include_router(audit.router)
+admin_router.include_router(system_logs.router)
+admin_router.include_router(governance.router)
 api_router.include_router(admin_router)
 
 api_router.include_router(auth.router)

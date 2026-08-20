@@ -34,6 +34,12 @@ import { toolDisplayName } from "@/lib/tool-display"
 
 type GrantValue = "none" | "view" | "use"
 
+/**
+ * Displays and manages workspace members' permissions for a selected tool.
+ *
+ * @param tool - The tool whose permissions are managed, or `null` when no tool is selected.
+ * @param onMessage - Callback used to report successful updates and errors.
+ */
 export function ToolPermissionsDialog({
   open,
   onOpenChange,

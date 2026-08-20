@@ -70,17 +70,36 @@ import {
 
 type ToolGroup = "mine" | "shared" | "builtin"
 
+/**
+ * Categorizes a tool based on its type and creator.
+ *
+ * @param tool - The tool to categorize
+ * @param userId - The current user's identifier
+ * @returns `builtin` for built-in tools, `mine` for tools created by the user, or `shared` for other tools
+ */
 function toolGroup(tool: ToolSummary, userId: string): ToolGroup {
   if (tool.kind === "builtin") return "builtin"
   return tool.created_by_user_id === userId ? "mine" : "shared"
 }
 
+/**
+ * Selects the icon associated with a tool kind.
+ *
+ * @param kind - The tool category used to determine the icon
+ * @returns The icon component for the tool kind
+ */
 function kindIcon(kind: ToolKind) {
   if (kind === "python") return Code2Icon
   if (kind === "mcp") return NetworkIcon
   return SparklesIcon
 }
 
+/**
+ * Determines whether a tool is active, available, and has a current version.
+ *
+ * @param tool - The tool summary to evaluate
+ * @returns `true` if the tool is active and available with a current version, `false` otherwise.
+ */
 function toolIsAvailable(tool: ToolSummary) {
   return (
     tool.status === "active" &&
@@ -89,10 +108,22 @@ function toolIsAvailable(tool: ToolSummary) {
   )
 }
 
+/**
+ * Provides the display label for a tool kind.
+ *
+ * @param kind - The tool kind to label
+ * @returns `Python`, `MCP`, or `内置` for the corresponding tool kind
+ */
 function kindLabel(kind: ToolKind) {
   return kind === "python" ? "Python" : kind === "mcp" ? "MCP" : "内置"
 }
 
+/**
+ * Gets the localized label for a tool permission level.
+ *
+ * @param permission - The tool permission level to label
+ * @returns The Chinese label for the permission level
+ */
 function permissionLabel(permission: NonNullable<ToolSummary["permission"]>) {
   if (permission === "use") return "使用权限"
   if (permission === "view") return "查看权限"
@@ -100,12 +131,23 @@ function permissionLabel(permission: NonNullable<ToolSummary["permission"]>) {
   return "所有者"
 }
 
+/**
+ * Formats a tool source transport for display.
+ *
+ * @param transport - The tool source transport type
+ * @returns The human-readable transport label
+ */
 function transportLabel(transport: ToolSourceDetail["transport"]) {
   if (transport === "streamable_http") return "Streamable HTTP"
   if (transport === "sse") return "SSE"
   return "stdio"
 }
 
+/**
+ * Manages workspace tools and MCP sources, including discovery, search, permissions, execution policies, and lifecycle actions.
+ *
+ * @returns The workspace tools management interface.
+ */
 export function ToolsPage() {
   const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()

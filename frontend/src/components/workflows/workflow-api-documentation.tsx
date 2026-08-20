@@ -18,6 +18,9 @@ import {
   type WorkflowApiDocumentation as Documentation,
 } from "@/lib/api/public-workflows"
 
+/**
+ * Displays API documentation for a workflow after API-key verification.
+ */
 export function WorkflowApiDocumentation({
   workflowId,
 }: {

@@ -28,6 +28,11 @@ type WorkspaceUsersPanelProps = {
   handleOpenWorkspaceMembers: () => void
 }
 
+/**
+ * Displays workspace details, member-management actions, and workspace users.
+ *
+ * @returns The workspace user-management panel.
+ */
 export function WorkspaceUsersPanel({
   selectedWorkspace,
   selectedWorkspaceId,

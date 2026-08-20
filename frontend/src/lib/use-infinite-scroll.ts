@@ -4,6 +4,12 @@ import * as React from "react"
 
 export const CARD_BATCH_SIZE = 50
 
+/**
+ * Creates a callback ref that loads more content when its element approaches the viewport.
+ *
+ * @param loadMore - Callback invoked when the observed element intersects the viewport.
+ * @returns A callback ref for the element used as the infinite-scroll sentinel.
+ */
 export function useInfiniteScroll(loadMore: () => void) {
   const loadMoreRef = React.useRef(loadMore)
   React.useLayoutEffect(() => {

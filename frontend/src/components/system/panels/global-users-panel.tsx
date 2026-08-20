@@ -63,6 +63,29 @@ type GlobalUsersPanelProps = {
   handleDeleteUser: (user: User) => void | Promise<void>
 }
 
+/**
+ * Displays global user management controls, filters, and user details.
+ *
+ * @param me - The currently authenticated user.
+ * @param users - All users available for management.
+ * @param filteredUsers - Users matching the active search and filters.
+ * @param workspaces - Workspaces available for filtering and display.
+ * @param isUsersLoading - Whether user data is loading.
+ * @param userSearch - The current user search query.
+ * @param setUserSearch - Updates the user search query.
+ * @param userStatusFilter - The active user status filter.
+ * @param setUserStatusFilter - Updates the user status filter.
+ * @param userRoleFilter - The active user role filter.
+ * @param setUserRoleFilter - Updates the user role filter.
+ * @param userWorkspaceFilter - The active workspace filter.
+ * @param setUserWorkspaceFilter - Updates the workspace filter.
+ * @param locale - The locale used to format dates.
+ * @param handleOpenCreateUser - Opens the create-user form.
+ * @param handleToggleUser - Enables or disables a user.
+ * @param handleOpenEditUser - Opens the edit form for a user.
+ * @param handleOpenUserPasswordDialog - Opens the password-change dialog for a user.
+ * @param handleDeleteUser - Deletes a user.
+ */
 export function GlobalUsersPanel({
   me,
   users,

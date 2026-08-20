@@ -8,6 +8,12 @@ type AgentDetailPageProps = {
   }>
 }
 
+/**
+ * Renders the agent detail page for the requested conversation and view.
+ *
+ * @param searchParams - Query parameters containing the conversation ID and optional view.
+ * @returns The agent page configured with the requested conversation and detail view.
+ */
 export default async function AgentDetailPage({
   searchParams,
 }: AgentDetailPageProps) {

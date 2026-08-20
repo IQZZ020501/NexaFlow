@@ -1,5 +1,12 @@
 import { type TFunction } from "@/i18n"
 
+/**
+ * Validates a new password against its confirmation and password requirements.
+ *
+ * @param newPassword - The new password to validate
+ * @param confirmPassword - The password confirmation to compare
+ * @returns A translated validation error message, or `null` when the password is valid
+ */
 export function getNewPasswordError(
   newPassword: string,
   confirmPassword: string,

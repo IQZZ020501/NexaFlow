@@ -241,6 +241,14 @@ export type KnowledgeModelTestResult = {
   reranker_results: number
 }
 
+/**
+ * Lists knowledge bases in a workspace.
+ *
+ * @param token - Authentication token
+ * @param workspaceId - Identifier of the workspace
+ * @param options - Optional pagination parameters
+ * @returns The workspace's knowledge bases
+ */
 export function listKnowledgeBases(
   token: string,
   workspaceId: string,
@@ -252,6 +260,13 @@ export function listKnowledgeBases(
   )
 }
 
+/**
+ * Creates a knowledge base in a workspace.
+ *
+ * @param workspaceId - The workspace that will contain the knowledge base
+ * @param payload - The knowledge base name, description, and optional model configuration
+ * @returns The created knowledge base
+ */
 export function createKnowledgeBase(
   token: string,
   workspaceId: string,
@@ -272,6 +287,14 @@ export function createKnowledgeBase(
   )
 }
 
+/**
+ * Updates the metadata, status, or models of a knowledge base.
+ *
+ * @param workspaceId - The workspace containing the knowledge base
+ * @param knowledgeBaseId - The knowledge base to update
+ * @param payload - The fields to update
+ * @returns The updated knowledge base
+ */
 export function updateKnowledgeBase(
   token: string,
   workspaceId: string,
@@ -294,6 +317,9 @@ export function updateKnowledgeBase(
   )
 }
 
+/**
+ * Deletes a knowledge base from a workspace.
+ */
 export function deleteKnowledgeBase(
   token: string,
   workspaceId: string,
@@ -308,6 +334,12 @@ export function deleteKnowledgeBase(
   )
 }
 
+/**
+ * Lists documents in a knowledge base.
+ *
+ * @param options - Controls whether staged documents are included.
+ * @returns The knowledge base documents.
+ */
 export function listKnowledgeDocuments(
   token: string,
   workspaceId: string,
@@ -321,6 +353,12 @@ export function listKnowledgeDocuments(
   )
 }
 
+/**
+ * Uploads a file attachment to a knowledge base.
+ *
+ * @param file - The file to upload.
+ * @returns The uploaded knowledge attachment.
+ */
 export function uploadKnowledgeAttachment(
   token: string,
   workspaceId: string,
@@ -339,6 +377,13 @@ export function uploadKnowledgeAttachment(
   )
 }
 
+/**
+ * Deletes an uploaded knowledge-base attachment.
+ *
+ * @param workspaceId - The workspace containing the knowledge base
+ * @param knowledgeBaseId - The knowledge base containing the attachment
+ * @param attachmentId - The attachment to delete
+ */
 export function deleteKnowledgeAttachment(
   token: string,
   workspaceId: string,
@@ -351,6 +396,14 @@ export function deleteKnowledgeAttachment(
   )
 }
 
+/**
+ * Creates knowledge-base documents from uploaded attachments.
+ *
+ * @param attachmentIds - Identifiers of the attachments to convert into documents
+ * @param staged - Whether to create the documents in staged mode
+ * @param importMode - The import format for the documents
+ * @returns The created knowledge-base documents
+ */
 export function createKnowledgeDocuments(
   token: string,
   workspaceId: string,
@@ -373,6 +426,15 @@ export function createKnowledgeDocuments(
   )
 }
 
+/**
+ * Starts parsing a knowledge document with optional segmentation, cleaning, and automatic indexing settings.
+ *
+ * @param workspaceId - The workspace containing the knowledge base
+ * @param knowledgeBaseId - The knowledge base containing the document
+ * @param documentId - The document to parse
+ * @param payload - Parsing, chunking, cleaning, and indexing settings
+ * @returns The parsing task
+ */
 export function parseKnowledgeDocument(
   token: string,
   workspaceId: string,
@@ -398,6 +460,15 @@ export function parseKnowledgeDocument(
 }
 
 
+/**
+ * Starts indexing for a knowledge-base document.
+ *
+ * @param token - Authentication token for the request
+ * @param workspaceId - Identifier of the workspace containing the knowledge base
+ * @param knowledgeBaseId - Identifier of the knowledge base containing the document
+ * @param documentId - Identifier of the document to index
+ * @returns The indexing task
+ */
 export function indexKnowledgeDocument(
   token: string,
   workspaceId: string,
@@ -413,6 +484,9 @@ export function indexKnowledgeDocument(
   )
 }
 
+/**
+ * Deletes a document from a knowledge base.
+ */
 export function deleteKnowledgeDocument(
   token: string,
   workspaceId: string,
@@ -428,6 +502,12 @@ export function deleteKnowledgeDocument(
   )
 }
 
+/**
+ * Updates whether a knowledge document is active.
+ *
+ * @param isActive - Whether the document should be active.
+ * @returns The updated knowledge document.
+ */
 export function setKnowledgeDocumentActive(
   token: string,
   workspaceId: string,
@@ -445,6 +525,12 @@ export function setKnowledgeDocumentActive(
   )
 }
 
+/**
+ * Downloads a knowledge document and saves it with the specified filename.
+ *
+ * @param filename - The name to use for the downloaded file.
+ * @throws `ApiError` when the download request fails.
+ */
 export async function downloadKnowledgeDocument(
   token: string,
   workspaceId: string,
@@ -473,6 +559,12 @@ export async function downloadKnowledgeDocument(
   URL.revokeObjectURL(url)
 }
 
+/**
+ * Lists all chunks for a knowledge document.
+ *
+ * @param documentId - The document whose chunks to retrieve
+ * @returns All chunks belonging to the document
+ */
 export async function listKnowledgeDocumentChunks(
   token: string,
   workspaceId: string,
@@ -494,6 +586,15 @@ export async function listKnowledgeDocumentChunks(
 }
 
 
+/**
+ * Loads an asset associated with a knowledge document.
+ *
+ * @param workspaceId - The workspace containing the knowledge base
+ * @param knowledgeBaseId - The knowledge base containing the document
+ * @param documentId - The document containing the asset
+ * @param assetId - The asset to load
+ * @returns The asset data as a blob
+ */
 export function loadKnowledgeAsset(
   token: string,
   workspaceId: string,
@@ -507,6 +608,12 @@ export function loadKnowledgeAsset(
   )
 }
 
+/**
+ * Lists tasks for a knowledge base, optionally limited to a document.
+ *
+ * @param documentId - The document whose tasks to list
+ * @returns The matching knowledge-base tasks
+ */
 export function listKnowledgeTasks(
   token: string,
   workspaceId: string,
@@ -520,6 +627,15 @@ export function listKnowledgeTasks(
   return request<KnowledgeTask[]>(path, { token })
 }
 
+/**
+ * Retries a knowledge-base task.
+ *
+ * @param token - Authentication token
+ * @param workspaceId - Workspace containing the knowledge base
+ * @param knowledgeBaseId - Knowledge base containing the task
+ * @param taskId - Task to retry
+ * @returns The retried knowledge-base task
+ */
 export function retryKnowledgeTask(
   token: string,
   workspaceId: string,
@@ -535,6 +651,13 @@ export function retryKnowledgeTask(
   )
 }
 
+/**
+ * Starts a full index rebuild for a knowledge base.
+ *
+ * @param workspaceId - The workspace containing the knowledge base
+ * @param knowledgeBaseId - The knowledge base whose index should be rebuilt
+ * @returns The task created for the index rebuild
+ */
 export function rebuildKnowledgeIndex(
   token: string,
   workspaceId: string,
@@ -549,6 +672,15 @@ export function rebuildKnowledgeIndex(
   )
 }
 
+/**
+ * Queries a knowledge base for relevant results.
+ *
+ * @param token - The authentication token
+ * @param workspaceId - The workspace identifier
+ * @param knowledgeBaseId - The knowledge base identifier
+ * @param payload - The query text and maximum number of results
+ * @returns The matching knowledge-base hits
+ */
 export function queryKnowledgeBase(
   token: string,
   workspaceId: string,
@@ -565,6 +697,12 @@ export function queryKnowledgeBase(
   )
 }
 
+/**
+ * Inspects knowledge-base retrieval for a query.
+ *
+ * @param payload - The query and retrieval configuration to inspect
+ * @returns The matched results and detailed retrieval trace
+ */
 export function inspectKnowledgeBase(
   token: string,
   workspaceId: string,
@@ -581,6 +719,14 @@ export function inspectKnowledgeBase(
   )
 }
 
+/**
+ * Builds the API path for knowledge-base evaluation operations.
+ *
+ * @param workspaceId - The workspace identifier
+ * @param knowledgeBaseId - The knowledge-base identifier
+ * @param suffix - An optional path suffix appended to the evaluations path
+ * @returns The evaluation API path
+ */
 function evaluationPath(
   workspaceId: string,
   knowledgeBaseId: string,
@@ -589,6 +735,11 @@ function evaluationPath(
   return `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/evaluations${suffix}`
 }
 
+/**
+ * Lists evaluation cases for a knowledge base.
+ *
+ * @returns The knowledge base's evaluation cases
+ */
 export function listKnowledgeEvaluationCases(
   token: string,
   workspaceId: string,
@@ -600,6 +751,12 @@ export function listKnowledgeEvaluationCases(
   )
 }
 
+/**
+ * Creates an evaluation case for a knowledge base.
+ *
+ * @param payload - The question and document identifiers expected to support its answer
+ * @returns The created evaluation case
+ */
 export function createKnowledgeEvaluationCase(
   token: string,
   workspaceId: string,
@@ -615,6 +772,14 @@ export function createKnowledgeEvaluationCase(
   )
 }
 
+/**
+ * Deletes an evaluation case from a knowledge base.
+ *
+ * @param token - Authentication token
+ * @param workspaceId - Workspace containing the knowledge base
+ * @param knowledgeBaseId - Knowledge base containing the evaluation case
+ * @param caseId - Evaluation case to delete
+ */
 export function deleteKnowledgeEvaluationCase(
   token: string,
   workspaceId: string,
@@ -627,6 +792,11 @@ export function deleteKnowledgeEvaluationCase(
   )
 }
 
+/**
+ * Lists evaluation runs for a knowledge base.
+ *
+ * @returns The knowledge base's evaluation runs
+ */
 export function listKnowledgeEvaluationRuns(
   token: string,
   workspaceId: string,
@@ -638,6 +808,12 @@ export function listKnowledgeEvaluationRuns(
   )
 }
 
+/**
+ * Starts an evaluation run for a knowledge base.
+ *
+ * @param payload - The evaluation run configuration.
+ * @returns The task created for the evaluation run.
+ */
 export function createKnowledgeEvaluationRun(
   token: string,
   workspaceId: string,
@@ -650,6 +826,15 @@ export function createKnowledgeEvaluationRun(
   )
 }
 
+/**
+ * Retrieves a knowledge-base evaluation run.
+ *
+ * @param token - The authentication token
+ * @param workspaceId - The workspace identifier
+ * @param knowledgeBaseId - The knowledge-base identifier
+ * @param taskId - The evaluation run identifier
+ * @returns The evaluation run task
+ */
 export function getKnowledgeEvaluationRun(
   token: string,
   workspaceId: string,
@@ -662,6 +847,11 @@ export function getKnowledgeEvaluationRun(
   )
 }
 
+/**
+ * Deletes a knowledge-base evaluation run.
+ *
+ * @param taskId - The identifier of the evaluation run to delete
+ */
 export function deleteKnowledgeEvaluationRun(
   token: string,
   workspaceId: string,
@@ -674,6 +864,12 @@ export function deleteKnowledgeEvaluationRun(
   )
 }
 
+/**
+ * Retrieves the summary and individual results for a knowledge-base evaluation run.
+ *
+ * @param taskId - The identifier of the evaluation run
+ * @returns The evaluation summary, metrics, latency statistics, task details, and results
+ */
 export function getKnowledgeEvaluationSummary(
   token: string,
   workspaceId: string,
@@ -686,6 +882,11 @@ export function getKnowledgeEvaluationSummary(
   )
 }
 
+/**
+ * Tests the configured knowledge-base models with a sample query and document.
+ *
+ * @returns The model test result.
+ */
 export function testKnowledgeBaseModels(
   token: string,
   workspaceId: string,
@@ -701,6 +902,13 @@ export function testKnowledgeBaseModels(
   )
 }
 
+/**
+ * Lists permissions for a knowledge base.
+ *
+ * @param workspaceId - The workspace containing the knowledge base
+ * @param knowledgeBaseId - The knowledge base whose permissions are listed
+ * @returns The knowledge base permissions
+ */
 export function listKnowledgeBasePermissions(
   token: string,
   workspaceId: string,
@@ -712,6 +920,16 @@ export function listKnowledgeBasePermissions(
   )
 }
 
+/**
+ * Assigns or updates a user's permission for a knowledge base.
+ *
+ * @param token - Authentication token
+ * @param workspaceId - Workspace identifier
+ * @param knowledgeBaseId - Knowledge base identifier
+ * @param userId - User whose permission is being assigned or updated
+ * @param permission - Access level to grant
+ * @returns The updated resource permission
+ */
 export function upsertKnowledgeBasePermission(
   token: string,
   workspaceId: string,
@@ -729,6 +947,11 @@ export function upsertKnowledgeBasePermission(
   )
 }
 
+/**
+ * Removes a user's permission from a knowledge base.
+ *
+ * @param userId - The ID of the user whose permission is removed
+ */
 export function revokeKnowledgeBasePermission(
   token: string,
   workspaceId: string,

@@ -35,6 +35,11 @@ type WorkspacesPanelProps = {
   handleDeleteWorkspace: (workspace: Workspace) => void | Promise<void>
 }
 
+/**
+ * Renders a workspace management panel with workspace selection and administrative actions.
+ *
+ * @returns The workspace management panel.
+ */
 export function WorkspacesPanel({
   me,
   workspaces,

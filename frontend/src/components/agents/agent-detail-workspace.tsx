@@ -136,6 +136,13 @@ function previewScrollHost(element: HTMLElement) {
   return element.ownerDocument.scrollingElement ?? element
 }
 
+/**
+ * Converts an agent run event into a localized progress message.
+ *
+ * @param event - The run event to summarize
+ * @param run - The run whose status determines the answer-generation message
+ * @returns A localized summary for recognized events, or the original event summary
+ */
 function processSummary(
   event: AgentRun["events"][number],
   run: AgentRun,
@@ -673,6 +680,11 @@ function ReasoningContent({ reasoning }: { reasoning: string }) {
   )
 }
 
+/**
+ * Renders the Agent detail workspace with configuration, preview, navigation, and management views.
+ *
+ * @returns The Agent detail workspace interface.
+ */
 export function AgentDetailWorkspace({
   agent,
   form,

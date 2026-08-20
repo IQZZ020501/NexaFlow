@@ -1,4 +1,6 @@
 import * as React from "react"
+import Link from "next/link"
+import { ActivityIcon, KeyRoundIcon, ShieldCheckIcon } from "lucide-react"
 import { useLanguage } from "@/contexts/language-provider"
 import type {
   AuditLog,
@@ -92,6 +94,14 @@ type SystemPageViewProps = {
   isWorkspaceMembersLoading: boolean
   auditLogs: AuditLog[]
   isAuditLoading: boolean
+  auditSearch?: string
+  setAuditSearch?: (value: string) => void
+  auditAction?: string
+  setAuditAction?: (value: string) => void
+  onRefresh?: () => void
+  onLoadMore?: () => void
+  hasMore?: boolean
+  workspaceScope?: string | null
   workspaceEditForm: ScopeEditForm | null
   setWorkspaceEditForm: React.Dispatch<
     React.SetStateAction<ScopeEditForm | null>
@@ -115,6 +125,7 @@ type SystemPageViewProps = {
   handleUserCreateWorkspaceChange: (workspaceId: string) => void
   userForm: UserForm | null
   setUserForm: React.Dispatch<React.SetStateAction<UserForm | null>>
+  canManageGlobalAdmin: boolean
   isSavingUser: boolean
   handleUpdateUser: React.FormEventHandler<HTMLFormElement>
   userPasswordForm: UserPasswordForm | null
@@ -145,6 +156,11 @@ type SystemPageViewProps = {
   teamMembersDialogProps: React.ComponentProps<typeof TeamMembersDialog>
 }
 
+/**
+ * Renders the system-management interface with permission-aware navigation, panels, and dialogs.
+ *
+ * @returns The system-management interface.
+ */
 export function SystemPageView({
   activeSystemTab,
   systemTabs,
@@ -192,6 +208,14 @@ export function SystemPageView({
   isWorkspaceMembersLoading,
   auditLogs,
   isAuditLoading,
+  auditSearch = "",
+  setAuditSearch = () => undefined,
+  auditAction = "",
+  setAuditAction = () => undefined,
+  onRefresh = () => undefined,
+  onLoadMore = () => undefined,
+  hasMore = false,
+  workspaceScope = null,
   workspaceEditForm,
   setWorkspaceEditForm,
   isSavingWorkspace,
@@ -213,6 +237,7 @@ export function SystemPageView({
   handleUserCreateWorkspaceChange,
   userForm,
   setUserForm,
+  canManageGlobalAdmin,
   isSavingUser,
   handleUpdateUser,
   userPasswordForm,
@@ -274,6 +299,32 @@ export function SystemPageView({
               </button>
             )
           })}
+          <div className="my-1 border-t" />
+          {me.user.is_global_admin ? (
+            <Link
+              href="/system/operations"
+              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+            >
+              <ActivityIcon className="size-4 shrink-0" />
+              <span>{t("系统运行")}</span>
+            </Link>
+          ) : null}
+          {canManageAnyWorkspace(me, selectedWorkspaceId) ? (
+            <Link
+              href="/system/governance"
+              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+            >
+              <ShieldCheckIcon className="size-4 shrink-0" />
+              <span>{t("工作空间治理")}</span>
+            </Link>
+          ) : null}
+          <Link
+            href="/system/security"
+            className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+          >
+            <KeyRoundIcon className="size-4 shrink-0" />
+            <span>{t("会话安全")}</span>
+          </Link>
         </div>
       </aside>
 
@@ -351,11 +402,19 @@ export function SystemPageView({
           />
         ) : null}
 
-        {activeSystemTab === "audit" && me.user.is_global_admin ? (
+        {activeSystemTab === "audit" && (me.user.is_global_admin || canManageWorkspace) ? (
           <AuditPanel
             auditLogs={auditLogs}
             isAuditLoading={isAuditLoading}
             locale={locale}
+            auditSearch={auditSearch}
+            setAuditSearch={setAuditSearch}
+            auditAction={auditAction}
+            setAuditAction={setAuditAction}
+            onRefresh={onRefresh}
+            onLoadMore={onLoadMore}
+            hasMore={hasMore}
+            workspaceScope={workspaceScope}
           />
         ) : null}
       </div>
@@ -392,6 +451,7 @@ export function SystemPageView({
       <EditUserDialog
         userForm={userForm}
         setUserForm={setUserForm}
+        canManageGlobalAdmin={canManageGlobalAdmin}
         isSavingUser={isSavingUser}
         handleUpdateUser={handleUpdateUser}
       />
@@ -427,5 +487,23 @@ export function SystemPageView({
       <WorkspaceMembersDialog {...workspaceMembersDialogProps} />
       <TeamMembersDialog {...teamMembersDialogProps} />
     </div>
+  )
+}
+
+/**
+ * Determines whether the current user can manage the selected workspace or any workspace.
+ *
+ * @param me - The current user's profile and workspace memberships
+ * @param workspaceId - The selected workspace identifier, or `null` when no workspace is selected
+ * @returns `true` if the user is a global administrator, administers the selected workspace, or administers any workspace, `false` otherwise.
+ */
+function canManageAnyWorkspace(me: MeResponse, workspaceId: string | null) {
+  return Boolean(
+    me.user.is_global_admin ||
+      me.memberships.some(
+        (membership) =>
+          membership.workspace_id === workspaceId && membership.role === "admin"
+      ) ||
+      me.memberships.some((membership) => membership.role === "admin")
   )
 }

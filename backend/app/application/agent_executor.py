@@ -686,6 +686,17 @@ async def _execute_claimed_agent_run(
     settings: Settings,
     lease_lost: asyncio.Event,
 ) -> str:
+    """
+    Execute a claimed agent run with durable tool handling, checkpointing, event recording, and lease monitoring.
+    
+    Parameters:
+    	run_id (str): Identifier of the agent run to execute.
+    	worker_task_id (str): Identifier of the worker holding the run lease.
+    	lease_lost (asyncio.Event): Event set when the run lease is lost.
+    
+    Returns:
+    	str: A run status indicating whether execution finished, remains busy, or is awaiting approval.
+    """
     scope = await _load_execution_scope(run_id)
     run = scope.run
     run_timeout, max_turns, max_tool_calls, max_model_tokens = _run_limits(

@@ -21,7 +21,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - 鉴权：`/auth/login|refresh|logout`、`/health` 与已发布应用的 `/public/agents/{agent_id}/*`、`/public/workflows/{workflow_id}/*` 不要求登录；公开会话使用 HttpOnly 访客 Cookie 隔离。`/agent-api/{agent_id}/*` 与 `/workflow-api/{workflow_id}/*` 使用应用级 API Key Bearer 鉴权；其余接口使用登录 Bearer，且需完成初始改密（`require_password_changed`）。
 - API 文档：后端 `/docs` 与 `/openapi.json` 保留完整 FastAPI 文档。应用概览的专属文档入口使用 `/agent-api/{agent_id}/docs` 或 `/workflow-api/{workflow_id}/docs`，验证对应 API Key 后只展示该应用的 Run 创建、查询和流式订阅接口。
 - 流式：登录态 Agent 先 `POST /runs` 持久提交，再 `GET /runs/{run_id}/stream?after={sequence}&live_after={redis_stream_id}` 订阅 NDJSON。`after` 重放 PostgreSQL 过程/终态事件，`live_after` 补发短期 Redis 答案/推理增量；实时事件的 `stream_epoch` 变化表示新 worker 已接管，客户端必须清空已累积的答案和推理后重新累积。公开/API Key 流复用同一 durable Run，只输出固定枚举的安全进度摘要、知识片段数量、答案增量、模型思考过程（`reasoning_delta` 增量与 progress 累积文本）和终态白名单，不返回工具名称/参数、检索原文、System Prompt 或 trace。终态 Run 快照始终覆盖实时片段，断线不取消 Run。请求中的旧 `preview` 字段仅为兼容保留并被忽略，所有 Run 都是持久执行。所有 `/api` 响应默认 `no-store`。
-- 全局管理员仅限 `/admin/*` 与工作空间生命周期管理。
+- 系统管理员可访问 `/admin/*`，并以管理员上下文治理所有工作空间；工作空间管理员只能治理自己所在空间的成员、团队和空间策略。
 
 ## 文件清单
 
@@ -33,7 +33,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 ### app/api/v1/endpoints/
 
 - `backend/app/api/v1/endpoints/auth.py` — `/auth`：登录/刷新/登出/改密/当前用户（`/me`），refresh token 走 HttpOnly Cookie
-- `backend/app/api/v1/endpoints/workspaces.py` — `/workspaces`：工作区 CRUD、成员管理、成员用户创建、工作区审计日志
+- `backend/app/api/v1/endpoints/workspaces.py` — `/workspaces`：工作区 CRUD、成员/团队管理、治理配额、资源盘点、邀请与工作区审计日志
 - `backend/app/api/v1/endpoints/teams.py` — `/workspaces/{workspace_id}/teams`：团队 CRUD（admin 角色限定）
 - `backend/app/api/v1/endpoints/knowledge.py` — `/workspaces/{workspace_id}/knowledge-bases` 主接口族：知识库 CRUD、普通文档/QA 表上传、分块/解析/索引、任务列表与重试、重建索引、模型测试、资源权限管理；文档创建通过 `import_mode=document|qa` 显式选择导入语义
 - `backend/app/api/v1/endpoints/knowledge_lifecycle.py` — 同前缀文档生命周期：文档下载、解析资产下载、删除、激活状态更新（PATCH）
@@ -50,8 +50,10 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 
 ### app/api/v1/admin/
 
-- `backend/app/api/v1/admin/users.py` — `/admin/users`：全局用户管理（列表/创建/更新/重置密码/删除，仅全局管理员）
-- `backend/app/api/v1/admin/audit.py` — `/admin/audit-logs`：全局审计日志分页列表（仅全局管理员）
+- `backend/app/api/v1/admin/users.py` — `/admin/users`：全局用户管理与会话撤销（仅系统管理员）
+- `backend/app/api/v1/admin/audit.py` — `/admin/audit-logs`：支持工作空间、操作者、动作、资源、时间和全文条件的审计列表（仅系统管理员）
+- `backend/app/api/v1/admin/system_logs.py` — `/admin/system-logs`：脱敏系统运行日志查询（仅系统管理员）
+- `backend/app/api/v1/admin/governance.py` — `/admin/governance/health`：数据库、依赖配置、任务积压和失败日志健康摘要（仅系统管理员）
 
 ### app/schemas/（Pydantic 契约）
 

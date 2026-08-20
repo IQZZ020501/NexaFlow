@@ -13,16 +13,37 @@ import {
   deriveAnalyticsKeyMetrics,
 } from "@/components/system/workspace-analytics-metrics"
 
+/**
+ * Formats a number according to locale-specific conventions.
+ *
+ * @param value - The number to format
+ * @param locale - The locale to use for formatting
+ * @returns The localized number string
+ */
 function formatNumber(value: number, locale: string) {
   return new Intl.NumberFormat(locale).format(value)
 }
 
+/**
+ * Formats a number with up to one decimal place according to the specified locale.
+ *
+ * @param value - The number to format
+ * @param locale - The locale used for formatting
+ * @returns The localized number string
+ */
 function formatDecimal(value: number, locale: string) {
   return new Intl.NumberFormat(locale, {
     maximumFractionDigits: 1,
   }).format(value)
 }
 
+/**
+ * Formats a nullable ratio as a localized percentage.
+ *
+ * @param value - The ratio to format, or `null` when the value is unavailable
+ * @param locale - The locale used for formatting
+ * @returns The localized percentage, or `"—"` when `value` is `null`
+ */
 function formatPercent(value: number | null, locale: string) {
   return value === null
     ? "—"
@@ -32,6 +53,12 @@ function formatPercent(value: number | null, locale: string) {
       }).format(value)
 }
 
+/**
+ * Displays a localized period-over-period percentage comparison.
+ *
+ * @param value - The percentage change, or `null` when no comparable data is available
+ * @returns The localized comparison text or no-comparable-data message
+ */
 function Comparison({
   value,
 }: {
@@ -43,6 +70,15 @@ function Comparison({
   return <span>{t("较上期 {value}%", { value: formatted })}</span>
 }
 
+/**
+ * Renders a metric card with an icon, label, value, and optional supporting content.
+ *
+ * @param icon - Icon component displayed beside the metric
+ * @param label - Metric label
+ * @param value - Formatted metric value
+ * @param detail - Supporting content displayed beneath the value.
+ * @param comparison - Period-over-period change displayed when `detail` is not provided.
+ */
 export function CoreMetricCard({
   icon: Icon,
   label,
@@ -75,6 +111,14 @@ export function CoreMetricCard({
   )
 }
 
+/**
+ * Renders a compact metric with optional supporting detail or period comparison.
+ *
+ * @param label - Metric label
+ * @param value - Formatted metric value
+ * @param detail - Supporting content displayed beneath the metric value
+ * @param comparison - Period-over-period change displayed when `detail` is not provided
+ */
 function KeyMetric({
   label,
   value,
@@ -99,6 +143,13 @@ function KeyMetric({
   )
 }
 
+/**
+ * Renders a localized panel of workspace key metrics.
+ *
+ * @param data - Workspace analytics data used to calculate and display the metrics
+ * @param locale - Locale used to format metric values
+ * @returns The rendered key metrics panel
+ */
 export function AnalyticsKeyMetricsPanel({
   data,
   locale,
@@ -176,6 +227,13 @@ export function AnalyticsKeyMetricsPanel({
   )
 }
 
+/**
+ * Renders the workspace analytics overview with primary metrics and supporting key metrics.
+ *
+ * @param data - Workspace analytics data used to populate the metrics.
+ * @param locale - Locale used to format numeric and percentage values.
+ * @returns The rendered workspace analytics overview.
+ */
 export function WorkspaceAnalyticsOverview({
   data,
   locale,

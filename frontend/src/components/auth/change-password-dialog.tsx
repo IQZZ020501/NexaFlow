@@ -29,6 +29,15 @@ type ChangePasswordForm = {
   confirmPassword: string
 }
 
+/**
+ * Renders a dialog for changing a user's password.
+ *
+ * @param token - Access token used to authenticate the password change.
+ * @param canDismiss - Whether the dialog can be dismissed by the user.
+ * @param requireCurrentPassword - Whether to require the user's current password.
+ * @param onNotify - Handles validation and password-change error notifications.
+ * @param onChanged - Called after the password is changed successfully.
+ */
 export function ChangePasswordDialog({
   open,
   token,

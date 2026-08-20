@@ -47,11 +47,24 @@ const stageLabels: Record<string, TranslationKey> = {
   assemble: "结果组装",
 }
 
+/**
+ * Formats a finite number with a configurable number of decimal places.
+ *
+ * @param value - The number to format, or `null`
+ * @param digits - The maximum number of decimal places
+ * @returns The formatted number, or `"-"` when `value` is `null` or not finite
+ */
 function formatNumber(value: number | null, digits = 3) {
   if (value === null || !Number.isFinite(value)) return "-"
   return Number(value.toFixed(digits)).toString()
 }
 
+/**
+ * Creates a compact summary of a knowledge-query hit.
+ *
+ * @param hit - The hit whose question or content provides the summary text
+ * @returns A normalized summary truncated to 220 characters, or `"-"` when no text is available
+ */
 function hitSummary(hit: KnowledgeQueryHit) {
   const source = hit.kind === "qa" && hit.question ? hit.question : hit.content
   const summary = source.replace(/\s+/g, " ").trim()
@@ -60,6 +73,12 @@ function hitSummary(hit: KnowledgeQueryHit) {
   return `${summary.slice(0, 217).trimEnd()}...`
 }
 
+/**
+ * Translates a retrieval source identifier into its localized label.
+ *
+ * @param source - The retrieval source to label
+ * @returns The localized source label
+ */
 function sourceLabel(
   t: TFunction,
   source: "vector" | "keywords" | "reference"
@@ -69,6 +88,12 @@ function sourceLabel(
   return t("文档引用")
 }
 
+/**
+ * Translates a retrieval reranking status into a localized label.
+ *
+ * @param status - The reranking status to label
+ * @returns The localized status label
+ */
 function rerankStatusLabel(
   t: TFunction,
   status: KnowledgeRetrievalTrace["rerank_status"]
@@ -79,6 +104,16 @@ function rerankStatusLabel(
   return t("已跳过")
 }
 
+/**
+ * Provides an interactive interface for testing knowledge-base retrieval and inspecting ranked hits.
+ *
+ * @param token - Authentication token for the knowledge-base request
+ * @param workspaceId - Workspace containing the knowledge base
+ * @param knowledgeBaseId - Knowledge base to query
+ * @param reportError - Reports errors encountered during retrieval
+ * @param onTested - Called after a successful test with the query settings and results
+ * @returns The knowledge-base retrieval test interface
+ */
 export function KnowledgeHitTest({
   token,
   workspaceId,

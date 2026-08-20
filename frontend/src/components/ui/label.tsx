@@ -3,6 +3,11 @@ import { Label as LabelPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Renders a styled label while forwarding props to the underlying label primitive.
+ *
+ * @param className - Additional classes to apply to the label
+ */
 function Label({
   className,
   ...props

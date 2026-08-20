@@ -164,6 +164,14 @@ const PROCESSING_DOCUMENT_STATUSES: Record<string, true> = {
 export const DOCUMENT_PAGE_SIZES = [10, 20, 50, 100] as const
 export type DocumentPageSize = (typeof DOCUMENT_PAGE_SIZES)[number]
 
+/**
+ * Returns the items for a one-based page.
+ *
+ * @param items - The complete ordered collection of items
+ * @param page - The one-based page number
+ * @param pageSize - The maximum number of items per page
+ * @returns The items included in the requested page
+ */
 export function paginateDocuments<T>(
   items: readonly T[],
   page: number,
@@ -172,10 +180,27 @@ export function paginateDocuments<T>(
   return items.slice((page - 1) * pageSize, page * pageSize)
 }
 
+/**
+ * Calculates the number of document pages for a result set.
+ *
+ * @param total - The total number of documents
+ * @param pageSize - The maximum number of documents per page
+ * @returns The number of pages, with at least one page
+ */
 export function documentPageCount(total: number, pageSize: number): number {
   return Math.max(1, Math.ceil(total / pageSize))
 }
 
+/**
+ * Renders document count, page-size selection, and pagination controls.
+ *
+ * @param total - The total number of documents.
+ * @param page - The currently selected page.
+ * @param pageSize - The number of documents displayed per page.
+ * @param onPageChange - Called when the selected page changes.
+ * @param onPageSizeChange - Called when the page size changes.
+ * @returns Pagination controls, or `null` when there are no documents.
+ */
 function PaginationFooter({
   total,
   page,
@@ -309,6 +334,13 @@ function documentStatusText(
   return documentStatusLabel(document.status, t)
 }
 
+/**
+ * Renders the workspace-aware knowledge-base management page for the authenticated user.
+ *
+ * @param initialDetailTab - The detail tab displayed initially.
+ * @param uploadStep - The upload workflow step to display.
+ * @param uploadRouteState - The state associated with the upload route.
+ */
 export function KnowledgeBasePage({
   initialDetailTab = "documents",
   uploadStep,
@@ -337,6 +369,17 @@ export function KnowledgeBasePage({
   )
 }
 
+/**
+ * Renders the workspace-scoped knowledge-base list, detail views, and upload flow.
+ *
+ * @param token - Authentication token used for knowledge-base operations
+ * @param me - Current user and workspace membership information
+ * @param selectedWorkspaceId - Currently selected workspace identifier
+ * @param notify - Displays localized success and error notifications
+ * @param initialDetailTab - Detail tab to show when a knowledge base is opened
+ * @param uploadStep - Current upload-flow step, when an upload route is active
+ * @param uploadRouteState - State required to render the current upload-flow step
+ */
 function KnowledgeBasePageContent({
   token,
   me,

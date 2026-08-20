@@ -43,6 +43,14 @@ type EditWorkspaceDialogProps = {
   handleUpdateWorkspace: React.FormEventHandler<HTMLFormElement>
 }
 
+/**
+ * Provides a dialog for editing a workspace's name and description.
+ *
+ * @param workspaceEditForm - The workspace form state, or `null` when the dialog is closed.
+ * @param setWorkspaceEditForm - Updates or clears the workspace form state.
+ * @param isSavingWorkspace - Whether the workspace changes are currently being saved.
+ * @param handleUpdateWorkspace - Handles submission of the workspace changes.
+ */
 export function EditWorkspaceDialog({
   workspaceEditForm,
   setWorkspaceEditForm,
@@ -131,6 +139,16 @@ type EditTeamDialogProps = {
   handleUpdateTeam: React.FormEventHandler<HTMLFormElement>
 }
 
+/**
+ * Provides a dialog for editing a team's name and description within a workspace.
+ *
+ * @param teamEditForm - The team's editable form state, or `null` when the dialog is closed.
+ * @param selectedWorkspace - The workspace currently associated with the team.
+ * @param selectedWorkspaceId - The identifier of the selected workspace.
+ * @param isSavingTeam - Whether the team update is being submitted.
+ * @param setTeamEditForm - Updates or clears the team's editable form state.
+ * @param handleUpdateTeam - Handles submission of the team update.
+ */
 export function EditTeamDialog({
   teamEditForm,
   setTeamEditForm,
@@ -227,6 +245,19 @@ type CreateWorkspaceDialogProps = {
   handleCreateWorkspace: React.FormEventHandler<HTMLFormElement>
 }
 
+/**
+ * Renders a dialog for creating a workspace and assigning an active user as its administrator.
+ *
+ * @param isWorkspaceDialogOpen - Whether the dialog is visible
+ * @param setIsWorkspaceDialogOpen - Updates the dialog visibility
+ * @param workspaceForm - Current workspace name, description, and administrator selection
+ * @param setWorkspaceForm - Updates the workspace form
+ * @param users - Users eligible for administrator selection
+ * @param isUsersLoading - Whether users are still loading
+ * @param isCreatingWorkspace - Whether workspace creation is in progress
+ * @param handleCreateWorkspace - Handles workspace form submission
+ * @returns The workspace creation dialog
+ */
 export function CreateWorkspaceDialog({
   isWorkspaceDialogOpen,
   setIsWorkspaceDialogOpen,
@@ -392,6 +423,21 @@ type CreateTeamDialogProps = {
   handleTeamWorkspaceChange: (workspaceId: string) => void
 }
 
+/**
+ * Renders a dialog for creating a team within a selected workspace.
+ *
+ * @param isTeamDialogOpen - Whether the dialog is open.
+ * @param setIsTeamDialogOpen - Updates the dialog's open state.
+ * @param teamWorkspace - The workspace selected for the team.
+ * @param manageableWorkspaces - Workspaces available for team creation.
+ * @param teamForm - Current team name, description, workspace, and administrator values.
+ * @param setTeamForm - Updates the team form state.
+ * @param isCreatingTeam - Whether team creation is in progress.
+ * @param handleCreateTeam - Handles team form submission.
+ * @param teamAdminCandidates - Members eligible for team administrator selection.
+ * @param isTeamAdminCandidatesLoading - Whether administrator candidates are loading.
+ * @param handleTeamWorkspaceChange - Handles workspace selection changes.
+ */
 export function CreateTeamDialog({
   isTeamDialogOpen,
   setIsTeamDialogOpen,

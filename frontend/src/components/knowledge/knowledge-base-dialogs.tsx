@@ -59,6 +59,26 @@ type KnowledgeBaseDialogsProps = {
   handleRevokePermission: (userId: string) => void | Promise<void>
 }
 
+/**
+ * Renders dialogs for creating, editing, and managing permissions for knowledge bases.
+ *
+ * @param form - Values for the knowledge-base creation form
+ * @param setForm - Updates the knowledge-base creation form
+ * @param editForm - Values for the knowledge-base editing form, when open
+ * @param setEditForm - Updates or closes the knowledge-base editing form
+ * @param permissionForm - Values for the permission form, when open
+ * @param setPermissionForm - Updates or closes the permission form
+ * @param shareTargets - Workspace users who can receive permissions
+ * @param permissions - Existing permissions for the selected knowledge base
+ * @param registeredModels - Models available for embedding and reranking
+ * @param isDialogOpen - Whether the creation dialog is open
+ * @param setIsDialogOpen - Updates the creation dialog's open state
+ * @param isSaving - Whether a form submission is in progress
+ * @param handleCreate - Submits the knowledge-base creation form
+ * @param handleUpdate - Submits the knowledge-base editing form
+ * @param handleGrantPermission - Submits the permission form
+ * @param handleRevokePermission - Revokes a user's permission
+ */
 export function KnowledgeBaseDialogs({
   form,
   setForm,
@@ -443,6 +463,15 @@ export function KnowledgeBaseDialogs({
   )
 }
 
+/**
+ * Renders a dropdown for selecting a registered model.
+ *
+ * @param label - The label displayed for the model selector
+ * @param value - The currently selected model ID, or `null` when no model is selected
+ * @param models - The registered models available for selection
+ * @param optional - Whether selecting no model is allowed
+ * @param onChange - Called with the selected model ID, or `null` when no model is selected
+ */
 function KnowledgeModelSelect({
   label,
   value,

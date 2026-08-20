@@ -194,6 +194,16 @@ def describe_knowledge_sources(knowledge_bases: list[KnowledgeBase]) -> str:
 
 
 def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
+    """
+    Map an agent run to its API response representation.
+    
+    Parameters:
+    	run (AgentRun): The agent run to convert.
+    	trace_id (str): An optional trace identifier that takes precedence over the run's stored trace ID.
+    
+    Returns:
+    	AgentRunResponse: The response containing the run's identifiers, status, execution data, feedback, timestamps, and trace ID.
+    """
     return AgentRunResponse(
         id=run.id,
         workspace_id=run.workspace_id,

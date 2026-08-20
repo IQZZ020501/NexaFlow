@@ -13,6 +13,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """Add regeneration lineage and feedback fields to the ``agent_runs`` table."""
     op.add_column(
         "agent_runs",
         sa.Column("regenerated_from_run_id", sa.String(length=36), nullable=True),
@@ -45,6 +46,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """
+    Remove regeneration lineage and feedback fields from the agent_runs table.
+    """
     op.drop_index("ix_agent_runs_regenerated_from_run_id", table_name="agent_runs")
     with op.batch_alter_table("agent_runs") as batch:
         batch.drop_constraint("ck_agent_runs_feedback", type_="check")

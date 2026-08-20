@@ -1452,6 +1452,13 @@ async def seed_runs_for_logs_and_monitoring(
     workspace_id: str,
     agent_id: str,
 ) -> None:
+    """
+    Seed succeeded, failed, and historical agent runs for log and monitoring tests.
+    
+    Parameters:
+        workspace_id (str): Workspace containing the runs.
+        agent_id (str): Agent associated with the runs.
+    """
     from app.shareddomain.agents.models import AgentRun as AgentRunOrm
 
     async with get_session_factory()() as db:
@@ -1505,6 +1512,10 @@ async def hard_delete_credential(credential_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def assert_http_external_access() -> None:
+    """Exercise end-to-end external agent access through public and API interfaces.
+    
+    Verifies authentication, publication visibility, credential management, run creation and retrieval, streaming, tool approvals, access isolation, audit logs, monitoring, and rate-limit responses.
+    """
     original_rate_limit = agent_access.enforce_external_agent_rate_limit
     original_run_agent = None
 

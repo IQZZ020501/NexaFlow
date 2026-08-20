@@ -176,6 +176,12 @@ const pageCopy = {
   },
 } as const
 
+/**
+ * Builds localized workspace page configurations using the supplied translation function.
+ *
+ * @param t - Translation function used for page labels, descriptions, actions, and dialog fields
+ * @returns The localized workspace page configurations
+ */
 export function getPages(t: TFunction): WorkspacePageConfig[] {
   return pageDefinitions.map((page) => {
     const copy = pageCopy[page.key]

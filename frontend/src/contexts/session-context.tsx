@@ -63,10 +63,24 @@ const SessionContext = React.createContext<SessionContextValue | undefined>(
   undefined
 )
 
+/**
+ * Replaces the session user when the supplied user belongs to the current session.
+ *
+ * @param me - The current session data, or `null` when no session exists
+ * @param user - The user data to apply
+ * @returns The updated session data when user IDs match; otherwise, the original session data
+ */
 export function replaceSessionUser(me: MeResponse | null, user: User) {
   return me?.user.id === user.id ? { ...me, user } : me
 }
 
+/**
+ * Adds an administrator membership for a newly created workspace when the current user created it.
+ *
+ * @param me - The current user and their workspace memberships
+ * @param payload - The newly created workspace and its administrator
+ * @returns The updated user data, or `me` when no membership is added
+ */
 export function addCreatedWorkspaceMembership(
   me: MeResponse | null,
   payload: WorkspaceCreateResponse
@@ -90,6 +104,14 @@ export function addCreatedWorkspaceMembership(
   }
 }
 
+/**
+ * Adds a newly created team to the administrator's team memberships.
+ *
+ * @param me - The current session user data, or `null`
+ * @param team - The newly created team
+ * @param adminUserId - The user ID designated as the team's administrator
+ * @returns Session user data with the team added when applicable, otherwise the original value
+ */
 export function addCreatedTeamMembership(
   me: MeResponse | null,
   team: Team,
@@ -121,6 +143,14 @@ export function addCreatedTeamMembership(
   }
 }
 
+/**
+ * Selects the initial active workspace accessible to the user.
+ *
+ * @param me - The current user's session data
+ * @param workspaces - The available workspaces
+ * @param storedWorkspaceId - The previously selected workspace ID, if available
+ * @returns The stored workspace ID when eligible, otherwise the first eligible active workspace ID, or `null` when none is available
+ */
 export function getInitialWorkspaceId(
   me: MeResponse,
   workspaces: Workspace[],
@@ -143,8 +173,14 @@ export function getInitialWorkspaceId(
   )
 }
 
+/**
+ * Provides authentication state, session lifecycle management, workspace and team data, and session operations to descendant components.
+ *
+ * @param children - The components rendered within the session context
+ */
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { t } = useLanguage()
+  const tRef = React.useRef(t)
   const [token, setToken] = React.useState<string | null>(null)
   const [mustChangePassword, setMustChangePassword] = React.useState(false)
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = React.useState(false)
@@ -161,6 +197,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [notification, setNotification] =
     React.useState<AppNotification | null>(null)
   const [refreshAt, setRefreshAt] = React.useState<number | null>(null)
+
+  React.useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   const notify = React.useCallback(
     (kind: AppNotification["kind"], message: string) => {
@@ -235,7 +275,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           isCurrent &&
           !(error instanceof ApiError && error.status === 401)
         ) {
-          const message = getErrorMessage(error, t)
+          const message = getErrorMessage(error, tRef.current)
           setSessionError(message)
           notify("error", message)
         }
@@ -252,7 +292,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return () => {
       isCurrent = false
     }
-  }, [applyAccessToken, notify, t])
+  }, [applyAccessToken, notify])
 
   const loadSession = React.useCallback(
     async (nextToken: string) => {
@@ -297,14 +337,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           return
         }
 
-        const message = getErrorMessage(error, t)
+        const message = getErrorMessage(error, tRef.current)
         setSessionError(message)
         notify("error", message)
       } finally {
         setIsSessionLoading(false)
       }
     },
-    [clearSession, notify, renewAccessToken, t]
+    [clearSession, notify, renewAccessToken]
   )
 
   React.useEffect(() => {
@@ -329,12 +369,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         }
 
         setRefreshAt(Date.now() + REFRESH_RETRY_MILLISECONDS)
-        notify("error", getErrorMessage(error, t))
+        notify("error", getErrorMessage(error, tRef.current))
       })
     }, Math.max(refreshAt - Date.now(), 0))
 
     return () => window.clearTimeout(timer)
-  }, [clearSession, notify, refreshAt, renewAccessToken, t, token])
+  }, [clearSession, notify, refreshAt, renewAccessToken, token])
 
   React.useEffect(() => {
     if (!notification) {
@@ -366,7 +406,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       .catch((error: unknown) => {
         if (isCurrent) {
           setTeams([])
-          notify("error", getErrorMessage(error, t))
+          notify("error", getErrorMessage(error, tRef.current))
         }
       })
       .finally(() => {
@@ -384,7 +424,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     mustChangePassword,
     isSessionLoading,
     notify,
-    t,
   ])
 
   function handleLogin(
@@ -565,6 +604,11 @@ export const useSession = () => {
   return context
 }
 
+/**
+ * Provides the localized name of the selected workspace.
+ *
+ * @returns The localized workspace name, or a localized message when no workspace is selected
+ */
 export function useCurrentWorkspaceName() {
   const { t } = useLanguage()
   const { currentWorkspace } = useSession()

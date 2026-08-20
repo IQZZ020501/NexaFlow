@@ -21,6 +21,7 @@ from app.infrastructure.agent_live_stream import (
     AgentLiveStreamReader,
 )
 from app.infrastructure.config import Settings
+from app.application.governance import enforce_workspace_run_quota
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import workflow as workflow_repository
@@ -69,6 +70,9 @@ def workflow_run_to_response(
     run: AgentRun,
     detail: WorkflowRunDetail,
 ) -> WorkflowRunResponse:
+    """
+    Convert workflow run and detail records into an API response.
+    """
     return WorkflowRunResponse(
         id=run.id,
         conversation_id=run.conversation_id,
@@ -106,6 +110,19 @@ async def regenerate_workflow_run_from_source(
     actor: User,
     settings: Settings,
 ) -> WorkflowRunResponse:
+    """
+    Regenerate a completed workflow run using its preserved configuration and resource snapshots.
+    
+    Parameters:
+    	source (AgentRun): Completed workflow run to regenerate.
+    	detail (WorkflowRunDetail): Preserved workflow definition and resource details.
+    
+    Returns:
+    	WorkflowRunResponse: The newly queued workflow run.
+    
+    Raises:
+    	HTTPException: If the source run is incomplete, an active conversation run exists, or a preserved workflow resource is invalid or unavailable.
+    """
     if source.status != "succeeded":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -238,6 +255,12 @@ async def regenerate_workflow_run_from_source(
 
 
 def workflow_pending_form(run: AgentRun) -> WorkflowPendingForm | None:
+    """
+    Extracts the pending workflow form from a run checkpoint.
+    
+    Returns:
+        WorkflowPendingForm | None: The pending form, or `None` when the checkpoint does not contain one.
+    """
     value = (run.checkpoint or {}).get("workflow_form")
     if not isinstance(value, dict):
         return None
@@ -366,6 +389,25 @@ async def create_workflow_run(
     conversation_id: str | None = None,
     files: list[dict[str, Any]] | None = None,
 ) -> WorkflowRunResponse:
+    """
+    Create and queue a workflow run for execution.
+    
+    Parameters:
+    	workspace_id (str): Identifier of the workspace containing the workflow.
+    	agent_id (str): Identifier of the workflow agent.
+    	payload (WorkflowRunCreateRequest): Run input and source configuration.
+    	access_source (str): Origin of the run, such as ``console``, ``public``, or ``api``.
+    	consumer_id (str | None): External consumer identifier for non-console runs.
+    	conversation_id (str | None): Existing conversation identifier to associate with the run.
+    	files (list[dict[str, Any]] | None): Files to include as workflow inputs.
+    
+    Raises:
+    	ValueError: If the access source or required external consumer identifier is invalid.
+    	HTTPException: If the workflow, version, resources, files, permissions, quota, or conversation state prevents execution.
+    
+    Returns:
+    	WorkflowRunResponse: The newly queued workflow run.
+    """
     if access_source not in {"console", "public", "api"}:
         raise ValueError("Invalid workflow run access source.")
     if access_source != "console" and payload.source != "published":
@@ -375,6 +417,7 @@ async def create_workflow_run(
         )
     if access_source != "console" and not consumer_id:
         raise ValueError("External workflow runs require a consumer id.")
+    await enforce_workspace_run_quota(db, workspace_id)
     agent = await get_workflow_agent(db, workspace_id, agent_id)
     if payload.source == "draft" and access_source == "console":
         require_agent_edit(agent, actor, workspace_role)
@@ -592,6 +635,15 @@ async def cancel_workflow_run(
     actor: User,
     workspace_role: str | None,
 ) -> WorkflowRunResponse:
+    """
+    Cancel an active workflow run.
+    
+    Returns:
+        WorkflowRunResponse: The canceled workflow run.
+    
+    Raises:
+        HTTPException: If the workflow run has already finished.
+    """
     await get_workflow_run(
         db,
         workspace_id,
@@ -621,6 +673,23 @@ async def regenerate_workflow_run(
     workspace_role: str | None,
     settings: Settings,
 ) -> WorkflowRunResponse:
+    """
+    Regenerate a workflow run from an existing run after validating access.
+    
+    Parameters:
+        workspace_id (str): Workspace containing the workflow run.
+        agent_id (str): Agent associated with the workflow run.
+        run_id (str): Identifier of the source workflow run.
+        actor (User): User requesting regeneration.
+        workspace_role (str | None): Role of the user in the workspace.
+        settings (Settings): Application settings used to create the regenerated run.
+    
+    Returns:
+        WorkflowRunResponse: The newly created regenerated workflow run.
+    
+    Raises:
+        HTTPException: If the source workflow run or its details cannot be found.
+    """
     source_response = await get_workflow_run(
         db,
         workspace_id,
@@ -646,6 +715,15 @@ async def set_workflow_run_feedback(
     workspace_role: str | None,
     value: str | None,
 ) -> WorkflowRunResponse:
+    """
+    Update the feedback associated with a workflow run.
+    
+    Parameters:
+        value (str | None): The feedback value to associate with the run, or `None` to clear it.
+    
+    Returns:
+        WorkflowRunResponse: The updated workflow run.
+    """
     await get_workflow_run(db, workspace_id, agent_id, run_id, actor, workspace_role)
     run = await agent_repository.get_agent_run_by_id(db, run_id)
     detail = await workflow_repository.get_run_detail(db, run_id)
@@ -664,6 +742,16 @@ async def list_workflow_runs(
     limit: int,
     offset: int,
 ) -> list[WorkflowRunResponse]:
+    """
+    List the actor's latest console workflow runs for an agent.
+    
+    Parameters:
+    	limit (int): Maximum number of runs to return.
+    	offset (int): Number of runs to skip.
+    
+    Returns:
+    	list[WorkflowRunResponse]: Workflow run responses with available details.
+    """
     agent = await get_workflow_agent(db, workspace_id, agent_id)
     await require_agent_view(db, agent, actor, workspace_role)
     runs = await agent_repository.list_agent_runs(

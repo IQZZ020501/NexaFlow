@@ -14,6 +14,7 @@ from app.entities.user import RefreshSession, User
 from app.entities.workspace import WORKSPACE_ADMIN_ROLE
 from app.entities.workspace import Workspace, WorkspaceMembership
 from app.infrastructure.repositories import mapping
+from app.infrastructure.model_utils import utc_now
 
 
 async def list_users(
@@ -21,6 +22,16 @@ async def list_users(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[User]:
+    """
+    List users ordered by creation time from newest to oldest.
+    
+    Parameters:
+    	limit (int | None): Maximum number of users to return.
+    	offset (int): Number of users to skip before collecting results.
+    
+    Returns:
+    	list[User]: Users matching the pagination parameters.
+    """
     result = await db.scalars(
         select(UserOrm)
         .order_by(UserOrm.created_at.desc(), UserOrm.id.desc())
@@ -64,12 +75,23 @@ async def get_active_refresh_session(
     token_hash: str,
     now: datetime,
 ) -> RefreshSession | None:
+    """
+    Finds an active refresh session matching a token hash.
+    
+    Parameters:
+    	token_hash (str): Hash of the refresh token to locate.
+    	now (datetime): Reference time used to determine whether the session has expired.
+    
+    Returns:
+    	RefreshSession | None: The matching active session, or `None` if no eligible session exists.
+    """
     row = await db.scalar(
         select(RefreshSessionOrm)
         .join(UserOrm, RefreshSessionOrm.user_id == UserOrm.id)
         .where(
             RefreshSessionOrm.token_hash == token_hash,
             RefreshSessionOrm.expires_at > now,
+            RefreshSessionOrm.revoked_at.is_(None),
             UserOrm.is_active.is_(True),
         )
     )
@@ -83,21 +105,113 @@ async def delete_expired_refresh_sessions(db: AsyncSession, now: datetime) -> No
 
 
 async def delete_refresh_session(db: AsyncSession, token_hash: str) -> None:
+    """Delete the refresh session identified by its token hash.
+    
+    Parameters:
+    	token_hash (str): Hash of the token associated with the session.
+    """
     await db.execute(
         delete(RefreshSessionOrm).where(RefreshSessionOrm.token_hash == token_hash)
     )
 
 
+async def list_refresh_sessions(
+    db: AsyncSession,
+    user_id: str,
+    now: datetime,
+) -> list[RefreshSession]:
+    """
+    List a user's active refresh sessions ordered by most recent use.
+    
+    Parameters:
+    	user_id (str): Identifier of the user whose sessions are listed.
+    	now (datetime): Reference time used to exclude expired sessions.
+    
+    Returns:
+    	list[RefreshSession]: The user's unexpired, unrevoked refresh sessions.
+    """
+    result = await db.scalars(
+        select(RefreshSessionOrm)
+        .where(
+            RefreshSessionOrm.user_id == user_id,
+            RefreshSessionOrm.expires_at > now,
+            RefreshSessionOrm.revoked_at.is_(None),
+        )
+        .order_by(RefreshSessionOrm.last_used_at.desc(), RefreshSessionOrm.id.desc())
+    )
+    return [mapping.to_entity(RefreshSession, row) for row in result.all()]
+
+
+async def revoke_refresh_session_by_id(
+    db: AsyncSession,
+    session_id: str,
+    user_id: str | None = None,
+) -> None:
+    """
+    Revoke a refresh session by its identifier.
+    
+    Parameters:
+    	session_id (str): Identifier of the refresh session to revoke.
+    	user_id (str | None): Optional user identifier that restricts the session lookup.
+    
+    """
+    statement = select(RefreshSessionOrm).where(RefreshSessionOrm.id == session_id)
+    if user_id is not None:
+        statement = statement.where(RefreshSessionOrm.user_id == user_id)
+    row = await db.scalar(statement)
+    if row is not None:
+        row.revoked_at = utc_now()
+
+
 async def delete_refresh_sessions_for_user(db: AsyncSession, user_id: str) -> None:
+    """Delete all refresh sessions belonging to a user.
+    
+    Parameters:
+    	user_id (str): Identifier of the user whose refresh sessions are deleted.
+    """
     await db.execute(
         delete(RefreshSessionOrm).where(RefreshSessionOrm.user_id == user_id)
     )
+
+
+async def revoke_other_refresh_sessions(
+    db: AsyncSession,
+    user_id: str,
+    current_session_id: str | None,
+    now: datetime,
+) -> None:
+    """
+    Revoke a user's other active refresh sessions.
+    
+    Parameters:
+    	user_id (str): Identifier of the user whose sessions should be revoked.
+    	current_session_id (str | None): Identifier of the session to keep active, if provided.
+    	now (datetime): Timestamp recorded as the revocation time.
+    """
+    statement = select(RefreshSessionOrm).where(
+        RefreshSessionOrm.user_id == user_id,
+        RefreshSessionOrm.revoked_at.is_(None),
+        RefreshSessionOrm.expires_at > now,
+    )
+    if current_session_id:
+        statement = statement.where(RefreshSessionOrm.id != current_session_id)
+    for row in (await db.scalars(statement)).all():
+        row.revoked_at = now
 
 
 async def list_workspace_scope_rows(
     db: AsyncSession,
     user_ids: list[str],
 ):
+    """
+    Retrieve workspace memberships and their corresponding workspaces for the specified users.
+    
+    Parameters:
+    	user_ids (list[str]): User identifiers whose workspace memberships should be retrieved.
+    
+    Returns:
+    	list[tuple[WorkspaceMembership, Workspace]]: Membership and workspace entity pairs ordered by workspace creation time.
+    """
     if not user_ids:
         return []
 
@@ -213,6 +327,30 @@ async def create_refresh_session(
     db: AsyncSession,
     entity: RefreshSession,
 ) -> RefreshSession:
+    """Persist a refresh session and return the resulting domain entity.
+    
+    Parameters:
+    	entity (RefreshSession): The refresh session to persist.
+    
+    Returns:
+    	RefreshSession: The persisted refresh session.
+    """
+    orm_row = await mapping.save(db, RefreshSessionOrm, entity)
+    return mapping.to_entity(RefreshSession, orm_row)
+
+
+async def save_refresh_session(
+    db: AsyncSession,
+    entity: RefreshSession,
+) -> RefreshSession:
+    """Persist an existing refresh session and return its domain entity.
+    
+    Parameters:
+    	entity (RefreshSession): The refresh session to save.
+    
+    Returns:
+    	RefreshSession: The saved refresh session.
+    """
     orm_row = await mapping.save(db, RefreshSessionOrm, entity)
     return mapping.to_entity(RefreshSession, orm_row)
 
@@ -221,6 +359,15 @@ async def create_workspace_membership(
     db: AsyncSession,
     entity: WorkspaceMembership,
 ) -> WorkspaceMembership:
+    """
+    Create and persist a workspace membership.
+    
+    Parameters:
+    	entity (WorkspaceMembership): The workspace membership to persist.
+    
+    Returns:
+    	WorkspaceMembership: The persisted workspace membership.
+    """
     orm_row = await mapping.save(db, WorkspaceMembershipOrm, entity)
     return mapping.to_entity(WorkspaceMembership, orm_row)
 

@@ -242,6 +242,16 @@ async def seed_workspace_analytics(
     workspace_admin_id: str,
     team_admin_id: str,
 ) -> None:
+    """
+    Populate two workspaces with analytics test data, including models, agents, workflows, runs, and workflow details.
+    
+    Parameters:
+    	workspace_id (str): Identifier of the primary workspace.
+    	other_workspace_id (str): Identifier of a separate workspace used to verify isolation.
+    	global_admin_id (str): Identifier of the global administrator who creates shared resources and runs.
+    	workspace_admin_id (str): Identifier of the workspace administrator used for analytics runs.
+    	team_admin_id (str): Identifier of the team administrator used for analytics runs.
+    """
     async with get_session_factory()() as db:
         model = RegisteredModel(
             id="analytics-model",
@@ -521,6 +531,9 @@ async def get_analytics_audit_details(workspace_id: str) -> dict:
 
 
 def exercise_workspace_analytics() -> None:
+    """
+    Exercise workspace analytics authorization, aggregation, date-range handling, and audit logging.
+    """
     with test_client() as client:
         admin_token, workspace_id = activate_admin(client)
         admin_me = client.get(
