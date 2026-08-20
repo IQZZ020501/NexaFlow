@@ -54,3 +54,11 @@ async def activate_graph_schema(
     await graph_repository.retire_active_schema(db, knowledge_base)
     schema.status = GRAPH_SCHEMA_ACTIVE
     return await graph_repository.save_graph_schema(db, schema)
+
+
+from app.shareddomain.knowledge_graph.revisions import (  # noqa: E402,F401
+    GraphRevisionConflict,
+    create_revision,
+    publish_revision,
+    stage_revision_change,
+)
