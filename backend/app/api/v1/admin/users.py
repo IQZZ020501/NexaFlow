@@ -75,6 +75,7 @@ async def change_managed_user_password(
     user_id: str,
     payload: ChangePasswordRequest,
     actor: Annotated[User, Depends(require_global_admin)],
+    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserResponse:
     """Change the password for a managed user.
@@ -88,7 +89,13 @@ async def change_managed_user_password(
     	UserResponse: The updated user.
     """
     user = await get_user(db, user_id)
-    return await change_user_password(db, user, actor, payload.new_password)
+    return await change_user_password(
+        db,
+        user,
+        actor,
+        payload.new_password,
+        settings,
+    )
 
 
 @router.get("/{user_id}/sessions", response_model=list[RefreshSessionResponse])

@@ -12,6 +12,9 @@ from pathlib import Path
 SUITES = (
     "unit",
     "logger",
+    "smtp",
+    "email",
+    "system_governance",
     "identity",
     "workspaces",
     "teams",
@@ -50,6 +53,7 @@ def _run_suite(suite: str, run_id: int) -> tuple[str, int, Path]:
                     "-m",
                     "coverage",
                     "run",
+                    "--concurrency=thread,greenlet",
                     "--source=app",
                     f"--data-file=.coverage.{suite}",
                     "-m",

@@ -1,6 +1,6 @@
 import * as React from "react"
 import Link from "next/link"
-import { ActivityIcon, KeyRoundIcon, ShieldCheckIcon } from "lucide-react"
+import { ActivityIcon, KeyRoundIcon, MailIcon, ShieldCheckIcon } from "lucide-react"
 import { useLanguage } from "@/contexts/language-provider"
 import type {
   AuditLog,
@@ -307,6 +307,15 @@ export function SystemPageView({
             >
               <ActivityIcon className="size-4 shrink-0" />
               <span>{t("系统运行")}</span>
+            </Link>
+          ) : null}
+          {me.user.is_global_admin ? (
+            <Link
+              href="/system/email"
+              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+            >
+              <MailIcon className="size-4 shrink-0" />
+              <span>{t("SMTP 邮件")}</span>
             </Link>
           ) : null}
           {canManageAnyWorkspace(me, selectedWorkspaceId) ? (

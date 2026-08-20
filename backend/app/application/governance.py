@@ -1,6 +1,11 @@
+import asyncio
+import tempfile
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
+from pathlib import Path
 
 from fastapi import HTTPException, status
+from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +17,7 @@ from app.infrastructure.config import Settings
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import governance as governance_repository
 from app.infrastructure.repositories import workspace_governance as workspace_governance_repository
+from app.ports.vector_store import check_vector_store_health
 from app.schemas.governance import (
     AdminHealthResponse,
     HealthComponent,
@@ -20,6 +26,99 @@ from app.schemas.governance import (
     WorkspaceInventoryResponse,
 )
 from app.shareddomain.audit.services import record_audit_log
+
+
+HEALTH_PROBE_TIMEOUT_SECONDS = 3.0
+_STORAGE_PROBE_CONTENT = b"nexaflow-health"
+
+
+async def _check_health_component(
+    configured: bool,
+    probe: Callable[[], Awaitable[None]],
+) -> HealthComponent:
+    if not configured:
+        return HealthComponent(status="not_configured")
+    try:
+        async with asyncio.timeout(HEALTH_PROBE_TIMEOUT_SECONDS):
+            await probe()
+    except TimeoutError:
+        return HealthComponent(
+            status="error",
+            detail="timeout",
+        )
+    except Exception:
+        return HealthComponent(
+            status="error",
+            detail="unavailable",
+        )
+    return HealthComponent(status="ok")
+
+
+async def _probe_database(db: AsyncSession) -> None:
+    await db.execute(text("SELECT 1"))
+
+
+async def _probe_redis(settings: Settings) -> None:
+    client = Redis.from_url(
+        settings.celery_broker_url,
+        decode_responses=True,
+        socket_connect_timeout=2,
+        socket_timeout=2,
+    )
+    try:
+        if not await client.ping():
+            raise RuntimeError("Redis did not acknowledge the health probe.")
+    finally:
+        await client.aclose()
+
+
+async def _probe_qdrant(settings: Settings) -> None:
+    await asyncio.to_thread(check_vector_store_health, settings)
+
+
+def _probe_storage_sync(root: Path) -> None:
+    if not root.is_dir():
+        raise OSError("Storage directory is unavailable.")
+    probe_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=".nexaflow-health-",
+            dir=root,
+            delete=False,
+        ) as probe:
+            probe.write(_STORAGE_PROBE_CONTENT)
+            probe_path = Path(probe.name)
+        if probe_path.read_bytes() != _STORAGE_PROBE_CONTENT:
+            raise OSError("Storage probe content could not be read back.")
+    finally:
+        if probe_path is not None:
+            probe_path.unlink(missing_ok=True)
+
+
+async def _probe_storage(settings: Settings) -> None:
+    if settings.knowledge_storage_dir is None:
+        raise OSError("Storage directory is not configured.")
+    await asyncio.to_thread(_probe_storage_sync, settings.knowledge_storage_dir)
+
+
+def _probe_worker_sync(settings: Settings) -> None:
+    from app.infrastructure.celery import celery_app
+
+    with celery_app.connection_for_read(
+        settings.celery_broker_url,
+        connect_timeout=2,
+    ) as connection:
+        replies = celery_app.control.ping(
+            timeout=2,
+            limit=1,
+            connection=connection,
+        )
+    if not replies:
+        raise RuntimeError("No Celery worker replied to the health probe.")
+
+
+async def _probe_worker(settings: Settings) -> None:
+    await asyncio.to_thread(_probe_worker_sync, settings)
 
 
 def _governance_response(entity: WorkspaceGovernance) -> WorkspaceGovernanceResponse:
@@ -135,26 +234,51 @@ async def get_admin_health(
     	AdminHealthResponse: Health status, component details, pending task count, failed log count from the previous 24 hours, and check timestamp.
     """
     checked_at = utc_now()
-    components: dict[str, HealthComponent] = {}
-    try:
-        await db.execute(text("SELECT 1"))
-        components["database"] = HealthComponent(status="ok")
-    except Exception:
-        components["database"] = HealthComponent(status="error", detail="unavailable")
-    configured = {
-        "redis": bool(settings.celery_broker_url),
-        "qdrant": bool(settings.qdrant_url),
-        "storage": bool(settings.knowledge_storage_dir),
-        "worker": bool(settings.celery_broker_url),
-    }
-    for name, is_configured in configured.items():
-        components[name] = HealthComponent(
-            status="configured" if is_configured else "not_configured"
-        )
-    pending_tasks, failed_logs_24h = await governance_repository.health_counts(
-        db, checked_at - timedelta(days=1)
+    names = ("database", "redis", "qdrant", "storage", "worker")
+    results = await asyncio.gather(
+        _check_health_component(True, lambda: _probe_database(db)),
+        _check_health_component(
+            bool(settings.celery_broker_url),
+            lambda: _probe_redis(settings),
+        ),
+        _check_health_component(
+            bool(settings.qdrant_url),
+            lambda: _probe_qdrant(settings),
+        ),
+        _check_health_component(
+            settings.knowledge_storage_dir is not None,
+            lambda: _probe_storage(settings),
+        ),
+        _check_health_component(
+            bool(settings.celery_broker_url),
+            lambda: _probe_worker(settings),
+        ),
     )
-    healthy = all(item.status in {"ok", "configured"} for item in components.values())
+    components = dict(zip(names, results, strict=True))
+
+    pending_tasks = 0
+    failed_logs_24h = 0
+    if components["database"].status == "ok":
+        try:
+            async with asyncio.timeout(HEALTH_PROBE_TIMEOUT_SECONDS):
+                pending_tasks, failed_logs_24h = (
+                    await governance_repository.health_counts(
+                        db,
+                        checked_at - timedelta(days=1),
+                    )
+                )
+        except TimeoutError:
+            components["database"] = HealthComponent(
+                status="error",
+                detail="timeout",
+            )
+        except Exception:
+            components["database"] = HealthComponent(
+                status="error",
+                detail="unavailable",
+            )
+
+    healthy = all(item.status == "ok" for item in components.values())
     return AdminHealthResponse(
         status="ok" if healthy else "degraded",
         components=components,

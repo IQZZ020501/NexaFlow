@@ -39,6 +39,22 @@ class ChangePasswordRequest(BaseModel):
         return value
 
 
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=255)
+    new_password: str = Field(min_length=6, max_length=255)
+
+    @field_validator("new_password")
+    @classmethod
+    def require_uppercase(cls, value: str) -> str:
+        if not any(character.isupper() for character in value):
+            raise ValueError("Password must contain at least one uppercase letter.")
+        return value
+
+
 class UserWorkspaceResponse(BaseModel):
     id: str
     name: str

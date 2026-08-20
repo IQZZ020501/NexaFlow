@@ -13,6 +13,7 @@ from app.application.governance import (
 )
 from app.application.invitations import (
     create_workspace_invitation,
+    delete_workspace_invitation,
     list_workspace_invitations,
     revoke_workspace_invitation,
 )
@@ -193,6 +194,7 @@ async def list_invitations(
 async def create_invitation(
     payload: WorkspaceInvitationCreateRequest,
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkspaceInvitationResponse:
     """
@@ -205,7 +207,13 @@ async def create_invitation(
     Returns:
     	WorkspaceInvitationResponse: The created workspace invitation.
     """
-    return await create_workspace_invitation(db, context.workspace.id, context.user, payload)
+    return await create_workspace_invitation(
+        db,
+        context.workspace.id,
+        context.user,
+        payload,
+        settings,
+    )
 
 
 @router.delete(
@@ -224,6 +232,20 @@ async def revoke_invitation(
     	invitation_id (str): Identifier of the invitation to revoke
     """
     await revoke_workspace_invitation(db, context.workspace.id, invitation_id, context.user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/{workspace_id}/invitations/{invitation_id}/permanent",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_invitation(
+    invitation_id: str,
+    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """Permanently delete a workspace invitation record."""
+    await delete_workspace_invitation(db, context.workspace.id, invitation_id, context.user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

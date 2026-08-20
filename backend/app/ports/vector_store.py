@@ -17,6 +17,8 @@ from app.infrastructure.config import Settings
 
 
 class VectorStore(Protocol):
+    def check_health(self) -> None: ...
+
     def delete_vector_collection(self, knowledge_base_id: str) -> None: ...
 
     def delete_vectors(
@@ -46,6 +48,10 @@ class VectorStore(Protocol):
 
 def build_vector_store(settings: Settings) -> VectorStore:
     return QdrantVectorStore(settings)
+
+
+def check_vector_store_health(settings: Settings) -> None:
+    build_vector_store(settings).check_health()
 
 
 def delete_vector_collection(settings: Settings, knowledge_base_id: str) -> None:
@@ -99,6 +105,7 @@ __all__ = [
     "VectorHit",
     "VectorStore",
     "build_vector_store",
+    "check_vector_store_health",
     "delete_vector_collection",
     "delete_vectors",
     "query_vectors",

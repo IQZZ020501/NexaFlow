@@ -109,3 +109,14 @@ async def save(
     """
     row = await mapping.save(db, InvitationOrm, entity)
     return mapping.to_entity(WorkspaceInvitation, row)
+
+
+async def delete(
+    db: AsyncSession,
+    entity: WorkspaceInvitation,
+) -> None:
+    """Delete a workspace invitation."""
+    row = await db.get(InvitationOrm, entity.id)
+    if row is not None:
+        await db.delete(row)
+        await db.flush()

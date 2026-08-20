@@ -322,15 +322,19 @@ describe("AgentConfigFields", () => {
     ).toBeGreaterThan(0)
     expect(within(dialog).getByText("Execute SQL")).toBeTruthy()
 
-    fireEvent.click(within(dialog).getByText("Execute SQL").closest("label")!)
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", { name: "Execute SQL" })
+    )
     await waitFor(() =>
       expect(screen.getAllByText("2 个工具").length).toBeGreaterThan(0)
     )
 
     fireEvent.click(
-      within(dialog).getByText("Catalog search").closest("label")!
+      within(dialog).getByRole("checkbox", { name: "Catalog search" })
     )
-    fireEvent.click(within(dialog).getByText("Execute SQL").closest("label")!)
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", { name: "Execute SQL" })
+    )
     await waitFor(() =>
       expect(screen.getByText("选择的工具展示在这里")).toBeTruthy()
     )

@@ -1,6 +1,7 @@
 import * as React from "react"
 import { LoaderCircleIcon } from "lucide-react"
 import Image from "next/image"
+import Link from "next/link"
 import { useLanguage } from "@/contexts/language-provider"
 import { Button } from "@/components/ui/button"
 import {
@@ -14,7 +15,6 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { login } from "@/lib/api/auth"
-import { ChangePasswordDialog } from "@/components/auth/change-password-dialog"
 import { getErrorMessage } from "@/lib/errors"
 import type { AppNotification } from "@/lib/notifications"
 
@@ -24,7 +24,7 @@ type LoginForm = {
 }
 
 /**
- * Renders a localized login form and provides access to password changes.
+ * Renders a localized login form and provides access to password recovery.
  *
  * @param onLogin - Called with the access token, password-change requirement, and expiration time after a successful login.
  * @param onNotify - Called with the notification kind and message for user-facing feedback.
@@ -42,7 +42,6 @@ export function LoginScreen({
     password: "",
   })
   const [isSubmitting, setIsSubmitting] = React.useState(false)
-  const [isPasswordDialogOpen, setIsPasswordDialogOpen] = React.useState(false)
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -99,16 +98,7 @@ export function LoginScreen({
                   />
                 </Field>
                 <Field>
-                  <div className="flex min-h-5 items-baseline justify-between gap-3">
-                    <FieldLabel htmlFor="password">{t("密码")}</FieldLabel>
-                    <button
-                      type="button"
-                      className="rounded-sm text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                      onClick={() => setIsPasswordDialogOpen(true)}
-                    >
-                      {t("修改密码")}
-                    </button>
-                  </div>
+                  <FieldLabel htmlFor="password">{t("密码")}</FieldLabel>
                   <Input
                     id="password"
                     type="password"
@@ -122,6 +112,14 @@ export function LoginScreen({
                     }
                     required
                   />
+                  <div className="flex justify-end">
+                    <Link
+                      href="/forgot-password"
+                      className="rounded-sm text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                    >
+                      {t("忘记密码")}
+                    </Link>
+                  </div>
                 </Field>
               </FieldGroup>
             </CardContent>
@@ -136,19 +134,6 @@ export function LoginScreen({
           </form>
         </Card>
       </main>
-      <ChangePasswordDialog
-        open={isPasswordDialogOpen}
-        title={t("修改密码")}
-        description={t("设置一个新的登录密码")}
-        canDismiss
-        requireCurrentPassword
-        onOpenChange={setIsPasswordDialogOpen}
-        onNotify={onNotify}
-        onChanged={() => {
-          setIsPasswordDialogOpen(false)
-          onNotify("success", t("密码已修改"))
-        }}
-      />
     </>
   )
 }

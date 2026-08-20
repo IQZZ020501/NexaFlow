@@ -22,6 +22,77 @@ mockNextLink()
 
 afterEach(() => cleanup())
 
+async function createPersonalInvitationWithDeliveryStatus(
+  status: "queued" | "not_configured",
+  expectedMessage: string
+) {
+  withFetch((url, init) => {
+    if (url.endsWith("/inventory")) {
+      return jsonResponse({
+        workspace_id: "ws-1",
+        members_total: 1,
+        teams_total: 0,
+        agents_total: 0,
+        knowledge_bases_total: 0,
+        models_total: 0,
+        tools_total: 0,
+        workflows_total: 0,
+        active_runs: 0,
+        failed_runs_24h: 0,
+        failed_tasks_24h: 0,
+      })
+    }
+    if (url.endsWith("/governance")) {
+      return jsonResponse({
+        workspace_id: "ws-1",
+        daily_run_limit: null,
+        monthly_token_limit: null,
+        alert_threshold_percent: 80,
+        retention_days: null,
+        timezone: "UTC",
+        updated_at: "2026-08-20T00:00:00Z",
+      })
+    }
+    if (url.endsWith("/invitations") && init?.method === "POST") {
+      return jsonResponse(
+        {
+          id: `invitation-${status}`,
+          workspace_id: "ws-1",
+          kind: "personal",
+          username: "new-member",
+          email: "new-member@example.com",
+          name: "New Member",
+          role: "member",
+          expires_at: "2026-08-27T00:00:00Z",
+          accepted_at: null,
+          created_at: "2026-08-20T00:00:00Z",
+          token: `personal-token-${status}`,
+          invite_url: `/invite/personal-token-${status}`,
+          email_delivery_status: status,
+        },
+        201
+      )
+    }
+    if (url.endsWith("/invitations")) return jsonResponse([])
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  renderPage(<SystemGovernancePage section="governance" />)
+  fireEvent.change(await screen.findByLabelText("账号"), {
+    target: { value: "new-member" },
+  })
+  fireEvent.change(screen.getByLabelText("邮箱"), {
+    target: { value: "new-member@example.com" },
+  })
+  fireEvent.change(screen.getByLabelText("姓名"), {
+    target: { value: "New Member" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "生成邀请链接" }))
+
+  await waitFor(() => expect(screen.getByText(expectedMessage)).toBeTruthy())
+  expect(screen.getByRole("button", { name: "复制链接" })).toBeTruthy()
+}
+
 describe("workspace invitations", () => {
   test("accepts account details from a reusable invitation", async () => {
     let requestBody: unknown = null
@@ -124,6 +195,7 @@ describe("workspace invitations", () => {
             created_at: "2026-08-20T00:00:00Z",
             token: "reusable-token",
             invite_url: "/invite/reusable-token?mode=generic",
+            email_delivery_status: "not_applicable",
           }, 201)
         }
         if (url.endsWith("/invitations")) return jsonResponse([])
@@ -139,6 +211,12 @@ describe("workspace invitations", () => {
       const expectedUrl = `${window.location.origin}/invite/reusable-token?mode=generic`
       await waitFor(() => expect(screen.getByDisplayValue(expectedUrl)).toBeTruthy())
       expect(createBody).toEqual({ kind: "generic", role: "member" })
+      expect(screen.queryByText("邀请邮件已加入发送队列")).toBeNull()
+      expect(
+        screen.queryByText(
+          "邮件服务尚未配置，邀请邮件未发送；你仍可复制邀请链接"
+        )
+      ).toBeNull()
       fireEvent.click(screen.getByRole("button", { name: "复制链接" }))
       await waitFor(() => expect(copiedValue).toBe(expectedUrl))
     } finally {
@@ -147,5 +225,19 @@ describe("workspace invitations", () => {
         configurable: true,
       })
     }
+  })
+
+  test("shows when a personal invitation email is queued", async () => {
+    await createPersonalInvitationWithDeliveryStatus(
+      "queued",
+      "邀请邮件已加入发送队列"
+    )
+  })
+
+  test("keeps the link available when personal invitation email is not configured", async () => {
+    await createPersonalInvitationWithDeliveryStatus(
+      "not_configured",
+      "邮件服务尚未配置，邀请邮件未发送；你仍可复制邀请链接"
+    )
   })
 })

@@ -93,7 +93,7 @@ export function WorkspaceMembersDialog({
       return
     }
 
-    await onAddMember(newUserId, newRole)
+    await onAddMember(newUserId, canManageAdmins ? newRole : "member")
     setNewUserId("")
     setNewRole("member")
   }
@@ -191,36 +191,38 @@ export function WorkspaceMembersDialog({
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </Field>
-                <Field>
-                  <FieldLabel htmlFor="workspaceMemberRole">
-                    {t("空间角色")}
-                  </FieldLabel>
-                  <DropdownMenu modal={false}>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        id="workspaceMemberRole"
-                        type="button"
-                        variant="outline"
-                        className="h-9 w-full justify-between px-3 font-normal"
-                        disabled={isMutating}
+                {canManageAdmins ? (
+                  <Field>
+                    <FieldLabel htmlFor="workspaceMemberRole">
+                      {t("空间角色")}
+                    </FieldLabel>
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          id="workspaceMemberRole"
+                          type="button"
+                          variant="outline"
+                          className="h-9 w-full justify-between px-3 font-normal"
+                          disabled={isMutating}
+                        >
+                          {newRole === "admin" ? t("管理员") : t("成员")}
+                          <ChevronDownIcon data-icon="inline-end" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align="start"
+                        className="w-(--radix-dropdown-menu-trigger-width)"
                       >
-                        {newRole === "admin" ? t("管理员") : t("成员")}
-                        <ChevronDownIcon data-icon="inline-end" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      align="start"
-                      className="w-(--radix-dropdown-menu-trigger-width)"
-                    >
-                      <DropdownMenuItem onSelect={() => setNewRole("member")}>
-                        {t("成员")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => setNewRole("admin")}>
-                        {t("管理员")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </Field>
+                        <DropdownMenuItem onSelect={() => setNewRole("member")}>
+                          {t("成员")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setNewRole("admin")}>
+                          {t("管理员")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </Field>
+                ) : null}
                 <Button
                   type="button"
                   size="sm"

@@ -68,9 +68,48 @@ export type SystemLog = {
   created_at: string
 }
 
+export type SmtpSecurity = "none" | "starttls" | "ssl"
+
+export type SmtpSettings = {
+  host: string
+  port: number
+  username: string
+  security: SmtpSecurity
+  from_email: string
+  from_name: string
+  enabled: boolean
+  timeout_seconds: number
+  has_password: boolean
+  password_hint: string | null
+  configured: boolean
+  site_url: string
+  identity_configured: boolean
+  updated_at: string
+}
+
+export type SmtpSettingsUpdate = {
+  host?: string
+  port?: number
+  username?: string
+  password?: string
+  clear_password?: boolean
+  security?: SmtpSecurity
+  from_email?: string
+  from_name?: string
+  enabled?: boolean
+  timeout_seconds?: number
+  site_url?: string
+}
+
 export type AdminHealth = {
-  status: string
-  components: Record<string, { status: string; detail?: string | null }>
+  status: "ok" | "degraded"
+  components: Record<
+    string,
+    {
+      status: "ok" | "error" | "not_configured"
+      detail?: "timeout" | "unavailable" | null
+    }
+  >
   pending_tasks: number
   failed_logs_24h: number
   checked_at: string
@@ -118,6 +157,7 @@ export type WorkspaceInvitation = {
   created_at: string
   token?: string | null
   invite_url?: string | null
+  email_delivery_status?: "queued" | "not_configured" | "not_applicable" | null
 }
 
 export type RefreshSession = {
@@ -720,6 +760,32 @@ export function getAdminHealth(token: string) {
   return request<AdminHealth>("/api/v1/admin/governance/health", { token })
 }
 
+/** Retrieves the global SMTP delivery configuration. */
+export function getSmtpSettings(token: string) {
+  return request<SmtpSettings>("/api/v1/admin/smtp", { token })
+}
+
+/** Updates the global SMTP delivery configuration without returning secrets. */
+export function updateSmtpSettings(
+  token: string,
+  payload: SmtpSettingsUpdate
+) {
+  return request<SmtpSettings>("/api/v1/admin/smtp", {
+    method: "PATCH",
+    token,
+    body: JSON.stringify(payload),
+  })
+}
+
+/** Sends a one-off SMTP test message to an administrator-provided address. */
+export function sendSmtpTest(token: string, toEmail: string) {
+  return request<{ success: boolean }>("/api/v1/admin/smtp/test", {
+    method: "POST",
+    token,
+    body: JSON.stringify({ to_email: toEmail }),
+  })
+}
+
 /**
  * Retrieves inventory details for a workspace.
  *
@@ -817,6 +883,24 @@ export function revokeWorkspaceInvitation(
 ) {
   return request<void>(
     `/api/v1/workspaces/${workspaceId}/invitations/${invitationId}`,
+    { method: "DELETE", token }
+  )
+}
+
+/**
+ * Permanently deletes a workspace invitation.
+ *
+ * @param token - The authentication token
+ * @param workspaceId - The workspace containing the invitation
+ * @param invitationId - The invitation to delete
+ */
+export function deleteWorkspaceInvitation(
+  token: string,
+  workspaceId: string,
+  invitationId: string
+) {
+  return request<void>(
+    `/api/v1/workspaces/${workspaceId}/invitations/${invitationId}/permanent`,
     { method: "DELETE", token }
   )
 }

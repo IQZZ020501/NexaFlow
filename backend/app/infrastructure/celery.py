@@ -44,7 +44,12 @@ def create_celery_app() -> Celery:
     app = Celery(
         "app",
         broker=settings.celery_broker_url,
-        include=["app.tasks.knowledge", "app.tasks.agents", "app.tasks.tools"],
+        include=[
+            "app.tasks.knowledge",
+            "app.tasks.agents",
+            "app.tasks.tools",
+            "app.tasks.email",
+        ],
     )
     app.conf.update(
         accept_content=["json"],
@@ -79,6 +84,10 @@ def create_celery_app() -> Celery:
             },
             "recover-tool-invocations": {
                 "task": "app.tools.recover",
+                "schedule": 30.0,
+            },
+            "recover-email-deliveries": {
+                "task": "app.email.recover",
                 "schedule": 30.0,
             },
         },

@@ -49,6 +49,11 @@ def _client(settings: Settings) -> QdrantClient:
     return _build_qdrant_client(settings.qdrant_url, settings.qdrant_api_key)
 
 
+def check_vector_store_health(settings: Settings) -> None:
+    """Verify that the configured Qdrant service accepts an API request."""
+    _client(settings).get_collections()
+
+
 def _ensure_collection(
     client: QdrantClient,
     collection_name: str,
@@ -321,6 +326,9 @@ class QdrantVectorStore:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+
+    def check_health(self) -> None:
+        check_vector_store_health(self._settings)
 
     def delete_vector_collection(self, knowledge_base_id: str) -> None:
         delete_vector_collection(self._settings, knowledge_base_id)

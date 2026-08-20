@@ -13,8 +13,10 @@ import {
   HistoryIcon,
   KeyRoundIcon,
   LoaderCircleIcon,
+  MailIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
+  Trash2Icon,
   UserPlusIcon,
   UsersIcon,
   XCircleIcon,
@@ -26,6 +28,7 @@ import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { languageLocales } from "@/i18n"
 import {
   createWorkspaceInvitation,
+  deleteWorkspaceInvitation,
   getAdminHealth,
   getWorkspaceGovernance,
   getWorkspaceInventory,
@@ -62,12 +65,14 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { displayWorkspaceName, formatDateTime } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
+import { copyText } from "@/lib/clipboard"
 import {
   systemLogEventLabel,
   systemLogLevelLabel,
 } from "@/lib/constants"
+import { SmtpSettingsPage } from "@/components/system/smtp-settings-page"
 
-export type SystemGovernanceSection = "operations" | "governance" | "security"
+export type SystemGovernanceSection = "operations" | "governance" | "security" | "email"
 
 type Props = {
   section: SystemGovernanceSection
@@ -75,7 +80,7 @@ type Props = {
 
 const navItems: Array<{
   href: string
-  label: "工作空间" | "团队" | "用户管理" | "审计日志" | "系统运行" | "工作空间治理" | "会话安全"
+  label: "工作空间" | "团队" | "用户管理" | "审计日志" | "系统运行" | "工作空间治理" | "会话安全" | "SMTP 邮件"
   icon: React.ElementType
 }> = [
   { href: "/system/workspaces", label: "工作空间", icon: Building2Icon },
@@ -83,6 +88,7 @@ const navItems: Array<{
   { href: "/system/users", label: "用户管理", icon: KeyRoundIcon },
   { href: "/system/audit", label: "审计日志", icon: HistoryIcon },
   { href: "/system/operations", label: "系统运行", icon: ActivityIcon },
+  { href: "/system/email", label: "SMTP 邮件", icon: MailIcon },
   { href: "/system/governance", label: "工作空间治理", icon: ShieldCheckIcon },
   { href: "/system/security", label: "会话安全", icon: KeyRoundIcon },
 ]
@@ -115,7 +121,7 @@ export function SystemGovernancePage({ section }: Props) {
       router.replace("/app/apps")
       return
     }
-    if (section === "operations" && !session.me.user.is_global_admin) {
+    if ((section === "operations" || section === "email") && !session.me.user.is_global_admin) {
       router.replace("/system/teams")
     }
     if (section === "governance" && !canManageWorkspace) {
@@ -132,6 +138,7 @@ export function SystemGovernancePage({ section }: Props) {
         {section === "operations" ? <OperationsPanel /> : null}
         {section === "governance" ? <GovernancePanel /> : null}
         {section === "security" ? <SecurityPanel /> : null}
+        {section === "email" ? <SmtpSettingsPage /> : null}
       </main>
     </div>
   )
@@ -159,7 +166,7 @@ function SystemGovernanceNav({
   )
   const visible = navItems.filter((item) => {
     if (item.href === "/system/users") return canManageUsers
-    if (item.href === "/system/audit" || item.href === "/system/operations") {
+    if (item.href === "/system/audit" || item.href === "/system/operations" || item.href === "/system/email") {
       return me.user.is_global_admin
     }
     if (item.href === "/system/governance") return canManageWorkspace
@@ -231,6 +238,14 @@ function useGovernanceContext() {
   }
 }
 
+const healthComponents = [
+  { name: "database", label: "数据库" },
+  { name: "redis", label: "Redis" },
+  { name: "qdrant", label: "向量数据库" },
+  { name: "storage", label: "文件存储" },
+  { name: "worker", label: "后台 Worker" },
+] as const
+
 /**
  * Displays system health metrics and filtered operation logs for administrators.
  *
@@ -245,33 +260,60 @@ function OperationsPanel() {
   const [event, setEvent] = React.useState("")
   const [search, setSearch] = React.useState("")
   const [loading, setLoading] = React.useState(true)
+  const healthRequestRef = React.useRef(0)
 
-  const load = React.useCallback(async () => {
+  const loadHealth = React.useCallback(async (reportFailure: boolean) => {
     if (!session.token) return
-    setLoading(true)
+    const requestId = ++healthRequestRef.current
     try {
-      const [nextHealth, nextLogs] = await Promise.all([
-        getAdminHealth(session.token),
-        listSystemLogs(session.token, {
+      const nextHealth = await getAdminHealth(session.token)
+      if (requestId === healthRequestRef.current) setHealth(nextHealth)
+    } catch (error) {
+      if (requestId !== healthRequestRef.current) return
+      setHealth(null)
+      if (reportFailure) reportError(error)
+    }
+  }, [reportError, session.token])
+
+  const loadLogs = React.useCallback(async () => {
+    if (!session.token) return
+    try {
+      setLogs(
+        await listSystemLogs(session.token, {
           limit: 100,
           level: level || undefined,
           event: event || undefined,
           search: search || undefined,
-        }),
-      ])
-      setHealth(nextHealth)
-      setLogs(nextLogs)
+        })
+      )
     } catch (error) {
       reportError(error)
+    }
+  }, [event, level, reportError, search, session.token])
+
+  const load = React.useCallback(async () => {
+    setLoading(true)
+    try {
+      await Promise.all([loadHealth(true), loadLogs()])
     } finally {
       setLoading(false)
     }
-  }, [event, level, reportError, search, session.token])
+  }, [loadHealth, loadLogs])
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [load])
+
+  React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadHealth(false)
+    }, 30_000)
+    return () => {
+      window.clearInterval(timer)
+      healthRequestRef.current += 1
+    }
+  }, [loadHealth])
 
   function exportLogs() {
     const header = [t("时间"), t("级别"), t("事件"), t("消息"), t("状态")]
@@ -299,21 +341,38 @@ function OperationsPanel() {
         <CardHeader className="flex-row items-start justify-between gap-4">
           <div>
             <CardTitle className="flex items-center gap-2"><ActivityIcon className="size-4" />{t("系统运行")}</CardTitle>
-            <CardDescription>{t("查看服务状态与后台失败记录")}</CardDescription>
+            <CardDescription>
+              <span className="block">{t("查看服务状态与后台失败记录")}</span>
+              <span className="mt-1 block text-xs">
+                {t("每 30 秒自动刷新")} · {t("最后检查")}：{health ? formatDateTime(health.checked_at, languageLocales[language]) : t("未知")}
+              </span>
+            </CardDescription>
           </div>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />{t("刷新")}
           </Button>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {Object.entries(health?.components ?? {}).map(([name, component]) => (
-            <div key={name} className="rounded-lg border bg-muted/20 p-3">
-              <div className="text-sm font-medium">{t(name === "qdrant" ? "向量数据库" : name === "worker" ? "后台 Worker" : name === "storage" ? "文件存储" : name === "redis" ? "Redis" : "数据库")}</div>
-              <Badge variant={component.status === "error" ? "destructive" : "secondary"} className="mt-2">
-                {component.status === "ok" ? t("正常") : component.status === "configured" ? t("已配置") : component.status === "error" ? t("异常") : t("未配置")}
-              </Badge>
-            </div>
-          ))}
+          {healthComponents.map(({ name, label }) => {
+            const component = health?.components[name]
+            const componentStatus = component?.status ?? "unknown"
+            return (
+              <div key={name} className="rounded-lg border bg-muted/20 p-3">
+                <div className="text-sm font-medium">{t(label)}</div>
+                <Badge
+                  variant={componentStatus === "error" ? "destructive" : componentStatus === "ok" ? "secondary" : "outline"}
+                  className="mt-2"
+                >
+                  {componentStatus === "ok" ? t("正常") : componentStatus === "error" ? t("异常") : componentStatus === "not_configured" ? t("未配置") : t("未知")}
+                </Badge>
+                {componentStatus === "error" ? (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {component?.detail === "timeout" ? t("检查超时") : t("服务不可用")}
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
           <div className="rounded-lg border bg-muted/20 p-3"><div className="text-sm font-medium">{t("待处理任务")}</div><div className="mt-2 text-2xl font-semibold">{health?.pending_tasks ?? "—"}</div></div>
           <div className="rounded-lg border bg-muted/20 p-3"><div className="text-sm font-medium">{t("近 24 小时错误")}</div><div className="mt-2 text-2xl font-semibold">{health?.failed_logs_24h ?? "—"}</div></div>
         </CardContent>
@@ -448,6 +507,30 @@ function GovernancePanel() {
     try { await revokeWorkspaceInvitation(session.token, selectedWorkspaceId, id); setInvitations((current) => current.map((item) => item.id === id ? { ...item, accepted_at: new Date().toISOString() } : item)); session.notify("success", t("邀请已撤销")) } catch (error) { reportError(error) }
   }
 
+  async function deleteInvite(id: string) {
+    if (!session.token || !selectedWorkspaceId) return
+    if (!(await confirmAction({
+      description: t("确认删除邀请"),
+      confirmLabel: t("删除"),
+      destructive: true,
+    }))) return
+    try {
+      await deleteWorkspaceInvitation(session.token, selectedWorkspaceId, id)
+      setInvitations((current) => current.filter((item) => item.id !== id))
+      setInviteResult((current) => current?.id === id ? null : current)
+      session.notify("success", t("邀请已删除"))
+    } catch (error) { reportError(error) }
+  }
+
+  async function copyInviteLink() {
+    try {
+      await copyText(inviteResult?.invite_url ?? inviteResult?.token ?? "")
+      session.notify("success", t("已复制"))
+    } catch {
+      session.notify("error", t("复制失败"))
+    }
+  }
+
   if (!selectedWorkspace) return <EmptyState text={t("暂无可管理工作空间")} />
   const dateLocale = language === "en" ? "en-US" : language === "zh-Hant" ? "zh-TW" : "zh-CN"
   const cards: Array<[string, number]> = inventory ? [["成员", inventory.members_total], ["团队", inventory.teams_total], ["Agent", inventory.agents_total], ["知识库", inventory.knowledge_bases_total], ["模型", inventory.models_total], ["工具", inventory.tools_total], ["工作流", inventory.workflows_total], ["活跃运行", inventory.active_runs], ["失败运行（24小时）", inventory.failed_runs_24h], ["失败任务（24小时）", inventory.failed_tasks_24h]] : []
@@ -497,8 +580,65 @@ function GovernancePanel() {
           </div>
           <div className="flex justify-end"><Button type="submit"><UserPlusIcon className="size-4" />{t("生成邀请链接")}</Button></div>
         </form>
-        {inviteResult?.token ? <div className="mt-4 rounded-lg border bg-muted/20 p-3"><div className="mb-2 text-sm font-medium">{t("邀请链接")}</div><div className="flex gap-2"><Input readOnly value={inviteResult.invite_url ?? inviteResult.token} /><Button type="button" variant="outline" size="icon" aria-label={t("复制链接")} onClick={() => { void navigator.clipboard?.writeText(inviteResult.invite_url ?? inviteResult.token ?? ""); session.notify("success", t("已复制")) }}><CopyIcon className="size-4" /></Button></div></div> : null}
-        <div className="mt-4 grid gap-2">{invitations.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"><div><div className="font-medium">{item.kind === "generic" ? t("通用邀请") : `${item.name} · ${item.email}`}</div><div className="text-xs text-muted-foreground">{item.role} · {formatDateTime(item.expires_at, dateLocale)}</div></div>{item.accepted_at ? <Badge variant="secondary">{t("已撤销或已接受")}</Badge> : <Button type="button" variant="outline" size="sm" onClick={() => void revokeInvite(item.id)}>{t("撤销")}</Button>}</div>)}</div>
+        {inviteResult?.token ? (
+          <div className="mt-4 rounded-lg border bg-muted/20 p-3">
+            <div className="mb-2 text-sm font-medium">{t("邀请链接")}</div>
+            <div className="flex gap-2">
+              <Input
+                readOnly
+                value={inviteResult.invite_url ?? inviteResult.token}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label={t("复制链接")}
+                onClick={() => void copyInviteLink()}
+              >
+                <CopyIcon className="size-4" />
+              </Button>
+            </div>
+            {inviteResult.kind === "personal" &&
+            inviteResult.email_delivery_status === "queued" ? (
+              <p
+                className="mt-2 text-xs text-emerald-700 dark:text-emerald-400"
+                role="status"
+              >
+                {t("邀请邮件已加入发送队列")}
+              </p>
+            ) : null}
+            {inviteResult.kind === "personal" &&
+            inviteResult.email_delivery_status === "not_configured" ? (
+              <p
+                className="mt-2 text-xs text-amber-700 dark:text-amber-400"
+                role="status"
+              >
+                {t("邮件服务尚未配置，邀请邮件未发送；你仍可复制邀请链接")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="mt-4 grid gap-2">
+          {invitations.map((item) => (
+            <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+              <div>
+                <div className="font-medium">{item.kind === "generic" ? t("通用邀请") : `${item.name} · ${item.email}`}</div>
+                <div className="text-xs text-muted-foreground">{t(item.role === "admin" ? "工作空间管理员" : "成员")} · {formatDateTime(item.expires_at, dateLocale)}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {item.accepted_at ? (
+                  <Badge variant="secondary">{t("已撤销或已接受")}</Badge>
+                ) : (
+                  <Button type="button" variant="outline" size="sm" onClick={() => void revokeInvite(item.id)}>{t("撤销")}</Button>
+                )}
+                <Button type="button" variant="outline" size="sm" onClick={() => void deleteInvite(item.id)}>
+                  <Trash2Icon className="size-4" />
+                  {t("删除")}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
     </div>

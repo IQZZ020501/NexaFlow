@@ -2541,11 +2541,16 @@ def test_celery() -> None:
         "recover-agent-runs",
         "recover-legacy-agent-runs",
         "recover-tool-invocations",
+        "recover-email-deliveries",
     }
     assert beat["recover-knowledge-tasks"]["schedule"] == 30.0
     assert beat["recover-agent-runs"]["schedule"] == 30.0
     assert beat["recover-tool-invocations"] == {
         "task": "app.tools.recover",
+        "schedule": 30.0,
+    }
+    assert beat["recover-email-deliveries"] == {
+        "task": "app.email.recover",
         "schedule": 30.0,
     }
     assert beat["recover-legacy-agent-runs"] == {
