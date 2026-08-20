@@ -16,6 +16,10 @@ import tests.support  # noqa: F401  (sets required env before app imports)
 
 from fastapi import HTTPException
 
+from app.application.knowledge_graph_build import (
+    charged_graph_tokens,
+    estimate_graph_call_tokens,
+)
 from app.capabilities.llm.registry import (
     is_masked_secret,
     normalize_model_type,
@@ -139,6 +143,14 @@ def test_default_policy_graph_schema_is_stable() -> None:
     assert schema.relation("conflicts_with").review_required is True
     assert normalize_graph_name("  信息\u3000科技部 ") == "信息 科技部"
     assert graph_schema_hash(schema) == graph_schema_hash(schema)
+
+
+def test_graph_token_charge_uses_reported_or_conservative_estimate() -> None:
+    assert charged_graph_tokens({"total_tokens": 120}, 500) == (120, False)
+    assert charged_graph_tokens({"total_tokens": 0}, 500) == (500, True)
+    assert estimate_graph_call_tokens(
+        [{"role": "user", "content": "制度" * 1000}]
+    ) >= 1000
 
 
 def test_normalized_document_artifact_is_content_addressed() -> None:
@@ -5988,6 +6000,7 @@ def main() -> None:
     test_validate_permission_rejects_unknown()
     test_graph_schema_rejects_unknown_relation_endpoint()
     test_default_policy_graph_schema_is_stable()
+    test_graph_token_charge_uses_reported_or_conservative_estimate()
     test_normalized_document_artifact_is_content_addressed()
     test_graph_extraction_requires_exact_chunk_evidence()
     test_graph_extractor_parses_bounded_json_only_response()

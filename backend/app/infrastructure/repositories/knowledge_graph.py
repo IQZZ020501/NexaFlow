@@ -2,7 +2,10 @@ from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import (
+    BigInteger,
+    and_,
     case,
+    cast,
     delete,
     exists,
     false,
@@ -40,6 +43,7 @@ from app.entities.knowledge_graph import (
 )
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories.mapping import save, to_entity
+from app.shareddomain.agents.models import AgentRun as AgentRunORM
 from app.shareddomain.knowledge.models import KnowledgeBase as KnowledgeBaseORM
 from app.shareddomain.knowledge.models import (
     KnowledgeDocument as KnowledgeDocumentORM,
@@ -56,6 +60,7 @@ from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphRevisionChange as KnowledgeGraphRevisionChangeORM,
     KnowledgeGraphSchema as KnowledgeGraphSchemaORM,
 )
+from app.shareddomain.workflows.models import WorkflowRunDetail as WorkflowRunDetailORM
 
 _GRAPH_SQL_DIR = Path(__file__).parent.parent / "sql" / "knowledge_graph"
 _SHORTEST_PATH_SQL = text(
@@ -69,6 +74,85 @@ _QUERY_ENTITY_CANDIDATES_SQL = text(
 )
 _SET_GRAPH_STATEMENT_TIMEOUT = text("SET LOCAL statement_timeout = '2000ms'")
 _RESET_GRAPH_STATEMENT_TIMEOUT = text("SET LOCAL statement_timeout = 0")
+
+
+def _nonnegative_json_integer(column, key: str, dialect_name: str):
+    value = column[key].as_string()
+    if dialect_name == "postgresql":
+        parsed = case(
+            (value.op("~")(r"^[0-9]+$"), cast(value, BigInteger)),
+            else_=0,
+        )
+    else:
+        parsed = cast(func.coalesce(value, "0"), BigInteger)
+    return case((parsed > 0, parsed), else_=0)
+
+
+def _nonnegative_integer(column):
+    return case((column > 0, column), else_=0)
+
+
+async def monthly_workspace_model_tokens(
+    db: AsyncSession,
+    workspace_id: str,
+    start_at: datetime,
+    end_at: datetime,
+) -> dict[str, int]:
+    dialect_name = db.get_bind().dialect.name
+    agent_tokens = _nonnegative_json_integer(
+        AgentRunORM.model_usage,
+        "total_tokens",
+        dialect_name,
+    )
+    workflow_tokens = _nonnegative_integer(WorkflowRunDetailORM.token_usage)
+    application_value = case(
+        (WorkflowRunDetailORM.run_id.is_not(None), workflow_tokens),
+        else_=agent_tokens,
+    )
+    application_tokens = await db.scalar(
+        select(func.coalesce(func.sum(application_value), 0))
+        .select_from(AgentRunORM)
+        .outerjoin(
+            WorkflowRunDetailORM,
+            and_(
+                WorkflowRunDetailORM.workspace_id == AgentRunORM.workspace_id,
+                WorkflowRunDetailORM.run_id == AgentRunORM.id,
+            ),
+        )
+        .where(
+            AgentRunORM.workspace_id == workspace_id,
+            AgentRunORM.depth == 0,
+            AgentRunORM.created_at >= start_at,
+            AgentRunORM.created_at < end_at,
+        )
+    )
+    graph_charged = _nonnegative_json_integer(
+        KnowledgeGraphRevisionORM.model_usage_json,
+        "charged_tokens",
+        dialect_name,
+    )
+    graph_reserved = _nonnegative_json_integer(
+        KnowledgeGraphRevisionORM.model_usage_json,
+        "reserved_tokens",
+        dialect_name,
+    )
+    graph_totals = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(graph_charged), 0),
+                func.coalesce(func.sum(graph_reserved), 0),
+            ).where(
+                KnowledgeGraphRevisionORM.workspace_id == workspace_id,
+                KnowledgeGraphRevisionORM.created_at >= start_at,
+                KnowledgeGraphRevisionORM.created_at < end_at,
+            )
+        )
+    ).one()
+    return {
+        "application_tokens": max(0, int(application_tokens or 0)),
+        "graph_charged_tokens": max(0, int(graph_totals[0] or 0)),
+        "graph_reserved_tokens": max(0, int(graph_totals[1] or 0)),
+    }
 
 
 async def create_graph_schema(

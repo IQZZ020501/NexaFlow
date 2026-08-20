@@ -53,7 +53,8 @@ export function deriveAnalyticsKeyMetrics(
     distributionCount(data.distributions.access_sources, "api")
 
   return {
-    averageTokens: runs > 0 ? data.summary.tokens.total / runs : null,
+    averageTokens:
+      runs > 0 ? data.summary.tokens.application_total / runs : null,
     consoleRunsPerUser:
       activeUsers > 0
         ? distributionCount(data.distributions.access_sources, "console") /

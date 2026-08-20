@@ -1,8 +1,9 @@
 import asyncio
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
@@ -35,6 +36,8 @@ from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import knowledge as knowledge_repository
 from app.infrastructure.repositories import knowledge_graph as graph_repository
 from app.infrastructure.repositories import knowledge_reference as reference_repository
+from app.infrastructure.repositories import workspace as workspace_repository
+from app.infrastructure.repositories import workspace_governance as governance_repository
 from app.ports.llm import ChatProvider, RegisteredModel, build_chat_model
 from app.ports.parsing import KnowledgePipelineError
 from app.ports.vector_store import (
@@ -75,11 +78,208 @@ from app.shareddomain.knowledge_graph.schema import (
 from app.shareddomain.knowledge_graph.services import create_graph_schema
 
 PROFILE_TIMEOUT_SECONDS = 90
+GRAPH_SYNC_MAX_CHARGED_TOKENS = 250_000
+GRAPH_REBUILD_MAX_CHARGED_TOKENS = 2_000_000
+GRAPH_MODEL_OUTPUT_RESERVATION = 8_192
 
 
 class _EntityProfileResponse(BaseModel):
     profile_markdown: str = Field(min_length=1, max_length=20_000)
     claim_ids: list[str] = Field(default_factory=list, max_length=500)
+
+
+def estimate_graph_call_tokens(messages: Sequence[Any]) -> int:
+    serializable = [
+        item
+        if isinstance(item, (dict, list, str, int, float, bool, type(None)))
+        else {
+            "type": getattr(item, "type", "message"),
+            "content": getattr(item, "content", str(item)),
+        }
+        for item in messages
+    ]
+    serialized = json.dumps(
+        serializable,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return max(1, len(serialized)) + GRAPH_MODEL_OUTPUT_RESERVATION
+
+
+def charged_graph_tokens(
+    usage: dict[str, Any] | None,
+    reserved_tokens: int,
+) -> tuple[int, bool]:
+    value = (usage or {}).get("total_tokens")
+    reported = isinstance(value, int) and not isinstance(value, bool) and value > 0
+    return (value if reported else reserved_tokens), not reported
+
+
+def _graph_usage_number(usage: dict[str, Any], key: str) -> int:
+    value = usage.get(key)
+    return (
+        value
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        else 0
+    )
+
+
+def finalize_abandoned_graph_reservations(
+    usage: dict[str, Any] | None,
+) -> dict[str, Any]:
+    current = dict(usage or {})
+    reserved = _graph_usage_number(current, "reserved_tokens")
+    if reserved == 0:
+        return current
+    merged = merge_usage(
+        current,
+        {"model_calls": 1, "reported_model_calls": 0},
+    )
+    merged.update(
+        reserved_tokens=0,
+        charged_tokens=_graph_usage_number(current, "charged_tokens") + reserved,
+        estimated_tokens=_graph_usage_number(current, "estimated_tokens") + reserved,
+        unreported_model_calls=(
+            _graph_usage_number(current, "unreported_model_calls") + 1
+        ),
+    )
+    return merged
+
+
+async def reserve_graph_model_tokens(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    revision: KnowledgeGraphRevision,
+    task: KnowledgeTask,
+    reserved_tokens: int,
+) -> None:
+    if (
+        await workspace_repository.lock_workspace(db, knowledge_base.workspace_id)
+        is None
+    ):
+        raise KnowledgePipelineError("Workspace is unavailable.")
+    governance = await governance_repository.get(db, knowledge_base.workspace_id)
+    now = datetime.now(UTC)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    monthly = await graph_repository.monthly_workspace_model_tokens(
+        db,
+        knowledge_base.workspace_id,
+        month_start,
+        now,
+    )
+    locked = await graph_repository.lock_revision(
+        db,
+        knowledge_base,
+        revision.id,
+    )
+    if locked is None:
+        raise KnowledgePipelineError("Graph revision is unavailable.")
+    usage = dict(locked.model_usage_json or {})
+    current_reserved = _graph_usage_number(usage, "reserved_tokens")
+    task_limit = (
+        GRAPH_REBUILD_MAX_CHARGED_TOKENS
+        if task.task_type == TASK_GRAPH_REBUILD
+        else GRAPH_SYNC_MAX_CHARGED_TOKENS
+    )
+    if (
+        _graph_usage_number(usage, "charged_tokens")
+        + current_reserved
+        + reserved_tokens
+        > task_limit
+    ):
+        raise KnowledgePipelineError("Graph model token limit exceeded for this task.")
+    monthly_limit = governance.monthly_token_limit if governance is not None else None
+    if monthly_limit is not None and sum(monthly.values()) + reserved_tokens > monthly_limit:
+        raise KnowledgePipelineError("Workspace monthly model token limit exceeded.")
+    # ponytail: Graph calls share a persisted workspace lock; introduce a unified
+    # token ledger only if concurrent non-Graph calls make the hard cap inaccurate.
+    usage["reserved_tokens"] = current_reserved + reserved_tokens
+    locked.model_usage_json = usage
+    await graph_repository.save_revision(db, locked)
+    await db.commit()
+    revision.model_usage_json = dict(usage)
+
+
+async def finalize_graph_model_tokens(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    revision: KnowledgeGraphRevision,
+    usage: dict[str, Any] | None,
+    reserved_tokens: int,
+) -> None:
+    locked = await graph_repository.lock_revision(
+        db,
+        knowledge_base,
+        revision.id,
+    )
+    if locked is None:
+        raise KnowledgePipelineError("Graph revision is unavailable.")
+    current = dict(locked.model_usage_json or {})
+    current_reserved = _graph_usage_number(current, "reserved_tokens")
+    normalized = usage or {"model_calls": 1, "reported_model_calls": 0}
+    charged, estimated = charged_graph_tokens(usage, reserved_tokens)
+    merged = merge_usage(current, normalized)
+    merged.update(
+        reserved_tokens=max(0, current_reserved - reserved_tokens),
+        charged_tokens=_graph_usage_number(current, "charged_tokens") + charged,
+        estimated_tokens=(
+            _graph_usage_number(current, "estimated_tokens")
+            + (charged if estimated else 0)
+        ),
+        unreported_model_calls=(
+            _graph_usage_number(current, "unreported_model_calls")
+            + int(estimated)
+        ),
+    )
+    locked.model_usage_json = merged
+    await graph_repository.save_revision(db, locked)
+    await db.commit()
+    revision.model_usage_json = dict(merged)
+
+
+class BudgetedGraphChatProvider:
+    def __init__(
+        self,
+        db: AsyncSession,
+        delegate: ChatProvider,
+        knowledge_base: KnowledgeBase,
+        revision: KnowledgeGraphRevision,
+        task: KnowledgeTask,
+    ) -> None:
+        self._db = db
+        self._delegate = delegate
+        self._knowledge_base = knowledge_base
+        self._revision = revision
+        self._task = task
+
+    async def ainvoke(self, messages: list[Any], **kwargs: Any) -> Any:
+        reserved = estimate_graph_call_tokens(messages)
+        await reserve_graph_model_tokens(
+            self._db,
+            self._knowledge_base,
+            self._revision,
+            self._task,
+            reserved,
+        )
+        try:
+            response = await self._delegate.ainvoke(messages, **kwargs)
+        except Exception:
+            await finalize_graph_model_tokens(
+                self._db,
+                self._knowledge_base,
+                self._revision,
+                usage=None,
+                reserved_tokens=reserved,
+            )
+            raise
+        await finalize_graph_model_tokens(
+            self._db,
+            self._knowledge_base,
+            self._revision,
+            usage=usage_from_message(response),
+            reserved_tokens=reserved,
+        )
+        return response
 
 
 def graph_document_source_version(document: KnowledgeDocument) -> str:
@@ -920,10 +1120,9 @@ async def stage_entity_profiles(
     schema: GraphSchemaDefinition,
     provider: ChatProvider | None,
     entity_ids: set[str],
-) -> dict[str, Any]:
+) -> None:
     entities = await _projected_entities(db, knowledge_base, revision)
     claims = await _projected_claims(db, knowledge_base, revision)
-    usage: dict[str, Any] = {}
     for entity_id in sorted(entity_ids):
         entity = entities.get(entity_id)
         if entity is None:
@@ -979,7 +1178,6 @@ async def stage_entity_profiles(
             async with asyncio.timeout(PROFILE_TIMEOUT_SECONDS):
                 response = await provider.ainvoke(prompt)
             profile = _EntityProfileResponse.model_validate(_json_response(response))
-            usage = merge_usage(usage, usage_from_message(response))
         claim_ids = [
             claim_id
             for claim_id in profile.claim_ids
@@ -1001,7 +1199,6 @@ async def stage_entity_profiles(
                 "profile_claim_ids": claim_ids,
             },
         )
-    return usage
 
 
 async def _projected_profile_vectors(
@@ -1054,6 +1251,9 @@ async def mark_revision_failed(
     revision.status = GRAPH_REVISION_FAILED
     revision.failure_reason = message[:2000]
     revision.stats_json = {**(revision.stats_json or {}), **(stats_patch or {})}
+    revision.model_usage_json = finalize_abandoned_graph_reservations(
+        revision.model_usage_json
+    )
     await graph_repository.save_revision(db, revision)
     await db.commit()
 
@@ -1207,7 +1407,6 @@ async def run_graph_build_task(
         )
         if model is None:
             raise KnowledgePipelineError("Graph extraction model is required.")
-        provider = build_chat_model(settings, model)
     revision = await create_revision(
         db,
         knowledge_base,
@@ -1232,6 +1431,14 @@ async def run_graph_build_task(
     published = False
     review_decision = (task.options or {}).get("review_decision")
     try:
+        if model is not None:
+            provider = BudgetedGraphChatProvider(
+                db,
+                build_chat_model(settings, model),
+                knowledge_base,
+                revision,
+                task,
+            )
         affected_entities.update(
             await stage_changed_document_retirements(
                 db,
@@ -1269,10 +1476,6 @@ async def run_graph_build_task(
                     ),
                 )
             )
-            revision.model_usage_json = merge_usage(
-                revision.model_usage_json,
-                extraction.model_usage,
-            )
             await graph_repository.save_revision(db, revision)
             task.processed_items += len(batch_chunks)
             await knowledge_repository.save_knowledge_task(db, task)
@@ -1296,7 +1499,7 @@ async def run_graph_build_task(
         affected_entities.update(
             await stage_connected_components(db, knowledge_base, revision)
         )
-        profile_usage = await stage_entity_profiles(
+        await stage_entity_profiles(
             db,
             knowledge_base,
             revision,
@@ -1307,10 +1510,6 @@ async def run_graph_build_task(
                 else provider
             ),
             affected_entities,
-        )
-        revision.model_usage_json = merge_usage(
-            revision.model_usage_json,
-            profile_usage,
         )
         profiles = await _projected_profile_vectors(
             db,

@@ -69,10 +69,13 @@ const analytics: WorkspaceAnalytics = {
     tokens: {
       input: 140,
       output: 75,
-      total: 280,
+      application_total: 280,
+      graph_total: 40,
+      total: 320,
       unreported_runs: 1,
-      previous_total: 50,
-      change_percent: 460,
+      unreported_graph_builds: 1,
+      previous_total: 60,
+      change_percent: 433.3,
     },
     success_rate: { value: 0.5, previous_value: 1, change_percent: -50 },
     average_duration_ms: {
@@ -85,16 +88,22 @@ const analytics: WorkspaceAnalytics = {
     {
       date: "2026-08-01",
       runs: 1,
+      graph_builds: 0,
       input_tokens: 100,
       output_tokens: 50,
+      application_tokens: 150,
+      graph_tokens: 0,
       total_tokens: 150,
     },
     {
       date: "2026-08-02",
       runs: 3,
+      graph_builds: 1,
       input_tokens: 40,
       output_tokens: 25,
-      total_tokens: 130,
+      application_tokens: 130,
+      graph_tokens: 40,
+      total_tokens: 170,
     },
   ],
   hourly_runs: Array.from({ length: 24 }, (_, hour) => ({
@@ -219,8 +228,11 @@ describe("workspace analytics", () => {
     const tokenCard = screen
       .getByText("Token 消耗")
       .closest<HTMLElement>("[data-slot='card']")!
-    expect(within(tokenCard).getByText("280")).toBeTruthy()
+    expect(within(tokenCard).getByText("320")).toBeTruthy()
+    expect(within(tokenCard).getByText("应用运行 280")).toBeTruthy()
+    expect(within(tokenCard).getByText("知识整理 40")).toBeTruthy()
     expect(within(tokenCard).getByText("1 次运行的用量未完整上报")).toBeTruthy()
+    expect(within(tokenCard).getByText("1 次知识整理使用估算 Token")).toBeTruthy()
     expect(screen.getByText("公开/API 调用")).toBeTruthy()
     expect(screen.getByText("How do I deploy?")).toBeTruthy()
     expect(screen.getByText("时段活跃曲线")).toBeTruthy()
@@ -320,6 +332,12 @@ describe("workspace analytics", () => {
         summary: {
           ...analytics.summary,
           runs: { value: 0, previous_value: 0, change_percent: 0 },
+          tokens: {
+            ...analytics.summary.tokens,
+            application_total: 0,
+            graph_total: 0,
+            total: 0,
+          },
         },
       })
     renderPage(<WorkspaceAnalyticsPage />)

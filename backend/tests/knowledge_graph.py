@@ -19,6 +19,7 @@ from app.infrastructure.repositories import knowledge as knowledge_repository
 from app.infrastructure.repositories import knowledge_graph as graph_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
+from app.infrastructure.repositories import workspace_governance as governance_repository
 from app.infrastructure.session import get_engine, get_session_factory
 from app.entities.knowledge import (
     KnowledgeBase,
@@ -37,6 +38,7 @@ from app.entities.knowledge_graph import (
 )
 from app.entities.user import User
 from app.entities.workspace import Workspace
+from app.entities.workspace_governance import WorkspaceGovernance
 from app.shareddomain.knowledge_graph.schema import (
     GraphSchemaDefinition,
     default_policy_graph_schema,
@@ -2633,6 +2635,308 @@ async def test_structured_graph_build_publishes_evidence_and_profiles() -> None:
         )
 
 
+async def test_graph_build_stops_before_workspace_monthly_limit() -> None:
+    content = "制度 A 定义术语 A。"
+    async with get_session_factory()() as db:
+        _, actor, _ = await _graph_fixture(db)
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-budget-limit-kb",
+                workspace_id="graph-workspace",
+                name="Graph Budget Limit KB",
+                graph_enabled=True,
+                created_by_user_id=actor.id,
+            ),
+        )
+        schema = await create_graph_schema(
+            db,
+            knowledge_base,
+            default_policy_graph_schema(),
+            actor,
+        )
+        await graph_repository.create_revision(
+            db,
+            GraphRevisionRecord(
+                id="graph-budget-prior-revision",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                revision_no=1,
+                schema_id=schema.id,
+                status="failed",
+                source_watermark="prior",
+                model_usage_json={"charged_tokens": 9_500},
+                created_by_user_id=actor.id,
+            ),
+        )
+        document = await knowledge_repository.create_knowledge_document(
+            db,
+            KnowledgeDocument(
+                id="graph-budget-limit-doc",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                filename="budget.md",
+                content_type="text/markdown",
+                size_bytes=len(content.encode("utf-8")),
+                status="indexed",
+                created_by_user_id=actor.id,
+            ),
+        )
+        await knowledge_repository.save_knowledge_document_chunk(
+            db,
+            KnowledgeDocumentChunk(
+                id="graph-budget-limit-chunk",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                document_id=document.id,
+                content=content,
+                search_text=content,
+                char_count=len(content),
+                token_count=8,
+                status="indexed",
+            ),
+        )
+        task = await knowledge_repository.create_knowledge_task(
+            db,
+            KnowledgeTask(
+                id="graph-budget-limit-task",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                task_type="graph_sync",
+                status="running",
+                attempts=1,
+                options={"changed_document_ids": [document.id]},
+                created_by_user_id=actor.id,
+            ),
+        )
+        await governance_repository.save(
+            db,
+            WorkspaceGovernance(
+                workspace_id=knowledge_base.workspace_id,
+                monthly_token_limit=10_000,
+                updated_by_user_id=actor.id,
+            ),
+        )
+        await db.commit()
+
+        class CountingProvider:
+            calls = 0
+
+            async def ainvoke(self, _messages, **_kwargs):
+                self.calls += 1
+                return SimpleNamespace(content="{}")
+
+        provider = CountingProvider()
+        with (
+            patch.object(
+                knowledge_graph_build,
+                "get_knowledge_model",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        id="graph-budget-model",
+                        model_name="graph-budget-model",
+                    )
+                ),
+            ),
+            patch.object(
+                knowledge_graph_build,
+                "build_chat_model",
+                return_value=provider,
+            ),
+        ):
+            try:
+                await knowledge_graph_build.run_graph_build_task(
+                    db,
+                    task,
+                    knowledge_base,
+                    actor,
+                    tests.support.settings(),
+                    asyncio.Event(),
+                )
+            except Exception as exc:
+                assert "monthly model token limit" in str(exc).lower()
+            else:
+                raise AssertionError("monthly graph model budget must stop the build")
+        assert provider.calls == 0
+        await governance_repository.save(
+            db,
+            WorkspaceGovernance(
+                workspace_id=knowledge_base.workspace_id,
+                monthly_token_limit=None,
+                updated_by_user_id=actor.id,
+            ),
+        )
+        await db.commit()
+
+    async with get_session_factory()() as db:
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            "graph-budget-limit-kb",
+        )
+        assert knowledge_base is not None
+        revision = await graph_repository.get_latest_revision(db, knowledge_base)
+        assert revision is not None
+        assert revision.status == "failed"
+        assert revision.model_usage_json.get("reserved_tokens", 0) == 0
+
+
+async def test_unreported_graph_usage_is_charged_once_and_persisted() -> None:
+    content = "制度 A 定义术语 A。"
+    quote = content[:-1]
+    async with get_session_factory()() as db:
+        _, actor, _ = await _graph_fixture(db)
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-budget-usage-kb",
+                workspace_id="graph-workspace",
+                name="Graph Budget Usage KB",
+                graph_enabled=True,
+                created_by_user_id=actor.id,
+            ),
+        )
+        document = await knowledge_repository.create_knowledge_document(
+            db,
+            KnowledgeDocument(
+                id="graph-budget-usage-doc",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                filename="usage.md",
+                content_type="text/markdown",
+                size_bytes=len(content.encode("utf-8")),
+                status="indexed",
+                created_by_user_id=actor.id,
+            ),
+        )
+        await knowledge_repository.save_knowledge_document_chunk(
+            db,
+            KnowledgeDocumentChunk(
+                id="graph-budget-usage-chunk",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                document_id=document.id,
+                content=content,
+                search_text=content,
+                char_count=len(content),
+                token_count=8,
+                status="indexed",
+            ),
+        )
+        task = await knowledge_repository.create_knowledge_task(
+            db,
+            KnowledgeTask(
+                id="graph-budget-usage-task",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                task_type="graph_sync",
+                status="running",
+                attempts=1,
+                options={"changed_document_ids": [document.id]},
+                created_by_user_id=actor.id,
+            ),
+        )
+        await db.commit()
+
+        class UnreportedProvider:
+            calls = 0
+
+            async def ainvoke(self, messages, **_kwargs):
+                self.calls += 1
+                if "Extract only explicitly stated" in messages[0]["content"]:
+                    return SimpleNamespace(
+                        content=json.dumps(
+                            {
+                                "entities": [
+                                    {
+                                        "temp_id": "document-a",
+                                        "entity_type": "Document",
+                                        "canonical_name": "制度 A",
+                                    },
+                                    {
+                                        "temp_id": "concept-a",
+                                        "entity_type": "Concept",
+                                        "canonical_name": "术语 A",
+                                    },
+                                ],
+                                "claims": [
+                                    {
+                                        "subject_temp_id": "document-a",
+                                        "predicate": "defines",
+                                        "object_temp_id": "concept-a",
+                                        "evidence_chunk_id": "graph-budget-usage-chunk",
+                                        "quote": quote,
+                                        "start_offset": 0,
+                                        "end_offset": len(quote),
+                                    }
+                                ],
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                return SimpleNamespace(
+                    content=json.dumps(
+                        {"profile_markdown": "# Evidence profile", "claim_ids": []}
+                    )
+                )
+
+        provider = UnreportedProvider()
+
+        async def fake_embedding_model(*_args, **_kwargs):
+            return SimpleNamespace(id="graph-budget-embedding")
+
+        with (
+            patch.object(
+                knowledge_graph_build,
+                "get_knowledge_model",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        id="graph-budget-model",
+                        model_name="graph-budget-model",
+                    )
+                ),
+            ),
+            patch.object(
+                knowledge_graph_build,
+                "build_chat_model",
+                return_value=provider,
+            ),
+            patch.object(
+                knowledge_graph_build,
+                "resolve_embedding_model",
+                fake_embedding_model,
+            ),
+            patch.object(
+                knowledge_graph_build,
+                "upsert_graph_profile_vectors",
+            ),
+        ):
+            await knowledge_graph_build.run_graph_build_task(
+                db,
+                task,
+                knowledge_base,
+                actor,
+                tests.support.settings(),
+                asyncio.Event(),
+            )
+
+        assert provider.calls == 3
+
+    async with get_session_factory()() as db:
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            "graph-budget-usage-kb",
+        )
+        assert knowledge_base is not None
+        revision = await graph_repository.get_active_revision(db, knowledge_base)
+        assert revision is not None
+        usage = revision.model_usage_json
+        assert usage["model_calls"] == 3
+        assert usage["unreported_model_calls"] == 3
+        assert usage["estimated_tokens"] > 0
+        assert usage["charged_tokens"] == usage["estimated_tokens"]
+        assert usage["reserved_tokens"] == 0
+
+
 async def test_index_success_queues_graph_sync_when_enabled() -> None:
     async with get_session_factory()() as db:
         actor = await user_repository.get_user_by_id(db, "graph-user")
@@ -3217,6 +3521,8 @@ async def main() -> None:
     await test_graph_sync_coalesces_behind_running_build()
     await test_graph_rebuild_follows_running_task_and_coalesces_sync()
     await test_structured_graph_build_publishes_evidence_and_profiles()
+    await test_graph_build_stops_before_workspace_monthly_limit()
+    await test_unreported_graph_usage_is_charged_once_and_persisted()
     await test_index_success_queues_graph_sync_when_enabled()
     await test_failed_profile_write_keeps_revision_unpublished_for_repair()
     await test_graph_import_persists_immutable_records_and_queues_sync()

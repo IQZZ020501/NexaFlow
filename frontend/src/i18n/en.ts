@@ -125,7 +125,11 @@ export const en = {
   外部调用占比: "External call share",
   "Token 消耗": "Token usage",
   "输入 {input} / 输出 {output}": "Input {input} / output {output}",
+  "应用运行 {value}": "Application runs {value}",
+  "知识整理 {value}": "Knowledge graph builds {value}",
   "{value} 次运行的用量未完整上报": "Usage was incomplete for {value} runs",
+  "{value} 次知识整理使用估算 Token":
+    "Estimated tokens were used for {value} knowledge graph builds",
   运行成功率: "Run success rate",
   平均运行耗时: "Average run duration",
   上期无可比数据: "No comparable previous-period data",

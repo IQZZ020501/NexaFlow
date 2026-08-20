@@ -5,6 +5,9 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.knowledge_graph_build import (
+    finalize_abandoned_graph_reservations,
+)
 from app.entities.knowledge import TASK_QUEUED_STATUS, TASK_RUNNING_STATUS
 from app.entities.knowledge_graph import (
     GRAPH_REVISION_BUILDING,
@@ -194,6 +197,9 @@ async def recover_orphaned_graph_revisions(db: AsyncSession) -> None:
             )
             locked.status = GRAPH_REVISION_FAILED
             locked.failure_reason = "Orphaned graph revision recovered."
+            locked.model_usage_json = finalize_abandoned_graph_reservations(
+                locked.model_usage_json
+            )
             locked.stats_json = {
                 **stats,
                 "profile_repair_pending": bool(repair_ids),
