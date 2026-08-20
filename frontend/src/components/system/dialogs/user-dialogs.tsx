@@ -321,8 +321,10 @@ type EditUserDialogProps = {
  * Provides a dialog for editing a user's account information and global administrator privileges.
  *
  * @param userForm - The user's editable account details, or `null` when the dialog is closed
+ * @param setUserForm - Updates the editable user state and closes the dialog when set to `null`
  * @param canManageGlobalAdmin - Whether the current user can change global administrator privileges
  * @param isSavingUser - Whether the user changes are being saved
+ * @param handleUpdateUser - Submits the edited user details
  */
 export function EditUserDialog({
   userForm,

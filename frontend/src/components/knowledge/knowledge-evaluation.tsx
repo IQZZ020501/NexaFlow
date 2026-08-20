@@ -53,7 +53,7 @@ type KnowledgeEvaluationProps = {
 }
 
 /**
- * Formats a numeric metric to three decimal places.
+ * Rounds a numeric metric to at most three decimal places and removes trailing zeroes.
  *
  * @param value - The metric value to format
  * @returns The formatted metric as a string

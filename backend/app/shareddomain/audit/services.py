@@ -76,7 +76,7 @@ async def list_audit_logs(
         resource_id (str | None): Restricts results to the specified resource.
         search (str | None): Filters results by text search.
         from_date (datetime | None): Includes logs created on or after this date.
-        to_date (datetime | None): Includes logs created on or before this date.
+        to_date (datetime | None): Excludes logs created on or after this date.
     
     Returns:
         list[AuditLogResponse]: The matching audit logs as response objects.
@@ -124,7 +124,7 @@ async def list_workspace_audit_logs(
         resource_id (str | None): Filter by resource identifier.
         search (str | None): Search log content.
         from_date (datetime | None): Include logs created on or after this date.
-        to_date (datetime | None): Include logs created on or before this date.
+        to_date (datetime | None): Exclude logs created on or after this date.
     
     Returns:
         list[AuditLogResponse]: Audit log responses matching the workspace and filters.

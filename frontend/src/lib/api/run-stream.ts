@@ -103,8 +103,8 @@ async function consumeNdjsonStream<TEvent extends NdjsonCursorEvent>(
 /**
  * Observes an NDJSON stream until a terminal event is received or observation is aborted.
  *
- * Reconnects after transient failures, resuming from the latest event cursors and increasing
- * the delay between attempts up to five seconds.
+ * Reconnects after caught stream-processing failures other than non-retryable HTTP responses,
+ * resuming from the latest event cursors and increasing the delay between attempts up to five seconds.
  *
  * @param getResponse - Creates a stream response using the current numeric and live cursors.
  * @param onEvent - Handles each event received from the stream.

@@ -13,7 +13,7 @@ async def get(db: AsyncSession, workspace_id: str) -> WorkspaceGovernance | None
         workspace_id (str): Identifier of the workspace.
     
     Returns:
-        WorkspaceGovernance | None: The workspace governance entity, or `None` if no matching workspace exists.
+        WorkspaceGovernance | None: The workspace governance entity, or `None` if no matching governance row exists.
     """
     row = await db.get(WorkspaceGovernanceOrm, workspace_id)
     return mapping.to_entity(WorkspaceGovernance, row) if row is not None else None

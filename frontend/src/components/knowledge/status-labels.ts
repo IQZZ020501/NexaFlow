@@ -4,6 +4,7 @@ import type { TFunction, TranslationKey } from "@/i18n"
  * Resolves a document status to its translated display label.
  *
  * @param status - The document status to label
+ * @param t - The translation function
  * @returns The translated label for a known status, or the original status for an unknown value
  */
 export function documentStatusLabel(status: string, t: TFunction) {
@@ -69,6 +70,7 @@ export function taskTypeLabel(taskType: string, t: TFunction) {
  * Provides a translated label for a task status.
  *
  * @param status - The task status to label
+ * @param t - The translation function
  * @returns The translated label for a recognized status, or the original status
  */
 export function taskStatusLabel(status: string, t: TFunction) {

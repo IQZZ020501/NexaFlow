@@ -38,7 +38,7 @@ export function draggedCanvasPosition(
  * @param size - The dimensions of the item being positioned.
  * @param obstacles - Rectangles that the item must avoid.
  * @param gap - Minimum spacing required between the item and each obstacle.
- * @returns The proposed position when it is clear, or the closest available non-overlapping position; the proposed position if no alternative is available.
+ * @returns The proposed position when clear, or the nearest non-overlapping candidate found by the placement heuristic; the proposed position if no candidate is available.
  */
 export function nonOverlappingCanvasPosition(
   position: CanvasPosition,

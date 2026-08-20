@@ -11,7 +11,7 @@ const KNOWLEDGE_BASE_DETAIL_TABS = [
  * Parses a knowledge-base detail tab value.
  *
  * @param value - The tab value or query value array to parse
- * @returns The first valid detail tab, or `null` when the value is invalid or undefined
+ * @returns The first array value when valid, otherwise `null`
  */
 export function parseKnowledgeBaseDetailTab(
   value: string | string[] | undefined

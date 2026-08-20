@@ -214,7 +214,7 @@ export function listUsers(token: string) {
  * Creates an administrator-managed user account.
  *
  * @param payload - User details and optional administrative, workspace, and team assignments
- * @returns The created user's password reset response
+ * @returns The user-creation response containing the created user and initial password
  */
 export function createUser(
   token: string,
@@ -432,7 +432,7 @@ export function addWorkspaceMember(
  *
  * @param workspaceId - The workspace receiving the new user
  * @param payload - The new user's username, email address, and display name
- * @returns The password reset response for the created user
+ * @returns The user-creation response containing the created user and initial password
  */
 export function createWorkspaceUser(
   token: string,

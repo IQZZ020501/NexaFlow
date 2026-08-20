@@ -122,7 +122,7 @@ async def list_workspace_audit_logs(
         resource_id (str | None): Optional resource identifier filter.
         search (str | None): Optional text search across audit log fields.
         from_date (datetime | None): Optional inclusive lower bound for creation time.
-        to_date (datetime | None): Optional inclusive upper bound for creation time.
+        to_date (datetime | None): Optional exclusive upper bound for creation time.
     
     Returns:
         list[AuditLogEntity]: Audit logs matching the filters, ordered newest first.

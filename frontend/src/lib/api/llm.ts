@@ -56,6 +56,7 @@ export type RegisteredModelPayload = {
 /**
  * Lists available model providers, optionally filtered by model type.
  *
+ * @param token - Authentication token for the request
  * @param modelType - The model type used to filter the provider catalog.
  * @returns The matching model provider catalog entries.
  */
@@ -74,6 +75,7 @@ export type ModelTypeOption = {
 /**
  * Lists the model types supported by a model provider.
  *
+ * @param token - Authentication token for the request
  * @param provider - The provider whose supported model types to retrieve
  * @returns The provider's supported model types
  */
@@ -87,6 +89,7 @@ export function listModelProviderModelTypes(token: string, provider: string) {
 /**
  * Lists the base models available from a provider for a model type.
  *
+ * @param token - Authentication token for the request
  * @param provider - The model provider identifier
  * @param modelType - The model type used to filter available models
  * @returns The provider's available base model options
@@ -105,6 +108,7 @@ export function listModelProviderBaseModels(
 /**
  * Retrieves the credential form fields for a model provider.
  *
+ * @param token - Authentication token for the request
  * @param provider - The provider whose credential fields to retrieve
  * @returns The provider's credential form field definitions
  */
@@ -118,6 +122,7 @@ export function getModelProviderForm(token: string, provider: string) {
 /**
  * Lists the models registered in a workspace.
  *
+ * @param token - Authentication token for the request
  * @param workspaceId - The workspace whose registered models to retrieve
  * @param options - Optional pagination parameters
  * @returns The workspace's registered models
@@ -136,6 +141,7 @@ export function listRegisteredModels(
 /**
  * Creates a registered model for a workspace.
  *
+ * @param token - Authentication token for the request
  * @param workspaceId - The workspace that will own the model
  * @param payload - The model details to create
  * @returns The created registered model
@@ -155,6 +161,7 @@ export function createRegisteredModel(
 /**
  * Partially updates a registered model in a workspace.
  *
+ * @param token - Authentication token for the request
  * @param workspaceId - The workspace containing the model
  * @param modelId - The identifier of the model to update
  * @param payload - The model fields to update
@@ -179,6 +186,7 @@ export function updateRegisteredModel(
 /**
  * Deletes a registered model from a workspace.
  *
+ * @param token - Authentication token for the request
  * @param workspaceId - The workspace containing the model
  * @param modelId - The registered model to delete
  */

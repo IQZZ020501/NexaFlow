@@ -1,5 +1,5 @@
 /**
- * Filters runs to retain the latest valid version of each run.
+ * Removes failed or cancelled regenerations and originals superseded by valid regenerations.
  *
  * @param runs - The runs to filter.
  * @returns The runs excluding failed or cancelled regenerations and originals superseded by non-failed, non-cancelled regenerations.

@@ -180,6 +180,7 @@ export function getInitialWorkspaceId(
  */
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { t } = useLanguage()
+  const tRef = React.useRef(t)
   const [token, setToken] = React.useState<string | null>(null)
   const [mustChangePassword, setMustChangePassword] = React.useState(false)
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = React.useState(false)
@@ -196,6 +197,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [notification, setNotification] =
     React.useState<AppNotification | null>(null)
   const [refreshAt, setRefreshAt] = React.useState<number | null>(null)
+
+  React.useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   const notify = React.useCallback(
     (kind: AppNotification["kind"], message: string) => {
@@ -270,7 +275,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           isCurrent &&
           !(error instanceof ApiError && error.status === 401)
         ) {
-          const message = getErrorMessage(error, t)
+          const message = getErrorMessage(error, tRef.current)
           setSessionError(message)
           notify("error", message)
         }
@@ -287,7 +292,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return () => {
       isCurrent = false
     }
-  }, [applyAccessToken, notify, t])
+  }, [applyAccessToken, notify])
 
   const loadSession = React.useCallback(
     async (nextToken: string) => {
@@ -332,14 +337,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           return
         }
 
-        const message = getErrorMessage(error, t)
+        const message = getErrorMessage(error, tRef.current)
         setSessionError(message)
         notify("error", message)
       } finally {
         setIsSessionLoading(false)
       }
     },
-    [clearSession, notify, renewAccessToken, t]
+    [clearSession, notify, renewAccessToken]
   )
 
   React.useEffect(() => {
@@ -364,12 +369,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         }
 
         setRefreshAt(Date.now() + REFRESH_RETRY_MILLISECONDS)
-        notify("error", getErrorMessage(error, t))
+        notify("error", getErrorMessage(error, tRef.current))
       })
     }, Math.max(refreshAt - Date.now(), 0))
 
     return () => window.clearTimeout(timer)
-  }, [clearSession, notify, refreshAt, renewAccessToken, t, token])
+  }, [clearSession, notify, refreshAt, renewAccessToken, token])
 
   React.useEffect(() => {
     if (!notification) {
@@ -401,7 +406,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       .catch((error: unknown) => {
         if (isCurrent) {
           setTeams([])
-          notify("error", getErrorMessage(error, t))
+          notify("error", getErrorMessage(error, tRef.current))
         }
       })
       .finally(() => {
@@ -419,7 +424,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     mustChangePassword,
     isSessionLoading,
     notify,
-    t,
   ])
 
   function handleLogin(

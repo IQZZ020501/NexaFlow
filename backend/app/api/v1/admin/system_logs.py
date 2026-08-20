@@ -40,7 +40,7 @@ async def list_logs(
         user_id (str | None): User identifier filter.
         search (str | None): Text to search for in log entries.
         from_date (datetime | None): Inclusive start of the date range.
-        to_date (datetime | None): Inclusive end of the date range.
+        to_date (datetime | None): Exclusive end of the date range.
         include_stack (bool): Whether to include stack traces.
     
     Returns:

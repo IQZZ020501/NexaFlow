@@ -194,6 +194,8 @@ export async function listAllTools(token: string, workspaceId: string) {
 /**
  * Retrieves detailed information about a workspace tool.
  *
+ * @param token - Authentication token for the request
+ * @param workspaceId - Workspace containing the tool
  * @param toolId - The identifier of the tool to retrieve
  * @returns The tool details
  */
@@ -204,6 +206,8 @@ export function getTool(token: string, workspaceId: string, toolId: string) {
 /**
  * Retrieves a paginated list of tool sources for a workspace.
  *
+ * @param token - Authentication token for the request
+ * @param workspaceId - Workspace containing the tool sources
  * @param options - Optional pagination settings.
  * @returns The matching tool source details.
  */

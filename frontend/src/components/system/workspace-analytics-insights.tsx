@@ -76,6 +76,7 @@ function formatNumber(value: number, locale: string) {
 /**
  * Formats a fractional value as a localized percentage.
  *
+ * @param value - The fractional value, or `null` when unavailable
  * @param locale - The locale used for formatting
  * @returns The localized percentage with up to one decimal place, or an em dash when `value` is `null`
  */

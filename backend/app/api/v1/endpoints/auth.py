@@ -41,7 +41,7 @@ async def accept_invitation(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserResponse:
     """
-    Accepts a workspace invitation and returns the updated user profile.
+    Accepts a workspace invitation and returns the created user profile.
     
     Parameters:
     	payload (WorkspaceInvitationAcceptRequest): Invitation acceptance data.
@@ -177,11 +177,11 @@ async def revoke_other_sessions(
     refresh_token: Annotated[str | None, Cookie(alias=REFRESH_TOKEN_COOKIE)] = None,
 ) -> Response:
     """
-    Revoke all refresh sessions for the current user except the active session.
+    Revoke refresh sessions for the current user, preserving the active session only when its token is supplied and valid.
     
     Parameters:
     	user (User): The authenticated user whose sessions are revoked.
-    	refresh_token (str | None): The current refresh token used to preserve the active session.
+        refresh_token (str | None): The current refresh token; without a valid token, all sessions may be revoked.
     
     Returns:
     	Response: An HTTP 204 response.

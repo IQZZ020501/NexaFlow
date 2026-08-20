@@ -89,6 +89,7 @@ export function knowledgeUploadPath(knowledgeBaseId: string) {
 /**
  * Builds the URL for uploading document segments to a knowledge base.
  *
+ * @param knowledgeBaseId - The knowledge base identifier
  * @param documentIds - Document identifiers to include, deduplicated and limited to the upload maximum
  * @param parseSettings - Segmentation and cleaning settings to encode in the URL
  * @param importMode - Import mode for the upload

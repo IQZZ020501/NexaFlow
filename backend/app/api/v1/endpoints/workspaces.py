@@ -109,7 +109,7 @@ async def read_workspace_analytics(
     
     Parameters:
     	from_date (date | None): Start date of the analytics range, inclusive.
-    	to_date (date | None): End date of the analytics range, inclusive.
+        to_date (date | None): End date of the analytics range, exclusive.
     
     Returns:
     	WorkspaceAnalyticsResponse: Analytics for the workspace within the specified date range.

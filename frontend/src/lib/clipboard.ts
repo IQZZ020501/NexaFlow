@@ -2,7 +2,7 @@
  * Copies text to the system clipboard.
  *
  * @param value - The text to copy
- * @throws An error if the fallback copy operation fails
+ * @throws An error if the Clipboard API or fallback copy operation fails
  */
 export async function copyText(value: string) {
   if (typeof navigator !== "undefined" && navigator.clipboard) {

@@ -16,6 +16,7 @@ import {
 /**
  * Formats a number according to locale-specific conventions.
  *
+ * @param value - The number to format
  * @param locale - The locale to use for formatting
  * @returns The localized number string
  */
@@ -72,6 +73,9 @@ function Comparison({
 /**
  * Renders a metric card with an icon, label, value, and optional supporting content.
  *
+ * @param icon - Icon component displayed beside the metric
+ * @param label - Metric label
+ * @param value - Formatted metric value
  * @param detail - Supporting content displayed beneath the value.
  * @param comparison - Period-over-period change displayed when `detail` is not provided.
  */
@@ -110,6 +114,8 @@ export function CoreMetricCard({
 /**
  * Renders a compact metric with optional supporting detail or period comparison.
  *
+ * @param label - Metric label
+ * @param value - Formatted metric value
  * @param detail - Supporting content displayed beneath the metric value
  * @param comparison - Period-over-period change displayed when `detail` is not provided
  */

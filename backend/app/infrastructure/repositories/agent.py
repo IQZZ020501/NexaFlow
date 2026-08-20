@@ -447,7 +447,7 @@ async def list_agent_runs(
     Parameters:
     	access_source (str): The source through which the runs were accessed.
     	consumer_id (str): The identifier of the consumer associated with the runs.
-    	latest_versions_only (bool): Whether to exclude failed or cancelled regenerated runs and runs with a non-failed successor.
+        latest_versions_only (bool): Whether to exclude failed or cancelled regenerated runs and runs with a non-failed, non-cancelled successor.
     
     Returns:
     	list[AgentRunEntity]: Runs matching the specified filters, ordered from newest to oldest.

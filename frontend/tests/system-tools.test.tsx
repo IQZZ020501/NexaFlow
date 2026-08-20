@@ -7,8 +7,10 @@
  * all backend traffic goes through globalThis.fetch stubbed by withFetch.
  */
 import { beforeEach, describe, expect, test } from "bun:test"
+import { act } from "react"
 
 import { McpToolsPage, buildMcpServerCreatePayload, type McpForm } from "@/components/tools/mcp-tools-page"
+import { SystemShell } from "@/components/system/system-shell"
 import {
   canManageTeamMembers,
   formatAuditDetails,
@@ -55,6 +57,7 @@ import {
   fireEvent,
   jsonResponse,
   makeSession,
+  mockNextNavigation,
   mockUseSession,
   renderPage,
   screen,
@@ -69,6 +72,7 @@ import {
 
 const session = makeSession()
 mockUseSession(session)
+mockNextNavigation()
 
 // makeSession types these fields as non-null/no-arg; the mock's useSession
 // returns the same object, so mutations through this wider view are observed.
@@ -1120,6 +1124,55 @@ describe("system API client", () => {
     await expect(listWorkspaces("tok")).rejects.toThrow("name required; raw item")
     // A non-JSON error body fails while parsing the payload.
     await expect(listTeams("tok", "w-1")).rejects.toThrow(/boom/)
+  })
+})
+
+describe("SystemShell audit loading", () => {
+  test("debounces search and ignores an older response", async () => {
+    setSession()
+    const searches: string[] = []
+    let resolveOldSearch: (response: Response) => void = () => undefined
+    handler = (url) => {
+      const parsed = new URL(url, "http://localhost")
+      if (parsed.pathname !== "/api/v1/admin/audit-logs") {
+        return jsonResponse([])
+      }
+      const search = parsed.searchParams.get("search") ?? ""
+      searches.push(search)
+      if (search === "old") {
+        return new Promise<Response>((resolve) => {
+          resolveOldSearch = resolve
+        })
+      }
+      if (search === "new") {
+        return jsonResponse([
+          { ...auditLog, id: "audit-new", resource_name: "Newest result" },
+        ])
+      }
+      return jsonResponse([])
+    }
+
+    renderPage(<SystemShell activeTab="audit" />)
+    const searchInput = await screen.findByLabelText("搜索审计")
+    fireEvent.change(searchInput, { target: { value: "o" } })
+    fireEvent.change(searchInput, { target: { value: "ol" } })
+    fireEvent.change(searchInput, { target: { value: "old" } })
+    await waitFor(() => expect(searches).toContain("old"))
+    expect(searches).not.toContain("o")
+    expect(searches).not.toContain("ol")
+
+    fireEvent.change(searchInput, { target: { value: "new" } })
+    await waitFor(() => expect(screen.getByText("Newest result")).toBeTruthy())
+    await act(async () => {
+      resolveOldSearch(
+        jsonResponse([
+          { ...auditLog, id: "audit-old", resource_name: "Stale result" },
+        ])
+      )
+    })
+
+    expect(screen.queryByText("Stale result")).toBeNull()
+    expect(screen.getByText("Newest result")).toBeTruthy()
   })
 })
 

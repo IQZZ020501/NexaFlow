@@ -121,6 +121,7 @@ export const SYSTEM_LOG_EVENT_LABEL_KEYS: Record<string, TranslationKey> = {
  * Translates an audit action into its localized label.
  *
  * @param action - The audit action identifier to translate
+ * @param t - The translation function
  * @returns The localized action label, or a generic label for unrecognized actions
  */
 export function auditActionLabel(action: string, t: TFunction) {
@@ -132,6 +133,7 @@ export function auditActionLabel(action: string, t: TFunction) {
  * Translates a system log level into its localized label.
  *
  * @param level - The system log level identifier
+ * @param t - The translation function
  * @returns The localized label for the level, or a generic label for unrecognized levels
  */
 export function systemLogLevelLabel(level: string, t: TFunction) {

@@ -110,7 +110,7 @@ async def list_system_logs(
         user_id (str | None): User identifier filter.
         search (str | None): Text search filter.
         from_date (datetime | None): Earliest log timestamp to include.
-        to_date (datetime | None): Latest log timestamp to include.
+        to_date (datetime | None): Exclusive upper bound for log timestamps.
         include_stack (bool): Whether to include stack traces in the responses.
     
     Returns:
