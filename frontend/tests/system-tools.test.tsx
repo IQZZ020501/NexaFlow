@@ -11,6 +11,7 @@ import { act } from "react"
 
 import { McpToolsPage, buildMcpServerCreatePayload, type McpForm } from "@/components/tools/mcp-tools-page"
 import { SystemShell } from "@/components/system/system-shell"
+import { LanguageProvider } from "@/contexts/language-provider"
 import {
   canManageTeamMembers,
   formatAuditDetails,
@@ -80,6 +81,7 @@ const sessionState = session as unknown as {
   me: MeResponse | null
   token: string | null
   selectedWorkspaceId: string | null
+  workspaces: Workspace[]
   notify: (kind: "success" | "error", message: string) => void
 }
 
@@ -1173,6 +1175,75 @@ describe("SystemShell audit loading", () => {
 
     expect(screen.queryByText("Stale result")).toBeNull()
     expect(screen.getByText("Newest result")).toBeTruthy()
+  })
+
+  test("resets pagination on refresh and workspace changes", async () => {
+    const workspaceOne = { ...workspace, id: "ws-1", name: "Workspace One" }
+    const workspaceTwo = { ...workspace, id: "ws-2", name: "Workspace Two" }
+    const workspaceAdmin: MeResponse = {
+      user: {
+        ...adminUser,
+        is_global_admin: false,
+        workspaces: [
+          { id: "ws-1", name: "Workspace One", is_default: true, role: "admin" },
+          { id: "ws-2", name: "Workspace Two", is_default: false, role: "admin" },
+        ],
+      },
+      memberships: [
+        { workspace_id: "ws-1", role: "admin" },
+        { workspace_id: "ws-2", role: "admin" },
+      ],
+    }
+    setSession({ me: workspaceAdmin, selectedWorkspaceId: "ws-1" })
+    sessionState.workspaces = [workspaceOne, workspaceTwo]
+    const requests: string[] = []
+    handler = (url) => {
+      const parsed = new URL(url, "http://localhost")
+      const offset = parsed.searchParams.get("offset") ?? "0"
+      requests.push(`${parsed.pathname}?offset=${offset}`)
+      if (parsed.pathname.endsWith("/ws-2/audit-logs")) {
+        return jsonResponse([
+          { ...auditLog, id: "ws-2-page-1", resource_name: "Workspace two page one" },
+        ])
+      }
+      if (offset === "100") {
+        return jsonResponse([
+          { ...auditLog, id: "ws-1-page-2", resource_name: "Workspace one page two" },
+        ])
+      }
+      return jsonResponse(
+        Array.from({ length: 100 }, (_, index) => ({
+          ...auditLog,
+          id: `ws-1-page-1-${index}`,
+          resource_name: `Workspace one page one ${index}`,
+        }))
+      )
+    }
+
+    const view = renderPage(<SystemShell activeTab="audit" />)
+    await screen.findByText("Workspace one page one 0")
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }))
+    await screen.findByText("Workspace one page two")
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }))
+    await waitFor(() => expect(screen.queryByText("Workspace one page two")).toBeNull())
+    expect(
+      requests.filter((request) => request === "/api/v1/workspaces/ws-1/audit-logs?offset=0")
+    ).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }))
+    await screen.findByText("Workspace one page two")
+    sessionState.selectedWorkspaceId = "ws-2"
+    view.rerender(
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <SystemShell activeTab="audit" />
+      </LanguageProvider>
+    )
+
+    await screen.findByText("Workspace two page one")
+    expect(screen.queryByText("Workspace one page two")).toBeNull()
+    expect(requests).toContain("/api/v1/workspaces/ws-2/audit-logs?offset=0")
+    expect(requests).not.toContain("/api/v1/workspaces/ws-2/audit-logs?offset=100")
   })
 })
 

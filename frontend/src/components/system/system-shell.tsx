@@ -435,7 +435,7 @@ function SystemPageContent({
     [reportError, token]
   )
 
-  const loadAuditLogs = React.useCallback(async () => {
+  const loadAuditLogs = React.useCallback(async (offset: number) => {
     const requestId = auditRequestId.current + 1
     auditRequestId.current = requestId
     setIsAuditLoading(true)
@@ -443,7 +443,7 @@ function SystemPageContent({
     try {
       const filters: AuditFilters = {
         limit: 100,
-        offset: auditOffset,
+        offset,
         search: debouncedAuditSearch || undefined,
         action: auditAction || undefined,
       }
@@ -453,7 +453,7 @@ function SystemPageContent({
           ? await listWorkspaceAuditLogs(token, selectedWorkspaceId, filters)
           : []
       if (requestId !== auditRequestId.current) return
-      setAuditLogs((current) => (auditOffset ? [...current, ...nextLogs] : nextLogs))
+      setAuditLogs((current) => (offset ? [...current, ...nextLogs] : nextLogs))
       setAuditHasMore(nextLogs.length === 100)
     } catch (error) {
       if (requestId !== auditRequestId.current) return
@@ -464,7 +464,7 @@ function SystemPageContent({
         setIsAuditLoading(false)
       }
     }
-  }, [auditAction, auditOffset, debouncedAuditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
+  }, [auditAction, debouncedAuditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
 
   const loadUserCreateTeams = React.useCallback(
     async (workspaceId: string) => {
@@ -551,7 +551,8 @@ function SystemPageContent({
     }
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadAuditLogs()
+    setAuditOffset(0)
+    void loadAuditLogs(0)
   }, [activeTab, loadAuditLogs, me, me.user.is_global_admin, selectedWorkspaceId])
 
   const filteredUsers = React.useMemo(() => {
@@ -1345,8 +1346,15 @@ function SystemPageContent({
         setAuditAction(value)
         setAuditOffset(0)
       }}
-      onRefresh={() => void loadAuditLogs()}
-      onLoadMore={() => setAuditOffset((current) => current + 100)}
+      onRefresh={() => {
+        setAuditOffset(0)
+        void loadAuditLogs(0)
+      }}
+      onLoadMore={() => {
+        const nextOffset = auditOffset + 100
+        setAuditOffset(nextOffset)
+        void loadAuditLogs(nextOffset)
+      }}
       hasMore={auditHasMore}
       workspaceScope={me.user.is_global_admin ? null : selectedWorkspace?.name ?? null}
       workspaceEditForm={workspaceEditForm}
