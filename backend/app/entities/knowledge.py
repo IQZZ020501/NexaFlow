@@ -39,6 +39,8 @@ TASK_PARSE = "parse"
 TASK_INDEX = "index"
 TASK_REBUILD_INDEX = "rebuild_index"
 TASK_EVALUATE = "evaluate"
+TASK_GRAPH_SYNC = "graph_sync"
+TASK_GRAPH_REBUILD = "graph_rebuild"
 TASK_QUEUED_STATUS = "queued"
 TASK_RUNNING_STATUS = "running"
 TASK_SUCCEEDED_STATUS = "succeeded"
@@ -54,6 +56,10 @@ class KnowledgeBase:
     status: str = "active"
     embedding_model_id: str | None = None
     reranker_model_id: str | None = None
+    graph_enabled: bool = False
+    active_graph_schema_id: str | None = None
+    active_graph_revision_id: str | None = None
+    graph_extraction_model_id: str | None = None
     created_by_user_id: str = ""
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
@@ -206,6 +212,7 @@ class KnowledgeEvaluationCase:
     knowledge_base_id: str = ""
     question: str = ""
     answer_points: list[str] = field(default_factory=list)
+    graph_expectation: dict[str, Any] = field(default_factory=dict)
     created_by_user_id: str = ""
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
@@ -235,6 +242,7 @@ class KnowledgeEvaluationResult:
     ndcg_at_k: float = 0.0
     latency_ms: float = 0.0
     trace: dict[str, Any] = field(default_factory=dict)
+    graph_metrics: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     created_at: datetime = field(default_factory=utc_now)
 

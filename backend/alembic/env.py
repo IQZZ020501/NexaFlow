@@ -34,6 +34,17 @@ from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
+from app.shareddomain.knowledge_graph.models import (  # noqa: F401
+    KnowledgeGraphAlias,
+    KnowledgeGraphClaim,
+    KnowledgeGraphClaimEvidence,
+    KnowledgeGraphEntity,
+    KnowledgeGraphMention,
+    KnowledgeGraphReviewItem,
+    KnowledgeGraphRevision,
+    KnowledgeGraphRevisionChange,
+    KnowledgeGraphSchema,
+)
 from app.shareddomain.tools.models import (  # noqa: F401
     ApplicationToolBinding,
     McpServer,

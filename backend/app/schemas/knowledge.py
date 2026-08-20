@@ -14,6 +14,10 @@ class KnowledgeBaseResponse(BaseModel):
     status: str
     embedding_model_id: str | None
     reranker_model_id: str | None
+    graph_enabled: bool = False
+    active_graph_schema_id: str | None = None
+    active_graph_revision_id: str | None = None
+    graph_extraction_model_id: str | None = None
     created_by_user_id: str
     created_at: datetime
     updated_at: datetime
@@ -30,6 +34,7 @@ class KnowledgeBaseCreateRequest(BaseModel):
     description: str = Field(default="", max_length=2000)
     embedding_model_id: str | None = Field(default=None, max_length=36)
     reranker_model_id: str | None = Field(default=None, max_length=36)
+    graph_enabled: Literal[False] = False
 
 
 class KnowledgeBaseUpdateRequest(BaseModel):
@@ -139,7 +144,7 @@ class KnowledgeDocumentChunkResponse(BaseModel):
     start_offset: int | None = None
     end_offset: int | None = None
     content: str
-    kind: Literal["document", "qa"] = "document"
+    kind: Literal["document", "qa", "graph_record"] = "document"
     question: str | None = None
     source: str | None = None
     row_number: int | None = None
@@ -211,7 +216,7 @@ class KnowledgeQueryHitResponse(BaseModel):
     contributing_chunk_ids: list[str] = Field(default_factory=list, max_length=20)
     distance: float | None = None
     similarity: float | None = Field(default=None, ge=0, le=1)
-    kind: Literal["document", "qa"] = "document"
+    kind: Literal["document", "qa", "graph_record"] = "document"
     question: str | None = None
     source: str | None = None
     sources: list[str] = Field(default_factory=list, max_length=3)
