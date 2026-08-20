@@ -940,6 +940,36 @@ function renderDetailPage(
     if (url.includes("/models")) return jsonResponse(options.models ?? models)
     if (url.includes("/knowledge-bases?")) return jsonResponse(knowledgeBases)
     if (url.includes("/documents")) return jsonResponse(documents)
+    if (url.endsWith("/graph/settings")) {
+      return jsonResponse({
+        enabled: false,
+        extraction_model_id: null,
+        active_schema_id: null,
+        active_revision_id: null,
+      })
+    }
+    if (url.endsWith("/graph/status")) {
+      return jsonResponse({
+        enabled: false,
+        active_schema_id: null,
+        active_revision_id: null,
+        revision_no: null,
+        revision_status: null,
+        source_watermark: null,
+        stats: {},
+        model_usage: {},
+        pending_review_count: 0,
+        last_error: null,
+        published_at: null,
+      })
+    }
+    if (url.endsWith("/graph/schema")) return jsonResponse(null)
+    if (url.includes("/graph/entities")) {
+      return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 })
+    }
+    if (url.includes("/graph/reviews")) {
+      return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 })
+    }
     if (url.includes("/tasks")) return jsonResponse([])
     if (url.includes("/members")) return jsonResponse([])
     return jsonResponse([])
@@ -953,6 +983,7 @@ function renderDetailPage(
 describe("KnowledgeBasePage documents tab", () => {
   test("routes every knowledge base detail page", async () => {
     expect(parseKnowledgeBaseDetailTab("tasks")).toBe("tasks")
+    expect(parseKnowledgeBaseDetailTab("graph")).toBe("graph")
     expect(parseKnowledgeBaseDetailTab("unknown")).toBeNull()
     expect(knowledgeBaseDetailPath(KB_ID, "documents")).toBe(
       `/app/knowledge/${KB_ID}`
@@ -960,8 +991,17 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(knowledgeBaseDetailPath(KB_ID, "evaluation")).toBe(
       `/app/knowledge/${KB_ID}/evaluation`
     )
+    expect(knowledgeBaseDetailPath(KB_ID, "graph")).toBe(
+      `/app/knowledge/${KB_ID}/graph`
+    )
 
     renderDetailPage()
+    fireEvent.click(await screen.findByText("知识关联"))
+    expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}/graph`)
+    await waitFor(() =>
+      expect(screen.getByText("知识关联尚未启用")).toBeTruthy()
+    )
+
     fireEvent.click(await screen.findByText("任务"))
     expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}/tasks`)
     await waitFor(() => expect(screen.getByText("暂无任务")).toBeTruthy())

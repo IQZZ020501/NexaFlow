@@ -19,6 +19,7 @@ import {
   FlaskConicalIcon,
   LoaderCircleIcon,
   MoreHorizontalIcon,
+  NetworkIcon,
   PencilIcon,
   PlusIcon,
   RotateCcwIcon,
@@ -105,6 +106,7 @@ import { knowledgeBaseDetailPath } from "@/lib/knowledge-views"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
+import { KnowledgeGraph } from "@/components/knowledge/knowledge-graph"
 import {
   getDocumentFileIcon,
   getDocumentFileIconColor,
@@ -1312,6 +1314,7 @@ function KnowledgeBasePageContent({
     icon: React.ElementType
   }> = [
     { key: "documents", label: t("文档"), icon: FileTextIcon },
+    { key: "graph", label: t("知识关联"), icon: NetworkIcon },
     { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
     { key: "evaluation", label: t("检索评测"), icon: FlaskConicalIcon },
     { key: "settings", label: t("设置"), icon: SettingsIcon },
@@ -2179,6 +2182,21 @@ function KnowledgeBasePageContent({
                 knowledgeBaseId={selectedKnowledgeBase.id}
                 documents={documents}
                 canEdit={canEditDocuments}
+                reportError={reportError}
+              />
+            ) : null}
+
+            {activeDetailTab === "graph" ? (
+              <KnowledgeGraph
+                key={selectedKnowledgeBase.id}
+                token={token}
+                workspaceId={selectedKnowledgeBase.workspace_id}
+                knowledgeBaseId={selectedKnowledgeBase.id}
+                canEdit={canEditDocuments}
+                llmModels={registeredModels.filter(
+                  (model) => model.model_type === "LLM",
+                )}
+                notify={notify}
                 reportError={reportError}
               />
             ) : null}
