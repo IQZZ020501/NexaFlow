@@ -3,6 +3,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
+from app.schemas.knowledge_graph import KnowledgeGraphQueryResultResponse
 from app.schemas.user import UserResponse
 
 
@@ -188,6 +189,9 @@ class KnowledgeTaskResponse(BaseModel):
     updated_at: datetime
 
 
+GraphMode = Literal["off", "auto", "path", "neighborhood"]
+
+
 class KnowledgeQueryRequest(BaseModel):
     query: Annotated[
         str,
@@ -198,6 +202,11 @@ class KnowledgeQueryRequest(BaseModel):
     # 归一化余弦相似度阈值（0–1，保留相似度不低于该值的命中）
     similarity: float | None = Field(default=None, ge=0, le=1)
     include_references: bool = False
+    graph_mode: GraphMode = "auto"
+    source_entity: str | None = Field(default=None, max_length=500)
+    target_entity: str | None = Field(default=None, max_length=500)
+    max_hops: int = Field(default=6, ge=1, le=8)
+    relation_filters: list[str] = Field(default_factory=list, max_length=32)
 
 
 class KnowledgeQueryHitResponse(BaseModel):
@@ -219,8 +228,10 @@ class KnowledgeQueryHitResponse(BaseModel):
     kind: Literal["document", "qa", "graph_record"] = "document"
     question: str | None = None
     source: str | None = None
-    sources: list[str] = Field(default_factory=list, max_length=3)
+    sources: list[str] = Field(default_factory=list, max_length=4)
     reference_hops: int = Field(default=0, ge=0, le=1)
+    graph_claim_ids: list[str] = Field(default_factory=list, max_length=400)
+    graph_hops: int = Field(default=0, ge=0, le=8)
     rerank_score: float | None = None
 
 
@@ -233,6 +244,17 @@ class KnowledgeRetrievalTraceResponse(BaseModel):
     vector_candidates: int = Field(ge=0)
     keyword_candidates: int = Field(ge=0)
     reference_candidates: int = Field(ge=0)
+    graph_mode: GraphMode = "auto"
+    graph_intent: str | None = None
+    graph_revision_id: str | None = None
+    graph_entity_candidates: int = Field(default=0, ge=0)
+    graph_profile_candidates: int = Field(default=0, ge=0)
+    graph_claim_candidates: int = Field(default=0, ge=0)
+    graph_path_count: int = Field(default=0, ge=0)
+    graph_visited_nodes: int = Field(default=0, ge=0)
+    graph_hops: int = Field(default=0, ge=0, le=8)
+    graph_truncated: bool = False
+    graph_limit_reason: str | None = None
     fused_candidates: int = Field(ge=0)
     rerank_status: Literal["not_configured", "applied", "fallback", "skipped"]
     returned_hits: int = Field(ge=0)
@@ -244,6 +266,7 @@ class KnowledgeRetrievalTraceResponse(BaseModel):
 class KnowledgeQueryInspectResponse(BaseModel):
     hits: list[KnowledgeQueryHitResponse]
     trace: KnowledgeRetrievalTraceResponse
+    graph: KnowledgeGraphQueryResultResponse | None = None
 
 
 KnowledgeEvaluationId = Annotated[str, Field(min_length=1, max_length=36)]

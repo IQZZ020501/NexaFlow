@@ -18,6 +18,7 @@ from app.capabilities.rag.retrieval import (
     parent_evidence,
     reciprocal_rank_fusion,
 )
+from app.application import knowledge_graph_query
 from app.entities.knowledge import (
     KnowledgeBase,
     KnowledgeDocumentChunk,
@@ -54,6 +55,21 @@ def normalized_cosine_similarity(distance: float | None) -> float | None:
     if distance is None:
         return None
     return max(0.0, min(1.0, 1.0 - distance / 2.0))
+
+
+def _graph_hit_metadata(
+    chunk_ids: list[str],
+    result: knowledge_graph_query.GraphCandidateResult,
+) -> tuple[list[str], int]:
+    claim_ids = list(
+        dict.fromkeys(
+            claim_id
+            for chunk_id in chunk_ids
+            for claim_id in result.claim_ids_by_chunk.get(chunk_id, ())
+        )
+    )
+    hops = [result.claim_hops[claim_id] for claim_id in claim_ids]
+    return claim_ids, min(hops) if hops else 0
 
 
 async def _query_candidates(
@@ -288,10 +304,21 @@ async def retrieve_knowledge_base(
         )[:candidate_limit]
         stage_duration_ms["references"] = _elapsed_ms(reference_started_at)
 
+    graph_started_at = time.perf_counter()
+    graph_result = await knowledge_graph_query.retrieve_graph_candidates(
+        db,
+        knowledge_base,
+        payload,
+        settings,
+        candidate_limit,
+    )
+    stage_duration_ms["graph"] = _elapsed_ms(graph_started_at)
+
     ranked_hits = reciprocal_rank_fusion(
         vector_hits,
         keyword_chunk_ids,
         reference_chunk_ids,
+        graph_result.chunk_ids,
     )
     chunks = await knowledge_base_repository.list_chunks_by_ids(
         db,
@@ -347,6 +374,13 @@ async def retrieve_knowledge_base(
                 MAX_EVIDENCE_CONTENT_CHARS,
             )
             truncated_hits += int(content_truncated)
+            graph_claim_ids, graph_hops = _graph_hit_metadata(
+                [chunk.id for chunk, _ in hits],
+                graph_result,
+            )
+            sources = list(representative_hit.sources)
+            if graph_claim_ids and "graph" not in sources:
+                sources.append("graph")
             responses.append(
                 KnowledgeQueryHitResponse(
                     chunk_id=representative_chunk.id,
@@ -367,10 +401,12 @@ async def retrieve_knowledge_base(
                     similarity=normalized_cosine_similarity(
                         representative_hit.distance
                     ),
-                    sources=list(representative_hit.sources),
+                    sources=sources,
                     reference_hops=(
                         1 if representative_hit.reference_rank is not None else 0
                     ),
+                    graph_claim_ids=graph_claim_ids,
+                    graph_hops=graph_hops,
                     rerank_score=representative_hit.rerank_score,
                 )
             )
@@ -442,6 +478,13 @@ async def retrieve_knowledge_base(
                 and isinstance((parent.meta or {}).get("section_path"), list)
                 else []
             )
+            graph_claim_ids, graph_hops = _graph_hit_metadata(
+                contributing_chunk_ids,
+                graph_result,
+            )
+            sources = list(hit.sources)
+            if graph_claim_ids and "graph" not in sources:
+                sources.append("graph")
             responses.append(
                 KnowledgeQueryHitResponse(
                     chunk_id=chunk.id,
@@ -466,8 +509,10 @@ async def retrieve_knowledge_base(
                     else None,
                     distance=hit.distance,
                     similarity=normalized_cosine_similarity(hit.distance),
-                    sources=list(hit.sources),
+                    sources=sources,
                     reference_hops=1 if hit.reference_rank is not None else 0,
+                    graph_claim_ids=graph_claim_ids,
+                    graph_hops=graph_hops,
                     rerank_score=hit.rerank_score,
                 )
             )
@@ -493,6 +538,19 @@ async def retrieve_knowledge_base(
         vector_candidates=len(vector_hits),
         keyword_candidates=len(keyword_chunk_ids),
         reference_candidates=len(reference_chunk_ids),
+        graph_mode=payload.graph_mode,
+        graph_intent=graph_result.operation,
+        graph_revision_id=graph_result.revision_id,
+        graph_entity_candidates=graph_result.entity_candidate_count,
+        graph_profile_candidates=graph_result.profile_candidate_count,
+        graph_claim_candidates=len(graph_result.claim_hops),
+        graph_path_count=(
+            len(graph_result.traversal.paths) if graph_result.traversal else 0
+        ),
+        graph_visited_nodes=graph_result.visited_nodes,
+        graph_hops=max(graph_result.claim_hops.values(), default=0),
+        graph_truncated=graph_result.truncated,
+        graph_limit_reason=graph_result.limit_reason,
         fused_candidates=len(ranked_hits),
         rerank_status=rerank_status,
         returned_hits=len(responses),
@@ -510,13 +568,23 @@ async def retrieve_knowledge_base(
         vector_candidates=trace.vector_candidates,
         keyword_candidates=trace.keyword_candidates,
         reference_candidates=trace.reference_candidates,
+        graph_intent=trace.graph_intent,
+        graph_claim_candidates=trace.graph_claim_candidates,
+        graph_path_count=trace.graph_path_count,
+        graph_truncated=trace.graph_truncated,
         fused_candidates=trace.fused_candidates,
         rerank_status=trace.rerank_status,
         returned_hits=trace.returned_hits,
         truncated_hits=trace.truncated_hits,
         duration_ms=trace.duration_ms,
     )
-    return KnowledgeQueryInspectResponse(hits=responses, trace=trace)
+    return KnowledgeQueryInspectResponse(
+        hits=responses,
+        trace=trace,
+        graph=knowledge_graph_query.graph_query_result_response(
+            graph_result.traversal
+        ),
+    )
 
 
 async def query_knowledge_base(

@@ -2849,6 +2849,15 @@ def test_reciprocal_rank_fusion_merges_and_ranks() -> None:
     assert fused_shared[0].chunk_id == "shared"
     assert fused_shared[0].distance == 0.2
 
+    fused_graph = reciprocal_rank_fusion(
+        [VectorHit(chunk_id="shared", distance=0.2)],
+        [],
+        graph_chunk_ids=["shared", "graph-only"],
+    )
+    assert [hit.chunk_id for hit in fused_graph] == ["shared", "graph-only"]
+    assert fused_graph[0].graph_rank == 1
+    assert fused_graph[0].sources == ("vector", "graph")
+
 
 def test_reciprocal_rank_fusion_reports_named_rankings_deterministically() -> None:
     ranked = reciprocal_rank_fusion(
@@ -2868,6 +2877,7 @@ def test_reciprocal_rank_fusion_reports_named_rankings_deterministically() -> No
             vector_rank=2,
             keyword_rank=1,
             reference_rank=None,
+            graph_rank=None,
             sources=("vector", "keywords"),
         ),
         RankedHit(
@@ -2877,6 +2887,7 @@ def test_reciprocal_rank_fusion_reports_named_rankings_deterministically() -> No
             vector_rank=None,
             keyword_rank=2,
             reference_rank=1,
+            graph_rank=None,
             sources=("keywords", "reference"),
         ),
         RankedHit(
@@ -2886,6 +2897,7 @@ def test_reciprocal_rank_fusion_reports_named_rankings_deterministically() -> No
             vector_rank=1,
             keyword_rank=None,
             reference_rank=None,
+            graph_rank=None,
             sources=("vector",),
         ),
     ]
@@ -2934,6 +2946,45 @@ def test_keyword_repository_uses_scoped_bm25_query() -> None:
     assert result == ["chunk-2", "chunk-1"]
 
 
+def test_graph_entity_repository_uses_scoped_bm25_query() -> None:
+    from app.infrastructure.repositories import knowledge_graph as graph_repository
+
+    class FakeResult:
+        def scalars(self):
+            return ["entity-2", "entity-1"]
+
+    class FakeDatabase:
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        async def execute(self, statement, parameters):
+            sql = str(statement)
+            assert "entity.search_text ||| CAST(:query AS text)" in sql
+            assert "pdb.score(entity.id) DESC" in sql
+            assert "entity.workspace_id = :workspace_id" in sql
+            assert "entity.knowledge_base_id = :knowledge_base_id" in sql
+            assert "entity.state = 'active'" in sql
+            assert parameters == {
+                "workspace_id": "ws-1",
+                "knowledge_base_id": "kb-1",
+                "query": "离职 账号",
+                "candidate_limit": 8,
+                "entity_types": ["Document", "Process"],
+            }
+            return FakeResult()
+
+    result = asyncio.run(
+        graph_repository.query_entity_candidate_ids(
+            FakeDatabase(),  # type: ignore[arg-type]
+            KnowledgeBase(id="kb-1", workspace_id="ws-1"),
+            "离职 账号",
+            8,
+            {"Process", "Document"},
+        )
+    )
+    assert result == ["entity-2", "entity-1"]
+
+
 def test_detailed_knowledge_query_contract_defaults() -> None:
     from app.schemas.knowledge import (
         KnowledgeQueryHitResponse,
@@ -2945,6 +2996,11 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
     request = KnowledgeQueryRequest(query="  private customer question  ")
     assert request.query == "private customer question"
     assert request.include_references is False
+    assert request.graph_mode == "auto"
+    assert request.source_entity is None
+    assert request.target_entity is None
+    assert request.max_hops == 6
+    assert request.relation_filters == []
     assert KnowledgeQueryRequest(query="question", similarity=0.75).similarity == 0.75
     try:
         KnowledgeQueryRequest(query="   ")
@@ -2987,6 +3043,8 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
         "source": None,
         "sources": [],
         "reference_hops": 0,
+        "graph_claim_ids": [],
+        "graph_hops": 0,
         "rerank_score": None,
     }
 
@@ -3008,7 +3066,11 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
     dumped_trace = trace.model_dump()
     assert "query" not in dumped_trace
     assert all("hash" not in field for field in dumped_trace)
-    assert KnowledgeQueryInspectResponse(hits=[hit], trace=trace).trace is trace
+    assert dumped_trace["graph_mode"] == "auto"
+    assert dumped_trace["graph_claim_candidates"] == 0
+    inspect = KnowledgeQueryInspectResponse(hits=[hit], trace=trace)
+    assert inspect.trace is trace
+    assert inspect.graph is None
 
 
 def test_retrieval_evaluation_metrics_are_deterministic() -> None:
@@ -5970,6 +6032,7 @@ def main() -> None:
     test_reciprocal_rank_fusion_merges_and_ranks()
     test_reciprocal_rank_fusion_reports_named_rankings_deterministically()
     test_keyword_repository_uses_scoped_bm25_query()
+    test_graph_entity_repository_uses_scoped_bm25_query()
     test_detailed_knowledge_query_contract_defaults()
     test_retrieval_evaluation_metrics_are_deterministic()
     test_evaluation_mutations_lock_before_validation_and_require_lease()

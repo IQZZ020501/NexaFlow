@@ -39,6 +39,7 @@ from app.shareddomain.knowledge_graph.schema import (
     default_policy_graph_schema,
     graph_schema_hash,
 )
+from app.schemas.knowledge import KnowledgeQueryRequest
 from app.shareddomain.knowledge_graph import revisions as graph_revisions
 from app.shareddomain.knowledge_graph.revisions import GraphRevisionConflict
 from app.shareddomain.knowledge_graph.resolution import claim_fingerprint
@@ -56,6 +57,8 @@ from app.shareddomain.knowledge.orchestration import (
     enqueue_index_knowledge_document,
 )
 from app.application import knowledge_graph, knowledge_graph_build
+from app.application import knowledge_retrieval as knowledge_retrieval_application
+from app.application import knowledge_graph_query as graph_query
 from app.shareddomain.knowledge import lifecycle as knowledge_lifecycle
 from app.shareddomain.knowledge import task_runner as knowledge_task_runner
 
@@ -378,6 +381,455 @@ async def test_graph_traversal_bounds_scoping_and_truncation() -> None:
     assert neighborhood.limit_reason == "size"
     assert len(neighborhood.nodes) == graph_traversal.MAX_GRAPH_NODES
     assert len(neighborhood.claims) == graph_traversal.MAX_GRAPH_NODES - 1
+
+
+async def test_graph_query_candidates_require_unique_entities_and_keep_hops() -> None:
+    knowledge_base = KnowledgeBase(
+        id="query-kb",
+        workspace_id="query-workspace",
+        graph_enabled=True,
+    )
+    revision = SimpleNamespace(
+        id="query-revision",
+        schema_id="query-schema",
+        stats_json={},
+    )
+    source = GraphEntityRecord(
+        id="source",
+        entity_type="Account",
+        canonical_name="账户 A",
+        normalized_name="账户 a",
+    )
+    target = GraphEntityRecord(
+        id="target",
+        entity_type="Organization",
+        canonical_name="公司 X",
+        normalized_name="公司 x",
+    )
+    claim = GraphClaimRecord(
+        id="query-claim",
+        subject_entity_id=source.id,
+        predicate="connected_to",
+        object_entity_id=target.id,
+        status="active",
+        quality_score=1.0,
+        support_count=1,
+    )
+    evidence = graph_traversal.GraphEvidenceView(
+        id="query-evidence",
+        document_id="query-document",
+        document_filename="query.md",
+        chunk_id="query-chunk",
+        quote="账户 A 与公司 X 相关。",
+        start_offset=0,
+        end_offset=13,
+        source_kind="explicit_text",
+    )
+    path = graph_traversal.assemble_path(
+        [source.id, target.id],
+        [claim.id],
+        {source.id: source, target.id: target},
+        {claim.id: claim},
+        {claim.id: (evidence,)},
+    )
+    assert path is not None
+    traversal_result = graph_traversal.GraphTraversalResult(
+        revision_id=revision.id,
+        operation="path",
+        resolved_entities=path.nodes,
+        nodes=path.nodes,
+        claims=path.steps,
+        paths=(path,),
+        evidence=(evidence,),
+        visited_nodes=2,
+        truncated=False,
+    )
+
+    async def exact_matches(_db, _knowledge_base, text):
+        return [source] if text == "账户 a" else [target]
+
+    with (
+        patch.object(
+            graph_repository,
+            "get_active_revision",
+            AsyncMock(return_value=revision),
+        ),
+        patch.object(
+            graph_repository,
+            "get_schema",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    schema_json=default_policy_graph_schema().model_dump(
+                        mode="json"
+                    )
+                )
+            ),
+        ),
+        patch.object(
+            graph_repository,
+            "list_exact_entity_matches",
+            exact_matches,
+        ),
+        patch.object(
+            graph_traversal,
+            "shortest_path",
+            AsyncMock(return_value=traversal_result),
+        ) as shortest_path,
+    ):
+        result = await graph_query.retrieve_graph_candidates(
+            SimpleNamespace(),
+            knowledge_base,
+            KnowledgeQueryRequest(
+                query="账户 A 与公司 X 有什么关系",
+                graph_mode="path",
+                source_entity="账户 A",
+                target_entity="公司 X",
+            ),
+            SimpleNamespace(),
+            10,
+        )
+    assert result.operation == "path"
+    assert result.chunk_ids == (evidence.chunk_id,)
+    assert result.claim_ids_by_chunk == {evidence.chunk_id: (claim.id,)}
+    assert result.claim_hops == {claim.id: 1}
+    shortest_path.assert_awaited_once()
+
+    duplicate = GraphEntityRecord(
+        id="duplicate",
+        entity_type="Account",
+        canonical_name="张三",
+        normalized_name="张三",
+    )
+    duplicate_two = GraphEntityRecord(
+        id="duplicate-two",
+        entity_type="Account",
+        canonical_name="张三",
+        normalized_name="张三",
+    )
+    with (
+        patch.object(
+            graph_repository,
+            "get_active_revision",
+            AsyncMock(return_value=revision),
+        ),
+        patch.object(
+            graph_repository,
+            "get_schema",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    schema_json=default_policy_graph_schema().model_dump(
+                        mode="json"
+                    )
+                )
+            ),
+        ),
+        patch.object(
+            graph_repository,
+            "list_query_entity_mentions",
+            AsyncMock(return_value=[duplicate, duplicate_two, target]),
+        ),
+        patch.object(
+            graph_traversal,
+            "shortest_path",
+            AsyncMock(side_effect=AssertionError("ambiguous path was guessed")),
+        ),
+    ):
+        ambiguous = await graph_query.retrieve_graph_candidates(
+            SimpleNamespace(),
+            knowledge_base,
+            KnowledgeQueryRequest(
+                query="张三与公司 X 有什么关系",
+            ),
+            SimpleNamespace(),
+            10,
+        )
+    assert ambiguous.operation == "ambiguous"
+    assert ambiguous.traversal is not None
+    assert ambiguous.traversal.paths == ()
+
+
+async def test_graph_retrieval_fuses_evidence_without_changing_off_mode() -> None:
+    text_chunk = KnowledgeDocumentChunk(
+        id="text-chunk",
+        workspace_id="retrieval-workspace",
+        knowledge_base_id="retrieval-kb",
+        document_id="text-document",
+        content="Direct text evidence",
+        search_text="Direct text evidence",
+        status="indexed",
+    )
+    graph_chunk = KnowledgeDocumentChunk(
+        id="graph-chunk",
+        workspace_id="retrieval-workspace",
+        knowledge_base_id="retrieval-kb",
+        document_id="graph-document",
+        content="Cross-document graph evidence",
+        search_text="Cross-document graph evidence",
+        status="indexed",
+    )
+    documents = {
+        "text-document": KnowledgeDocument(
+            id="text-document",
+            workspace_id="retrieval-workspace",
+            knowledge_base_id="retrieval-kb",
+            filename="direct.md",
+            status="indexed",
+        ),
+        "graph-document": KnowledgeDocument(
+            id="graph-document",
+            workspace_id="retrieval-workspace",
+            knowledge_base_id="retrieval-kb",
+            filename="related.md",
+            status="indexed",
+        ),
+    }
+    node = graph_traversal.GraphNodeView("entity", "Document", "制度 A")
+    evidence = graph_traversal.GraphEvidenceView(
+        id="retrieval-evidence",
+        document_id="graph-document",
+        document_filename="related.md",
+        chunk_id=graph_chunk.id,
+        quote="Cross-document graph evidence",
+        start_offset=0,
+        end_offset=29,
+        source_kind="explicit_text",
+    )
+    step = graph_traversal.GraphPathStep(
+        claim_id="retrieval-claim",
+        predicate="references",
+        source_entity_id="entity",
+        target_entity_id="related-entity",
+        semantic_direction="forward",
+        quality_score=1.0,
+        support_count=1,
+        evidence=(evidence,),
+    )
+    path = graph_traversal.GraphPath(nodes=(node,), steps=(step,))
+    traversal_result = graph_traversal.GraphTraversalResult(
+        revision_id="retrieval-revision",
+        operation="path",
+        resolved_entities=(node,),
+        nodes=(node,),
+        claims=(step,),
+        paths=(path,),
+        evidence=(evidence,),
+        visited_nodes=2,
+        truncated=False,
+    )
+    graph_result = graph_query.GraphCandidateResult(
+        chunk_ids=(graph_chunk.id,),
+        claim_ids_by_chunk={graph_chunk.id: (step.claim_id,)},
+        claim_hops={step.claim_id: 1},
+        traversal=traversal_result,
+        operation="path",
+        revision_id=traversal_result.revision_id,
+        visited_nodes=2,
+        truncated=False,
+        limit_reason=None,
+        entity_candidate_count=2,
+        profile_candidate_count=0,
+    )
+    off_result = graph_query.GraphCandidateResult(
+        (), {}, {}, None, "off", None, 0, False, None, 0, 0
+    )
+
+    async def fake_graph(_db, knowledge_base, payload, _settings, _limit):
+        if not knowledge_base.graph_enabled or payload.graph_mode == "off":
+            return off_result
+        return graph_result
+
+    async def list_chunks(_db, _knowledge_base, chunk_ids):
+        values = {text_chunk.id: text_chunk, graph_chunk.id: graph_chunk}
+        return [values[chunk_id] for chunk_id in chunk_ids if chunk_id in values]
+
+    async def list_documents(_db, _knowledge_base, document_ids):
+        return [documents[document_id] for document_id in document_ids]
+
+    with (
+        patch.object(
+            knowledge_repository,
+            "query_keyword_chunk_ids",
+            AsyncMock(return_value=[text_chunk.id]),
+        ),
+        patch.object(knowledge_repository, "list_chunks_by_ids", list_chunks),
+        patch.object(
+            knowledge_repository,
+            "list_active_documents_by_ids",
+            list_documents,
+        ),
+        patch.object(graph_query, "retrieve_graph_candidates", fake_graph),
+    ):
+        baseline = await knowledge_retrieval_application.retrieve_knowledge_base(
+            SimpleNamespace(),
+            SimpleNamespace(
+                id="retrieval-kb",
+                workspace_id="retrieval-workspace",
+                graph_enabled=False,
+                reranker_model_id=None,
+            ),
+            KnowledgeQueryRequest(
+                query="制度 A",
+                limit=2,
+                search_mode="keywords",
+            ),
+            SimpleNamespace(),
+        )
+        explicit_off = await knowledge_retrieval_application.retrieve_knowledge_base(
+            SimpleNamespace(),
+            SimpleNamespace(
+                id="retrieval-kb",
+                workspace_id="retrieval-workspace",
+                graph_enabled=True,
+                reranker_model_id=None,
+            ),
+            KnowledgeQueryRequest(
+                query="制度 A",
+                limit=2,
+                search_mode="keywords",
+                graph_mode="off",
+            ),
+            SimpleNamespace(),
+        )
+        blended = await knowledge_retrieval_application.retrieve_knowledge_base(
+            SimpleNamespace(),
+            SimpleNamespace(
+                id="retrieval-kb",
+                workspace_id="retrieval-workspace",
+                graph_enabled=True,
+                reranker_model_id=None,
+            ),
+            KnowledgeQueryRequest(
+                query="制度 A",
+                limit=2,
+                search_mode="keywords",
+            ),
+            SimpleNamespace(),
+        )
+
+    assert [hit.model_dump() for hit in explicit_off.hits] == [
+        hit.model_dump() for hit in baseline.hits
+    ]
+    assert {hit.document_filename for hit in blended.hits} == {
+        "direct.md",
+        "related.md",
+    }
+    related = next(hit for hit in blended.hits if hit.document_id == "graph-document")
+    assert related.sources == ["graph"]
+    assert related.graph_claim_ids == [step.claim_id]
+    assert related.graph_hops == 1
+    assert blended.trace.graph_claim_candidates == 1
+    assert blended.graph is not None
+    assert blended.graph.operation == "path"
+
+
+async def test_graph_query_drops_stale_profiles_and_rejects_unknown_relations() -> None:
+    knowledge_base = KnowledgeBase(
+        id="profile-query-kb",
+        workspace_id="profile-query-workspace",
+        graph_enabled=True,
+    )
+    revision = SimpleNamespace(
+        id="profile-query-revision",
+        schema_id="profile-query-schema",
+        stats_json={"profile_embedding_model_id": "embedding-model"},
+    )
+    entity = GraphEntityRecord(
+        id="profile-entity",
+        entity_type="Document",
+        canonical_name="制度 A",
+        normalized_name="制度 a",
+        profile_hash="current-profile-hash",
+    )
+    schema = SimpleNamespace(
+        schema_json=default_policy_graph_schema().model_dump(mode="json")
+    )
+    with (
+        patch.object(
+            graph_repository,
+            "get_active_revision",
+            AsyncMock(return_value=revision),
+        ),
+        patch.object(
+            graph_repository,
+            "get_schema",
+            AsyncMock(return_value=schema),
+        ),
+        patch.object(
+            graph_repository,
+            "list_query_entity_mentions",
+            AsyncMock(return_value=[]),
+        ),
+        patch.object(
+            graph_repository,
+            "list_exact_entity_matches",
+            AsyncMock(return_value=[]),
+        ),
+        patch.object(
+            graph_repository,
+            "query_entity_candidate_ids",
+            AsyncMock(return_value=[]),
+        ),
+        patch.object(
+            graph_repository,
+            "list_active_entities_by_ids",
+            AsyncMock(return_value=[entity]),
+        ),
+        patch.object(
+            graph_query,
+            "resolve_embedding_model",
+            AsyncMock(return_value=SimpleNamespace(id="embedding-model")),
+        ),
+        patch.object(
+            graph_query,
+            "query_graph_profile_vectors",
+            return_value=[
+                graph_query.GraphProfileVectorHit(
+                    entity_id=entity.id,
+                    profile_hash="stale-profile-hash",
+                    distance=0.0,
+                )
+            ],
+        ),
+    ):
+        result = await graph_query.retrieve_graph_candidates(
+            SimpleNamespace(),
+            knowledge_base,
+            KnowledgeQueryRequest(query="制度 A 的要求"),
+            SimpleNamespace(),
+            10,
+        )
+    assert result.operation == "none"
+    assert result.profile_candidate_count == 0
+    assert result.traversal is not None
+    assert result.traversal.resolved_entities == ()
+
+    with (
+        patch.object(
+            graph_repository,
+            "get_active_revision",
+            AsyncMock(return_value=revision),
+        ),
+        patch.object(
+            graph_repository,
+            "get_schema",
+            AsyncMock(return_value=schema),
+        ),
+    ):
+        try:
+            await graph_query.retrieve_graph_candidates(
+                SimpleNamespace(),
+                knowledge_base,
+                KnowledgeQueryRequest(
+                    query="制度 A",
+                    relation_filters=["drop_table"],
+                ),
+                SimpleNamespace(),
+                10,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 422
+        else:
+            raise AssertionError("unknown graph relations must be rejected")
 
 
 def test_graph_profile_collection_is_knowledge_base_scoped() -> None:
@@ -1724,6 +2176,9 @@ async def main() -> None:
     test_bank_path_preserves_relation_direction_and_evidence()
     test_graph_traversal_sql_requires_acyclic_active_evidence()
     await test_graph_traversal_bounds_scoping_and_truncation()
+    await test_graph_query_candidates_require_unique_entities_and_keep_hops()
+    await test_graph_retrieval_fuses_evidence_without_changing_off_mode()
+    await test_graph_query_drops_stale_profiles_and_rejects_unknown_relations()
     test_graph_profile_collection_is_knowledge_base_scoped()
     test_graph_profile_vectors_use_an_isolated_collection()
     await test_graph_database_constraints()

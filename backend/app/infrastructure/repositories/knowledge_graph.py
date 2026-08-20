@@ -1,7 +1,18 @@
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import case, delete, exists, false, func, or_, select, text, update
+from sqlalchemy import (
+    case,
+    delete,
+    exists,
+    false,
+    func,
+    literal,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +60,9 @@ _SHORTEST_PATH_SQL = text(
 _NEIGHBORHOOD_SQL = text(
     (_GRAPH_SQL_DIR / "neighborhood.sql").read_text(encoding="utf-8")
 )
+_QUERY_ENTITY_CANDIDATES_SQL = text(
+    (_GRAPH_SQL_DIR / "query_entity_candidates.sql").read_text(encoding="utf-8")
+)
 _SET_GRAPH_STATEMENT_TIMEOUT = text("SET LOCAL statement_timeout = '2000ms'")
 _RESET_GRAPH_STATEMENT_TIMEOUT = text("SET LOCAL statement_timeout = 0")
 
@@ -79,6 +93,21 @@ async def get_schema_by_hash(
             KnowledgeGraphSchemaORM.workspace_id == knowledge_base.workspace_id,
             KnowledgeGraphSchemaORM.knowledge_base_id == knowledge_base.id,
             KnowledgeGraphSchemaORM.schema_hash == schema_hash,
+        )
+    )
+    return to_entity(KnowledgeGraphSchema, row) if row else None
+
+
+async def get_schema(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    schema_id: str,
+) -> KnowledgeGraphSchema | None:
+    row = await db.scalar(
+        select(KnowledgeGraphSchemaORM).where(
+            KnowledgeGraphSchemaORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphSchemaORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphSchemaORM.id == schema_id,
         )
     )
     return to_entity(KnowledgeGraphSchema, row) if row else None
@@ -1016,6 +1045,116 @@ async def list_active_entities_by_ids(
         )
     )
     return [to_entity(KnowledgeGraphEntity, row) for row in rows.all()]
+
+
+async def list_exact_entity_matches(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    normalized_text: str,
+) -> list[KnowledgeGraphEntity]:
+    if not normalized_text:
+        return []
+    alias_match = exists(
+        select(KnowledgeGraphAliasORM.id).where(
+            KnowledgeGraphAliasORM.workspace_id
+            == KnowledgeGraphEntityORM.workspace_id,
+            KnowledgeGraphAliasORM.knowledge_base_id
+            == KnowledgeGraphEntityORM.knowledge_base_id,
+            KnowledgeGraphAliasORM.entity_id == KnowledgeGraphEntityORM.id,
+            KnowledgeGraphAliasORM.normalized_alias == normalized_text,
+            KnowledgeGraphAliasORM.retired_revision_id.is_(None),
+        )
+    )
+    rows = await db.scalars(
+        select(KnowledgeGraphEntityORM)
+        .where(
+            KnowledgeGraphEntityORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphEntityORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphEntityORM.state == "active",
+            KnowledgeGraphEntityORM.retired_revision_id.is_(None),
+            or_(
+                KnowledgeGraphEntityORM.normalized_name == normalized_text,
+                alias_match,
+            ),
+        )
+        .order_by(KnowledgeGraphEntityORM.id)
+    )
+    return [to_entity(KnowledgeGraphEntity, row) for row in rows.all()]
+
+
+async def list_query_entity_mentions(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    normalized_query: str,
+    limit: int = 16,
+) -> list[KnowledgeGraphEntity]:
+    if not normalized_query or limit <= 0:
+        return []
+    contains = (
+        func.instr(literal(normalized_query), KnowledgeGraphEntityORM.normalized_name)
+        if db.get_bind().dialect.name == "sqlite"
+        else func.strpos(
+            literal(normalized_query),
+            KnowledgeGraphEntityORM.normalized_name,
+        )
+    )
+    alias_contains = (
+        func.instr(literal(normalized_query), KnowledgeGraphAliasORM.normalized_alias)
+        if db.get_bind().dialect.name == "sqlite"
+        else func.strpos(
+            literal(normalized_query),
+            KnowledgeGraphAliasORM.normalized_alias,
+        )
+    )
+    alias_match = exists(
+        select(KnowledgeGraphAliasORM.id).where(
+            KnowledgeGraphAliasORM.workspace_id
+            == KnowledgeGraphEntityORM.workspace_id,
+            KnowledgeGraphAliasORM.knowledge_base_id
+            == KnowledgeGraphEntityORM.knowledge_base_id,
+            KnowledgeGraphAliasORM.entity_id == KnowledgeGraphEntityORM.id,
+            KnowledgeGraphAliasORM.retired_revision_id.is_(None),
+            alias_contains > 0,
+        )
+    )
+    rows = await db.scalars(
+        select(KnowledgeGraphEntityORM)
+        .where(
+            KnowledgeGraphEntityORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphEntityORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphEntityORM.state == "active",
+            KnowledgeGraphEntityORM.retired_revision_id.is_(None),
+            or_(contains > 0, alias_match),
+        )
+        .order_by(
+            func.length(KnowledgeGraphEntityORM.normalized_name).desc(),
+            KnowledgeGraphEntityORM.id,
+        )
+        .limit(limit)
+    )
+    return [to_entity(KnowledgeGraphEntity, row) for row in rows.all()]
+
+
+async def query_entity_candidate_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    query: str,
+    candidate_limit: int = 8,
+    entity_types: set[str] | None = None,
+) -> list[str]:
+    if db.get_bind().dialect.name != "postgresql" or candidate_limit <= 0:
+        return []
+    result = await db.execute(
+        _QUERY_ENTITY_CANDIDATES_SQL,
+        {
+            "workspace_id": knowledge_base.workspace_id,
+            "knowledge_base_id": knowledge_base.id,
+            "query": query,
+            "candidate_limit": candidate_limit,
+            "entity_types": sorted(entity_types) if entity_types else None,
+        },
+    )
+    return list(result.scalars())
 
 
 async def list_active_claims_by_ids(
