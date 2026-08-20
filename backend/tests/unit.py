@@ -9,6 +9,7 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 
 import asyncio
 from dataclasses import FrozenInstanceError
+import json
 from types import SimpleNamespace
 
 import tests.support  # noqa: F401  (sets required env before app imports)
@@ -53,6 +54,12 @@ from app.shareddomain.knowledge_graph.schema import (
     default_policy_graph_schema,
     graph_schema_hash,
     normalize_graph_name,
+)
+from app.shareddomain.knowledge_graph.extraction import (
+    ExtractionChunk,
+    GraphExtractionBatch,
+    extract_graph_batch,
+    validate_extraction_batch,
 )
 
 
@@ -136,6 +143,130 @@ def test_normalized_document_artifact_is_content_addressed() -> None:
     assert artifact.object_key.endswith(".md")
     assert len(artifact.content_hash) == 64
     assert artifact.content == "# 制度 A\n\n离职审批由人力资源部负责。"
+
+
+def test_graph_extraction_requires_exact_chunk_evidence() -> None:
+    content = "账户 A 与账户 B 共用手机号 P。"
+    quote = "账户 A 与账户 B 共用手机号 P"
+    chunks = [
+        ExtractionChunk(
+            chunk_id="chunk-1",
+            document_id="doc-1",
+            content=content,
+        )
+    ]
+    valid = GraphExtractionBatch.model_validate(
+        {
+            "entities": [
+                {
+                    "temp_id": "a",
+                    "entity_type": "Account",
+                    "canonical_name": "账户 A",
+                    "aliases": [],
+                },
+                {
+                    "temp_id": "p",
+                    "entity_type": "Phone",
+                    "canonical_name": "手机号 P",
+                    "aliases": [],
+                },
+            ],
+            "claims": [
+                {
+                    "subject_temp_id": "a",
+                    "predicate": "uses_phone",
+                    "object_temp_id": "p",
+                    "object_value": None,
+                    "evidence_chunk_id": "chunk-1",
+                    "quote": quote,
+                    "start_offset": content.index(quote),
+                    "end_offset": content.index(quote) + len(quote),
+                }
+            ],
+        }
+    )
+    assert validate_extraction_batch(valid, chunks).claims[0].predicate == "uses_phone"
+
+    invalid = valid.model_copy(deep=True)
+    invalid.claims[0].quote = "账户 A 登录设备 D"
+    try:
+        validate_extraction_batch(invalid, chunks)
+    except ValueError as exc:
+        assert "quote" in str(exc).lower()
+    else:
+        raise AssertionError("unsupported graph evidence must fail")
+
+
+def test_graph_extractor_parses_bounded_json_only_response() -> None:
+    content = "账户 A 使用手机号 P。"
+    quote = "账户 A 使用手机号 P"
+    payload = {
+        "entities": [
+            {
+                "temp_id": "a",
+                "entity_type": "Account",
+                "canonical_name": "账户 A",
+            },
+            {
+                "temp_id": "p",
+                "entity_type": "Phone",
+                "canonical_name": "手机号 P",
+            },
+        ],
+        "claims": [
+            {
+                "subject_temp_id": "a",
+                "predicate": "uses_phone",
+                "object_temp_id": "p",
+                "evidence_chunk_id": "chunk-1",
+                "quote": quote,
+                "start_offset": 0,
+                "end_offset": len(quote),
+            }
+        ],
+    }
+
+    class Provider:
+        prompt = None
+
+        async def ainvoke(self, messages):
+            self.prompt = messages
+            return SimpleNamespace(
+                text=f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```",
+                usage_metadata={"input_tokens": 12, "output_tokens": 8},
+            )
+
+    provider = Provider()
+    schema = GraphSchemaDefinition.model_validate(
+        {
+            "entity_types": [
+                {"name": "Account"},
+                {"name": "Phone"},
+            ],
+            "relations": [
+                {
+                    "name": "uses_phone",
+                    "source_types": ["Account"],
+                    "target_types": ["Phone"],
+                }
+            ],
+        }
+    )
+    result = asyncio.run(
+        extract_graph_batch(
+            provider,
+            schema,
+            [
+                ExtractionChunk(f"chunk-{index}", "doc-1", content)
+                for index in range(1, 6)
+            ],
+        )
+    )
+    assert result.batch.claims[0].predicate == "uses_phone"
+    assert len(result.prompt_hash) == 64
+    assert result.model_usage["total_tokens"] == 20
+    assert provider.prompt is not None
+    assert "chunk-5" not in provider.prompt[1]["content"]
 
 
 def test_effective_agent_permission_matrix() -> None:
@@ -5654,6 +5785,8 @@ def main() -> None:
     test_graph_schema_rejects_unknown_relation_endpoint()
     test_default_policy_graph_schema_is_stable()
     test_normalized_document_artifact_is_content_addressed()
+    test_graph_extraction_requires_exact_chunk_evidence()
+    test_graph_extractor_parses_bounded_json_only_response()
     test_tool_ref_requires_stable_ids()
     test_agent_publication_snapshot_is_canonical_and_tool_versioned()
     test_agent_tool_binding_requires_current_available_policy()

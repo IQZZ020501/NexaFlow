@@ -62,3 +62,10 @@ from app.shareddomain.knowledge_graph.revisions import (  # noqa: E402,F401
     publish_revision,
     stage_revision_change,
 )
+from app.shareddomain.knowledge_graph.extraction import (  # noqa: E402,F401
+    ExtractionChunk,
+    GraphExtractionBatch,
+    GraphExtractionResult,
+    extract_graph_batch,
+    validate_extraction_batch,
+)
