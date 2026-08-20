@@ -8,7 +8,7 @@ from datetime import timedelta
 from io import BytesIO
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import tests.support  # noqa: F401
 from fastapi import HTTPException, UploadFile
@@ -43,6 +43,7 @@ from app.shareddomain.knowledge_graph import revisions as graph_revisions
 from app.shareddomain.knowledge_graph.revisions import GraphRevisionConflict
 from app.shareddomain.knowledge_graph.resolution import claim_fingerprint
 from app.shareddomain.knowledge_graph.services import create_graph_schema
+from app.shareddomain.knowledge_graph import traversal as graph_traversal
 from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphClaim,
     KnowledgeGraphClaimEvidence,
@@ -136,6 +137,247 @@ def test_graph_source_batches_keep_structured_and_text_chunks_separate() -> None
         (True, ["graph-1", "graph-2"]),
         (False, ["text-2"]),
     ]
+
+
+def test_bank_path_preserves_relation_direction_and_evidence() -> None:
+    node_specs = [
+        ("account-a", "Account", "账户 A"),
+        ("phone-p", "Phone", "手机号 P"),
+        ("account-b", "Account", "账户 B"),
+        ("device-d", "Device", "设备 D"),
+        ("account-c", "Account", "账户 C"),
+        ("company-x", "Organization", "公司 X"),
+    ]
+    entities = {
+        entity_id: GraphEntityRecord(
+            id=entity_id,
+            entity_type=entity_type,
+            canonical_name=name,
+            normalized_name=name.casefold(),
+        )
+        for entity_id, entity_type, name in node_specs
+    }
+    claim_specs = [
+        ("claim-1", "account-a", "uses_phone", "phone-p"),
+        ("claim-2", "account-b", "uses_phone", "phone-p"),
+        ("claim-3", "account-b", "logged_in_on", "device-d"),
+        ("claim-4", "account-c", "logged_in_on", "device-d"),
+        (
+            "claim-5",
+            "account-c",
+            "legal_representative_of",
+            "company-x",
+        ),
+    ]
+    claims = {
+        claim_id: GraphClaimRecord(
+            id=claim_id,
+            subject_entity_id=subject_id,
+            predicate=predicate,
+            object_entity_id=object_id,
+            status="active",
+            quality_score=1.0,
+            support_count=1,
+        )
+        for claim_id, subject_id, predicate, object_id in claim_specs
+    }
+    evidence = {
+        claim_id: (
+            graph_traversal.GraphEvidenceView(
+                id=f"evidence-{claim_id}",
+                document_id="bank-document",
+                document_filename="bank.jsonl",
+                chunk_id=f"chunk-{claim_id}",
+                quote=claim_id,
+                start_offset=0,
+                end_offset=len(claim_id),
+                source_kind="structured_import",
+            ),
+        )
+        for claim_id in claims
+    }
+    path = graph_traversal.assemble_path(
+        [item[0] for item in node_specs],
+        [item[0] for item in claim_specs],
+        entities,
+        claims,
+        evidence,
+    )
+    assert path is not None
+    assert [step.predicate for step in path.steps] == [
+        "uses_phone",
+        "uses_phone",
+        "logged_in_on",
+        "logged_in_on",
+        "legal_representative_of",
+    ]
+    assert [node.canonical_name for node in path.nodes] == [
+        "账户 A",
+        "手机号 P",
+        "账户 B",
+        "设备 D",
+        "账户 C",
+        "公司 X",
+    ]
+    assert [step.semantic_direction for step in path.steps] == [
+        "forward",
+        "reverse",
+        "forward",
+        "reverse",
+        "forward",
+    ]
+    assert all(step.evidence for step in path.steps)
+
+
+def test_graph_traversal_sql_requires_acyclic_active_evidence() -> None:
+    for statement in (
+        graph_repository._SHORTEST_PATH_SQL,
+        graph_repository._NEIGHBORHOOD_SQL,
+    ):
+        assert "next_step.entity_id <> ALL(walk.entity_path)" in statement.text
+        assert "evidence.evidence_state = 'active'" in statement.text
+        assert "document.status <> 'deleted'" in statement.text
+        assert "document.is_active IS TRUE" in statement.text
+
+
+async def test_graph_traversal_bounds_scoping_and_truncation() -> None:
+    db = SimpleNamespace()
+    knowledge_base = KnowledgeBase(id="traversal-kb", workspace_id="traversal-ws")
+    revision = SimpleNamespace(id="traversal-revision")
+    source = GraphEntityRecord(
+        id="source",
+        entity_type="Account",
+        canonical_name="Source",
+    )
+    target = GraphEntityRecord(
+        id="target",
+        entity_type="Organization",
+        canonical_name="Target",
+    )
+
+    for invalid_hops in (0, 9):
+        try:
+            await graph_traversal.shortest_path(
+                db,
+                knowledge_base,
+                revision,
+                source.id,
+                target.id,
+                max_hops=invalid_hops,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("path traversal must enforce the 8-hop ceiling")
+
+    query_path = AsyncMock()
+    with (
+        patch.object(
+            graph_repository,
+            "list_active_entities_by_ids",
+            AsyncMock(return_value=[source]),
+        ),
+        patch.object(graph_repository, "query_shortest_path_rows", query_path),
+    ):
+        scoped = await graph_traversal.shortest_path(
+            db,
+            knowledge_base,
+            revision,
+            source.id,
+            target.id,
+            max_hops=8,
+        )
+    assert scoped.paths == ()
+    assert [item.id for item in scoped.resolved_entities] == [source.id]
+    query_path.assert_not_awaited()
+
+    query_path = AsyncMock(return_value=([], 2, False))
+    with (
+        patch.object(
+            graph_repository,
+            "list_active_entities_by_ids",
+            AsyncMock(return_value=[source, target]),
+        ),
+        patch.object(graph_repository, "query_shortest_path_rows", query_path),
+    ):
+        no_path = await graph_traversal.shortest_path(
+            db,
+            knowledge_base,
+            revision,
+            source.id,
+            target.id,
+            max_hops=8,
+            relation_filters=["uses_phone"],
+        )
+    assert no_path.paths == ()
+    query_path.assert_awaited_once_with(
+        db,
+        knowledge_base,
+        source.id,
+        target.id,
+        8,
+        ["uses_phone"],
+    )
+
+    entities = {source.id: source}
+    claims = {}
+    rows = []
+    for index in range(201):
+        entity = GraphEntityRecord(
+            id=f"neighbor-{index}",
+            entity_type="Account",
+            canonical_name=f"Neighbor {index}",
+        )
+        claim = GraphClaimRecord(
+            id=f"neighbor-claim-{index}",
+            subject_entity_id=source.id,
+            predicate="connected_to",
+            object_entity_id=entity.id,
+            status="active",
+        )
+        entities[entity.id] = entity
+        claims[claim.id] = claim
+        rows.append(([source.id, entity.id], [claim.id]))
+
+    async def list_entities(_db, _knowledge_base, entity_ids):
+        return [entities[entity_id] for entity_id in sorted(entity_ids)]
+
+    async def list_claims(_db, _knowledge_base, claim_ids):
+        return [claims[claim_id] for claim_id in sorted(claim_ids)]
+
+    with (
+        patch.object(
+            graph_repository,
+            "list_active_entities_by_ids",
+            list_entities,
+        ),
+        patch.object(
+            graph_repository,
+            "query_neighborhood_rows",
+            AsyncMock(return_value=(rows, 202, False)),
+        ),
+        patch.object(
+            graph_repository,
+            "list_active_claims_by_ids",
+            list_claims,
+        ),
+        patch.object(
+            graph_repository,
+            "list_ranked_evidence_for_claim_ids",
+            AsyncMock(return_value=[]),
+        ),
+    ):
+        neighborhood = await graph_traversal.neighborhood(
+            db,
+            knowledge_base,
+            revision,
+            source.id,
+            max_hops=3,
+        )
+    assert neighborhood.truncated
+    assert neighborhood.limit_reason == "size"
+    assert len(neighborhood.nodes) == graph_traversal.MAX_GRAPH_NODES
+    assert len(neighborhood.claims) == graph_traversal.MAX_GRAPH_NODES - 1
 
 
 def test_graph_profile_collection_is_knowledge_base_scoped() -> None:
@@ -1479,6 +1721,9 @@ async def test_claim_survives_until_last_evidence_is_deleted() -> None:
 async def main() -> None:
     test_graph_import_parser_is_atomic_and_bounded()
     test_graph_source_batches_keep_structured_and_text_chunks_separate()
+    test_bank_path_preserves_relation_direction_and_evidence()
+    test_graph_traversal_sql_requires_acyclic_active_evidence()
+    await test_graph_traversal_bounds_scoping_and_truncation()
     test_graph_profile_collection_is_knowledge_base_scoped()
     test_graph_profile_vectors_use_an_isolated_collection()
     await test_graph_database_constraints()

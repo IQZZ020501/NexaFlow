@@ -1,4 +1,8 @@
-from sqlalchemy import delete, exists, false, func, or_, select, update
+from datetime import datetime
+from pathlib import Path
+
+from sqlalchemy import case, delete, exists, false, func, or_, select, text, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import (
@@ -37,6 +41,16 @@ from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphRevisionChange as KnowledgeGraphRevisionChangeORM,
     KnowledgeGraphSchema as KnowledgeGraphSchemaORM,
 )
+
+_GRAPH_SQL_DIR = Path(__file__).parent.parent / "sql" / "knowledge_graph"
+_SHORTEST_PATH_SQL = text(
+    (_GRAPH_SQL_DIR / "shortest_path.sql").read_text(encoding="utf-8")
+)
+_NEIGHBORHOOD_SQL = text(
+    (_GRAPH_SQL_DIR / "neighborhood.sql").read_text(encoding="utf-8")
+)
+_SET_GRAPH_STATEMENT_TIMEOUT = text("SET LOCAL statement_timeout = '2000ms'")
+_RESET_GRAPH_STATEMENT_TIMEOUT = text("SET LOCAL statement_timeout = 0")
 
 
 async def create_graph_schema(
@@ -912,3 +926,194 @@ async def delete_review_item(
             KnowledgeGraphReviewItemORM.id == record_key,
         )
     )
+
+
+async def _query_traversal_rows(
+    db: AsyncSession,
+    statement,
+    parameters: dict[str, object],
+) -> tuple[list[tuple[list[str], list[str]]], int, bool]:
+    if db.get_bind().dialect.name != "postgresql":
+        raise RuntimeError("Knowledge graph traversal requires PostgreSQL.")
+    try:
+        async with db.begin_nested():
+            await db.execute(_SET_GRAPH_STATEMENT_TIMEOUT)
+            result = await db.execute(statement, parameters)
+            rows = result.mappings().all()
+            await db.execute(_RESET_GRAPH_STATEMENT_TIMEOUT)
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) == "57014":
+            return [], 0, True
+        raise
+    visited_nodes = int(rows[0]["visited_nodes"] or 0) if rows else 0
+    paths = [
+        (
+            [str(value) for value in row["entity_path"]],
+            [str(value) for value in row["claim_path"]],
+        )
+        for row in rows
+        if row["entity_path"] is not None and row["claim_path"] is not None
+    ]
+    return paths, visited_nodes, False
+
+
+async def query_shortest_path_rows(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    source_entity_id: str,
+    target_entity_id: str,
+    max_hops: int,
+    relation_filters: list[str] | None,
+) -> tuple[list[tuple[list[str], list[str]]], int, bool]:
+    return await _query_traversal_rows(
+        db,
+        _SHORTEST_PATH_SQL,
+        {
+            "workspace_id": knowledge_base.workspace_id,
+            "knowledge_base_id": knowledge_base.id,
+            "source_entity_id": source_entity_id,
+            "target_entity_id": target_entity_id,
+            "max_hops": max_hops,
+            "relation_filters": relation_filters or None,
+        },
+    )
+
+
+async def query_neighborhood_rows(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    source_entity_id: str,
+    max_hops: int,
+    relation_filters: list[str] | None,
+) -> tuple[list[tuple[list[str], list[str]]], int, bool]:
+    return await _query_traversal_rows(
+        db,
+        _NEIGHBORHOOD_SQL,
+        {
+            "workspace_id": knowledge_base.workspace_id,
+            "knowledge_base_id": knowledge_base.id,
+            "source_entity_id": source_entity_id,
+            "max_hops": max_hops,
+            "relation_filters": relation_filters or None,
+        },
+    )
+
+
+async def list_active_entities_by_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    entity_ids: set[str],
+) -> list[KnowledgeGraphEntity]:
+    if not entity_ids:
+        return []
+    rows = await db.scalars(
+        select(KnowledgeGraphEntityORM).where(
+            KnowledgeGraphEntityORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphEntityORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphEntityORM.id.in_(sorted(entity_ids)),
+            KnowledgeGraphEntityORM.state == "active",
+            KnowledgeGraphEntityORM.retired_revision_id.is_(None),
+        )
+    )
+    return [to_entity(KnowledgeGraphEntity, row) for row in rows.all()]
+
+
+async def list_active_claims_by_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    claim_ids: set[str],
+) -> list[KnowledgeGraphClaim]:
+    if not claim_ids:
+        return []
+    rows = await db.scalars(
+        select(KnowledgeGraphClaimORM).where(
+            KnowledgeGraphClaimORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphClaimORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphClaimORM.id.in_(sorted(claim_ids)),
+            KnowledgeGraphClaimORM.status == "active",
+            KnowledgeGraphClaimORM.retired_revision_id.is_(None),
+        )
+    )
+    return [to_entity(KnowledgeGraphClaim, row) for row in rows.all()]
+
+
+async def list_ranked_evidence_for_claim_ids(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    claim_ids: set[str],
+) -> list[tuple[KnowledgeGraphClaimEvidence, str, str, float, datetime]]:
+    if not claim_ids:
+        return []
+    source_priority = case(
+        (KnowledgeGraphClaimORM.source_kind == "structured_import", 0),
+        (KnowledgeGraphClaimORM.source_kind == "document_reference", 1),
+        else_=2,
+    )
+    rows = await db.execute(
+        select(
+            KnowledgeGraphClaimEvidenceORM,
+            KnowledgeDocumentORM.filename,
+            KnowledgeGraphClaimORM.source_kind,
+            KnowledgeGraphClaimORM.quality_score,
+            KnowledgeDocumentORM.updated_at,
+        )
+        .join(
+            KnowledgeGraphClaimORM,
+            (
+                KnowledgeGraphClaimORM.workspace_id
+                == KnowledgeGraphClaimEvidenceORM.workspace_id
+            )
+            & (
+                KnowledgeGraphClaimORM.knowledge_base_id
+                == KnowledgeGraphClaimEvidenceORM.knowledge_base_id
+            )
+            & (
+                KnowledgeGraphClaimORM.id
+                == KnowledgeGraphClaimEvidenceORM.claim_id
+            ),
+        )
+        .join(
+            KnowledgeDocumentORM,
+            (
+                KnowledgeDocumentORM.workspace_id
+                == KnowledgeGraphClaimEvidenceORM.workspace_id
+            )
+            & (
+                KnowledgeDocumentORM.knowledge_base_id
+                == KnowledgeGraphClaimEvidenceORM.knowledge_base_id
+            )
+            & (
+                KnowledgeDocumentORM.id
+                == KnowledgeGraphClaimEvidenceORM.document_id
+            ),
+        )
+        .where(
+            KnowledgeGraphClaimEvidenceORM.workspace_id
+            == knowledge_base.workspace_id,
+            KnowledgeGraphClaimEvidenceORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphClaimEvidenceORM.claim_id.in_(sorted(claim_ids)),
+            KnowledgeGraphClaimEvidenceORM.evidence_state == "active",
+            KnowledgeGraphClaimEvidenceORM.retired_revision_id.is_(None),
+            KnowledgeGraphClaimORM.status == "active",
+            KnowledgeGraphClaimORM.retired_revision_id.is_(None),
+            KnowledgeDocumentORM.status != DOCUMENT_DELETED_STATUS,
+            KnowledgeDocumentORM.is_active.is_(True),
+        )
+        .order_by(
+            KnowledgeGraphClaimEvidenceORM.claim_id,
+            source_priority,
+            KnowledgeGraphClaimORM.quality_score.desc(),
+            KnowledgeDocumentORM.updated_at.desc(),
+            KnowledgeGraphClaimEvidenceORM.id,
+        )
+    )
+    return [
+        (
+            to_entity(KnowledgeGraphClaimEvidence, evidence),
+            str(filename),
+            str(source_kind),
+            float(quality_score),
+            document_updated_at,
+        )
+        for evidence, filename, source_kind, quality_score, document_updated_at in rows
+    ]
