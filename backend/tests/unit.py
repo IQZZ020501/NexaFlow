@@ -36,7 +36,10 @@ from app.entities.agents import Agent
 from app.entities.knowledge import KnowledgeBase
 from app.entities.resource_permission import ResourcePermission
 from app.entities.user import User
-from app.schemas.knowledge_graph import KnowledgeGraphReviewDecisionRequest
+from app.schemas.knowledge_graph import (
+    KnowledgeGraphImportRecord,
+    KnowledgeGraphReviewDecisionRequest,
+)
 from app.shareddomain.agents.permissions import (
     effective_agent_permission,
     validate_agent_permission,
@@ -362,6 +365,37 @@ def test_graph_review_decision_request_is_bounded() -> None:
         pass
     else:
         raise AssertionError("oversized graph review decision must fail")
+
+
+def test_graph_import_record_requires_one_object_kind() -> None:
+    record = KnowledgeGraphImportRecord.model_validate(
+        {
+            "subject": {
+                "entity_type": "Document",
+                "canonical_name": "制度 A",
+            },
+            "predicate": "defines",
+            "value": "术语 A",
+        }
+    )
+    assert record.object is None
+    for payload in (
+        {
+            "subject": {"entity_type": "Document", "canonical_name": "制度 A"},
+            "predicate": "defines",
+        },
+        {
+            "subject": {"entity_type": "Document", "canonical_name": "制度 A"},
+            "predicate": "defines",
+            "object": {"entity_type": "Concept", "canonical_name": "术语 A"},
+            "value": "duplicate",
+        },
+    ):
+        try:
+            KnowledgeGraphImportRecord.model_validate(payload)
+        except ValueError:
+            continue
+        raise AssertionError("structured graph object XOR must be enforced")
 
 
 def test_effective_agent_permission_matrix() -> None:
@@ -5885,6 +5919,7 @@ def main() -> None:
     test_graph_entity_auto_match_requires_deterministic_identity()
     test_graph_claim_fingerprint_and_initial_status_are_deterministic()
     test_graph_review_decision_request_is_bounded()
+    test_graph_import_record_requires_one_object_kind()
     test_tool_ref_requires_stable_ids()
     test_agent_publication_snapshot_is_canonical_and_tool_versioned()
     test_agent_tool_binding_requires_current_available_policy()

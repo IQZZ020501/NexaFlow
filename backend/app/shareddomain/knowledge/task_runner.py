@@ -28,6 +28,8 @@ from app.entities.knowledge import (
     DOCUMENT_PARSING_STATUS,
     TASK_FAILED_STATUS,
     TASK_EVALUATE,
+    TASK_GRAPH_REBUILD,
+    TASK_GRAPH_SYNC,
     TASK_INDEX,
     TASK_PARSE,
     TASK_QUEUED_STATUS,
@@ -50,6 +52,8 @@ from app.ports.vector_store import (
 )
 from app.shareddomain.knowledge.orchestration import (
     chunk_search_text,
+    enqueue_graph_rebuild,
+    enqueue_graph_sync,
     enqueue_index_knowledge_document,
     extract_document_chunk_contents,
     parse_task_options_from_task,
@@ -82,6 +86,7 @@ EvaluationTaskRunner = Callable[
     ],
     Awaitable[None],
 ]
+GraphTaskRunner = EvaluationTaskRunner
 
 
 def batches(items: list[VectorChunk], size: int) -> list[list[VectorChunk]]:
@@ -446,8 +451,9 @@ async def run_knowledge_task(
     enqueue_task: Callable[[str, Settings], Awaitable[None]] | None = None,
     worker_task_id: str | None = None,
     evaluation_runner: EvaluationTaskRunner | None = None,
+    graph_runner: GraphTaskRunner | None = None,
 ) -> str:
-    chained_task_id: str | None = None
+    chained_task_ids: list[str] = []
     worker_task_id = worker_task_id or new_id()
     async with get_session_factory()() as db:
         started_at = utc_now()
@@ -530,6 +536,18 @@ async def run_knowledge_task(
                     settings,
                     lease_lost,
                 )
+            elif (
+                task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
+                and graph_runner is not None
+            ):
+                await graph_runner(
+                    db,
+                    task,
+                    knowledge_base,
+                    actor,
+                    settings,
+                    lease_lost,
+                )
             else:
                 raise KnowledgePipelineError("Unsupported knowledge task type.")
 
@@ -584,7 +602,7 @@ async def run_knowledge_task(
                         document,
                         actor,
                     )
-                    chained_task_id = index_task.id
+                    chained_task_ids.append(index_task.id)
                 except Exception as exc:
                     log_error(
                         logger,
@@ -600,6 +618,32 @@ async def run_knowledge_task(
                         document,
                     )
                     await db.commit()
+            if knowledge_base.graph_enabled:
+                try:
+                    graph_task = None
+                    if task.task_type == TASK_INDEX and document is not None:
+                        graph_task = await enqueue_graph_sync(
+                            db,
+                            knowledge_base,
+                            actor,
+                            [document.id],
+                        )
+                    elif task.task_type == TASK_REBUILD_INDEX:
+                        graph_task = await enqueue_graph_rebuild(
+                            db,
+                            knowledge_base,
+                            actor,
+                        )
+                    if graph_task is not None and graph_task.id not in chained_task_ids:
+                        chained_task_ids.append(graph_task.id)
+                except Exception as exc:
+                    log_error(
+                        logger,
+                        "Knowledge graph chain enqueue failed.",
+                        exc,
+                        task_id=task.id,
+                    )
+                    await db.rollback()
         except Exception as exc:
             await db.rollback()
             log_error(
@@ -621,7 +665,7 @@ async def run_knowledge_task(
             with suppress(asyncio.CancelledError):
                 await lease_heartbeat
 
-    if chained_task_id is not None:
+    for chained_task_id in chained_task_ids:
         if enqueue_task is not None:
             await enqueue_task(chained_task_id, settings)
         else:
@@ -629,6 +673,7 @@ async def run_knowledge_task(
                 chained_task_id,
                 settings,
                 evaluation_runner=evaluation_runner,
+                graph_runner=graph_runner,
             )
     return TASK_RUN_FINISHED
 
@@ -636,6 +681,7 @@ async def run_knowledge_task(
 async def recover_knowledge_tasks(
     settings: Settings,
     evaluation_runner: EvaluationTaskRunner | None = None,
+    graph_runner: GraphTaskRunner | None = None,
 ) -> None:
     task_ids = await list_recoverable_knowledge_task_ids(settings)
     await asyncio.gather(
@@ -644,6 +690,7 @@ async def recover_knowledge_tasks(
                 task_id,
                 settings,
                 evaluation_runner=evaluation_runner,
+                graph_runner=graph_runner,
             )
             for task_id in task_ids
         )

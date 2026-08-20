@@ -571,6 +571,28 @@ async def list_indexable_chunks(
     return [to_entity(KnowledgeDocumentChunk, row) for row in result]
 
 
+async def list_chunks_for_documents(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_ids: set[str],
+) -> list[KnowledgeDocumentChunk]:
+    if not document_ids:
+        return []
+    result = await db.scalars(
+        select(KnowledgeDocumentChunkORM)
+        .where(
+            KnowledgeDocumentChunkORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentChunkORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocumentChunkORM.document_id.in_(sorted(document_ids)),
+        )
+        .order_by(
+            KnowledgeDocumentChunkORM.document_id,
+            KnowledgeDocumentChunkORM.chunk_index,
+        )
+    )
+    return [to_entity(KnowledgeDocumentChunk, row) for row in result]
+
+
 async def save_knowledge_document_chunk(
     db: AsyncSession,
     entity: KnowledgeDocumentChunk,
@@ -877,11 +899,41 @@ async def claim_knowledge_task(
     lease_expires_at: datetime,
     worker_task_id: str,
 ) -> bool:
+    earlier_graph_task = KnowledgeTaskORM.__table__.alias("earlier_graph_task")
+    # ponytail: serialize graph publication per knowledge base; split extraction
+    # workers only when measured backlog shows this ceiling is material.
+    earlier_graph_task_exists = (
+        select(1)
+        .select_from(earlier_graph_task)
+        .where(
+            earlier_graph_task.c.workspace_id == KnowledgeTaskORM.workspace_id,
+            earlier_graph_task.c.knowledge_base_id
+            == KnowledgeTaskORM.knowledge_base_id,
+            earlier_graph_task.c.task_type.in_(["graph_sync", "graph_rebuild"]),
+            earlier_graph_task.c.status.in_(
+                [TASK_QUEUED_STATUS, TASK_RUNNING_STATUS]
+            ),
+            or_(
+                earlier_graph_task.c.created_at < KnowledgeTaskORM.created_at,
+                and_(
+                    earlier_graph_task.c.created_at == KnowledgeTaskORM.created_at,
+                    earlier_graph_task.c.id < KnowledgeTaskORM.id,
+                ),
+            ),
+        )
+        .exists()
+    )
     result = await db.execute(
         update(KnowledgeTaskORM)
         .where(
             KnowledgeTaskORM.id == task_id,
             KnowledgeTaskORM.attempts < KnowledgeTaskORM.max_attempts,
+            or_(
+                KnowledgeTaskORM.task_type.not_in(
+                    ["graph_sync", "graph_rebuild"]
+                ),
+                ~earlier_graph_task_exists,
+            ),
             or_(
                 KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
                 (KnowledgeTaskORM.status == TASK_RUNNING_STATUS)
@@ -902,6 +954,40 @@ async def claim_knowledge_task(
         )
     )
     return result.rowcount == 1
+
+
+async def get_queued_graph_sync(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> KnowledgeTask | None:
+    row = await db.scalar(
+        select(KnowledgeTaskORM)
+        .where(
+            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeTaskORM.task_type == "graph_sync",
+            KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
+        )
+        .order_by(KnowledgeTaskORM.created_at, KnowledgeTaskORM.id)
+    )
+    return to_entity(KnowledgeTask, row) if row else None
+
+
+async def get_queued_graph_rebuild(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> KnowledgeTask | None:
+    row = await db.scalar(
+        select(KnowledgeTaskORM)
+        .where(
+            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeTaskORM.task_type == "graph_rebuild",
+            KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
+        )
+        .order_by(KnowledgeTaskORM.created_at, KnowledgeTaskORM.id)
+    )
+    return to_entity(KnowledgeTask, row) if row else None
 
 
 async def renew_knowledge_task_lease(

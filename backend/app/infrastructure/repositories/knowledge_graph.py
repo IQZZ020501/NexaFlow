@@ -1,7 +1,7 @@
-from sqlalchemy import delete, false, func, or_, select, update
+from sqlalchemy import delete, exists, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.knowledge import KnowledgeBase
+from app.entities.knowledge import KnowledgeBase, KnowledgeDocumentChunk
 from app.entities.knowledge_graph import (
     GRAPH_SCHEMA_ACTIVE,
     GRAPH_SCHEMA_RETIRED,
@@ -18,6 +18,10 @@ from app.entities.knowledge_graph import (
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories.mapping import save, to_entity
 from app.shareddomain.knowledge.models import KnowledgeBase as KnowledgeBaseORM
+from app.shareddomain.knowledge.models import (
+    KnowledgeDocument as KnowledgeDocumentORM,
+    KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
+)
 from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphAlias as KnowledgeGraphAliasORM,
     KnowledgeGraphClaim as KnowledgeGraphClaimORM,
@@ -58,6 +62,38 @@ async def get_schema_by_hash(
             KnowledgeGraphSchemaORM.knowledge_base_id == knowledge_base.id,
             KnowledgeGraphSchemaORM.schema_hash == schema_hash,
         )
+    )
+    return to_entity(KnowledgeGraphSchema, row) if row else None
+
+
+async def get_active_schema(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> KnowledgeGraphSchema | None:
+    row = await db.scalar(
+        select(KnowledgeGraphSchemaORM)
+        .where(
+            KnowledgeGraphSchemaORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphSchemaORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphSchemaORM.status == GRAPH_SCHEMA_ACTIVE,
+        )
+        .order_by(KnowledgeGraphSchemaORM.version.desc())
+    )
+    return to_entity(KnowledgeGraphSchema, row) if row else None
+
+
+async def get_latest_draft_or_active_schema(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> KnowledgeGraphSchema | None:
+    row = await db.scalar(
+        select(KnowledgeGraphSchemaORM)
+        .where(
+            KnowledgeGraphSchemaORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphSchemaORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphSchemaORM.status.in_(["draft", GRAPH_SCHEMA_ACTIVE]),
+        )
+        .order_by(KnowledgeGraphSchemaORM.version.desc())
     )
     return to_entity(KnowledgeGraphSchema, row) if row else None
 
@@ -164,6 +200,18 @@ async def lock_revision(
             KnowledgeGraphRevisionORM.knowledge_base_id == knowledge_base.id,
             KnowledgeGraphRevisionORM.id == revision_id,
         )
+        .with_for_update()
+    )
+    return to_entity(KnowledgeGraphRevision, row) if row else None
+
+
+async def lock_revision_by_id(
+    db: AsyncSession,
+    revision_id: str,
+) -> KnowledgeGraphRevision | None:
+    row = await db.scalar(
+        select(KnowledgeGraphRevisionORM)
+        .where(KnowledgeGraphRevisionORM.id == revision_id)
         .with_for_update()
     )
     return to_entity(KnowledgeGraphRevision, row) if row else None
@@ -291,6 +339,20 @@ async def create_entity(
 ) -> KnowledgeGraphEntity:
     row = await save(db, KnowledgeGraphEntityORM, entity)
     return to_entity(KnowledgeGraphEntity, row)
+
+
+async def list_active_entities(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> list[KnowledgeGraphEntity]:
+    rows = await db.scalars(
+        select(KnowledgeGraphEntityORM).where(
+            KnowledgeGraphEntityORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphEntityORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphEntityORM.state == "active",
+        )
+    )
+    return [to_entity(KnowledgeGraphEntity, row) for row in rows.all()]
 
 
 async def list_entity_identity_candidates(
@@ -453,6 +515,26 @@ async def create_mention(
     return to_entity(KnowledgeGraphMention, row)
 
 
+async def list_active_mentions_for_documents(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_ids: set[str] | None,
+) -> list[KnowledgeGraphMention]:
+    if document_ids == set():
+        return []
+    statement = select(KnowledgeGraphMentionORM).where(
+            KnowledgeGraphMentionORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphMentionORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphMentionORM.retired_revision_id.is_(None),
+        )
+    if document_ids is not None:
+        statement = statement.where(
+            KnowledgeGraphMentionORM.document_id.in_(sorted(document_ids))
+        )
+    rows = await db.scalars(statement)
+    return [to_entity(KnowledgeGraphMention, row) for row in rows.all()]
+
+
 async def get_mention(
     db: AsyncSession,
     revision: KnowledgeGraphRevision,
@@ -496,6 +578,69 @@ async def create_claim(
 ) -> KnowledgeGraphClaim:
     row = await save(db, KnowledgeGraphClaimORM, entity)
     return to_entity(KnowledgeGraphClaim, row)
+
+
+async def list_active_claims(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> list[KnowledgeGraphClaim]:
+    rows = await db.scalars(
+        select(KnowledgeGraphClaimORM).where(
+            KnowledgeGraphClaimORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphClaimORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphClaimORM.status == "active",
+            KnowledgeGraphClaimORM.retired_revision_id.is_(None),
+        )
+    )
+    return [to_entity(KnowledgeGraphClaim, row) for row in rows.all()]
+
+
+async def list_current_claims(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> list[KnowledgeGraphClaim]:
+    rows = await db.scalars(
+        select(KnowledgeGraphClaimORM).where(
+            KnowledgeGraphClaimORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphClaimORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphClaimORM.status.in_(["active", "candidate", "rejected"]),
+            KnowledgeGraphClaimORM.retired_revision_id.is_(None),
+        )
+    )
+    return [to_entity(KnowledgeGraphClaim, row) for row in rows.all()]
+
+
+async def list_active_claims_without_evidence_outside_documents(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_ids: set[str] | None,
+) -> list[KnowledgeGraphClaim]:
+    if document_ids is None:
+        return await list_active_claims(db, knowledge_base)
+    remaining_evidence = exists(
+        select(KnowledgeGraphClaimEvidenceORM.id).where(
+            KnowledgeGraphClaimEvidenceORM.workspace_id
+            == KnowledgeGraphClaimORM.workspace_id,
+            KnowledgeGraphClaimEvidenceORM.knowledge_base_id
+            == KnowledgeGraphClaimORM.knowledge_base_id,
+            KnowledgeGraphClaimEvidenceORM.claim_id == KnowledgeGraphClaimORM.id,
+            KnowledgeGraphClaimEvidenceORM.evidence_state == "active",
+            KnowledgeGraphClaimEvidenceORM.retired_revision_id.is_(None),
+            KnowledgeGraphClaimEvidenceORM.document_id.not_in(
+                sorted(document_ids)
+            ),
+        )
+    )
+    rows = await db.scalars(
+        select(KnowledgeGraphClaimORM).where(
+            KnowledgeGraphClaimORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphClaimORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphClaimORM.status == "active",
+            KnowledgeGraphClaimORM.retired_revision_id.is_(None),
+            ~remaining_evidence,
+        )
+    )
+    return [to_entity(KnowledgeGraphClaim, row) for row in rows.all()]
 
 
 async def get_claim(
@@ -547,6 +692,70 @@ async def create_evidence(
 ) -> KnowledgeGraphClaimEvidence:
     row = await save(db, KnowledgeGraphClaimEvidenceORM, entity)
     return to_entity(KnowledgeGraphClaimEvidence, row)
+
+
+async def list_active_evidence_for_documents(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_ids: set[str] | None,
+) -> list[KnowledgeGraphClaimEvidence]:
+    if document_ids == set():
+        return []
+    statement = select(KnowledgeGraphClaimEvidenceORM).where(
+            KnowledgeGraphClaimEvidenceORM.workspace_id
+            == knowledge_base.workspace_id,
+            KnowledgeGraphClaimEvidenceORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphClaimEvidenceORM.evidence_state == "active",
+            KnowledgeGraphClaimEvidenceORM.retired_revision_id.is_(None),
+        )
+    if document_ids is not None:
+        statement = statement.where(
+            KnowledgeGraphClaimEvidenceORM.document_id.in_(sorted(document_ids))
+        )
+    rows = await db.scalars(statement)
+    return [to_entity(KnowledgeGraphClaimEvidence, row) for row in rows.all()]
+
+
+async def list_graph_source_chunks(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_ids: set[str] | None = None,
+) -> list[KnowledgeDocumentChunk]:
+    statement = (
+        select(KnowledgeDocumentChunkORM)
+        .join(
+            KnowledgeDocumentORM,
+            (
+                KnowledgeDocumentORM.workspace_id
+                == KnowledgeDocumentChunkORM.workspace_id
+            )
+            & (
+                KnowledgeDocumentORM.knowledge_base_id
+                == KnowledgeDocumentChunkORM.knowledge_base_id
+            )
+            & (KnowledgeDocumentORM.id == KnowledgeDocumentChunkORM.document_id),
+        )
+        .where(
+            KnowledgeDocumentChunkORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentChunkORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocumentChunkORM.status == "indexed",
+            KnowledgeDocumentORM.status == "indexed",
+            KnowledgeDocumentORM.is_active.is_(True),
+        )
+    )
+    if document_ids is not None:
+        if not document_ids:
+            return []
+        statement = statement.where(
+            KnowledgeDocumentChunkORM.document_id.in_(sorted(document_ids))
+        )
+    rows = await db.scalars(
+        statement.order_by(
+            KnowledgeDocumentChunkORM.document_id,
+            KnowledgeDocumentChunkORM.chunk_index,
+        )
+    )
+    return [to_entity(KnowledgeDocumentChunk, row) for row in rows.all()]
 
 
 async def save_evidence(

@@ -449,7 +449,11 @@ def upgrade() -> None:
         sa.Column("subject_entity_id", sa.String(length=36), nullable=False),
         sa.Column("predicate", sa.String(length=80), nullable=False),
         sa.Column("object_entity_id", sa.String(length=36), nullable=True),
-        sa.Column("object_value_json", sa.JSON(), nullable=True),
+        sa.Column(
+            "object_value_json",
+            sa.JSON(none_as_null=True),
+            nullable=True,
+        ),
         sa.Column("properties_json", sa.JSON(), nullable=False),
         sa.Column("valid_from", sa.DateTime(timezone=True), nullable=True),
         sa.Column("valid_to", sa.DateTime(timezone=True), nullable=True),

@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,7 +85,11 @@ async def stage_revision_change(
         record_key,
     )
     if existing is not None:
-        existing.after_json = after_json
+        existing.after_json = (
+            {**(existing.after_json or {}), **(after_json or {})}
+            if existing.operation == operation == "upsert"
+            else after_json
+        )
         existing.operation = operation
         return await graph_repository.save_revision_change(db, existing)
     return await graph_repository.create_revision_change(
@@ -174,6 +179,12 @@ async def _upsert_claim(
     existing = await graph_repository.get_claim(db, revision, change.record_key)
     values = _upsert_values(revision, change, existing)
     values.setdefault("fingerprint", change.record_key)
+    for field_name in ("valid_from", "valid_to"):
+        value = values.get(field_name)
+        if isinstance(value, str):
+            values[field_name] = datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            )
     if (
         existing is not None
         and existing.status == GRAPH_CLAIM_REJECTED

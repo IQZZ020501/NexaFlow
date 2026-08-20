@@ -96,3 +96,5 @@ def create_celery_app() -> Celery:
 
 
 celery_app = create_celery_app()
+if "app.tasks.knowledge" not in sys.modules:
+    celery_app.loader.import_task_module("app.tasks.knowledge")

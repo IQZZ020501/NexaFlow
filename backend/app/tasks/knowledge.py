@@ -3,6 +3,7 @@ import logging
 import os
 
 from app.application.knowledge_evaluation import run_evaluation_task
+from app.application.knowledge_graph_build import run_graph_build_task
 from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
@@ -52,6 +53,7 @@ def run_knowledge_task_job(self, task_id: str) -> None:
                 settings,
                 enqueue_knowledge_task,
                 evaluation_runner=run_evaluation_task,
+                graph_runner=run_graph_build_task,
             )
         )
     except Exception as exc:
@@ -162,6 +164,7 @@ async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
             settings,
             enqueue_knowledge_task,
             evaluation_runner=run_evaluation_task,
+            graph_runner=run_graph_build_task,
         )
         return
 

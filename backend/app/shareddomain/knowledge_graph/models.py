@@ -620,7 +620,10 @@ class KnowledgeGraphClaim(Base):
     object_entity_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, index=True
     )
-    object_value_json: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+    object_value_json: Mapped[Any | None] = mapped_column(
+        JSON(none_as_null=True),
+        nullable=True,
+    )
     properties_json: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict
     )

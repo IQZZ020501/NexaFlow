@@ -29,6 +29,8 @@ from app.entities.knowledge import (
     DOCUMENT_STAGED_META_KEY,
     TASK_FAILED_STATUS,
     TASK_EVALUATE,
+    TASK_GRAPH_REBUILD,
+    TASK_GRAPH_SYNC,
     TASK_INDEX,
     TASK_PARSE,
     TASK_QUEUED_STATUS,
@@ -593,6 +595,7 @@ async def create_knowledge_task(
             )
 
     total_items = 0
+    task_options = options or {}
     if task_type == TASK_INDEX and document is not None:
         chunks = await knowledge_base_repository.list_document_chunks(db, knowledge_base, document.id)
         if not chunks:
@@ -613,12 +616,57 @@ async def create_knowledge_task(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Knowledge base has no indexed chunks.")
         total_items = len(chunks)
     elif task_type == TASK_EVALUATE:
-        total_items = len((options or {}).get("case_ids", []))
+        total_items = len(task_options.get("case_ids", []))
         if total_items == 0:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Evaluation task has no cases.",
             )
+    elif task_type == TASK_GRAPH_SYNC:
+        if not knowledge_base.graph_enabled:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Graph RAG is disabled.")
+        changed_document_ids = list(
+            dict.fromkeys(
+                str(item)
+                for item in task_options.get("changed_document_ids", [])
+                if str(item)
+            )
+        )
+        if not changed_document_ids:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Graph sync requires changed documents.",
+            )
+        if document is not None and document.status != DOCUMENT_INDEXED_STATUS:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Document must be indexed before graph sync.",
+            )
+        total_items = len(
+            await knowledge_base_repository.list_chunks_for_documents(
+                db,
+                knowledge_base,
+                set(changed_document_ids),
+            )
+        )
+        task_options = {
+            **task_options,
+            "changed_document_ids": changed_document_ids,
+        }
+    elif task_type == TASK_GRAPH_REBUILD:
+        if not knowledge_base.graph_enabled:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Graph RAG is disabled.")
+        chunks = await knowledge_base_repository.list_indexable_chunks(
+            db,
+            knowledge_base,
+            statuses={CHUNK_INDEXED_STATUS},
+        )
+        if not chunks:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Knowledge base has no indexed chunks.",
+            )
+        total_items = len(chunks)
     else:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid knowledge task.")
 
@@ -636,7 +684,7 @@ async def create_knowledge_task(
         max_attempts=MAX_TASK_ATTEMPTS,
         total_items=total_items,
         processed_items=0,
-        options=options or {},
+        options=task_options,
         created_by_user_id=actor.id,
     )
     task = await knowledge_base_repository.create_knowledge_task(db, task)
@@ -661,8 +709,28 @@ async def get_conflicting_open_task(
     task_type: str,
     document_id: str | None,
 ) -> KnowledgeTask | None:
-    if task_type in {TASK_REBUILD_INDEX, TASK_EVALUATE}:
+    if task_type in {TASK_REBUILD_INDEX, TASK_EVALUATE, TASK_GRAPH_REBUILD}:
         return await knowledge_base_repository.get_open_knowledge_base_task(db, knowledge_base)
+    if task_type == TASK_GRAPH_SYNC:
+        queued_graph = await knowledge_base_repository.get_queued_graph_sync(
+            db,
+            knowledge_base,
+        ) or await knowledge_base_repository.get_queued_graph_rebuild(
+            db,
+            knowledge_base,
+        )
+        if queued_graph is not None:
+            return queued_graph
+        for blocking_task_type in (TASK_REBUILD_INDEX, TASK_EVALUATE):
+            blocking_task = await knowledge_base_repository.get_open_knowledge_task(
+                db,
+                knowledge_base,
+                blocking_task_type,
+                None,
+            )
+            if blocking_task is not None:
+                return blocking_task
+        return None
     if document_id is None:
         return await knowledge_base_repository.get_open_knowledge_task(
             db,
@@ -677,7 +745,11 @@ async def get_conflicting_open_task(
     )
     if open_task is not None:
         return open_task
-    for blocking_task_type in (TASK_REBUILD_INDEX, TASK_EVALUATE):
+    for blocking_task_type in (
+        TASK_REBUILD_INDEX,
+        TASK_EVALUATE,
+        TASK_GRAPH_REBUILD,
+    ):
         blocking_task = await knowledge_base_repository.get_open_knowledge_task(
             db,
             knowledge_base,
@@ -687,6 +759,77 @@ async def get_conflicting_open_task(
         if blocking_task is not None:
             return blocking_task
     return None
+
+
+async def enqueue_graph_sync(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    actor: User,
+    changed_document_ids: list[str],
+    *,
+    options: dict[str, Any] | None = None,
+) -> KnowledgeTask:
+    locked = await knowledge_base_repository.lock_knowledge_base(db, knowledge_base)
+    if locked is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    queued = await knowledge_base_repository.get_queued_graph_sync(db, locked)
+    if queued is not None:
+        queued.options = {
+            **(queued.options or {}),
+            **(options or {}),
+            "changed_document_ids": sorted(
+                {
+                    *(queued.options or {}).get("changed_document_ids", []),
+                    *changed_document_ids,
+                }
+            ),
+        }
+        await knowledge_base_repository.save_knowledge_task(db, queued)
+        await db.commit()
+        return await knowledge_base_repository.refresh_knowledge_task(db, queued)
+    queued_rebuild = await knowledge_base_repository.get_queued_graph_rebuild(
+        db,
+        locked,
+    )
+    if queued_rebuild is not None:
+        return queued_rebuild
+    response = await create_knowledge_task(
+        db,
+        locked,
+        None,
+        TASK_GRAPH_SYNC,
+        actor,
+        options={
+            **(options or {}),
+            "changed_document_ids": sorted(set(changed_document_ids)),
+        },
+    )
+    task = await knowledge_base_repository.get_knowledge_task_by_id(db, response.id)
+    assert task is not None
+    return task
+
+
+async def enqueue_graph_rebuild(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    actor: User,
+) -> KnowledgeTask:
+    queued = await knowledge_base_repository.get_queued_graph_rebuild(
+        db,
+        knowledge_base,
+    )
+    if queued is not None:
+        return queued
+    response = await create_knowledge_task(
+        db,
+        knowledge_base,
+        None,
+        TASK_GRAPH_REBUILD,
+        actor,
+    )
+    task = await knowledge_base_repository.get_knowledge_task_by_id(db, response.id)
+    assert task is not None
+    return task
 
 
 async def enqueue_parse_knowledge_document(
