@@ -1,4 +1,6 @@
 import asyncio
+from dataclasses import dataclass
+import hashlib
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -45,6 +47,7 @@ from app.ports.parsing import (
     ChildChunkDraft,
     DocumentChunkDrafts,
     KnowledgePipelineError,
+    NORMALIZED_TEXT_VERSION,
     SPLIT_SEPARATORS,
     build_flat_chunks,
     build_hierarchical_chunks,
@@ -85,6 +88,31 @@ DEFAULT_PARSE_OPTIONS: dict[str, Any] = {
     "cleaning_rules": [],
     "auto_index": True,
 }
+
+
+@dataclass(frozen=True)
+class NormalizedDocumentArtifact:
+    object_key: str
+    content_hash: str
+    content: str
+
+
+def normalized_document_artifact(
+    *,
+    workspace_id: str,
+    knowledge_base_id: str,
+    document_id: str,
+    text: str,
+) -> NormalizedDocumentArtifact:
+    content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return NormalizedDocumentArtifact(
+        object_key=(
+            f"{workspace_id}/{knowledge_base_id}/normalized/"
+            f"{document_id}/{content_hash}.md"
+        ),
+        content_hash=content_hash,
+        content=text,
+    )
 
 
 def chunk_search_text(
@@ -354,6 +382,7 @@ async def extract_document_chunk_contents(
         parents=chunks.parents,
         children=chunks.children,
         assets=assets,
+        normalized_text=text,
     )
 
 
@@ -375,26 +404,57 @@ async def replace_document_chunks(
         knowledge_base,
         document.id,
     )
-    stale_asset_keys = await knowledge_base_repository.delete_document_assets(
+    stale_object_keys = await knowledge_base_repository.delete_document_assets(
         db,
         document.id,
     )
     await knowledge_base_repository.delete_document_chunks(db, document.id)
 
     storage = knowledge_object_storage(settings)
-    written_asset_keys: list[str] = []
+    written_object_keys: list[str] = []
     assets: list[KnowledgeAsset] = []
     parents: list[KnowledgeDocumentParentChunk] = []
     children: list[KnowledgeDocumentChunk] = []
     chunk_asset_links: list[tuple[str, str, int]] = []
     try:
+        if chunks.normalized_text:
+            artifact = normalized_document_artifact(
+                workspace_id=document.workspace_id,
+                knowledge_base_id=document.knowledge_base_id,
+                document_id=document.id,
+                text=chunks.normalized_text,
+            )
+            previous_key = str(
+                (document.meta or {}).get("normalized_artifact_key") or ""
+            )
+            if artifact.object_key != previous_key or not storage.path(
+                artifact.object_key
+            ).exists():
+                storage.put_bytes(
+                    artifact.object_key,
+                    artifact.content.encode("utf-8"),
+                )
+                written_object_keys.append(artifact.object_key)
+            if previous_key and previous_key != artifact.object_key:
+                stale_object_keys.append(previous_key)
+            document.meta = {
+                **(document.meta or {}),
+                "normalized_artifact_key": artifact.object_key,
+                "normalized_content_hash": artifact.content_hash,
+                "normalized_text_version": NORMALIZED_TEXT_VERSION,
+                "document_version": int(
+                    (document.meta or {}).get("document_version") or 0
+                )
+                + 1,
+            }
+
         for index, draft in enumerate(chunks.assets):
             object_key = (
                 f"{document.workspace_id}/{document.knowledge_base_id}/assets/"
                 f"{document.id}/{draft.id}/{draft.filename}"
             )
             storage.put_bytes(object_key, draft.content)
-            written_asset_keys.append(object_key)
+            written_object_keys.append(object_key)
             assets.append(
                 KnowledgeAsset(
                     id=draft.id,
@@ -492,10 +552,10 @@ async def replace_document_chunks(
             children,
         )
     except Exception:
-        for object_key in written_asset_keys:
+        for object_key in written_object_keys:
             storage.delete(object_key)
         raise
-    return vector_ids, stale_asset_keys, written_asset_keys
+    return vector_ids, stale_object_keys, written_object_keys
 
 
 async def create_knowledge_task(

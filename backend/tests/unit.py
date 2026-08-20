@@ -39,7 +39,10 @@ from app.shareddomain.agents.permissions import (
     effective_agent_permission,
     validate_agent_permission,
 )
-from app.shareddomain.knowledge.orchestration import parse_task_options
+from app.shareddomain.knowledge.orchestration import (
+    normalized_document_artifact,
+    parse_task_options,
+)
 from app.shareddomain.knowledge.services import (
     clean_upload_filename,
     effective_permission,
@@ -120,6 +123,19 @@ def test_default_policy_graph_schema_is_stable() -> None:
     assert schema.relation("conflicts_with").review_required is True
     assert normalize_graph_name("  信息\u3000科技部 ") == "信息 科技部"
     assert graph_schema_hash(schema) == graph_schema_hash(schema)
+
+
+def test_normalized_document_artifact_is_content_addressed() -> None:
+    artifact = normalized_document_artifact(
+        workspace_id="ws-1",
+        knowledge_base_id="kb-1",
+        document_id="doc-1",
+        text="# 制度 A\n\n离职审批由人力资源部负责。",
+    )
+    assert artifact.object_key.startswith("ws-1/kb-1/normalized/doc-1/")
+    assert artifact.object_key.endswith(".md")
+    assert len(artifact.content_hash) == 64
+    assert artifact.content == "# 制度 A\n\n离职审批由人力资源部负责。"
 
 
 def test_effective_agent_permission_matrix() -> None:
@@ -5637,6 +5653,7 @@ def main() -> None:
     test_validate_permission_rejects_unknown()
     test_graph_schema_rejects_unknown_relation_endpoint()
     test_default_policy_graph_schema_is_stable()
+    test_normalized_document_artifact_is_content_addressed()
     test_tool_ref_requires_stable_ids()
     test_agent_publication_snapshot_is_canonical_and_tool_versioned()
     test_agent_tool_binding_requires_current_available_policy()

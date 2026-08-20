@@ -18,6 +18,7 @@ CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150
 PARENT_CHUNK_SIZE = CHUNK_SIZE * 4
 SEGMENTATION_VERSION = "hierarchical-v2"
+NORMALIZED_TEXT_VERSION = "normalized-markdown-v1"
 EMBED_BATCH_SIZE = 64
 PDF_OCR_LANGUAGE = "chi_sim+eng"
 MARKITDOWN = MarkItDown(enable_plugins=False)
@@ -150,6 +151,7 @@ class DocumentChunkDrafts:
     parents: list[ParentChunkDraft]
     children: list[ChildChunkDraft]
     assets: list[DocumentAssetDraft] = field(default_factory=list)
+    normalized_text: str = ""
 
 
 def normalize_text(text: str) -> str:

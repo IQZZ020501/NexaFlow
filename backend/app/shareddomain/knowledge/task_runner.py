@@ -139,7 +139,7 @@ async def run_parse_task(
     options = parse_task_options_from_task(task)
     chunks = await extract_document_chunk_contents(document, settings, options)
     ensure_knowledge_task_lease(lease_lost)
-    vector_ids, stale_asset_keys, written_asset_keys = await replace_document_chunks(
+    vector_ids, stale_object_keys, written_object_keys = await replace_document_chunks(
         db,
         knowledge_base,
         document,
@@ -182,10 +182,10 @@ async def run_parse_task(
         await db.commit()
     except Exception:
         await db.rollback()
-        for object_key in written_asset_keys:
+        for object_key in written_object_keys:
             storage.delete(object_key)
         raise
-    for object_key in stale_asset_keys:
+    for object_key in stale_object_keys:
         storage.delete(object_key)
     ensure_knowledge_task_lease(lease_lost)
     await asyncio.to_thread(

@@ -54,6 +54,9 @@ async def delete_knowledge_document(
         db,
         document.id,
     )
+    normalized_object_key = str(
+        (document.meta or {}).get("normalized_artifact_key") or ""
+    )
     await knowledge_base_repository.delete_document_chunks(db, document.id)
     document.status = DOCUMENT_DELETED_STATUS
     document.last_error = None
@@ -82,6 +85,8 @@ async def delete_knowledge_document(
     storage.delete(document.storage_path)
     for object_key in asset_object_keys:
         storage.delete(object_key)
+    if normalized_object_key:
+        storage.delete(normalized_object_key)
     await asyncio.to_thread(
         delete_vectors,
         settings,
