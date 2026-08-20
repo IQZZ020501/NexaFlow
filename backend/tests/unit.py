@@ -45,6 +45,12 @@ from app.shareddomain.knowledge.services import (
     effective_permission,
     validate_permission,
 )
+from app.shareddomain.knowledge_graph.schema import (
+    GraphSchemaDefinition,
+    default_policy_graph_schema,
+    graph_schema_hash,
+    normalize_graph_name,
+)
 
 
 def expect_http_error(callback, status_code: int) -> None:
@@ -85,6 +91,35 @@ def test_effective_permission_matrix() -> None:
 
 def test_validate_permission_rejects_unknown() -> None:
     expect_http_error(lambda: validate_permission("delete"), 422)
+
+
+def test_graph_schema_rejects_unknown_relation_endpoint() -> None:
+    try:
+        GraphSchemaDefinition.model_validate(
+            {
+                "entity_types": [{"name": "Document", "properties": []}],
+                "relations": [
+                    {
+                        "name": "defines",
+                        "source_types": ["Missing"],
+                        "target_types": ["Document"],
+                        "traversable": True,
+                    }
+                ],
+            }
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown endpoint type must fail")
+
+
+def test_default_policy_graph_schema_is_stable() -> None:
+    schema = default_policy_graph_schema()
+    assert schema.relation("supersedes").traversable is True
+    assert schema.relation("conflicts_with").review_required is True
+    assert normalize_graph_name("  信息\u3000科技部 ") == "信息 科技部"
+    assert graph_schema_hash(schema) == graph_schema_hash(schema)
 
 
 def test_effective_agent_permission_matrix() -> None:
@@ -5600,6 +5635,8 @@ def main() -> None:
     """Run the complete pure-unit test suite and print a success marker when all tests pass."""
     test_effective_permission_matrix()
     test_validate_permission_rejects_unknown()
+    test_graph_schema_rejects_unknown_relation_endpoint()
+    test_default_policy_graph_schema_is_stable()
     test_tool_ref_requires_stable_ids()
     test_agent_publication_snapshot_is_canonical_and_tool_versioned()
     test_agent_tool_binding_requires_current_available_policy()
