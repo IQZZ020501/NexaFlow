@@ -671,6 +671,7 @@ def main() -> None:
             item
             for item in audit_logs.json()
             if item["action"] == "user.change_password"
+            and item["resource_id"] == analyst_id
         )
         assert password_change_audit["details"]["sessions_revoked"] is True
 
