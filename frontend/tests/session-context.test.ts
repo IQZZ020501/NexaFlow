@@ -5,9 +5,9 @@ import {
   addCreatedWorkspaceMembership,
   getInitialWorkspaceId,
   replaceSessionUser,
-} from "../contexts/session-context"
-import type { MeResponse, User } from "../lib/api/auth"
-import type { Team, WorkspaceCreateResponse } from "../lib/api/system"
+} from "../src/contexts/session-context"
+import type { MeResponse, User } from "../src/lib/api/auth"
+import type { Team, WorkspaceCreateResponse } from "../src/lib/api/system"
 
 const currentUser: User = {
   id: "current-user",

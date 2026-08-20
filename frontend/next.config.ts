@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   // Keep the proxy request-body ceiling aligned with the backend upload limit.
   experimental: {
-    middlewareClientMaxBodySize: "100mb",
+    proxyClientMaxBodySize: "100mb",
     proxyTimeout: 120_000,
   },
   async rewrites() {

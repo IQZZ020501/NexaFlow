@@ -105,6 +105,7 @@ async def _workflow_context(
                 limit=WORKFLOW_HISTORY_LIMIT,
                 status=AGENT_RUN_SUCCEEDED_STATUS,
                 conversation_id=run.conversation_id,
+                latest_versions_only=True,
             )
             executions = await workflow_repository.list_node_executions_for_runs(
                 db,

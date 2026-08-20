@@ -152,6 +152,10 @@ class AgentRunCreateRequest(BaseModel):
     )
 
 
+class RunFeedbackRequest(BaseModel):
+    value: Literal["positive", "negative"] | None = None
+
+
 class ExternalAgentRunCreateRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
@@ -198,6 +202,7 @@ class AgentRunResponse(BaseModel):
     agent_id: str
     requested_by_user_id: str | None
     conversation_id: str
+    regenerated_from_run_id: str | None = None
     goal: str
     model_id: str
     model_name: str
@@ -209,6 +214,8 @@ class AgentRunResponse(BaseModel):
     model_usage: dict[str, Any] = Field(default_factory=dict)
     grounding_status: str = "not_started"
     grounding_meta: dict[str, Any] = Field(default_factory=dict)
+    feedback: Literal["positive", "negative"] | None = None
+    feedback_updated_at: datetime | None = None
     last_error: str | None
     planned_at: datetime | None
     started_at: datetime | None
@@ -318,6 +325,7 @@ class ExternalAgentProgressEventResponse(BaseModel):
 class ExternalAgentRunResponse(BaseModel):
     id: str
     conversation_id: str
+    regenerated_from_run_id: str | None = None
     question: str
     status: str
     result: str
@@ -327,6 +335,8 @@ class ExternalAgentRunResponse(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     updated_at: datetime
+    feedback: Literal["positive", "negative"] | None = None
+    feedback_updated_at: datetime | None = None
 
 
 class ExternalAgentRunListResponse(BaseModel):
@@ -363,6 +373,8 @@ class AgentLogResponse(BaseModel):
     result: str
     last_error: str | None
     model_usage: dict[str, Any] = Field(default_factory=dict)
+    feedback: Literal["positive", "negative"] | None = None
+    feedback_updated_at: datetime | None = None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None

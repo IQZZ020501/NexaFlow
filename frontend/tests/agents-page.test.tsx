@@ -15,6 +15,7 @@ import {
   mergeInitialAgentRun,
   type AgentFormState,
 } from "@/components/agents/agents-page"
+import { LanguageProvider } from "@/contexts/language-provider"
 import type {
   Agent,
   AgentRun,
@@ -511,6 +512,7 @@ async function renderDetail(
     agents?: Agent[]
     tools?: ToolSummary[]
     extraRoutes?: FetchCase[]
+    initialConversationId?: string | null
   } = {}
 ) {
   const agent = opts.agent ?? makeAgent()
@@ -528,10 +530,13 @@ async function renderDetail(
   const viewProps = {
     ...(opts.initialView ? { initialView: opts.initialView as never } : {}),
     ...(opts.hasLegacyView ? { hasLegacyView: true } : {}),
+    ...(opts.initialConversationId
+      ? { initialConversationId: opts.initialConversationId }
+      : {}),
   }
-  renderPage(<AgentsPage {...viewProps} />)
+  const rendered = renderPage(<AgentsPage {...viewProps} />)
   await waitFor(() => expect(screen.getByText(agent.name)).toBeTruthy())
-  return agent
+  return rendered
 }
 
 async function expectWorkflowStub(name = "Weekly Digest") {
@@ -2862,6 +2867,116 @@ describe("AgentsPage run flows", () => {
     emitStream!()
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByText("Late answer")).toBeNull()
+  })
+
+  test("clears stale regeneration when navigating to an existing conversation", async () => {
+    const agent = makeAgent()
+    const succeededRun = makeRun({ result: "Original answer" })
+    const nextRun = makeRun({
+      id: "run-2",
+      conversation_id: "conversation-2",
+      result: "Existing conversation answer",
+    })
+    let resolveRegeneration: (value: Response) => void = () => undefined
+    const rendered = await renderDetail({
+      agent,
+      initialView: "settings",
+      initialConversationId: "conversation-1",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: (_init, _path, query) =>
+            jsonResponse(
+              query?.get("conversation_id") === "conversation-2"
+                ? [nextRun]
+                : [succeededRun]
+            ),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/regenerate`,
+          exact: true,
+          respond: () =>
+            new Promise<Response>((resolve) => {
+              resolveRegeneration = resolve
+            }),
+        },
+      ],
+    })
+    await waitFor(() => expect(screen.getByText("Original answer")).toBeTruthy())
+
+    fireEvent.click(screen.getByRole("button", { name: "重新生成" }))
+    rendered.rerender(
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <AgentsPage
+          initialView="settings"
+          initialConversationId="conversation-2"
+        />
+      </LanguageProvider>
+    )
+    await waitFor(() =>
+      expect(screen.getByText("Existing conversation answer")).toBeTruthy()
+    )
+    expect(
+      (screen.getByRole("button", { name: "重新生成" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false)
+    resolveRegeneration!(
+      jsonResponse(
+        makeRun({
+          id: "run-regenerated",
+          regenerated_from_run_id: "run-1",
+          result: "Stale regenerated answer",
+        })
+      )
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(screen.queryByText("Stale regenerated answer")).toBeNull()
+    expect(notifyCalls.some((call) => call.kind === "error")).toBe(false)
+  })
+
+  test("ignores stale feedback after switching conversations", async () => {
+    const agent = makeAgent()
+    const succeededRun = makeRun({ result: "Original answer" })
+    let resolveFeedback: (value: Response) => void = () => undefined
+    await renderDetail({
+      agent,
+      initialView: "settings",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([succeededRun]),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/feedback`,
+          exact: true,
+          respond: () =>
+            new Promise<Response>((resolve) => {
+              resolveFeedback = resolve
+            }),
+        },
+      ],
+    })
+    await waitFor(() => expect(screen.getByText("Original answer")).toBeTruthy())
+
+    fireEvent.click(screen.getByRole("button", { name: "点赞" }))
+    fireEvent.click(screen.getByLabelText("新建对话"))
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    resolveFeedback!(
+      jsonResponse(makeRun({ result: "Stale feedback run", feedback: "positive" }))
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(screen.queryByText("Stale feedback run")).toBeNull()
+    expect(notifyCalls.some((call) => call.kind === "error")).toBe(false)
   })
 
   test("reports an error when a tool call decision fails", async () => {

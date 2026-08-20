@@ -5,7 +5,7 @@ import {
   knowledgeUploadPath,
   knowledgeUploadSegmentPath,
   parseKnowledgeUploadRouteState,
-} from "../lib/knowledge-upload-route"
+} from "../src/lib/knowledge-upload-route"
 
 const KNOWLEDGE_BASE_ID = "5fa2f018-636f-47c5-9955-62f341058747"
 const DOCUMENT_IDS = [

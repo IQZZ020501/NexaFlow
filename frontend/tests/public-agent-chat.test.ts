@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test"
 import {
   hasPublicToolDetails,
   publicToolName,
-} from "../components/agents/public-agent-chat"
-import type { ExternalAgentProgressEvent } from "../lib/api/public-agents"
+} from "../src/components/agents/public-agent-chat"
+import type { ExternalAgentProgressEvent } from "../src/lib/api/public-agents"
 
 function mcpProgressEvent(
   overrides: Partial<ExternalAgentProgressEvent> = {}

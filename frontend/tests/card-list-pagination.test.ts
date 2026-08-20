@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { listAgents, listAllAgents } from "../lib/api/agents"
-import { listKnowledgeBases } from "../lib/api/knowledge"
-import { listRegisteredModels } from "../lib/api/llm"
-import { listMcpServers } from "../lib/api/mcp"
-import { CARD_BATCH_SIZE } from "../lib/use-infinite-scroll"
+import { listAgents, listAllAgents } from "../src/lib/api/agents"
+import { listKnowledgeBases } from "../src/lib/api/knowledge"
+import { listRegisteredModels } from "../src/lib/api/llm"
+import { listMcpServers } from "../src/lib/api/mcp"
+import { CARD_BATCH_SIZE } from "../src/lib/use-infinite-scroll"
 
 const originalFetch = globalThis.fetch
 

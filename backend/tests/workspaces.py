@@ -392,7 +392,7 @@ async def seed_workspace_analytics(
             access_source="api",
             status="cancelled",
             goal="Run release workflow",
-            created_at=current_start + timedelta(days=4),
+            created_at=current_start + timedelta(days=4, hours=23),
             duration_seconds=15,
             model_usage={
                 "model_calls": 1,
@@ -421,10 +421,10 @@ async def seed_workspace_analytics(
             model_name=model.name,
             status="succeeded",
             model_usage={"total_tokens": 1000},
-            started_at=current_start + timedelta(days=2),
-            finished_at=current_start + timedelta(days=2, seconds=1),
-            created_at=current_start + timedelta(days=2),
-            updated_at=current_start + timedelta(days=2, seconds=1),
+            started_at=current_start + timedelta(days=2, hours=23),
+            finished_at=current_start + timedelta(days=2, hours=23, seconds=1),
+            created_at=current_start + timedelta(days=2, hours=23),
+            updated_at=current_start + timedelta(days=2, hours=23, seconds=1),
         )
         other = _analytics_run(
             workspace_id=other_workspace_id,
@@ -445,8 +445,40 @@ async def seed_workspace_analytics(
         )
         other.model_id = other_model.id
         other.model_name = other_model.name
+        boundary_end = _analytics_run(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            user_id=global_admin_id,
+            access_source="console",
+            status="succeeded",
+            goal="End boundary must be excluded",
+            created_at=current_start + timedelta(days=7),
+            duration_seconds=1,
+            model_usage={"total_tokens": 777},
+        )
+        boundary_before_previous = _analytics_run(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            user_id=global_admin_id,
+            access_source="console",
+            status="succeeded",
+            goal="Before previous boundary must be excluded",
+            created_at=current_start - timedelta(days=8),
+            duration_seconds=1,
+            model_usage={"total_tokens": 888},
+        )
         db.add_all(
-            [previous, first, unreported, public, workflow_run, child, other]
+            [
+                previous,
+                first,
+                unreported,
+                public,
+                workflow_run,
+                child,
+                other,
+                boundary_end,
+                boundary_before_previous,
+            ]
         )
         await db.flush()
         db.add(
@@ -630,6 +662,12 @@ def exercise_workspace_analytics() -> None:
             "output_tokens": 5,
             "total_tokens": 80,
         }
+        assert len(payload["hourly_runs"]) == 24
+        assert [item["hour"] for item in payload["hourly_runs"]] == list(range(24))
+        hourly_by_hour = {item["hour"]: item["runs"] for item in payload["hourly_runs"]}
+        assert hourly_by_hour[0] == 3
+        assert hourly_by_hour[23] == 1
+        assert sum(hourly_by_hour.values()) == 4
         assert {
             item["key"]: item["count"]
             for item in payload["distributions"]["run_types"]

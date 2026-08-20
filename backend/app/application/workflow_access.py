@@ -12,8 +12,10 @@ from app.application.agent_access import (
 )
 from app.application.workflow_runs import (
     create_workflow_run,
+    regenerate_workflow_run_from_source,
     resume_workflow_form,
     stream_workflow_run,
+    update_run_feedback,
     workflow_pending_form,
 )
 from app.application.workflow_uploads import (
@@ -67,6 +69,7 @@ def _external_run_response(
     return ExternalWorkflowRunResponse(
         id=run.id,
         conversation_id=run.conversation_id,
+        regenerated_from_run_id=run.regenerated_from_run_id,
         inputs=detail.inputs,
         outputs=detail.outputs if display_status == "succeeded" else {},
         status=display_status,
@@ -77,6 +80,8 @@ def _external_run_response(
         finished_at=run.finished_at,
         updated_at=run.updated_at,
         pending_form=workflow_pending_form(run),
+        feedback=run.feedback,
+        feedback_updated_at=run.feedback_updated_at,
     )
 
 
@@ -84,6 +89,7 @@ def _external_run_from_payload(payload: dict[str, Any]) -> ExternalWorkflowRunRe
     return ExternalWorkflowRunResponse(
         id=str(payload["id"]),
         conversation_id=str(payload.get("conversation_id") or ""),
+        regenerated_from_run_id=payload.get("regenerated_from_run_id"),
         inputs=payload.get("inputs") or {},
         outputs=payload.get("outputs") or {},
         status=str(payload.get("status") or ""),
@@ -94,6 +100,8 @@ def _external_run_from_payload(payload: dict[str, Any]) -> ExternalWorkflowRunRe
         finished_at=payload.get("finished_at"),
         updated_at=payload["updated_at"],
         pending_form=payload.get("pending_form"),
+        feedback=payload.get("feedback"),
+        feedback_updated_at=payload.get("feedback_updated_at"),
     )
 
 
@@ -257,6 +265,39 @@ async def get_external_workflow_run(
     )
 
 
+async def regenerate_external_workflow_run(
+    db: AsyncSession,
+    workflow_id: str,
+    run_id: str,
+    source: ExternalAccessSource,
+    consumer_id: str,
+    actor: User,
+    settings: Settings,
+) -> ExternalWorkflowRunResponse:
+    if source != "public":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
+    run, detail = await _external_run(db, workflow_id, run_id, source, consumer_id)
+    regenerated = await regenerate_workflow_run_from_source(
+        db, run, detail, actor, settings
+    )
+    return _external_run_from_payload(regenerated.model_dump(mode="json"))
+
+
+async def set_external_workflow_run_feedback(
+    db: AsyncSession,
+    workflow_id: str,
+    run_id: str,
+    source: ExternalAccessSource,
+    consumer_id: str,
+    value: str | None,
+) -> ExternalWorkflowRunResponse:
+    if source != "public":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
+    run, detail = await _external_run(db, workflow_id, run_id, source, consumer_id)
+    updated = await update_run_feedback(db, run, value)
+    return _external_run_response(updated, detail)
+
+
 async def submit_external_workflow_form(
     db: AsyncSession,
     workflow_id: str,
@@ -289,6 +330,7 @@ async def list_external_workflow_runs(
         limit,
         offset,
         conversation_id=conversation_id,
+        latest_versions_only=True,
     )
     total = await agent_repository.count_agent_runs(
         db,
@@ -296,6 +338,7 @@ async def list_external_workflow_runs(
         access_source=source,
         consumer_id=consumer_id,
         conversation_id=conversation_id,
+        latest_versions_only=True,
     )
     details = {
         item.run_id: item

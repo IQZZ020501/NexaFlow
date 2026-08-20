@@ -1,0 +1,435 @@
+import * as React from "react"
+import {
+  BotIcon,
+  Building2Icon,
+  MessageCircleQuestionIcon,
+  WorkflowIcon,
+} from "lucide-react"
+import {
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts"
+
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { useLanguage } from "@/contexts/language-provider"
+import type { TFunction, TranslationKey } from "@/i18n"
+import type { WorkspaceAnalytics } from "@/lib/api/analytics"
+import {
+  distributionTotal,
+} from "@/components/system/workspace-analytics-metrics"
+
+type DistributionKind = "type" | "source" | "status"
+type DistributionItem = { key: string; count: number }
+
+const COLORS = {
+  type: [
+    "color-mix(in oklch, var(--primary) 65%, oklch(0.62 0.14 245))",
+    "color-mix(in oklch, var(--primary) 65%, oklch(0.62 0.12 300))",
+  ],
+  source: [
+    "color-mix(in oklch, var(--primary) 55%, oklch(0.62 0.13 185))",
+    "color-mix(in oklch, var(--primary) 55%, oklch(0.68 0.13 65))",
+    "var(--muted-foreground)",
+  ],
+  status: [
+    "color-mix(in oklch, var(--primary) 45%, oklch(0.62 0.13 145))",
+    "var(--destructive)",
+    "var(--muted-foreground)",
+  ],
+} satisfies Record<DistributionKind, string[]>
+
+const STATUS_LABELS: Record<string, TranslationKey> = {
+  queued: "排队中",
+  planning: "规划中",
+  planned: "已规划",
+  running: "运行中",
+  awaiting_approval: "等待审批",
+  awaiting_input: "等待输入",
+  awaiting_child: "等待子运行",
+  succeeded: "运行成功",
+  failed: "运行失败",
+  cancelled: "已取消",
+}
+
+function formatNumber(value: number, locale: string) {
+  return new Intl.NumberFormat(locale).format(value)
+}
+
+function formatPercent(value: number | null, locale: string) {
+  return value === null
+    ? "—"
+    : new Intl.NumberFormat(locale, {
+        style: "percent",
+        maximumFractionDigits: 1,
+      }).format(value)
+}
+
+function formatDateTime(value: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(new Date(value))
+}
+
+function distributionLabel(
+  key: string,
+  kind: DistributionKind,
+  t: TFunction
+) {
+  if (kind === "type") return key === "workflow" ? t("工作流") : t("Agent")
+  if (kind === "source") {
+    if (key === "public") return t("公开访问")
+    if (key === "api") return t("API")
+    return t("控制台")
+  }
+  const label = STATUS_LABELS[key]
+  return label ? t(label) : key
+}
+
+function dominantItem(items: DistributionItem[]) {
+  return items.reduce<DistributionItem | null>(
+    (current, item) =>
+      current === null || item.count > current.count ? item : current,
+    null
+  )
+}
+
+function itemColor(kind: DistributionKind, key: string, index: number) {
+  if (kind === "type") {
+    return key === "workflow" ? COLORS.type[1] : COLORS.type[0]
+  }
+  if (kind === "source") {
+    if (key === "api") return COLORS.source[1]
+    if (key === "public") return COLORS.source[2]
+    return COLORS.source[0]
+  }
+  if (key === "failed") return COLORS.status[1]
+  if (key === "cancelled") return COLORS.status[2]
+  if (key === "succeeded") return COLORS.status[0]
+  return COLORS.status[index % COLORS.status.length]
+}
+
+function DonutChart({
+  items,
+  kind,
+  locale,
+}: {
+  items: DistributionItem[]
+  kind: DistributionKind
+  locale: string
+}) {
+  const { t } = useLanguage()
+  const total = distributionTotal(items)
+  const dominant = dominantItem(items)
+  const successCount = items.find((item) => item.key === "succeeded")?.count ?? 0
+  const centerItem = kind === "status" ? null : dominant
+  const centerLabel =
+    kind === "status"
+      ? t("成功率")
+      : centerItem
+        ? distributionLabel(centerItem.key, kind, t)
+        : t("暂无数据")
+  const centerValue =
+    total && (kind === "status" || centerItem)
+      ? `${Math.round(
+          ((kind === "status" ? successCount : centerItem?.count ?? 0) / total) *
+            100
+        )}%`
+      : "—"
+
+  return (
+    <div className="min-w-0 rounded-lg border bg-muted/10 p-3">
+      <div className="relative h-44">
+        {items.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart accessibilityLayer>
+              <Pie
+                data={items}
+                dataKey="count"
+                nameKey="key"
+                innerRadius="58%"
+                outerRadius="82%"
+                paddingAngle={2}
+                stroke="var(--card)"
+                strokeWidth={2}
+                isAnimationActive={false}
+              >
+                {items.map((item, index) => (
+                  <Cell
+                    key={item.key}
+                    fill={itemColor(kind, item.key, index)}
+                  />
+                ))}
+              </Pie>
+              <Tooltip
+                formatter={(value) => formatNumber(Number(value ?? 0), locale)}
+                labelFormatter={(value) =>
+                  distributionLabel(String(value), kind, t)
+                }
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        ) : null}
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <strong className="text-xl tabular-nums">{centerValue}</strong>
+          <span className="max-w-24 truncate text-center text-[11px] text-muted-foreground">
+            {centerLabel}
+          </span>
+        </div>
+      </div>
+      <ul className="mt-2 space-y-1.5 text-xs">
+        {items.length ? (
+          items.map((item, index) => (
+            <li key={item.key} className="flex items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: itemColor(kind, item.key, index) }}
+                />
+                <span className="truncate">{distributionLabel(item.key, kind, t)}</span>
+              </span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                {formatPercent(total ? item.count / total : null, locale)}
+              </span>
+            </li>
+          ))
+        ) : (
+          <li className="text-muted-foreground">{t("暂无数据")}</li>
+        )}
+      </ul>
+    </div>
+  )
+}
+
+export function RunDistributionPanel({
+  data,
+  locale,
+}: {
+  data: WorkspaceAnalytics["distributions"]
+  locale: string
+}) {
+  const { t } = useLanguage()
+  return (
+    <Card className="min-w-0 gap-4 py-5 shadow-none">
+      <CardHeader className="px-5">
+        <CardTitle>{t("运行分布")}</CardTitle>
+        <CardDescription>{t("按类型、来源和状态查看运行构成")}</CardDescription>
+      </CardHeader>
+      <CardContent className="grid min-w-0 gap-4 px-5 lg:grid-cols-3">
+        <div className="min-w-0">
+          <h3 className="mb-2 text-sm font-medium">{t("运行类型")}</h3>
+          <DonutChart items={data.run_types} kind="type" locale={locale} />
+        </div>
+        <div className="min-w-0">
+          <h3 className="mb-2 text-sm font-medium">{t("访问来源")}</h3>
+          <DonutChart items={data.access_sources} kind="source" locale={locale} />
+        </div>
+        <div className="min-w-0">
+          <h3 className="mb-2 text-sm font-medium">{t("运行状态")}</h3>
+          <DonutChart items={data.statuses} kind="status" locale={locale} />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+type RankingView = "applications" | "users" | "teams"
+
+export function AnalyticsRankingPanel({
+  data,
+  locale,
+}: {
+  data: WorkspaceAnalytics["rankings"]
+  locale: string
+}) {
+  const { t } = useLanguage()
+  const [view, setView] = React.useState<RankingView>("applications")
+  const options: Array<{ value: RankingView; label: string }> = [
+    { value: "applications", label: t("应用 / 工作流") },
+    { value: "users", label: t("用户") },
+    { value: "teams", label: t("团队") },
+  ]
+
+  return (
+    <Card className="min-w-0 gap-4 py-5 shadow-none">
+      <CardHeader className="gap-3 px-5">
+        <CardTitle>{t("使用排行")}</CardTitle>
+        <div
+          className="flex max-w-full gap-1 overflow-x-auto pb-1"
+          role="group"
+          aria-label={t("使用排行")}
+        >
+          {options.map((option) => (
+            <Button
+              key={option.value}
+              size="sm"
+              variant={view === option.value ? "secondary" : "outline"}
+              aria-pressed={view === option.value}
+              onClick={() => setView(option.value)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardContent className="min-w-0 px-5">
+        {view === "applications" ? (
+          <div className="space-y-3">
+            {data.applications.map((item, index) => (
+              <div
+                key={item.application_id}
+                className="grid min-w-0 gap-1 rounded-lg border px-3 py-2 text-sm sm:grid-cols-[2rem_minmax(0,1fr)_auto_auto_auto] sm:items-center sm:gap-3"
+              >
+                <span className="text-muted-foreground">{index + 1}</span>
+                <span className="flex min-w-0 items-center gap-2 font-medium">
+                  {item.app_type === "workflow" ? (
+                    <WorkflowIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <BotIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="truncate">{item.name}</span>
+                </span>
+                <span className="text-muted-foreground">
+                  {t("运行 {runs} 次", { runs: formatNumber(item.run_count, locale) })}
+                </span>
+                <span className="tabular-nums">
+                  {t("Tokens {tokens}", {
+                    tokens: formatNumber(item.total_tokens, locale),
+                  })}
+                </span>
+                <span className="tabular-nums text-muted-foreground">
+                  {formatPercent(item.success_rate, locale)}
+                </span>
+              </div>
+            ))}
+            <div className="flex flex-col gap-1 rounded-lg border bg-muted/30 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <span>{t("公开/API 调用")}</span>
+              <span className="text-muted-foreground">
+                {t("运行 {runs} 次，Tokens {tokens}", {
+                  runs: formatNumber(data.anonymous.run_count, locale),
+                  tokens: formatNumber(data.anonymous.total_tokens, locale),
+                })}
+              </span>
+            </div>
+          </div>
+        ) : view === "users" ? (
+          <div className="space-y-3">
+            {data.users.map((item, index) => (
+              <div
+                key={item.user_id}
+                className="grid min-w-0 gap-1 rounded-lg border px-3 py-2 text-sm sm:grid-cols-[2rem_minmax(0,1fr)_auto_auto] sm:items-center sm:gap-3"
+              >
+                <span className="text-muted-foreground">{index + 1}</span>
+                <span className="truncate font-medium">{item.name}</span>
+                <span className="text-muted-foreground">
+                  {t("运行 {runs} 次", { runs: formatNumber(item.run_count, locale) })}
+                </span>
+                <span className="tabular-nums">
+                  {t("Tokens {tokens}", {
+                    tokens: formatNumber(item.total_tokens, locale),
+                  })}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {data.teams.length ? (
+              data.teams.map((item, index) => (
+                <div
+                  key={item.team_id}
+                  className="grid min-w-0 gap-1 rounded-lg border px-3 py-2 text-sm sm:grid-cols-[2rem_minmax(0,1fr)_auto_auto] sm:items-center sm:gap-3"
+                >
+                  <span className="text-muted-foreground">{index + 1}</span>
+                  <span className="flex min-w-0 items-center gap-2 font-medium">
+                    <Building2Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{item.name}</span>
+                  </span>
+                  <span className="text-muted-foreground">
+                    {t("单日最高 {runs}", {
+                      runs: formatNumber(item.peak_daily_runs, locale),
+                    })}
+                  </span>
+                  <span className="tabular-nums">
+                    {t("运行 {runs} 次", { runs: formatNumber(item.run_count, locale) })}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">{t("暂无团队使用数据")}</p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function FrequentQuestionsPanel({
+  items,
+  locale,
+}: {
+  items: WorkspaceAnalytics["frequent_questions"]
+  locale: string
+}) {
+  const { t } = useLanguage()
+  const [expanded, setExpanded] = React.useState(false)
+  const visibleItems = expanded ? items.slice(0, 20) : items.slice(0, 5)
+
+  return (
+    <Card className="min-w-0 gap-4 py-5 shadow-none">
+      <CardHeader className="gap-1 px-5">
+        <CardTitle className="flex items-center gap-2">
+          <MessageCircleQuestionIcon aria-hidden="true" className="size-4" />
+          {t("高频问题")}
+        </CardTitle>
+        <CardDescription>{t("仅展示当前工作空间内出现至少 3 次的问题")}</CardDescription>
+      </CardHeader>
+      <CardContent className="min-w-0 px-5">
+        {visibleItems.length ? (
+          <div className="space-y-2">
+            {visibleItems.map((item) => (
+              <div
+                key={item.question}
+                className="flex min-w-0 flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-start sm:justify-between"
+              >
+                <p className="min-w-0 whitespace-normal break-words">{item.question}</p>
+                <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
+                  <Badge variant="secondary">{formatNumber(item.count, locale)}</Badge>
+                  <time className="text-xs text-muted-foreground">
+                    {formatDateTime(item.latest_at, locale)}
+                  </time>
+                </div>
+              </div>
+            ))}
+            {items.length > 5 ? (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-expanded={expanded}
+                onClick={() => setExpanded((value) => !value)}
+              >
+                {expanded ? t("收起") : t("展开全部")}
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t("暂无达到阈值的高频问题")}</p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}

@@ -5,7 +5,7 @@ import {
   streamAgentRun,
   type AgentRun,
   type AgentRunStreamEvent,
-} from "../lib/api/agents"
+} from "../src/lib/api/agents"
 
 const originalFetch = globalThis.fetch
 const originalSetTimeout = globalThis.setTimeout

@@ -2721,6 +2721,7 @@ def assert_external_agent_access() -> None:
             assert set(public_run_one_payload) == {
                 "id",
                 "conversation_id",
+                "regenerated_from_run_id",
                 "question",
                 "status",
                 "result",
@@ -2730,6 +2731,8 @@ def assert_external_agent_access() -> None:
                 "started_at",
                 "finished_at",
                 "updated_at",
+                "feedback",
+                "feedback_updated_at",
             }
             assert "workspace_id" not in public_run_one_payload
             assert "trace_id" not in public_run_one_payload
@@ -2759,6 +2762,61 @@ def assert_external_agent_access() -> None:
                 headers=auth_headers(member_token),
             )
             assert cross_visitor_read.status_code == 404, cross_visitor_read.text
+            public_feedback = client.post(
+                f"{public_base}/runs/{public_run_one_payload['id']}/feedback",
+                headers=auth_headers(admin_token),
+                json={"value": "positive"},
+            )
+            assert public_feedback.status_code == 200, public_feedback.text
+            assert public_feedback.json()["feedback"] == "positive"
+            feedback_updated_at = public_feedback.json()["feedback_updated_at"]
+            assert feedback_updated_at
+            repeated_public_feedback = client.post(
+                f"{public_base}/runs/{public_run_one_payload['id']}/feedback",
+                headers=auth_headers(admin_token),
+                json={"value": "positive"},
+            )
+            assert repeated_public_feedback.status_code == 200
+            assert repeated_public_feedback.json()["feedback_updated_at"] == feedback_updated_at
+            cross_visitor_feedback = client.post(
+                f"{public_base}/runs/{public_run_one_payload['id']}/feedback",
+                headers=auth_headers(member_token),
+                json={"value": "negative"},
+            )
+            assert cross_visitor_feedback.status_code == 404, cross_visitor_feedback.text
+            cross_visitor_regeneration = client.post(
+                f"{public_base}/runs/{public_run_one_payload['id']}/regenerate",
+                headers=auth_headers(member_token),
+            )
+            assert cross_visitor_regeneration.status_code == 404
+            regenerated_public = client.post(
+                f"{public_base}/runs/{public_run_one_payload['id']}/regenerate",
+                headers=auth_headers(admin_token),
+            )
+            assert regenerated_public.status_code == 200, regenerated_public.text
+            regenerated_public_payload = regenerated_public.json()
+            assert regenerated_public_payload["status"] == "succeeded"
+            assert (
+                regenerated_public_payload["regenerated_from_run_id"]
+                == public_run_one_payload["id"]
+            )
+            assert regenerated_public_payload["conversation_id"] == conversation_id
+            assert regenerated_public_payload["question"] == "Visitor one"
+            assert regenerated_public_payload["feedback"] is None
+            original_public_after_regeneration = client.get(
+                f"{public_base}/runs/{public_run_one_payload['id']}",
+                headers=auth_headers(admin_token),
+            )
+            assert original_public_after_regeneration.status_code == 200
+            assert original_public_after_regeneration.json()["feedback"] == "positive"
+            logical_public_runs = client.get(
+                f"{public_base}/runs?conversation_id={conversation_id}",
+                headers=auth_headers(admin_token),
+            )
+            assert logical_public_runs.status_code == 200, logical_public_runs.text
+            assert [item["id"] for item in logical_public_runs.json()["items"]] == [
+                regenerated_public_payload["id"]
+            ]
             public_run_two_followup = client.post(
                 f"{public_base}/runs",
                 headers=auth_headers(member_token),
@@ -3362,6 +3420,23 @@ def main() -> None:
             failed_run = failed_run_response.json()
             assert failed_run["status"] == "failed"
             assert failed_run["last_error"] == "Agent execution failed."
+            failed_feedback = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{agent_id}/runs/{failed_run['id']}/feedback",
+                ),
+                headers=auth_headers(admin_token),
+                json={"value": "negative"},
+            )
+            assert failed_feedback.status_code == 409, failed_feedback.text
+            failed_regeneration = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{agent_id}/runs/{failed_run['id']}/regenerate",
+                ),
+                headers=auth_headers(admin_token),
+            )
+            assert failed_regeneration.status_code == 409, failed_regeneration.text
             failure_log = asyncio.run(get_agent_failure_log(failed_run["trace_id"]))
             assert failure_log is not None
             assert failure_log.details["agent_run_id"] == failed_run["id"]
@@ -3561,6 +3636,19 @@ def main() -> None:
             assert executed["status"] == "succeeded"
             assert executed["conversation_id"] == member_run["conversation_id"]
             assert executed["result"] == "Completed."
+            assert executed["grounding_status"] == "skipped"
+            assert not any(
+                str(event.get("summary", "")).startswith("agent.grounding_")
+                for event in executed["events"]
+            )
+            assert not any(
+                any(
+                    item.get("role") == "system"
+                    and "final evidence verifier" in item.get("content", "")
+                    for item in call.get("messages", [])
+                )
+                for call in AgentModelHandler.calls
+            )
             assert executed["events"][0]["tool_name"] == "search_knowledge"
             assert "citations" not in executed
             assert query_calls == [
@@ -3577,6 +3665,51 @@ def main() -> None:
             assert knowledge_event["output"]["evidence_status"] == "found"
             assert "source_id" not in knowledge_event["output"]["hits"][0]
             assert knowledge_event["output"]["hits"][0]["document"] == "release.md"
+            console_feedback = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{agent_id}/runs/{executed['id']}/feedback",
+                ),
+                headers=auth_headers(member_token),
+                json={"value": "negative"},
+            )
+            assert console_feedback.status_code == 200, console_feedback.text
+            assert console_feedback.json()["feedback"] == "negative"
+            cross_console_feedback = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{agent_id}/runs/{executed['id']}/feedback",
+                ),
+                headers=auth_headers(admin_token),
+                json={"value": "positive"},
+            )
+            assert cross_console_feedback.status_code == 404, cross_console_feedback.text
+            regenerated_console = client.post(
+                agents_url(
+                    workspace_id,
+                    f"/{agent_id}/runs/{executed['id']}/regenerate",
+                ),
+                headers=auth_headers(member_token),
+            )
+            assert regenerated_console.status_code == 200, regenerated_console.text
+            regenerated_console_payload = regenerated_console.json()
+            assert regenerated_console_payload["status"] == "succeeded"
+            assert regenerated_console_payload["goal"] == executed["goal"]
+            assert regenerated_console_payload["conversation_id"] == executed["conversation_id"]
+            assert regenerated_console_payload["regenerated_from_run_id"] == executed["id"]
+            assert regenerated_console_payload["feedback"] is None
+            logical_console_runs = client.get(
+                agents_url(
+                    workspace_id,
+                    f"/{agent_id}/runs?conversation_id={executed['conversation_id']}",
+                ),
+                headers=auth_headers(member_token),
+            )
+            assert logical_console_runs.status_code == 200, logical_console_runs.text
+            assert [item["id"] for item in logical_console_runs.json()] == [
+                regenerated_console_payload["id"],
+                member_run["id"],
+            ]
 
             agentic_update = client.patch(
                 agents_url(workspace_id, f"/{agent_id}"),

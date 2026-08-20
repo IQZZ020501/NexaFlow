@@ -1,7 +1,7 @@
 import * as React from "react"
 import { expect, test } from "bun:test"
 
-import { CardMoreMenu } from "../components/ui/card-more-menu"
+import { CardMoreMenu } from "../src/components/ui/card-more-menu"
 
 test("stops clicks from the portalled menu content", () => {
   const menu = CardMoreMenu({ label: "More", children: null })

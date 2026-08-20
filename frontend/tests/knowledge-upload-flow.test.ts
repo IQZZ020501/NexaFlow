@@ -4,8 +4,8 @@ import {
   appendKnowledgeUploadFiles,
   resolveSelectedDocumentId,
   SUPPORTED_FILE_TYPES,
-} from "../components/knowledge/knowledge-upload-flow"
-import { MAX_KNOWLEDGE_UPLOAD_DOCUMENTS } from "../lib/knowledge-upload-route"
+} from "../src/components/knowledge/knowledge-upload-flow"
+import { MAX_KNOWLEDGE_UPLOAD_DOCUMENTS } from "../src/lib/knowledge-upload-route"
 
 describe("knowledge upload preview selection", () => {
   test("accepts the supported document formats", () => {

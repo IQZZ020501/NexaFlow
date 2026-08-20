@@ -1,6 +1,12 @@
 /* @jsxImportSource react */
 import { afterEach, describe, expect, test } from "bun:test"
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 
 import { KnowledgeBasePage } from "@/components/knowledge/knowledge-base-page"
 import { KnowledgeUploadStateProvider } from "@/components/knowledge/knowledge-upload-state"
@@ -41,7 +47,9 @@ const adminUser = {
   must_change_password: false,
   is_active: true,
   created_at: "2026-01-01T00:00:00Z",
-  workspaces: [{ id: WS, name: "Test Workspace", is_default: true, role: "admin" }],
+  workspaces: [
+    { id: WS, name: "Test Workspace", is_default: true, role: "admin" },
+  ],
   teams: [],
 }
 
@@ -51,7 +59,9 @@ const memberUser = {
   username: "member",
   name: "Plain Member",
   is_global_admin: false,
-  workspaces: [{ id: WS, name: "Test Workspace", is_default: true, role: "member" }],
+  workspaces: [
+    { id: WS, name: "Test Workspace", is_default: true, role: "member" },
+  ],
 }
 
 const session = makeSession({
@@ -106,24 +116,28 @@ class FakeIntersectionObserver {
   triggerIntersect() {
     this.callback(
       [{ isIntersecting: true } as IntersectionObserverEntry],
-      this as unknown as IntersectionObserver,
+      this as unknown as IntersectionObserver
     )
   }
 }
-;(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver =
-  FakeIntersectionObserver
+;(
+  globalThis as unknown as { IntersectionObserver: unknown }
+).IntersectionObserver = FakeIntersectionObserver
 
 function resetSession() {
   session.selectedWorkspaceId = WS
   session.token = "test-token"
-  session.me = { user: adminUser, memberships: [{ workspace_id: WS, role: "admin" }] }
+  session.me = {
+    user: adminUser,
+    memberships: [{ workspace_id: WS, role: "admin" }],
+  }
 }
 
 async function respondToConfirm(label: string) {
   const dialog = await screen.findByRole("dialog", { name: "确认操作" })
   fireEvent.click(within(dialog).getByRole("button", { name: label }))
   await waitFor(() =>
-    expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull(),
+    expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull()
   )
 }
 
@@ -188,7 +202,9 @@ const rerankerModel: RegisteredModel = {
 
 const models = [embeddingModel, rerankerModel]
 
-function makeDocument(overrides: Record<string, unknown> = {}): KnowledgeDocument {
+function makeDocument(
+  overrides: Record<string, unknown> = {}
+): KnowledgeDocument {
   return {
     id: "doc-1",
     workspace_id: WS,
@@ -251,7 +267,8 @@ const otherMember: WorkspaceMember = {
 function renderListPage() {
   fetchHandler = (url) => {
     if (url.includes("/models")) return jsonResponse(models)
-    if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+    if (url.includes("/knowledge-bases?"))
+      return jsonResponse([makeKnowledgeBase()])
     return jsonResponse([])
   }
   renderPage(<KnowledgeBasePage />)
@@ -268,7 +285,7 @@ function cardElement(kbName: string) {
 /** Filename buttons in DOM order (they carry title but no aria-label). */
 function filenameButtons() {
   return Array.from(
-    document.querySelectorAll<HTMLButtonElement>("button[title]"),
+    document.querySelectorAll<HTMLButtonElement>("button[title]")
   ).filter((button) => !button.hasAttribute("aria-label"))
 }
 
@@ -369,12 +386,15 @@ describe("KnowledgeBasePage list view", () => {
       expect(screen.getByText("还没有知识库")).toBeTruthy()
     })
     expect(
-      screen.getByText("创建知识库后，你可以上传文档、配置检索方式，并让应用调用这些知识。"),
+      screen.getByText(
+        "创建知识库后，你可以上传文档、配置检索方式，并让应用调用这些知识。"
+      )
     ).toBeTruthy()
   })
 
   test("shows workspace placeholder when no workspace is selected", async () => {
-    ;(session as { selectedWorkspaceId: string | null }).selectedWorkspaceId = null
+    ;(session as { selectedWorkspaceId: string | null }).selectedWorkspaceId =
+      null
     renderPage(<KnowledgeBasePage />)
 
     expect(screen.getByText("先选择工作空间")).toBeTruthy()
@@ -416,16 +436,18 @@ describe("KnowledgeBasePage list view", () => {
 
   test("loads more cards through the infinite scroll sentinel", async () => {
     const firstBatch = Array.from({ length: 50 }, (_, index) =>
-      makeKnowledgeBase({ id: `kb-${index}`, name: `KB ${index}` }),
+      makeKnowledgeBase({ id: `kb-${index}`, name: `KB ${index}` })
     )
     const secondBatch = Array.from({ length: 3 }, (_, index) =>
-      makeKnowledgeBase({ id: `kb-50-${index}`, name: `KB 50-${index}` }),
+      makeKnowledgeBase({ id: `kb-50-${index}`, name: `KB 50-${index}` })
     )
     const requestedOffsets: string[] = []
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?")) {
-        const offset = new URL(url, "http://localhost").searchParams.get("offset")
+        const offset = new URL(url, "http://localhost").searchParams.get(
+          "offset"
+        )
         requestedOffsets.push(offset ?? "")
         return jsonResponse(offset === "50" ? secondBatch : firstBatch)
       }
@@ -468,12 +490,14 @@ describe("KnowledgeBasePage list view", () => {
 
   test("reports an error when loading more cards fails", async () => {
     const firstBatch = Array.from({ length: 50 }, (_, index) =>
-      makeKnowledgeBase({ id: `kb-${index}`, name: `KB ${index}` }),
+      makeKnowledgeBase({ id: `kb-${index}`, name: `KB ${index}` })
     )
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?")) {
-        const offset = new URL(url, "http://localhost").searchParams.get("offset")
+        const offset = new URL(url, "http://localhost").searchParams.get(
+          "offset"
+        )
         if (offset === "50") {
           return jsonResponse({ detail: "load more boom" }, 500)
         }
@@ -489,19 +513,21 @@ describe("KnowledgeBasePage list view", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "load more boom",
+      "load more boom"
     )
   })
 
   test("shows the loading indicator while fetching more cards", async () => {
     const firstBatch = Array.from({ length: 50 }, (_, index) =>
-      makeKnowledgeBase({ id: `kb-${index}`, name: `KB ${index}` }),
+      makeKnowledgeBase({ id: `kb-${index}`, name: `KB ${index}` })
     )
     let resolveMore: ((response: Response) => void) | null = null
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?")) {
-        const offset = new URL(url, "http://localhost").searchParams.get("offset")
+        const offset = new URL(url, "http://localhost").searchParams.get(
+          "offset"
+        )
         if (offset === "50") {
           return new Promise<Response>((resolve) => {
             resolveMore = resolve
@@ -519,7 +545,7 @@ describe("KnowledgeBasePage list view", () => {
       expect(screen.getByText("正在加载")).toBeTruthy()
     })
     ;(resolveMore as ((response: Response) => void) | null)?.(
-      jsonResponse([makeKnowledgeBase({ id: "kb-extra", name: "KB extra" })]),
+      jsonResponse([makeKnowledgeBase({ id: "kb-extra", name: "KB extra" })])
     )
     await waitFor(() => {
       expect(screen.getByText("KB extra")).toBeTruthy()
@@ -549,7 +575,7 @@ describe("KnowledgeBasePage list view", () => {
     rerender(
       <LanguageProvider defaultLanguage="zh-Hans">
         <KnowledgeBasePage />
-      </LanguageProvider>,
+      </LanguageProvider>
     )
     await waitFor(() => {
       expect(listRequests).toBe(2)
@@ -564,7 +590,8 @@ describe("KnowledgeBasePage list view", () => {
         return jsonResponse({ detail: "update boom" }, 500)
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       return jsonResponse([])
     }
     renderPage(<KnowledgeBasePage />)
@@ -581,16 +608,18 @@ describe("KnowledgeBasePage list view", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "update boom",
+      "update boom"
     )
   })
 
   test("reports an error when deleting a knowledge base fails", async () => {
     fetchHandler = (url, init) => {
       const method = init?.method ?? "GET"
-      if (method === "DELETE") return jsonResponse({ detail: "delete boom" }, 500)
+      if (method === "DELETE")
+        return jsonResponse({ detail: "delete boom" }, 500)
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       return jsonResponse([])
     }
     renderPage(<KnowledgeBasePage />)
@@ -604,7 +633,7 @@ describe("KnowledgeBasePage list view", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "delete boom",
+      "delete boom"
     )
   })
 
@@ -629,7 +658,9 @@ describe("KnowledgeBasePage list view", () => {
     fireEvent.click(screen.getAllByText("新建知识库")[0])
 
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByText("配置知识库名称、描述和默认数据源。")).toBeTruthy()
+    expect(
+      within(dialog).getByText("配置知识库名称、描述和默认数据源。")
+    ).toBeTruthy()
 
     fireEvent.change(within(dialog).getByLabelText("知识库名称"), {
       target: { value: "New KB" },
@@ -642,7 +673,11 @@ describe("KnowledgeBasePage list view", () => {
     await waitFor(() => {
       expect(screen.getByText("New KB")).toBeTruthy()
     })
-    expect(notifications.some(([kind, msg]) => kind === "success" && msg === "知识库已新建")).toBe(true)
+    expect(
+      notifications.some(
+        ([kind, msg]) => kind === "success" && msg === "知识库已新建"
+      )
+    ).toBe(true)
     const create = requests.find((request) => request.method === "POST")
     expect(create?.url).toContain("/knowledge-bases")
     expect(JSON.parse(create?.body ?? "{}")).toEqual({
@@ -679,7 +714,9 @@ describe("KnowledgeBasePage list view", () => {
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
-    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe("name taken")
+    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
+      "name taken"
+    )
   })
 
   test("edits a knowledge base from the card pencil button", async () => {
@@ -702,7 +739,9 @@ describe("KnowledgeBasePage list view", () => {
     fireEvent.click(screen.getByRole("button", { name: "编辑知识库" }))
     const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText("更新知识库名称和描述。")).toBeTruthy()
-    const nameInput = within(dialog).getByLabelText("知识库名称") as HTMLInputElement
+    const nameInput = within(dialog).getByLabelText(
+      "知识库名称"
+    ) as HTMLInputElement
     expect(nameInput.value).toBe("KB Alpha")
     fireEvent.change(nameInput, { target: { value: "KB Renamed" } })
     fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
@@ -712,7 +751,9 @@ describe("KnowledgeBasePage list view", () => {
     })
     expect(notifications.some(([, msg]) => msg === "知识库已更新")).toBe(true)
     const patch = requests.find((request) => request.method === "PATCH")
-    expect(JSON.parse(patch?.body ?? "{}")).toMatchObject({ name: "KB Renamed" })
+    expect(JSON.parse(patch?.body ?? "{}")).toMatchObject({
+      name: "KB Renamed",
+    })
   })
 
   test("archives and restores a knowledge base from the card menu", async () => {
@@ -743,7 +784,11 @@ describe("KnowledgeBasePage list view", () => {
     expect(requests[0]).toMatchObject({ method: "PATCH" })
     expect(JSON.parse(requests[0].body)).toEqual({ status: "archived" })
 
-    openMenu(within(screen.getByRole("button", { name: /KB Alpha/ })).getByTitle("更多"))
+    openMenu(
+      within(screen.getByRole("button", { name: /KB Alpha/ })).getByTitle(
+        "更多"
+      )
+    )
     fireEvent.click(await screen.findByText("恢复知识库"))
     await waitFor(() => {
       expect(notifications.some(([, msg]) => msg === "知识库已恢复")).toBe(true)
@@ -754,10 +799,14 @@ describe("KnowledgeBasePage list view", () => {
   test("reports permission errors from archive as a notification", async () => {
     fetchHandler = (url, init) => {
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?") && (init?.method ?? "GET") === "GET") {
+      if (
+        url.includes("/knowledge-bases?") &&
+        (init?.method ?? "GET") === "GET"
+      ) {
         return jsonResponse([makeKnowledgeBase()])
       }
-      if (init?.method === "PATCH") return jsonResponse({ detail: "没有权限" }, 403)
+      if (init?.method === "PATCH")
+        return jsonResponse({ detail: "没有权限" }, 403)
       return jsonResponse([])
     }
     renderPage(<KnowledgeBasePage />)
@@ -780,7 +829,8 @@ describe("KnowledgeBasePage list view", () => {
       const method = init?.method ?? "GET"
       if (method === "DELETE") deletes.push(url)
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       return jsonResponse([])
     }
     renderPage(<KnowledgeBasePage />)
@@ -812,7 +862,9 @@ describe("KnowledgeBasePage list view", () => {
     expect(pushes).toContain(`/app/knowledge/${KB_ID}`)
 
     fireEvent.keyDown(cardElement("KB Alpha"), { key: "Enter" })
-    expect(pushes.filter((href) => href === `/app/knowledge/${KB_ID}`).length).toBe(2)
+    expect(
+      pushes.filter((href) => href === `/app/knowledge/${KB_ID}`).length
+    ).toBe(2)
   })
 
   test("does not open a knowledge base when a menu item is clicked", async () => {
@@ -835,14 +887,15 @@ describe("KnowledgeBasePage list view", () => {
     routeParams.id = KB_ID
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       return jsonResponse([])
     }
     renderPage(
       <KnowledgeUploadStateProvider>
         <KnowledgeBasePage uploadStep="files" />
-      </KnowledgeUploadStateProvider>,
+      </KnowledgeUploadStateProvider>
     )
 
     await waitFor(() => {
@@ -873,12 +926,14 @@ describe("KnowledgeBasePage list view", () => {
 // Detail view — documents tab
 // ---------------------------------------------------------------------------
 
-function renderDetailPage(options: {
-  knowledgeBases?: Array<Record<string, unknown>>
-  documents?: KnowledgeDocument[]
-  models?: RegisteredModel[]
-  initialDetailTab?: KnowledgeBaseDetailTab
-} = {}) {
+function renderDetailPage(
+  options: {
+    knowledgeBases?: Array<Record<string, unknown>>
+    documents?: KnowledgeDocument[]
+    models?: RegisteredModel[]
+    initialDetailTab?: KnowledgeBaseDetailTab
+  } = {}
+) {
   const knowledgeBases = options.knowledgeBases ?? [makeKnowledgeBase()]
   const documents = options.documents ?? []
   fetchHandler = (url) => {
@@ -891,7 +946,7 @@ function renderDetailPage(options: {
   }
   routeParams.id = KB_ID
   return renderPage(
-    <KnowledgeBasePage initialDetailTab={options.initialDetailTab} />,
+    <KnowledgeBasePage initialDetailTab={options.initialDetailTab} />
   )
 }
 
@@ -900,10 +955,10 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(parseKnowledgeBaseDetailTab("tasks")).toBe("tasks")
     expect(parseKnowledgeBaseDetailTab("unknown")).toBeNull()
     expect(knowledgeBaseDetailPath(KB_ID, "documents")).toBe(
-      `/app/knowledge/${KB_ID}`,
+      `/app/knowledge/${KB_ID}`
     )
     expect(knowledgeBaseDetailPath(KB_ID, "evaluation")).toBe(
-      `/app/knowledge/${KB_ID}/evaluation`,
+      `/app/knowledge/${KB_ID}/evaluation`
     )
 
     renderDetailPage()
@@ -925,7 +980,7 @@ describe("KnowledgeBasePage documents tab", () => {
 
     await waitFor(() => expect(screen.getByText("暂无任务")).toBeTruthy())
     expect(
-      screen.getByRole("button", { name: "任务" }).getAttribute("aria-current"),
+      screen.getByRole("button", { name: "任务" }).getAttribute("aria-current")
     ).toBe("page")
   })
 
@@ -990,7 +1045,8 @@ describe("KnowledgeBasePage documents tab", () => {
     ]
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse(tasks)
       return jsonResponse([])
@@ -1037,7 +1093,7 @@ describe("KnowledgeBasePage documents tab", () => {
         filename: `file-${String(index).padStart(2, "0")}.md`,
         created_at: `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
         updated_at: `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
-      }),
+      })
     )
     renderDetailPage({ documents })
 
@@ -1078,13 +1134,14 @@ describe("KnowledgeBasePage documents tab", () => {
         id: `doc-${index}`,
         filename: `file-${String(index).padStart(2, "0")}.md`,
         created_at: `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
-      }),
+      })
     )
     const deletes: string[] = []
     fetchHandler = (url, init) => {
       if (init?.method === "DELETE") deletes.push(url)
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1157,9 +1214,12 @@ describe("KnowledgeBasePage documents tab", () => {
       const method = init?.method ?? "GET"
       if (method !== "GET") requests.push({ url, method })
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
-      if (url.includes("/documents") && method === "DELETE") return jsonResponse(null, 204)
-      if (url.includes("/documents") && method === "POST") return jsonResponse(makeTask())
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents") && method === "DELETE")
+        return jsonResponse(null, 204)
+      if (url.includes("/documents") && method === "POST")
+        return jsonResponse(makeTask())
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1177,26 +1237,34 @@ describe("KnowledgeBasePage documents tab", () => {
 
     fireEvent.click(screen.getByText("向量化(2)"))
     await waitFor(() => {
-      expect(notifications.some(([, msg]) => msg === "已提交 2 个向量化任务")).toBe(true)
+      expect(
+        notifications.some(([, msg]) => msg === "已提交 2 个向量化任务")
+      ).toBe(true)
     })
     const indexCalls = requests.filter(
-      (request) => request.method === "POST" && request.url.includes("/index"),
+      (request) => request.method === "POST" && request.url.includes("/index")
     )
     expect(indexCalls).toHaveLength(2)
 
     fireEvent.click(screen.getByText("删除(2)"))
     await respondToConfirm("删除")
     await waitFor(() => {
-      expect(notifications.some(([, msg]) => msg === "已删除 2 个文档")).toBe(true)
+      expect(notifications.some(([, msg]) => msg === "已删除 2 个文档")).toBe(
+        true
+      )
     })
-    expect(requests.filter((request) => request.method === "DELETE")).toHaveLength(2)
+    expect(
+      requests.filter((request) => request.method === "DELETE")
+    ).toHaveLength(2)
     await waitFor(() => {
       expect(screen.getByText("暂无文档")).toBeTruthy()
     })
   })
 
   test("toggles a document active state", async () => {
-    const documents = [makeDocument({ id: "doc-1", filename: "a.md", is_active: true })]
+    const documents = [
+      makeDocument({ id: "doc-1", filename: "a.md", is_active: true }),
+    ]
     fetchHandler = (url, init) => {
       const method = init?.method ?? "GET"
       if (method === "PATCH" && url.includes("/documents")) {
@@ -1205,11 +1273,12 @@ describe("KnowledgeBasePage documents tab", () => {
             id: "doc-1",
             filename: "a.md",
             is_active: JSON.parse(String(init?.body ?? "{}")).is_active,
-          }),
+          })
         )
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1240,7 +1309,8 @@ describe("KnowledgeBasePage documents tab", () => {
         return jsonResponse(makeTask())
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1249,16 +1319,20 @@ describe("KnowledgeBasePage documents tab", () => {
     renderPage(<KnowledgeBasePage />)
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "重新分段 a.md" }),
+      await screen.findByRole("button", { name: "重新分段 a.md" })
     )
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByText("先用智能规则生成预览，需要时再精调。")).toBeTruthy()
+    expect(
+      within(dialog).getByText("先用智能规则生成预览，需要时再精调。")
+    ).toBeTruthy()
     expect(within(dialog).getByText("智能分段")).toBeTruthy()
 
     fireEvent.click(within(dialog).getByRole("button", { name: "开始导入" }))
 
     await waitFor(() => {
-      expect(notifications.some(([, msg]) => msg === "已提交解析任务")).toBe(true)
+      expect(notifications.some(([, msg]) => msg === "已提交解析任务")).toBe(
+        true
+      )
     })
     expect(parseCalls).toHaveLength(1)
     const payload = JSON.parse(parseCalls[0].body)
@@ -1282,7 +1356,8 @@ describe("KnowledgeBasePage documents tab", () => {
         return jsonResponse(makeTask())
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1290,12 +1365,18 @@ describe("KnowledgeBasePage documents tab", () => {
     routeParams.id = KB_ID
     renderPage(<KnowledgeBasePage />)
 
-    fireEvent.click(await screen.findByRole("button", { name: "重新分段 a.md" }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "重新分段 a.md" })
+    )
     const dialog = await screen.findByRole("dialog")
 
     fireEvent.click(within(dialog).getByText("高级分段"))
-    const sizeInput = within(dialog).getByLabelText("片段字符") as HTMLInputElement
-    const overlapInput = within(dialog).getByLabelText("重叠字符") as HTMLInputElement
+    const sizeInput = within(dialog).getByLabelText(
+      "片段字符"
+    ) as HTMLInputElement
+    const overlapInput = within(dialog).getByLabelText(
+      "重叠字符"
+    ) as HTMLInputElement
     expect(sizeInput.value).toBe("1200")
     expect(overlapInput.value).toBe("150")
 
@@ -1303,8 +1384,11 @@ describe("KnowledgeBasePage documents tab", () => {
     fireEvent.change(sizeInput, { target: { value: "100" } })
     expect(within(dialog).getByText("重叠字符必须小于片段字符")).toBeTruthy()
     expect(
-      (within(dialog).getByRole("button", { name: "开始导入" }) as HTMLButtonElement)
-        .disabled,
+      (
+        within(dialog).getByRole("button", {
+          name: "开始导入",
+        }) as HTMLButtonElement
+      ).disabled
     ).toBe(true)
 
     fireEvent.change(sizeInput, { target: { value: "800" } })
@@ -1320,7 +1404,9 @@ describe("KnowledgeBasePage documents tab", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "开始导入" }))
     await waitFor(() => {
-      expect(notifications.some(([, msg]) => msg === "已提交解析任务")).toBe(true)
+      expect(notifications.some(([, msg]) => msg === "已提交解析任务")).toBe(
+        true
+      )
     })
     const payload = JSON.parse(parseCalls[0].body)
     expect(payload).toMatchObject({
@@ -1342,7 +1428,8 @@ describe("KnowledgeBasePage documents tab", () => {
         return jsonResponse({ detail: "index down" }, 503)
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1357,7 +1444,9 @@ describe("KnowledgeBasePage documents tab", () => {
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
-    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe("index down")
+    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
+      "index down"
+    )
   })
 
   test("downloads the original document from the row menu", async () => {
@@ -1372,7 +1461,8 @@ describe("KnowledgeBasePage documents tab", () => {
         })
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1397,7 +1487,8 @@ describe("KnowledgeBasePage documents tab", () => {
       const method = init?.method ?? "GET"
       if (method === "DELETE") deletes.push(url)
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1429,31 +1520,48 @@ describe("KnowledgeBasePage documents tab", () => {
   test("disables document actions without edit permission", async () => {
     const documents = [makeDocument({ id: "doc-1", filename: "a.md" })]
     renderDetailPage({
-      knowledgeBases: [makeKnowledgeBase({ permission: "view", created_by_user_id: "u-other" })],
+      knowledgeBases: [
+        makeKnowledgeBase({
+          permission: "view",
+          created_by_user_id: "u-other",
+        }),
+      ],
       documents,
     })
 
     await waitFor(() => expect(screen.getByText("a.md")).toBeTruthy())
-    expect((screen.getByText("上传文档") as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByText("重建索引") as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole("switch", { name: "停用 a.md" }) as HTMLButtonElement).disabled).toBe(
-      true,
+    expect((screen.getByText("上传文档") as HTMLButtonElement).disabled).toBe(
+      true
     )
+    expect((screen.getByText("重建索引") as HTMLButtonElement).disabled).toBe(
+      true
+    )
+    expect(
+      (screen.getByRole("switch", { name: "停用 a.md" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
     // Action buttons stay rendered but disabled without edit permission.
     expect(
-      (screen.getByRole("button", { name: "重新分段 a.md" }) as HTMLButtonElement).disabled,
+      (
+        screen.getByRole("button", {
+          name: "重新分段 a.md",
+        }) as HTMLButtonElement
+      ).disabled
     ).toBe(true)
-    expect((screen.getByRole("button", { name: "操作 a.md" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    )
+    expect(
+      (screen.getByRole("button", { name: "操作 a.md" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true)
     expect(screen.queryByRole("button", { name: "编辑知识库" })).toBeNull()
   })
 
   test("notifies when document loading fails", async () => {
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
-      if (url.includes("/documents")) return jsonResponse({ detail: "docs down" }, 500)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents"))
+        return jsonResponse({ detail: "docs down" }, 500)
       return jsonResponse([])
     }
     routeParams.id = KB_ID
@@ -1462,7 +1570,9 @@ describe("KnowledgeBasePage documents tab", () => {
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
-    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe("docs down")
+    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
+      "docs down"
+    )
     await waitFor(() => expect(screen.getByText("暂无文档")).toBeTruthy())
   })
 
@@ -1485,7 +1595,8 @@ describe("KnowledgeBasePage documents tab", () => {
     const resolvers: Array<(value: Response) => void> = []
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) {
         return new Promise<Response>((resolve) => {
           resolvers.push(resolve)
@@ -1598,7 +1709,8 @@ describe("KnowledgeBasePage documents tab", () => {
       const method = init?.method ?? "GET"
       if (method === "POST" && url.includes("/index")) indexCalls.push(url)
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1613,14 +1725,18 @@ describe("KnowledgeBasePage documents tab", () => {
     await waitFor(() => {
       expect(indexCalls).toHaveLength(1)
     })
-    expect(notifications.some(([, msg]) => msg === "已提交向量化任务")).toBe(true)
+    expect(notifications.some(([, msg]) => msg === "已提交向量化任务")).toBe(
+      true
+    )
   })
 
   test("closes the re-segment dialog with Escape", async () => {
     const documents = [makeDocument({ id: "doc-1", filename: "a.md" })]
     renderDetailPage({ documents })
 
-    fireEvent.click(await screen.findByRole("button", { name: "重新分段 a.md" }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "重新分段 a.md" })
+    )
     expect(await screen.findByRole("dialog")).toBeTruthy()
     fireEvent.keyDown(document.body, { key: "Escape" })
     await waitFor(() => {
@@ -1632,15 +1748,19 @@ describe("KnowledgeBasePage documents tab", () => {
     const documents = [makeDocument({ id: "doc-1", filename: "a.md" })]
     renderDetailPage({ documents })
 
-    fireEvent.click(await screen.findByRole("button", { name: "重新分段 a.md" }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "重新分段 a.md" })
+    )
     const dialog = await screen.findByRole("dialog")
     fireEvent.click(within(dialog).getByText("高级分段"))
 
     openMenu(within(dialog).getByRole("button", { name: /去除行首尾空白/ }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "合并连续空白" }))
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "合并连续空白" })
+    )
     await waitFor(() => {
       expect(
-        within(dialog).getByRole("button", { name: /合并连续空白/ }),
+        within(dialog).getByRole("button", { name: /合并连续空白/ })
       ).toBeTruthy()
     })
   })
@@ -1652,7 +1772,8 @@ describe("KnowledgeBasePage documents tab", () => {
       const method = init?.method ?? "GET"
       if (method === "DELETE") deletes.push(url)
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1676,7 +1797,8 @@ describe("KnowledgeBasePage documents tab", () => {
         return jsonResponse({ detail: "bulk delete boom" }, 500)
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1693,7 +1815,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "bulk delete boom",
+      "bulk delete boom"
     )
   })
 
@@ -1705,7 +1827,8 @@ describe("KnowledgeBasePage documents tab", () => {
         return jsonResponse({ detail: "toggle boom" }, 500)
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1718,7 +1841,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "toggle boom",
+      "toggle boom"
     )
   })
 
@@ -1730,7 +1853,8 @@ describe("KnowledgeBasePage documents tab", () => {
         return jsonResponse({ detail: "parse boom" }, 500)
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1738,7 +1862,9 @@ describe("KnowledgeBasePage documents tab", () => {
     routeParams.id = KB_ID
     renderPage(<KnowledgeBasePage />)
 
-    fireEvent.click(await screen.findByRole("button", { name: "重新分段 a.md" }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "重新分段 a.md" })
+    )
     const dialog = await screen.findByRole("dialog")
     fireEvent.click(within(dialog).getByRole("button", { name: "开始导入" }))
 
@@ -1746,7 +1872,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "parse boom",
+      "parse boom"
     )
   })
 
@@ -1758,7 +1884,8 @@ describe("KnowledgeBasePage documents tab", () => {
         return jsonResponse({ detail: "rebuild boom" }, 500)
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1773,7 +1900,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "rebuild boom",
+      "rebuild boom"
     )
   })
 
@@ -1787,7 +1914,8 @@ describe("KnowledgeBasePage documents tab", () => {
         })
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1802,7 +1930,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "download server error",
+      "download server error"
     )
   })
 
@@ -1814,7 +1942,8 @@ describe("KnowledgeBasePage documents tab", () => {
         return jsonResponse({ detail: "delete doc boom" }, 500)
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse(documents)
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1830,7 +1959,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "delete doc boom",
+      "delete doc boom"
     )
   })
 
@@ -1841,7 +1970,8 @@ describe("KnowledgeBasePage documents tab", () => {
     let documentFetches = 0
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) {
         documentFetches += 1
         return jsonResponse(documents)
@@ -1895,7 +2025,8 @@ describe("KnowledgeBasePage tasks tab", () => {
         return jsonResponse(makeTask({ id: "task-1", status: "queued" }))
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse(tasks)
       return jsonResponse([])
@@ -1915,7 +2046,9 @@ describe("KnowledgeBasePage tasks tab", () => {
 
     const retryButtons = screen.getAllByRole("button", { name: "重试" })
     expect(retryButtons).toHaveLength(2) // failed + queued tasks both render it
-    const enabledRetry = retryButtons.find((button) => !(button as HTMLButtonElement).disabled)
+    const enabledRetry = retryButtons.find(
+      (button) => !(button as HTMLButtonElement).disabled
+    )
     expect(enabledRetry).toBeTruthy()
     fireEvent.click(enabledRetry!)
 
@@ -1931,11 +2064,12 @@ describe("KnowledgeBasePage tasks tab", () => {
       makeTask({
         id: `task-${index}`,
         last_error: `任务记录 ${String(index).padStart(2, "0")}`,
-      }),
+      })
     )
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse(tasks)
       return jsonResponse([])
@@ -1967,10 +2101,13 @@ describe("KnowledgeBasePage tasks tab", () => {
       const method = init?.method ?? "GET"
       if (method === "POST" && url.includes("/rebuild-index")) {
         rebuildCalls.push(url)
-        return jsonResponse(makeTask({ id: "task-rb", task_type: "rebuild_index" }))
+        return jsonResponse(
+          makeTask({ id: "task-rb", task_type: "rebuild_index" })
+        )
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -1985,14 +2122,17 @@ describe("KnowledgeBasePage tasks tab", () => {
     await waitFor(() => {
       expect(rebuildCalls).toHaveLength(1)
     })
-    expect(notifications.some(([, msg]) => msg === "已提交重建索引任务")).toBe(true)
+    expect(notifications.some(([, msg]) => msg === "已提交重建索引任务")).toBe(
+      true
+    )
   })
 
   test("refreshes tasks with the refresh button", async () => {
     let taskCount = 0
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) {
         taskCount += 1
@@ -2015,9 +2155,11 @@ describe("KnowledgeBasePage tasks tab", () => {
   test("notifies when the tasks fetch fails", async () => {
     fetchHandler = (url) => {
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
-      if (url.includes("/tasks")) return jsonResponse({ detail: "tasks down" }, 500)
+      if (url.includes("/tasks"))
+        return jsonResponse({ detail: "tasks down" }, 500)
       return jsonResponse([])
     }
     routeParams.id = KB_ID
@@ -2027,7 +2169,9 @@ describe("KnowledgeBasePage tasks tab", () => {
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
-    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe("tasks down")
+    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
+      "tasks down"
+    )
   })
 
   test("reports errors when retrying a task fails", async () => {
@@ -2048,7 +2192,8 @@ describe("KnowledgeBasePage tasks tab", () => {
         return jsonResponse({ detail: "retry boom" }, 500)
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse(tasks)
       return jsonResponse([])
@@ -2062,7 +2207,7 @@ describe("KnowledgeBasePage tasks tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "retry boom",
+      "retry boom"
     )
   })
 })
@@ -2134,7 +2279,8 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
         })
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2156,27 +2302,37 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
       target: { value: "0.8" },
     })
     const includeReferences = screen.getByLabelText(
-      "扩展文档引用",
+      "扩展文档引用"
     ) as HTMLInputElement
     expect(includeReferences.checked).toBe(true)
-    expect((screen.getByRole("button", { name: "测试召回" }) as HTMLButtonElement).disabled).toBe(
-      false,
-    )
+    expect(
+      (screen.getByRole("button", { name: "测试召回" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false)
     const limitInput = screen.getByLabelText("返回数量") as HTMLInputElement
     fireEvent.change(limitInput, { target: { value: "99" } })
     expect(limitInput.value).toBe("20")
     fireEvent.click(screen.getByRole("button", { name: "测试召回" }))
 
     await waitFor(() => {
-      expect(screen.getByText("guide.md / #1")).toBeTruthy()
+      expect(screen.getAllByRole("button", { name: /guide\.md/ })).toHaveLength(
+        2
+      )
     })
-    expect(screen.getByText("guide.md / #2")).toBeTruthy()
-    expect(screen.getByText("相似度：0.9383")).toBeTruthy()
-    expect(screen.getByText("相似度：-")).toBeTruthy()
-    expect(screen.getByText("分段 ID：chunk-1")).toBeTruthy()
-    expect(screen.getByText("父分段 ID：parent-1")).toBeTruthy()
-    expect(screen.getByText("来源：向量检索、文档引用")).toBeTruthy()
-    expect(screen.getByText("引用跳数：1")).toBeTruthy()
+    const [firstCard, secondCard] = screen.getAllByRole("button", {
+      name: /guide\.md/,
+    })
+    expect(firstCard.getAttribute("aria-haspopup")).toBe("dialog")
+    expect(within(firstCard).getAllByText("#1", { exact: true })).toHaveLength(
+      2
+    )
+    expect(within(firstCard).getByText("相似度：0.9383")).toBeTruthy()
+    expect(within(secondCard).getByText("相似度：-")).toBeTruthy()
+    expect(within(firstCard).getByText("向量检索")).toBeTruthy()
+    expect(within(firstCard).getByText("文档引用")).toBeTruthy()
+    expect(within(firstCard).getByText("引用跳数：1")).toBeTruthy()
+    expect(screen.queryByText("chunk-1", { exact: true })).toBeNull()
+    expect(screen.queryByText("正文内容", { exact: true })).toBeNull()
     expect(screen.getByText("追踪 ID：trace-123")).toBeTruthy()
     expect(screen.getByText("向量候选：4")).toBeTruthy()
     expect(screen.getByText("关键词候选：3")).toBeTruthy()
@@ -2185,8 +2341,6 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     expect(screen.getByText("重排状态：已应用")).toBeTruthy()
     expect(screen.getByText("总耗时：12.345 毫秒")).toBeTruthy()
     expect(screen.queryByText("候选召回：4.5 毫秒")).toBeNull()
-    // Markdown content rendered for the hit body.
-    expect(screen.getByText("正文内容")).toBeTruthy()
     expect(JSON.parse(queryCalls[0].body)).toEqual({
       query: "what is alpha",
       limit: 20,
@@ -2194,6 +2348,39 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
       similarity: 0.8,
       include_references: true,
     })
+
+    fireEvent.click(firstCard)
+    const dialog = await screen.findByRole("dialog")
+    expect(
+      within(dialog).getByRole("heading", { name: "guide.md / #1" })
+    ).toBeTruthy()
+    expect(within(dialog).getByText("chunk-1", { exact: true })).toBeTruthy()
+    expect(within(dialog).getByText("parent-1", { exact: true })).toBeTruthy()
+    expect(within(dialog).getByText("正文内容", { exact: true })).toBeTruthy()
+    expect(dialog.textContent).toContain("相似度：0.9383")
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(firstCard))
+
+    fireEvent.click(secondCard)
+    const secondDialog = await screen.findByRole("dialog")
+    expect(
+      within(secondDialog).getByRole("heading", { name: "guide.md / #2" })
+    ).toBeTruthy()
+    expect(
+      within(secondDialog).getByText("no distance", { exact: true })
+    ).toBeTruthy()
+    expect(secondDialog.textContent).toContain("相似度：-")
+    expect(
+      within(secondDialog).getByText("重排分数", { exact: true })
+    ).toBeTruthy()
+    expect(
+      within(secondDialog).queryByText("parent-1", { exact: true })
+    ).toBeNull()
+    fireEvent.keyDown(document.body, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(secondCard))
 
     // Query limit clamps to 1..20.
     fireEvent.change(limitInput, { target: { value: "0" } })
@@ -2203,9 +2390,11 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
   test("does not submit an empty query", async () => {
     let queryCalls = 0
     fetchHandler = (url, init) => {
-      if (init?.method === "POST" && url.includes("/query/inspect")) queryCalls += 1
+      if (init?.method === "POST" && url.includes("/query/inspect"))
+        queryCalls += 1
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2214,7 +2403,9 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     renderPage(<KnowledgeBasePage />)
 
     fireEvent.click(await screen.findByText("检索评测"))
-    const submit = screen.getByRole("button", { name: "测试召回" }) as HTMLButtonElement
+    const submit = screen.getByRole("button", {
+      name: "测试召回",
+    }) as HTMLButtonElement
     expect(submit.disabled).toBe(true)
     fireEvent.click(submit)
     await waitFor(() => expect(queryCalls).toBe(0))
@@ -2223,9 +2414,11 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
   test("does not submit a whitespace-only query", async () => {
     let queryCalls = 0
     fetchHandler = (url, init) => {
-      if (init?.method === "POST" && url.includes("/query/inspect")) queryCalls += 1
+      if (init?.method === "POST" && url.includes("/query/inspect"))
+        queryCalls += 1
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2247,7 +2440,8 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
         return jsonResponse({ detail: "query failed" }, 500)
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2263,7 +2457,9 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
-    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe("query failed")
+    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
+      "query failed"
+    )
   })
 })
 
@@ -2301,7 +2497,8 @@ describe("KnowledgeBasePage settings tab", () => {
         })
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2327,7 +2524,8 @@ describe("KnowledgeBasePage settings tab", () => {
         return jsonResponse({ detail: "embedding api unreachable" }, 502)
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2368,14 +2566,20 @@ describe("KnowledgeBasePage settings tab", () => {
         return jsonResponse([
           otherMember,
           {
-            user: { ...adminUser, id: "u-admin", name: "NexaFlow Admin", username: "admin" },
+            user: {
+              ...adminUser,
+              id: "u-admin",
+              name: "NexaFlow Admin",
+              username: "admin",
+            },
             role: "admin",
           },
         ])
       }
       if (url.includes("/permissions")) return jsonResponse(grants)
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2390,7 +2594,9 @@ describe("KnowledgeBasePage settings tab", () => {
     expect(within(dialog).getByText("资源授权")).toBeTruthy()
     expect(within(dialog).getByText("Other User")).toBeTruthy()
     // Existing grant shows in the permission list (badge + dropdown trigger).
-    expect(within(dialog).getAllByText("可查看").length).toBeGreaterThanOrEqual(2)
+    expect(within(dialog).getAllByText("可查看").length).toBeGreaterThanOrEqual(
+      2
+    )
 
     // Switch permission to edit and save (the trigger is label-associated 权限).
     openMenu(within(dialog).getByRole("button", { name: "权限" }))
@@ -2426,7 +2632,8 @@ describe("KnowledgeBasePage settings tab", () => {
         return jsonResponse([{ user: otherMember.user, permission: "view" }])
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2441,7 +2648,11 @@ describe("KnowledgeBasePage settings tab", () => {
     // u-other is the first member besides me and becomes the default target.
     expect(within(dialog).getByText("Other User / other")).toBeTruthy()
     expect(
-      (within(dialog).getByRole("button", { name: "保存授权" }) as HTMLButtonElement).disabled,
+      (
+        within(dialog).getByRole("button", {
+          name: "保存授权",
+        }) as HTMLButtonElement
+      ).disabled
     ).toBe(false)
   })
 
@@ -2452,7 +2663,10 @@ describe("KnowledgeBasePage settings tab", () => {
     }
     renderDetailPage({
       knowledgeBases: [
-        makeKnowledgeBase({ permission: "view", created_by_user_id: "u-other" }),
+        makeKnowledgeBase({
+          permission: "view",
+          created_by_user_id: "u-other",
+        }),
       ],
       documents: [],
     })
@@ -2468,7 +2682,9 @@ describe("KnowledgeBasePage settings tab", () => {
 
   test("renders a configured reranker model in settings", async () => {
     renderDetailPage({
-      knowledgeBases: [makeKnowledgeBase({ reranker_model_id: "model-rerank" })],
+      knowledgeBases: [
+        makeKnowledgeBase({ reranker_model_id: "model-rerank" }),
+      ],
       documents: [],
     })
 
@@ -2486,7 +2702,8 @@ describe("KnowledgeBasePage settings tab", () => {
       }
       if (url.includes("/permissions")) return jsonResponse([])
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2500,7 +2717,7 @@ describe("KnowledgeBasePage settings tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "members boom",
+      "members boom"
     )
   })
 
@@ -2515,7 +2732,8 @@ describe("KnowledgeBasePage settings tab", () => {
       }
       if (url.includes("/permissions")) return jsonResponse([])
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2532,7 +2750,7 @@ describe("KnowledgeBasePage settings tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "grant boom",
+      "grant boom"
     )
   })
 
@@ -2549,7 +2767,8 @@ describe("KnowledgeBasePage settings tab", () => {
         return jsonResponse([{ user: otherMember.user, permission: "view" }])
       }
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])
@@ -2566,7 +2785,7 @@ describe("KnowledgeBasePage settings tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "revoke boom",
+      "revoke boom"
     )
   })
 
@@ -2580,7 +2799,8 @@ describe("KnowledgeBasePage settings tab", () => {
       }
       if (url.includes("/permissions")) return jsonResponse([])
       if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
       if (url.includes("/documents")) return jsonResponse([])
       if (url.includes("/tasks")) return jsonResponse([])
       return jsonResponse([])

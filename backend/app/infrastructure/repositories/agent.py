@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import and_, case, delete, func, or_, select, update
+from sqlalchemy import and_, case, delete, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, load_only
@@ -439,6 +439,7 @@ async def list_agent_runs(
     *,
     status: str | None = None,
     conversation_id: str | None = None,
+    latest_versions_only: bool = False,
 ) -> list[AgentRunEntity]:
     statement = (
         select(AgentRun)
@@ -455,6 +456,24 @@ async def list_agent_runs(
         statement = statement.where(AgentRun.status.in_(agent_run_storage_statuses(status)))
     if conversation_id is not None:
         statement = statement.where(AgentRun.conversation_id == conversation_id)
+    if latest_versions_only:
+        successor = aliased(AgentRun)
+        statement = statement.where(
+            (
+                AgentRun.regenerated_from_run_id.is_(None)
+                | AgentRun.status.notin_(
+                    (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
+                )
+            ),
+            ~exists(
+                select(successor.id).where(
+                    successor.regenerated_from_run_id == AgentRun.id,
+                    successor.status.notin_(
+                        (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
+                    ),
+                )
+            )
+        )
     result = await db.scalars(statement)
     return [to_entity(AgentRunEntity, row) for row in result.all()]
 
@@ -466,6 +485,7 @@ async def count_agent_runs(
     access_source: str | None = None,
     consumer_id: str | None = None,
     conversation_id: str | None = None,
+    latest_versions_only: bool = False,
 ) -> int:
     statement = select(func.count()).select_from(AgentRun).where(
         AgentRun.agent_id == agent_id
@@ -476,6 +496,24 @@ async def count_agent_runs(
         statement = statement.where(AgentRun.consumer_id == consumer_id)
     if conversation_id is not None:
         statement = statement.where(AgentRun.conversation_id == conversation_id)
+    if latest_versions_only:
+        successor = aliased(AgentRun)
+        statement = statement.where(
+            (
+                AgentRun.regenerated_from_run_id.is_(None)
+                | AgentRun.status.notin_(
+                    (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
+                )
+            ),
+            ~exists(
+                select(successor.id).where(
+                    successor.regenerated_from_run_id == AgentRun.id,
+                    successor.status.notin_(
+                        (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
+                    ),
+                )
+            )
+        )
     return int(await db.scalar(statement) or 0)
 
 
@@ -570,6 +608,23 @@ async def list_consumer_conversations(
         AgentRun.access_source == access_source,
         AgentRun.consumer_id == consumer_id,
     )
+    successor = aliased(AgentRun)
+    visible = (
+        (
+            AgentRun.regenerated_from_run_id.is_(None)
+            | AgentRun.status.notin_(
+                (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
+            )
+        )
+        & ~exists(
+            select(successor.id).where(
+                successor.regenerated_from_run_id == AgentRun.id,
+                successor.status.notin_(
+                    (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
+                ),
+            )
+        )
+    )
     aggregates = (
         select(
             AgentRun.conversation_id.label("conversation_id"),
@@ -577,7 +632,7 @@ async def list_consumer_conversations(
             func.min(AgentRun.created_at).label("created_at"),
             func.max(AgentRun.updated_at).label("updated_at"),
         )
-        .where(*scope)
+        .where(*scope, visible)
         .group_by(AgentRun.conversation_id)
         .subquery()
     )
@@ -595,7 +650,7 @@ async def list_consumer_conversations(
             )
             .label("rank"),
         )
-        .where(*scope)
+        .where(*scope, visible)
         .subquery()
     )
     result = await db.execute(
@@ -674,6 +729,7 @@ async def list_conversation_memory_runs(
         AgentRun.consumer_id == run.consumer_id,
         AgentRun.conversation_id == run.conversation_id,
     )
+    successor = aliased(AgentRun)
     before_current = or_(
         AgentRun.created_at < run.created_at,
         and_(AgentRun.created_at == run.created_at, AgentRun.id < run.id),
@@ -686,6 +742,14 @@ async def list_conversation_memory_runs(
             AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
             AgentRun.context_summary != "",
             before_current,
+            ~exists(
+                select(successor.id).where(
+                    successor.regenerated_from_run_id == AgentRun.id,
+                    successor.status.notin_(
+                        (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
+                    ),
+                )
+            ),
         )
         .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         .limit(1)
@@ -706,6 +770,14 @@ async def list_conversation_memory_runs(
             *scope,
             AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
             before_current,
+            ~exists(
+                select(successor.id).where(
+                    successor.regenerated_from_run_id == AgentRun.id,
+                    successor.status.notin_(
+                        (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS),
+                    ),
+                )
+            ),
         )
         .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         .limit(limit)

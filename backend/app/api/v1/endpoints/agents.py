@@ -28,9 +28,11 @@ from app.application.agents import (
     list_agent_runs,
     list_agents,
     prepare_agent_run,
+    regenerate_agent_run,
     resolve_workspace_agent_files,
     require_agent_edit,
     resolve_agent_tool_approval,
+    set_agent_run_feedback,
     revoke_agent_api_credential,
     revoke_agent_permission,
     rotate_agent_api_credential,
@@ -54,6 +56,7 @@ from app.schemas.agent import (
     AgentPermissionUpsertRequest,
     AgentRunCreateRequest,
     AgentRunResponse,
+    RunFeedbackRequest,
     AgentToolCallResponse,
     AgentUploadResponse,
     AgentUpdateRequest,
@@ -439,6 +442,44 @@ async def cancel_workspace_agent_run(
         run_id,
         context.user,
         context.membership_role,
+    )
+
+
+@router.post("/{agent_id}/runs/{run_id}/regenerate", response_model=AgentRunResponse)
+async def regenerate_workspace_agent_run(
+    agent_id: str,
+    run_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentRunResponse:
+    return await regenerate_agent_run(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        context.user,
+        context.membership_role,
+        settings,
+    )
+
+
+@router.post("/{agent_id}/runs/{run_id}/feedback", response_model=AgentRunResponse)
+async def set_workspace_agent_run_feedback(
+    agent_id: str,
+    run_id: str,
+    payload: RunFeedbackRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentRunResponse:
+    return await set_agent_run_feedback(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        context.user,
+        context.membership_role,
+        payload.value,
     )
 
 

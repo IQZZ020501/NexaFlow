@@ -3,10 +3,10 @@ import { describe, expect, test } from "bun:test"
 import {
   canAccessWorkspaceAnalytics,
   canManageTeamMembers,
-} from "../components/system/system-utils"
-import type { MeResponse } from "../lib/api/auth"
-import type { Team } from "../lib/api/system"
-import { getMembershipRole, hasWorkspaceMembership } from "../lib/display"
+} from "../src/components/system/system-utils"
+import type { MeResponse } from "../src/lib/api/auth"
+import type { Team } from "../src/lib/api/system"
+import { getMembershipRole, hasWorkspaceMembership } from "../src/lib/display"
 
 const team: Team = {
   id: "team-1",

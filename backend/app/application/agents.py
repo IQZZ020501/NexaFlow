@@ -15,7 +15,9 @@ from app.application.agent_runs import (
     list_agent_runs,
     list_agent_run_tool_calls,
     prepare_agent_run,
+    regenerate_agent_run,
     resolve_agent_tool_approval,
+    set_agent_run_feedback,
     stream_agent_run,
 )
 from app.application.agent_tools import (
@@ -45,6 +47,8 @@ from app.application.agent_access import (
     revoke_agent_api_credential,
     rotate_agent_api_credential,
     resolve_external_agent_tool_approval,
+    regenerate_external_agent_run,
+    set_external_agent_run_feedback,
     stream_external_agent_run,
 )
 from app.application.workflow_uploads import (
@@ -110,13 +114,17 @@ __all__ = [
     "list_public_agent_conversations",
     "mcp_function_name",
     "prepare_agent_run",
+    "regenerate_agent_run",
     "require_agent_edit",
     "resolve_agent_tool_approval",
+    "set_agent_run_feedback",
     "resolve_workspace_agent_files",
     "revoke_agent_api_credential",
     "revoke_agent_permission",
     "rotate_agent_api_credential",
     "resolve_external_agent_tool_approval",
+    "regenerate_external_agent_run",
+    "set_external_agent_run_feedback",
     "run_to_response",
     "safe_agent_error",
     "stream_agent_run",

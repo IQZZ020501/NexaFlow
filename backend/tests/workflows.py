@@ -1807,6 +1807,49 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         ]
         assert nodes.json()["items"][0]["outputs"]["question"] == "release-ready"
         assert nodes.json()["items"][1]["outputs"] == {"value": "release-ready"}
+        draft_feedback = client.post(
+            f"{base}/runs/{run_id}/feedback",
+            headers=headers,
+            json={"value": "positive"},
+        )
+        assert draft_feedback.status_code == 200, draft_feedback.text
+        assert draft_feedback.json()["feedback"] == "positive"
+        draft_feedback_updated_at = draft_feedback.json()["feedback_updated_at"]
+        assert draft_feedback_updated_at
+        repeated_draft_feedback = client.post(
+            f"{base}/runs/{run_id}/feedback",
+            headers=headers,
+            json={"value": "positive"},
+        )
+        assert repeated_draft_feedback.status_code == 200
+        assert (
+            repeated_draft_feedback.json()["feedback_updated_at"]
+            == draft_feedback_updated_at
+        )
+        cross_draft_feedback = client.post(
+            f"{base}/runs/{run_id}/feedback",
+            headers=member_headers,
+            json={"value": "negative"},
+        )
+        assert cross_draft_feedback.status_code == 404, cross_draft_feedback.text
+        regenerated_draft = client.post(
+            f"{base}/runs/{run_id}/regenerate",
+            headers=headers,
+        )
+        assert regenerated_draft.status_code == 200, regenerated_draft.text
+        regenerated_draft_payload = regenerated_draft.json()
+        assert regenerated_draft_payload["status"] == "succeeded"
+        assert regenerated_draft_payload["source"] == "draft"
+        assert regenerated_draft_payload["inputs"] == {"question": "release-ready"}
+        assert regenerated_draft_payload["outputs"] == {"result": "draft-two"}
+        assert regenerated_draft_payload["regenerated_from_run_id"] == run_id
+        assert regenerated_draft_payload["feedback"] is None
+        original_draft = client.get(f"{base}/runs/{run_id}", headers=headers)
+        assert original_draft.status_code == 200
+        assert original_draft.json()["feedback"] == "positive"
+        logical_draft_runs = client.get(f"{base}/runs", headers=headers)
+        assert logical_draft_runs.status_code == 200, logical_draft_runs.text
+        assert logical_draft_runs.json()[0]["id"] == regenerated_draft_payload["id"]
 
         events = client.get(f"{base}/runs/{run_id}/stream", headers=headers)
         assert events.status_code == 200, events.text
@@ -1893,6 +1936,17 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert failed_run.status_code == 201, failed_run.text
         assert failed_run.json()["status"] == "failed"
         assert "reference path not found" in failed_run.json()["last_error"]
+        failed_feedback = client.post(
+            f"{base}/runs/{failed_run.json()['id']}/feedback",
+            headers=headers,
+            json={"value": "negative"},
+        )
+        assert failed_feedback.status_code == 409, failed_feedback.text
+        failed_regeneration = client.post(
+            f"{base}/runs/{failed_run.json()['id']}/regenerate",
+            headers=headers,
+        )
+        assert failed_regeneration.status_code == 409, failed_regeneration.text
         failed_nodes = client.get(
             f"{base}/runs/{failed_run.json()['id']}/nodes", headers=headers
         )
@@ -2069,6 +2123,44 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             "category": "document",
         }
         assert len(public_payload["inputs"]["files"]) == 11
+        public_feedback = client.post(
+            f"/api/v1/public/workflows/{workflow_id}/runs/{public_payload['id']}/feedback",
+            headers=member_headers,
+            json={"value": "negative"},
+        )
+        assert public_feedback.status_code == 200, public_feedback.text
+        assert public_feedback.json()["feedback"] == "negative"
+        cross_public_feedback = client.post(
+            f"/api/v1/public/workflows/{workflow_id}/runs/{public_payload['id']}/feedback",
+            headers=headers,
+            json={"value": "positive"},
+        )
+        assert cross_public_feedback.status_code == 404, cross_public_feedback.text
+        cross_public_regeneration = client.post(
+            f"/api/v1/public/workflows/{workflow_id}/runs/{public_payload['id']}/regenerate",
+            headers=headers,
+        )
+        assert cross_public_regeneration.status_code == 404
+        regenerated_public = client.post(
+            f"/api/v1/public/workflows/{workflow_id}/runs/{public_payload['id']}/regenerate",
+            headers=member_headers,
+        )
+        assert regenerated_public.status_code == 200, regenerated_public.text
+        regenerated_public_payload = regenerated_public.json()
+        assert regenerated_public_payload["status"] == "succeeded"
+        assert regenerated_public_payload["inputs"] == public_payload["inputs"]
+        assert regenerated_public_payload["outputs"] == public_payload["outputs"]
+        assert regenerated_public_payload["regenerated_from_run_id"] == public_payload["id"]
+        assert regenerated_public_payload["feedback"] is None
+        logical_public_runs = client.get(
+            f"/api/v1/public/workflows/{workflow_id}/runs"
+            f"?conversation_id={public_payload['conversation_id']}",
+            headers=member_headers,
+        )
+        assert logical_public_runs.status_code == 200, logical_public_runs.text
+        assert [item["id"] for item in logical_public_runs.json()["items"]] == [
+            regenerated_public_payload["id"]
+        ]
         reused_upload = client.post(
             f"/api/v1/public/workflows/{workflow_id}/runs",
             headers=member_headers,

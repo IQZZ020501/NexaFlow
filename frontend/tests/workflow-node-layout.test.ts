@@ -10,38 +10,38 @@ function expectStringArray(text: string, values: string[], negated = false) {
 }
 
 const source = readFileSync(
-  join(import.meta.dir, "../components/workflows/workflow-node.tsx"),
+  join(import.meta.dir, "../src/components/workflows/workflow-node.tsx"),
   "utf8"
 )
 const graphSource = readFileSync(
-  join(import.meta.dir, "../lib/workflows/graph.ts"),
+  join(import.meta.dir, "../src/lib/workflows/graph.ts"),
   "utf8"
 )
 const canvasSource = readFileSync(
-  join(import.meta.dir, "../components/workflows/workflow-canvas.tsx"),
+  join(import.meta.dir, "../src/components/workflows/workflow-canvas.tsx"),
   "utf8"
 )
 const paletteSource = readFileSync(
-  join(import.meta.dir, "../components/workflows/workflow-node-palette.tsx"),
+  join(import.meta.dir, "../src/components/workflows/workflow-node-palette.tsx"),
   "utf8"
 )
 const detailSource = readFileSync(
   join(
     import.meta.dir,
-    "../components/workflows/workflow-detail-workspace.tsx"
+    "../src/components/workflows/workflow-detail-workspace.tsx"
   ),
   "utf8"
 )
 const publicChatSource = readFileSync(
-  join(import.meta.dir, "../components/workflows/public-workflow-chat.tsx"),
+  join(import.meta.dir, "../src/components/workflows/public-workflow-chat.tsx"),
   "utf8"
 )
 const appConfigSource = readFileSync(
-  join(import.meta.dir, "../components/agents/agent-config-fields.tsx"),
+  join(import.meta.dir, "../src/components/agents/agent-config-fields.tsx"),
   "utf8"
 )
 const agentsPageSource = readFileSync(
-  join(import.meta.dir, "../components/agents/agents-page.tsx"),
+  join(import.meta.dir, "../src/components/agents/agents-page.tsx"),
   "utf8"
 )
 

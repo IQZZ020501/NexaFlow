@@ -127,13 +127,13 @@ Correctness, safety, evidence, and validation take priority over speed.
   deployments must trust MCP-managing admins with backend process-level code
   execution.
 - `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
-  and Tailwind CSS. Pages live under the `app/` route groups `(auth)`,
+  and Tailwind CSS. Pages live under the `src/app/` route groups `(auth)`,
   `(platform)`, `(dashboard)`, and `(public)` (anonymous share pages for
-  published agents and Agent API docs); shared components in `components/`,
-  providers in `contexts/`, trilingual dictionaries in `i18n/`, and feature
-  API modules in `lib/api/`.
+  published agents and Agent API docs); shared components in `src/components/`,
+  providers in `src/contexts/`, trilingual dictionaries in `src/i18n/`, and
+  feature API modules in `src/lib/api/`.
 - Every new user-navigable frontend page must have a stable App Router entry
-  under `frontend/app/`; do not leave navigation-level views only in component
+  under `frontend/src/app/`; do not leave navigation-level views only in component
   state. Dialogs and responsive panels remain component states unless they are
   intentionally promoted to pages.
 - `sandbox/` is a standard-library Python execution service for Workflow code
@@ -300,8 +300,8 @@ broad. Never claim a check passed unless it completed successfully.
   `bun test --parallel` (per-file isolation is required: happy-dom state leaks
   between files in serial mode). DOM-level page tests use the happy-dom
   preload in `frontend/bunfig.toml` and helpers in `frontend/tests/helpers/dom.tsx`;
-  new DOM test files must start with `/* @jsxImportSource react */` because
-  `tsconfig.json` uses `jsx: preserve`.
+  new DOM test files keep the existing `/* @jsxImportSource react */` header;
+  Next.js 16 configures `tsconfig.json` with the `react-jsx` runtime.
 - `backend/` changes: use the project's Python tooling. Run `compileall` over the
   touched packages, then run the affected suite from `backend/` with
   `uv run python -m tests.<suite>` (unit, logger, identity, workspaces, teams,

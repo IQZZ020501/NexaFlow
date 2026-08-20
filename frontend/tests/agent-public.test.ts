@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { appViewPath, parseAgentDetailView } from "../lib/agent-views"
+import { appViewPath, parseAgentDetailView } from "../src/lib/agent-views"
 import {
   cancelPublicAgentStream,
   mergePublicRunEvent,
-} from "../components/agents/public-agent-chat"
+} from "../src/components/agents/public-agent-chat"
 import {
   initializePublicAgent,
   observePublicAgentRun,
-} from "../lib/api/public-agents"
-import { getAgent, getAgentApiDocumentation } from "../lib/api/agents"
+} from "../src/lib/api/public-agents"
+import { getAgent, getAgentApiDocumentation } from "../src/lib/api/agents"
 
 const originalFetch = globalThis.fetch
 const originalSetTimeout = globalThis.setTimeout
@@ -452,7 +452,7 @@ describe("public agent API", () => {
     }) as unknown as typeof fetch
 
     const events: string[] = []
-    const response = await import("../lib/api/public-agents")
+    const response = await import("../src/lib/api/public-agents")
     await response.streamPublicAgentRun("agent-1", "access-token", "hello", (event) =>
       events.push(event.type)
     )
@@ -527,7 +527,7 @@ describe("public agent API", () => {
       )) as unknown as typeof fetch
     const events: string[] = []
 
-    const response = await import("../lib/api/public-agents")
+    const response = await import("../src/lib/api/public-agents")
     await response.streamPublicAgentRun(
       "agent-1",
       "access-token",

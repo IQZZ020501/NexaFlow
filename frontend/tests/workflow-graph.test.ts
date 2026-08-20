@@ -15,7 +15,7 @@ import {
   workflowExecutionNodeLabel,
   workflowGraphSignature,
   workflowNodeLabel,
-} from "../lib/workflows/graph"
+} from "../src/lib/workflows/graph"
 import {
   applyWorkflowEdgeChanges,
   applyWorkflowNodeChanges,
@@ -25,7 +25,7 @@ import {
   persistedWorkflowViewport,
   viewportIncludingCanvasX,
   workflowNodeRects,
-} from "../lib/workflows/canvas"
+} from "../src/lib/workflows/canvas"
 
 describe("workflow graph", () => {
   test("presents workflow execution details in the active language", () => {

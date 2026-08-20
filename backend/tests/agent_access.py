@@ -1469,7 +1469,13 @@ async def seed_runs_for_logs_and_monitoring(
         await db.execute(
             update(AgentRunOrm)
             .where(AgentRunOrm.id == succeeded.id)
-            .values(status="succeeded", model_usage={"total_tokens": 120})
+            .values(
+                status="succeeded",
+                result="Monitor answer",
+                model_usage={"total_tokens": 120},
+                feedback="positive",
+                feedback_updated_at=utc_now(),
+            )
         )
         await db.execute(
             update(AgentRunOrm)
@@ -1937,6 +1943,12 @@ def assert_http_external_access() -> None:
             assert any(
                 name and not name.startswith(("Visitor ", "API Key"))
                 for name in display_names
+            )
+            assert any(item["feedback"] == "positive" for item in logs.json()["items"])
+            assert any(
+                item["feedback_updated_at"]
+                for item in logs.json()["items"]
+                if item["feedback"] == "positive"
             )
 
             # ---- conversation-users (1042-1043, 1065) ----

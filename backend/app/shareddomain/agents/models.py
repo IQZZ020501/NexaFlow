@@ -375,6 +375,12 @@ class AgentRun(Base):
             name="fk_agent_runs_parent_workspace",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "regenerated_from_run_id"],
+            ["agent_runs.workspace_id", "agent_runs.id"],
+            name="fk_agent_runs_regenerated_from",
+            ondelete="SET NULL",
+        ),
         CheckConstraint(
             "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'awaiting_child', 'queued_v2', 'running_v2', 'awaiting_approval_v2', 'awaiting_input_v2', 'awaiting_child_v2', 'succeeded', 'failed', 'cancelled')",
             name="ck_agent_runs_status",
@@ -403,6 +409,10 @@ class AgentRun(Base):
         CheckConstraint(
             "access_source IN ('console', 'public', 'api')",
             name="ck_agent_runs_access_source",
+        ),
+        CheckConstraint(
+            "feedback IS NULL OR feedback IN ('positive', 'negative')",
+            name="ck_agent_runs_feedback",
         ),
         CheckConstraint(
             "configuration_source IN ('draft', 'published', 'legacy')",
@@ -476,6 +486,11 @@ class AgentRun(Base):
         String(36), nullable=True, index=True
     )
     parent_node_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    regenerated_from_run_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True,
+    )
     depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     goal: Mapped[str] = mapped_column(Text, nullable=False)
     attachment_context: Mapped[str] = mapped_column(
@@ -527,6 +542,10 @@ class AgentRun(Base):
     )
     grounding_meta: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
+    )
+    feedback: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    feedback_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     trace_id: Mapped[str] = mapped_column(
         String(36), nullable=False, default="", server_default=""

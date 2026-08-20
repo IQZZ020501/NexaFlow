@@ -6,7 +6,7 @@
   <p>
     <a href="https://github.com/IQZZ020501/NexaFlow/actions/workflows/ci.yml"><img src="https://github.com/IQZZ020501/NexaFlow/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
     <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB" alt="Python 3.11+" />
-    <img src="https://img.shields.io/badge/Next.js-15-000000" alt="Next.js 15" />
+    <img src="https://img.shields.io/badge/Next.js-16-000000" alt="Next.js 15" />
     <a href="https://coderabbit.ai"><img src="https://img.shields.io/coderabbit/prs/github/IQZZ020501/NexaFlow?utm_source=oss&amp;utm_medium=github&amp;utm_campaign=IQZZ020501%2FNexaFlow&amp;labelColor=171717&amp;color=FF570A&amp;link=https%3A%2F%2Fcoderabbit.ai&amp;label=CodeRabbit+Reviews" alt="CodeRabbit Pull Request Reviews" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue" alt="GPLv3 license" /></a>
   </p>
