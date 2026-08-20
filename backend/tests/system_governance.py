@@ -101,6 +101,13 @@ def main() -> None:
         assert generic_payload["invite_url"].endswith("?mode=generic")
         generic_token = generic_payload["token"]
 
+        generic_admin = client.post(
+            f"/api/v1/workspaces/{workspace_id}/invitations",
+            headers=admin_headers,
+            json={"kind": "generic", "role": "admin"},
+        )
+        assert generic_admin.status_code == 422, generic_admin.text
+
         missing_identity = client.post(
             "/api/v1/auth/invitations/accept",
             json={"token": generic_token, "password": ADMIN_PASSWORD},

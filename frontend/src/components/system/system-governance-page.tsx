@@ -469,7 +469,11 @@ function GovernancePanel() {
               <FilterDropdown
                 className="h-9 w-full"
                 value={invite.kind}
-                onChange={(kind) => setInvite((current) => ({ ...current, kind: kind as WorkspaceInvitationKind }))}
+                onChange={(kind) => setInvite((current) => ({
+                  ...current,
+                  kind: kind as WorkspaceInvitationKind,
+                  role: kind === "generic" ? "member" : current.role,
+                }))}
                 ariaLabel={t("邀请方式")}
                 options={[
                   { value: "personal", label: t("指定成员") },
@@ -479,7 +483,7 @@ function GovernancePanel() {
             </label>
             <label className="grid gap-1 text-sm">
               <span>{t("角色")}</span>
-              <FilterDropdown className="h-9 w-full" value={invite.role} onChange={(role) => setInvite((current) => ({ ...current, role }))} ariaLabel={t("角色")} options={[{ value: "member", label: t("成员") }, ...(session.me?.user.is_global_admin ? [{ value: "admin", label: t("工作空间管理员") }] : [])]} />
+              <FilterDropdown className="h-9 w-full" value={invite.role} onChange={(role) => setInvite((current) => ({ ...current, role }))} ariaLabel={t("角色")} options={[{ value: "member", label: t("成员") }, ...(invite.kind === "personal" && session.me?.user.is_global_admin ? [{ value: "admin", label: t("工作空间管理员") }] : [])]} />
             </label>
             {invite.kind === "personal" ? (
               <>

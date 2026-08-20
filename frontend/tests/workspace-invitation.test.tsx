@@ -25,7 +25,11 @@ afterEach(() => cleanup())
 describe("workspace invitations", () => {
   test("accepts account details from a reusable invitation", async () => {
     let requestBody: unknown = null
-    withFetch((_url, init) => {
+    let requestUrl = ""
+    let requestMethod = ""
+    withFetch((url, init) => {
+      requestUrl = url
+      requestMethod = init?.method ?? ""
       requestBody = JSON.parse(String(init?.body)) as Record<string, string>
       return jsonResponse({
         id: "user-2",
@@ -57,6 +61,8 @@ describe("workspace invitations", () => {
       email: "new-member@example.com",
       name: "New Member",
     })
+    expect(requestUrl).toBe("/api/v1/auth/invitations/accept")
+    expect(requestMethod).toBe("POST")
   })
 
   test("shows and submits a reusable invitation as a full URL", async () => {
@@ -65,62 +71,81 @@ describe("workspace invitations", () => {
     }
     testWindow.happyDOM.setURL("https://nexaflow.example/system/governance")
     let createBody: unknown = null
-    withFetch((url, init) => {
-      if (url.endsWith("/inventory")) {
-        return jsonResponse({
-          workspace_id: "ws-1",
-          members_total: 1,
-          teams_total: 0,
-          agents_total: 0,
-          knowledge_bases_total: 0,
-          models_total: 0,
-          tools_total: 0,
-          workflows_total: 0,
-          active_runs: 0,
-          failed_runs_24h: 0,
-          failed_tasks_24h: 0,
-        })
-      }
-      if (url.endsWith("/governance")) {
-        return jsonResponse({
-          workspace_id: "ws-1",
-          daily_run_limit: null,
-          monthly_token_limit: null,
-          alert_threshold_percent: 80,
-          retention_days: null,
-          timezone: "UTC",
-          updated_at: "2026-08-20T00:00:00Z",
-        })
-      }
-      if (url.endsWith("/invitations") && init?.method === "POST") {
-        createBody = JSON.parse(String(init.body)) as Record<string, string>
-        return jsonResponse({
-          id: "invitation-1",
-          workspace_id: "ws-1",
-          kind: "generic",
-          username: null,
-          email: null,
-          name: null,
-          role: "member",
-          expires_at: "2026-08-27T00:00:00Z",
-          accepted_at: null,
-          created_at: "2026-08-20T00:00:00Z",
-          token: "reusable-token",
-          invite_url: "/invite/reusable-token?mode=generic",
-        }, 201)
-      }
-      if (url.endsWith("/invitations")) return jsonResponse([])
-      throw new Error(`Unexpected request: ${url}`)
+    const originalClipboard = navigator.clipboard
+    let copiedValue = ""
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async (value: string) => {
+          copiedValue = value
+        },
+      },
+      configurable: true,
     })
+    try {
+      withFetch((url, init) => {
+        if (url.endsWith("/inventory")) {
+          return jsonResponse({
+            workspace_id: "ws-1",
+            members_total: 1,
+            teams_total: 0,
+            agents_total: 0,
+            knowledge_bases_total: 0,
+            models_total: 0,
+            tools_total: 0,
+            workflows_total: 0,
+            active_runs: 0,
+            failed_runs_24h: 0,
+            failed_tasks_24h: 0,
+          })
+        }
+        if (url.endsWith("/governance")) {
+          return jsonResponse({
+            workspace_id: "ws-1",
+            daily_run_limit: null,
+            monthly_token_limit: null,
+            alert_threshold_percent: 80,
+            retention_days: null,
+            timezone: "UTC",
+            updated_at: "2026-08-20T00:00:00Z",
+          })
+        }
+        if (url.endsWith("/invitations") && init?.method === "POST") {
+          createBody = JSON.parse(String(init.body)) as Record<string, string>
+          return jsonResponse({
+            id: "invitation-1",
+            workspace_id: "ws-1",
+            kind: "generic",
+            username: null,
+            email: null,
+            name: null,
+            role: "member",
+            expires_at: "2026-08-27T00:00:00Z",
+            accepted_at: null,
+            created_at: "2026-08-20T00:00:00Z",
+            token: "reusable-token",
+            invite_url: "/invite/reusable-token?mode=generic",
+          }, 201)
+        }
+        if (url.endsWith("/invitations")) return jsonResponse([])
+        throw new Error(`Unexpected request: ${url}`)
+      })
 
-    renderPage(<SystemGovernancePage section="governance" />)
-    await waitFor(() => expect(screen.getByRole("button", { name: "邀请方式" })).toBeTruthy())
-    fireEvent.pointerDown(screen.getByRole("button", { name: "邀请方式" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "通用邀请" }))
-    fireEvent.click(screen.getByRole("button", { name: "生成邀请链接" }))
+      renderPage(<SystemGovernancePage section="governance" />)
+      await waitFor(() => expect(screen.getByRole("button", { name: "邀请方式" })).toBeTruthy())
+      fireEvent.pointerDown(screen.getByRole("button", { name: "邀请方式" }))
+      fireEvent.click(await screen.findByRole("menuitem", { name: "通用邀请" }))
+      fireEvent.click(screen.getByRole("button", { name: "生成邀请链接" }))
 
-    const expectedUrl = `${window.location.origin}/invite/reusable-token?mode=generic`
-    await waitFor(() => expect(screen.getByDisplayValue(expectedUrl)).toBeTruthy())
-    expect(createBody).toEqual({ kind: "generic", role: "member" })
+      const expectedUrl = `${window.location.origin}/invite/reusable-token?mode=generic`
+      await waitFor(() => expect(screen.getByDisplayValue(expectedUrl)).toBeTruthy())
+      expect(createBody).toEqual({ kind: "generic", role: "member" })
+      fireEvent.click(screen.getByRole("button", { name: "复制链接" }))
+      await waitFor(() => expect(copiedValue).toBe(expectedUrl))
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        value: originalClipboard,
+        configurable: true,
+      })
+    }
   })
 })

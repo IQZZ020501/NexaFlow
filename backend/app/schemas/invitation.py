@@ -19,6 +19,8 @@ class WorkspaceInvitationCreateRequest(BaseModel):
             raise ValueError("Personal invitations require username, email, and name.")
         if self.kind == "generic" and any(value is not None for value in details):
             raise ValueError("Generic invitations cannot specify a recipient.")
+        if self.kind == "generic" and self.role == "admin":
+            raise ValueError("Generic invitations can only assign the member role.")
         return self
 
 
