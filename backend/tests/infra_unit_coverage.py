@@ -2536,6 +2536,7 @@ def test_celery() -> None:
     beat = app.conf.beat_schedule
     assert set(beat) == {
         "recover-knowledge-tasks",
+        "reconcile-knowledge-graphs",
         "recover-knowledge-storage-cleanups",
         "recover-upload-storage-cleanups",
         "recover-agent-runs",
@@ -2544,6 +2545,10 @@ def test_celery() -> None:
         "recover-email-deliveries",
     }
     assert beat["recover-knowledge-tasks"]["schedule"] == 30.0
+    assert beat["reconcile-knowledge-graphs"] == {
+        "task": "app.knowledge.reconcile_graphs",
+        "schedule": 60.0,
+    }
     assert beat["recover-agent-runs"]["schedule"] == 30.0
     assert beat["recover-tool-invocations"] == {
         "task": "app.tools.recover",

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application import knowledge_graph as knowledge_graph_application
 from app.entities.knowledge import (
+    DOCUMENT_INDEXED_STATUS,
     TASK_GRAPH_REBUILD,
     TASK_GRAPH_SYNC,
     KnowledgeBase,
@@ -30,6 +31,7 @@ from app.entities.knowledge_graph import (
 )
 from app.entities.user import User
 from app.infrastructure.config import Settings
+from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import knowledge as knowledge_repository
 from app.infrastructure.repositories import knowledge_graph as graph_repository
 from app.infrastructure.repositories import knowledge_reference as reference_repository
@@ -78,6 +80,13 @@ PROFILE_TIMEOUT_SECONDS = 90
 class _EntityProfileResponse(BaseModel):
     profile_markdown: str = Field(min_length=1, max_length=20_000)
     claim_ids: list[str] = Field(default_factory=list, max_length=500)
+
+
+def graph_document_source_version(document: KnowledgeDocument) -> str:
+    meta = document.meta or {}
+    version = int(meta.get("document_version") or 0)
+    content_hash = str(meta.get("normalized_content_hash") or "")
+    return f"{version}:{content_hash}:{int(document.is_active)}:{document.status}"
 
 
 def _stable_id(kind: str, *parts: str) -> str:
@@ -1027,6 +1036,7 @@ async def mark_profile_index_ready(
         **(revision.stats_json or {}),
         "profile_repair_pending": False,
         "profile_repair_entity_ids": [],
+        "profile_repaired_at": utc_now().isoformat(),
     }
     await graph_repository.save_revision(db, revision)
     await db.commit()
@@ -1170,6 +1180,15 @@ async def run_graph_build_task(
         if active_revision is not None
         else ""
     )
+    source_documents = await graph_repository.list_graph_source_documents(
+        db,
+        knowledge_base,
+    )
+    source_versions = {
+        document.id: graph_document_source_version(document)
+        for document in source_documents
+        if document.status == DOCUMENT_INDEXED_STATUS and document.is_active
+    }
     chunks = await graph_repository.list_graph_source_chunks(
         db,
         knowledge_base,
@@ -1199,6 +1218,12 @@ async def run_graph_build_task(
             default=task.created_at.isoformat(),
         ),
     )
+    revision.stats_json = {
+        **(revision.stats_json or {}),
+        "task_id": task.id,
+        "source_versions": source_versions,
+    }
+    await graph_repository.save_revision(db, revision)
     task.total_items = len(chunks)
     task.processed_items = 0
     await knowledge_repository.save_knowledge_task(db, task)
@@ -1318,11 +1343,17 @@ async def run_graph_build_task(
             embedding_model,
             profiles,
         )
+        profile_entity_ids = {profile.entity_id for profile in profiles}
+        profile_delete_entity_ids = sorted(
+            affected_entities - profile_entity_ids
+        )
         revision.stats_json = {
             **(revision.stats_json or {}),
             "profile_embedding_model_id": embedding_model.id,
             "profile_repair_entity_ids": sorted(affected_entities),
             "profile_repair_pending": True,
+            "profile_delete_entity_ids": profile_delete_entity_ids,
+            "profile_delete_pending": bool(profile_delete_entity_ids),
         }
         await graph_repository.save_revision(db, revision)
         await publish_revision(db, knowledge_base, revision)

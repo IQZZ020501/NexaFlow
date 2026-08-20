@@ -1008,6 +1008,23 @@ async def get_queued_graph_rebuild(
     return to_entity(KnowledgeTask, row) if row else None
 
 
+async def get_running_graph_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> KnowledgeTask | None:
+    row = await db.scalar(
+        select(KnowledgeTaskORM)
+        .where(
+            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeTaskORM.task_type.in_(["graph_sync", "graph_rebuild"]),
+            KnowledgeTaskORM.status == TASK_RUNNING_STATUS,
+        )
+        .order_by(KnowledgeTaskORM.created_at, KnowledgeTaskORM.id)
+    )
+    return to_entity(KnowledgeTask, row) if row else None
+
+
 async def renew_knowledge_task_lease(
     db: AsyncSession,
     task_id: str,

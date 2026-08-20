@@ -4,6 +4,7 @@ import os
 
 from app.application.knowledge_evaluation import run_evaluation_task
 from app.application.knowledge_graph_build import run_graph_build_task
+from app.application.knowledge_graph_maintenance import reconcile_knowledge_graphs
 from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
@@ -77,6 +78,18 @@ def recover_knowledge_tasks_job() -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
     task_ids = asyncio.run(list_recoverable_knowledge_task_ids(settings))
+    for task_id in task_ids:
+        run_knowledge_task_job.apply_async(args=(task_id,))
+
+
+@celery_app.task(
+    name="app.knowledge.reconcile_graphs",
+    ignore_result=True,
+)
+def reconcile_knowledge_graphs_job() -> None:
+    settings = Settings.from_env(require_bootstrap=False)
+    configure_task_worker(settings)
+    task_ids = asyncio.run(reconcile_knowledge_graphs(settings))
     for task_id in task_ids:
         run_knowledge_task_job.apply_async(args=(task_id,))
 

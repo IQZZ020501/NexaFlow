@@ -18,10 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import (
     DOCUMENT_DELETED_STATUS,
+    DOCUMENT_INDEXED_STATUS,
+    DOCUMENT_STAGED_META_KEY,
     KnowledgeBase,
+    KnowledgeDocument,
     KnowledgeDocumentChunk,
 )
 from app.entities.knowledge_graph import (
+    GRAPH_REVISION_BUILDING,
     GRAPH_SCHEMA_ACTIVE,
     GRAPH_SCHEMA_RETIRED,
     KnowledgeGraphAlias,
@@ -272,6 +276,55 @@ async def get_latest_revision(
     return to_entity(KnowledgeGraphRevision, row) if row else None
 
 
+async def list_profile_maintenance_revisions(
+    db: AsyncSession,
+    limit: int = 100,
+) -> list[KnowledgeGraphRevision]:
+    if limit <= 0:
+        return []
+    rows = await db.scalars(
+        select(KnowledgeGraphRevisionORM)
+        .where(
+            or_(
+                KnowledgeGraphRevisionORM.stats_json[
+                    "profile_repair_pending"
+                ].as_boolean().is_(True),
+                KnowledgeGraphRevisionORM.stats_json[
+                    "profile_delete_pending"
+                ].as_boolean().is_(True),
+            )
+        )
+        .order_by(
+            KnowledgeGraphRevisionORM.updated_at,
+            KnowledgeGraphRevisionORM.id,
+        )
+        .limit(limit)
+    )
+    return [to_entity(KnowledgeGraphRevision, row) for row in rows.all()]
+
+
+async def list_stale_building_revisions(
+    db: AsyncSession,
+    updated_before: datetime,
+    limit: int = 100,
+) -> list[KnowledgeGraphRevision]:
+    if limit <= 0:
+        return []
+    rows = await db.scalars(
+        select(KnowledgeGraphRevisionORM)
+        .where(
+            KnowledgeGraphRevisionORM.status == GRAPH_REVISION_BUILDING,
+            KnowledgeGraphRevisionORM.updated_at < updated_before,
+        )
+        .order_by(
+            KnowledgeGraphRevisionORM.updated_at,
+            KnowledgeGraphRevisionORM.id,
+        )
+        .limit(limit)
+    )
+    return [to_entity(KnowledgeGraphRevision, row) for row in rows.all()]
+
+
 async def lock_revision_by_id(
     db: AsyncSession,
     revision_id: str,
@@ -320,6 +373,20 @@ async def lock_knowledge_base_graph(
         .with_for_update()
     )
     return to_entity(KnowledgeBase, row) if row else None
+
+
+async def list_graph_enabled_knowledge_bases(
+    db: AsyncSession,
+) -> list[KnowledgeBase]:
+    rows = await db.scalars(
+        select(KnowledgeBaseORM)
+        .where(
+            KnowledgeBaseORM.status == "active",
+            KnowledgeBaseORM.graph_enabled.is_(True),
+        )
+        .order_by(KnowledgeBaseORM.id)
+    )
+    return [to_entity(KnowledgeBase, row) for row in rows.all()]
 
 
 async def save_knowledge_base_graph_fields(
@@ -1039,6 +1106,41 @@ async def list_graph_source_chunks(
         )
     )
     return [to_entity(KnowledgeDocumentChunk, row) for row in rows.all()]
+
+
+async def list_graph_source_documents(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> list[KnowledgeDocument]:
+    rows = await db.scalars(
+        select(KnowledgeDocumentORM)
+        .where(
+            KnowledgeDocumentORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocumentORM.status == DOCUMENT_INDEXED_STATUS,
+            KnowledgeDocumentORM.is_active.is_(True),
+            KnowledgeDocumentORM.meta[
+                DOCUMENT_STAGED_META_KEY
+            ].as_boolean().is_not(True),
+        )
+        .order_by(KnowledgeDocumentORM.id)
+    )
+    return [to_entity(KnowledgeDocument, row) for row in rows.all()]
+
+
+async def current_graph_source_versions(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for document in await list_graph_source_documents(db, knowledge_base):
+        meta = document.meta or {}
+        versions[document.id] = (
+            f"{int(meta.get('document_version') or 0)}:"
+            f"{str(meta.get('normalized_content_hash') or '')}:"
+            f"{int(document.is_active)}:{document.status}"
+        )
+    return versions
 
 
 async def save_evidence(

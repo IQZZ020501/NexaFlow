@@ -11,7 +11,10 @@ from app.infrastructure.config import Settings
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import knowledge as knowledge_repository
 from app.infrastructure.session import get_session_factory
-from app.ports.vector_store import delete_vector_collection
+from app.ports.vector_store import (
+    delete_graph_profile_collection,
+    delete_vector_collection,
+)
 from app.shareddomain.knowledge.documents import knowledge_object_storage
 from app.shareddomain.knowledge.permissions import RESOURCE_TYPE
 
@@ -21,10 +24,18 @@ async def purge_knowledge_base_storage(
     workspace_id: str,
     knowledge_base_id: str,
 ) -> None:
-    await asyncio.to_thread(delete_vector_collection, settings, knowledge_base_id)
-    await asyncio.to_thread(
-        knowledge_object_storage(settings).delete_prefix,
-        f"{workspace_id}/{knowledge_base_id}",
+    storage = knowledge_object_storage(settings)
+    await asyncio.gather(
+        asyncio.to_thread(delete_vector_collection, settings, knowledge_base_id),
+        asyncio.to_thread(
+            delete_graph_profile_collection,
+            settings,
+            knowledge_base_id,
+        ),
+        asyncio.to_thread(
+            storage.delete_prefix,
+            f"{workspace_id}/{knowledge_base_id}",
+        ),
     )
 
 

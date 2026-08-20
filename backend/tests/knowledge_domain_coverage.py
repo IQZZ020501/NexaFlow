@@ -74,6 +74,7 @@ from app.tasks.knowledge import (
     enqueue_knowledge_storage_cleanup,
     enqueue_knowledge_task,
     recover_knowledge_tasks_job,
+    reconcile_knowledge_graphs_job,
     enqueue_upload_storage_cleanups,
     recover_knowledge_storage_cleanups_job,
     recover_upload_storage_cleanups_job,
@@ -3090,6 +3091,23 @@ def run_celery_job_tests(
     assert [call.kwargs for call in apply_async.call_args_list] == [
         {"args": ("task-recover-1",)},
         {"args": ("task-recover-2",)},
+    ]
+
+    with (
+        patch.object(
+            knowledge_tasks_module,
+            "reconcile_knowledge_graphs",
+            new=AsyncMock(return_value=["graph-task-1", "graph-task-2"]),
+        ),
+        patch.object(
+            knowledge_tasks_module.run_knowledge_task_job,
+            "apply_async",
+        ) as apply_async,
+    ):
+        reconcile_knowledge_graphs_job()
+    assert [call.kwargs for call in apply_async.call_args_list] == [
+        {"args": ("graph-task-1",)},
+        {"args": ("graph-task-2",)},
     ]
 
     # run_knowledge_storage_cleanup_job: success

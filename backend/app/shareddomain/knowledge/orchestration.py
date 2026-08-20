@@ -10,7 +10,7 @@ from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
 from app.infrastructure.logger import get_logger
-from app.infrastructure.model_utils import new_id
+from app.infrastructure.model_utils import new_id, utc_now
 from app.entities.user import User
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.entities.knowledge import (
@@ -35,6 +35,7 @@ from app.entities.knowledge import (
     TASK_PARSE,
     TASK_QUEUED_STATUS,
     TASK_REBUILD_INDEX,
+    TASK_RUNNING_STATUS,
     TASK_SUCCEEDED_STATUS,
     KnowledgeAsset,
     KnowledgeBase,
@@ -576,7 +577,21 @@ async def create_knowledge_task(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
     require_knowledge_base_active(knowledge_base)
     document_id = document.id if document else None
-    if await get_conflicting_open_task(db, knowledge_base, task_type, document_id) is not None:
+    task_options = options or {}
+    conflict = await get_conflicting_open_task(
+        db,
+        knowledge_base,
+        task_type,
+        document_id,
+    )
+    follows_running_graph = (
+        conflict is not None
+        and task_type == TASK_GRAPH_REBUILD
+        and conflict.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
+        and conflict.status == TASK_RUNNING_STATUS
+        and task_options.get("follower_of_task_id") == conflict.id
+    )
+    if conflict is not None and not follows_running_graph:
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
     if (
         task_type == TASK_INDEX
@@ -604,7 +619,6 @@ async def create_knowledge_task(
             )
 
     total_items = 0
-    task_options = options or {}
     if task_type == TASK_INDEX and document is not None:
         chunks = await knowledge_base_repository.list_document_chunks(db, knowledge_base, document.id)
         if not chunks:
@@ -681,7 +695,7 @@ async def create_knowledge_task(
             knowledge_base,
             statuses={CHUNK_INDEXED_STATUS},
         )
-        if not chunks:
+        if not chunks and knowledge_base.active_graph_revision_id is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Knowledge base has no indexed chunks.",
@@ -844,21 +858,49 @@ async def enqueue_graph_rebuild(
     knowledge_base: KnowledgeBase,
     actor: User,
 ) -> KnowledgeTask:
-    queued = await knowledge_base_repository.get_queued_graph_rebuild(
+    locked = await knowledge_base_repository.lock_knowledge_base(
         db,
         knowledge_base,
     )
+    if locked is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    queued = await knowledge_base_repository.get_queued_graph_rebuild(
+        db,
+        locked,
+    )
+    queued_sync = await knowledge_base_repository.get_queued_graph_sync(db, locked)
     if queued is not None:
+        if queued_sync is not None:
+            queued_sync.status = TASK_SUCCEEDED_STATUS
+            queued_sync.last_error = f"Coalesced into graph rebuild {queued.id}."
+            queued_sync.finished_at = utc_now()
+            await knowledge_base_repository.save_knowledge_task(db, queued_sync)
+            await db.commit()
         return queued
+    running = await knowledge_base_repository.get_running_graph_task(db, locked)
+    if queued_sync is not None:
+        queued_sync.status = TASK_SUCCEEDED_STATUS
+        queued_sync.last_error = "Coalesced into graph rebuild."
+        queued_sync.finished_at = utc_now()
+        await knowledge_base_repository.save_knowledge_task(db, queued_sync)
     response = await create_knowledge_task(
         db,
-        knowledge_base,
+        locked,
         None,
         TASK_GRAPH_REBUILD,
         actor,
+        options=(
+            {"follower_of_task_id": running.id}
+            if running is not None
+            else {}
+        ),
     )
     task = await knowledge_base_repository.get_knowledge_task_by_id(db, response.id)
     assert task is not None
+    if queued_sync is not None:
+        queued_sync.last_error = f"Coalesced into graph rebuild {task.id}."
+        await knowledge_base_repository.save_knowledge_task(db, queued_sync)
+        await db.commit()
     return task
 
 

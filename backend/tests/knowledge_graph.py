@@ -8,7 +8,7 @@ from datetime import timedelta
 from io import BytesIO
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import tests.support  # noqa: F401
 from fastapi import HTTPException, UploadFile
@@ -32,6 +32,7 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphClaimEvidence as GraphEvidenceRecord,
     KnowledgeGraphEntity as GraphEntityRecord,
     KnowledgeGraphMention as GraphMentionRecord,
+    KnowledgeGraphRevision as GraphRevisionRecord,
     KnowledgeGraphReviewItem as GraphReviewRecord,
 )
 from app.entities.user import User
@@ -60,13 +61,19 @@ from app.shareddomain.knowledge_graph.models import (
 )
 from app.infrastructure.model_utils import utc_now
 from app.shareddomain.knowledge.orchestration import (
+    enqueue_graph_rebuild,
     enqueue_graph_sync,
     enqueue_index_knowledge_document,
 )
-from app.application import knowledge_graph, knowledge_graph_build
+from app.application import (
+    knowledge_graph,
+    knowledge_graph_build,
+    knowledge_graph_maintenance,
+)
 from app.application import knowledge_retrieval as knowledge_retrieval_application
 from app.application import knowledge_graph_query as graph_query
 from app.shareddomain.knowledge import lifecycle as knowledge_lifecycle
+from app.shareddomain.knowledge import cleanup as knowledge_cleanup
 from app.shareddomain.knowledge import task_runner as knowledge_task_runner
 
 
@@ -147,6 +154,179 @@ def test_graph_source_batches_keep_structured_and_text_chunks_separate() -> None
         (True, ["graph-1", "graph-2"]),
         (False, ["text-2"]),
     ]
+
+
+def test_graph_source_versions_are_stable_and_diffable() -> None:
+    document = KnowledgeDocument(
+        status="indexed",
+        is_active=True,
+        meta={
+            "document_version": 2,
+            "normalized_content_hash": "hash-b",
+        },
+    )
+    assert (
+        knowledge_graph_build.graph_document_source_version(document)
+        == "2:hash-b:1:indexed"
+    )
+    assert knowledge_graph_maintenance.diff_graph_source_versions(
+        None,
+        {"doc-1": "2:hash-b:1:indexed"},
+    ) == knowledge_graph_maintenance.GraphSourceChanges(True, ())
+    assert knowledge_graph_maintenance.diff_graph_source_versions(
+        {
+            "doc-1": "1:hash-a:1:indexed",
+            "doc-deleted": "1:hash-old:1:indexed",
+        },
+        {
+            "doc-1": "2:hash-b:1:indexed",
+            "doc-added": "1:hash-new:1:indexed",
+        },
+    ) == knowledge_graph_maintenance.GraphSourceChanges(
+        False,
+        ("doc-1", "doc-added", "doc-deleted"),
+    )
+
+
+async def test_graph_source_reconcile_queues_sync_and_model_rebuild() -> None:
+    knowledge_bases = [
+        KnowledgeBase(
+            id="reconcile-sync-kb",
+            workspace_id="reconcile-workspace",
+            graph_enabled=True,
+            created_by_user_id="graph-user",
+        ),
+        KnowledgeBase(
+            id="reconcile-rebuild-kb",
+            workspace_id="reconcile-workspace",
+            graph_enabled=True,
+            created_by_user_id="graph-user",
+        ),
+        KnowledgeBase(
+            id="reconcile-clean-kb",
+            workspace_id="reconcile-workspace",
+            graph_enabled=True,
+            created_by_user_id="graph-user",
+        ),
+        KnowledgeBase(
+            id="reconcile-empty-kb",
+            workspace_id="reconcile-workspace",
+            graph_enabled=True,
+            created_by_user_id="graph-user",
+        ),
+        KnowledgeBase(
+            id="reconcile-error-kb",
+            workspace_id="reconcile-workspace",
+            graph_enabled=True,
+            created_by_user_id="graph-user",
+        ),
+    ]
+    revisions = {
+        "reconcile-sync-kb": SimpleNamespace(
+            stats_json={
+                "source_versions": {"doc-1": "1:hash-a:1:indexed"},
+                "profile_embedding_model_id": "embedding-a",
+            }
+        ),
+        "reconcile-rebuild-kb": SimpleNamespace(
+            stats_json={
+                "source_versions": {"doc-2": "1:hash-a:1:indexed"},
+                "profile_embedding_model_id": "embedding-a",
+            }
+        ),
+        "reconcile-clean-kb": SimpleNamespace(
+            stats_json={
+                "source_versions": {"doc-3": "1:hash-a:1:indexed"},
+                "profile_embedding_model_id": "embedding-a",
+            }
+        ),
+        "reconcile-empty-kb": None,
+        "reconcile-error-kb": None,
+    }
+    current_versions = {
+        "reconcile-sync-kb": {"doc-1": "2:hash-b:1:indexed"},
+        "reconcile-rebuild-kb": {"doc-2": "1:hash-a:1:indexed"},
+        "reconcile-clean-kb": {"doc-3": "1:hash-a:1:indexed"},
+        "reconcile-empty-kb": {},
+    }
+    db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+    sync_calls: list[list[str]] = []
+    rebuild_calls: list[str] = []
+
+    async def active_revision(_db, knowledge_base):
+        return revisions[knowledge_base.id]
+
+    async def source_versions(_db, knowledge_base):
+        if knowledge_base.id == "reconcile-error-kb":
+            raise RuntimeError("source query failed")
+        return current_versions[knowledge_base.id]
+
+    async def embedding_model(_db, knowledge_base):
+        model_id = (
+            "embedding-b"
+            if knowledge_base.id == "reconcile-rebuild-kb"
+            else "embedding-a"
+        )
+        return SimpleNamespace(id=model_id)
+
+    async def enqueue_sync(_db, knowledge_base, _actor, document_ids):
+        sync_calls.append(document_ids)
+        return KnowledgeTask(
+            id=f"{knowledge_base.id}-task",
+            status="queued",
+        )
+
+    async def enqueue_rebuild(_db, knowledge_base, _actor):
+        rebuild_calls.append(knowledge_base.id)
+        return KnowledgeTask(
+            id=f"{knowledge_base.id}-task",
+            status="queued",
+        )
+
+    with (
+        patch.object(
+            graph_repository,
+            "list_graph_enabled_knowledge_bases",
+            AsyncMock(return_value=knowledge_bases),
+        ),
+        patch.object(graph_repository, "get_active_revision", active_revision),
+        patch.object(
+            graph_repository,
+            "current_graph_source_versions",
+            source_versions,
+        ),
+        patch.object(
+            knowledge_graph_maintenance,
+            "resolve_embedding_model",
+            embedding_model,
+        ),
+        patch.object(
+            user_repository,
+            "get_user_by_id",
+            AsyncMock(return_value=User(id="graph-user")),
+        ),
+        patch.object(
+            knowledge_graph_maintenance,
+            "enqueue_graph_sync",
+            enqueue_sync,
+        ),
+        patch.object(
+            knowledge_graph_maintenance,
+            "enqueue_graph_rebuild",
+            enqueue_rebuild,
+        ),
+        patch.object(knowledge_graph_maintenance, "log_error") as log_error,
+    ):
+        task_ids = await knowledge_graph_maintenance.enqueue_due_graph_tasks(db)
+
+    assert task_ids == [
+        "reconcile-sync-kb-task",
+        "reconcile-rebuild-kb-task",
+    ]
+    assert sync_calls == [["doc-1"]]
+    assert rebuild_calls == ["reconcile-rebuild-kb"]
+    assert db.rollback.await_count == 1
+    log_error.assert_called_once()
 
 
 def test_bank_path_preserves_relation_direction_and_evidence() -> None:
@@ -948,6 +1128,30 @@ def test_graph_profile_vectors_use_an_isolated_collection() -> None:
     vector_store._build_qdrant_client.cache_clear()
 
 
+async def test_graph_storage_cleanup_removes_both_vector_collections() -> None:
+    storage = SimpleNamespace(delete_prefix=MagicMock())
+    with (
+        patch.object(knowledge_cleanup, "delete_vector_collection") as delete_base,
+        patch.object(
+            knowledge_cleanup,
+            "delete_graph_profile_collection",
+        ) as delete_graph,
+        patch.object(
+            knowledge_cleanup,
+            "knowledge_object_storage",
+            return_value=storage,
+        ),
+    ):
+        await knowledge_cleanup.purge_knowledge_base_storage(
+            tests.support.settings(),
+            "cleanup-workspace",
+            "cleanup-kb",
+        )
+    delete_base.assert_called_once()
+    delete_graph.assert_called_once()
+    storage.delete_prefix.assert_called_once_with("cleanup-workspace/cleanup-kb")
+
+
 async def test_graph_database_constraints() -> None:
     async with get_engine().begin() as connection:
         await connection.execute(text("PRAGMA foreign_keys=ON"))
@@ -1032,6 +1236,229 @@ async def _stage_entity(db, revision, entity_id: str, name: str):
             "normalized_name": name,
         },
     )
+
+
+async def test_graph_maintenance_repairs_orphans_profiles_and_sources() -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_user_by_id(db, "graph-user")
+        assert actor is not None
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-maintenance-kb",
+                workspace_id="graph-workspace",
+                name="Graph Maintenance KB",
+                graph_enabled=True,
+                created_by_user_id=actor.id,
+            ),
+        )
+        schema = await create_graph_schema(
+            db,
+            knowledge_base,
+            default_policy_graph_schema(),
+            actor,
+        )
+        active_revision = await graph_repository.create_revision(
+            db,
+            GraphRevisionRecord(
+                id="graph-maintenance-active",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                revision_no=1,
+                schema_id=schema.id,
+                status="published",
+                source_watermark="active",
+                stats_json={
+                    "source_versions": {
+                        "graph-maintenance-doc": "1:hash-a:1:indexed"
+                    },
+                    "profile_embedding_model_id": "embedding-maintenance",
+                },
+                created_by_user_id=actor.id,
+                published_at=utc_now(),
+            ),
+        )
+        knowledge_base.active_graph_schema_id = schema.id
+        knowledge_base.active_graph_revision_id = active_revision.id
+        await knowledge_repository.save_knowledge_base(db, knowledge_base)
+        await graph_repository.create_entity(
+            db,
+            GraphEntityRecord(
+                id="graph-maintenance-active-entity",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                entity_type="Document",
+                canonical_name="Maintenance Entity",
+                normalized_name="maintenance entity",
+                profile_markdown="# Current profile",
+                profile_hash="current-profile-hash",
+                state="active",
+                created_revision_id=active_revision.id,
+                last_published_revision_id=active_revision.id,
+            ),
+        )
+        failed_revision = await graph_repository.create_revision(
+            db,
+            GraphRevisionRecord(
+                id="graph-maintenance-failed",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                revision_no=2,
+                schema_id=schema.id,
+                parent_revision_id=active_revision.id,
+                status="failed",
+                source_watermark="failed",
+                stats_json={
+                    "profile_repair_pending": True,
+                    "profile_repair_entity_ids": [
+                        "graph-maintenance-active-entity",
+                        "graph-maintenance-missing-entity",
+                    ],
+                    "profile_delete_pending": True,
+                    "profile_delete_entity_ids": [
+                        "graph-maintenance-retired-entity"
+                    ],
+                },
+                created_by_user_id=actor.id,
+            ),
+        )
+        orphan_revision = await graph_repository.create_revision(
+            db,
+            GraphRevisionRecord(
+                id="graph-maintenance-orphan",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                revision_no=3,
+                schema_id=schema.id,
+                parent_revision_id=active_revision.id,
+                status="building",
+                source_watermark="orphan",
+                stats_json={"task_id": "missing-graph-task"},
+                created_by_user_id=actor.id,
+                started_at=utc_now() - timedelta(minutes=12),
+                created_at=utc_now() - timedelta(minutes=12),
+                updated_at=utc_now() - timedelta(minutes=12),
+            ),
+        )
+        await graph_revisions.stage_revision_change(
+            db,
+            orphan_revision,
+            record_kind="entity",
+            record_key="graph-maintenance-orphan-entity",
+            operation="upsert",
+            before_json=None,
+            after_json={
+                "id": "graph-maintenance-orphan-entity",
+                "entity_type": "Document",
+                "canonical_name": "Orphan Entity",
+                "normalized_name": "orphan entity",
+            },
+        )
+        await knowledge_repository.create_knowledge_document(
+            db,
+            KnowledgeDocument(
+                id="graph-maintenance-doc",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                filename="maintenance.md",
+                content_type="text/markdown",
+                size_bytes=10,
+                meta={
+                    "document_version": 2,
+                    "normalized_content_hash": "hash-b",
+                },
+                status="indexed",
+                created_by_user_id=actor.id,
+            ),
+        )
+        await knowledge_repository.create_knowledge_document(
+            db,
+            KnowledgeDocument(
+                id="graph-maintenance-staged-doc",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                filename="staged.md",
+                content_type="text/markdown",
+                size_bytes=10,
+                meta={"staged": True},
+                status="indexed",
+                created_by_user_id=actor.id,
+            ),
+        )
+        await db.commit()
+
+        enabled = await graph_repository.list_graph_enabled_knowledge_bases(db)
+        assert knowledge_base.id in {item.id for item in enabled}
+        assert await graph_repository.current_graph_source_versions(
+            db,
+            knowledge_base,
+        ) == {"graph-maintenance-doc": "2:hash-b:1:indexed"}
+
+        await knowledge_graph_maintenance.recover_orphaned_graph_revisions(db)
+        recovered = await graph_repository.get_revision(
+            db,
+            knowledge_base,
+            orphan_revision.id,
+        )
+        assert recovered is not None
+        assert recovered.status == "failed"
+        assert recovered.failure_reason == "Orphaned graph revision recovered."
+        assert recovered.stats_json["profile_repair_entity_ids"] == [
+            "graph-maintenance-orphan-entity"
+        ]
+
+        async def embedding_model(*_args, **_kwargs):
+            return SimpleNamespace(id="embedding-maintenance")
+
+        upsert_profiles = MagicMock()
+        delete_profiles = MagicMock()
+        with (
+            patch.object(
+                knowledge_graph_maintenance,
+                "resolve_embedding_model",
+                embedding_model,
+            ),
+            patch.object(
+                knowledge_graph_maintenance,
+                "upsert_graph_profile_vectors",
+                upsert_profiles,
+            ),
+            patch.object(
+                knowledge_graph_maintenance,
+                "delete_graph_profile_vectors",
+                delete_profiles,
+            ),
+        ):
+            await knowledge_graph_maintenance.repair_pending_graph_profiles(
+                db,
+                tests.support.settings(),
+            )
+
+        assert [
+            profile.entity_id
+            for profile in upsert_profiles.call_args.args[-1]
+        ] == ["graph-maintenance-active-entity"]
+        deleted_ids = {
+            entity_id
+            for call in delete_profiles.call_args_list
+            for entity_id in call.args[-1]
+        }
+        assert deleted_ids == {
+            "graph-maintenance-missing-entity",
+            "graph-maintenance-retired-entity",
+            "graph-maintenance-orphan-entity",
+        }
+        for revision_id in (failed_revision.id, orphan_revision.id):
+            refreshed = await graph_repository.get_revision(
+                db,
+                knowledge_base,
+                revision_id,
+            )
+            assert refreshed is not None
+            assert refreshed.stats_json["profile_repair_pending"] is False
+            assert refreshed.stats_json["profile_delete_pending"] is False
+            assert refreshed.stats_json["profile_repaired_at"]
+            assert refreshed.stats_json["profile_deleted_at"]
 
 
 async def test_revision_publish_is_atomic() -> None:
@@ -1948,6 +2375,114 @@ async def test_graph_sync_coalesces_behind_running_build() -> None:
         await db.rollback()
 
 
+async def test_graph_rebuild_follows_running_task_and_coalesces_sync() -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_user_by_id(db, "graph-user")
+        assert actor is not None
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-rebuild-follower-kb",
+                workspace_id="graph-workspace",
+                name="Graph Rebuild Follower KB",
+                graph_enabled=True,
+                created_by_user_id=actor.id,
+            ),
+        )
+        document = await knowledge_repository.create_knowledge_document(
+            db,
+            KnowledgeDocument(
+                id="graph-rebuild-follower-doc",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                filename="rebuild.md",
+                content_type="text/markdown",
+                size_bytes=10,
+                status="indexed",
+                created_by_user_id=actor.id,
+            ),
+        )
+        await knowledge_repository.save_knowledge_document_chunk(
+            db,
+            KnowledgeDocumentChunk(
+                id="graph-rebuild-follower-chunk",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                document_id=document.id,
+                content="rebuild",
+                search_text="rebuild",
+                char_count=7,
+                token_count=1,
+                status="indexed",
+            ),
+        )
+        running = await knowledge_repository.create_knowledge_task(
+            db,
+            KnowledgeTask(
+                id="graph-rebuild-running-task",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                task_type="graph_sync",
+                status="running",
+                attempts=1,
+                options={"changed_document_ids": [document.id]},
+                created_by_user_id=actor.id,
+                started_at=utc_now() - timedelta(seconds=10),
+                lease_expires_at=utc_now() + timedelta(minutes=5),
+                worker_task_id="graph-rebuild-running-worker",
+                created_at=utc_now() - timedelta(minutes=1),
+            ),
+        )
+        queued_sync = await knowledge_repository.create_knowledge_task(
+            db,
+            KnowledgeTask(
+                id="graph-rebuild-queued-sync",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                task_type="graph_sync",
+                status="queued",
+                options={"changed_document_ids": [document.id]},
+                created_by_user_id=actor.id,
+            ),
+        )
+        await db.commit()
+
+        rebuild = await enqueue_graph_rebuild(db, knowledge_base, actor)
+        assert rebuild.task_type == "graph_rebuild"
+        assert rebuild.status == "queued"
+        assert rebuild.options["follower_of_task_id"] == running.id
+        coalesced = await knowledge_repository.get_knowledge_task_by_id(
+            db,
+            queued_sync.id,
+        )
+        assert coalesced is not None
+        assert coalesced.status == "succeeded"
+        assert coalesced.last_error == f"Coalesced into graph rebuild {rebuild.id}."
+
+        claimed = await knowledge_repository.claim_knowledge_task(
+            db,
+            rebuild.id,
+            utc_now(),
+            utc_now() + timedelta(minutes=5),
+            "graph-rebuild-follower-worker",
+        )
+        assert claimed is False
+        running.status = "succeeded"
+        running.lease_expires_at = None
+        running.worker_task_id = None
+        await knowledge_repository.save_knowledge_task(db, running)
+        await db.commit()
+        claimed = await knowledge_repository.claim_knowledge_task(
+            db,
+            rebuild.id,
+            utc_now(),
+            utc_now() + timedelta(minutes=5),
+            "graph-rebuild-follower-worker",
+        )
+        assert claimed is True
+        await db.rollback()
+
+
 async def test_structured_graph_build_publishes_evidence_and_profiles() -> None:
     content = json.dumps(
         {
@@ -1979,7 +2514,11 @@ async def test_structured_graph_build_publishes_evidence_and_profiles() -> None:
                 filename="graph.jsonl",
                 content_type="application/jsonl",
                 size_bytes=len(content.encode("utf-8")),
-                meta={"import_mode": "graph"},
+                meta={
+                    "import_mode": "graph",
+                    "document_version": 2,
+                    "normalized_content_hash": "structured-content-hash",
+                },
                 status="indexed",
                 created_by_user_id=actor.id,
             ),
@@ -2081,6 +2620,17 @@ async def test_structured_graph_build_publishes_evidence_and_profiles() -> None:
         assert {item.entity_id for item in captured_profiles} == {
             item.id for item in entities
         }
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            "graph-kb",
+        )
+        assert knowledge_base is not None
+        revision = await graph_repository.get_active_revision(db, knowledge_base)
+        assert revision is not None
+        assert revision.stats_json["task_id"] == "structured-graph-task"
+        assert revision.stats_json["source_versions"][document.id] == (
+            "2:structured-content-hash:1:indexed"
+        )
 
 
 async def test_index_success_queues_graph_sync_when_enabled() -> None:
@@ -2645,6 +3195,8 @@ async def test_claim_survives_until_last_evidence_is_deleted() -> None:
 async def main() -> None:
     test_graph_import_parser_is_atomic_and_bounded()
     test_graph_source_batches_keep_structured_and_text_chunks_separate()
+    test_graph_source_versions_are_stable_and_diffable()
+    await test_graph_source_reconcile_queues_sync_and_model_rebuild()
     test_bank_path_preserves_relation_direction_and_evidence()
     test_graph_traversal_sql_requires_acyclic_active_evidence()
     await test_graph_traversal_bounds_scoping_and_truncation()
@@ -2653,14 +3205,17 @@ async def main() -> None:
     await test_graph_query_drops_stale_profiles_and_rejects_unknown_relations()
     test_graph_profile_collection_is_knowledge_base_scoped()
     test_graph_profile_vectors_use_an_isolated_collection()
+    await test_graph_storage_cleanup_removes_both_vector_collections()
     await test_graph_database_constraints()
     await test_versioned_graph_schemas()
+    await test_graph_maintenance_repairs_orphans_profiles_and_sources()
     await test_revision_publish_is_atomic()
     await test_review_decisions_publish_atomically_and_reset_on_failure()
     await test_entity_identity_candidates_are_scoped_and_ambiguous()
     await test_stale_revision_cannot_overwrite_newer_graph()
     await test_claim_fingerprint_dedupes_without_reactivating_rejection()
     await test_graph_sync_coalesces_behind_running_build()
+    await test_graph_rebuild_follows_running_task_and_coalesces_sync()
     await test_structured_graph_build_publishes_evidence_and_profiles()
     await test_index_success_queues_graph_sync_when_enabled()
     await test_failed_profile_write_keeps_revision_unpublished_for_repair()
