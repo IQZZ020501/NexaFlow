@@ -29,8 +29,8 @@ def upgrade() -> None:
         batch.create_foreign_key(
             "fk_agent_runs_regenerated_from",
             "agent_runs",
-            ["regenerated_from_run_id"],
-            ["id"],
+            ["workspace_id", "regenerated_from_run_id"],
+            ["workspace_id", "id"],
             ondelete="SET NULL",
         )
         batch.create_check_constraint(

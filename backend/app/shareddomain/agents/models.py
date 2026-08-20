@@ -375,6 +375,12 @@ class AgentRun(Base):
             name="fk_agent_runs_parent_workspace",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "regenerated_from_run_id"],
+            ["agent_runs.workspace_id", "agent_runs.id"],
+            name="fk_agent_runs_regenerated_from",
+            ondelete="SET NULL",
+        ),
         CheckConstraint(
             "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'awaiting_child', 'queued_v2', 'running_v2', 'awaiting_approval_v2', 'awaiting_input_v2', 'awaiting_child_v2', 'succeeded', 'failed', 'cancelled')",
             name="ck_agent_runs_status",
@@ -481,11 +487,7 @@ class AgentRun(Base):
     )
     parent_node_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     regenerated_from_run_id: Mapped[str | None] = mapped_column(
-        ForeignKey(
-            "agent_runs.id",
-            name="fk_agent_runs_regenerated_from",
-            ondelete="SET NULL",
-        ),
+        String(36),
         nullable=True,
         index=True,
     )

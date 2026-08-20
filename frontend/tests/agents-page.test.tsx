@@ -2864,6 +2864,94 @@ describe("AgentsPage run flows", () => {
     expect(screen.queryByText("Late answer")).toBeNull()
   })
 
+  test("ignores stale regeneration after switching conversations", async () => {
+    const agent = makeAgent()
+    const succeededRun = makeRun({ result: "Original answer" })
+    let resolveRegeneration: (value: Response) => void = () => undefined
+    await renderDetail({
+      agent,
+      initialView: "settings",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([succeededRun]),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/regenerate`,
+          exact: true,
+          respond: () =>
+            new Promise<Response>((resolve) => {
+              resolveRegeneration = resolve
+            }),
+        },
+      ],
+    })
+    await waitFor(() => expect(screen.getByText("Original answer")).toBeTruthy())
+
+    fireEvent.click(screen.getByRole("button", { name: "重新生成" }))
+    fireEvent.click(screen.getByLabelText("新建对话"))
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    resolveRegeneration!(
+      jsonResponse(
+        makeRun({
+          id: "run-regenerated",
+          regenerated_from_run_id: "run-1",
+          result: "Stale regenerated answer",
+        })
+      )
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(screen.queryByText("Stale regenerated answer")).toBeNull()
+    expect(notifyCalls.some((call) => call.kind === "error")).toBe(false)
+  })
+
+  test("ignores stale feedback after switching conversations", async () => {
+    const agent = makeAgent()
+    const succeededRun = makeRun({ result: "Original answer" })
+    let resolveFeedback: (value: Response) => void = () => undefined
+    await renderDetail({
+      agent,
+      initialView: "settings",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([succeededRun]),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/feedback`,
+          exact: true,
+          respond: () =>
+            new Promise<Response>((resolve) => {
+              resolveFeedback = resolve
+            }),
+        },
+      ],
+    })
+    await waitFor(() => expect(screen.getByText("Original answer")).toBeTruthy())
+
+    fireEvent.click(screen.getByRole("button", { name: "点赞" }))
+    fireEvent.click(screen.getByLabelText("新建对话"))
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    resolveFeedback!(
+      jsonResponse(makeRun({ result: "Stale feedback run", feedback: "positive" }))
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(screen.queryByText("Stale feedback run")).toBeNull()
+    expect(notifyCalls.some((call) => call.kind === "error")).toBe(false)
+  })
+
   test("reports an error when a tool call decision fails", async () => {
     const agent = makeAgent()
     const pendingRun = makeRun({
