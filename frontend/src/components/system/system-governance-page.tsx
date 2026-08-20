@@ -45,6 +45,7 @@ import {
   type SystemLog,
   type User,
   type WorkspaceInvitation,
+  type WorkspaceInvitationKind,
   type WorkspaceInventory,
 } from "@/lib/api/system"
 import { Button } from "@/components/ui/button"
@@ -374,7 +375,13 @@ function GovernancePanel() {
   const [inventory, setInventory] = React.useState<WorkspaceInventory | null>(null)
   const [invitations, setInvitations] = React.useState<WorkspaceInvitation[]>([])
   const [form, setForm] = React.useState({ daily: "", monthly: "", threshold: "80", retention: "", timezone: "UTC" })
-  const [invite, setInvite] = React.useState({ username: "", email: "", name: "", role: "member" })
+  const [invite, setInvite] = React.useState<{
+    kind: WorkspaceInvitationKind
+    username: string
+    email: string
+    name: string
+    role: string
+  }>({ kind: "personal", username: "", email: "", name: "", role: "member" })
   const [inviteResult, setInviteResult] = React.useState<WorkspaceInvitation | null>(null)
   const [loading, setLoading] = React.useState(false)
 
@@ -408,8 +415,26 @@ function GovernancePanel() {
   async function createInvite(event: React.FormEvent) {
     event.preventDefault(); if (!session.token || !selectedWorkspaceId) return
     try {
-      const created = await createWorkspaceInvitation(session.token, selectedWorkspaceId, invite)
-      setInviteResult(created); setInvitations((current) => [created, ...current]); setInvite({ username: "", email: "", name: "", role: "member" }); session.notify("success", t("邀请已创建"))
+      const created = await createWorkspaceInvitation(
+        session.token,
+        selectedWorkspaceId,
+        invite.kind === "generic"
+          ? { kind: "generic", role: invite.role }
+          : invite
+      )
+      const invitePath = created.invite_url ?? (
+        created.token
+          ? `/invite/${created.token}${created.kind === "generic" ? "?mode=generic" : ""}`
+          : null
+      )
+      const result = {
+        ...created,
+        invite_url: invitePath ? new URL(invitePath, window.location.origin).href : null,
+      }
+      setInviteResult(result)
+      setInvitations((current) => [result, ...current])
+      setInvite((current) => ({ ...current, username: "", email: "", name: "" }))
+      session.notify("success", t("邀请已创建"))
     } catch (error) { reportError(error) }
   }
 
@@ -431,7 +456,51 @@ function GovernancePanel() {
     <Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><ShieldCheckIcon className="size-4" />{t("工作空间治理")}</CardTitle><CardDescription>{t("系统管理员可治理全部工作空间，工作空间管理员可治理本空间团队与策略")}</CardDescription></div><div className="flex items-center gap-2"><label className="text-sm text-muted-foreground">{t("工作空间")}</label><FilterDropdown className="h-9 w-56" value={selectedWorkspaceId} onChange={session.selectWorkspace} ariaLabel={t("选择工作空间")} options={manageableWorkspaces.map((workspace) => ({ value: workspace.id, label: displayWorkspaceName(workspace, t) }))} /><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{cards.map(([label, value]) => <div key={label} className="rounded-lg border bg-muted/20 p-3"><div className="text-xs text-muted-foreground">{t(label as never)}</div><div className="mt-1 text-2xl font-semibold">{value}</div></div>)}</CardContent></Card>
     <div className="grid gap-4 xl:grid-cols-2">
       <Card><CardHeader><CardTitle>{t("配额策略")}</CardTitle><CardDescription>{t("先限制运行规模，再根据用量告警调整")}</CardDescription></CardHeader><CardContent><form className="grid gap-3" onSubmit={saveGovernance}><Field label={t("每日运行上限")} value={form.daily} onChange={(value) => setForm((current) => ({ ...current, daily: value }))} placeholder={t("不限制")} type="number" /><Field label={t("月度 Token 上限")} value={form.monthly} onChange={(value) => setForm((current) => ({ ...current, monthly: value }))} placeholder={t("不限制")} type="number" /><Field label={t("告警阈值（百分比）")} value={form.threshold} onChange={(value) => setForm((current) => ({ ...current, threshold: value }))} type="number" /><Field label={t("数据保留天数")} value={form.retention} onChange={(value) => setForm((current) => ({ ...current, retention: value }))} placeholder={t("不限制")} type="number" /><Field label={t("时区")} value={form.timezone} onChange={(value) => setForm((current) => ({ ...current, timezone: value }))} /><div className="flex justify-end"><Button type="submit"><ClipboardIcon className="size-4" />{t("保存策略")}</Button></div></form></CardContent></Card>
-    <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserPlusIcon className="size-4" />{t("工作空间邀请")}</CardTitle><CardDescription>{t("生成一次性链接，接受后由成员自行设置密码")}</CardDescription></CardHeader><CardContent><form className="grid gap-3" onSubmit={createInvite}><div className="grid gap-3 sm:grid-cols-2"><Field label={t("账号")} value={invite.username} onChange={(value) => setInvite((current) => ({ ...current, username: value }))} required /><Field label={t("邮箱")} value={invite.email} onChange={(value) => setInvite((current) => ({ ...current, email: value }))} required type="email" /><Field label={t("姓名")} value={invite.name} onChange={(value) => setInvite((current) => ({ ...current, name: value }))} required /><label className="grid gap-1 text-sm"><span>{t("角色")}</span><FilterDropdown className="h-9 w-full" value={invite.role} onChange={(role) => setInvite((current) => ({ ...current, role }))} ariaLabel={t("角色")} options={[{ value: "member", label: t("成员") }, ...(session.me?.user.is_global_admin ? [{ value: "admin", label: t("工作空间管理员") }] : [])]} /></label></div><div className="flex justify-end"><Button type="submit"><UserPlusIcon className="size-4" />{t("生成邀请链接")}</Button></div></form>{inviteResult?.token ? <div className="mt-4 rounded-lg border bg-muted/20 p-3"><div className="mb-2 text-sm font-medium">{t("邀请链接")}</div><div className="flex gap-2"><Input readOnly value={inviteResult.invite_url ?? inviteResult.token} /><Button type="button" variant="outline" size="icon" aria-label={t("复制链接")} onClick={() => { void navigator.clipboard?.writeText(inviteResult.invite_url ?? inviteResult.token ?? ""); session.notify("success", t("已复制")) }}><CopyIcon className="size-4" /></Button></div></div> : null}<div className="mt-4 grid gap-2">{invitations.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"><div><div className="font-medium">{item.name} · {item.email}</div><div className="text-xs text-muted-foreground">{item.role} · {formatDateTime(item.expires_at, dateLocale)}</div></div>{item.accepted_at ? <Badge variant="secondary">{t("已撤销或已接受")}</Badge> : <Button type="button" variant="outline" size="sm" onClick={() => void revokeInvite(item.id)}>{t("撤销")}</Button>}</div>)}</div></CardContent></Card>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><UserPlusIcon className="size-4" />{t("工作空间邀请")}</CardTitle>
+        <CardDescription>{t("指定成员链接仅可领取一次；通用链接 7 天内可重复使用")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form className="grid gap-3" onSubmit={createInvite}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-1 text-sm">
+              <span>{t("邀请方式")}</span>
+              <FilterDropdown
+                className="h-9 w-full"
+                value={invite.kind}
+                onChange={(kind) => setInvite((current) => ({
+                  ...current,
+                  kind: kind as WorkspaceInvitationKind,
+                  role: kind === "generic" ? "member" : current.role,
+                }))}
+                ariaLabel={t("邀请方式")}
+                options={[
+                  { value: "personal", label: t("指定成员") },
+                  { value: "generic", label: t("通用邀请") },
+                ]}
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span>{t("角色")}</span>
+              <FilterDropdown className="h-9 w-full" value={invite.role} onChange={(role) => setInvite((current) => ({ ...current, role }))} ariaLabel={t("角色")} options={[{ value: "member", label: t("成员") }, ...(invite.kind === "personal" && session.me?.user.is_global_admin ? [{ value: "admin", label: t("工作空间管理员") }] : [])]} />
+            </label>
+            {invite.kind === "personal" ? (
+              <>
+                <Field label={t("账号")} value={invite.username} onChange={(value) => setInvite((current) => ({ ...current, username: value }))} required />
+                <Field label={t("邮箱")} value={invite.email} onChange={(value) => setInvite((current) => ({ ...current, email: value }))} required type="email" />
+                <Field label={t("姓名")} value={invite.name} onChange={(value) => setInvite((current) => ({ ...current, name: value }))} required />
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground sm:col-span-2">{t("通用链接在 7 天内可由多人注册，撤销后立即失效")}</p>
+            )}
+          </div>
+          <div className="flex justify-end"><Button type="submit"><UserPlusIcon className="size-4" />{t("生成邀请链接")}</Button></div>
+        </form>
+        {inviteResult?.token ? <div className="mt-4 rounded-lg border bg-muted/20 p-3"><div className="mb-2 text-sm font-medium">{t("邀请链接")}</div><div className="flex gap-2"><Input readOnly value={inviteResult.invite_url ?? inviteResult.token} /><Button type="button" variant="outline" size="icon" aria-label={t("复制链接")} onClick={() => { void navigator.clipboard?.writeText(inviteResult.invite_url ?? inviteResult.token ?? ""); session.notify("success", t("已复制")) }}><CopyIcon className="size-4" /></Button></div></div> : null}
+        <div className="mt-4 grid gap-2">{invitations.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"><div><div className="font-medium">{item.kind === "generic" ? t("通用邀请") : `${item.name} · ${item.email}`}</div><div className="text-xs text-muted-foreground">{item.role} · {formatDateTime(item.expires_at, dateLocale)}</div></div>{item.accepted_at ? <Badge variant="secondary">{t("已撤销或已接受")}</Badge> : <Button type="button" variant="outline" size="sm" onClick={() => void revokeInvite(item.id)}>{t("撤销")}</Button>}</div>)}</div>
+      </CardContent>
+    </Card>
     </div>
   </div>
 }

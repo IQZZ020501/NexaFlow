@@ -7,9 +7,11 @@ import { InvitationPage } from "@/components/auth/invitation-page"
  */
 export default async function InvitationRoute({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>
+  searchParams: Promise<{ mode?: string | string[] }>
 }) {
-  const { token } = await params
-  return <InvitationPage token={token} />
+  const [{ token }, { mode }] = await Promise.all([params, searchParams])
+  return <InvitationPage token={token} generic={mode === "generic"} />
 }

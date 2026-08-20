@@ -38,14 +38,15 @@ async def get_by_token_hash(
     	now (datetime): Reference time used to determine whether the invitation has expired
     
     Returns:
-    	WorkspaceInvitation | None: The matching unaccepted, unexpired invitation, or `None` if no match exists
+        WorkspaceInvitation | None: The matching active, unexpired invitation, or `None` if no match exists.
     """
+    # ponytail: one row lock per link; split generic lookups if signup contention is measured.
     row = await db.scalar(
         select(InvitationOrm).where(
             InvitationOrm.token_hash == token_hash,
             InvitationOrm.accepted_at.is_(None),
             InvitationOrm.expires_at > now,
-        )
+        ).with_for_update()
     )
     return mapping.to_entity(WorkspaceInvitation, row) if row is not None else None
 

@@ -103,12 +103,15 @@ export type WorkspaceGovernance = {
   updated_at: string
 }
 
+export type WorkspaceInvitationKind = "personal" | "generic"
+
 export type WorkspaceInvitation = {
   id: string
   workspace_id: string
-  username: string
-  email: string
-  name: string
+  kind: WorkspaceInvitationKind
+  username: string | null
+  email: string | null
+  name: string | null
   role: string
   expires_at: string
   accepted_at: string | null
@@ -784,13 +787,15 @@ export function listWorkspaceInvitations(token: string, workspaceId: string) {
  * Creates an invitation for a user to join a workspace.
  *
  * @param workspaceId - The workspace receiving the invitation
- * @param payload - The invited user's username, email address, name, and workspace role
+ * @param payload - The invitation kind, workspace role, and personal recipient when applicable
  * @returns The created workspace invitation
  */
 export function createWorkspaceInvitation(
   token: string,
   workspaceId: string,
-  payload: { username: string; email: string; name: string; role: string }
+  payload:
+    | { kind: "personal"; username: string; email: string; name: string; role: string }
+    | { kind: "generic"; role: string }
 ) {
   return request<WorkspaceInvitation>(
     `/api/v1/workspaces/${workspaceId}/invitations`,
