@@ -334,10 +334,16 @@ describe("workspace governance settings", () => {
   test("switches invitation kinds, copies the link, and shows a not-configured hint", async () => {
     const originalClipboard = navigator.clipboard
     let copiedValue = ""
+    let rejectCopy = false
+    let resolveCopy: (() => void) | null = null
     Object.defineProperty(navigator, "clipboard", {
       value: {
-        writeText: async (value: string) => {
+        writeText: (value: string) => {
           copiedValue = value
+          if (rejectCopy) return Promise.reject(new Error("denied"))
+          return new Promise<void>((resolve) => {
+            resolveCopy = resolve
+          })
         },
       },
       configurable: true,
@@ -395,7 +401,20 @@ describe("workspace governance settings", () => {
       ).toBeTruthy()
       fireEvent.click(screen.getByRole("button", { name: "复制链接" }))
       await waitFor(() => expect(copiedValue).toBe(expectedUrl))
-      expect(notifications).toContainEqual(["success", "已复制"])
+      expect(notifications).not.toContainEqual(["success", "已复制"])
+      await act(async () => {
+        resolveCopy?.()
+        await Promise.resolve()
+      })
+      await waitFor(() =>
+        expect(notifications).toContainEqual(["success", "已复制"])
+      )
+
+      rejectCopy = true
+      fireEvent.click(screen.getByRole("button", { name: "复制链接" }))
+      await waitFor(() =>
+        expect(notifications).toContainEqual(["error", "复制失败"])
+      )
     } finally {
       Object.defineProperty(navigator, "clipboard", {
         value: originalClipboard,

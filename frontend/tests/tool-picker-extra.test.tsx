@@ -1,12 +1,14 @@
 /* @jsxImportSource react */
-import { beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import { ToolPicker } from "@/components/tools/tool-picker"
 import type { ToolRef, ToolSummary } from "@/lib/api/tools"
 import {
+  cleanup,
   fireEvent,
   jsonResponse,
   renderPage,
+  resetFetch,
   screen,
   waitFor,
   within,
@@ -56,6 +58,11 @@ beforeEach(() => {
   catalog = [usable, secondUsable, viewOnly]
   globalThis.fetch = (async () =>
     jsonResponse(catalog)) as unknown as typeof fetch
+})
+
+afterEach(() => {
+  cleanup()
+  resetFetch()
 })
 
 function picker(

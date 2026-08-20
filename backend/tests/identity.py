@@ -667,6 +667,12 @@ def main() -> None:
         assert "user.update" in actions
         assert "user.change_password" in actions
         assert "user.delete" in actions
+        password_change_audit = next(
+            item
+            for item in audit_logs.json()
+            if item["action"] == "user.change_password"
+        )
+        assert password_change_audit["details"]["sessions_revoked"] is True
 
         events = asyncio.run(get_system_log_events())
         assert "auth.login_failed" in events

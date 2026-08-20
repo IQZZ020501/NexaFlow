@@ -375,7 +375,15 @@ async def change_user_password(
     await email_repository.invalidate_password_reset_tokens(db, user.id, now)
     await email_repository.delete_password_reset_deliveries(db, user.id)
     user = await user_repository.save_user(db, user)
-    record_audit_log(db, actor, "user.change_password", "user", user.id, user.name)
+    record_audit_log(
+        db,
+        actor,
+        "user.change_password",
+        "user",
+        user.id,
+        user.name,
+        {"sessions_revoked": True},
+    )
     delivery_id = await queue_identity_email(
         db,
         settings,

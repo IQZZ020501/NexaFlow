@@ -129,4 +129,43 @@ describe("system health", () => {
     }
     expect(notifications.length).toBe(1)
   })
+
+  test("ignores an older health result after a newer refresh fails", async () => {
+    let healthRequests = 0
+    let resolveOlderHealth: ((response: Response) => void) | null = null
+    withFetch((url) => {
+      if (url === "/api/v1/admin/governance/health") {
+        healthRequests += 1
+        if (healthRequests === 1) return jsonResponse(health)
+        if (healthRequests === 2) {
+          return new Promise<Response>((resolve) => {
+            resolveOlderHealth = resolve
+          })
+        }
+        return jsonResponse({ detail: "unavailable" }, 503)
+      }
+      if (url.startsWith("/api/v1/admin/system-logs")) return jsonResponse([])
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    renderPage(<SystemGovernancePage section="operations" />)
+    await waitFor(() => expect(healthCard("数据库").getByText("正常")).toBeTruthy())
+
+    await act(async () => {
+      intervalHandler?.()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(healthRequests).toBe(2))
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }))
+    await waitFor(() => expect(healthRequests).toBe(3))
+    await waitFor(() => expect(healthCard("数据库").getByText("未知")).toBeTruthy())
+    expect(notifications).toContainEqual(["error", "unavailable"])
+
+    await act(async () => {
+      resolveOlderHealth?.(jsonResponse(health))
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(healthCard("数据库").getByText("未知")).toBeTruthy())
+  })
 })

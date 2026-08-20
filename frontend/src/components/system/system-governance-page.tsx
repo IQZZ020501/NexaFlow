@@ -63,6 +63,7 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { displayWorkspaceName, formatDateTime } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
+import { copyText } from "@/lib/clipboard"
 import {
   systemLogEventLabel,
   systemLogLevelLabel,
@@ -257,12 +258,16 @@ function OperationsPanel() {
   const [event, setEvent] = React.useState("")
   const [search, setSearch] = React.useState("")
   const [loading, setLoading] = React.useState(true)
+  const healthRequestRef = React.useRef(0)
 
   const loadHealth = React.useCallback(async (reportFailure: boolean) => {
     if (!session.token) return
+    const requestId = ++healthRequestRef.current
     try {
-      setHealth(await getAdminHealth(session.token))
+      const nextHealth = await getAdminHealth(session.token)
+      if (requestId === healthRequestRef.current) setHealth(nextHealth)
     } catch (error) {
+      if (requestId !== healthRequestRef.current) return
       setHealth(null)
       if (reportFailure) reportError(error)
     }
@@ -302,7 +307,10 @@ function OperationsPanel() {
     const timer = window.setInterval(() => {
       void loadHealth(false)
     }, 30_000)
-    return () => window.clearInterval(timer)
+    return () => {
+      window.clearInterval(timer)
+      healthRequestRef.current += 1
+    }
   }, [loadHealth])
 
   function exportLogs() {
@@ -497,6 +505,15 @@ function GovernancePanel() {
     try { await revokeWorkspaceInvitation(session.token, selectedWorkspaceId, id); setInvitations((current) => current.map((item) => item.id === id ? { ...item, accepted_at: new Date().toISOString() } : item)); session.notify("success", t("邀请已撤销")) } catch (error) { reportError(error) }
   }
 
+  async function copyInviteLink() {
+    try {
+      await copyText(inviteResult?.invite_url ?? inviteResult?.token ?? "")
+      session.notify("success", t("已复制"))
+    } catch {
+      session.notify("error", t("复制失败"))
+    }
+  }
+
   if (!selectedWorkspace) return <EmptyState text={t("暂无可管理工作空间")} />
   const dateLocale = language === "en" ? "en-US" : language === "zh-Hant" ? "zh-TW" : "zh-CN"
   const cards: Array<[string, number]> = inventory ? [["成员", inventory.members_total], ["团队", inventory.teams_total], ["Agent", inventory.agents_total], ["知识库", inventory.knowledge_bases_total], ["模型", inventory.models_total], ["工具", inventory.tools_total], ["工作流", inventory.workflows_total], ["活跃运行", inventory.active_runs], ["失败运行（24小时）", inventory.failed_runs_24h], ["失败任务（24小时）", inventory.failed_tasks_24h]] : []
@@ -559,12 +576,7 @@ function GovernancePanel() {
                 variant="outline"
                 size="icon"
                 aria-label={t("复制链接")}
-                onClick={() => {
-                  void navigator.clipboard?.writeText(
-                    inviteResult.invite_url ?? inviteResult.token ?? ""
-                  )
-                  session.notify("success", t("已复制"))
-                }}
+                onClick={() => void copyInviteLink()}
               >
                 <CopyIcon className="size-4" />
               </Button>

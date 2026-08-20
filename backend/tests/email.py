@@ -23,14 +23,19 @@ from tests.support import (
     test_client,
 )
 from app.application.email import (
+    EMAIL_BROKER_TIMEOUT_SECONDS,
+    EMAIL_DISPATCH_TIMEOUT_SECONDS,
+    EMAIL_PUBLISH_RETRY_POLICY,
     _claim_delivery,
     _defer_unconfigured,
     _finish_delivery,
     dispatch_email_deliveries,
     list_due_email_delivery_ids,
+    queue_identity_email,
     run_email_delivery,
 )
 from app.entities.email import EmailDelivery as EmailDeliveryEntity
+from app.entities.smtp_settings import SmtpSettings
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import email as email_repository
 from app.infrastructure.secrets import decrypt_secret, encrypt_secret
@@ -209,6 +214,42 @@ def test_email_task_wrappers() -> None:
 
 async def test_delivery_edge_cases() -> None:
     settings = test_settings()
+
+    smtp = SmtpSettings(
+        host="smtp.example.com",
+        from_email="noreply@example.com",
+        site_url="https://nexaflow.example/",
+        enabled=True,
+    )
+    create_delivery_mock = AsyncMock(side_effect=lambda _db, delivery: delivery)
+    with (
+        patch(
+            "app.application.email.smtp_repository.get",
+            new=AsyncMock(return_value=smtp),
+        ),
+        patch(
+            "app.application.email.email_repository.create_delivery",
+            new=create_delivery_mock,
+        ),
+    ):
+        queued_id = await queue_identity_email(
+            AsyncMock(),
+            settings,
+            kind="password_reset",
+            recipient="member@example.com",
+            payload={"name": "Member"},
+            expires_at=utc_now() + timedelta(minutes=30),
+            source_type="password_reset",
+            source_id="reset-id",
+            path="/reset-password/token",
+        )
+    queued_delivery = create_delivery_mock.await_args.args[1]
+    assert queued_id == queued_delivery.id
+    queued_payload = json.loads(
+        decrypt_secret(queued_delivery.payload_ciphertext, settings.model_secret_key)
+    )
+    assert queued_payload["url"] == "https://nexaflow.example/reset-password/token"
+
     await _defer_unconfigured("missing-delivery")
 
     live_id = await create_delivery(
@@ -303,9 +344,32 @@ async def test_delivery_edge_cases() -> None:
     broker_settings = replace(settings, celery_task_always_eager=False)
     import app.tasks.email as email_tasks
 
-    with patch.object(email_tasks.run_email_delivery_job, "apply_async") as apply_async:
+    from app.infrastructure.celery import celery_app
+
+    with (
+        patch.object(email_tasks.run_email_delivery_job, "apply_async") as apply_async,
+        patch(
+            "app.application.email.asyncio.wait_for",
+            wraps=asyncio.wait_for,
+        ) as wait_for,
+    ):
         await dispatch_email_deliveries(["queued"], broker_settings)
-    apply_async.assert_called_once_with(args=("queued",))
+    apply_async.assert_called_once_with(
+        args=("queued",),
+        retry=True,
+        retry_policy=EMAIL_PUBLISH_RETRY_POLICY,
+    )
+    wait_for.assert_awaited_once()
+    assert wait_for.await_args.kwargs["timeout"] == EMAIL_DISPATCH_TIMEOUT_SECONDS
+    assert celery_app.conf.broker_connection_timeout == EMAIL_BROKER_TIMEOUT_SECONDS
+    assert (
+        celery_app.conf.broker_transport_options["socket_connect_timeout"]
+        == EMAIL_BROKER_TIMEOUT_SECONDS
+    )
+    assert (
+        celery_app.conf.broker_transport_options["socket_timeout"]
+        == EMAIL_BROKER_TIMEOUT_SECONDS
+    )
 
     with (
         patch.object(

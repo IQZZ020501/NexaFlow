@@ -109,9 +109,9 @@ describe("SMTP settings extra", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "保存 SMTP 配置" }))
 
-    await waitFor(() =>
-      expect(screen.queryByRole("alert")).toBeNull()
-    )
+    const portInput = screen.getByLabelText("端口") as HTMLInputElement
+    await waitFor(() => expect(portInput.checkValidity()).toBe(false))
+    expect(screen.queryByRole("alert")).toBeNull()
     expect(patchRequests).toBe(0)
   })
 

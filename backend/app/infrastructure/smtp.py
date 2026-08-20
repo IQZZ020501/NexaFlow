@@ -94,6 +94,8 @@ def _authenticate_and_send(
     message: EmailMessage,
 ) -> None:
     if config.username:
+        if config.security == "none":
+            raise SmtpConfigurationError("SMTP authentication requires TLS.")
         client.login(config.username, config.password or "")
     client.send_message(message)
 

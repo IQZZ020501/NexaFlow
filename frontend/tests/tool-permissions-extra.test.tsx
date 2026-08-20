@@ -5,6 +5,7 @@ import { useState } from "react"
 import { ToolPermissionsDialog } from "@/components/tools/tool-permissions-dialog"
 import type { ToolSummary } from "@/lib/api/tools"
 import {
+  cleanup,
   fireEvent,
   jsonResponse,
   renderPage,
@@ -15,6 +16,7 @@ import {
 const originalFetch = globalThis.fetch
 
 afterEach(() => {
+  cleanup()
   globalThis.fetch = originalFetch
 })
 

@@ -28,6 +28,16 @@ from app.shareddomain.email.services import render_email
 
 logger = get_logger(__name__)
 
+EMAIL_BROKER_TIMEOUT_SECONDS = 3.0
+EMAIL_DISPATCH_TIMEOUT_SECONDS = 5.0
+EMAIL_PUBLISH_RETRY_POLICY = {
+    "max_retries": 0,
+    "interval_start": 0,
+    "interval_step": 0,
+    "interval_max": 0,
+    "timeout": EMAIL_BROKER_TIMEOUT_SECONDS,
+}
+
 
 def _utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
@@ -58,7 +68,7 @@ async def queue_identity_email(
     content = dict(payload)
     content["recipient"] = normalize_email(recipient)
     if path is not None:
-        content["url"] = f"{smtp.site_url}{path}"
+        content["url"] = f"{smtp.site_url.rstrip('/')}{path}"
     ciphertext = encrypt_secret(
         json.dumps(content, ensure_ascii=False, separators=(",", ":")),
         settings.model_secret_key,
@@ -275,15 +285,28 @@ async def dispatch_email_deliveries(
 
     from app.infrastructure.celery import celery_app
 
+    broker_transport_options = dict(celery_app.conf.broker_transport_options or {})
+    broker_transport_options.update(
+        socket_connect_timeout=EMAIL_BROKER_TIMEOUT_SECONDS,
+        socket_timeout=EMAIL_BROKER_TIMEOUT_SECONDS,
+    )
     celery_app.conf.update(
         broker_url=settings.celery_broker_url,
+        broker_connection_timeout=EMAIL_BROKER_TIMEOUT_SECONDS,
+        broker_transport_options=broker_transport_options,
         task_always_eager=False,
     )
     for delivery_id in delivery_ids:
         try:
-            await asyncio.to_thread(
-                run_email_delivery_job.apply_async,
-                args=(delivery_id,),
+            # Durable Beat recovery owns retries; requests get one bounded publish attempt.
+            await asyncio.wait_for(
+                asyncio.to_thread(
+                    run_email_delivery_job.apply_async,
+                    args=(delivery_id,),
+                    retry=True,
+                    retry_policy=EMAIL_PUBLISH_RETRY_POLICY,
+                ),
+                timeout=EMAIL_DISPATCH_TIMEOUT_SECONDS,
             )
         except Exception as exc:
             log_error(

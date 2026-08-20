@@ -29,6 +29,7 @@ from app.infrastructure.smtp import (
     SmtpConfigurationError,
     SmtpDeliveryError,
     SmtpTransportConfig,
+    _authenticate_and_send,
     _send_smtp_message_sync,
     send_smtp_message,
 )
@@ -51,8 +52,8 @@ def test_transport_modes() -> None:
     config = SmtpTransportConfig(
         host="smtp.example.com",
         port=587,
-        username="mailer@example.com",
-        password="secret",
+        username="",
+        password=None,
         security="none",
         from_email="noreply@example.com",
         from_name="NexaFlow",
@@ -63,7 +64,7 @@ def test_transport_modes() -> None:
     with patch("app.infrastructure.smtp.smtplib.SMTP", return_value=client) as smtp:
         _send_smtp_message_sync(config, "to@example.com", "subject", "body")
     smtp.assert_called_once_with("smtp.example.com", 587, timeout=7)
-    client.login.assert_called_once_with("mailer@example.com", "secret")
+    client.login.assert_not_called()
     client.starttls.assert_not_called()
     client.send_message.assert_called_once()
 
@@ -88,11 +89,36 @@ def test_transport_modes() -> None:
     else:
         raise AssertionError("SMTP header injection was accepted")
 
-    config = SmtpTransportConfig(**{**config.__dict__, "security": "starttls"})
+    plaintext_auth = SmtpTransportConfig(
+        **{
+            **config.__dict__,
+            "username": "mailer@example.com",
+            "password": "secret",
+        }
+    )
+    client.reset_mock()
+    try:
+        _authenticate_and_send(client, plaintext_auth, MagicMock())
+    except SmtpConfigurationError:
+        pass
+    else:
+        raise AssertionError("SMTP authentication without TLS was accepted")
+    client.login.assert_not_called()
+    client.send_message.assert_not_called()
+
+    config = SmtpTransportConfig(
+        **{
+            **config.__dict__,
+            "username": "mailer@example.com",
+            "password": "secret",
+            "security": "starttls",
+        }
+    )
     client.reset_mock()
     with patch("app.infrastructure.smtp.smtplib.SMTP", return_value=client):
         _send_smtp_message_sync(config, "to@example.com", "subject", "body")
     client.starttls.assert_called_once()
+    client.login.assert_called_once_with("mailer@example.com", "secret")
 
     config = SmtpTransportConfig(**{**config.__dict__, "security": "ssl", "port": 465})
     client.reset_mock()
@@ -141,6 +167,12 @@ def test_application_validation() -> None:
             host="smtp.example.com",
             from_email="noreply@example.com",
             security="invalid",
+        ),
+        SmtpSettings(
+            host="smtp.example.com",
+            username="mailer@example.com",
+            from_email="noreply@example.com",
+            security="none",
         ),
         SmtpSettings(
             host="smtp.example.com\ninvalid",

@@ -86,6 +86,8 @@ def _validate_entity(entity: SmtpSettings) -> None:
         entity.from_email = _validate_email(entity.from_email, "sender address")
     if entity.security not in {"none", "starttls", "ssl"}:
         raise _invalid("Invalid SMTP security mode.")
+    if entity.security == "none" and entity.username:
+        raise _invalid("SMTP authentication requires TLS.")
     if entity.enabled and (not entity.host or not entity.from_email):
         raise _invalid("SMTP host and sender address are required when enabled.")
     if entity.site_url:
