@@ -166,12 +166,32 @@ export type KnowledgeQueryInspectResult = {
   trace: KnowledgeRetrievalTrace
 }
 
+export type KnowledgeGraphEvaluationExpectation = {
+  entity_names: string[]
+  predicates: string[]
+  path_entity_names: string[]
+  path_predicates: string[]
+}
+
+export type KnowledgeGraphEvaluationMetrics = {
+  entity_precision: number
+  entity_recall: number
+  claim_precision: number
+  claim_recall: number
+  path_exact_match: number
+  path_edge_accuracy: number
+  citation_coverage: number
+}
+
+export type KnowledgeGraphMode = "off" | "auto" | "path" | "neighborhood"
+
 export type KnowledgeEvaluationCase = {
   id: string
   workspace_id: string
   knowledge_base_id: string
   question: string
   expected_document_ids: string[]
+  graph_expectation: KnowledgeGraphEvaluationExpectation | null
   created_by_user_id: string
   created_at: string
   updated_at: string
@@ -183,6 +203,8 @@ export type KnowledgeEvaluationRunRequest = {
   search_mode: KnowledgeSearchMode
   similarity: number | null
   include_references: boolean
+  graph_mode: KnowledgeGraphMode
+  max_hops: number
 }
 
 export type KnowledgeEvaluationResult = {
@@ -197,6 +219,7 @@ export type KnowledgeEvaluationResult = {
   ndcg_at_k: number
   latency_ms: number
   trace: Record<string, unknown>
+  graph_metrics: KnowledgeGraphEvaluationMetrics | null
   error: string | null
   created_at: string
 }
@@ -764,6 +787,7 @@ export function createKnowledgeEvaluationCase(
   payload: {
     question: string
     expected_document_ids: string[]
+    graph_expectation?: KnowledgeGraphEvaluationExpectation | null
   },
 ) {
   return request<KnowledgeEvaluationCase>(

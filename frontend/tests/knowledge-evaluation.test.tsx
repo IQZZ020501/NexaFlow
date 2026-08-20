@@ -35,6 +35,7 @@ const evaluationCase = {
   knowledge_base_id: "kb-1",
   question: "如何回滚？",
   expected_document_ids: ["doc-1"],
+  graph_expectation: null,
   created_by_user_id: "user-1",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
@@ -119,8 +120,12 @@ describe("knowledge evaluation", () => {
         })
       }
       if (method === "POST" && url.endsWith("/evaluations/cases")) {
-        requestBodies.push(JSON.parse(String(init?.body)))
-        return jsonResponse(evaluationCase, 201)
+        const body = JSON.parse(String(init?.body))
+        requestBodies.push(body)
+        return jsonResponse(
+          { ...evaluationCase, graph_expectation: body.graph_expectation },
+          201,
+        )
       }
       if (method === "POST" && url.endsWith("/evaluations/runs")) {
         requestBodies.push(JSON.parse(String(init?.body)))
@@ -149,7 +154,16 @@ describe("knowledge evaluation", () => {
               reciprocal_rank: 1,
               ndcg_at_k: 1,
               latency_ms: 12,
-              trace: {},
+              trace: { graph: { revision_id: "revision-1" } },
+              graph_metrics: {
+                entity_precision: 1,
+                entity_recall: 1,
+                claim_precision: 1,
+                claim_recall: 1,
+                path_exact_match: 1,
+                path_edge_accuracy: 1,
+                citation_coverage: 1,
+              },
               error: null,
               created_at: "2026-01-01T00:00:00Z",
             },
@@ -200,13 +214,40 @@ describe("knowledge evaluation", () => {
     expect(inspectBodies[0]?.search_mode).toBe("keywords")
     await screen.findByText("检索模式：关键词检索")
     await screen.findByText("保存当前检索")
+    fireEvent.click(screen.getByText("知识关联期望"))
+    fireEvent.change(screen.getByLabelText("实体名称"), {
+      target: { value: "制度 A, 账号管理办法" },
+    })
+    fireEvent.change(screen.getByLabelText("关系类型"), {
+      target: { value: "references" },
+    })
+    fireEvent.change(screen.getByLabelText("路径实体序列"), {
+      target: { value: "制度 A,账号管理办法" },
+    })
+    fireEvent.change(screen.getByLabelText("路径关系序列"), {
+      target: { value: "references" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "添加用例" }))
     await screen.findByRole("checkbox", { name: "选择用例：如何回滚？" })
     expect(requestBodies[0]).toEqual({
       question: "如何回滚？",
       expected_document_ids: ["doc-1"],
+      graph_expectation: {
+        entity_names: ["制度 A", "账号管理办法"],
+        predicates: ["references"],
+        path_entity_names: ["制度 A", "账号管理办法"],
+        path_predicates: ["references"],
+      },
     })
 
+    const graphModeTrigger = screen.getByRole("button", {
+      name: "图谱检索模式",
+    })
+    fireEvent.pointerDown(graphModeTrigger)
+    fireEvent.click(await screen.findByText("路径图谱检索"))
+    fireEvent.change(screen.getByLabelText("最大图谱跳数"), {
+      target: { value: "5" },
+    })
     fireEvent.click(
       await screen.findByRole("button", { name: "开始评测（1 条）" }),
     )
@@ -219,6 +260,10 @@ describe("knowledge evaluation", () => {
     expect(evaluationHelp.getAttribute("aria-expanded")).toBe("true")
     await screen.findByText("评测指标说明")
     expect(screen.getByText("测试问题：怎么申请年假？")).toBeTruthy()
+    const graphMetrics = screen.getByText("知识关联指标")
+    fireEvent.click(graphMetrics)
+    expect(screen.getByText("图谱修订：revision-1")).toBeTruthy()
+    expect(screen.getByText("引用覆盖率")).toBeTruthy()
     expect(screen.getAllByText("1").length).toBeGreaterThan(0)
     expect(requestBodies[1]).toEqual({
       case_ids: ["case-1"],
@@ -226,6 +271,8 @@ describe("knowledge evaluation", () => {
       search_mode: "keywords",
       similarity: 0.6,
       include_references: true,
+      graph_mode: "path",
+      max_hops: 5,
     })
     expect(errors).toEqual([])
   })
@@ -287,6 +334,7 @@ describe("knowledge evaluation", () => {
     )
 
     await screen.findByText("P95 延迟")
+    expect(screen.queryByText(/^知识关联期望：/)).toBeNull()
     const caseCheckbox = screen.getByRole("checkbox", {
       name: "选择用例：如何回滚？",
     })

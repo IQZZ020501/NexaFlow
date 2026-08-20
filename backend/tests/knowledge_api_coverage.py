@@ -63,7 +63,9 @@ from app.shareddomain.knowledge.models import (
     KnowledgeDocumentParentChunk,
 )
 from app.api.v1.endpoints import knowledge as knowledge_api
+from app.api.v1.endpoints import knowledge_evaluation as knowledge_evaluation_api
 from app.application import knowledge_graph as graph_application
+from app.application import knowledge_evaluation as knowledge_evaluation_application
 from app.api.v1.endpoints import knowledge_lifecycle as knowledge_lifecycle_api
 from app.api.v1.endpoints import knowledge_retrieval as knowledge_retrieval_api
 from app.application import knowledge as knowledge_application
@@ -82,9 +84,13 @@ from app.schemas.knowledge import (
     KnowledgeDocumentCreateRequest,
     KnowledgeDocumentStatusUpdateRequest,
     KnowledgeModelTestRequest,
+    KnowledgeQueryHitResponse,
+    KnowledgeQueryInspectResponse,
     KnowledgeQueryRequest,
+    KnowledgeRetrievalTraceResponse,
     ResourcePermissionUpsertRequest,
 )
+from app.schemas.knowledge_graph import KnowledgeGraphQueryResultResponse
 from app.shareddomain.knowledge.orchestration import (
     enqueue_parse_knowledge_document,
 )
@@ -96,7 +102,10 @@ from app.shareddomain.knowledge_graph.revisions import (
 )
 from app.shareddomain.knowledge_graph.schema import default_policy_graph_schema
 from app.shareddomain.knowledge_graph.services import create_graph_schema
-from app.shareddomain.knowledge.task_runner import recover_knowledge_tasks
+from app.shareddomain.knowledge.task_runner import (
+    recover_knowledge_tasks,
+    run_knowledge_task,
+)
 from sqlalchemy import select, text
 
 MEMBER_PASSWORD = "Member@12345."
@@ -177,6 +186,8 @@ async def seed_graph_api_fixture(
 
         if not publish_graph:
             return {
+                "document_id": document_id,
+                "chunk_id": chunk_id,
                 "source_id": source_id,
                 "target_id": target_id,
                 "claim_id": claim_id,
@@ -299,6 +310,8 @@ async def seed_graph_api_fixture(
         await db.commit()
         await publish_graph_revision(db, knowledge_base, revision)
     return {
+        "document_id": document_id,
+        "chunk_id": chunk_id,
         "source_id": source_id,
         "target_id": target_id,
         "claim_id": claim_id,
@@ -2613,6 +2626,162 @@ def test_graph_api_permissions_and_scoping() -> None:
         assert detail.status_code == 200, detail.text
         assert detail.json()["claims"][0]["evidence_ids"]
         assert detail.json()["evidence"][0]["document_filename"] == "graph-api.md"
+
+        target_detail = client.get(
+            graph_url(
+                workspace_id,
+                knowledge_base_id,
+                f"/entities/{fixture['target_id']}",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert target_detail.status_code == 200, target_detail.text
+        graph_claim = detail.json()["claims"][0]
+        graph_evidence = detail.json()["evidence"]
+        graph_path = KnowledgeGraphQueryResultResponse.model_validate(
+            {
+                "revision_id": status_response.json()["active_revision_id"],
+                "operation": "path",
+                "resolved_entities": [detail.json(), target_detail.json()],
+                "nodes": [detail.json(), target_detail.json()],
+                "claims": [graph_claim],
+                "paths": [
+                    {
+                        "nodes": [detail.json(), target_detail.json()],
+                        "steps": [
+                            {
+                                "claim_id": graph_claim["id"],
+                                "predicate": graph_claim["predicate"],
+                                "source_entity_id": graph_claim[
+                                    "subject_entity_id"
+                                ],
+                                "target_entity_id": graph_claim[
+                                    "object_entity_id"
+                                ],
+                                "semantic_direction": "forward",
+                                "quality_score": graph_claim["quality_score"],
+                                "support_count": graph_claim["support_count"],
+                                "evidence_ids": graph_claim["evidence_ids"],
+                            }
+                        ],
+                    }
+                ],
+                "evidence": graph_evidence,
+                "visited_nodes": 2,
+                "truncated": False,
+            }
+        )
+        evaluation_base = knowledge_url(
+            workspace_id,
+            f"/{knowledge_base_id}/evaluations",
+        )
+        evaluation_case = client.post(
+            f"{evaluation_base}/cases",
+            headers=auth_headers(alice_token),
+            json={
+                "question": "制度 A 引用了什么？",
+                "expected_document_ids": [fixture["document_id"]],
+                "graph_expectation": {
+                    "entity_names": ["制度 A", "账号管理办法"],
+                    "predicates": ["references"],
+                    "path_entity_names": ["制度 A", "账号管理办法"],
+                    "path_predicates": ["references"],
+                },
+            },
+        )
+        assert evaluation_case.status_code == 201, evaluation_case.text
+        assert evaluation_case.json()["graph_expectation"]["predicates"] == [
+            "references"
+        ]
+        evaluation_queries: list[tuple[str, int]] = []
+
+        async def fake_evaluation_retrieve(
+            _db,
+            _knowledge_base,
+            payload,
+            _settings,
+        ) -> KnowledgeQueryInspectResponse:
+            evaluation_queries.append((payload.graph_mode, payload.max_hops))
+            return KnowledgeQueryInspectResponse(
+                hits=[
+                    KnowledgeQueryHitResponse(
+                        chunk_id=fixture["chunk_id"],
+                        document_id=fixture["document_id"],
+                        document_filename="graph-api.md",
+                        chunk_index=0,
+                        content="制度 A 引用账号管理办法。",
+                    )
+                ],
+                trace=KnowledgeRetrievalTraceResponse(
+                    trace_id="graph-evaluation-trace",
+                    search_mode=payload.search_mode,
+                    limit=payload.limit,
+                    min_similarity=payload.similarity,
+                    max_distance=None,
+                    vector_candidates=0,
+                    keyword_candidates=0,
+                    reference_candidates=0,
+                    graph_claim_candidates=1,
+                    graph_path_count=1,
+                    graph_visited_nodes=2,
+                    graph_hops=1,
+                    fused_candidates=1,
+                    rerank_status="not_configured",
+                    returned_hits=1,
+                    duration_ms=2,
+                    stage_duration_ms={"graph_traversal": 2},
+                ),
+                graph=graph_path,
+            )
+
+        with (
+            patch.object(
+                knowledge_evaluation_api,
+                "dispatch_knowledge_task",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                knowledge_evaluation_application,
+                "retrieve_knowledge_base",
+                new=fake_evaluation_retrieve,
+            ),
+        ):
+            evaluation_run = client.post(
+                f"{evaluation_base}/runs",
+                headers=auth_headers(alice_token),
+                json={
+                    "case_ids": [evaluation_case.json()["id"]],
+                    "graph_mode": "path",
+                    "max_hops": 5,
+                },
+            )
+            assert evaluation_run.status_code == 202, evaluation_run.text
+            asyncio.run(
+                run_knowledge_task(
+                    evaluation_run.json()["id"],
+                    test_settings(),
+                    evaluation_runner=(
+                        knowledge_evaluation_application.run_evaluation_task
+                    ),
+                )
+            )
+        evaluation_summary = client.get(
+            f"{evaluation_base}/runs/{evaluation_run.json()['id']}/results",
+            headers=auth_headers(alice_token),
+        )
+        assert evaluation_summary.status_code == 200, evaluation_summary.text
+        graph_result = evaluation_summary.json()["results"][0]
+        assert graph_result["graph_metrics"] == {
+            "entity_precision": 1.0,
+            "entity_recall": 1.0,
+            "claim_precision": 1.0,
+            "claim_recall": 1.0,
+            "path_exact_match": 1,
+            "path_edge_accuracy": 1.0,
+            "citation_coverage": 1.0,
+        }
+        assert graph_result["trace"]["graph"]["revision_id"]
+        assert evaluation_queries == [("path", 5)]
 
         unknown_relation = client.post(
             graph_url(workspace_id, knowledge_base_id, "/path"),

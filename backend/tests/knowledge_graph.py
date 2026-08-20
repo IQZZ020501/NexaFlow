@@ -41,8 +41,12 @@ from app.shareddomain.knowledge_graph.schema import (
     default_policy_graph_schema,
     graph_schema_hash,
 )
-from app.schemas.knowledge import KnowledgeQueryRequest
+from app.schemas.knowledge import (
+    KnowledgeGraphEvaluationExpectation,
+    KnowledgeQueryRequest,
+)
 from app.schemas.knowledge_graph import KnowledgeGraphReviewDecisionRequest
+from app.shareddomain.knowledge.evaluation import graph_evaluation_metrics
 from app.shareddomain.knowledge_graph import revisions as graph_revisions
 from app.shareddomain.knowledge_graph.revisions import GraphRevisionConflict
 from app.shareddomain.knowledge_graph.resolution import claim_fingerprint
@@ -233,6 +237,41 @@ def test_bank_path_preserves_relation_direction_and_evidence() -> None:
         "forward",
     ]
     assert all(step.evidence for step in path.steps)
+
+    graph = graph_query.graph_query_result_response(
+        graph_traversal.GraphTraversalResult(
+            revision_id="bank-revision",
+            operation="path",
+            resolved_entities=path.nodes,
+            nodes=path.nodes,
+            claims=path.steps,
+            paths=(path,),
+            evidence=tuple(
+                item
+                for step in path.steps
+                for item in step.evidence
+            ),
+            visited_nodes=len(path.nodes),
+            truncated=False,
+        )
+    )
+    assert graph is not None
+    metrics = graph_evaluation_metrics(
+        KnowledgeGraphEvaluationExpectation(
+            path_entity_names=[node.canonical_name for node in path.nodes],
+            path_predicates=[step.predicate for step in path.steps],
+        ),
+        graph,
+    )
+    assert metrics is not None
+    assert metrics.entity_precision == 1
+    assert metrics.entity_recall == 1
+    assert metrics.claim_precision == 1
+    assert metrics.claim_recall == 1
+    assert metrics.path_exact_match == 1
+    assert metrics.path_edge_accuracy == 1
+    assert metrics.citation_coverage == 1
+    assert graph_evaluation_metrics(None, graph) is None
 
 
 def test_graph_traversal_sql_requires_acyclic_active_evidence() -> None:

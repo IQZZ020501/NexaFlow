@@ -272,12 +272,30 @@ class KnowledgeQueryInspectResponse(BaseModel):
 KnowledgeEvaluationId = Annotated[str, Field(min_length=1, max_length=36)]
 
 
+class KnowledgeGraphEvaluationExpectation(BaseModel):
+    entity_names: list[str] = Field(default_factory=list, max_length=32)
+    predicates: list[str] = Field(default_factory=list, max_length=32)
+    path_entity_names: list[str] = Field(default_factory=list, max_length=16)
+    path_predicates: list[str] = Field(default_factory=list, max_length=15)
+
+
+class KnowledgeGraphEvaluationMetrics(BaseModel):
+    entity_precision: float = Field(default=0, ge=0, le=1)
+    entity_recall: float = Field(default=0, ge=0, le=1)
+    claim_precision: float = Field(default=0, ge=0, le=1)
+    claim_recall: float = Field(default=0, ge=0, le=1)
+    path_exact_match: int = Field(default=0, ge=0, le=1)
+    path_edge_accuracy: float = Field(default=0, ge=0, le=1)
+    citation_coverage: float = Field(default=0, ge=0, le=1)
+
+
 class KnowledgeEvaluationCaseCreateRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     expected_document_ids: list[KnowledgeEvaluationId] = Field(
         min_length=1,
         max_length=20,
     )
+    graph_expectation: KnowledgeGraphEvaluationExpectation | None = None
 
 
 class KnowledgeEvaluationCaseResponse(BaseModel):
@@ -286,6 +304,7 @@ class KnowledgeEvaluationCaseResponse(BaseModel):
     knowledge_base_id: str
     question: str
     expected_document_ids: list[str]
+    graph_expectation: KnowledgeGraphEvaluationExpectation | None = None
     created_by_user_id: str
     created_at: datetime
     updated_at: datetime
@@ -297,6 +316,8 @@ class KnowledgeEvaluationRunRequest(BaseModel):
     search_mode: Literal["embedding", "keywords", "blend"] = "blend"
     similarity: float | None = Field(default=None, ge=0, le=1)
     include_references: bool = True
+    graph_mode: Literal["off", "auto", "path", "neighborhood"] = "auto"
+    max_hops: int = Field(default=6, ge=1, le=8)
 
 
 class KnowledgeEvaluationResultResponse(BaseModel):
@@ -311,6 +332,7 @@ class KnowledgeEvaluationResultResponse(BaseModel):
     ndcg_at_k: float
     latency_ms: float
     trace: dict[str, Any]
+    graph_metrics: KnowledgeGraphEvaluationMetrics | None = None
     error: str | None
     created_at: datetime
 

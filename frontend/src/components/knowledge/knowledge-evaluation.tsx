@@ -10,6 +10,7 @@ import {
   Trash2Icon,
 } from "lucide-react"
 import { Popover as PopoverPrimitive } from "radix-ui"
+import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -19,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/contexts/language-provider"
 import {
   createKnowledgeEvaluationCase,
@@ -34,6 +36,8 @@ import type {
   KnowledgeDocument,
   KnowledgeEvaluationCase,
   KnowledgeEvaluationSummary,
+  KnowledgeGraphEvaluationExpectation,
+  KnowledgeGraphMode,
   KnowledgeQueryInspectResult,
   KnowledgeSearchMode,
   KnowledgeTask,
@@ -60,6 +64,20 @@ type KnowledgeEvaluationProps = {
  */
 function metric(value: number) {
   return Number(value.toFixed(3)).toString()
+}
+
+function delimitedValues(value: string) {
+  return value
+    .split(/[,，\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function graphRevisionId(trace: Record<string, unknown>) {
+  const graph = trace.graph
+  if (!graph || typeof graph !== "object" || Array.isArray(graph)) return null
+  const revisionId = (graph as Record<string, unknown>).revision_id
+  return typeof revisionId === "string" && revisionId ? revisionId : null
 }
 
 /**
@@ -96,10 +114,19 @@ export function KnowledgeEvaluation({
   const [selectedCaseIds, setSelectedCaseIds] = React.useState<string[]>([])
   const [testedQuery, setTestedQuery] = React.useState("")
   const [limit, setLimit] = React.useState(5)
-  const [searchMode, setSearchMode] = React.useState<KnowledgeSearchMode>("blend")
+  const [searchMode, setSearchMode] =
+    React.useState<KnowledgeSearchMode>("blend")
   const [similarity, setSimilarity] = React.useState(0.6)
   const [includeReferences, setIncludeReferences] = React.useState(true)
-  const [expectedDocumentIds, setExpectedDocumentIds] = React.useState<string[]>([])
+  const [graphMode, setGraphMode] = React.useState<KnowledgeGraphMode>("auto")
+  const [maxHops, setMaxHops] = React.useState(6)
+  const [expectedDocumentIds, setExpectedDocumentIds] = React.useState<
+    string[]
+  >([])
+  const [expectedEntities, setExpectedEntities] = React.useState("")
+  const [expectedPredicates, setExpectedPredicates] = React.useState("")
+  const [expectedPathEntities, setExpectedPathEntities] = React.useState("")
+  const [expectedPathPredicates, setExpectedPathPredicates] = React.useState("")
   const [activeTask, setActiveTask] = React.useState<KnowledgeTask | null>(null)
   const [summary, setSummary] = React.useState<KnowledgeEvaluationSummary | null>(null)
   const [isSaving, setIsSaving] = React.useState(false)
@@ -207,6 +234,7 @@ export function KnowledgeEvaluation({
   async function addCase(payload: {
     question: string
     expected_document_ids: string[]
+    graph_expectation?: KnowledgeGraphEvaluationExpectation | null
   }) {
     const created = await createKnowledgeEvaluationCase(
       token,
@@ -223,11 +251,26 @@ export function KnowledgeEvaluation({
     if (!testedQuery.trim() || !expectedDocumentIds.length) return
     setIsSaving(true)
     try {
+      const graphExpectation = {
+        entity_names: delimitedValues(expectedEntities),
+        predicates: delimitedValues(expectedPredicates),
+        path_entity_names: delimitedValues(expectedPathEntities),
+        path_predicates: delimitedValues(expectedPathPredicates),
+      }
       await addCase({
         question: testedQuery.trim(),
         expected_document_ids: expectedDocumentIds,
+        graph_expectation: Object.values(graphExpectation).some(
+          (values) => values.length,
+        )
+          ? graphExpectation
+          : null,
       })
       setExpectedDocumentIds([])
+      setExpectedEntities("")
+      setExpectedPredicates("")
+      setExpectedPathEntities("")
+      setExpectedPathPredicates("")
     } catch (error) {
       reportError(error)
     } finally {
@@ -287,6 +330,8 @@ export function KnowledgeEvaluation({
           search_mode: searchMode,
           similarity,
           include_references: includeReferences,
+          graph_mode: graphMode,
+          max_hops: maxHops,
         },
       )
       setActiveTask(task)
@@ -373,6 +418,36 @@ export function KnowledgeEvaluation({
                 )) : <p className="text-sm text-muted-foreground">{t("暂无已启用文档")}</p>}
               </div>
             </fieldset>
+            <details className="mt-3 rounded-md border p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                {t("知识关联期望")}
+              </summary>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t("用逗号分隔，路径字段按顺序填写")}
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {([
+                  ["实体名称", expectedEntities, setExpectedEntities],
+                  ["关系类型", expectedPredicates, setExpectedPredicates],
+                  ["路径实体序列", expectedPathEntities, setExpectedPathEntities],
+                  [
+                    "路径关系序列",
+                    expectedPathPredicates,
+                    setExpectedPathPredicates,
+                  ],
+                ] as const).map(([label, value, onChange]) => (
+                  <label key={label} className="grid gap-1 text-sm font-medium">
+                    {t(label)}
+                    <Input
+                      value={value}
+                      aria-label={t(label)}
+                      placeholder={t("用逗号分隔")}
+                      onChange={(event) => onChange(event.target.value)}
+                    />
+                  </label>
+                ))}
+              </div>
+            </details>
           </section>
         ) : null}
 
@@ -404,6 +479,18 @@ export function KnowledgeEvaluation({
                           .join(t("列表分隔符")),
                       })}
                     </p>
+                    {item.graph_expectation ? (
+                      <p className="mt-1 break-words text-xs text-muted-foreground">
+                        {t("知识关联期望：{value}", {
+                          value: [
+                            ...item.graph_expectation.entity_names,
+                            ...item.graph_expectation.predicates,
+                            ...item.graph_expectation.path_entity_names,
+                            ...item.graph_expectation.path_predicates,
+                          ].join(t("列表分隔符")),
+                        })}
+                      </p>
+                    ) : null}
                   </div>
                   {canEdit ? (
                     <Button
@@ -429,6 +516,44 @@ export function KnowledgeEvaluation({
         {canEdit ? (
           <section className="mt-4 rounded-lg border p-4">
             <h2 className="text-sm font-semibold">{t("运行评测")}</h2>
+            <div className="mt-3 grid max-w-lg gap-3 sm:grid-cols-2">
+              <div className="grid gap-1 text-sm font-medium">
+                <span>{t("图谱检索模式")}</span>
+                <div className="[&_button]:h-9">
+                  <FilterDropdown
+                    ariaLabel={t("图谱检索模式")}
+                    value={graphMode}
+                    options={[
+                      { value: "off", label: t("关闭图谱检索") },
+                      { value: "auto", label: t("自动图谱检索") },
+                      { value: "path", label: t("路径图谱检索") },
+                      { value: "neighborhood", label: t("邻域图谱检索") },
+                    ]}
+                    onChange={(value) =>
+                      setGraphMode(value as KnowledgeGraphMode)
+                    }
+                  />
+                </div>
+              </div>
+              <label
+                className="grid gap-1 text-sm font-medium"
+                htmlFor="evaluation-max-hops"
+              >
+                {t("最大图谱跳数")}
+                <Input
+                  id="evaluation-max-hops"
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={maxHops}
+                  onChange={(event) =>
+                    setMaxHops(
+                      Math.min(8, Math.max(1, Number(event.target.value) || 1)),
+                    )
+                  }
+                />
+              </label>
+            </div>
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
               <Button
                 type="button"
@@ -587,19 +712,59 @@ export function KnowledgeEvaluation({
                     <div className="grid grid-cols-[minmax(260px,1fr)_90px_90px_90px_90px_120px] border-b px-4 py-2 text-xs font-medium text-muted-foreground">
                       <span>{t("问题 / 错误")}</span><span>{t("Hit@K")}</span><span>{t("Recall@K")}</span><span>{t("MRR")}</span><span>{t("nDCG@K")}</span><span>{t("延迟")}</span>
                     </div>
-                    {summary.results.map((result) => (
-                      <div key={result.id} className="grid grid-cols-[minmax(260px,1fr)_90px_90px_90px_90px_120px] border-b px-4 py-3 text-sm last:border-b-0">
-                        <span className="min-w-0 break-words pr-3">
-                          {result.question}
-                          {result.error ? <small className="mt-1 block text-destructive">{result.error}</small> : null}
-                        </span>
-                        <span>{metric(result.hit_at_k)}</span>
-                        <span>{metric(result.recall_at_k)}</span>
-                        <span>{metric(result.reciprocal_rank)}</span>
-                        <span>{metric(result.ndcg_at_k)}</span>
-                        <span>{t("{value} 毫秒", { value: metric(result.latency_ms) })}</span>
-                      </div>
-                    ))}
+                    {summary.results.map((result) => {
+                      const revisionId = graphRevisionId(result.trace)
+                      return (
+                        <div
+                          key={result.id}
+                          className="grid grid-cols-[minmax(260px,1fr)_90px_90px_90px_90px_120px] border-b px-4 py-3 text-sm last:border-b-0"
+                        >
+                          <span className="min-w-0 break-words pr-3">
+                            {result.question}
+                            {result.error ? (
+                              <small className="mt-1 block text-destructive">
+                                {result.error}
+                              </small>
+                            ) : null}
+                            {result.graph_metrics ? (
+                              <details className="mt-2 rounded-md bg-muted/50 p-2 text-xs">
+                                <summary className="cursor-pointer font-medium">
+                                  {t("知识关联指标")}
+                                </summary>
+                                {revisionId ? (
+                                  <p className="mt-2 break-all text-muted-foreground">
+                                    {t("图谱修订：{value}", { value: revisionId })}
+                                  </p>
+                                ) : null}
+                                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                                  {([
+                                    ["实体精确率", result.graph_metrics.entity_precision],
+                                    ["实体召回率", result.graph_metrics.entity_recall],
+                                    ["关系精确率", result.graph_metrics.claim_precision],
+                                    ["关系召回率", result.graph_metrics.claim_recall],
+                                    ["路径完全匹配", result.graph_metrics.path_exact_match],
+                                    ["路径边准确率", result.graph_metrics.path_edge_accuracy],
+                                    ["引用覆盖率", result.graph_metrics.citation_coverage],
+                                  ] as const).map(([label, value]) => (
+                                    <div key={label}>
+                                      <dt className="text-muted-foreground">
+                                        {t(label)}
+                                      </dt>
+                                      <dd>{metric(value)}</dd>
+                                    </div>
+                                  ))}
+                                </dl>
+                              </details>
+                            ) : null}
+                          </span>
+                          <span>{metric(result.hit_at_k)}</span>
+                          <span>{metric(result.recall_at_k)}</span>
+                          <span>{metric(result.reciprocal_rank)}</span>
+                          <span>{metric(result.ndcg_at_k)}</span>
+                          <span>{t("{value} 毫秒", { value: metric(result.latency_ms) })}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </div>
