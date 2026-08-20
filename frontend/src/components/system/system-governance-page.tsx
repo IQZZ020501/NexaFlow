@@ -623,7 +623,7 @@ function GovernancePanel() {
             <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
               <div>
                 <div className="font-medium">{item.kind === "generic" ? t("通用邀请") : `${item.name} · ${item.email}`}</div>
-                <div className="text-xs text-muted-foreground">{item.role} · {formatDateTime(item.expires_at, dateLocale)}</div>
+                <div className="text-xs text-muted-foreground">{t(item.role === "admin" ? "工作空间管理员" : "成员")} · {formatDateTime(item.expires_at, dateLocale)}</div>
               </div>
               <div className="flex items-center gap-2">
                 {item.accepted_at ? (

@@ -582,16 +582,16 @@ describe("workspace governance and invitations", () => {
     expectCall("/api/v1/workspaces/ws-1/invitations", "POST", payload)
   })
 
-  test("revokeWorkspaceInvitation posts to the revoke action", async () => {
+  test("revokeWorkspaceInvitation issues a DELETE", async () => {
     install(() => noContent())
     await revokeWorkspaceInvitation(TOKEN, "ws-1", "inv-1")
-    expectCall("/api/v1/workspaces/ws-1/invitations/inv-1/revoke", "POST")
+    expectCall("/api/v1/workspaces/ws-1/invitations/inv-1", "DELETE")
   })
 
   test("deleteWorkspaceInvitation issues a DELETE", async () => {
     install(() => noContent())
     await deleteWorkspaceInvitation(TOKEN, "ws-1", "inv-1")
-    expectCall("/api/v1/workspaces/ws-1/invitations/inv-1", "DELETE")
+    expectCall("/api/v1/workspaces/ws-1/invitations/inv-1/permanent", "DELETE")
   })
 })
 

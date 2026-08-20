@@ -340,8 +340,8 @@ def main() -> None:
         )
         assert generic_invitation["accepted_at"] is None
 
-        revoked = client.post(
-            f"/api/v1/workspaces/{workspace_id}/invitations/{generic_payload['id']}/revoke",
+        revoked = client.delete(
+            f"/api/v1/workspaces/{workspace_id}/invitations/{generic_payload['id']}",
             headers=admin_headers,
         )
         assert revoked.status_code == 204, revoked.text
@@ -358,7 +358,7 @@ def main() -> None:
         assert after_revoke.status_code == 400, after_revoke.text
 
         deleted = client.delete(
-            f"/api/v1/workspaces/{workspace_id}/invitations/{generic_payload['id']}",
+            f"/api/v1/workspaces/{workspace_id}/invitations/{generic_payload['id']}/permanent",
             headers=admin_headers,
         )
         assert deleted.status_code == 204, deleted.text

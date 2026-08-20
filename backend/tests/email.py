@@ -693,18 +693,18 @@ def main() -> None:
             json={"kind": "generic", "role": "member"},
         )
         assert revokable.status_code == 201, revokable.text
-        revoked = client.post(
-            f"/api/v1/workspaces/{workspace_id}/invitations/{revokable.json()['id']}/revoke",
+        revoked = client.delete(
+            f"/api/v1/workspaces/{workspace_id}/invitations/{revokable.json()['id']}",
             headers=admin_headers,
         )
         assert revoked.status_code == 204, revoked.text
-        missing_revoke = client.post(
-            f"/api/v1/workspaces/{workspace_id}/invitations/missing-invitation/revoke",
+        missing_revoke = client.delete(
+            f"/api/v1/workspaces/{workspace_id}/invitations/missing-invitation",
             headers=admin_headers,
         )
         assert missing_revoke.status_code == 404, missing_revoke.text
         missing_delete = client.delete(
-            f"/api/v1/workspaces/{workspace_id}/invitations/missing-invitation",
+            f"/api/v1/workspaces/{workspace_id}/invitations/missing-invitation/permanent",
             headers=admin_headers,
         )
         assert missing_delete.status_code == 404, missing_delete.text

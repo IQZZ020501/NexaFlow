@@ -216,8 +216,8 @@ async def create_invitation(
     )
 
 
-@router.post(
-    "/{workspace_id}/invitations/{invitation_id}/revoke",
+@router.delete(
+    "/{workspace_id}/invitations/{invitation_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def revoke_invitation(
@@ -236,7 +236,7 @@ async def revoke_invitation(
 
 
 @router.delete(
-    "/{workspace_id}/invitations/{invitation_id}",
+    "/{workspace_id}/invitations/{invitation_id}/permanent",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_invitation(
@@ -244,7 +244,7 @@ async def delete_invitation(
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
-    """Delete a workspace invitation record."""
+    """Permanently delete a workspace invitation record."""
     await delete_workspace_invitation(db, context.workspace.id, invitation_id, context.user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

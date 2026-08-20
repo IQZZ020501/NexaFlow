@@ -474,9 +474,9 @@ describe("workspace governance settings", () => {
     withFetch((url, init) => {
       if (url.endsWith("/inventory")) return jsonResponse(inventory)
       if (url.endsWith("/governance")) return jsonResponse(governance)
-      if (url.endsWith("/invitations/inv-1/revoke") && init?.method === "POST") {
+      if (url.endsWith("/invitations/inv-1") && init?.method === "DELETE") {
         revoked += 1
-        return jsonResponse(null, 204)
+        return new Response(null, { status: 204 })
       }
       if (url.endsWith("/invitations")) return jsonResponse([pendingInvitation])
       throw new Error(`Unexpected request: ${url}`)
@@ -499,9 +499,9 @@ describe("workspace governance settings", () => {
     withFetch((url, init) => {
       if (url.endsWith("/inventory")) return jsonResponse(inventory)
       if (url.endsWith("/governance")) return jsonResponse(governance)
-      if (url.endsWith("/invitations/inv-2") && init?.method === "DELETE") {
+      if (url.endsWith("/invitations/inv-2/permanent") && init?.method === "DELETE") {
         deleted += 1
-        return jsonResponse(null, 204)
+        return new Response(null, { status: 204 })
       }
       if (url.endsWith("/invitations")) return jsonResponse([completedInvitation])
       throw new Error(`Unexpected request: ${url}`)
@@ -755,10 +755,10 @@ describe("session security panel", () => {
         url === "/api/v1/admin/users/u-2/sessions/sess-3" &&
         method === "DELETE"
       ) {
-        return jsonResponse(null, 204)
+        return new Response(null, { status: 204 })
       }
       if (url === "/api/v1/admin/users/u-2/sessions" && method === "DELETE") {
-        return jsonResponse(null, 204)
+        return new Response(null, { status: 204 })
       }
       throw new Error(`Unexpected request: ${method} ${url}`)
     })
@@ -831,10 +831,10 @@ describe("session security panel", () => {
         return jsonResponse(sessions)
       }
       if (url === "/api/v1/auth/sessions/sess-1" && method === "DELETE") {
-        return jsonResponse(null, 204)
+        return new Response(null, { status: 204 })
       }
       if (url === "/api/v1/auth/sessions/revoke-others" && method === "POST") {
-        return jsonResponse(null, 204)
+        return new Response(null, { status: 204 })
       }
       throw new Error(`Unexpected request: ${method} ${url}`)
     })

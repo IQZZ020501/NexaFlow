@@ -882,8 +882,8 @@ export function revokeWorkspaceInvitation(
   invitationId: string
 ) {
   return request<void>(
-    `/api/v1/workspaces/${workspaceId}/invitations/${invitationId}/revoke`,
-    { method: "POST", token }
+    `/api/v1/workspaces/${workspaceId}/invitations/${invitationId}`,
+    { method: "DELETE", token }
   )
 }
 
@@ -900,7 +900,7 @@ export function deleteWorkspaceInvitation(
   invitationId: string
 ) {
   return request<void>(
-    `/api/v1/workspaces/${workspaceId}/invitations/${invitationId}`,
+    `/api/v1/workspaces/${workspaceId}/invitations/${invitationId}/permanent`,
     { method: "DELETE", token }
   )
 }

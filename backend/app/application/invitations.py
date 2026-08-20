@@ -215,7 +215,7 @@ async def revoke_workspace_invitation(
         "workspace.invitation.revoke",
         "workspace_invitation",
         invitation.id,
-        invitation.email or "Generic invitation",
+        invitation.id,
         {},
         workspace_id=workspace_id,
     )
@@ -240,7 +240,7 @@ async def delete_workspace_invitation(
         "workspace.invitation.delete",
         "workspace_invitation",
         invitation.id,
-        invitation.email or "Generic invitation",
+        invitation.id,
         {},
         workspace_id=workspace_id,
     )
