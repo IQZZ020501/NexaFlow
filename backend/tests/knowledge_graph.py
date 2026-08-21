@@ -95,6 +95,70 @@ GRAPH_IMPORT_RECORD = {
     "evidence": "制度 A 定义术语 A。",
 }
 
+BANK_RECORDS = [
+    {
+        "subject": ("account-a", "Account", "账户 A"),
+        "predicate": "uses_phone",
+        "object": ("phone-p", "Phone", "手机号 P"),
+        "evidence": "账户 A 和账户 B 共用同一个手机号 P。",
+    },
+    {
+        "subject": ("account-b", "Account", "账户 B"),
+        "predicate": "uses_phone",
+        "object": ("phone-p", "Phone", "手机号 P"),
+        "evidence": "账户 A 和账户 B 共用同一个手机号 P。",
+    },
+    {
+        "subject": ("account-b", "Account", "账户 B"),
+        "predicate": "logged_in_on",
+        "object": ("device-d", "Device", "设备 D"),
+        "evidence": "账户 B 和账户 C 在同一台设备 D 登录过。",
+    },
+    {
+        "subject": ("account-c", "Account", "账户 C"),
+        "predicate": "logged_in_on",
+        "object": ("device-d", "Device", "设备 D"),
+        "evidence": "账户 B 和账户 C 在同一台设备 D 登录过。",
+    },
+    {
+        "subject": ("account-c", "Account", "账户 C"),
+        "predicate": "legal_representative_of",
+        "object": ("company-x", "Organization", "公司 X"),
+        "evidence": "账户 C 是公司 X 的法定代表人。",
+    },
+]
+
+POLICY_RECORDS = [
+    {
+        "subject": ("policy-a", "Document", "制度 A"),
+        "predicate": "defines",
+        "object": ("approval", "Clause", "离职审批"),
+        "evidence": "制度 A 定义离职审批。",
+        "document": "policy-a.md",
+    },
+    {
+        "subject": ("approval", "Clause", "离职审批"),
+        "predicate": "requires",
+        "object": ("process", "Process", "离职流程"),
+        "evidence": "离职审批要求执行离职流程。",
+        "document": "policy-a.md",
+    },
+    {
+        "subject": ("hr", "Department", "人力资源部"),
+        "predicate": "responsible_for",
+        "object": ("process", "Process", "离职流程"),
+        "evidence": "人力资源部负责离职流程。",
+        "document": "policy-a.md",
+    },
+    {
+        "subject": ("policy-b", "Document", "制度 B"),
+        "predicate": "references",
+        "object": ("policy-a", "Document", "制度 A"),
+        "evidence": "制度 B references 制度 A",
+        "document": "policy-b.md",
+    },
+]
+
 
 def test_graph_import_parser_is_atomic_and_bounded() -> None:
     content = (
@@ -333,14 +397,14 @@ async def test_graph_source_reconcile_queues_sync_and_model_rebuild() -> None:
 
 
 def test_bank_path_preserves_relation_direction_and_evidence() -> None:
-    node_specs = [
-        ("account-a", "Account", "账户 A"),
-        ("phone-p", "Phone", "手机号 P"),
-        ("account-b", "Account", "账户 B"),
-        ("device-d", "Device", "设备 D"),
-        ("account-c", "Account", "账户 C"),
-        ("company-x", "Organization", "公司 X"),
-    ]
+    entity_specs = {
+        entity_id: (entity_type, name)
+        for record in BANK_RECORDS
+        for entity_id, entity_type, name in (
+            record["subject"],
+            record["object"],
+        )
+    }
     entities = {
         entity_id: GraphEntityRecord(
             id=entity_id,
@@ -348,31 +412,19 @@ def test_bank_path_preserves_relation_direction_and_evidence() -> None:
             canonical_name=name,
             normalized_name=name.casefold(),
         )
-        for entity_id, entity_type, name in node_specs
+        for entity_id, (entity_type, name) in entity_specs.items()
     }
-    claim_specs = [
-        ("claim-1", "account-a", "uses_phone", "phone-p"),
-        ("claim-2", "account-b", "uses_phone", "phone-p"),
-        ("claim-3", "account-b", "logged_in_on", "device-d"),
-        ("claim-4", "account-c", "logged_in_on", "device-d"),
-        (
-            "claim-5",
-            "account-c",
-            "legal_representative_of",
-            "company-x",
-        ),
-    ]
     claims = {
-        claim_id: GraphClaimRecord(
-            id=claim_id,
-            subject_entity_id=subject_id,
-            predicate=predicate,
-            object_entity_id=object_id,
+        f"claim-{index}": GraphClaimRecord(
+            id=f"claim-{index}",
+            subject_entity_id=record["subject"][0],
+            predicate=record["predicate"],
+            object_entity_id=record["object"][0],
             status="active",
             quality_score=1.0,
             support_count=1,
         )
-        for claim_id, subject_id, predicate, object_id in claim_specs
+        for index, record in enumerate(BANK_RECORDS, start=1)
     }
     evidence = {
         claim_id: (
@@ -381,17 +433,24 @@ def test_bank_path_preserves_relation_direction_and_evidence() -> None:
                 document_id="bank-document",
                 document_filename="bank.jsonl",
                 chunk_id=f"chunk-{claim_id}",
-                quote=claim_id,
+                quote=record["evidence"],
                 start_offset=0,
-                end_offset=len(claim_id),
+                end_offset=len(record["evidence"]),
                 source_kind="structured_import",
             ),
         )
-        for claim_id in claims
+        for claim_id, record in zip(claims, BANK_RECORDS, strict=True)
     }
     path = graph_traversal.assemble_path(
-        [item[0] for item in node_specs],
-        [item[0] for item in claim_specs],
+        [
+            "account-a",
+            "phone-p",
+            "account-b",
+            "device-d",
+            "account-c",
+            "company-x",
+        ],
+        list(claims),
         entities,
         claims,
         evidence,
@@ -420,6 +479,11 @@ def test_bank_path_preserves_relation_direction_and_evidence() -> None:
         "forward",
     ]
     assert all(step.evidence for step in path.steps)
+    assert not any(
+        claim.subject_entity_id == "account-a"
+        and claim.object_entity_id == "device-d"
+        for claim in claims.values()
+    )
 
     graph = graph_query.graph_query_result_response(
         graph_traversal.GraphTraversalResult(
@@ -455,6 +519,131 @@ def test_bank_path_preserves_relation_direction_and_evidence() -> None:
     assert metrics.path_edge_accuracy == 1
     assert metrics.citation_coverage == 1
     assert graph_evaluation_metrics(None, graph) is None
+
+
+def test_policy_graph_evaluation_preserves_fixed_citations() -> None:
+    entity_specs = {
+        entity_id: (entity_type, name)
+        for record in POLICY_RECORDS
+        for entity_id, entity_type, name in (
+            record["subject"],
+            record["object"],
+        )
+    }
+    entities = {
+        entity_id: GraphEntityRecord(
+            id=entity_id,
+            entity_type=entity_type,
+            canonical_name=name,
+            normalized_name=name.casefold(),
+        )
+        for entity_id, (entity_type, name) in entity_specs.items()
+    }
+    claims = {}
+    evidence = {}
+    for index, record in enumerate(POLICY_RECORDS, start=1):
+        claim_id = f"policy-claim-{index}"
+        subject_id = record["subject"][0]
+        object_id = record["object"][0]
+        claims[claim_id] = GraphClaimRecord(
+            id=claim_id,
+            subject_entity_id=subject_id,
+            predicate=record["predicate"],
+            object_entity_id=object_id,
+            status="active",
+            quality_score=1.0,
+            support_count=1,
+        )
+        quote = record["evidence"]
+        evidence[claim_id] = (
+            graph_traversal.GraphEvidenceView(
+                id=f"policy-evidence-{index}",
+                document_id=record["document"].removesuffix(".md"),
+                document_filename=record["document"],
+                chunk_id=f"policy-chunk-{index}",
+                quote=quote,
+                start_offset=0,
+                end_offset=len(quote),
+                source_kind="structured_import",
+            ),
+        )
+
+    policy_path = graph_traversal.assemble_path(
+        ["policy-a", "approval", "process", "hr"],
+        ["policy-claim-1", "policy-claim-2", "policy-claim-3"],
+        entities,
+        claims,
+        evidence,
+    )
+    reference_path = graph_traversal.assemble_path(
+        ["policy-b", "policy-a"],
+        ["policy-claim-4"],
+        entities,
+        claims,
+        evidence,
+    )
+    assert policy_path is not None
+    assert reference_path is not None
+    node_views = {
+        node.id: node
+        for path in (policy_path, reference_path)
+        for node in path.nodes
+    }
+    graph = graph_query.graph_query_result_response(
+        graph_traversal.GraphTraversalResult(
+            revision_id="policy-revision",
+            operation="synthesis",
+            resolved_entities=policy_path.nodes,
+            nodes=tuple(node_views.values()),
+            claims=(*policy_path.steps, *reference_path.steps),
+            paths=(policy_path, reference_path),
+            evidence=tuple(
+                item
+                for claim_evidence in evidence.values()
+                for item in claim_evidence
+            ),
+            visited_nodes=len(node_views),
+            truncated=False,
+        )
+    )
+    assert graph is not None
+    metrics = graph_evaluation_metrics(
+        KnowledgeGraphEvaluationExpectation(
+            entity_names=[
+                "制度 A",
+                "制度 B",
+                "离职审批",
+                "离职流程",
+                "人力资源部",
+            ],
+            predicates=[
+                "defines",
+                "requires",
+                "responsible_for",
+                "references",
+            ],
+            path_entity_names=[
+                "制度 A",
+                "离职审批",
+                "离职流程",
+                "人力资源部",
+            ],
+            path_predicates=["defines", "requires", "responsible_for"],
+        ),
+        graph,
+    )
+    assert metrics is not None
+    assert metrics.entity_precision == metrics.entity_recall == 1
+    assert metrics.claim_precision == metrics.claim_recall == 1
+    assert metrics.path_exact_match == 1
+    assert metrics.path_edge_accuracy == 1
+    assert metrics.citation_coverage == 1
+    assert {item.quote for item in graph.evidence} == {
+        "制度 A 定义离职审批。",
+        "离职审批要求执行离职流程。",
+        "人力资源部负责离职流程。",
+        "制度 B references 制度 A",
+    }
 
 
 def test_graph_traversal_sql_requires_acyclic_active_evidence() -> None:
@@ -3912,6 +4101,7 @@ async def main() -> None:
     test_graph_source_versions_are_stable_and_diffable()
     await test_graph_source_reconcile_queues_sync_and_model_rebuild()
     test_bank_path_preserves_relation_direction_and_evidence()
+    test_policy_graph_evaluation_preserves_fixed_citations()
     test_graph_traversal_sql_requires_acyclic_active_evidence()
     await test_graph_traversal_bounds_scoping_and_truncation()
     await test_graph_query_candidates_require_unique_entities_and_keep_hops()
