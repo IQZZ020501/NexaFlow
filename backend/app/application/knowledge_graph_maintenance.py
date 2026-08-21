@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.knowledge_graph_build import (
     finalize_abandoned_graph_reservations,
 )
-from app.entities.knowledge import TASK_QUEUED_STATUS, TASK_RUNNING_STATUS
+from app.entities.knowledge import (
+    TASK_CANCELLED_STATUS,
+    TASK_FAILED_STATUS,
+    TASK_QUEUED_STATUS,
+    TASK_RUNNING_STATUS,
+)
 from app.entities.knowledge_graph import (
     GRAPH_REVISION_BUILDING,
     GRAPH_REVISION_FAILED,
@@ -78,11 +83,30 @@ async def enqueue_due_graph_tasks(db: AsyncSession) -> list[str]:
     knowledge_bases = await graph_repository.list_graph_enabled_knowledge_bases(db)
     for knowledge_base in knowledge_bases:
         try:
+            latest_task = await knowledge_repository.get_latest_graph_task(
+                db,
+                knowledge_base,
+            )
+            if latest_task is not None and latest_task.status in {
+                TASK_FAILED_STATUS,
+                TASK_CANCELLED_STATUS,
+            }:
+                continue
             revision = await graph_repository.get_active_revision(db, knowledge_base)
+            latest_revision = await graph_repository.get_latest_revision(
+                db,
+                knowledge_base,
+            )
             current = await graph_repository.current_graph_source_versions(
                 db,
                 knowledge_base,
             )
+            if (
+                latest_revision is not None
+                and latest_revision.status == GRAPH_REVISION_FAILED
+                and _revision_source_versions(latest_revision) == current
+            ):
+                continue
             changes = diff_graph_source_versions(
                 _revision_source_versions(revision),
                 current,

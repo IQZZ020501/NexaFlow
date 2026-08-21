@@ -45,6 +45,12 @@ TASK_QUEUED_STATUS = "queued"
 TASK_RUNNING_STATUS = "running"
 TASK_SUCCEEDED_STATUS = "succeeded"
 TASK_FAILED_STATUS = "failed"
+TASK_CANCELLING_STATUS = "cancelling"
+TASK_CANCELLED_STATUS = "cancelled"
+GRAPH_RETRY_ALL = "all"
+GRAPH_RETRY_UNFINISHED = "unfinished"
+GRAPH_RETRY_MODE_OPTION = "graph_retry_mode"
+GRAPH_RESUME_REVISION_ID_OPTION = "graph_resume_revision_id"
 
 
 @dataclass

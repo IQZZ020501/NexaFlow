@@ -64,9 +64,12 @@ from app.shareddomain.knowledge_graph.models import (
 from app.shareddomain.audit.models import AuditLog
 from app.infrastructure.model_utils import utc_now
 from app.shareddomain.knowledge.orchestration import (
+    delete_knowledge_task,
     enqueue_graph_rebuild,
     enqueue_graph_sync,
     enqueue_index_knowledge_document,
+    retry_knowledge_task,
+    stop_knowledge_task,
 )
 from app.application import (
     knowledge_graph,
@@ -208,6 +211,7 @@ def test_graph_import_parser_is_atomic_and_bounded() -> None:
 def test_graph_source_batches_keep_structured_and_text_chunks_separate() -> None:
     chunks = [
         KnowledgeDocumentChunk(id="text-1", kind="document"),
+        KnowledgeDocumentChunk(id="text-1b", kind="document"),
         KnowledgeDocumentChunk(id="graph-1", kind="graph_record"),
         KnowledgeDocumentChunk(id="graph-2", kind="graph_record"),
         KnowledgeDocumentChunk(id="text-2", kind="document"),
@@ -218,6 +222,7 @@ def test_graph_source_batches_keep_structured_and_text_chunks_separate() -> None
         for structured, batch in batches
     ] == [
         (False, ["text-1"]),
+        (False, ["text-1b"]),
         (True, ["graph-1", "graph-2"]),
         (False, ["text-2"]),
     ]
@@ -290,18 +295,21 @@ async def test_graph_source_reconcile_queues_sync_and_model_rebuild() -> None:
     ]
     revisions = {
         "reconcile-sync-kb": SimpleNamespace(
+            status="published",
             stats_json={
                 "source_versions": {"doc-1": "1:hash-a:1:indexed"},
                 "profile_embedding_model_id": "embedding-a",
             }
         ),
         "reconcile-rebuild-kb": SimpleNamespace(
+            status="published",
             stats_json={
                 "source_versions": {"doc-2": "1:hash-a:1:indexed"},
                 "profile_embedding_model_id": "embedding-a",
             }
         ),
         "reconcile-clean-kb": SimpleNamespace(
+            status="published",
             stats_json={
                 "source_versions": {"doc-3": "1:hash-a:1:indexed"},
                 "profile_embedding_model_id": "embedding-a",
@@ -358,6 +366,16 @@ async def test_graph_source_reconcile_queues_sync_and_model_rebuild() -> None:
         ),
         patch.object(graph_repository, "get_active_revision", active_revision),
         patch.object(
+            knowledge_repository,
+            "get_latest_graph_task",
+            AsyncMock(return_value=None),
+        ),
+        patch.object(
+            graph_repository,
+            "get_latest_revision",
+            active_revision,
+        ),
+        patch.object(
             graph_repository,
             "current_graph_source_versions",
             source_versions,
@@ -394,6 +412,108 @@ async def test_graph_source_reconcile_queues_sync_and_model_rebuild() -> None:
     assert rebuild_calls == ["reconcile-rebuild-kb"]
     assert db.rollback.await_count == 1
     log_error.assert_called_once()
+
+
+async def test_graph_source_reconcile_does_not_retry_failed_task() -> None:
+    knowledge_base = KnowledgeBase(
+        id="reconcile-failed-kb",
+        workspace_id="reconcile-workspace",
+        graph_enabled=True,
+        created_by_user_id="graph-user",
+    )
+    failed_task = KnowledgeTask(
+        id="reconcile-failed-task",
+        workspace_id=knowledge_base.workspace_id,
+        knowledge_base_id=knowledge_base.id,
+        task_type="graph_rebuild",
+        status="failed",
+    )
+    db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+
+    with (
+        patch.object(
+            graph_repository,
+            "list_graph_enabled_knowledge_bases",
+            AsyncMock(return_value=[knowledge_base]),
+        ),
+        patch.object(
+            knowledge_repository,
+            "get_latest_graph_task",
+            AsyncMock(return_value=failed_task),
+        ),
+        patch.object(
+            knowledge_graph_maintenance,
+            "enqueue_graph_rebuild",
+            AsyncMock(),
+        ) as enqueue_rebuild,
+        patch.object(
+            knowledge_graph_maintenance,
+            "enqueue_graph_sync",
+            AsyncMock(),
+        ) as enqueue_sync,
+    ):
+        task_ids = await knowledge_graph_maintenance.enqueue_due_graph_tasks(db)
+
+    assert task_ids == []
+    enqueue_rebuild.assert_not_awaited()
+    enqueue_sync.assert_not_awaited()
+
+
+async def test_graph_source_reconcile_keeps_deleted_failed_task_stopped() -> None:
+    knowledge_base = KnowledgeBase(
+        id="reconcile-deleted-failed-task-kb",
+        workspace_id="reconcile-workspace",
+        graph_enabled=True,
+        created_by_user_id="graph-user",
+    )
+    source_versions = {"doc-1": "1:hash-a:1:indexed"}
+    failed_revision = GraphRevisionRecord(
+        id="reconcile-deleted-failed-task-revision",
+        workspace_id=knowledge_base.workspace_id,
+        knowledge_base_id=knowledge_base.id,
+        schema_id="reconcile-schema",
+        revision_no=1,
+        status="failed",
+        stats_json={"source_versions": source_versions},
+    )
+    db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+
+    with (
+        patch.object(
+            graph_repository,
+            "list_graph_enabled_knowledge_bases",
+            AsyncMock(return_value=[knowledge_base]),
+        ),
+        patch.object(
+            knowledge_repository,
+            "get_latest_graph_task",
+            AsyncMock(return_value=None),
+        ),
+        patch.object(
+            graph_repository,
+            "get_active_revision",
+            AsyncMock(return_value=None),
+        ),
+        patch.object(
+            graph_repository,
+            "get_latest_revision",
+            AsyncMock(return_value=failed_revision),
+        ),
+        patch.object(
+            graph_repository,
+            "current_graph_source_versions",
+            AsyncMock(return_value=source_versions),
+        ),
+        patch.object(
+            knowledge_graph_maintenance,
+            "enqueue_graph_rebuild",
+            AsyncMock(),
+        ) as enqueue_rebuild,
+    ):
+        task_ids = await knowledge_graph_maintenance.enqueue_due_graph_tasks(db)
+
+    assert task_ids == []
+    enqueue_rebuild.assert_not_awaited()
 
 
 def test_bank_path_preserves_relation_direction_and_evidence() -> None:
@@ -3037,6 +3157,343 @@ async def test_graph_rebuild_follows_running_task_and_coalesces_sync() -> None:
         await db.rollback()
 
 
+async def test_graph_tasks_can_be_stopped_retried_and_deleted() -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_user_by_id(db, "graph-user")
+        assert actor is not None
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-task-control-kb",
+                workspace_id="graph-workspace",
+                name="Graph Task Control KB",
+                graph_enabled=True,
+                created_by_user_id=actor.id,
+            ),
+        )
+        task = await knowledge_repository.create_knowledge_task(
+            db,
+            KnowledgeTask(
+                id="graph-task-control",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                task_type="graph_rebuild",
+                status="running",
+                attempts=1,
+                total_items=175,
+                processed_items=1,
+                options={
+                    "graph_retry_mode": "unfinished",
+                    "graph_resume_revision_id": "old-revision",
+                },
+                worker_task_id="graph-task-worker",
+                lease_expires_at=utc_now() + timedelta(minutes=5),
+                created_by_user_id=actor.id,
+            ),
+        )
+        await db.commit()
+
+        stopped = await stop_knowledge_task(db, knowledge_base, task.id, actor)
+        assert stopped.status == "cancelling"
+        assert (await knowledge_repository.get_open_graph_task(db, knowledge_base)).id == task.id
+        assert not await knowledge_repository.update_owned_knowledge_task_progress(
+            db,
+            task.id,
+            "graph-task-worker",
+            175,
+            2,
+            utc_now() + timedelta(minutes=5),
+        )
+        current = await knowledge_repository.get_knowledge_task_by_id(db, task.id)
+        assert current is not None
+        assert current.status == "cancelling"
+        assert current.processed_items == 1
+        try:
+            await delete_knowledge_task(db, knowledge_base, task.id, actor)
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError("cancelling tasks must not be deleted")
+
+        await knowledge_task_runner.mark_knowledge_task_cancelled(
+            db,
+            task.id,
+            "graph-task-worker",
+        )
+        try:
+            await retry_knowledge_task(
+                db,
+                knowledge_base,
+                task.id,
+                actor,
+                "unfinished",
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError("missing graph checkpoints must not be resumed")
+        retried = await retry_knowledge_task(db, knowledge_base, task.id, actor)
+        assert retried.status == "queued"
+        assert retried.processed_items == 0
+        current = await knowledge_repository.get_knowledge_task_by_id(db, task.id)
+        assert current is not None
+        assert "graph_retry_mode" not in current.options
+        assert "graph_resume_revision_id" not in current.options
+        stopped = await stop_knowledge_task(db, knowledge_base, task.id, actor)
+        assert stopped.status == "cancelled"
+        await delete_knowledge_task(db, knowledge_base, task.id, actor)
+        assert await knowledge_repository.get_knowledge_task_by_id(db, task.id) is None
+
+
+async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
+    contents = {
+        "graph-resume-chunk-a": "制度 A 定义术语 A。",
+        "graph-resume-chunk-b": "制度 B 定义术语 B。",
+    }
+
+    class ExtractionProvider:
+        def __init__(self, fail_chunk_id: str | None = None):
+            self.fail_chunk_id = fail_chunk_id
+            self.chunk_ids: list[str] = []
+
+        async def ainvoke(self, messages, **_kwargs):
+            payload = json.loads(messages[1]["content"])
+            chunk_id = payload[0]["chunk_id"]
+            self.chunk_ids.append(chunk_id)
+            if chunk_id == self.fail_chunk_id:
+                raise RuntimeError("second chunk failed")
+            suffix = "A" if chunk_id.endswith("-a") else "B"
+            quote = contents[chunk_id]
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "entities": [
+                            {
+                                "temp_id": f"document-{suffix}",
+                                "entity_type": "Document",
+                                "canonical_name": f"制度 {suffix}",
+                            },
+                            {
+                                "temp_id": f"concept-{suffix}",
+                                "entity_type": "Concept",
+                                "canonical_name": f"术语 {suffix}",
+                            },
+                        ],
+                        "claims": [
+                            {
+                                "subject_temp_id": f"document-{suffix}",
+                                "predicate": "defines",
+                                "object_temp_id": f"concept-{suffix}",
+                                "evidence_chunk_id": chunk_id,
+                                "quote": quote,
+                                "start_offset": 0,
+                                "end_offset": len(quote),
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_user_by_id(db, "graph-user")
+        assert actor is not None
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-resume-kb",
+                workspace_id="graph-workspace",
+                name="Graph Resume KB",
+                graph_enabled=True,
+                created_by_user_id=actor.id,
+            ),
+        )
+        document = await knowledge_repository.create_knowledge_document(
+            db,
+            KnowledgeDocument(
+                id="graph-resume-doc",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                filename="resume.md",
+                content_type="text/markdown",
+                size_bytes=sum(len(item.encode()) for item in contents.values()),
+                status="indexed",
+                created_by_user_id=actor.id,
+            ),
+        )
+        for index, (chunk_id, content) in enumerate(contents.items()):
+            await knowledge_repository.save_knowledge_document_chunk(
+                db,
+                KnowledgeDocumentChunk(
+                    id=chunk_id,
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    document_id=document.id,
+                    chunk_index=index,
+                    content=content,
+                    search_text=content,
+                    char_count=len(content),
+                    token_count=8,
+                    status="indexed",
+                ),
+            )
+        task = await knowledge_repository.create_knowledge_task(
+            db,
+            KnowledgeTask(
+                id="graph-resume-task",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                task_type="graph_sync",
+                status="running",
+                attempts=1,
+                options={"changed_document_ids": [document.id]},
+                created_by_user_id=actor.id,
+                worker_task_id="graph-resume-worker-1",
+            ),
+        )
+        await db.commit()
+
+        first_provider = ExtractionProvider("graph-resume-chunk-b")
+        with (
+            patch.object(
+                knowledge_graph_build,
+                "get_knowledge_model",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        id="graph-resume-model",
+                        model_name="graph-resume-model",
+                    )
+                ),
+            ),
+            patch.object(
+                knowledge_graph_build,
+                "build_chat_model",
+                return_value=first_provider,
+            ),
+            patch.object(
+                knowledge_graph_build,
+                "stage_entity_profiles",
+                AsyncMock(),
+            ),
+        ):
+            try:
+                await knowledge_graph_build.run_graph_build_task(
+                    db,
+                    task,
+                    knowledge_base,
+                    actor,
+                    tests.support.settings(),
+                    asyncio.Event(),
+                )
+            except RuntimeError as exc:
+                assert str(exc) == "second chunk failed"
+            else:
+                raise AssertionError("the second chunk must fail the first build")
+        assert first_provider.chunk_ids == [
+            "graph-resume-chunk-a",
+            "graph-resume-chunk-b",
+        ]
+
+        failed_task = await knowledge_repository.get_knowledge_task_by_id(db, task.id)
+        assert failed_task is not None
+        assert failed_task.processed_items == 1
+        failed_task.status = "failed"
+        failed_task.worker_task_id = None
+        failed_task.lease_expires_at = None
+        await knowledge_repository.save_knowledge_task(db, failed_task)
+        await db.commit()
+        failed_revision = await graph_repository.get_latest_revision(
+            db,
+            knowledge_base,
+        )
+        assert failed_revision is not None
+        assert failed_revision.status == "failed"
+
+        retried = await retry_knowledge_task(
+            db,
+            knowledge_base,
+            task.id,
+            actor,
+            "unfinished",
+        )
+        assert retried.status == "queued"
+        assert retried.processed_items == 1
+        resumed_task = await knowledge_repository.get_knowledge_task_by_id(db, task.id)
+        assert resumed_task is not None
+        assert resumed_task.options["graph_resume_revision_id"] == failed_revision.id
+        resumed_task.status = "running"
+        resumed_task.worker_task_id = "graph-resume-worker-2"
+        resumed_task.attempts += 1
+        await knowledge_repository.save_knowledge_task(db, resumed_task)
+        await db.commit()
+
+        resume_provider = ExtractionProvider()
+
+        async def fake_embedding_model(*_args, **_kwargs):
+            return SimpleNamespace(id="graph-resume-embedding")
+
+        with (
+            patch.object(
+                knowledge_graph_build,
+                "get_knowledge_model",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        id="graph-resume-model",
+                        model_name="graph-resume-model",
+                    )
+                ),
+            ),
+            patch.object(
+                knowledge_graph_build,
+                "build_chat_model",
+                return_value=resume_provider,
+            ),
+            patch.object(
+                knowledge_graph_build,
+                "stage_entity_profiles",
+                AsyncMock(),
+            ),
+            patch.object(
+                knowledge_graph_build,
+                "resolve_embedding_model",
+                fake_embedding_model,
+            ),
+            patch.object(
+                knowledge_graph_build,
+                "upsert_graph_profile_vectors",
+            ),
+        ):
+            await knowledge_graph_build.run_graph_build_task(
+                db,
+                resumed_task,
+                knowledge_base,
+                actor,
+                tests.support.settings(),
+                asyncio.Event(),
+            )
+        assert resume_provider.chunk_ids == ["graph-resume-chunk-b"]
+
+    async with get_session_factory()() as db:
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            "graph-resume-kb",
+        )
+        assert knowledge_base is not None
+        published = await graph_repository.get_active_revision(db, knowledge_base)
+        assert published is not None
+        assert published.id == failed_revision.id
+        claims = list(
+            (
+                await db.scalars(
+                    select(KnowledgeGraphClaim).where(
+                        KnowledgeGraphClaim.knowledge_base_id == knowledge_base.id
+                    )
+                )
+            ).all()
+        )
+        assert len(claims) == 2
+
+
 async def test_structured_graph_build_publishes_evidence_and_profiles() -> None:
     content = json.dumps(
         {
@@ -4100,6 +4557,8 @@ async def main() -> None:
     test_graph_source_batches_keep_structured_and_text_chunks_separate()
     test_graph_source_versions_are_stable_and_diffable()
     await test_graph_source_reconcile_queues_sync_and_model_rebuild()
+    await test_graph_source_reconcile_does_not_retry_failed_task()
+    await test_graph_source_reconcile_keeps_deleted_failed_task_stopped()
     test_bank_path_preserves_relation_direction_and_evidence()
     test_policy_graph_evaluation_preserves_fixed_citations()
     test_graph_traversal_sql_requires_acyclic_active_evidence()
@@ -4122,6 +4581,8 @@ async def main() -> None:
     await test_claim_fingerprint_dedupes_without_reactivating_rejection()
     await test_graph_sync_coalesces_behind_running_build()
     await test_graph_rebuild_follows_running_task_and_coalesces_sync()
+    await test_graph_tasks_can_be_stopped_retried_and_deleted()
+    await test_graph_retry_can_resume_from_the_last_committed_chunk()
     await test_structured_graph_build_publishes_evidence_and_profiles()
     await test_graph_build_stops_before_workspace_monthly_limit()
     await test_unreported_graph_usage_is_charged_once_and_persisted()

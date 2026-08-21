@@ -46,6 +46,8 @@ from app.shareddomain.knowledge.orchestration import (
     list_knowledge_document_chunks,
     list_knowledge_tasks,
     retry_knowledge_task,
+    stop_knowledge_task,
+    delete_knowledge_task,
 )
 from app.entities.knowledge import (
     KnowledgeAsset,
@@ -273,6 +275,8 @@ __all__ = [
     "require_can_manage_permissions",
     "require_knowledge_base_permission",
     "retry_knowledge_task",
+    "stop_knowledge_task",
+    "delete_knowledge_task",
     "revoke_resource_permission",
     "set_knowledge_document_active",
     "test_knowledge_base_models",

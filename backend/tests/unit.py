@@ -250,8 +250,9 @@ def test_graph_extractor_parses_bounded_json_only_response() -> None:
     class Provider:
         prompt = None
 
-        async def ainvoke(self, messages):
+        async def ainvoke(self, messages, **kwargs):
             self.prompt = messages
+            assert kwargs == {"max_tokens": 4096}
             return SimpleNamespace(
                 text=f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```",
                 usage_metadata={"input_tokens": 12, "output_tokens": 8},
@@ -288,6 +289,109 @@ def test_graph_extractor_parses_bounded_json_only_response() -> None:
     assert result.model_usage["total_tokens"] == 20
     assert provider.prompt is not None
     assert "chunk-5" not in provider.prompt[1]["content"]
+    assert len(json.loads(provider.prompt[1]["content"])) == 1
+
+
+def test_graph_extractor_rejects_oversized_input_without_truncating_json() -> None:
+    class Provider:
+        called = False
+
+        async def ainvoke(self, messages, **kwargs):
+            self.called = True
+            return SimpleNamespace(text='{"entities": [], "claims": []}')
+
+    provider = Provider()
+    schema = default_policy_graph_schema()
+    try:
+        asyncio.run(
+            extract_graph_batch(
+                provider,
+                schema,
+                [ExtractionChunk("large", "doc-1", "x" * 25_000)],
+            )
+        )
+    except ValueError as exc:
+        assert str(exc) == "Graph extraction input exceeds the per-call limit."
+    else:
+        raise AssertionError("oversized extraction input must be rejected")
+    assert provider.called is False
+
+
+def test_graph_extractor_retries_invalid_model_output_once() -> None:
+    quote = "制度 A 定义术语 A。"
+    valid = {
+        "entities": [
+            {
+                "temp_id": "policy",
+                "entity_type": "Document",
+                "canonical_name": "制度 A",
+            },
+            {
+                "temp_id": "term",
+                "entity_type": "Concept",
+                "canonical_name": "术语 A",
+            },
+        ],
+        "claims": [
+            {
+                "subject_temp_id": "policy",
+                "predicate": "defines",
+                "object_temp_id": "term",
+                "evidence_chunk_id": "chunk-1",
+                "quote": quote,
+                "start_offset": 0,
+                "end_offset": len(quote),
+            }
+        ],
+    }
+
+    class Provider:
+        calls = 0
+
+        async def ainvoke(self, messages, **kwargs):
+            self.calls += 1
+            assert kwargs == {"max_tokens": 4096}
+            if self.calls == 1:
+                return SimpleNamespace(text="not json")
+            assert "failed server validation" in messages[-1]["content"]
+            return SimpleNamespace(text=json.dumps(valid, ensure_ascii=False))
+
+    provider = Provider()
+    result = asyncio.run(
+        extract_graph_batch(
+            provider,
+            default_policy_graph_schema(),
+            [ExtractionChunk("chunk-1", "doc-1", quote)],
+        )
+    )
+    assert provider.calls == 2
+    assert result.batch.claims[0].predicate == "defines"
+
+
+def test_graph_extractor_does_not_retry_provider_failure() -> None:
+    from app.ports.llm import ModelProviderStatusError
+
+    class Provider:
+        calls = 0
+
+        async def ainvoke(self, _messages, **_kwargs):
+            self.calls += 1
+            raise ModelProviderStatusError(402, "Insufficient Balance")
+
+    provider = Provider()
+    try:
+        asyncio.run(
+            extract_graph_batch(
+                provider,
+                default_policy_graph_schema(),
+                [ExtractionChunk("chunk-1", "doc-1", "制度 A 定义术语 A。")],
+            )
+        )
+    except ModelProviderStatusError as exc:
+        assert exc.status_code == 402
+    else:
+        raise AssertionError("provider failures must stop graph extraction")
+    assert provider.calls == 1
 
 
 def test_graph_entity_auto_match_requires_deterministic_identity() -> None:
@@ -6004,6 +6108,9 @@ def main() -> None:
     test_normalized_document_artifact_is_content_addressed()
     test_graph_extraction_requires_exact_chunk_evidence()
     test_graph_extractor_parses_bounded_json_only_response()
+    test_graph_extractor_rejects_oversized_input_without_truncating_json()
+    test_graph_extractor_retries_invalid_model_output_once()
+    test_graph_extractor_does_not_retry_provider_failure()
     test_graph_entity_auto_match_requires_deterministic_identity()
     test_graph_claim_fingerprint_and_initial_status_are_deterministic()
     test_graph_review_decision_request_is_bounded()

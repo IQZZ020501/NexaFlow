@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 import tests.support  # noqa: F401
 from app.application import knowledge_graph
-from app.entities.knowledge import KnowledgeBase
+from app.entities.knowledge import KnowledgeBase, KnowledgeTask
 from app.entities.knowledge_graph import (
     KnowledgeGraphAlias,
     KnowledgeGraphClaim,
@@ -296,6 +296,11 @@ async def test_graph_application_edge_paths() -> None:
             "list_pending_review_page",
             AsyncMock(return_value=([], 0)),
         ),
+        patch.object(
+            knowledge_repository,
+            "get_open_graph_task",
+            AsyncMock(return_value=None),
+        ),
     ):
         status_response = await knowledge_graph.get_graph_status(
             SimpleNamespace(), knowledge_base
@@ -307,6 +312,49 @@ async def test_graph_application_edge_paths() -> None:
         ),
         409,
     )
+
+    active_task = KnowledgeTask(
+        id="active-graph-rebuild",
+        workspace_id=knowledge_base.workspace_id,
+        knowledge_base_id=knowledge_base.id,
+        task_type="graph_rebuild",
+        status="running",
+        attempts=1,
+        created_by_user_id=actor.id,
+    )
+    enabled_base = KnowledgeBase(
+        id="active-graph-kb",
+        workspace_id=knowledge_base.workspace_id,
+        graph_enabled=True,
+        graph_extraction_model_id="extraction-model",
+        created_by_user_id=actor.id,
+    )
+    with (
+        patch.object(
+            knowledge_graph,
+            "_validate_graph_build_requirements",
+            AsyncMock(),
+        ),
+        patch.object(
+            knowledge_repository,
+            "get_queued_graph_rebuild",
+            AsyncMock(return_value=None),
+        ),
+        patch.object(
+            knowledge_repository,
+            "get_running_graph_task",
+            AsyncMock(return_value=active_task),
+        ),
+        patch.object(knowledge_graph, "_dispatch_graph_task", AsyncMock()) as dispatch,
+    ):
+        response = await knowledge_graph.rebuild_graph(
+            AsyncMock(),
+            enabled_base,
+            actor,
+            SimpleNamespace(),
+        )
+    assert response.id == active_task.id
+    dispatch.assert_not_awaited()
 
     entity = SimpleNamespace(
         id="application-edge-entity",

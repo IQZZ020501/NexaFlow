@@ -354,6 +354,10 @@ async def get_graph_status(
         limit=1,
         offset=0,
     )
+    build_task = await knowledge_repository.get_open_graph_task(
+        db,
+        knowledge_base,
+    )
     return KnowledgeGraphStatusResponse(
         enabled=knowledge_base.graph_enabled,
         active_schema_id=knowledge_base.active_graph_schema_id,
@@ -366,6 +370,8 @@ async def get_graph_status(
         pending_review_count=pending_review_count,
         last_error=revision.failure_reason if revision else None,
         published_at=revision.published_at if revision else None,
+        build_task_id=build_task.id if build_task else None,
+        build_task_status=build_task.status if build_task else None,
     )
 
 
@@ -382,7 +388,18 @@ async def rebuild_graph(
         knowledge_base,
         knowledge_base.graph_extraction_model_id,
     )
-    task = await enqueue_graph_rebuild(db, knowledge_base, actor)
+    queued = await knowledge_repository.get_queued_graph_rebuild(db, knowledge_base)
+    running = await knowledge_repository.get_running_graph_task(db, knowledge_base)
+    if queued is not None:
+        return task_to_response(queued)
+    if running is not None and running.task_type == "graph_rebuild":
+        return task_to_response(running)
+    task = await enqueue_graph_rebuild(
+        db,
+        knowledge_base,
+        actor,
+        follow_running=False,
+    )
     record_audit_log(
         db,
         actor,

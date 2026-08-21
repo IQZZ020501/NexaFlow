@@ -189,6 +189,10 @@ class KnowledgeTaskResponse(BaseModel):
     updated_at: datetime
 
 
+class KnowledgeTaskRetryRequest(BaseModel):
+    mode: Literal["all", "unfinished"] = "all"
+
+
 GraphMode = Literal["off", "auto", "path", "neighborhood"]
 
 

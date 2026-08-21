@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+from datetime import UTC, timedelta
 import hashlib
 from typing import Any
 
@@ -13,6 +14,7 @@ from app.infrastructure.logger import get_logger
 from app.infrastructure.model_utils import new_id, utc_now
 from app.entities.user import User
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
+from app.infrastructure.repositories import knowledge_graph as graph_repository
 from app.entities.knowledge import (
     CHUNK_INDEX_FAILED_STATUS,
     CHUNK_INDEXED_STATUS,
@@ -27,6 +29,12 @@ from app.entities.knowledge import (
     DOCUMENT_PARSED_STATUS,
     DOCUMENT_PARSING_STATUS,
     DOCUMENT_STAGED_META_KEY,
+    GRAPH_RESUME_REVISION_ID_OPTION,
+    GRAPH_RETRY_ALL,
+    GRAPH_RETRY_MODE_OPTION,
+    GRAPH_RETRY_UNFINISHED,
+    TASK_CANCELLED_STATUS,
+    TASK_CANCELLING_STATUS,
     TASK_FAILED_STATUS,
     TASK_EVALUATE,
     TASK_GRAPH_REBUILD,
@@ -44,6 +52,7 @@ from app.entities.knowledge import (
     KnowledgeDocumentParentChunk,
     KnowledgeTask,
 )
+from app.entities.knowledge_graph import GRAPH_REVISION_FAILED
 from app.ports.parsing import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
@@ -857,6 +866,8 @@ async def enqueue_graph_rebuild(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     actor: User,
+    *,
+    follow_running: bool = True,
 ) -> KnowledgeTask:
     locked = await knowledge_base_repository.lock_knowledge_base(
         db,
@@ -878,6 +889,8 @@ async def enqueue_graph_rebuild(
             await db.commit()
         return queued
     running = await knowledge_base_repository.get_running_graph_task(db, locked)
+    if running is not None and not follow_running and running.task_type == TASK_GRAPH_REBUILD:
+        return running
     if queued_sync is not None:
         queued_sync.status = TASK_SUCCEEDED_STATUS
         queued_sync.last_error = "Coalesced into graph rebuild."
@@ -952,6 +965,7 @@ async def retry_knowledge_task(
     knowledge_base: KnowledgeBase,
     task_id: str,
     actor: User,
+    retry_mode: str = GRAPH_RETRY_ALL,
 ) -> KnowledgeTaskResponse:
     knowledge_base = await knowledge_base_repository.lock_knowledge_base(
         db,
@@ -963,12 +977,51 @@ async def retry_knowledge_task(
     task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
     if task is None or task.workspace_id != knowledge_base.workspace_id or task.knowledge_base_id != knowledge_base.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge task not found.")
-    if task.status != TASK_FAILED_STATUS:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Only failed knowledge tasks can be retried.")
+    if task.status not in {TASK_FAILED_STATUS, TASK_CANCELLED_STATUS}:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Only failed or stopped knowledge tasks can be retried.",
+        )
     if task.attempts >= task.max_attempts:
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task retry limit reached.")
     if await get_conflicting_open_task(db, knowledge_base, task.task_type, task.document_id) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
+
+    if retry_mode not in {GRAPH_RETRY_ALL, GRAPH_RETRY_UNFINISHED}:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown retry mode.")
+    is_graph_task = task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
+    if retry_mode == GRAPH_RETRY_UNFINISHED:
+        if not is_graph_task:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Only graph tasks can retry unfinished chunks.",
+            )
+        if not 0 < task.processed_items < task.total_items:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "No unfinished graph chunks are available to retry.",
+            )
+        revision = await graph_repository.get_latest_revision(db, knowledge_base)
+        if (
+            revision is None
+            or revision.status != GRAPH_REVISION_FAILED
+            or str((revision.stats_json or {}).get("task_id") or "") != task.id
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "The graph task checkpoint is no longer available; retry all chunks.",
+            )
+        task.options = {
+            **(task.options or {}),
+            GRAPH_RETRY_MODE_OPTION: GRAPH_RETRY_UNFINISHED,
+            GRAPH_RESUME_REVISION_ID_OPTION: revision.id,
+        }
+    else:
+        options = dict(task.options or {})
+        options.pop(GRAPH_RETRY_MODE_OPTION, None)
+        options.pop(GRAPH_RESUME_REVISION_ID_OPTION, None)
+        task.options = options
+        task.processed_items = 0
 
     if task.document_id is not None:
         document = await get_knowledge_document(db, knowledge_base, task.document_id)
@@ -988,7 +1041,6 @@ async def retry_knowledge_task(
     task.lease_expires_at = None
     task.worker_task_id = None
     task.finished_at = None
-    task.processed_items = 0
     await knowledge_base_repository.save_knowledge_task(db, task)
     record_audit_log(
         db,
@@ -997,9 +1049,136 @@ async def retry_knowledge_task(
         "knowledge_task",
         task.id,
         task.task_type,
-        {"knowledge_base_id": knowledge_base.id, "document_id": task.document_id},
+        {
+            "knowledge_base_id": knowledge_base.id,
+            "document_id": task.document_id,
+            "retry_mode": retry_mode,
+        },
         workspace_id=knowledge_base.workspace_id,
     )
     await db.commit()
     task = await knowledge_base_repository.refresh_knowledge_task(db, task)
     return task_to_response(task)
+
+
+TASK_STOPPED_MESSAGE = "Knowledge task stopped by user."
+
+
+async def stop_knowledge_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    task_id: str,
+    actor: User,
+) -> KnowledgeTaskResponse:
+    knowledge_base = await knowledge_base_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    require_knowledge_base_active(knowledge_base)
+    task = await knowledge_base_repository.lock_knowledge_task(db, task_id)
+    if task is None or (
+        task.workspace_id != knowledge_base.workspace_id
+        or task.knowledge_base_id != knowledge_base.id
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge task not found.")
+    if task.status not in {TASK_QUEUED_STATUS, TASK_RUNNING_STATUS}:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Only queued or running knowledge tasks can be stopped.",
+        )
+
+    was_running = task.status == TASK_RUNNING_STATUS
+    task.status = TASK_CANCELLING_STATUS if was_running else TASK_CANCELLED_STATUS
+    task.last_error = TASK_STOPPED_MESSAGE
+    if not was_running:
+        task.lease_expires_at = None
+        task.worker_task_id = None
+        task.finished_at = utc_now()
+    else:
+        cancellation_deadline = utc_now() + timedelta(seconds=60)
+        current_lease = task.lease_expires_at
+        if current_lease is not None and current_lease.tzinfo is None:
+            current_lease = current_lease.replace(tzinfo=UTC)
+        task.lease_expires_at = min(
+            current_lease or cancellation_deadline,
+            cancellation_deadline,
+        )
+    if task.document_id is not None:
+        document = await get_knowledge_document(db, knowledge_base, task.document_id)
+        if task.task_type == TASK_PARSE:
+            document.status = DOCUMENT_PARSE_FAILED_STATUS
+            document.last_error = TASK_STOPPED_MESSAGE
+            await knowledge_base_repository.save_knowledge_document(db, document)
+        elif task.task_type in {TASK_INDEX, TASK_REBUILD_INDEX}:
+            document.status = DOCUMENT_INDEX_FAILED_STATUS
+            document.last_error = TASK_STOPPED_MESSAGE
+            await knowledge_base_repository.save_knowledge_document(db, document)
+            for chunk in await knowledge_base_repository.list_document_chunks(
+                db,
+                knowledge_base,
+                document.id,
+            ):
+                chunk.status = CHUNK_INDEX_FAILED_STATUS
+                await knowledge_base_repository.save_knowledge_document_chunk(db, chunk)
+    await knowledge_base_repository.save_knowledge_task(db, task)
+    record_audit_log(
+        db,
+        actor,
+        "knowledge_task.stop",
+        "knowledge_task",
+        task.id,
+        task.task_type,
+        {
+            "knowledge_base_id": knowledge_base.id,
+            "document_id": task.document_id,
+            "status": task.status,
+        },
+        workspace_id=knowledge_base.workspace_id,
+    )
+    await db.commit()
+    task = await knowledge_base_repository.refresh_knowledge_task(db, task)
+    return task_to_response(task)
+
+
+async def delete_knowledge_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    task_id: str,
+    actor: User,
+) -> None:
+    knowledge_base = await knowledge_base_repository.lock_knowledge_base(
+        db,
+        knowledge_base,
+    )
+    if knowledge_base is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
+    require_knowledge_base_active(knowledge_base)
+    task = await knowledge_base_repository.lock_knowledge_task(db, task_id)
+    if task is None or (
+        task.workspace_id != knowledge_base.workspace_id
+        or task.knowledge_base_id != knowledge_base.id
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge task not found.")
+    if task.status in {
+        TASK_QUEUED_STATUS,
+        TASK_RUNNING_STATUS,
+        TASK_CANCELLING_STATUS,
+    }:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Stop the knowledge task before deleting it.",
+        )
+    await knowledge_base_repository.delete_knowledge_task(db, task)
+    record_audit_log(
+        db,
+        actor,
+        "knowledge_task.delete",
+        "knowledge_task",
+        task.id,
+        task.task_type,
+        {"knowledge_base_id": knowledge_base.id, "status": task.status},
+        workspace_id=knowledge_base.workspace_id,
+    )
+    await db.commit()

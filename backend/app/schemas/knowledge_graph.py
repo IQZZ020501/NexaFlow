@@ -124,6 +124,8 @@ class KnowledgeGraphStatusResponse(BaseModel):
     pending_review_count: int
     last_error: str | None
     published_at: datetime | None
+    build_task_id: str | None = None
+    build_task_status: str | None = None
 
 
 class KnowledgeGraphEntityResponse(BaseModel):

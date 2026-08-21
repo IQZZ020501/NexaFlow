@@ -17,6 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application import knowledge_graph as knowledge_graph_application
 from app.entities.knowledge import (
     DOCUMENT_INDEXED_STATUS,
+    GRAPH_RESUME_REVISION_ID_OPTION,
+    GRAPH_RETRY_MODE_OPTION,
+    GRAPH_RETRY_UNFINISHED,
     TASK_GRAPH_REBUILD,
     TASK_GRAPH_SYNC,
     KnowledgeBase,
@@ -28,6 +31,7 @@ from app.entities.knowledge_graph import (
     GRAPH_CLAIM_ACTIVE,
     GRAPH_CLAIM_CANDIDATE,
     GRAPH_ENTITY_ACTIVE,
+    GRAPH_REVISION_BUILDING,
     GRAPH_REVISION_FAILED,
     KnowledgeGraphClaim,
     KnowledgeGraphEntity,
@@ -55,7 +59,10 @@ from app.shareddomain.agents.runtime.usage import merge_usage, usage_from_messag
 from app.shareddomain.audit.services import record_audit_log
 from app.shareddomain.knowledge.orchestration import resolve_embedding_model
 from app.shareddomain.knowledge.services import get_knowledge_model
-from app.shareddomain.knowledge.task_runner import ensure_knowledge_task_lease
+from app.shareddomain.knowledge.task_runner import (
+    ensure_knowledge_task_lease,
+    persist_owned_knowledge_task_progress,
+)
 from app.shareddomain.knowledge_graph.extraction import (
     ExtractedClaim,
     ExtractedEntity,
@@ -1207,10 +1214,12 @@ async def stage_entity_profiles(
     schema: GraphSchemaDefinition,
     provider: ChatProvider | None,
     entity_ids: set[str],
+    lease_lost: asyncio.Event,
 ) -> None:
     entities = await _projected_entities(db, knowledge_base, revision)
     claims = await _projected_claims(db, knowledge_base, revision)
     for entity_id in sorted(entity_ids):
+        ensure_knowledge_task_lease(lease_lost)
         entity = entities.get(entity_id)
         if entity is None:
             continue
@@ -1264,6 +1273,7 @@ async def stage_entity_profiles(
             ]
             async with asyncio.timeout(PROFILE_TIMEOUT_SECONDS):
                 response = await provider.ainvoke(prompt)
+            ensure_knowledge_task_lease(lease_lost)
             profile = _EntityProfileResponse.model_validate(_json_response(response))
         claim_ids = [
             claim_id
@@ -1426,13 +1436,56 @@ def _graph_source_batches(
         end = offset
         while (
             end < len(chunks)
-            and end - offset < 4
+            and (structured or end - offset < 1)
             and (chunks[end].kind == "graph_record") == structured
         ):
             end += 1
         result.append((structured, chunks[offset:end]))
         offset = end
     return result
+
+
+async def _resume_graph_revision(
+    db: AsyncSession,
+    task: KnowledgeTask,
+    knowledge_base: KnowledgeBase,
+    schema_id: str,
+    source_versions: dict[str, str],
+    chunk_count: int,
+) -> KnowledgeGraphRevision | None:
+    options = task.options or {}
+    if options.get(GRAPH_RETRY_MODE_OPTION) != GRAPH_RETRY_UNFINISHED:
+        return None
+    revision_id = str(options.get(GRAPH_RESUME_REVISION_ID_OPTION) or "")
+    revision = await graph_repository.lock_revision(
+        db,
+        knowledge_base,
+        revision_id,
+    )
+    stats = revision.stats_json if revision is not None else {}
+    if (
+        revision is None
+        or revision.status != GRAPH_REVISION_FAILED
+        or str((stats or {}).get("task_id") or "") != task.id
+        or revision.schema_id != schema_id
+        or revision.parent_revision_id != knowledge_base.active_graph_revision_id
+        or (stats or {}).get("source_versions") != source_versions
+        or task.total_items != chunk_count
+        or not 0 < task.processed_items < chunk_count
+    ):
+        raise KnowledgePipelineError(
+            "Graph task checkpoint is stale; retry all chunks."
+        )
+    revision.status = GRAPH_REVISION_BUILDING
+    revision.failure_reason = None
+    revision.started_at = utc_now()
+    revision.updated_at = utc_now()
+    revision.stats_json = {
+        **(stats or {}),
+        "profile_repair_pending": False,
+        "profile_delete_pending": False,
+    }
+    return await graph_repository.save_revision(db, revision)
 
 
 async def run_graph_build_task(
@@ -1494,16 +1547,26 @@ async def run_graph_build_task(
         )
         if model is None:
             raise KnowledgePipelineError("Graph extraction model is required.")
-    revision = await create_revision(
+    revision = await _resume_graph_revision(
         db,
+        task,
         knowledge_base,
-        schema_entity,
-        actor.id,
-        source_watermark=max(
-            (item.updated_at.isoformat() for item in chunks),
-            default=task.created_at.isoformat(),
-        ),
+        schema_entity.id,
+        source_versions,
+        len(chunks),
     )
+    resuming = revision is not None
+    if revision is None:
+        revision = await create_revision(
+            db,
+            knowledge_base,
+            schema_entity,
+            actor.id,
+            source_watermark=max(
+                (item.updated_at.isoformat() for item in chunks),
+                default=task.created_at.isoformat(),
+            ),
+        )
     revision.stats_json = {
         **(revision.stats_json or {}),
         "task_id": task.id,
@@ -1511,16 +1574,30 @@ async def run_graph_build_task(
     }
     await graph_repository.save_revision(db, revision)
     task.total_items = len(chunks)
-    task.processed_items = 0
-    await knowledge_repository.save_knowledge_task(db, task)
+    if not resuming:
+        task.processed_items = 0
+    await persist_owned_knowledge_task_progress(db, task)
     await db.commit()
-    affected_entities: set[str] = set()
+    repair_ids = (revision.stats_json or {}).get("profile_repair_entity_ids")
+    affected_entities = (
+        {item for item in repair_ids if isinstance(item, str) and item}
+        if resuming and isinstance(repair_ids, list)
+        else set()
+    )
     document_count = (
         len(changed_document_ids)
         if task.task_type == TASK_GRAPH_SYNC
         else len(source_versions)
     )
-    stage_duration_ms = {stage: 0.0 for stage in GRAPH_BUILD_STAGES}
+    stored_durations = (revision.stats_json or {}).get("stage_duration_ms")
+    stage_duration_ms = {
+        stage: (
+            float(stored_durations.get(stage) or 0.0)
+            if resuming and isinstance(stored_durations, dict)
+            else 0.0
+        )
+        for stage in GRAPH_BUILD_STAGES
+    }
     current_stage = "extract"
     published = False
     review_decision = (task.options or {}).get("review_decision")
@@ -1533,21 +1610,32 @@ async def run_graph_build_task(
                 revision,
                 task,
             )
-        current_stage = "resolve"
-        with _measure_graph_stage(stage_duration_ms, current_stage):
-            affected_entities.update(
-                await stage_changed_document_retirements(
-                    db,
-                    knowledge_base,
-                    revision,
-                    (
-                        changed_document_ids
-                        if task.task_type == TASK_GRAPH_SYNC
-                        else None
-                    ),
+        if not resuming:
+            current_stage = "resolve"
+            with _measure_graph_stage(stage_duration_ms, current_stage):
+                affected_entities.update(
+                    await stage_changed_document_retirements(
+                        db,
+                        knowledge_base,
+                        revision,
+                        (
+                            changed_document_ids
+                            if task.task_type == TASK_GRAPH_SYNC
+                            else None
+                        ),
+                    )
                 )
-            )
+        processed_offset = 0
         for structured, batch_chunks in _graph_source_batches(chunks):
+            batch_end = processed_offset + len(batch_chunks)
+            if batch_end <= task.processed_items:
+                processed_offset = batch_end
+                continue
+            if processed_offset < task.processed_items:
+                raise KnowledgePipelineError(
+                    "Graph task checkpoint is not aligned to a source batch; "
+                    "retry all chunks."
+                )
             ensure_knowledge_task_lease(lease_lost)
             current_stage = "extract"
             with _measure_graph_stage(stage_duration_ms, current_stage):
@@ -1563,6 +1651,7 @@ async def run_graph_build_task(
                         ],
                     )
                 )
+            ensure_knowledge_task_lease(lease_lost)
             current_stage = "resolve"
             with _measure_graph_stage(stage_duration_ms, current_stage):
                 affected_entities.update(
@@ -1579,10 +1668,11 @@ async def run_graph_build_task(
                             "structured_import" if structured else "explicit_text"
                         ),
                     )
-                )
+            )
             await graph_repository.save_revision(db, revision)
-            task.processed_items += len(batch_chunks)
-            await knowledge_repository.save_knowledge_task(db, task)
+            processed_offset = batch_end
+            task.processed_items = processed_offset
+            await persist_owned_knowledge_task_progress(db, task)
             await db.commit()
         current_stage = "references"
         with _measure_graph_stage(stage_duration_ms, current_stage):
@@ -1643,7 +1733,9 @@ async def run_graph_build_task(
                     else provider
                 ),
                 affected_entities,
+                lease_lost,
             )
+        ensure_knowledge_task_lease(lease_lost)
         _log_graph_build_stage(
             knowledge_base,
             task,
@@ -1687,6 +1779,7 @@ async def run_graph_build_task(
                 embedding_model,
                 profiles,
             )
+        ensure_knowledge_task_lease(lease_lost)
         _log_graph_build_stage(
             knowledge_base,
             task,
@@ -1736,6 +1829,7 @@ async def run_graph_build_task(
             workspace_id=knowledge_base.workspace_id,
         )
         current_stage = "publish"
+        ensure_knowledge_task_lease(lease_lost)
         revision = await publish_revision(db, knowledge_base, revision)
         published = True
         published_stats = revision.stats_json or {}

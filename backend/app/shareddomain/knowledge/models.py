@@ -503,7 +503,8 @@ class KnowledgeTask(Base):
             name="ck_knowledge_tasks_task_type",
         ),
         CheckConstraint(
-            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            "status IN ('queued', 'running', 'succeeded', 'failed', "
+            "'cancelling', 'cancelled')",
             name="ck_knowledge_tasks_status",
         ),
         UniqueConstraint(

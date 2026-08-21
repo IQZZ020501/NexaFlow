@@ -4,15 +4,17 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.ports.llm import ChatProvider
 from app.shareddomain.agents.runtime.usage import usage_from_message
 from app.shareddomain.knowledge_graph.schema import GraphSchemaDefinition
 
 GRAPH_EXTRACTION_TIMEOUT_SECONDS = 90
-MAX_EXTRACTION_CHUNKS = 4
+MAX_EXTRACTION_CHUNKS = 1
 MAX_EXTRACTION_CHARS = 24_000
+MAX_EXTRACTION_OUTPUT_TOKENS = 4_096
+MAX_EXTRACTION_ATTEMPTS = 2
 
 
 @dataclass(frozen=True)
@@ -132,7 +134,10 @@ async def extract_graph_batch(
     encoded_chunks = json.dumps(
         [item.__dict__ for item in bounded],
         ensure_ascii=False,
-    )[:MAX_EXTRACTION_CHARS]
+        separators=(",", ":"),
+    )
+    if len(encoded_chunks) > MAX_EXTRACTION_CHARS:
+        raise ValueError("Graph extraction input exceeds the per-call limit.")
     prompt = [
         {
             "role": "system",
@@ -147,20 +152,46 @@ async def extract_graph_batch(
         },
         {"role": "user", "content": encoded_chunks},
     ]
-    prompt_hash = hashlib.sha256(
-        json.dumps(prompt, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    ).hexdigest()
-    async with asyncio.timeout(GRAPH_EXTRACTION_TIMEOUT_SECONDS):
-        response = await provider.ainvoke(prompt)
-    stripped = _response_text(response).strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()[1:]
-        if lines and lines[-1].strip() == "```":
-            lines.pop()
-        stripped = "\n".join(lines).strip()
-    batch = GraphExtractionBatch.model_validate(json.loads(stripped))
-    return GraphExtractionResult(
-        batch=validate_extraction_batch(batch, bounded, schema),
-        prompt_hash=prompt_hash,
-        model_usage=usage_from_message(response),
-    )
+    messages = prompt
+    for attempt in range(MAX_EXTRACTION_ATTEMPTS):
+        async with asyncio.timeout(GRAPH_EXTRACTION_TIMEOUT_SECONDS):
+            response = await provider.ainvoke(
+                messages,
+                max_tokens=MAX_EXTRACTION_OUTPUT_TOKENS,
+            )
+        try:
+            stripped = _response_text(response).strip()
+            if stripped.startswith("```"):
+                lines = stripped.splitlines()[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines.pop()
+                stripped = "\n".join(lines).strip()
+            batch = validate_extraction_batch(
+                GraphExtractionBatch.model_validate(json.loads(stripped)),
+                bounded,
+                schema,
+            )
+        except (json.JSONDecodeError, ValidationError, ValueError):
+            if attempt + 1 == MAX_EXTRACTION_ATTEMPTS:
+                raise
+            messages = [
+                *prompt,
+                {
+                    "role": "user",
+                    "content": (
+                        "The response failed server validation. Re-evaluate the supplied "
+                        "source and return one corrected JSON object only. Verify schema "
+                        "names, temp ids, exact quotes, and offsets."
+                    ),
+                },
+            ]
+            continue
+        prompt_hash = hashlib.sha256(
+            json.dumps(messages, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        return GraphExtractionResult(
+            batch=batch,
+            prompt_hash=prompt_hash,
+            model_usage=usage_from_message(response),
+        )
+    raise AssertionError("Graph extraction attempts were exhausted.")

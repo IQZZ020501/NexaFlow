@@ -33,6 +33,7 @@ from app.schemas.knowledge import (
     KnowledgeDocumentResponse,
     KnowledgeModelTestRequest,
     KnowledgeModelTestResponse,
+    KnowledgeTaskRetryRequest,
     KnowledgeTaskResponse,
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
@@ -56,6 +57,8 @@ from app.application.knowledge import (
     require_can_manage_permissions,
     require_knowledge_base_permission,
     retry_knowledge_task,
+    stop_knowledge_task,
+    delete_knowledge_task,
     revoke_resource_permission,
     test_knowledge_base_models,
     transfer_knowledge_base_owner,
@@ -433,6 +436,7 @@ async def retry_workspace_knowledge_task(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    payload: Annotated[KnowledgeTaskRetryRequest | None, Body()] = None,
 ) -> KnowledgeTaskResponse:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     await require_knowledge_base_permission(
@@ -442,9 +446,57 @@ async def retry_workspace_knowledge_task(
         context.membership_role,
         {"edit"},
     )
-    task = await retry_knowledge_task(db, knowledge_base, task_id, context.user)
+    task = await retry_knowledge_task(
+        db,
+        knowledge_base,
+        task_id,
+        context.user,
+        payload.mode if payload is not None else "all",
+    )
     await dispatch_knowledge_task(task.id, settings)
     return task
+
+
+@router.post(
+    "/{knowledge_base_id}/tasks/{task_id}/stop",
+    response_model=KnowledgeTaskResponse,
+)
+async def stop_workspace_knowledge_task(
+    knowledge_base_id: str,
+    task_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeTaskResponse:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    return await stop_knowledge_task(db, knowledge_base, task_id, context.user)
+
+
+@router.delete(
+    "/{knowledge_base_id}/tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_workspace_knowledge_task(
+    knowledge_base_id: str,
+    task_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    await delete_knowledge_task(db, knowledge_base, task_id, context.user)
 
 
 @router.post(

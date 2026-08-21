@@ -10,6 +10,9 @@ from app.entities.knowledge import (
     DOCUMENT_INDEXED_STATUS,
     DOCUMENT_STAGED_META_KEY,
     TASK_FAILED_STATUS,
+    TASK_CANCELLING_STATUS,
+    TASK_GRAPH_REBUILD,
+    TASK_GRAPH_SYNC,
     TASK_QUEUED_STATUS,
     TASK_RUNNING_STATUS,
     VISIBLE_DOCUMENT_STATUSES,
@@ -853,11 +856,22 @@ async def list_recoverable_tasks(
     result = await db.scalars(
         select(KnowledgeTaskORM)
         .where(
-            KnowledgeTaskORM.attempts < KnowledgeTaskORM.max_attempts,
             or_(
-                KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
                 and_(
-                    KnowledgeTaskORM.status == TASK_RUNNING_STATUS,
+                    KnowledgeTaskORM.attempts < KnowledgeTaskORM.max_attempts,
+                    or_(
+                        KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
+                        and_(
+                            KnowledgeTaskORM.status == TASK_RUNNING_STATUS,
+                            or_(
+                                KnowledgeTaskORM.lease_expires_at.is_(None),
+                                KnowledgeTaskORM.lease_expires_at <= now,
+                            ),
+                        ),
+                    ),
+                ),
+                and_(
+                    KnowledgeTaskORM.status == TASK_CANCELLING_STATUS,
                     or_(
                         KnowledgeTaskORM.lease_expires_at.is_(None),
                         KnowledgeTaskORM.lease_expires_at <= now,
@@ -903,6 +917,12 @@ async def save_knowledge_task(db: AsyncSession, entity: KnowledgeTask) -> None:
     await save(db, KnowledgeTaskORM, entity)
 
 
+async def delete_knowledge_task(db: AsyncSession, entity: KnowledgeTask) -> None:
+    row = await db.get(KnowledgeTaskORM, entity.id)
+    if row is not None:
+        await db.delete(row)
+
+
 async def refresh_knowledge_task(
     db: AsyncSession,
     entity: KnowledgeTask,
@@ -929,7 +949,7 @@ async def claim_knowledge_task(
             == KnowledgeTaskORM.knowledge_base_id,
             earlier_graph_task.c.task_type.in_(["graph_sync", "graph_rebuild"]),
             earlier_graph_task.c.status.in_(
-                [TASK_QUEUED_STATUS, TASK_RUNNING_STATUS]
+                [TASK_QUEUED_STATUS, TASK_RUNNING_STATUS, TASK_CANCELLING_STATUS]
             ),
             or_(
                 earlier_graph_task.c.created_at < KnowledgeTaskORM.created_at,
@@ -1025,6 +1045,46 @@ async def get_running_graph_task(
     return to_entity(KnowledgeTask, row) if row else None
 
 
+async def get_open_graph_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> KnowledgeTask | None:
+    row = await db.scalar(
+        select(KnowledgeTaskORM)
+        .where(
+            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeTaskORM.task_type.in_([TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD]),
+            KnowledgeTaskORM.status.in_(
+                [TASK_QUEUED_STATUS, TASK_RUNNING_STATUS, TASK_CANCELLING_STATUS]
+            ),
+        )
+        .order_by(KnowledgeTaskORM.created_at.desc(), KnowledgeTaskORM.id.desc())
+    )
+    return to_entity(KnowledgeTask, row) if row else None
+
+
+async def get_latest_graph_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> KnowledgeTask | None:
+    row = await db.scalar(
+        select(KnowledgeTaskORM)
+        .where(
+            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeTaskORM.task_type.in_([TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD]),
+        )
+        .order_by(
+            KnowledgeTaskORM.updated_at.desc(),
+            KnowledgeTaskORM.created_at.desc(),
+            KnowledgeTaskORM.id.desc(),
+        )
+        .limit(1)
+    )
+    return to_entity(KnowledgeTask, row) if row else None
+
+
 async def renew_knowledge_task_lease(
     db: AsyncSession,
     task_id: str,
@@ -1080,7 +1140,9 @@ async def get_open_knowledge_task(
             KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
             KnowledgeTaskORM.document_id == document_id,
             KnowledgeTaskORM.task_type == task_type,
-            KnowledgeTaskORM.status.in_([TASK_QUEUED_STATUS, TASK_RUNNING_STATUS]),
+            KnowledgeTaskORM.status.in_(
+                [TASK_QUEUED_STATUS, TASK_RUNNING_STATUS, TASK_CANCELLING_STATUS]
+            ),
         )
         .order_by(KnowledgeTaskORM.created_at.desc())
     )
@@ -1096,7 +1158,9 @@ async def get_open_knowledge_base_task(
         .where(
             KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
             KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
-            KnowledgeTaskORM.status.in_([TASK_QUEUED_STATUS, TASK_RUNNING_STATUS]),
+            KnowledgeTaskORM.status.in_(
+                [TASK_QUEUED_STATUS, TASK_RUNNING_STATUS, TASK_CANCELLING_STATUS]
+            ),
         )
         .order_by(KnowledgeTaskORM.created_at.desc())
     )
@@ -1114,7 +1178,9 @@ async def get_open_document_task(
             KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
             KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
             KnowledgeTaskORM.document_id == document_id,
-            KnowledgeTaskORM.status.in_([TASK_QUEUED_STATUS, TASK_RUNNING_STATUS]),
+            KnowledgeTaskORM.status.in_(
+                [TASK_QUEUED_STATUS, TASK_RUNNING_STATUS, TASK_CANCELLING_STATUS]
+            ),
         )
         .order_by(KnowledgeTaskORM.created_at.desc())
     )
@@ -1133,7 +1199,9 @@ async def fail_open_document_tasks(
             KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
             KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
             KnowledgeTaskORM.document_id == document_id,
-            KnowledgeTaskORM.status.in_([TASK_QUEUED_STATUS, TASK_RUNNING_STATUS]),
+            KnowledgeTaskORM.status.in_(
+                [TASK_QUEUED_STATUS, TASK_RUNNING_STATUS, TASK_CANCELLING_STATUS]
+            ),
         )
         .order_by(KnowledgeTaskORM.created_at.desc())
     )

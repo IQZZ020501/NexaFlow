@@ -508,7 +508,7 @@ def exercise_direct_endpoint_calls(
                 text(
                     "UPDATE knowledge_tasks SET status = 'failed' "
                     "WHERE knowledge_base_id = :knowledge_base_id "
-                    "AND status IN ('queued', 'running')"
+                    "AND status IN ('queued', 'running', 'cancelling')"
                 ),
                 {"knowledge_base_id": knowledge_base_id},
             )
@@ -669,7 +669,22 @@ def exercise_direct_endpoint_calls(
                     db,
                 )
                 assert rebuild_task.task_type == "rebuild_index"
-                await settle_open_tasks(db)
+                stopped_task = await knowledge_api.stop_workspace_knowledge_task(
+                    knowledge_base_id,
+                    rebuild_task.id,
+                    alice_ctx,
+                    db,
+                )
+                assert stopped_task.status == "cancelled"
+                assert (
+                    await knowledge_api.delete_workspace_knowledge_task(
+                        knowledge_base_id,
+                        rebuild_task.id,
+                        alice_ctx,
+                        db,
+                    )
+                    is None
+                )
 
                 # POST /{kb}/documents/{id}/index — enqueue only.
                 index_task = await knowledge_api.index_workspace_knowledge_base_document(
