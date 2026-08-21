@@ -293,6 +293,13 @@ def test_graph_extraction_requires_exact_chunk_evidence() -> None:
     )
     assert validate_extraction_batch(valid, chunks).claims[0].predicate == "uses_phone"
 
+    misaligned = valid.model_copy(deep=True)
+    misaligned.claims[0].start_offset = 1
+    misaligned.claims[0].end_offset = 2
+    repaired = validate_extraction_batch(misaligned, chunks)
+    assert repaired.claims[0].start_offset == content.index(quote)
+    assert repaired.claims[0].end_offset == content.index(quote) + len(quote)
+
     invalid = valid.model_copy(deep=True)
     invalid.claims[0].quote = "账户 A 登录设备 D"
     try:

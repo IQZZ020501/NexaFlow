@@ -103,7 +103,11 @@ def validate_extraction_batch(
         if chunk is None:
             raise ValueError("Extracted claim references an unknown evidence chunk.")
         if chunk.content[claim.start_offset : claim.end_offset] != claim.quote:
-            raise ValueError("Extracted claim quote does not match the evidence chunk.")
+            start_offset = chunk.content.find(claim.quote)
+            if start_offset < 0:
+                raise ValueError("Extracted claim quote does not match the evidence chunk.")
+            claim.start_offset = start_offset
+            claim.end_offset = start_offset + len(claim.quote)
         for endpoint in (subject, target):
             if endpoint is None:
                 continue
