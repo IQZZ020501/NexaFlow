@@ -2571,6 +2571,15 @@ def test_graph_api_permissions_and_scoping() -> None:
         )
         assert enabled.status_code == 200, enabled.text
         assert enabled.json()["enabled"] is True
+        auto_build_tasks = client.get(
+            knowledge_url(workspace_id, f"/{knowledge_base_id}/tasks"),
+            headers=auth_headers(alice_token),
+        )
+        assert auto_build_tasks.status_code == 200, auto_build_tasks.text
+        assert any(
+            task["task_type"] == "graph_rebuild"
+            for task in auto_build_tasks.json()
+        )
 
         missing_revision = client.post(
             graph_url(workspace_id, knowledge_base_id, "/path"),

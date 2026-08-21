@@ -363,7 +363,10 @@ describe("knowledge graph workspace", () => {
         )
       ).toBe(true)
     )
-    expect(notifications).toContainEqual(["success", "知识关联已启用"])
+    expect(notifications).toContainEqual([
+      "success",
+      "知识关联已启用，正在自动抽取已有文件",
+    ])
   })
 
   test("queries a bounded path and shows edge evidence", async () => {
@@ -490,7 +493,9 @@ describe("knowledge graph workspace", () => {
     expect(screen.queryByRole("button", { name: "拒绝关系" })).toBeNull()
     fireEvent.click(screen.getByRole("tab", { name: "设置" }))
     expect(screen.queryByRole("button", { name: "保存图谱设置" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "重建知识关联" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "重新抽取全部文件" })
+    ).toBeNull()
     expect(screen.queryByRole("button", { name: "导入结构化记录" })).toBeNull()
   })
 
@@ -660,6 +665,7 @@ describe("knowledge graph workspace", () => {
     renderGraph()
 
     fireEvent.click(await screen.findByRole("tab", { name: "设置" }))
+    fireEvent.click(screen.getByText("自定义 Schema（高级）"))
     const editor = screen.getByLabelText("Schema JSON")
     fireEvent.change(editor, { target: { value: "{" } })
     fireEvent.click(screen.getByRole("button", { name: "保存 Schema 草稿" }))
@@ -671,7 +677,7 @@ describe("knowledge graph workspace", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "保存 Schema 草稿" }))
     await waitFor(() => expect(putCount).toBe(1))
-    fireEvent.click(screen.getByRole("button", { name: "重建知识关联" }))
+    fireEvent.click(screen.getByRole("button", { name: "重新抽取全部文件" }))
     await waitFor(() => expect(rebuildStarted).toBe(true))
     await waitFor(() => expect(screen.getByText("#2 · 已发布")).toBeTruthy(), {
       timeout: 4500,

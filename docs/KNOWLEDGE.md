@@ -42,6 +42,7 @@ api/knowledge*.py → application（用例组合）
 - 文档引用图使用 PostgreSQL `knowledge_document_references` 邻接表，不使用图数据库。Markdown/纯文本中的相对链接在解析时确定性解析；仅扩展同工作区、同知识库、已启用且已索引的目标文档，固定一跳，单文档最多 100 条边、单次最多 8 个目标文档。
 - Evidence Graph 由 `backend/app/shareddomain/knowledge_graph/` 保存领域规则和纯遍历逻辑：`application/knowledge_graph_build.py` 负责抽取、身份消歧、引用 claim、组件/Profile 和 revision 发布；`knowledge_graph_query.py` 负责实体链接、路径/邻域计划和结果裁剪；`knowledge_graph_maintenance.py` 负责源变更对账、孤儿 revision 恢复与 Profile 清理。复杂路径查询使用 `infrastructure/sql/knowledge_graph/*.sql` 的有界 PostgreSQL `WITH RECURSIVE` CTE，并在同一 workspace/knowledge base 范围内设置 2 秒 statement timeout。
 - Graph schema 是知识库级版本化抽取约束；revision 依次经历 `building`、`published`、`failed`、`retired`，发布时以数据库事务原子切换活动版本。Entity 为 `active/merged/retired`，claim 为 `candidate/active/rejected/superseded`，evidence 为 `active/deleted/inaccessible`，review 为 `open/approved/rejected/resolved`。候选、人工 merge/split 和拒绝结果都进入下一 revision，不直接改写历史快照。
+- Graph 默认使用内置 schema，不要求用户先编辑 JSON。知识库从关闭切换为启用时会持久化一次全量 `graph_rebuild`；之后每个文档索引成功都会自动合并 `graph_sync`，因此上传流程不需要手工触发抽取。自定义 schema 和手动全量重建只用于高级约束、模型切换或故障恢复。
 - `graph_sync` 只处理文档增量和停用/删除 tombstone，`graph_rebuild` 从当前文档全量重建；两者都通过持久化 `KnowledgeTask`、租约、心跳、冲突检测和有限重试运行。Graph LLM 调用有单任务与工作空间月度 token 预算，实际/估算用量写入 revision。Celery Beat 的 `reconcile_graphs` 会重新派发过期任务、恢复孤儿 revision，并按批次清理 profile repair；不得改成提交后的 best-effort 调用。
 - 构建失败会保留上一个 `published` revision 和现有文本 RAG 结果，失败原因只在管理员可见的截断字段中保存；Profile 向量写入失败会留下 `profile_repair_pending/profile_delete_pending`，由 Beat 重试。revision changes、状态、统计和发布审计在同一数据库事务中提交，失败回滚不会留下半个活动图。
 

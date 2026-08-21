@@ -178,7 +178,7 @@ export function KnowledgeGraph({
 
   const [formEnabled, setFormEnabled] = React.useState(false)
   const [modelId, setModelId] = React.useState("")
-  const [schemaText, setSchemaText] = React.useState("{}")
+  const [schemaText, setSchemaText] = React.useState("")
   const [importFile, setImportFile] = React.useState<File | null>(null)
 
   const refreshLists = React.useCallback(
@@ -263,7 +263,9 @@ export function KnowledgeGraph({
           setSelectedReviewId(reviewPage.items[0]?.id ?? null)
           setFormEnabled(nextSettings.enabled)
           setModelId(nextSettings.extraction_model_id ?? defaultModelId)
-          setSchemaText(JSON.stringify(nextSchema?.schema_json ?? {}, null, 2))
+          setSchemaText(
+            nextSchema ? JSON.stringify(nextSchema.schema_json, null, 2) : ""
+          )
         }
       )
       .catch((error) => {
@@ -310,7 +312,9 @@ export function KnowledgeGraph({
           setSettings(nextSettings)
           setFormEnabled(nextSettings.enabled)
           setSchema(nextSchema)
-          setSchemaText(JSON.stringify(nextSchema?.schema_json ?? {}, null, 2))
+          setSchemaText(
+            nextSchema ? JSON.stringify(nextSchema.schema_json, null, 2) : ""
+          )
           setPollBaseline(undefined)
           return
         }
@@ -386,6 +390,7 @@ export function KnowledgeGraph({
     }
     setBusyAction("settings")
     try {
+      const wasEnabled = settings?.enabled ?? false
       const next = await updateKnowledgeGraphSettings(
         token,
         workspaceId,
@@ -402,7 +407,12 @@ export function KnowledgeGraph({
         current ? { ...current, enabled: next.enabled } : current
       )
       setLoadError(null)
-      notify("success", t(next.enabled ? "知识关联已启用" : "知识关联已关闭"))
+      if (next.enabled && !wasEnabled) {
+        notify("success", t("知识关联已启用，正在自动抽取已有文件"))
+        beginPolling()
+      } else {
+        notify("success", t(next.enabled ? "知识关联已启用" : "知识关联已关闭"))
+      }
     } catch (error) {
       reportError(error)
     } finally {
@@ -745,7 +755,7 @@ export function KnowledgeGraph({
             <section className="m-4 border p-5 lg:m-5">
               <h2 className="font-semibold">{t("知识关联尚未启用")}</h2>
               <p className="mt-2 text-sm text-muted-foreground">
-                {t("选择抽取模型并启用后，才能构建和探索实体关系")}
+                {t("选择抽取模型并启用；已有文件会自动构建，后续上传文件会在索引完成后自动抽取")}
               </p>
               {canEdit ? (
                 <div className="mt-4 flex max-w-xl flex-col gap-3 sm:flex-row">
@@ -775,7 +785,7 @@ export function KnowledgeGraph({
             <section className="m-4 border p-5 lg:m-5">
               <h2 className="font-semibold">{t("尚无活动修订")}</h2>
               <p className="mt-2 text-sm text-muted-foreground">
-                {t("保存 Schema 后执行重建，发布完成即可开始探索")}
+                {t("正在自动抽取已有文件；完成后将在这里显示实体关系图")}
               </p>
               {canEdit ? (
                 <Button
@@ -1443,54 +1453,68 @@ export function KnowledgeGraph({
           </section>
 
           <section className="border-b p-4 lg:p-5">
-            <h2 className="font-semibold">{t("Schema 与构建")}</h2>
-            <label className="mt-4 grid gap-1 text-sm font-medium">
-              {t("Schema JSON")}
-              <textarea
-                className={`${TEXTAREA_CLASS} min-h-72 font-mono text-xs`}
-                value={schemaText}
-                spellCheck={false}
-                disabled={!canEdit || busyAction !== null}
-                onChange={(event) => setSchemaText(event.target.value)}
-              />
-            </label>
-            {schema ? (
-              <p className="mt-2 text-xs text-muted-foreground">
-                {t("Schema 版本 {version} · {status}", {
-                  version: schema.version,
-                  status: schema.status,
-                })}
-              </p>
-            ) : null}
+            <h2 className="font-semibold">{t("自动抽取与高级设置")}</h2>
+            <p className="mt-4 text-sm text-muted-foreground">
+              {t("启用后，上传文件会在索引完成后自动抽取实体和关系；首次启用会自动处理已有文件")}
+            </p>
             {canEdit ? (
-              <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                className="mt-4"
+                disabled={
+                  busyAction !== null ||
+                  pollBaseline !== undefined ||
+                  !settings.enabled
+                }
+                onClick={() => void handleRebuild()}
+              >
+                {busyAction === "rebuild" ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : (
+                  <RefreshCwIcon />
+                )}
+                {t("重新抽取全部文件")}
+              </Button>
+            ) : null}
+            <details className="mt-5 border p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                {t("自定义 Schema（高级）")}
+              </summary>
+              <p className="mt-3 text-xs text-muted-foreground">
+                {t("默认使用内置 Schema；仅在需要限定实体类型和关系时修改")}
+              </p>
+              <label className="mt-3 grid gap-1 text-sm font-medium">
+                {t("Schema JSON")}
+                <textarea
+                  className={`${TEXTAREA_CLASS} min-h-72 font-mono text-xs`}
+                  value={schemaText}
+                  spellCheck={false}
+                  placeholder={t("留空使用内置 Schema")}
+                  disabled={!canEdit || busyAction !== null}
+                  onChange={(event) => setSchemaText(event.target.value)}
+                />
+              </label>
+              {schema ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {t("Schema 版本 {version} · {status}", {
+                    version: schema.version,
+                    status: schema.status,
+                  })}
+                </p>
+              ) : null}
+              {canEdit ? (
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={busyAction !== null}
+                  className="mt-4"
+                  disabled={busyAction !== null || !schemaText.trim()}
                   onClick={() => void handleSchemaSave()}
                 >
                   <FileJsonIcon />
                   {t("保存 Schema 草稿")}
                 </Button>
-                <Button
-                  type="button"
-                  disabled={
-                    busyAction !== null ||
-                    pollBaseline !== undefined ||
-                    !settings.enabled
-                  }
-                  onClick={() => void handleRebuild()}
-                >
-                  {busyAction === "rebuild" ? (
-                    <LoaderCircleIcon className="animate-spin" />
-                  ) : (
-                    <RefreshCwIcon />
-                  )}
-                  {t("重建知识关联")}
-                </Button>
-              </div>
-            ) : null}
+              ) : null}
+            </details>
           </section>
 
           <section className="p-4 lg:col-span-2 lg:p-5">

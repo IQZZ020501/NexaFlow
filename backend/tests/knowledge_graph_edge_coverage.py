@@ -63,6 +63,49 @@ async def test_graph_application_edge_paths() -> None:
         await knowledge_graph._dispatch_graph_task("dispatch-task", SimpleNamespace())
     dispatch.assert_awaited_once()
 
+    initial_db = AsyncMock()
+    initial_settings = SimpleNamespace()
+    with (
+        patch.object(
+            knowledge_graph,
+            "enqueue_graph_rebuild",
+            AsyncMock(return_value=SimpleNamespace(id="initial-graph-task")),
+        ) as enqueue_initial,
+        patch.object(
+            knowledge_graph,
+            "_dispatch_graph_task",
+            AsyncMock(),
+        ) as dispatch_initial,
+    ):
+        await knowledge_graph._enqueue_initial_graph_build(
+            initial_db,
+            knowledge_base,
+            actor,
+            initial_settings,
+        )
+    enqueue_initial.assert_awaited_once_with(initial_db, knowledge_base, actor)
+    dispatch_initial.assert_awaited_once_with(
+        "initial-graph-task",
+        initial_settings,
+    )
+
+    with (
+        patch.object(
+            knowledge_graph,
+            "enqueue_graph_rebuild",
+            AsyncMock(side_effect=RuntimeError("busy")),
+        ),
+        patch.object(knowledge_graph, "log_error") as log_initial_error,
+    ):
+        await knowledge_graph._enqueue_initial_graph_build(
+            initial_db,
+            knowledge_base,
+            actor,
+            initial_settings,
+        )
+    initial_db.rollback.assert_awaited_once()
+    log_initial_error.assert_called_once()
+
     with (
         patch.object(
             knowledge_graph,
@@ -138,12 +181,14 @@ async def test_graph_application_edge_paths() -> None:
                 knowledge_base,
                 KnowledgeGraphSettingsUpdateRequest(enabled=False),
                 actor,
+                SimpleNamespace(),
             ),
             404,
         )
 
     locked = KnowledgeBase(**knowledge_base.__dict__)
     db = AsyncMock()
+    initial_settings = SimpleNamespace()
     with (
         patch.object(
             knowledge_repository,
@@ -171,8 +216,53 @@ async def test_graph_application_edge_paths() -> None:
                 extraction_model_id="missing-model",
             ),
             actor,
+            initial_settings,
         )
     assert settings_response.extraction_model_id is None
+
+    locked = KnowledgeBase(**knowledge_base.__dict__)
+    db = AsyncMock()
+    with (
+        patch.object(
+            knowledge_repository,
+            "lock_knowledge_base",
+            AsyncMock(return_value=locked),
+        ),
+        patch.object(
+            knowledge_graph,
+            "_validate_graph_build_requirements",
+            AsyncMock(return_value=("extraction-model", "embedding-model")),
+        ),
+        patch.object(knowledge_repository, "save_knowledge_base", AsyncMock()),
+        patch.object(
+            knowledge_repository,
+            "refresh_knowledge_base",
+            AsyncMock(return_value=locked),
+        ),
+        patch.object(knowledge_graph, "record_audit_log"),
+        patch.object(
+            knowledge_graph,
+            "_enqueue_initial_graph_build",
+            AsyncMock(),
+        ) as enqueue_initial,
+    ):
+        settings_response = await knowledge_graph.update_graph_settings(
+            db,
+            knowledge_base,
+            KnowledgeGraphSettingsUpdateRequest(
+                enabled=True,
+                extraction_model_id="extraction-model",
+            ),
+            actor,
+            initial_settings,
+        )
+    assert settings_response.enabled is True
+    enqueue_initial.assert_awaited_once_with(
+        db,
+        locked,
+        actor,
+        initial_settings,
+    )
 
     with patch.object(
         graph_repository,

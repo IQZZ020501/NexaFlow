@@ -30,6 +30,8 @@ from app.entities.knowledge_graph import (
 )
 from app.entities.user import User
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import log_error
+from app.infrastructure.logger import get_logger
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.repositories import knowledge as knowledge_repository
 from app.infrastructure.repositories import knowledge_graph as graph_repository
@@ -79,6 +81,7 @@ from app.shareddomain.knowledge_graph.services import create_graph_schema
 
 MAX_GRAPH_IMPORT_BYTES = 10 * 1024 * 1024
 MAX_GRAPH_IMPORT_RECORDS = 5_000
+logger = get_logger(__name__)
 
 
 async def _dispatch_graph_task(task_id: str, settings: Settings) -> None:
@@ -86,6 +89,28 @@ async def _dispatch_graph_task(task_id: str, settings: Settings) -> None:
     from app.application.knowledge import dispatch_knowledge_task
 
     await dispatch_knowledge_task(task_id, settings)
+
+
+async def _enqueue_initial_graph_build(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    actor: User,
+    settings: Settings,
+) -> None:
+    try:
+        task = await enqueue_graph_rebuild(db, knowledge_base, actor)
+        await _dispatch_graph_task(task.id, settings)
+    except Exception as exc:
+        await db.rollback()
+        # The persisted graph reconciler retries enabled knowledge bases whose
+        # indexed sources have not been published yet.
+        log_error(
+            logger,
+            "Initial knowledge graph build dispatch deferred.",
+            exc,
+            workspace_id=knowledge_base.workspace_id,
+            knowledge_base_id=knowledge_base.id,
+        )
 
 
 async def require_graph_knowledge_base(
@@ -218,11 +243,13 @@ async def update_graph_settings(
     knowledge_base: KnowledgeBase,
     payload: KnowledgeGraphSettingsUpdateRequest,
     actor: User,
+    settings: Settings,
 ) -> KnowledgeGraphSettingsResponse:
     locked = await knowledge_repository.lock_knowledge_base(db, knowledge_base)
     if locked is None or locked.workspace_id != knowledge_base.workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
 
+    was_enabled = locked.graph_enabled
     extraction_model_id = (
         locked.graph_extraction_model_id
         if payload.extraction_model_id is None
@@ -266,6 +293,8 @@ async def update_graph_settings(
     )
     await db.commit()
     locked = await knowledge_repository.refresh_knowledge_base(db, locked)
+    if locked.graph_enabled and not was_enabled:
+        await _enqueue_initial_graph_build(db, locked, actor, settings)
     return _settings_response(locked)
 
 

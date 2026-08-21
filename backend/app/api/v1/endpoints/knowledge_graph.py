@@ -69,6 +69,7 @@ async def patch_settings(
     knowledge_base_id: str,
     payload: KnowledgeGraphSettingsUpdateRequest,
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> KnowledgeGraphSettingsResponse:
     knowledge_base = await _knowledge_base(
@@ -82,6 +83,7 @@ async def patch_settings(
         knowledge_base,
         payload,
         context.user,
+        settings,
     )
 
 
