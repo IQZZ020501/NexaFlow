@@ -55,7 +55,7 @@ api/knowledge*.py → application（用例组合）
 ### 生命周期、权限、日志与回滚
 
 - 文档停用或删除先写 tombstone/revision change；当 evidence 不再被任何活动文档支持时才退休 claim。对象存储、普通向量和 profile 向量的删除意图均持久化，删除失败由 Beat 按退避重试，不能用未持久化的 post-commit 清理替代。
-- 知识任务支持 `POST /tasks/{task_id}/stop` 和 `DELETE /tasks/{task_id}`。排队任务停止后直接进入 `cancelled`；运行任务先进入 `cancelling`，worker 在租约/批次边界收口为 `cancelled`。`queued/running/cancelling` 仍参与冲突检测且不能删除，只有终态任务可以删除；`failed/cancelled` 可在重试次数范围内重新提交。Graph 重试请求可选择 `all` 或 `unfinished`：前者新建 revision 并从 0 开始，后者复用失败 revision，只跳过已原子提交的 Child；Schema、父 revision、文档版本或分片总数变化时拒绝断点续跑并要求全部重试。
+- 知识任务支持 `POST /tasks/{task_id}/stop`、`DELETE /tasks/{task_id}` 和 `POST /tasks/bulk-delete`。排队任务停止后直接进入 `cancelled`；运行任务先进入 `cancelling`，worker 在租约/批次边界收口为 `cancelled`。`queued/running/cancelling` 仍参与冲突检测且不能删除，只有终态任务可以单条或原子批量删除；`failed/cancelled` 可在重试次数范围内重新提交。Graph 重试请求可选择 `all` 或 `unfinished`：前者新建 revision 并从 0 开始，后者复用失败 revision，只跳过已原子提交的 Child；Schema、父 revision、文档版本或分片总数变化时拒绝断点续跑并要求全部重试。
 - Graph API 遵循知识库 view/edit 权限和 workspace 隔离；跨 workspace 的实体、review、path ID 不可读取。Graph 日志只记录 workspace/knowledge base/task/revision、阶段、计数、耗时、限制和安全错误分类，不记录 query、实体属性、canonical name、alias、profile、quote、prompt、源文件、凭据或完整异常 request body。
 - 回滚只需关闭 Graph setting（`enabled=false`），不要删除表、revision 或执行生产 downgrade；`graph_mode=off` 会继续走现有 vector + `pg_search` BM25 + reference + rerank 三路检索。确认文本 RAG 稳定后可重新启用并 rebuild，PostgreSQL Graph 权威数据和历史 revision 保留，Qdrant profile collection 可从发布 revision 重建。
 - 命中测试可将当前问题和选定期望文档保存为检索评测用例；评测任务复用生产检索链路，计算 Hit@K、Recall@K、MRR、nDCG@K 和 P50/P95 延迟。评测与解析、索引、重建互斥；失败用例可在同一任务上重试，已成功结果不会被重复执行或旧 worker 错误覆盖。已结束的评测运行可从历史中删除，结果随任务级联清理。
@@ -84,3 +84,4 @@ api/knowledge*.py → application（用例组合）
 
 - `backend/tests/knowledge.py` — 知识库端到端测试：CRUD/普通与 QA 导入/平铺与层级分块/引用图/混合检索/评测重试与恢复/任务租约/租户约束/权限/审计
 - `backend/tests/knowledge_graph.py` — Graph 固定数据、revision 原子发布、身份消歧、证据生命周期、路径限制、租约恢复、Agent/Workflow 输出和 Graph off 回滚回归
+- `backend/tests/knowledge_graph_edge_coverage.py` — Graph API、自动首次构建、协调补偿和错误边界覆盖
