@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    Settings,
     WorkspaceContext,
+    get_db,
     get_settings as get_app_settings,
     get_workspace_context_from_path,
 )
 from app.application import knowledge_graph as graph_application
-from app.infrastructure.config import Settings
-from app.infrastructure.session import get_db
 from app.schemas.knowledge import KnowledgeTaskResponse
 from app.schemas.knowledge_graph import (
     KnowledgeGraphEntityDetailResponse,
