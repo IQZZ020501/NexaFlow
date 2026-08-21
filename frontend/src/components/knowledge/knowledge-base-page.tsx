@@ -2558,9 +2558,6 @@ function KnowledgeBasePageContent({
                 workspaceId={selectedKnowledgeBase.workspace_id}
                 knowledgeBaseId={selectedKnowledgeBase.id}
                 canEdit={canEditDocuments}
-                llmModels={registeredModels.filter(
-                  (model) => model.model_type === "LLM"
-                )}
                 notify={notify}
                 reportError={reportError}
               />

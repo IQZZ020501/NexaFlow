@@ -2533,20 +2533,6 @@ def test_graph_api_permissions_and_scoping() -> None:
             },
         )
         assert embedding_model.status_code == 201, embedding_model.text
-        llm_model = client.post(
-            models_url(workspace_id),
-            headers=auth_headers(admin_token),
-            json={
-                **model_payload(model_base_url),
-                "name": "Graph API LLM",
-                "provider": "model_openai_provider",
-                "provider_type": "openai_compatible",
-                "model_type": "LLM",
-                "model_name": "gpt-test",
-            },
-        )
-        assert llm_model.status_code == 201, llm_model.text
-
         knowledge_base = client.post(
             knowledge_url(workspace_id),
             headers=auth_headers(alice_token),
@@ -2595,22 +2581,14 @@ def test_graph_api_permissions_and_scoping() -> None:
             json={"source_entity": " ", "target_entity": "账号管理办法"},
         )
         assert blank_path.status_code == 422, blank_path.text
-        missing_model = client.patch(
-            settings_url,
-            headers=auth_headers(alice_token),
-            json={"enabled": True, "extraction_model_id": None},
-        )
-        assert missing_model.status_code == 422, missing_model.text
         enabled = client.patch(
             settings_url,
             headers=auth_headers(alice_token),
-            json={
-                "enabled": True,
-                "extraction_model_id": llm_model.json()["id"],
-            },
+            json={"enabled": True},
         )
         assert enabled.status_code == 200, enabled.text
         assert enabled.json()["enabled"] is True
+        assert enabled.json()["extraction_model_id"] is None
         auto_build_tasks = client.get(
             knowledge_url(workspace_id, f"/{knowledge_base_id}/tasks"),
             headers=auth_headers(alice_token),
@@ -2620,16 +2598,6 @@ def test_graph_api_permissions_and_scoping() -> None:
             task["task_type"] == "graph_rebuild"
             for task in auto_build_tasks.json()
         )
-
-        missing_revision = client.post(
-            graph_url(workspace_id, knowledge_base_id, "/path"),
-            headers=auth_headers(alice_token),
-            json={
-                "source_entity": "制度 A",
-                "target_entity": "账号管理办法",
-            },
-        )
-        assert missing_revision.status_code == 409, missing_revision.text
 
         schema_payload = default_graph_schema().model_dump(mode="json")
         schema_response = client.put(
@@ -2663,7 +2631,20 @@ def test_graph_api_permissions_and_scoping() -> None:
             headers=auth_headers(alice_token),
         )
         assert entities.status_code == 200, entities.text
-        assert entities.json()["total"] == 1
+        assert entities.json()["total"] >= 1
+        overview = client.get(
+            graph_url(workspace_id, knowledge_base_id, "/overview"),
+            headers=auth_headers(alice_token),
+        )
+        assert overview.status_code == 200, overview.text
+        assert overview.json()["operation"] == "overview"
+        assert {item["id"] for item in overview.json()["nodes"]} >= {
+            fixture["source_id"],
+            fixture["target_id"],
+        }
+        assert fixture["claim_id"] in {
+            item["id"] for item in overview.json()["claims"]
+        }
         detail = client.get(
             graph_url(
                 workspace_id,
@@ -2915,7 +2896,7 @@ def test_graph_api_permissions_and_scoping() -> None:
             json={"enabled": False},
         )
         assert disabled.status_code == 200, disabled.text
-        assert disabled.json()["extraction_model_id"] == llm_model.json()["id"]
+        assert disabled.json()["extraction_model_id"] is None
         assert disabled.json()["active_schema_id"] == before_disable.json()[
             "active_schema_id"
         ]
@@ -2928,6 +2909,14 @@ def test_graph_api_permissions_and_scoping() -> None:
             json={"enabled": True},
         )
         assert reenabled.status_code == 200, reenabled.text
+        fixture = asyncio.run(
+            seed_graph_api_fixture(
+                workspace_id,
+                knowledge_base_id,
+                alice_id,
+                "graph-api-reenabled",
+            )
+        )
 
         granted_edit = client.put(
             knowledge_url(
@@ -2961,10 +2950,7 @@ def test_graph_api_permissions_and_scoping() -> None:
         view_cannot_edit = client.patch(
             settings_url,
             headers=auth_headers(bob_token),
-            json={
-                "enabled": True,
-                "extraction_model_id": llm_model.json()["id"],
-            },
+            json={"enabled": True},
         )
         assert view_cannot_edit.status_code == 403, view_cannot_edit.text
         revoked = client.delete(

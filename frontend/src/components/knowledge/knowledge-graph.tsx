@@ -13,6 +13,7 @@ import {
   SettingsIcon,
   ShieldCheckIcon,
   UploadIcon,
+  XIcon,
 } from "lucide-react"
 
 import { FilterDropdown } from "@/components/app/filter-dropdown"
@@ -23,6 +24,7 @@ import { useLanguage } from "@/contexts/language-provider"
 import { languageLocales, type TFunction } from "@/i18n"
 import {
   getKnowledgeGraphEntity,
+  getKnowledgeGraphOverview,
   getKnowledgeGraphSchema,
   getKnowledgeGraphSettings,
   getKnowledgeGraphStatus,
@@ -45,8 +47,7 @@ import type {
   KnowledgeGraphSettings,
   KnowledgeGraphStatus,
 } from "@/lib/api/knowledge"
-import type { RegisteredModel } from "@/lib/api/llm"
-import { formatDateTime, modelLabel } from "@/lib/display"
+import { formatDateTime } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import type { AppNotification } from "@/lib/notifications"
 import { cn } from "@/lib/utils"
@@ -120,7 +121,6 @@ export function KnowledgeGraph({
   workspaceId,
   knowledgeBaseId,
   canEdit,
-  llmModels,
   notify,
   reportError,
 }: {
@@ -128,13 +128,11 @@ export function KnowledgeGraph({
   workspaceId: string
   knowledgeBaseId: string
   canEdit: boolean
-  llmModels: RegisteredModel[]
   notify: (kind: AppNotification["kind"], message: string) => void
   reportError: (error: unknown) => void
 }) {
   const { language, t } = useLanguage()
   const locale = languageLocales[language]
-  const defaultModelId = llmModels[0]?.id ?? ""
   const [view, setView] = React.useState<GraphWorkspaceView>("explore")
   const [settings, setSettings] = React.useState<KnowledgeGraphSettings | null>(
     null
@@ -146,12 +144,14 @@ export function KnowledgeGraph({
   const [reviews, setReviews] = React.useState<KnowledgeGraphReviewItem[]>([])
   const [reviewTotal, setReviewTotal] = React.useState(0)
   const [isLoading, setIsLoading] = React.useState(true)
+  const [loadedKnowledgeBaseId, setLoadedKnowledgeBaseId] = React.useState<
+    string | null
+  >(null)
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [busyAction, setBusyAction] = React.useState<string | null>(null)
   const [pollBaseline, setPollBaseline] = React.useState<number | undefined>()
   const pollAttemptsRef = React.useRef(0)
   const pollSawRunningRef = React.useRef(false)
-  const autoQueryRevisionRef = React.useRef<string | null>(null)
 
   const [entitySearch, setEntitySearch] = React.useState("")
   const [sourceEntity, setSourceEntity] = React.useState("")
@@ -160,6 +160,10 @@ export function KnowledgeGraph({
   const [relationFilters, setRelationFilters] = React.useState<string[]>([])
   const [queryResult, setQueryResult] =
     React.useState<KnowledgeGraphQueryResult | null>(null)
+  const [overviewState, setOverviewState] = React.useState<{
+    knowledgeBaseId: string
+    result: KnowledgeGraphQueryResult
+  } | null>(null)
   const [queryError, setQueryError] = React.useState<string | null>(null)
   const [isQuerying, setIsQuerying] = React.useState(false)
   const [selectedClaimId, setSelectedClaimId] = React.useState<string | null>(
@@ -184,7 +188,6 @@ export function KnowledgeGraph({
   const [splitClaimIds, setSplitClaimIds] = React.useState<string[]>([])
 
   const [formEnabled, setFormEnabled] = React.useState(false)
-  const [modelId, setModelId] = React.useState("")
   const [schemaText, setSchemaText] = React.useState("")
   const [importFile, setImportFile] = React.useState<File | null>(null)
 
@@ -268,8 +271,11 @@ export function KnowledgeGraph({
           setReviews(reviewPage.items)
           setReviewTotal(reviewPage.total)
           setSelectedReviewId(reviewPage.items[0]?.id ?? null)
+          setLoadedKnowledgeBaseId(knowledgeBaseId)
+          setQueryResult(null)
+          setSelectedEntity(null)
+          setSelectedClaimId(null)
           setFormEnabled(nextSettings.enabled)
-          setModelId(nextSettings.extraction_model_id ?? defaultModelId)
           setSchemaText(
             nextSchema ? JSON.stringify(nextSchema.schema_json, null, 2) : ""
           )
@@ -293,7 +299,44 @@ export function KnowledgeGraph({
       controller.abort()
       entityRequestRef.current?.abort()
     }
-  }, [defaultModelId, knowledgeBaseId, reportError, t, token, workspaceId])
+  }, [knowledgeBaseId, reportError, t, token, workspaceId])
+
+  React.useEffect(() => {
+    if (
+      loadedKnowledgeBaseId !== knowledgeBaseId ||
+      !status?.active_revision_id ||
+      !settings?.enabled
+    )
+      return
+    const controller = new AbortController()
+    void getKnowledgeGraphOverview(
+      token,
+      workspaceId,
+      knowledgeBaseId,
+      controller.signal
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) {
+          setOverviewState({ knowledgeBaseId, result })
+          setQueryError(null)
+        }
+      })
+      .catch((error) => {
+        if (isAbortError(error)) return
+        setQueryError(getErrorMessage(error, t))
+        reportError(error)
+      })
+    return () => controller.abort()
+  }, [
+    knowledgeBaseId,
+    loadedKnowledgeBaseId,
+    reportError,
+    settings?.enabled,
+    status?.active_revision_id,
+    t,
+    token,
+    workspaceId,
+  ])
 
   React.useEffect(() => {
     if (pollBaseline === undefined) return
@@ -359,50 +402,29 @@ export function KnowledgeGraph({
     workspaceId,
   ])
 
-  React.useEffect(() => {
-    const revisionId = status?.active_revision_id
-    const firstEntity = entities[0]
-    if (
-      !revisionId ||
-      !firstEntity ||
-      autoQueryRevisionRef.current === revisionId
-    ) {
-      return
-    }
-    autoQueryRevisionRef.current = revisionId
-    setSourceEntity(firstEntity.canonical_name)
-    setIsQuerying(true)
-    setQueryError(null)
-    void queryKnowledgeGraphNeighborhood(token, workspaceId, knowledgeBaseId, {
-      entity: firstEntity.canonical_name,
-      max_hops: 3,
-      relation_filters: [],
-    })
-      .then(setQueryResult)
-      .catch((error) => {
-        setQueryError(getErrorMessage(error, t))
-        reportError(error)
-      })
-      .finally(() => setIsQuerying(false))
-  }, [
-    entities,
-    knowledgeBaseId,
-    reportError,
-    status?.active_revision_id,
-    t,
-    token,
-    workspaceId,
-  ])
-
   const selectedReview =
     reviews.find((item) => item.id === selectedReviewId) ?? null
   const relationNames = schemaNames(schema, "relations")
   const entityTypeNames = schemaNames(schema, "entity_types")
-  const selectedClaim = queryResult?.claims.find(
-    (claim) => claim.id === selectedClaimId
+  const overviewResult =
+    overviewState?.knowledgeBaseId === knowledgeBaseId
+      ? overviewState.result
+      : null
+  const displayResult = queryResult ?? overviewResult
+  const isOverviewLoading = Boolean(
+    settings?.enabled &&
+    status?.active_revision_id &&
+    !overviewResult &&
+    !queryError
   )
+  const selectedClaim =
+    selectedEntity?.claims.find((claim) => claim.id === selectedClaimId) ??
+    displayResult?.claims.find((claim) => claim.id === selectedClaimId)
   const evidenceById = new Map(
-    (queryResult?.evidence ?? []).map((item) => [item.id, item])
+    [
+      ...(displayResult?.evidence ?? []),
+      ...(selectedEntity?.evidence ?? []),
+    ].map((item) => [item.id, item])
   )
   const selectedEvidence = (selectedClaim?.evidence_ids ?? []).flatMap((id) => {
     const evidence = evidenceById.get(id)
@@ -410,14 +432,17 @@ export function KnowledgeGraph({
   })
   const graphEntities = new Map(
     [
-      ...(queryResult?.resolved_entities ?? []),
-      ...(queryResult?.nodes ?? []),
+      ...(displayResult?.resolved_entities ?? []),
+      ...(displayResult?.nodes ?? []),
     ].map((entity) => [entity.id, entity])
   )
   const orderedEntityIds =
     queryResult?.paths[0]?.nodes.map((entity) => entity.id) ?? []
   const claimCount = numericStat(status?.stats, "claim_count")
   const graphBusy = pollBaseline !== undefined || graphBuildActive(status)
+  const showGraphDetail = Boolean(
+    isEntityLoading || selectedClaim || selectedEntity
+  )
 
   function beginPolling(
     baseline = status?.revision_no ?? 0,
@@ -434,10 +459,6 @@ export function KnowledgeGraph({
   }
 
   async function handleSettingsSave(enabled = formEnabled) {
-    if (enabled && !modelId) {
-      localError(t("请选择图谱抽取模型"))
-      return
-    }
     setBusyAction("settings")
     try {
       const wasEnabled = settings?.enabled ?? false
@@ -447,12 +468,10 @@ export function KnowledgeGraph({
         knowledgeBaseId,
         {
           enabled,
-          extraction_model_id: modelId || null,
         }
       )
       setSettings(next)
       setFormEnabled(next.enabled)
-      setModelId(next.extraction_model_id ?? modelId)
       setStatus((current) =>
         current ? { ...current, enabled: next.enabled } : current
       )
@@ -489,11 +508,12 @@ export function KnowledgeGraph({
     }
   }
 
-  async function selectEntity(entityId: string) {
+  async function selectEntity(entityId: string, claimId: string | null = null) {
     entityRequestRef.current?.abort()
     const controller = new AbortController()
     entityRequestRef.current = controller
-    setSelectedClaimId(null)
+    setSelectedClaimId(claimId)
+    setSelectedEntity(null)
     setIsEntityLoading(true)
     try {
       const detail = await getKnowledgeGraphEntity(
@@ -509,6 +529,28 @@ export function KnowledgeGraph({
     } finally {
       if (!controller.signal.aborted) setIsEntityLoading(false)
     }
+  }
+
+  function selectClaim(claimId: string) {
+    const claim = displayResult?.claims.find((item) => item.id === claimId)
+    setSelectedClaimId(claimId)
+    setSelectedEntity(null)
+    if (claim && !claim.evidence_ids.length) {
+      void selectEntity(claim.subject_entity_id, claimId)
+    }
+  }
+
+  function showOverview() {
+    setQueryResult(null)
+    setQueryError(null)
+    clearGraphSelection()
+  }
+
+  function clearGraphSelection() {
+    entityRequestRef.current?.abort()
+    setIsEntityLoading(false)
+    setSelectedClaimId(null)
+    setSelectedEntity(null)
   }
 
   async function handleQuery(event: React.FormEvent<HTMLFormElement>) {
@@ -737,7 +779,7 @@ export function KnowledgeGraph({
                 : t("尚未构建"),
             ],
             [t("实体数"), entityTotal],
-            [t("关系数"), claimCount ?? "—"],
+            [t("关系数"), claimCount ?? overviewResult?.claims.length ?? "—"],
             [t("待审核"), status.pending_review_count],
             [
               t("最后发布时间"),
@@ -806,23 +848,14 @@ export function KnowledgeGraph({
               <h2 className="font-semibold">{t("知识关联尚未启用")}</h2>
               <p className="mt-2 text-sm text-muted-foreground">
                 {t(
-                  "选择抽取模型并启用；已有文件会自动构建，后续上传文件会在索引完成后自动抽取"
+                  "启用后，上传文件会在索引完成后自动抽取实体和关系；首次启用会自动处理已有文件"
                 )}
               </p>
               {canEdit ? (
-                <div className="mt-4 flex max-w-xl flex-col gap-3 sm:flex-row">
-                  <FilterDropdown
-                    ariaLabel={t("图谱抽取模型")}
-                    value={modelId}
-                    options={llmModels.map((model) => ({
-                      value: model.id,
-                      label: modelLabel(model),
-                    }))}
-                    onChange={setModelId}
-                  />
+                <div className="mt-4">
                   <Button
                     type="button"
-                    disabled={busyAction !== null || !modelId}
+                    disabled={busyAction !== null}
                     onClick={() => void handleSettingsSave(true)}
                   >
                     {busyAction === "settings" ? (
@@ -852,7 +885,7 @@ export function KnowledgeGraph({
             </section>
           ) : (
             <>
-              <div className="grid min-w-0 lg:grid-cols-[18rem_minmax(0,1fr)]">
+              <div className="grid min-w-0 lg:grid-cols-[15rem_minmax(0,1fr)]">
                 <aside className="min-w-0 border-b p-4 lg:min-h-[42rem] lg:border-r lg:border-b-0">
                   <form className="flex gap-2" onSubmit={handleEntitySearch}>
                     <Input
@@ -946,17 +979,28 @@ export function KnowledgeGraph({
                             }
                           />
                         </label>
-                        <Button
-                          type="submit"
-                          disabled={isQuerying || !sourceEntity.trim()}
-                        >
-                          {isQuerying ? (
-                            <LoaderCircleIcon className="animate-spin" />
-                          ) : (
-                            <GitBranchIcon />
-                          )}
-                          {t(targetEntity.trim() ? "查找路径" : "查询邻域")}
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            type="submit"
+                            disabled={isQuerying || !sourceEntity.trim()}
+                          >
+                            {isQuerying ? (
+                              <LoaderCircleIcon className="animate-spin" />
+                            ) : (
+                              <GitBranchIcon />
+                            )}
+                            {t(targetEntity.trim() ? "查找路径" : "查询邻域")}
+                          </Button>
+                          {queryResult ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={showOverview}
+                            >
+                              {t("全部图谱")}
+                            </Button>
+                          ) : null}
+                        </div>
                       </div>
                       {relationNames.length ? (
                         <details>
@@ -996,21 +1040,26 @@ export function KnowledgeGraph({
                       {queryError}
                     </p>
                   ) : null}
-                  {queryResult ? (
-                    <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_22rem]">
+                  {displayResult ? (
+                    <div
+                      className={cn(
+                        "grid min-w-0",
+                        showGraphDetail && "lg:grid-cols-[minmax(0,1fr)_22rem]"
+                      )}
+                    >
                       <section className="min-w-0 border-b lg:border-r lg:border-b-0">
-                        {queryResult.truncated ? (
+                        {displayResult.truncated ? (
                           <p className="border-b bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
                             {t("结果已截断：{reason}，已访问 {value} 个实体", {
                               reason:
-                                queryResult.limit_reason === "timeout"
+                                displayResult.limit_reason === "timeout"
                                   ? t("查询超时")
                                   : t("达到大小限制"),
-                              value: queryResult.visited_nodes,
+                              value: displayResult.visited_nodes,
                             })}
                           </p>
                         ) : null}
-                        {queryResult.operation === "ambiguous" ? (
+                        {displayResult.operation === "ambiguous" ? (
                           <div className="border-b p-4">
                             <p className="font-medium text-amber-700 dark:text-amber-300">
                               {t("实体匹配存在歧义")}
@@ -1019,215 +1068,225 @@ export function KnowledgeGraph({
                               {t("请从候选实体中确认后重新查询")}
                             </p>
                           </div>
-                        ) : queryResult.operation === "not_found" ? (
+                        ) : displayResult.operation === "not_found" ? (
                           <p className="border-b p-4 text-sm text-muted-foreground">
                             {t("未找到匹配实体")}
                           </p>
-                        ) : queryResult.operation === "path" &&
-                          !queryResult.paths.length ? (
+                        ) : displayResult.operation === "path" &&
+                          !displayResult.paths.length ? (
                           <p className="border-b p-4 text-sm text-muted-foreground">
                             {t("未找到路径")}
                           </p>
                         ) : null}
 
-                        {queryResult.nodes.length ? (
-                          <div className="hidden border-b md:block">
+                        {displayResult.nodes.length ? (
+                          <div className="border-b">
                             <KnowledgeGraphCanvas
-                              entities={queryResult.nodes}
-                              claims={queryResult.claims}
+                              entities={displayResult.nodes}
+                              claims={displayResult.claims}
                               orderedEntityIds={orderedEntityIds}
                               onEntitySelect={(id) => void selectEntity(id)}
-                              onClaimSelect={(id) => {
-                                setSelectedEntity(null)
-                                setSelectedClaimId(id)
-                              }}
+                              onClaimSelect={selectClaim}
                             />
                           </div>
                         ) : null}
 
-                        <div className="p-4">
-                          <h2 className="text-sm font-semibold">
-                            {t("实体与逐跳关系")}
-                          </h2>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {queryResult.nodes.map((entity) => (
-                              <button
-                                key={entity.id}
-                                type="button"
-                                className="rounded-full border px-3 py-1 text-sm hover:bg-muted"
-                                onClick={() => void selectEntity(entity.id)}
-                              >
-                                {entity.canonical_name}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="mt-4 space-y-2">
-                            {queryResult.paths.length
-                              ? queryResult.paths.flatMap((path, pathIndex) =>
-                                  path.steps.map((step, stepIndex) => (
+                        {queryResult ? (
+                          <div className="p-4">
+                            <h2 className="text-sm font-semibold">
+                              {t("实体与逐跳关系")}
+                            </h2>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {queryResult.nodes.map((entity) => (
+                                <button
+                                  key={entity.id}
+                                  type="button"
+                                  className="rounded-full border px-3 py-1 text-sm hover:bg-muted"
+                                  onClick={() => void selectEntity(entity.id)}
+                                >
+                                  {entity.canonical_name}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="mt-4 space-y-2">
+                              {queryResult.paths.length
+                                ? queryResult.paths.flatMap((path, pathIndex) =>
+                                    path.steps.map((step, stepIndex) => (
+                                      <button
+                                        key={`${pathIndex}-${step.claim_id}-${stepIndex}`}
+                                        type="button"
+                                        className="grid w-full gap-1 border p-3 text-left text-sm hover:bg-muted"
+                                        onClick={() =>
+                                          selectClaim(step.claim_id)
+                                        }
+                                      >
+                                        <span className="font-medium">
+                                          {graphEntities.get(
+                                            step.source_entity_id
+                                          )?.canonical_name ??
+                                            step.source_entity_id}
+                                          {" → "}
+                                          {step.predicate}
+                                          {" → "}
+                                          {graphEntities.get(
+                                            step.target_entity_id
+                                          )?.canonical_name ??
+                                            step.target_entity_id}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground">
+                                          {t(
+                                            "方向：{direction} · 支持数：{value}",
+                                            {
+                                              direction: t(
+                                                step.semantic_direction ===
+                                                  "forward"
+                                                  ? "正向"
+                                                  : "反向"
+                                              ),
+                                              value: step.support_count,
+                                            }
+                                          )}
+                                        </span>
+                                        {!step.evidence_ids.length ? (
+                                          <span className="text-xs text-destructive">
+                                            {t(
+                                              "此关系没有证据，不能视为已证实"
+                                            )}
+                                          </span>
+                                        ) : null}
+                                      </button>
+                                    ))
+                                  )
+                                : queryResult.claims.map((claim) => (
                                     <button
-                                      key={`${pathIndex}-${step.claim_id}-${stepIndex}`}
+                                      key={claim.id}
                                       type="button"
                                       className="grid w-full gap-1 border p-3 text-left text-sm hover:bg-muted"
-                                      onClick={() => {
-                                        setSelectedEntity(null)
-                                        setSelectedClaimId(step.claim_id)
-                                      }}
+                                      onClick={() => selectClaim(claim.id)}
                                     >
                                       <span className="font-medium">
                                         {graphEntities.get(
-                                          step.source_entity_id
+                                          claim.subject_entity_id
                                         )?.canonical_name ??
-                                          step.source_entity_id}
+                                          claim.subject_entity_id}
                                         {" → "}
-                                        {step.predicate}
+                                        {claim.predicate}
                                         {" → "}
-                                        {graphEntities.get(
-                                          step.target_entity_id
-                                        )?.canonical_name ??
-                                          step.target_entity_id}
+                                        {claim.object_entity_id
+                                          ? (graphEntities.get(
+                                              claim.object_entity_id
+                                            )?.canonical_name ??
+                                            claim.object_entity_id)
+                                          : String(claim.object_value ?? "—")}
                                       </span>
                                       <span className="text-xs text-muted-foreground">
-                                        {t(
-                                          "方向：{direction} · 支持数：{value}",
-                                          {
-                                            direction: t(
-                                              step.semantic_direction ===
-                                                "forward"
-                                                ? "正向"
-                                                : "反向"
-                                            ),
-                                            value: step.support_count,
-                                          }
-                                        )}
+                                        {t("支持数：{value}", {
+                                          value: claim.support_count,
+                                        })}
                                       </span>
-                                      {!step.evidence_ids.length ? (
-                                        <span className="text-xs text-destructive">
-                                          {t("此关系没有证据，不能视为已证实")}
-                                        </span>
-                                      ) : null}
                                     </button>
-                                  ))
-                                )
-                              : queryResult.claims.map((claim) => (
-                                  <button
-                                    key={claim.id}
-                                    type="button"
-                                    className="grid w-full gap-1 border p-3 text-left text-sm hover:bg-muted"
-                                    onClick={() => {
-                                      setSelectedEntity(null)
-                                      setSelectedClaimId(claim.id)
-                                    }}
-                                  >
-                                    <span className="font-medium">
-                                      {graphEntities.get(
-                                        claim.subject_entity_id
-                                      )?.canonical_name ??
-                                        claim.subject_entity_id}
-                                      {" → "}
-                                      {claim.predicate}
-                                      {" → "}
-                                      {claim.object_entity_id
-                                        ? (graphEntities.get(
-                                            claim.object_entity_id
-                                          )?.canonical_name ??
-                                          claim.object_entity_id)
-                                        : String(claim.object_value ?? "—")}
-                                    </span>
-                                    <span className="text-xs text-muted-foreground">
-                                      {t("支持数：{value}", {
-                                        value: claim.support_count,
-                                      })}
-                                    </span>
-                                  </button>
-                                ))}
+                                  ))}
+                            </div>
                           </div>
-                        </div>
+                        ) : null}
                       </section>
 
-                      <aside className="min-w-0 p-4">
-                        {isEntityLoading ? (
-                          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <LoaderCircleIcon className="size-4 animate-spin" />
-                            {t("正在加载实体详情")}
-                          </p>
-                        ) : selectedClaim ? (
-                          <div>
-                            <h2 className="font-semibold">
-                              {selectedClaim.predicate}
-                            </h2>
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              {t("质量 {quality} · 支持数 {value}", {
-                                quality: selectedClaim.quality_score,
-                                value: selectedClaim.support_count,
-                              })}
+                      {showGraphDetail ? (
+                        <aside className="relative min-w-0 border-t p-4 lg:border-t-0 lg:border-l">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute top-2 right-2"
+                            aria-label={t("关闭")}
+                            onClick={clearGraphSelection}
+                          >
+                            <XIcon />
+                          </Button>
+                          {isEntityLoading ? (
+                            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <LoaderCircleIcon className="size-4 animate-spin" />
+                              {t("正在加载实体详情")}
                             </p>
-                            <h3 className="mt-5 text-sm font-semibold">
-                              {t("逐边证据")}
-                            </h3>
-                            {selectedEvidence.length ? (
-                              <div className="mt-2 space-y-3">
-                                {selectedEvidence.map((evidence) => (
-                                  <blockquote
-                                    key={evidence.id}
-                                    className="border-l-2 pl-3 text-sm"
-                                  >
-                                    <p className="whitespace-pre-wrap">
-                                      {evidence.quote}
-                                    </p>
-                                    <footer className="mt-2 text-xs text-muted-foreground">
-                                      {t(
-                                        "{document} · 分段 {chunk} · 字符 {start}-{end}",
-                                        {
-                                          document: evidence.document_filename,
-                                          chunk: evidence.chunk_id,
-                                          start: evidence.start_offset,
-                                          end: evidence.end_offset,
-                                        }
-                                      )}
-                                    </footer>
-                                  </blockquote>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="mt-2 text-sm text-destructive">
-                                {t("此关系没有证据，不能视为已证实")}
-                              </p>
-                            )}
-                          </div>
-                        ) : selectedEntity ? (
-                          <div>
-                            <h2 className="font-semibold">
-                              {selectedEntity.canonical_name}
-                            </h2>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {selectedEntity.entity_type}
-                            </p>
-                            {selectedEntity.aliases.length ? (
-                              <p className="mt-3 text-sm">
-                                {t("别名：{value}", {
-                                  value: selectedEntity.aliases.join(", "),
+                          ) : selectedClaim ? (
+                            <div className="pr-8">
+                              <h2 className="font-semibold">
+                                {selectedClaim.predicate}
+                              </h2>
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                {t("质量 {quality} · 支持数 {value}", {
+                                  quality: selectedClaim.quality_score,
+                                  value: selectedClaim.support_count,
                                 })}
                               </p>
-                            ) : null}
-                            <h3 className="mt-5 text-sm font-semibold">
-                              {t("实体知识页")}
-                            </h3>
-                            <p className="mt-2 text-sm whitespace-pre-wrap text-muted-foreground">
-                              {selectedEntity.profile_markdown ||
-                                t("暂无实体知识页")}
+                              <h3 className="mt-5 text-sm font-semibold">
+                                {t("逐边证据")}
+                              </h3>
+                              {selectedEvidence.length ? (
+                                <div className="mt-2 space-y-3">
+                                  {selectedEvidence.map((evidence) => (
+                                    <blockquote
+                                      key={evidence.id}
+                                      className="border-l-2 pl-3 text-sm"
+                                    >
+                                      <p className="whitespace-pre-wrap">
+                                        {evidence.quote}
+                                      </p>
+                                      <footer className="mt-2 text-xs text-muted-foreground">
+                                        {t(
+                                          "{document} · 分段 {chunk} · 字符 {start}-{end}",
+                                          {
+                                            document:
+                                              evidence.document_filename,
+                                            chunk: evidence.chunk_id,
+                                            start: evidence.start_offset,
+                                            end: evidence.end_offset,
+                                          }
+                                        )}
+                                      </footer>
+                                    </blockquote>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="mt-2 text-sm text-destructive">
+                                  {t("此关系没有证据，不能视为已证实")}
+                                </p>
+                              )}
+                            </div>
+                          ) : selectedEntity ? (
+                            <div className="pr-8">
+                              <h2 className="font-semibold">
+                                {selectedEntity.canonical_name}
+                              </h2>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                {selectedEntity.entity_type}
+                              </p>
+                              {selectedEntity.aliases.length ? (
+                                <p className="mt-3 text-sm">
+                                  {t("别名：{value}", {
+                                    value: selectedEntity.aliases.join(", "),
+                                  })}
+                                </p>
+                              ) : null}
+                              <h3 className="mt-5 text-sm font-semibold">
+                                {t("实体知识页")}
+                              </h3>
+                              <p className="mt-2 text-sm whitespace-pre-wrap text-muted-foreground">
+                                {selectedEntity.profile_markdown ||
+                                  t("暂无实体知识页")}
+                              </p>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              {t("选择实体或关系查看详情与证据")}
                             </p>
-                          </div>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            {t("选择实体或关系查看详情与证据")}
-                          </p>
-                        )}
-                      </aside>
+                          )}
+                        </aside>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="flex min-h-64 items-center justify-center p-6 text-center text-sm text-muted-foreground">
-                      {graphBusy
+                      {graphBusy || isOverviewLoading
                         ? t(
                             "正在自动抽取已有文件；完成后将在这里显示实体关系图"
                           )
@@ -1326,11 +1385,11 @@ export function KnowledgeGraph({
                 ) : null}
 
                 {canEdit && reviewCanResolveEntity ? (
-                  <div className="mt-5 grid gap-5 border-t pt-5 xl:grid-cols-2">
-                    <div>
-                      <h3 className="text-sm font-semibold">{t("合并实体")}</h3>
+                  <div className="mt-5 grid items-start gap-4 border-t pt-5 xl:grid-cols-2">
+                    <section className="rounded-lg border bg-muted/15 p-4">
+                      <h3 className="font-semibold">{t("合并实体")}</h3>
                       <form
-                        className="mt-3 flex gap-2"
+                        className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
                         onSubmit={handleMergeSearch}
                       >
                         <Input
@@ -1348,25 +1407,27 @@ export function KnowledgeGraph({
                           {t("搜索")}
                         </Button>
                       </form>
-                      <div className="mt-2 max-h-40 overflow-auto border">
-                        {mergeCandidates.map((entity) => (
-                          <label
-                            key={entity.id}
-                            className="flex items-center gap-2 border-b p-2 text-sm last:border-b-0"
-                          >
-                            <input
-                              type="radio"
-                              name="merge-target"
-                              checked={mergeTargetId === entity.id}
-                              onChange={() => setMergeTargetId(entity.id)}
-                            />
-                            {entity.canonical_name}
-                          </label>
-                        ))}
-                      </div>
+                      {mergeCandidates.length ? (
+                        <div className="mt-3 max-h-40 overflow-auto rounded-md border bg-background">
+                          {mergeCandidates.map((entity) => (
+                            <label
+                              key={entity.id}
+                              className="flex items-center gap-2 border-b p-3 text-sm last:border-b-0 hover:bg-muted"
+                            >
+                              <input
+                                type="radio"
+                                name="merge-target"
+                                checked={mergeTargetId === entity.id}
+                                onChange={() => setMergeTargetId(entity.id)}
+                              />
+                              {entity.canonical_name}
+                            </label>
+                          ))}
+                        </div>
+                      ) : null}
                       <Button
                         type="button"
-                        className="mt-3"
+                        className="mt-4 w-fit"
                         disabled={
                           busyAction !== null || graphBusy || !mergeTargetId
                         }
@@ -1376,11 +1437,11 @@ export function KnowledgeGraph({
                       >
                         {t("确认合并")}
                       </Button>
-                    </div>
+                    </section>
 
-                    <div>
-                      <h3 className="text-sm font-semibold">{t("拆分实体")}</h3>
-                      <div className="mt-3 grid gap-3">
+                    <section className="rounded-lg border bg-muted/15 p-4">
+                      <h3 className="font-semibold">{t("拆分实体")}</h3>
+                      <div className="mt-4 grid gap-4">
                         <label className="grid gap-1 text-sm">
                           {t("新实体名称")}
                           <Input
@@ -1447,6 +1508,7 @@ export function KnowledgeGraph({
                         )}
                         <Button
                           type="button"
+                          className="w-fit"
                           disabled={
                             busyAction !== null ||
                             graphBusy ||
@@ -1461,7 +1523,7 @@ export function KnowledgeGraph({
                           {t("确认拆分")}
                         </Button>
                       </div>
-                    </div>
+                    </section>
                   </div>
                 ) : null}
               </div>
@@ -1488,24 +1550,11 @@ export function KnowledgeGraph({
                 />
                 {t("启用知识关联")}
               </label>
-              <label className="grid gap-1 text-sm font-medium">
-                {t("图谱抽取模型")}
-                <FilterDropdown
-                  ariaLabel={t("图谱抽取模型")}
-                  value={modelId}
-                  options={llmModels.map((model) => ({
-                    value: model.id,
-                    label: modelLabel(model),
-                  }))}
-                  disabled={!canEdit || busyAction !== null}
-                  onChange={setModelId}
-                />
-              </label>
               {canEdit ? (
                 <Button
                   type="button"
                   className="w-fit"
-                  disabled={busyAction !== null || (formEnabled && !modelId)}
+                  disabled={busyAction !== null}
                   onClick={() => void handleSettingsSave()}
                 >
                   {busyAction === "settings" ? (

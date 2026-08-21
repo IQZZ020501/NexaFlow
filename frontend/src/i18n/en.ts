@@ -1837,14 +1837,8 @@ export const en = {
   关闭知识关联不会删除已有数据:
     "Disabling the graph does not delete existing data.",
   知识关联尚未启用: "Knowledge graph is not enabled",
-  "选择抽取模型并启用后，才能构建和探索实体关系":
-    "Choose an extraction model and enable the graph before building relationships.",
-  "选择抽取模型并启用；已有文件会自动构建，后续上传文件会在索引完成后自动抽取":
-    "Choose an extraction model and enable the graph. Existing files are built automatically, and future uploads are extracted after indexing.",
   "启用后，上传文件会在索引完成后自动抽取实体和关系；首次启用会自动处理已有文件":
     "Once enabled, uploads automatically extract entities and relations after indexing; the first enable also processes existing files.",
-  图谱抽取模型: "Graph extraction model",
-  请选择图谱抽取模型: "Select a graph extraction model",
   尚无活动修订: "No active revision",
   "正在自动抽取已有文件；完成后将在这里显示实体关系图":
     "Existing files are being extracted automatically. The entity graph will appear here when complete.",
@@ -1870,6 +1864,7 @@ export const en = {
   留空时查询邻域: "Leave empty to query the neighborhood",
   查找路径: "Find path",
   查询邻域: "Query neighborhood",
+  全部图谱: "Full graph",
   实体匹配存在歧义: "Entity matching is ambiguous",
   请从候选实体中确认后重新查询:
     "Confirm a candidate entity and run the query again.",

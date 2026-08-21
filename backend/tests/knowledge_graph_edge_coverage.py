@@ -133,16 +133,11 @@ async def test_graph_application_edge_paths() -> None:
     with patch.object(
         knowledge_graph,
         "get_knowledge_model",
-        AsyncMock(
-            side_effect=[
-                SimpleNamespace(id="extraction-model"),
-                None,
-            ]
-        ),
+        AsyncMock(return_value=None),
     ):
         await _expect_http(
             knowledge_graph._validate_graph_build_requirements(
-                SimpleNamespace(), knowledge_base, "extraction-model"
+                SimpleNamespace(), knowledge_base
             ),
             422,
         )
@@ -150,12 +145,7 @@ async def test_graph_application_edge_paths() -> None:
         patch.object(
             knowledge_graph,
             "get_knowledge_model",
-            AsyncMock(
-                side_effect=[
-                    SimpleNamespace(id="extraction-model"),
-                    SimpleNamespace(id="embedding-model"),
-                ]
-            ),
+            AsyncMock(return_value=SimpleNamespace(id="embedding-model")),
         ),
         patch.object(
             knowledge_repository,
@@ -165,7 +155,7 @@ async def test_graph_application_edge_paths() -> None:
     ):
         await _expect_http(
             knowledge_graph._validate_graph_build_requirements(
-                SimpleNamespace(), knowledge_base, "extraction-model"
+                SimpleNamespace(), knowledge_base
             ),
             409,
         )
@@ -194,11 +184,6 @@ async def test_graph_application_edge_paths() -> None:
             knowledge_repository,
             "lock_knowledge_base",
             AsyncMock(return_value=locked),
-        ),
-        patch.object(
-            knowledge_graph,
-            "get_knowledge_model",
-            AsyncMock(return_value=None),
         ),
         patch.object(knowledge_repository, "save_knowledge_base", AsyncMock()),
         patch.object(
@@ -231,7 +216,7 @@ async def test_graph_application_edge_paths() -> None:
         patch.object(
             knowledge_graph,
             "_validate_graph_build_requirements",
-            AsyncMock(return_value=("extraction-model", "embedding-model")),
+            AsyncMock(return_value="embedding-model"),
         ),
         patch.object(knowledge_repository, "save_knowledge_base", AsyncMock()),
         patch.object(
@@ -257,6 +242,7 @@ async def test_graph_application_edge_paths() -> None:
             initial_settings,
         )
     assert settings_response.enabled is True
+    assert locked.graph_extraction_model_id is None
     enqueue_initial.assert_awaited_once_with(
         db,
         locked,
@@ -326,7 +312,6 @@ async def test_graph_application_edge_paths() -> None:
         id="active-graph-kb",
         workspace_id=knowledge_base.workspace_id,
         graph_enabled=True,
-        graph_extraction_model_id="extraction-model",
         created_by_user_id=actor.id,
     )
     with (
@@ -387,6 +372,50 @@ async def test_graph_application_edge_paths() -> None:
             offset=0,
         )
     assert entities.items[0].aliases == [alias.alias]
+    await _expect_http(
+        knowledge_graph.get_graph_overview(SimpleNamespace(), knowledge_base),
+        409,
+    )
+    overview_base = KnowledgeBase(
+        **{
+            **knowledge_base.__dict__,
+            "active_graph_revision_id": "application-edge-revision",
+        }
+    )
+    overview_claim = SimpleNamespace(
+        id="application-edge-claim",
+        subject_entity_id=entity.id,
+        predicate="references",
+        object_entity_id=entity.id,
+        object_value_json=None,
+        properties_json={},
+        quality_score=1.0,
+        support_count=1,
+    )
+    with (
+        patch.object(
+            graph_repository,
+            "list_active_entity_page",
+            AsyncMock(return_value=([entity], 1)),
+        ),
+        patch.object(
+            graph_repository,
+            "list_active_aliases_for_entity_ids",
+            AsyncMock(return_value=[alias]),
+        ),
+        patch.object(
+            graph_repository,
+            "list_active_claims",
+            AsyncMock(return_value=[overview_claim]),
+        ),
+    ):
+        overview = await knowledge_graph.get_graph_overview(
+            SimpleNamespace(), overview_base
+        )
+    assert overview.operation == "overview"
+    assert overview.nodes[0].aliases == [alias.alias]
+    assert overview.claims[0].id == overview_claim.id
+    assert overview.evidence == []
     with patch.object(
         graph_repository,
         "get_active_entity",

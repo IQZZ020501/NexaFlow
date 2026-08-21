@@ -121,10 +121,7 @@ export type KnowledgeTaskBulkDeleteResult = {
 }
 
 export type KnowledgeRetrievalSource =
-  | "vector"
-  | "keywords"
-  | "reference"
-  | "graph"
+  "vector" | "keywords" | "reference" | "graph"
 
 export type KnowledgeQueryHit = {
   chunk_id: string
@@ -970,7 +967,7 @@ export function updateKnowledgeGraphSettings(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  payload: { enabled: boolean; extraction_model_id: string | null }
+  payload: { enabled: boolean }
 ) {
   return request<KnowledgeGraphSettings>(
     knowledgeGraphPath(workspaceId, knowledgeBaseId, "/settings"),
@@ -1049,6 +1046,18 @@ export function listKnowledgeGraphEntities(
   const query = params.toString()
   return request<KnowledgeGraphEntityList>(
     `${knowledgeGraphPath(workspaceId, knowledgeBaseId, "/entities")}${query ? `?${query}` : ""}`,
+    { token, signal }
+  )
+}
+
+export function getKnowledgeGraphOverview(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  signal?: AbortSignal
+) {
+  return request<KnowledgeGraphQueryResult>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/overview"),
     { token, signal }
   )
 }

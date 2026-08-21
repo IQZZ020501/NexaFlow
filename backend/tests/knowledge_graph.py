@@ -8,11 +8,10 @@ from datetime import timedelta
 from io import BytesIO
 import json
 from types import SimpleNamespace
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import tests.support  # noqa: F401
 from fastapi import HTTPException, UploadFile
-from langchain_core.messages import AIMessageChunk
 from sqlalchemy import select, text
 
 from app.infrastructure.base import Base
@@ -3325,49 +3324,15 @@ async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
         "graph-resume-chunk-b": "制度 B 定义术语 B。",
     }
 
-    class ExtractionProvider:
-        def __init__(self, fail_chunk_id: str | None = None):
-            self.fail_chunk_id = fail_chunk_id
-            self.chunk_ids: list[str] = []
+    real_extract = knowledge_graph_build.extract_graph_batch
+    first_chunk_ids: list[str] = []
 
-        async def astream(self, messages, **_kwargs):
-            payload = json.loads(messages[1]["content"])
-            chunk_id = payload[0]["chunk_id"]
-            self.chunk_ids.append(chunk_id)
-            if chunk_id == self.fail_chunk_id:
-                raise RuntimeError("second chunk failed")
-            suffix = "A" if chunk_id.endswith("-a") else "B"
-            quote = contents[chunk_id]
-            yield AIMessageChunk(
-                content=json.dumps(
-                    {
-                        "entities": [
-                            {
-                                "temp_id": f"document-{suffix}",
-                                "entity_type": "Document",
-                                "canonical_name": f"制度 {suffix}",
-                            },
-                            {
-                                "temp_id": f"concept-{suffix}",
-                                "entity_type": "Concept",
-                                "canonical_name": f"术语 {suffix}",
-                            },
-                        ],
-                        "claims": [
-                            {
-                                "subject_temp_id": f"document-{suffix}",
-                                "predicate": "defines",
-                                "object_temp_id": f"concept-{suffix}",
-                                "evidence_chunk_id": chunk_id,
-                                "quote": quote,
-                                "start_offset": 0,
-                                "end_offset": len(quote),
-                            }
-                        ],
-                    },
-                    ensure_ascii=False,
-                )
-            )
+    def failing_extract(schema, chunks, lexicon=()):
+        chunk_id = chunks[0].chunk_id
+        first_chunk_ids.append(chunk_id)
+        if chunk_id == "graph-resume-chunk-b":
+            raise RuntimeError("second chunk failed")
+        return real_extract(schema, chunks, lexicon)
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_user_by_id(db, "graph-user")
@@ -3427,27 +3392,30 @@ async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
         )
         await db.commit()
 
-        first_provider = ExtractionProvider("graph-resume-chunk-b")
         with (
             patch.object(
                 knowledge_graph_build,
-                "get_knowledge_model",
-                AsyncMock(
-                    return_value=SimpleNamespace(
-                        id="graph-resume-model",
-                        model_name="graph-resume-model",
-                    )
-                ),
-            ),
-            patch.object(
-                knowledge_graph_build,
-                "build_chat_model",
-                return_value=first_provider,
+                "extract_graph_batch",
+                side_effect=failing_extract,
             ),
             patch.object(
                 knowledge_graph_build,
                 "stage_entity_profiles",
                 AsyncMock(),
+            ),
+            patch.object(
+                graph_repository,
+                "list_entity_identity_candidates",
+                AsyncMock(
+                    side_effect=AssertionError("entity resolution must use its batch cache")
+                ),
+            ),
+            patch.object(
+                graph_repository,
+                "list_human_alias_entity_ids",
+                AsyncMock(
+                    side_effect=AssertionError("alias resolution must use its batch cache")
+                ),
             ),
         ):
             try:
@@ -3463,7 +3431,7 @@ async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
                 assert str(exc) == "second chunk failed"
             else:
                 raise AssertionError("the second chunk must fail the first build")
-        assert first_provider.chunk_ids == [
+        assert first_chunk_ids == [
             "graph-resume-chunk-a",
             "graph-resume-chunk-b",
         ]
@@ -3501,7 +3469,11 @@ async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
         await knowledge_repository.save_knowledge_task(db, resumed_task)
         await db.commit()
 
-        resume_provider = ExtractionProvider()
+        resumed_chunk_ids: list[str] = []
+
+        def resumed_extract(schema, chunks, lexicon=()):
+            resumed_chunk_ids.append(chunks[0].chunk_id)
+            return real_extract(schema, chunks, lexicon)
 
         async def fake_embedding_model(*_args, **_kwargs):
             return SimpleNamespace(id="graph-resume-embedding")
@@ -3509,18 +3481,8 @@ async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
         with (
             patch.object(
                 knowledge_graph_build,
-                "get_knowledge_model",
-                AsyncMock(
-                    return_value=SimpleNamespace(
-                        id="graph-resume-model",
-                        model_name="graph-resume-model",
-                    )
-                ),
-            ),
-            patch.object(
-                knowledge_graph_build,
-                "build_chat_model",
-                return_value=resume_provider,
+                "extract_graph_batch",
+                side_effect=resumed_extract,
             ),
             patch.object(
                 knowledge_graph_build,
@@ -3536,6 +3498,20 @@ async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
                 knowledge_graph_build,
                 "upsert_graph_profile_vectors",
             ),
+            patch.object(
+                graph_repository,
+                "list_entity_identity_candidates",
+                AsyncMock(
+                    side_effect=AssertionError("entity resolution must use its batch cache")
+                ),
+            ),
+            patch.object(
+                graph_repository,
+                "list_human_alias_entity_ids",
+                AsyncMock(
+                    side_effect=AssertionError("alias resolution must use its batch cache")
+                ),
+            ),
         ):
             await knowledge_graph_build.run_graph_build_task(
                 db,
@@ -3545,7 +3521,7 @@ async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
                 tests.support.settings(),
                 asyncio.Event(),
             )
-        assert resume_provider.chunk_ids == ["graph-resume-chunk-b"]
+        assert resumed_chunk_ids == ["graph-resume-chunk-b"]
 
     async with get_session_factory()() as db:
         knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
@@ -3746,7 +3722,7 @@ async def test_structured_graph_build_publishes_evidence_and_profiles() -> None:
         assert publish_audit.details["status"] == "published"
 
 
-async def test_graph_build_stops_before_workspace_monthly_limit() -> None:
+async def test_graph_build_does_not_consume_workspace_model_budget() -> None:
     content = "制度 A 定义术语 A。"
     async with get_session_factory()() as db:
         _, actor, _ = await _graph_fixture(db)
@@ -3830,45 +3806,28 @@ async def test_graph_build_stops_before_workspace_monthly_limit() -> None:
         )
         await db.commit()
 
-        class CountingProvider:
-            calls = 0
+        async def fake_embedding_model(*_args, **_kwargs):
+            return SimpleNamespace(id="graph-budget-embedding")
 
-            async def astream(self, _messages, **_kwargs):
-                self.calls += 1
-                yield AIMessageChunk(content="{}")
-
-        provider = CountingProvider()
         with (
             patch.object(
                 knowledge_graph_build,
-                "get_knowledge_model",
-                AsyncMock(
-                    return_value=SimpleNamespace(
-                        id="graph-budget-model",
-                        model_name="graph-budget-model",
-                    )
-                ),
+                "resolve_embedding_model",
+                fake_embedding_model,
             ),
             patch.object(
                 knowledge_graph_build,
-                "build_chat_model",
-                return_value=provider,
+                "upsert_graph_profile_vectors",
             ),
         ):
-            try:
-                await knowledge_graph_build.run_graph_build_task(
-                    db,
-                    task,
-                    knowledge_base,
-                    actor,
-                    tests.support.settings(),
-                    asyncio.Event(),
-                )
-            except Exception as exc:
-                assert "monthly model token limit" in str(exc).lower()
-            else:
-                raise AssertionError("monthly graph model budget must stop the build")
-        assert provider.calls == 0
+            await knowledge_graph_build.run_graph_build_task(
+                db,
+                task,
+                knowledge_base,
+                actor,
+                tests.support.settings(),
+                asyncio.Event(),
+            )
         await governance_repository.save(
             db,
             WorkspaceGovernance(
@@ -3885,13 +3844,13 @@ async def test_graph_build_stops_before_workspace_monthly_limit() -> None:
             "graph-budget-limit-kb",
         )
         assert knowledge_base is not None
-        revision = await graph_repository.get_latest_revision(db, knowledge_base)
+        revision = await graph_repository.get_active_revision(db, knowledge_base)
         assert revision is not None
-        assert revision.status == "failed"
-        assert revision.model_usage_json.get("reserved_tokens", 0) == 0
+        assert revision.status == "published"
+        assert revision.model_usage_json == {}
 
 
-async def test_unreported_graph_usage_is_charged_once_and_persisted() -> None:
+async def test_rule_graph_build_persists_exact_evidence_without_model_usage() -> None:
     content = "制度 A 定义术语 A。"
     quote = content[:-1]
     async with get_session_factory()() as db:
@@ -3948,73 +3907,12 @@ async def test_unreported_graph_usage_is_charged_once_and_persisted() -> None:
         )
         await db.commit()
 
-        class UnreportedProvider:
-            calls = 0
-
-            async def astream(self, messages, **_kwargs):
-                self.calls += 1
-                yield AIMessageChunk(
-                    content=json.dumps(
-                        {
-                            "entities": [
-                                {
-                                    "temp_id": "document-a",
-                                    "entity_type": "Document",
-                                    "canonical_name": "制度 A",
-                                },
-                                {
-                                    "temp_id": "concept-a",
-                                    "entity_type": "Concept",
-                                    "canonical_name": "术语 A",
-                                },
-                            ],
-                            "claims": [
-                                {
-                                    "subject_temp_id": "document-a",
-                                    "predicate": "defines",
-                                    "object_temp_id": "concept-a",
-                                    "evidence_chunk_id": "graph-budget-usage-chunk",
-                                    "quote": quote,
-                                    "start_offset": 0,
-                                    "end_offset": len(quote),
-                                }
-                            ],
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-
-            async def ainvoke(self, _messages, **_kwargs):
-                self.calls += 1
-                return SimpleNamespace(
-                    content=json.dumps(
-                        {"profile_markdown": "# Evidence profile", "claim_ids": []}
-                    )
-                )
-
-        provider = UnreportedProvider()
-        build_chat_model_mock = MagicMock(return_value=provider)
         runtime_settings = tests.support.settings()
 
         async def fake_embedding_model(*_args, **_kwargs):
             return SimpleNamespace(id="graph-budget-embedding")
 
         with (
-            patch.object(
-                knowledge_graph_build,
-                "get_knowledge_model",
-                AsyncMock(
-                    return_value=SimpleNamespace(
-                        id="graph-budget-model",
-                        model_name="graph-budget-model",
-                    )
-                ),
-            ),
-            patch.object(
-                knowledge_graph_build,
-                "build_chat_model",
-                new=build_chat_model_mock,
-            ),
             patch.object(
                 knowledge_graph_build,
                 "resolve_embedding_model",
@@ -4034,13 +3932,6 @@ async def test_unreported_graph_usage_is_charged_once_and_persisted() -> None:
                 asyncio.Event(),
             )
 
-        assert provider.calls == 3
-        build_chat_model_mock.assert_called_once_with(
-            runtime_settings,
-            ANY,
-            timeout=90,
-        )
-
     async with get_session_factory()() as db:
         knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
             db,
@@ -4049,12 +3940,17 @@ async def test_unreported_graph_usage_is_charged_once_and_persisted() -> None:
         assert knowledge_base is not None
         revision = await graph_repository.get_active_revision(db, knowledge_base)
         assert revision is not None
-        usage = revision.model_usage_json
-        assert usage["model_calls"] == 3
-        assert usage["unreported_model_calls"] == 3
-        assert usage["estimated_tokens"] > 0
-        assert usage["charged_tokens"] == usage["estimated_tokens"]
-        assert usage["reserved_tokens"] == 0
+        assert revision.model_usage_json == {}
+        evidence = await db.scalar(
+            select(KnowledgeGraphClaimEvidence).where(
+                KnowledgeGraphClaimEvidence.knowledge_base_id == knowledge_base.id
+            )
+        )
+        assert evidence is not None
+        assert evidence.quote == quote
+        assert (evidence.start_offset, evidence.end_offset) == (0, len(quote))
+        assert evidence.extractor_type == "rules"
+        assert evidence.model_name == ""
 
 
 async def test_index_success_queues_graph_sync_when_enabled() -> None:
@@ -4668,8 +4564,8 @@ async def main() -> None:
     await test_knowledge_tasks_bulk_delete_is_atomic()
     await test_graph_retry_can_resume_from_the_last_committed_chunk()
     await test_structured_graph_build_publishes_evidence_and_profiles()
-    await test_graph_build_stops_before_workspace_monthly_limit()
-    await test_unreported_graph_usage_is_charged_once_and_persisted()
+    await test_graph_build_does_not_consume_workspace_model_budget()
+    await test_rule_graph_build_persists_exact_evidence_without_model_usage()
     await test_index_success_queues_graph_sync_when_enabled()
     await test_failed_profile_write_keeps_revision_unpublished_for_repair()
     await test_graph_import_persists_immutable_records_and_queues_sync()

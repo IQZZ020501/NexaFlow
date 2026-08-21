@@ -173,7 +173,7 @@ class KnowledgeGraphClaimEvidence:
     quote: str = ""
     start_offset: int = 0
     end_offset: int = 0
-    extractor_type: str = "llm"
+    extractor_type: str = "rules"
     model_name: str = ""
     prompt_hash: str = ""
     schema_hash: str = ""

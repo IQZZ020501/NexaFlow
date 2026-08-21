@@ -15,13 +15,6 @@ from types import SimpleNamespace
 import tests.support  # noqa: F401  (sets required env before app imports)
 
 from fastapi import HTTPException
-from langchain_core.messages import AIMessageChunk
-
-from app.application.knowledge_graph_build import (
-    BudgetedGraphChatProvider,
-    charged_graph_tokens,
-    estimate_graph_call_tokens,
-)
 from app.capabilities.llm.registry import (
     is_masked_secret,
     normalize_model_type,
@@ -66,8 +59,12 @@ from app.shareddomain.knowledge_graph.schema import (
     normalize_graph_name,
 )
 from app.shareddomain.knowledge_graph.extraction import (
+    EntityLexiconEntry,
+    ExtractedEntity,
     ExtractionChunk,
     GraphExtractionBatch,
+    build_entity_lexicon,
+    deduplicate_extracted_entities,
     extract_graph_batch,
     validate_extraction_batch,
 )
@@ -150,97 +147,6 @@ def test_default_graph_schema_is_stable() -> None:
     assert graph_schema_hash(schema) == graph_schema_hash(schema)
 
 
-def test_graph_token_charge_uses_reported_or_conservative_estimate() -> None:
-    assert charged_graph_tokens({"total_tokens": 120}, 500) == (120, False)
-    assert charged_graph_tokens({"total_tokens": 0}, 500) == (500, True)
-    assert estimate_graph_call_tokens(
-        [{"role": "user", "content": "制度" * 1000}]
-    ) >= 1000
-
-
-def test_graph_provider_rejection_releases_reserved_tokens() -> None:
-    from unittest.mock import AsyncMock, patch
-
-    from app.application import knowledge_graph_build
-    from app.ports.llm import ModelProviderStatusError
-
-    class RejectingProvider:
-        async def ainvoke(self, _messages, **_kwargs):
-            raise ModelProviderStatusError(402, "Insufficient Balance")
-
-    finalize = AsyncMock()
-    provider = BudgetedGraphChatProvider(
-        SimpleNamespace(),
-        RejectingProvider(),
-        SimpleNamespace(),
-        SimpleNamespace(model_usage_json={}),
-        SimpleNamespace(),
-    )
-    with (
-        patch.object(
-            knowledge_graph_build,
-            "reserve_graph_model_tokens",
-            new=AsyncMock(),
-        ),
-        patch.object(
-            knowledge_graph_build,
-            "finalize_graph_model_tokens",
-            new=finalize,
-        ),
-    ):
-        try:
-            asyncio.run(provider.ainvoke([{"role": "user", "content": "test"}]))
-        except ModelProviderStatusError as exc:
-            assert exc.status_code == 402
-        else:
-            raise AssertionError("provider rejection must escape immediately")
-    assert finalize.await_args.kwargs["charge_unreported"] is False
-
-
-def test_graph_streaming_provider_rejection_releases_reserved_tokens() -> None:
-    from unittest.mock import AsyncMock, patch
-
-    from app.application import knowledge_graph_build
-    from app.ports.llm import ModelProviderStatusError
-
-    class RejectingProvider:
-        async def astream(self, _messages, **_kwargs):
-            raise ModelProviderStatusError(402, "Insufficient Balance")
-            yield AIMessageChunk(content="")
-
-    async def consume(provider):
-        async for _ in provider.astream([{"role": "user", "content": "test"}]):
-            pass
-
-    finalize = AsyncMock()
-    provider = BudgetedGraphChatProvider(
-        SimpleNamespace(),
-        RejectingProvider(),
-        SimpleNamespace(),
-        SimpleNamespace(model_usage_json={}),
-        SimpleNamespace(),
-    )
-    with (
-        patch.object(
-            knowledge_graph_build,
-            "reserve_graph_model_tokens",
-            new=AsyncMock(),
-        ),
-        patch.object(
-            knowledge_graph_build,
-            "finalize_graph_model_tokens",
-            new=finalize,
-        ),
-    ):
-        try:
-            asyncio.run(consume(provider))
-        except ModelProviderStatusError as exc:
-            assert exc.status_code == 402
-        else:
-            raise AssertionError("streaming provider rejection must escape immediately")
-    assert finalize.await_args.kwargs["charge_unreported"] is False
-
-
 def test_normalized_document_artifact_is_content_addressed() -> None:
     artifact = normalized_document_artifact(
         workspace_id="ws-1",
@@ -287,14 +193,20 @@ def test_graph_extraction_requires_exact_chunk_evidence() -> None:
                     "object_temp_id": "p",
                     "object_value": None,
                     "evidence_chunk_id": "chunk-1",
-                    "quote": quote,
-                    "start_offset": content.index(quote),
-                    "end_offset": content.index(quote) + len(quote),
+                    "evidence_span": [
+                        content.index(quote),
+                        content.index(quote) + len(quote),
+                    ],
                 }
             ],
         }
     )
-    assert validate_extraction_batch(valid, chunks).claims[0].predicate == "uses_phone"
+    claim = validate_extraction_batch(valid, chunks).claims[0]
+    assert claim.predicate == "uses_phone"
+    assert content[claim.start_offset : claim.end_offset] == quote
+    claim_schema = GraphExtractionBatch.model_json_schema()["$defs"]["ExtractedClaim"]
+    assert "evidence_span" in claim_schema["properties"]
+    assert "quote" not in claim_schema["properties"]
 
     account_schema = GraphSchemaDefinition.model_validate(
         {
@@ -315,12 +227,39 @@ def test_graph_extraction_requires_exact_chunk_evidence() -> None:
     assert normalized.claims[0].subject_temp_id == "a"
     assert normalized.claims[0].object_temp_id == "p"
 
-    misaligned = valid.model_copy(deep=True)
-    misaligned.claims[0].start_offset = 1
-    misaligned.claims[0].end_offset = 2
-    repaired = validate_extraction_batch(misaligned, chunks)
-    assert repaired.claims[0].start_offset == content.index(quote)
-    assert repaired.claims[0].end_offset == content.index(quote) + len(quote)
+    inverse_claim = GraphExtractionBatch.model_validate(
+        {
+            "entities": [
+                {
+                    "temp_id": "policy",
+                    "entity_type": "Document",
+                    "canonical_name": "制度 A",
+                },
+                {
+                    "temp_id": "term",
+                    "entity_type": "Concept",
+                    "canonical_name": "术语 A",
+                },
+            ],
+            "claims": [
+                {
+                    "subject_temp_id": "term",
+                    "predicate": "defined_by",
+                    "object_temp_id": "policy",
+                    "evidence_chunk_id": "chunk-2",
+                    "evidence_span": [0, 9],
+                }
+            ],
+        }
+    )
+    normalized_inverse = validate_extraction_batch(
+        inverse_claim,
+        [ExtractionChunk("chunk-2", "doc-2", "术语 A 由制度 A 定义。")],
+        default_graph_schema(),
+    ).claims[0]
+    assert normalized_inverse.predicate == "defines"
+    assert normalized_inverse.subject_temp_id == "policy"
+    assert normalized_inverse.object_temp_id == "term"
 
     implicit_regulation = GraphExtractionBatch.model_validate(
         {
@@ -342,9 +281,7 @@ def test_graph_extraction_requires_exact_chunk_evidence() -> None:
                     "predicate": "applies_to",
                     "object_temp_id": "role",
                     "evidence_chunk_id": "chunk-2",
-                    "quote": "本规定适用于学生。",
-                    "start_offset": 0,
-                    "end_offset": 9,
+                    "evidence_span": [0, 9],
                 }
             ],
         }
@@ -356,372 +293,98 @@ def test_graph_extraction_requires_exact_chunk_evidence() -> None:
     ).claims[0].predicate == "applies_to"
 
     invalid = valid.model_copy(deep=True)
-    invalid.claims[0].quote = "账户 A 登录设备 D"
+    invalid.claims[0].evidence_span = (0, len(content) + 1)
     try:
         validate_extraction_batch(invalid, chunks)
     except ValueError as exc:
-        assert "quote" in str(exc).lower()
+        assert "span" in str(exc).lower()
     else:
         raise AssertionError("unsupported graph evidence must fail")
 
 
-def test_graph_extractor_parses_bounded_json_only_response() -> None:
-    content = "账户 A 使用手机号 P。"
-    quote = "账户 A 使用手机号 P"
-    payload = {
-        "entities": [
-            {
-                "temp_id": "a",
-                "entity_type": "Account",
-                "canonical_name": "账户 A",
-            },
-            {
-                "temp_id": "p",
-                "entity_type": "Phone",
-                "canonical_name": "手机号 P",
-            },
-        ],
-        "claims": [
-            {
-                "subject_temp_id": "a",
-                "predicate": "uses_phone",
-                "object_temp_id": "p",
-                "evidence_chunk_id": "chunk-1",
-                "quote": quote,
-                "start_offset": 0,
-                "end_offset": len(quote),
-            }
-        ],
+def test_graph_entity_batch_normalization_deduplicates_exact_identity() -> None:
+    entities = [
+        ExtractedEntity(
+            temp_id="a",
+            entity_type="Organization",
+            canonical_name=" 人力资源部 ",
+            aliases=["HR", "hr"],
+            properties={"source": "a"},
+        ),
+        ExtractedEntity(
+            temp_id="b",
+            entity_type="Organization",
+            canonical_name="人力资源部",
+            aliases=["Human Resources"],
+            properties={"owner": "alice"},
+        ),
+    ]
+    deduplicated, representative_ids = deduplicate_extracted_entities(entities)
+    assert len(deduplicated) == 1
+    assert representative_ids == {"a": "a", "b": "a"}
+    assert deduplicated[0].aliases == ["HR", "Human Resources"]
+    assert deduplicated[0].properties == {"source": "a", "owner": "alice"}
+
+
+def test_graph_rule_extractor_builds_typed_claims_with_exact_evidence() -> None:
+    content = "制度 A 定义术语 A。人力资源部负责员工入职流程。"
+    result = extract_graph_batch(
+        default_graph_schema(),
+        [ExtractionChunk("chunk-1", "doc-1", content)],
+    )
+    entities = {item.canonical_name: item for item in result.batch.entities}
+    assert {item.predicate for item in result.batch.claims} == {
+        "defines",
+        "responsible_for",
     }
-
-    class Provider:
-        prompt = None
-
-        async def astream(self, messages, **kwargs):
-            self.prompt = messages
-            assert kwargs == {}
-            yield AIMessageChunk(
-                content=f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```",
-                usage_metadata={
-                    "input_tokens": 12,
-                    "output_tokens": 8,
-                    "total_tokens": 20,
-                },
-            )
-
-    provider = Provider()
-    schema = GraphSchemaDefinition.model_validate(
-        {
-            "entity_types": [
-                {"name": "Account"},
-                {"name": "Phone"},
-            ],
-            "relations": [
-                {
-                    "name": "uses_phone",
-                    "source_types": ["Account"],
-                    "target_types": ["Phone"],
-                }
-            ],
-        }
-    )
-    result = asyncio.run(
-        extract_graph_batch(
-            provider,
-            schema,
-            [
-                ExtractionChunk(f"chunk-{index}", "doc-1", content)
-                for index in range(1, 6)
-            ],
-        )
-    )
-    assert result.batch.claims[0].predicate == "uses_phone"
+    assert entities["制度 A"].entity_type == "Regulation"
+    assert entities["术语 A"].entity_type == "Concept"
+    assert entities["人力资源部"].entity_type == "Department"
+    assert entities["员工入职流程"].entity_type == "Process"
+    for claim in result.batch.claims:
+        evidence = content[claim.start_offset : claim.end_offset]
+        assert evidence in {"制度 A 定义术语 A", "人力资源部负责员工入职流程"}
     assert len(result.prompt_hash) == 64
-    assert result.model_usage["total_tokens"] == 20
-    assert provider.prompt is not None
-    assert "Required output JSON Schema" in provider.prompt[0]["content"]
-    assert "exactly one non-null object" in provider.prompt[0]["content"]
-    for field_name in (
-        "temp_id",
-        "entity_type",
-        "canonical_name",
-        "subject_temp_id",
-        "evidence_chunk_id",
-    ):
-        assert f'"{field_name}"' in provider.prompt[0]["content"]
-    assert "chunk-5" not in provider.prompt[1]["content"]
-    assert len(json.loads(provider.prompt[1]["content"])) == 1
 
 
-def test_graph_extractor_allows_active_stream_past_total_timeout() -> None:
-    from unittest.mock import patch
-
-    from app.shareddomain.knowledge_graph import extraction
-
-    payload = json.dumps({"entities": [], "claims": []})
-    split_at = len(payload) // 3
-    parts = [
-        payload[:split_at],
-        payload[split_at : split_at * 2],
-        payload[split_at * 2 :],
-    ]
-
-    class Provider:
-        chunks = 0
-        prompt = None
-
-        async def astream(self, messages, **kwargs):
-            assert kwargs == {}
-            self.prompt = messages
-            for chunk in ["", *parts]:
-                await asyncio.sleep(0.075)
-                self.chunks += 1
-                yield AIMessageChunk(
-                    content=chunk,
-                    additional_kwargs=(
-                        {"reasoning_content": "still working"} if not chunk else {}
-                    ),
-                )
-
-    provider = Provider()
-    with patch.object(extraction, "GRAPH_EXTRACTION_TIMEOUT_SECONDS", 0.2):
-        result = asyncio.run(
-            extract_graph_batch(
-                provider,
-                default_graph_schema(),
-                [ExtractionChunk("chunk-1", "doc-1", "制度 A。")],
-            )
-        )
-    assert provider.chunks == 4
-    assert provider.prompt is not None
-    assert '"all_relations_allow_all_entity_types":true' in provider.prompt[0][
-        "content"
-    ]
-    assert result.batch == GraphExtractionBatch()
-
-
-def test_graph_extractor_uses_latest_stream_usage_snapshot() -> None:
-    content = "制度 A 定义术语 A。"
-
-    class Provider:
-        async def astream(self, _messages, **_kwargs):
-            payload = '{"entities": [], "claims": []}'
-            for part, total in zip(
-                (payload[:8], payload[8:16], payload[16:]),
-                (8, 16, 24),
-                strict=True,
-            ):
-                yield AIMessageChunk(
-                    content=part,
-                    usage_metadata={
-                        "input_tokens": 12,
-                        "output_tokens": total - 12,
-                        "total_tokens": total,
-                    },
-                )
-
-    result = asyncio.run(
-        extract_graph_batch(
-            Provider(),
-            default_graph_schema(),
-            [ExtractionChunk("chunk-1", "doc-1", content)],
-        )
-    )
-    assert result.model_usage["input_tokens"] == 12
-    assert result.model_usage["output_tokens"] == 12
-    assert result.model_usage["total_tokens"] == 24
-
-
-def test_budgeted_graph_stream_uses_latest_usage_snapshot() -> None:
-    from unittest.mock import AsyncMock, patch
-
-    from app.application import knowledge_graph_build
-
-    class Provider:
-        async def astream(self, _messages, **_kwargs):
-            for total in (8, 16, 24):
-                yield AIMessageChunk(
-                    content="{}",
-                    usage_metadata={
-                        "input_tokens": 12,
-                        "output_tokens": total - 12,
-                        "total_tokens": total,
-                    },
-                )
-
-    finalize = AsyncMock()
-    provider = BudgetedGraphChatProvider(
-        SimpleNamespace(),
-        Provider(),
-        SimpleNamespace(),
-        SimpleNamespace(model_usage_json={}),
-        SimpleNamespace(),
-    )
-
-    async def consume() -> None:
-        async for _ in provider.astream([{"role": "user", "content": "test"}]):
-            pass
-
-    with (
-        patch.object(knowledge_graph_build, "reserve_graph_model_tokens", new=AsyncMock()),
-        patch.object(knowledge_graph_build, "finalize_graph_model_tokens", new=finalize),
-    ):
-        asyncio.run(consume())
-    assert finalize.await_args.kwargs["usage"]["total_tokens"] == 24
-
-
-def test_graph_extractor_times_out_an_idle_stream() -> None:
-    from unittest.mock import patch
-
-    from app.ports.llm import ModelProviderTimeoutError
-    from app.shareddomain.knowledge_graph import extraction
-
-    class Provider:
-        async def astream(self, _messages, **_kwargs):
-            yield AIMessageChunk(content='{"entities": [], "claims": []}')
-            await asyncio.Event().wait()
-            yield AIMessageChunk(content="")
-
-    with patch.object(extraction, "GRAPH_EXTRACTION_TIMEOUT_SECONDS", 0.02):
-        try:
-            asyncio.run(
-                extract_graph_batch(
-                    Provider(),
-                    default_graph_schema(),
-                    [ExtractionChunk("chunk-1", "doc-1", "制度 A。")],
-                )
-            )
-        except ModelProviderTimeoutError as exc:
-            assert str(exc) == "Model request timed out."
-        else:
-            raise AssertionError("an idle graph model stream must time out")
-
-
-def test_graph_extractor_rejects_oversized_input_without_truncating_json() -> None:
-    class Provider:
-        called = False
-
-        async def astream(self, messages, **kwargs):
-            self.called = True
-            yield AIMessageChunk(content='{"entities": [], "claims": []}')
-
-    provider = Provider()
+def test_graph_rule_extractor_uses_human_lexicon_and_skips_unknown_text() -> None:
     schema = default_graph_schema()
+    result = extract_graph_batch(
+        schema,
+        [ExtractionChunk("chunk-1", "doc-1", "HR负责员工入职流程。")],
+        build_entity_lexicon(
+            [
+                EntityLexiconEntry(
+                    entity_type="Department",
+                    canonical_name="人力资源部",
+                    aliases=("HR",),
+                ),
+            ]
+        ),
+    )
+    subject = next(
+        item for item in result.batch.entities if item.canonical_name == "人力资源部"
+    )
+    assert subject.aliases == ["HR"]
+    assert result.batch.claims[0].predicate == "responsible_for"
+
+    empty = extract_graph_batch(
+        schema,
+        [ExtractionChunk("chunk-2", "doc-1", "这是一段没有显式关系的普通说明。")],
+    )
+    assert empty.batch == GraphExtractionBatch()
+
+
+def test_graph_rule_extractor_rejects_oversized_input() -> None:
     try:
-        asyncio.run(
-            extract_graph_batch(
-                provider,
-                schema,
-                [ExtractionChunk("large", "doc-1", "x" * 25_000)],
-            )
+        extract_graph_batch(
+            default_graph_schema(),
+            [ExtractionChunk("large", "doc-1", "x" * 25_000)],
         )
     except ValueError as exc:
         assert str(exc) == "Graph extraction input exceeds the per-call limit."
     else:
         raise AssertionError("oversized extraction input must be rejected")
-    assert provider.called is False
-
-
-def test_graph_extractor_retries_invalid_model_output_once() -> None:
-    quote = "制度 A 定义术语 A。"
-    valid = {
-        "entities": [
-            {
-                "temp_id": "policy",
-                "entity_type": "Document",
-                "canonical_name": "制度 A",
-            },
-            {
-                "temp_id": "term",
-                "entity_type": "Concept",
-                "canonical_name": "术语 A",
-            },
-        ],
-        "claims": [
-            {
-                "subject_temp_id": "policy",
-                "predicate": "defines",
-                "object_temp_id": "term",
-                "evidence_chunk_id": "chunk-1",
-                "quote": quote,
-                "start_offset": 0,
-                "end_offset": len(quote),
-            }
-        ],
-    }
-    invalid = json.loads(json.dumps(valid))
-    invalid["entities"][1]["entity_type"] = "Role"
-    schema = GraphSchemaDefinition.model_validate(
-        {
-            "entity_types": [
-                {"name": "Document"},
-                {"name": "Concept"},
-                {"name": "Role"},
-            ],
-            "relations": [
-                {
-                    "name": "defines",
-                    "source_types": ["Document"],
-                    "target_types": ["Concept"],
-                }
-            ],
-        }
-    )
-
-    class Provider:
-        calls = 0
-
-        async def astream(self, messages, **kwargs):
-            self.calls += 1
-            assert kwargs == {}
-            if self.calls == 1:
-                yield AIMessageChunk(content=json.dumps(invalid, ensure_ascii=False))
-                return
-            assert messages[-2] == {
-                "role": "assistant",
-                "content": json.dumps(invalid, ensure_ascii=False),
-            }
-            assert "Claim object type 'Role'" in messages[-1]["content"]
-            assert "expected one of ['Concept']" in messages[-1]["content"]
-            yield AIMessageChunk(content=json.dumps(valid, ensure_ascii=False))
-
-    provider = Provider()
-    result = asyncio.run(
-        extract_graph_batch(
-            provider,
-            schema,
-            [ExtractionChunk("chunk-1", "doc-1", quote)],
-        )
-    )
-    assert provider.calls == 2
-    assert result.batch.claims[0].predicate == "defines"
-
-
-def test_graph_extractor_does_not_retry_provider_failure() -> None:
-    from app.ports.llm import ModelProviderStatusError
-
-    class Provider:
-        calls = 0
-
-        async def astream(self, _messages, **_kwargs):
-            self.calls += 1
-            raise ModelProviderStatusError(402, "Insufficient Balance")
-            yield AIMessageChunk(content="")
-
-    provider = Provider()
-    try:
-        asyncio.run(
-            extract_graph_batch(
-                provider,
-                default_graph_schema(),
-                [ExtractionChunk("chunk-1", "doc-1", "制度 A 定义术语 A。")],
-            )
-        )
-    except ModelProviderStatusError as exc:
-        assert exc.status_code == 402
-    else:
-        raise AssertionError("provider failures must stop graph extraction")
-    assert provider.calls == 1
 
 
 def test_graph_entity_auto_match_requires_deterministic_identity() -> None:
@@ -6451,19 +6114,11 @@ def main() -> None:
     test_validate_permission_rejects_unknown()
     test_graph_schema_rejects_unknown_relation_endpoint()
     test_default_graph_schema_is_stable()
-    test_graph_token_charge_uses_reported_or_conservative_estimate()
-    test_graph_provider_rejection_releases_reserved_tokens()
-    test_graph_streaming_provider_rejection_releases_reserved_tokens()
     test_normalized_document_artifact_is_content_addressed()
     test_graph_extraction_requires_exact_chunk_evidence()
-    test_graph_extractor_parses_bounded_json_only_response()
-    test_graph_extractor_allows_active_stream_past_total_timeout()
-    test_graph_extractor_uses_latest_stream_usage_snapshot()
-    test_budgeted_graph_stream_uses_latest_usage_snapshot()
-    test_graph_extractor_times_out_an_idle_stream()
-    test_graph_extractor_rejects_oversized_input_without_truncating_json()
-    test_graph_extractor_retries_invalid_model_output_once()
-    test_graph_extractor_does_not_retry_provider_failure()
+    test_graph_rule_extractor_builds_typed_claims_with_exact_evidence()
+    test_graph_rule_extractor_uses_human_lexicon_and_skips_unknown_text()
+    test_graph_rule_extractor_rejects_oversized_input()
     test_graph_entity_auto_match_requires_deterministic_identity()
     test_graph_claim_fingerprint_and_initial_status_are_deterministic()
     test_graph_review_decision_request_is_bounded()

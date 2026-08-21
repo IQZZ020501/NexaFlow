@@ -577,6 +577,24 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.getByText("summary")).toBeTruthy()
   })
 
+  test("preserves and wraps multiline user messages", () => {
+    const goal = [
+      "scc .",
+      "───────────────────────────────────────────────────────────────────────────────",
+      "Language            Files       Lines    Blanks  Comments       Code Complexity",
+    ].join("\n")
+    const { container } = renderPage(
+      <Harness activeView="settings" runs={[makeRun({ goal })]} />
+    )
+    const message = Array.from(container.querySelectorAll(".bg-foreground")).find(
+      (element) => element.textContent === goal
+    )
+
+    expect(message).toBeTruthy()
+    expect(message!.className).toContain("whitespace-pre-wrap")
+    expect(message!.className).toContain("[overflow-wrap:anywhere]")
+  })
+
   test("renders unified result actions and disables regeneration while busy", () => {
     const regenerated: string[] = []
     const feedback: Array<[string, "positive" | "negative" | null]> = []

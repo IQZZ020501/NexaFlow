@@ -14,7 +14,6 @@ import type {
   KnowledgeGraphSettings,
   KnowledgeGraphStatus,
 } from "@/lib/api/knowledge"
-import type { RegisteredModel } from "@/lib/api/llm"
 import {
   cleanup,
   jsonResponse,
@@ -38,25 +37,6 @@ class TestResizeObserver {
 
 ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
   TestResizeObserver
-
-const llmModel: RegisteredModel = {
-  id: "llm-1",
-  workspace_id: workspaceId,
-  name: "Graph Extractor",
-  provider: "openai",
-  provider_type: "openai",
-  model_type: "LLM",
-  model_name: "gpt-5-mini",
-  status: "active",
-  credential: {},
-  api_base: "",
-  has_api_key: true,
-  api_key_hint: null,
-  meta: {},
-  created_by_user_id: "user-1",
-  created_at: "2026-01-01T00:00:00Z",
-  updated_at: "2026-01-01T00:00:00Z",
-}
 
 function entity(
   id: string,
@@ -187,6 +167,15 @@ const bankResult: KnowledgeGraphQueryResult = {
   limit_reason: null,
 }
 
+const overviewResult: KnowledgeGraphQueryResult = {
+  ...bankResult,
+  operation: "overview",
+  resolved_entities: [],
+  claims: bankClaims.map((claim) => ({ ...claim, evidence_ids: [] })),
+  paths: [],
+  evidence: [],
+}
+
 const graphSchema: KnowledgeGraphSchema = {
   id: "schema-1",
   version: 1,
@@ -209,7 +198,7 @@ const graphSchema: KnowledgeGraphSchema = {
 
 const graphSettings: KnowledgeGraphSettings = {
   enabled: true,
-  extraction_model_id: llmModel.id,
+  extraction_model_id: null,
   active_schema_id: graphSchema.id,
   active_revision_id: "revision-1",
 }
@@ -235,6 +224,7 @@ type GraphFetchOptions = {
   status?: KnowledgeGraphStatus
   schema?: KnowledgeGraphSchema | null
   entities?: KnowledgeGraphEntity[]
+  overview?: KnowledgeGraphQueryResult
   reviews?: KnowledgeGraphReviewItem[]
   custom?: (
     url: string,
@@ -249,6 +239,7 @@ function installGraphFetch(options: GraphFetchOptions = {}) {
   const status = options.status ?? graphStatus
   const schema = options.schema === undefined ? graphSchema : options.schema
   const entities = options.entities ?? bankEntities
+  const overview = options.overview ?? overviewResult
   const reviews = options.reviews ?? []
   withFetch(async (url, init) => {
     const method = init?.method ?? "GET"
@@ -262,6 +253,7 @@ function installGraphFetch(options: GraphFetchOptions = {}) {
     if (url.endsWith("/graph/settings")) return jsonResponse(settings)
     if (url.endsWith("/graph/status")) return jsonResponse(status)
     if (url.endsWith("/graph/schema")) return jsonResponse(schema)
+    if (url.endsWith("/graph/overview")) return jsonResponse(overview)
     if (url.includes("/graph/entities")) {
       return jsonResponse({
         items: entities,
@@ -296,7 +288,6 @@ function renderGraph(canEdit = true, nextKnowledgeBaseId = knowledgeBaseId) {
       workspaceId={workspaceId}
       knowledgeBaseId={nextKnowledgeBaseId}
       canEdit={canEdit}
-      llmModels={[llmModel]}
       notify={(kind, message) => notifications.push([kind, message])}
       reportError={(error) => errors.push(error)}
     />
@@ -324,10 +315,25 @@ describe("knowledge graph workspace", () => {
     ])
     expect(result.edges[0]?.source).toBe("account-a")
     expect(result.edges[0]?.target).toBe("phone-p")
-    expect(result.edges[0]?.label).toBe("uses_phone")
+    expect(result.edges[0]?.data?.predicate).toBe("uses_phone")
   })
 
-  test("enables a disabled graph with the selected LLM", async () => {
+  test("loads the full graph without an automatic neighborhood query", async () => {
+    installGraphFetch()
+    renderGraph()
+
+    await waitFor(() =>
+      expect(
+        requests.some((request) => request.url.endsWith("/graph/overview"))
+      ).toBe(true)
+    )
+    expect(
+      requests.some((request) => request.url.endsWith("/graph/neighborhood"))
+    ).toBe(false)
+    expect(screen.getByTestId("knowledge-graph-canvas")).toBeTruthy()
+  })
+
+  test("enables a disabled graph without an extraction model", async () => {
     const disabledSettings = {
       ...graphSettings,
       enabled: false,
@@ -353,7 +359,6 @@ describe("knowledge graph workspace", () => {
         if (url.endsWith("/graph/settings") && method === "PATCH") {
           expect(body).toEqual({
             enabled: true,
-            extraction_model_id: llmModel.id,
           })
           return jsonResponse({ ...disabledSettings, enabled: true })
         }
@@ -390,10 +395,10 @@ describe("knowledge graph workspace", () => {
     })
     renderGraph()
 
-    await screen.findByText("账户 A")
+    await screen.findAllByText("账户 A")
     await waitFor(() =>
       expect(
-        requests.some((request) => request.url.endsWith("/graph/neighborhood"))
+        requests.some((request) => request.url.endsWith("/graph/overview"))
       ).toBe(true)
     )
     fireEvent.change(screen.getByPlaceholderText("输入实体名称"), {
@@ -770,6 +775,9 @@ describe("knowledge graph workspace", () => {
         )
       ).toBe(true)
     )
+    await screen.findByText("别名：账号甲")
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }))
+    expect(screen.queryByText("别名：账号甲")).toBeNull()
     expect(errors).toEqual([])
   })
 
@@ -784,6 +792,7 @@ describe("knowledge graph workspace", () => {
       if (url.endsWith("/graph/settings")) return jsonResponse(graphSettings)
       if (url.endsWith("/graph/status")) return jsonResponse(graphStatus)
       if (url.endsWith("/graph/schema")) return jsonResponse(graphSchema)
+      if (url.endsWith("/graph/overview")) return jsonResponse(overviewResult)
       if (url.includes("/graph/entities")) {
         return jsonResponse({
           items: [bankEntities[5]],
@@ -795,13 +804,6 @@ describe("knowledge graph workspace", () => {
       if (url.includes("/graph/reviews")) {
         return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 })
       }
-      if (url.endsWith("/graph/neighborhood")) {
-        return jsonResponse({
-          ...bankResult,
-          operation: "neighborhood",
-          paths: [],
-        })
-      }
       throw new Error(`Unexpected request: ${url}`)
     })
     const rendered = renderGraph(true, "kb-old")
@@ -812,7 +814,6 @@ describe("knowledge graph workspace", () => {
           workspaceId={workspaceId}
           knowledgeBaseId="kb-new"
           canEdit
-          llmModels={[llmModel]}
           notify={(kind, message) => notifications.push([kind, message])}
           reportError={(error) => errors.push(error)}
         />

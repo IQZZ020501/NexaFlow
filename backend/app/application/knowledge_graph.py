@@ -81,6 +81,9 @@ from app.shareddomain.knowledge_graph.services import create_graph_schema
 
 MAX_GRAPH_IMPORT_BYTES = 10 * 1024 * 1024
 MAX_GRAPH_IMPORT_RECORDS = 5_000
+# ponytail: render a bounded overview; add server-side clustering when larger graphs need it.
+MAX_GRAPH_OVERVIEW_NODES = 500
+MAX_GRAPH_OVERVIEW_CLAIMS = 2_000
 logger = get_logger(__name__)
 
 
@@ -141,7 +144,7 @@ def _settings_response(
 ) -> KnowledgeGraphSettingsResponse:
     return KnowledgeGraphSettingsResponse(
         enabled=knowledge_base.graph_enabled,
-        extraction_model_id=knowledge_base.graph_extraction_model_id,
+        extraction_model_id=None,
         active_schema_id=knowledge_base.active_graph_schema_id,
         active_revision_id=knowledge_base.active_graph_revision_id,
     )
@@ -195,20 +198,8 @@ def _claim_response(
 async def _validate_graph_build_requirements(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
-    extraction_model_id: str | None,
-) -> tuple[str, str]:
+) -> str:
     require_knowledge_base_active(knowledge_base)
-    extraction_model = await get_knowledge_model(
-        db,
-        knowledge_base.workspace_id,
-        extraction_model_id,
-        "LLM",
-    )
-    if extraction_model is None:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Graph extraction model is required.",
-        )
     embedding_model = await get_knowledge_model(
         db,
         knowledge_base.workspace_id,
@@ -229,7 +220,7 @@ async def _validate_graph_build_requirements(
             status.HTTP_409_CONFLICT,
             "At least one indexed document is required.",
         )
-    return extraction_model.id, embedding_model.id
+    return embedding_model.id
 
 
 async def get_graph_settings(
@@ -250,31 +241,15 @@ async def update_graph_settings(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
 
     was_enabled = locked.graph_enabled
-    extraction_model_id = (
-        locked.graph_extraction_model_id
-        if payload.extraction_model_id is None
-        else payload.extraction_model_id
-    )
     embedding_model_id = locked.embedding_model_id
     if payload.enabled:
-        extraction_model_id, embedding_model_id = (
-            await _validate_graph_build_requirements(
-                db,
-                locked,
-                extraction_model_id,
-            )
-        )
-    elif payload.extraction_model_id is not None:
-        extraction_model = await get_knowledge_model(
+        embedding_model_id = await _validate_graph_build_requirements(
             db,
-            locked.workspace_id,
-            extraction_model_id,
-            "LLM",
+            locked,
         )
-        extraction_model_id = extraction_model.id if extraction_model else None
 
     locked.graph_enabled = payload.enabled
-    locked.graph_extraction_model_id = extraction_model_id
+    locked.graph_extraction_model_id = None
     locked.embedding_model_id = embedding_model_id
     await knowledge_repository.save_knowledge_base(db, locked)
     record_audit_log(
@@ -386,7 +361,6 @@ async def rebuild_graph(
     await _validate_graph_build_requirements(
         db,
         knowledge_base,
-        knowledge_base.graph_extraction_model_id,
     )
     queued = await knowledge_repository.get_queued_graph_rebuild(db, knowledge_base)
     running = await knowledge_repository.get_running_graph_task(db, knowledge_base)
@@ -452,6 +426,62 @@ async def list_graph_entities(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+async def get_graph_overview(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> KnowledgeGraphQueryResultResponse:
+    revision_id = knowledge_base.active_graph_revision_id
+    if revision_id is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Knowledge graph has no active revision.",
+        )
+    entities, total = await graph_repository.list_active_entity_page(
+        db,
+        knowledge_base,
+        query=None,
+        entity_type=None,
+        limit=MAX_GRAPH_OVERVIEW_NODES,
+        offset=0,
+    )
+    entity_ids = {entity.id for entity in entities}
+    aliases: dict[str, list[str]] = {}
+    for alias in await graph_repository.list_active_aliases_for_entity_ids(
+        db,
+        knowledge_base,
+        entity_ids,
+    ):
+        aliases.setdefault(alias.entity_id, []).append(alias.alias)
+    claims = sorted(
+        (
+            claim
+            for claim in await graph_repository.list_active_claims(
+                db,
+                knowledge_base,
+            )
+            if claim.subject_entity_id in entity_ids
+            and claim.object_entity_id in entity_ids
+        ),
+        key=lambda claim: claim.id,
+    )
+    truncated = total > len(entities) or len(claims) > MAX_GRAPH_OVERVIEW_CLAIMS
+    claims = claims[:MAX_GRAPH_OVERVIEW_CLAIMS]
+    return KnowledgeGraphQueryResultResponse(
+        revision_id=revision_id,
+        operation="overview",
+        resolved_entities=[],
+        nodes=[
+            _entity_response(entity, aliases.get(entity.id)) for entity in entities
+        ],
+        claims=[_claim_response(claim, []) for claim in claims],
+        paths=[],
+        evidence=[],
+        visited_nodes=len(entities),
+        truncated=truncated,
+        limit_reason="size" if truncated else None,
     )
 
 

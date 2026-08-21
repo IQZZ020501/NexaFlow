@@ -189,6 +189,21 @@ async def list_entities(
     )
 
 
+@router.get("/overview", response_model=KnowledgeGraphQueryResultResponse)
+async def overview(
+    knowledge_base_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeGraphQueryResultResponse:
+    knowledge_base = await _knowledge_base(
+        db,
+        context,
+        knowledge_base_id,
+        {"view", "edit"},
+    )
+    return await graph_application.get_graph_overview(db, knowledge_base)
+
+
 @router.get(
     "/entities/{entity_id}",
     response_model=KnowledgeGraphEntityDetailResponse,
