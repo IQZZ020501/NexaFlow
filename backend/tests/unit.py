@@ -377,6 +377,15 @@ def test_graph_extractor_parses_bounded_json_only_response() -> None:
     assert len(result.prompt_hash) == 64
     assert result.model_usage["total_tokens"] == 20
     assert provider.prompt is not None
+    assert "Required output JSON Schema" in provider.prompt[0]["content"]
+    for field_name in (
+        "temp_id",
+        "entity_type",
+        "canonical_name",
+        "subject_temp_id",
+        "evidence_chunk_id",
+    ):
+        assert f'"{field_name}"' in provider.prompt[0]["content"]
     assert "chunk-5" not in provider.prompt[1]["content"]
     assert len(json.loads(provider.prompt[1]["content"])) == 1
 
