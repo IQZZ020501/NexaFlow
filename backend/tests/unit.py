@@ -378,6 +378,7 @@ def test_graph_extractor_parses_bounded_json_only_response() -> None:
     assert result.model_usage["total_tokens"] == 20
     assert provider.prompt is not None
     assert "Required output JSON Schema" in provider.prompt[0]["content"]
+    assert "exactly one non-null object" in provider.prompt[0]["content"]
     for field_name in (
         "temp_id",
         "entity_type",
