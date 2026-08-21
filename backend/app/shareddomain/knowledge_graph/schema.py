@@ -98,22 +98,22 @@ def default_policy_graph_schema() -> GraphSchemaDefinition:
         relations=[
             {
                 "name": "defines",
-                "source_types": ["Document", "Clause"],
+                "source_types": ["Document", "Regulation", "Clause"],
                 "target_types": ["Concept"],
             },
             {
                 "name": "applies_to",
-                "source_types": ["Document", "Clause"],
+                "source_types": ["Document", "Regulation", "Clause"],
                 "target_types": ["Role", "Department", "Organization"],
             },
             {
                 "name": "requires",
-                "source_types": ["Document", "Clause"],
+                "source_types": ["Document", "Regulation", "Clause"],
                 "target_types": ["Process", "Form", "System"],
             },
             {
                 "name": "prohibits",
-                "source_types": ["Document", "Clause"],
+                "source_types": ["Document", "Regulation", "Clause"],
                 "target_types": ["Process"],
             },
             {
@@ -123,18 +123,18 @@ def default_policy_graph_schema() -> GraphSchemaDefinition:
             },
             {
                 "name": "references",
-                "source_types": ["Document", "Clause"],
-                "target_types": ["Document", "Clause"],
+                "source_types": ["Document", "Regulation", "Clause"],
+                "target_types": ["Document", "Regulation", "Clause"],
             },
             {
                 "name": "supersedes",
-                "source_types": ["Document", "Clause"],
-                "target_types": ["Document", "Clause"],
+                "source_types": ["Document", "Regulation", "Clause"],
+                "target_types": ["Document", "Regulation", "Clause"],
             },
             {
                 "name": "conflicts_with",
-                "source_types": ["Document", "Clause"],
-                "target_types": ["Document", "Clause"],
+                "source_types": ["Document", "Regulation", "Clause"],
+                "target_types": ["Document", "Regulation", "Clause"],
                 "review_required": True,
             },
             {

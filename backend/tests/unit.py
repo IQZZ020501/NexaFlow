@@ -141,6 +141,8 @@ def test_graph_schema_rejects_unknown_relation_endpoint() -> None:
 
 def test_default_policy_graph_schema_is_stable() -> None:
     schema = default_policy_graph_schema()
+    assert "Regulation" in schema.relation("defines").source_types
+    assert "Regulation" in schema.relation("references").target_types
     assert schema.relation("supersedes").traversable is True
     assert schema.relation("conflicts_with").review_required is True
     assert normalize_graph_name("  信息\u3000科技部 ") == "信息 科技部"
