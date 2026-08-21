@@ -798,10 +798,16 @@ export const en = {
   停止中: "Stopping",
   已停止: "Stopped",
   删除任务: "Delete task",
+  批量删除: "Delete selected",
+  选择所有可删除任务: "Select all deletable tasks",
+  "选择任务 {value}": "Select task {value}",
   已停止任务: "Task stopped",
   已删除任务: "Task deleted",
+  "已删除 {value} 个任务": "Deleted {value} tasks",
   "删除此任务记录？此操作不可恢复。":
     "Delete this task record? This action cannot be undone.",
+  "删除选中的 {value} 个任务？此操作不可恢复。":
+    "Delete the selected {value} tasks? This action cannot be undone.",
   图谱同步: "Graph sync",
   图谱重建: "Graph rebuild",
   查询内容: "Query",

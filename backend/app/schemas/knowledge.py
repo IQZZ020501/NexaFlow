@@ -193,6 +193,19 @@ class KnowledgeTaskRetryRequest(BaseModel):
     mode: Literal["all", "unfinished"] = "all"
 
 
+class KnowledgeTaskBulkDeleteRequest(BaseModel):
+    task_ids: list[
+        Annotated[
+            str,
+            StringConstraints(strip_whitespace=True, min_length=1, max_length=36),
+        ]
+    ] = Field(min_length=1, max_length=200)
+
+
+class KnowledgeTaskBulkDeleteResponse(BaseModel):
+    deleted_task_ids: list[str]
+
+
 GraphMode = Literal["off", "auto", "path", "neighborhood"]
 
 

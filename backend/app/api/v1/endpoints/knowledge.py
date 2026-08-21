@@ -34,6 +34,8 @@ from app.schemas.knowledge import (
     KnowledgeModelTestRequest,
     KnowledgeModelTestResponse,
     KnowledgeTaskRetryRequest,
+    KnowledgeTaskBulkDeleteRequest,
+    KnowledgeTaskBulkDeleteResponse,
     KnowledgeTaskResponse,
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
@@ -59,6 +61,7 @@ from app.application.knowledge import (
     retry_knowledge_task,
     stop_knowledge_task,
     delete_knowledge_task,
+    delete_knowledge_tasks,
     revoke_resource_permission,
     test_knowledge_base_models,
     transfer_knowledge_base_owner,
@@ -476,6 +479,33 @@ async def stop_workspace_knowledge_task(
         {"edit"},
     )
     return await stop_knowledge_task(db, knowledge_base, task_id, context.user)
+
+
+@router.post(
+    "/{knowledge_base_id}/tasks/bulk-delete",
+    response_model=KnowledgeTaskBulkDeleteResponse,
+)
+async def bulk_delete_workspace_knowledge_tasks(
+    knowledge_base_id: str,
+    payload: KnowledgeTaskBulkDeleteRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeTaskBulkDeleteResponse:
+    knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
+    await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        context.membership_role,
+        {"edit"},
+    )
+    deleted_task_ids = await delete_knowledge_tasks(
+        db,
+        knowledge_base,
+        payload.task_ids,
+        context.user,
+    )
+    return KnowledgeTaskBulkDeleteResponse(deleted_task_ids=deleted_task_ids)
 
 
 @router.delete(

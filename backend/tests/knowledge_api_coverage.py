@@ -88,6 +88,7 @@ from app.schemas.knowledge import (
     KnowledgeQueryInspectResponse,
     KnowledgeQueryRequest,
     KnowledgeRetrievalTraceResponse,
+    KnowledgeTaskBulkDeleteRequest,
     ResourcePermissionUpsertRequest,
 )
 from app.schemas.knowledge_graph import KnowledgeGraphQueryResultResponse
@@ -676,6 +677,30 @@ def exercise_direct_endpoint_calls(
                     db,
                 )
                 assert stopped_task.status == "cancelled"
+                bulk_deleted = (
+                    await knowledge_api.bulk_delete_workspace_knowledge_tasks(
+                        knowledge_base_id,
+                        KnowledgeTaskBulkDeleteRequest(
+                            task_ids=[rebuild_task.id, rebuild_task.id]
+                        ),
+                        alice_ctx,
+                        db,
+                    )
+                )
+                assert bulk_deleted.deleted_task_ids == [rebuild_task.id]
+
+                rebuild_task = await knowledge_api.rebuild_workspace_knowledge_base_index(
+                    knowledge_base_id,
+                    alice_ctx,
+                    settings,
+                    db,
+                )
+                await knowledge_api.stop_workspace_knowledge_task(
+                    knowledge_base_id,
+                    rebuild_task.id,
+                    alice_ctx,
+                    db,
+                )
                 assert (
                     await knowledge_api.delete_workspace_knowledge_task(
                         knowledge_base_id,

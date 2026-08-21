@@ -65,6 +65,7 @@ from app.shareddomain.audit.models import AuditLog
 from app.infrastructure.model_utils import utc_now
 from app.shareddomain.knowledge.orchestration import (
     delete_knowledge_task,
+    delete_knowledge_tasks,
     enqueue_graph_rebuild,
     enqueue_graph_sync,
     enqueue_index_knowledge_document,
@@ -3245,6 +3246,69 @@ async def test_graph_tasks_can_be_stopped_retried_and_deleted() -> None:
         assert await knowledge_repository.get_knowledge_task_by_id(db, task.id) is None
 
 
+async def test_knowledge_tasks_bulk_delete_is_atomic() -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_user_by_id(db, "graph-user")
+        assert actor is not None
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-task-bulk-delete-kb",
+                workspace_id="graph-workspace",
+                name="Graph Task Bulk Delete KB",
+                created_by_user_id=actor.id,
+            ),
+        )
+        tasks = [
+            await knowledge_repository.create_knowledge_task(
+                db,
+                KnowledgeTask(
+                    id=f"graph-task-bulk-delete-{task_status}",
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    task_type="graph_rebuild",
+                    status=task_status,
+                    created_by_user_id=actor.id,
+                ),
+            )
+            for task_status in ("failed", "succeeded", "running")
+        ]
+        await db.commit()
+
+        try:
+            await delete_knowledge_tasks(
+                db,
+                knowledge_base,
+                [tasks[0].id, tasks[2].id],
+                actor,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError("a batch containing an open task must be atomic")
+        remaining = [
+            await knowledge_repository.get_knowledge_task_by_id(db, task.id)
+            for task in tasks
+        ]
+        assert all(task is not None for task in remaining)
+
+        tasks[2].status = "cancelled"
+        await knowledge_repository.save_knowledge_task(db, tasks[2])
+        await db.commit()
+        deleted_ids = await delete_knowledge_tasks(
+            db,
+            knowledge_base,
+            [tasks[1].id, tasks[0].id, tasks[2].id, tasks[0].id],
+            actor,
+        )
+        assert deleted_ids == [tasks[1].id, tasks[0].id, tasks[2].id]
+        remaining = [
+            await knowledge_repository.get_knowledge_task_by_id(db, task.id)
+            for task in tasks
+        ]
+        assert all(task is None for task in remaining)
+
+
 async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
     contents = {
         "graph-resume-chunk-a": "制度 A 定义术语 A。",
@@ -4582,6 +4646,7 @@ async def main() -> None:
     await test_graph_sync_coalesces_behind_running_build()
     await test_graph_rebuild_follows_running_task_and_coalesces_sync()
     await test_graph_tasks_can_be_stopped_retried_and_deleted()
+    await test_knowledge_tasks_bulk_delete_is_atomic()
     await test_graph_retry_can_resume_from_the_last_committed_chunk()
     await test_structured_graph_build_publishes_evidence_and_profiles()
     await test_graph_build_stops_before_workspace_monthly_limit()

@@ -1159,9 +1159,12 @@ describe("lib/api/knowledge", () => {
   test("mutates tasks and rebuilds the index", async () => {
     const calls: Array<{ url: string; method: string }> = []
     let retryBody = ""
+    let bulkDeleteBody = ""
     stubFetch((url, init) => {
       calls.push({ url, method: init?.method ?? "GET" })
       if (url.includes("/retry")) retryBody = String(init?.body ?? "")
+      if (url.includes("/bulk-delete"))
+        bulkDeleteBody = String(init?.body ?? "")
       return new Response("{}", { status: 200 })
     })
     await knowledgeApi.retryKnowledgeTask(
@@ -1173,6 +1176,10 @@ describe("lib/api/knowledge", () => {
     )
     await knowledgeApi.stopKnowledgeTask("tok", "ws-1", "kb-1", "task-1")
     await knowledgeApi.deleteKnowledgeTask("tok", "ws-1", "kb-1", "task-1")
+    await knowledgeApi.deleteKnowledgeTasks("tok", "ws-1", "kb-1", [
+      "task-1",
+      "task-2",
+    ])
     await knowledgeApi.rebuildKnowledgeIndex("tok", "ws-1", "kb-1")
     expect(calls[0]).toEqual({
       url: "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/tasks/task-1/retry",
@@ -1188,6 +1195,13 @@ describe("lib/api/knowledge", () => {
       method: "DELETE",
     })
     expect(calls[3]).toEqual({
+      url: "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/tasks/bulk-delete",
+      method: "POST",
+    })
+    expect(JSON.parse(bulkDeleteBody)).toEqual({
+      task_ids: ["task-1", "task-2"],
+    })
+    expect(calls[4]).toEqual({
       url: "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/rebuild-index",
       method: "POST",
     })

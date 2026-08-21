@@ -64,6 +64,7 @@ import {
   createKnowledgeBase,
   deleteKnowledgeDocument,
   deleteKnowledgeTask,
+  deleteKnowledgeTasks,
   deleteKnowledgeBase,
   downloadKnowledgeDocument,
   indexKnowledgeDocument,
@@ -424,6 +425,8 @@ function KnowledgeBasePageContent({
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<
     string[]
   >([])
+  const [selectedKnowledgeTaskIds, setSelectedKnowledgeTaskIds] =
+    React.useState<string[]>([])
   const [registeredModels, setRegisteredModels] = React.useState<
     RegisteredModel[]
   >([])
@@ -478,6 +481,8 @@ function KnowledgeBasePageContent({
   const [busyKnowledgeTaskId, setBusyKnowledgeTaskId] = React.useState<
     string | null
   >(null)
+  const [isDeletingKnowledgeTasks, setIsDeletingKnowledgeTasks] =
+    React.useState(false)
   const [isTestingModels, setIsTestingModels] = React.useState(false)
   const [modelTestResult, setModelTestResult] =
     React.useState<KnowledgeModelTestResult | null>(null)
@@ -487,6 +492,7 @@ function KnowledgeBasePageContent({
   const [isSaving, setIsSaving] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const selectAllDocumentsRef = React.useRef<HTMLInputElement>(null)
+  const selectAllKnowledgeTasksRef = React.useRef<HTMLInputElement>(null)
 
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
   const selectedKnowledgeBaseId = activeKnowledgeBaseId
@@ -558,6 +564,25 @@ function KnowledgeBasePageContent({
     knowledgeTaskPage,
     knowledgeTaskPageSize
   )
+  const selectedKnowledgeTasks = knowledgeTasks.filter(
+    (task) =>
+      selectedKnowledgeTaskIds.includes(task.id) &&
+      !PROCESSING_TASK_STATUSES[task.status]
+  )
+  const visibleDeletableKnowledgeTasks = visibleKnowledgeTasks.filter(
+    (task) => !PROCESSING_TASK_STATUSES[task.status]
+  )
+  const isAllVisibleKnowledgeTasksSelected =
+    visibleDeletableKnowledgeTasks.length > 0 &&
+    visibleDeletableKnowledgeTasks.every((task) =>
+      selectedKnowledgeTaskIds.includes(task.id)
+    )
+  const isSomeVisibleKnowledgeTaskSelected =
+    visibleDeletableKnowledgeTasks.some((task) =>
+      selectedKnowledgeTaskIds.includes(task.id)
+    )
+  const isKnowledgeTaskMutationBusy =
+    busyKnowledgeTaskId !== null || isDeletingKnowledgeTasks
   const isAllFilteredDocumentsSelected =
     visibleDocuments.length > 0 &&
     visibleDocuments.every((document) =>
@@ -573,6 +598,17 @@ function KnowledgeBasePageContent({
         isSomeFilteredDocumentSelected && !isAllFilteredDocumentsSelected
     }
   }, [isAllFilteredDocumentsSelected, isSomeFilteredDocumentSelected])
+
+  React.useEffect(() => {
+    if (selectAllKnowledgeTasksRef.current) {
+      selectAllKnowledgeTasksRef.current.indeterminate =
+        isSomeVisibleKnowledgeTaskSelected &&
+        !isAllVisibleKnowledgeTasksSelected
+    }
+  }, [
+    isAllVisibleKnowledgeTasksSelected,
+    isSomeVisibleKnowledgeTaskSelected,
+  ])
 
   const reportError = React.useCallback(
     (error: unknown) => {
@@ -681,6 +717,7 @@ function KnowledgeBasePageContent({
     async (silent = false) => {
       if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
         setKnowledgeTasks([])
+        setSelectedKnowledgeTaskIds([])
         return
       }
 
@@ -688,16 +725,25 @@ function KnowledgeBasePageContent({
         setIsKnowledgeTaskLoading(true)
       }
       try {
-        setKnowledgeTasks(
-          await listKnowledgeTasks(
-            token,
-            selectedWorkspaceId,
-            selectedKnowledgeBaseId
+        const tasks = await listKnowledgeTasks(
+          token,
+          selectedWorkspaceId,
+          selectedKnowledgeBaseId
+        )
+        setKnowledgeTasks(tasks)
+        setSelectedKnowledgeTaskIds((current) =>
+          current.filter((taskId) =>
+            tasks.some(
+              (task) =>
+                task.id === taskId &&
+                !PROCESSING_TASK_STATUSES[task.status]
+            )
           )
         )
       } catch (error) {
         if (!silent) {
           setKnowledgeTasks([])
+          setSelectedKnowledgeTaskIds([])
           reportError(error)
         }
       } finally {
@@ -828,6 +874,27 @@ function KnowledgeBasePageContent({
     )
   }
 
+  function toggleKnowledgeTaskSelection(taskId: string, checked: boolean) {
+    setSelectedKnowledgeTaskIds((current) =>
+      checked
+        ? current.includes(taskId)
+          ? current
+          : [...current, taskId]
+        : current.filter((id) => id !== taskId)
+    )
+  }
+
+  function toggleAllVisibleKnowledgeTasks(checked: boolean) {
+    const visibleTaskIds = visibleDeletableKnowledgeTasks.map(
+      (task) => task.id
+    )
+    setSelectedKnowledgeTaskIds((current) =>
+      checked
+        ? Array.from(new Set([...current, ...visibleTaskIds]))
+        : current.filter((id) => !visibleTaskIds.includes(id))
+    )
+  }
+
   function canManagePermissions(knowledgeBase: KnowledgeBase) {
     return (
       workspaceRole === "admin" ||
@@ -856,11 +923,13 @@ function KnowledgeBasePageContent({
     setActiveDetailTab("documents")
     setDocumentSearch("")
     setSelectedDocumentIds([])
+    setSelectedKnowledgeTaskIds([])
     setKnowledgeTasks([])
     router.push(`/app/knowledge/${knowledgeBase.id}`)
   }
 
   function closeKnowledgeBase() {
+    setSelectedKnowledgeTaskIds([])
     setKnowledgeTasks([])
     router.push("/app/knowledge")
   }
@@ -1269,11 +1338,60 @@ function KnowledgeBasePageContent({
       setKnowledgeTasks((current) =>
         current.filter((item) => item.id !== task.id)
       )
+      setSelectedKnowledgeTaskIds((current) =>
+        current.filter((id) => id !== task.id)
+      )
       notify("success", t("已删除任务"))
     } catch (error) {
       reportError(error)
     } finally {
       setBusyKnowledgeTaskId(null)
+    }
+  }
+
+  async function handleDeleteSelectedKnowledgeTasks() {
+    if (
+      !selectedWorkspaceId ||
+      !selectedKnowledgeBase ||
+      !selectedKnowledgeTasks.length
+    ) {
+      return
+    }
+    if (
+      !(await confirmAction({
+        description: t("删除选中的 {value} 个任务？此操作不可恢复。", {
+          value: selectedKnowledgeTasks.length,
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
+    ) {
+      return
+    }
+
+    setIsDeletingKnowledgeTasks(true)
+    try {
+      const result = await deleteKnowledgeTasks(
+        token,
+        selectedWorkspaceId,
+        selectedKnowledgeBase.id,
+        selectedKnowledgeTasks.map((task) => task.id)
+      )
+      const deletedIds = new Set(result.deleted_task_ids)
+      setKnowledgeTasks((current) =>
+        current.filter((task) => !deletedIds.has(task.id))
+      )
+      setSelectedKnowledgeTaskIds((current) =>
+        current.filter((taskId) => !deletedIds.has(taskId))
+      )
+      notify(
+        "success",
+        t("已删除 {value} 个任务", { value: result.deleted_task_ids.length })
+      )
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsDeletingKnowledgeTasks(false)
     }
   }
 
@@ -2191,6 +2309,31 @@ function KnowledgeBasePageContent({
                     <Button
                       type="button"
                       variant="outline"
+                      disabled={
+                        !canEditDocuments ||
+                        selectedKnowledgeTasks.length === 0 ||
+                        isKnowledgeTaskMutationBusy
+                      }
+                      onClick={() =>
+                        void handleDeleteSelectedKnowledgeTasks()
+                      }
+                    >
+                      {isDeletingKnowledgeTasks ? (
+                        <LoaderCircleIcon
+                          className="animate-spin"
+                          data-icon="inline-start"
+                        />
+                      ) : (
+                        <Trash2Icon data-icon="inline-start" />
+                      )}
+                      {t("批量删除")}
+                      {selectedKnowledgeTasks.length
+                        ? `(${selectedKnowledgeTasks.length})`
+                        : ""}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
                       disabled={!canEditDocuments || isSubmittingDocumentTask}
                       onClick={() => void handleRebuildIndex()}
                     >
@@ -2201,8 +2344,27 @@ function KnowledgeBasePageContent({
                 </div>
 
                 <div className="mt-4 overflow-x-auto rounded-lg border bg-background">
-                  <div className="min-w-[860px]">
-                    <div className="grid grid-cols-[120px_120px_140px_120px_minmax(220px,1fr)_132px] border-b px-4 py-3 text-sm font-medium text-muted-foreground">
+                  <div className="min-w-[920px]">
+                    <div className="grid grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_176px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
+                      <label className="flex items-center justify-center">
+                        <input
+                          ref={selectAllKnowledgeTasksRef}
+                          type="checkbox"
+                          className="size-4"
+                          aria-label={t("选择所有可删除任务")}
+                          checked={isAllVisibleKnowledgeTasksSelected}
+                          disabled={
+                            !canEditDocuments ||
+                            !visibleDeletableKnowledgeTasks.length ||
+                            isKnowledgeTaskMutationBusy
+                          }
+                          onChange={(event) =>
+                            toggleAllVisibleKnowledgeTasks(
+                              event.target.checked
+                            )
+                          }
+                        />
+                      </label>
                       <span>{t("类型")}</span>
                       <span>{t("状态")}</span>
                       <span>{t("进度")}</span>
@@ -2218,8 +2380,33 @@ function KnowledgeBasePageContent({
                       visibleKnowledgeTasks.map((task) => (
                         <div
                           key={task.id}
-                          className="grid min-h-16 grid-cols-[120px_120px_140px_120px_minmax(220px,1fr)_176px] items-center border-b px-4 py-3 text-sm last:border-b-0"
+                          className="grid min-h-16 grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_176px] items-center border-b px-4 py-3 text-sm last:border-b-0"
                         >
+                          <label className="flex items-center justify-center">
+                            <input
+                              type="checkbox"
+                              className="size-4"
+                              aria-label={t("选择任务 {value}", {
+                                value: task.id,
+                              })}
+                              checked={selectedKnowledgeTaskIds.includes(
+                                task.id
+                              )}
+                              disabled={
+                                !canEditDocuments ||
+                                Boolean(
+                                  PROCESSING_TASK_STATUSES[task.status]
+                                ) ||
+                                isKnowledgeTaskMutationBusy
+                              }
+                              onChange={(event) =>
+                                toggleKnowledgeTaskSelection(
+                                  task.id,
+                                  event.target.checked
+                                )
+                              }
+                            />
+                          </label>
                           <span className="font-medium">
                             {taskTypeLabel(task.task_type, t)}
                           </span>
@@ -2253,7 +2440,7 @@ function KnowledgeBasePageContent({
                               label={t("停止")}
                               disabled={
                                 !canEditDocuments ||
-                                busyKnowledgeTaskId !== null ||
+                                isKnowledgeTaskMutationBusy ||
                                 !["queued", "running"].includes(task.status)
                               }
                               onClick={() => void handleStopKnowledgeTask(task)}
@@ -2268,7 +2455,7 @@ function KnowledgeBasePageContent({
                                   label={t("重试未完成分片")}
                                   disabled={
                                     !canEditDocuments ||
-                                    busyKnowledgeTaskId !== null ||
+                                    isKnowledgeTaskMutationBusy ||
                                     !["failed", "cancelled"].includes(
                                       task.status
                                     ) ||
@@ -2288,7 +2475,7 @@ function KnowledgeBasePageContent({
                                   label={t("重试全部分片")}
                                   disabled={
                                     !canEditDocuments ||
-                                    busyKnowledgeTaskId !== null ||
+                                    isKnowledgeTaskMutationBusy ||
                                     !["failed", "cancelled"].includes(
                                       task.status
                                     )
@@ -2305,7 +2492,7 @@ function KnowledgeBasePageContent({
                                 label={t("重试")}
                                 disabled={
                                   !canEditDocuments ||
-                                  busyKnowledgeTaskId !== null ||
+                                  isKnowledgeTaskMutationBusy ||
                                   !["failed", "cancelled"].includes(task.status)
                                 }
                                 onClick={() =>
@@ -2319,7 +2506,7 @@ function KnowledgeBasePageContent({
                               label={t("删除任务")}
                               disabled={
                                 !canEditDocuments ||
-                                busyKnowledgeTaskId !== null ||
+                                isKnowledgeTaskMutationBusy ||
                                 ["queued", "running", "cancelling"].includes(
                                   task.status
                                 )

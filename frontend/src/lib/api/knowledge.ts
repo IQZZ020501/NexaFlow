@@ -116,6 +116,10 @@ export type KnowledgeTask = {
 
 export type KnowledgeTaskRetryMode = "all" | "unfinished"
 
+export type KnowledgeTaskBulkDeleteResult = {
+  deleted_task_ids: string[]
+}
+
 export type KnowledgeQueryHit = {
   chunk_id: string
   document_id: string
@@ -823,6 +827,22 @@ export function deleteKnowledgeTask(
     {
       method: "DELETE",
       token,
+    }
+  )
+}
+
+export function deleteKnowledgeTasks(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  taskIds: string[]
+) {
+  return request<KnowledgeTaskBulkDeleteResult>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/tasks/bulk-delete`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify({ task_ids: taskIds }),
     }
   )
 }

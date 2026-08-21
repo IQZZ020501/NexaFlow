@@ -2159,6 +2159,66 @@ describe("KnowledgeBasePage tasks tab", () => {
     expect(notifications.some(([, msg]) => msg === "已删除任务")).toBe(true)
   })
 
+  test("bulk deletes selected terminal tasks", async () => {
+    const tasks = [
+      makeTask({
+        id: "failed-task",
+        status: "failed",
+        last_error: "failed task marker",
+      }),
+      makeTask({
+        id: "succeeded-task",
+        status: "succeeded",
+        last_error: "succeeded task marker",
+      }),
+      makeTask({
+        id: "running-task",
+        status: "running",
+        last_error: "running task marker",
+      }),
+    ]
+    let bulkDeleteBody: { task_ids: string[] } | null = null
+    fetchHandler = (url, init) => {
+      const method = init?.method ?? "GET"
+      if (method === "POST" && url.endsWith("/tasks/bulk-delete")) {
+        bulkDeleteBody = JSON.parse(String(init?.body))
+        return jsonResponse({
+          deleted_task_ids: bulkDeleteBody?.task_ids ?? [],
+        })
+      }
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse([])
+      if (url.includes("/tasks")) return jsonResponse(tasks)
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    fireEvent.click(await screen.findByText("任务"))
+    await screen.findByText("failed task marker")
+    fireEvent.click(screen.getByLabelText("选择所有可删除任务"))
+    expect(
+      (screen.getByLabelText("选择任务 running-task") as HTMLInputElement)
+        .disabled
+    ).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: /批量删除/ }))
+    await respondToConfirm("删除")
+
+    await waitFor(() =>
+      expect(bulkDeleteBody).toEqual({
+        task_ids: ["failed-task", "succeeded-task"],
+      })
+    )
+    expect(screen.queryByText("failed task marker")).toBeNull()
+    expect(screen.queryByText("succeeded task marker")).toBeNull()
+    expect(screen.getByText("running task marker")).toBeTruthy()
+    expect(
+      notifications.some(([, message]) => message === "已删除 2 个任务")
+    ).toBe(true)
+  })
+
   test("offers retry-all and checkpoint retry for a failed graph task", async () => {
     const retryModes: string[] = []
     const task = makeTask({

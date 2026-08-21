@@ -1148,6 +1148,16 @@ async def delete_knowledge_task(
     task_id: str,
     actor: User,
 ) -> None:
+    await delete_knowledge_tasks(db, knowledge_base, [task_id], actor)
+
+
+async def delete_knowledge_tasks(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    task_ids: list[str],
+    actor: User,
+) -> list[str]:
+    unique_task_ids = list(dict.fromkeys(task_ids))
     knowledge_base = await knowledge_base_repository.lock_knowledge_base(
         db,
         knowledge_base,
@@ -1155,30 +1165,39 @@ async def delete_knowledge_task(
     if knowledge_base is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
     require_knowledge_base_active(knowledge_base)
-    task = await knowledge_base_repository.lock_knowledge_task(db, task_id)
-    if task is None or (
-        task.workspace_id != knowledge_base.workspace_id
-        or task.knowledge_base_id != knowledge_base.id
+    tasks_by_id: dict[str, KnowledgeTask] = {}
+    for task_id in sorted(unique_task_ids):
+        task = await knowledge_base_repository.lock_knowledge_task(db, task_id)
+        if task is None or (
+            task.workspace_id != knowledge_base.workspace_id
+            or task.knowledge_base_id != knowledge_base.id
+        ):
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "Knowledge task not found.",
+            )
+        tasks_by_id[task.id] = task
+    if any(
+        task.status
+        in {TASK_QUEUED_STATUS, TASK_RUNNING_STATUS, TASK_CANCELLING_STATUS}
+        for task in tasks_by_id.values()
     ):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge task not found.")
-    if task.status in {
-        TASK_QUEUED_STATUS,
-        TASK_RUNNING_STATUS,
-        TASK_CANCELLING_STATUS,
-    }:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Stop the knowledge task before deleting it.",
         )
-    await knowledge_base_repository.delete_knowledge_task(db, task)
-    record_audit_log(
-        db,
-        actor,
-        "knowledge_task.delete",
-        "knowledge_task",
-        task.id,
-        task.task_type,
-        {"knowledge_base_id": knowledge_base.id, "status": task.status},
-        workspace_id=knowledge_base.workspace_id,
-    )
+    for task_id in unique_task_ids:
+        task = tasks_by_id[task_id]
+        await knowledge_base_repository.delete_knowledge_task(db, task)
+        record_audit_log(
+            db,
+            actor,
+            "knowledge_task.delete",
+            "knowledge_task",
+            task.id,
+            task.task_type,
+            {"knowledge_base_id": knowledge_base.id, "status": task.status},
+            workspace_id=knowledge_base.workspace_id,
+        )
     await db.commit()
+    return unique_task_ids
