@@ -638,6 +638,53 @@ class ActiveStreamingProvider:
         )
 
 
+class GatedStreamingProvider:
+    def __init__(self, chunk_emitted: asyncio.Event, finish: asyncio.Event) -> None:
+        self.chunk_emitted = chunk_emitted
+        self.finish = finish
+
+    def bind_tools(self, *_args, **_kwargs):
+        return self
+
+    async def astream(self, _messages: list[BaseMessage]):
+        yield AIMessageChunk(content="Live")
+        self.chunk_emitted.set()
+        await self.finish.wait()
+        yield AIMessageChunk(
+            content=" answer.",
+            response_metadata={"finish_reason": "stop"},
+        )
+
+
+async def assert_answer_delta_is_emitted_before_stream_completion() -> None:
+    chunk_emitted = asyncio.Event()
+    finish = asyncio.Event()
+    answer_emitted = asyncio.Event()
+    deltas: list[str] = []
+
+    async def emit(event: dict) -> None:
+        if event.get("type") == "answer_delta":
+            deltas.append(str(event.get("delta") or ""))
+            answer_emitted.set()
+
+    task = asyncio.create_task(
+        run_agent(
+            GatedStreamingProvider(chunk_emitted, finish),  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [],
+            on_event=emit,
+        )
+    )
+    await chunk_emitted.wait()
+    try:
+        await asyncio.wait_for(answer_emitted.wait(), timeout=0.1)
+    finally:
+        finish.set()
+        result = await task
+    assert result.content == "Live answer."
+    assert deltas == ["Live", " answer."]
+
+
 async def assert_active_model_stream_does_not_time_out() -> None:
     async def emit(_event: dict) -> None:
         return None
@@ -1485,6 +1532,9 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
     assert [event["type"] for event in emitted] == [
         "process",
         "process",
+        "answer_delta",
+        "answer_reset",
+        "process",
         "process",
         "process",
         "process",
@@ -1494,18 +1544,20 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
         "answer_delta",
     ]
     assert emitted[0]["event"]["type"] == "thought"
-    assert emitted[2]["event"]["type"] == "tool"
-    assert emitted[5] == {
+    assert emitted[2]["delta"] == "I will search again. "
+    assert emitted[3] == {"type": "answer_reset"}
+    assert emitted[5]["event"]["type"] == "tool"
+    assert emitted[8] == {
         "type": "reasoning_delta",
         "turn": 2,
         "delta": "Inspect ",
     }
-    assert len(emitted[6]["delta"]) == MAX_REASONING_CHARS - len("Inspect ")
-    assert len(emitted[7]["event"]["reasoning"]) == MAX_REASONING_CHARS
+    assert len(emitted[9]["delta"]) == MAX_REASONING_CHARS - len("Inspect ")
+    assert len(emitted[10]["event"]["reasoning"]) == MAX_REASONING_CHARS
     assert emitted[-1]["delta"] == "Streamed answer."
 
 
-async def assert_streaming_tool_preamble_is_not_emitted_on_failure() -> None:
+async def assert_streaming_tool_preamble_is_reset_on_failure() -> None:
     emitted: list[dict] = []
 
     async def emit(event: dict) -> None:
@@ -1543,7 +1595,18 @@ async def assert_streaming_tool_preamble_is_not_emitted_on_failure() -> None:
         assert str(exc) == "Agent returned an empty response."
     else:
         raise AssertionError("Empty final response was accepted.")
-    assert not [event for event in emitted if event["type"] == "answer_delta"]
+    visible_answer = ""
+    for event in emitted:
+        if event["type"] == "answer_delta":
+            visible_answer += event["delta"]
+        elif event["type"] == "answer_reset":
+            visible_answer = ""
+    assert visible_answer == ""
+    assert [
+        event["type"]
+        for event in emitted
+        if event["type"] in {"answer_delta", "answer_reset"}
+    ] == ["answer_delta", "answer_reset"]
 
 
 async def assert_parallel_policy_is_enforced() -> None:
@@ -3357,6 +3420,7 @@ def main() -> None:
     """
     Run the comprehensive agent, workflow, knowledge, MCP, streaming, persistence, authorization, and public-access integration assertions.
     """
+    asyncio.run(assert_answer_delta_is_emitted_before_stream_completion())
     asyncio.run(assert_active_model_stream_does_not_time_out())
     asyncio.run(assert_hanging_model_stream_times_out())
     asyncio.run(assert_required_knowledge_timeout_is_unavailable())
@@ -3372,7 +3436,7 @@ def main() -> None:
     assert_tool_routing_context_is_explicit()
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
     asyncio.run(assert_streaming_run_emits_process_and_answer())
-    asyncio.run(assert_streaming_tool_preamble_is_not_emitted_on_failure())
+    asyncio.run(assert_streaming_tool_preamble_is_reset_on_failure())
     asyncio.run(assert_parallel_policy_is_enforced())
     asyncio.run(assert_runtime_budgets_are_enforced())
     asyncio.run(assert_retrieval_progress_uses_evidence_ids())

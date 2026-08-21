@@ -352,6 +352,12 @@ describe("mergeAgentRunStreamEvent", () => {
     expect(streamed[0].result).toBe("Hello world")
     expect(streamed[0].live_stream_cursor).toBeUndefined()
 
+    const reset = mergeAgentRunStreamEvent(streamed, "run-1", {
+      type: "answer_reset",
+      sequence: 2,
+    } as AgentRunStreamEvent)
+    expect(reset[0].result).toBe("")
+
     const takeover = mergeAgentRunStreamEvent(
       [
         makeRun({

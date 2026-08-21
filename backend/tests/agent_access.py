@@ -488,6 +488,11 @@ async def assert_sanitize_external_agent_stream() -> None:
             "stream_epoch": "epoch-1",
         }
         yield {
+            "type": "answer_reset",
+            "live_sequence": "2-0",
+            "stream_epoch": "epoch-1",
+        }
+        yield {
             "type": "reasoning_delta",
             "turn": -2,
             "delta": "thinking",
@@ -530,6 +535,7 @@ async def assert_sanitize_external_agent_stream() -> None:
 
     assert [event["type"] for event in sanitized] == [
         "answer_delta",
+        "answer_reset",
         "reasoning_delta",
         "progress",
         "approval_required",
@@ -543,21 +549,25 @@ async def assert_sanitize_external_agent_stream() -> None:
     assert answer["stream_epoch"] != "epoch-1"
     assert len(answer["stream_epoch"]) == 32
 
-    reasoning = sanitized[1]
+    reset = sanitized[1]
+    assert reset["live_sequence"] == "2-0"
+    assert reset["stream_epoch"] == answer["stream_epoch"]
+
+    reasoning = sanitized[2]
     assert reasoning["turn"] == 0  # negative turn clamped
     assert reasoning["live_sequence"] == "3-1"
 
-    progress_event = sanitized[2]["event"]
+    progress_event = sanitized[3]["event"]
     assert progress_event["type"] == "analysis"
 
-    approval = sanitized[3]
+    approval = sanitized[4]
     assert approval["call_id"] == "call-approve"
     assert approval["reason"] == "sensitive tool"
     assert approval["sequence"] == 3
 
-    complete = sanitized[4]
+    complete = sanitized[5]
     assert complete["run"]["id"] == "r-1"
-    error = sanitized[5]
+    error = sanitized[6]
     assert error["run"]["error"] == "Agent run was cancelled."
 
 

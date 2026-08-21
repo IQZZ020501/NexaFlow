@@ -524,6 +524,34 @@ export function mergePublicRunEvent(
         : run
     )
   }
+  if (event.type === "answer_reset") {
+    return runs.map((run) =>
+      run.id === runId
+        ? (() => {
+            const sameStream =
+              !event.stream_epoch ||
+              event.stream_epoch === run.live_stream_epoch
+            if (
+              sameStream &&
+              event.live_sequence &&
+              run.live_stream_cursor &&
+              compareLiveStreamIds(
+                event.live_sequence,
+                run.live_stream_cursor
+              ) <= 0
+            ) {
+              return run
+            }
+            return {
+              ...run,
+              result: "",
+              live_stream_epoch: event.stream_epoch ?? run.live_stream_epoch,
+              live_stream_cursor: event.live_sequence ?? run.live_stream_cursor,
+            }
+          })()
+        : run
+    )
+  }
   if (event.type === "reasoning_delta") {
     return runs.map((run) => {
       if (run.id !== runId) return run

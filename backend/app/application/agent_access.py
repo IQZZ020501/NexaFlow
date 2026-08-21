@@ -417,6 +417,10 @@ async def sanitize_external_agent_stream(
             }
             _copy_external_stream_metadata(event, sanitized)
             yield sanitized
+        elif event_type == "answer_reset":
+            sanitized = {"type": "answer_reset"}
+            _copy_external_stream_metadata(event, sanitized)
+            yield sanitized
         elif event_type == "reasoning_delta":
             sanitized = {
                 "type": "reasoning_delta",

@@ -5877,6 +5877,12 @@ def test_agent_live_stream_round_trip() -> None:
                     "stream_epoch": "worker-1",
                 }
             )
+            await publisher.publish(
+                {
+                    "type": "answer_reset",
+                    "stream_epoch": "worker-1",
+                }
+            )
             reader = agent_live_stream.AgentLiveStreamReader(settings(), "run-1")
             events = await reader.read(
                 "0-0",
@@ -5903,8 +5909,19 @@ def test_agent_live_stream_round_trip() -> None:
                     "stream_epoch": "worker-1",
                 },
             ),
+            (
+                "1700000000000-2",
+                {
+                    "type": "answer_reset",
+                    "stream_epoch": "worker-1",
+                },
+            ),
         ]
         assert fake.expirations == [
+            (
+                agent_live_stream.live_stream_key("run-1"),
+                agent_live_stream.LIVE_STREAM_TTL_SECONDS,
+            ),
             (
                 agent_live_stream.live_stream_key("run-1"),
                 agent_live_stream.LIVE_STREAM_TTL_SECONDS,

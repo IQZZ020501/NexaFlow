@@ -131,7 +131,6 @@ async def agent_node(
     thought = callback.thought(turn)
     await callback.process(thought)
     answer_started = False
-    answer_deltas: list[str] = []
     reasoning = ""
 
     async def emit_reasoning_delta(delta: str) -> None:
@@ -186,8 +185,8 @@ async def agent_node(
                             "Agent model returned an invalid stream message."
                         )
                     await emit_reasoning_delta(reasoning_content(chunk))
-                    if chunk.text:
-                        answer_deltas.append(chunk.text)
+                    if chunk.text and not runtime.context.defer_answer:
+                        await emit_answer_delta(chunk.text)
                     aggregate = chunk if aggregate is None else aggregate + chunk
                 message = message_chunk_to_message(
                     aggregate or AIMessageChunk(content="")
@@ -211,6 +210,9 @@ async def agent_node(
         > runtime.context.max_model_tokens
     ):
         raise AgentRunnerError("Agent model token limit reached.")
+    if tool_calls and answer_started:
+        await callback.answer_reset()
+        answer_started = False
     if tool_calls:
         call_ids = [call["id"] for call in tool_calls]
         if any(not call_id for call_id in call_ids) or len(set(call_ids)) != len(
@@ -232,11 +234,6 @@ async def agent_node(
         raise AgentRunnerError("Agent response was truncated.")
     if not completion.content.strip():
         raise AgentRunnerError("Agent returned an empty response.")
-    # ponytail: buffer one model turn; add provisional deltas only if token-level
-    # answer latency matters more than keeping tool preambles out of the answer.
-    if not runtime.context.defer_answer:
-        for delta in answer_deltas:
-            await emit_answer_delta(delta)
     draft_answer = completion.content
     return {
         "messages": messages,

@@ -1279,6 +1279,19 @@ describe("public-agent-chat helpers", () => {
     expect(takenOver.result).toBe("New")
     expect(takenOver.live_stream_epoch).toBe("worker-2")
     expect(takenOver.live_stream_cursor).toBe("1700000000001-0")
+
+    const reset = mergePublicRunEvent(
+      [takenOver],
+      "run-1",
+      {
+        type: "answer_reset",
+        stream_epoch: "worker-2",
+        live_sequence: "1700000000002-0",
+      },
+      "pending-1"
+    )[0]
+    expect(reset.result).toBe("")
+    expect(reset.live_stream_cursor).toBe("1700000000002-0")
   })
 
   test("cancels the active public stream", () => {

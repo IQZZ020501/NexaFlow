@@ -313,6 +313,36 @@ export function mergeAgentRunStreamEvent(
         : run
     )
   }
+  if (streamEvent.type === "answer_reset") {
+    return runs.map((run) =>
+      run.id === runId
+        ? (() => {
+            const sameStream =
+              !streamEvent.stream_epoch ||
+              streamEvent.stream_epoch === run.live_stream_epoch
+            if (
+              sameStream &&
+              streamEvent.live_sequence &&
+              run.live_stream_cursor &&
+              compareLiveStreamIds(
+                streamEvent.live_sequence,
+                run.live_stream_cursor
+              ) <= 0
+            ) {
+              return run
+            }
+            return {
+              ...run,
+              result: "",
+              live_stream_epoch:
+                streamEvent.stream_epoch ?? run.live_stream_epoch,
+              live_stream_cursor:
+                streamEvent.live_sequence ?? run.live_stream_cursor,
+            }
+          })()
+        : run
+    )
+  }
   if (streamEvent.type === "approval_required") {
     return runs.map((run) =>
       run.id === runId

@@ -188,6 +188,12 @@ export type AgentRunStreamEvent =
       delta: string
     }
   | {
+      type: "answer_reset"
+      sequence?: number
+      live_sequence?: string
+      stream_epoch?: string
+    }
+  | {
       type: "approval_required"
       sequence: number
       call_id: string
