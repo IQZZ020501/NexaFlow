@@ -1094,6 +1094,331 @@ async def test_graph_query_drops_stale_profiles_and_rejects_unknown_relations() 
             raise AssertionError("unknown graph relations must be rejected")
 
 
+async def test_graph_query_planning_edge_paths() -> None:
+    knowledge_base = KnowledgeBase(
+        id="query-edge-kb",
+        workspace_id="query-edge-workspace",
+        graph_enabled=True,
+    )
+    revision = SimpleNamespace(
+        id="query-edge-revision",
+        schema_id="query-edge-schema",
+        stats_json={},
+    )
+    schema = SimpleNamespace(
+        schema_json=default_policy_graph_schema().model_dump(mode="json")
+    )
+    alpha = GraphEntityRecord(
+        id="query-alpha",
+        entity_type="Account",
+        canonical_name="Alpha",
+        normalized_name="alpha",
+    )
+    beta = GraphEntityRecord(
+        id="query-beta",
+        entity_type="Organization",
+        canonical_name="Beta",
+        normalized_name="beta",
+    )
+    gamma = GraphEntityRecord(
+        id="query-gamma",
+        entity_type="Concept",
+        canonical_name="Gamma",
+        normalized_name="gamma",
+    )
+
+    assert await graph_query._profile_candidates_impl(
+        SimpleNamespace(),
+        knowledge_base,
+        revision,
+        "Alpha",
+        SimpleNamespace(),
+    ) == ([], {})
+    profile_revision = SimpleNamespace(
+        id=revision.id,
+        schema_id=revision.schema_id,
+        stats_json={"profile_embedding_model_id": "embedding-a"},
+    )
+    with patch.object(
+        graph_query,
+        "resolve_embedding_model",
+        AsyncMock(return_value=SimpleNamespace(id="embedding-b")),
+    ):
+        assert await graph_query._profile_candidates_impl(
+            SimpleNamespace(),
+            knowledge_base,
+            profile_revision,
+            "Alpha",
+            SimpleNamespace(),
+        ) == ([], {})
+    with patch.object(
+        graph_query,
+        "resolve_embedding_model",
+        AsyncMock(side_effect=RuntimeError("embedding unavailable")),
+    ):
+        assert await graph_query._profile_candidates_impl(
+            SimpleNamespace(),
+            knowledge_base,
+            profile_revision,
+            "Alpha",
+            SimpleNamespace(),
+        ) == ([], {})
+
+    assert graph_query._name_tokens_match_query(alpha, "Alpha account")
+    assert not graph_query._name_tokens_match_query(alpha, "Beta account")
+    with patch.object(
+        graph_repository,
+        "list_exact_entity_matches",
+        AsyncMock(return_value=[alpha, beta]),
+    ):
+        linked = await graph_query._link_entity_text_impl(
+            SimpleNamespace(),
+            knowledge_base,
+            revision,
+            "shared",
+            SimpleNamespace(),
+        )
+    assert linked.status == "ambiguous"
+    assert linked.candidates == (alpha, beta)
+
+    async def link_from_candidates(candidates):
+        with (
+            patch.object(
+                graph_repository,
+                "list_exact_entity_matches",
+                AsyncMock(return_value=[]),
+            ),
+            patch.object(
+                graph_repository,
+                "query_entity_candidate_ids",
+                AsyncMock(return_value=[entity.id for entity in candidates]),
+            ),
+            patch.object(
+                graph_query,
+                "_profile_candidates",
+                AsyncMock(return_value=([], {})),
+            ),
+            patch.object(
+                graph_repository,
+                "list_active_entities_by_ids",
+                AsyncMock(return_value=candidates),
+            ),
+        ):
+            return await graph_query._link_entity_text_impl(
+                SimpleNamespace(),
+                knowledge_base,
+                revision,
+                "Alpha account",
+                SimpleNamespace(),
+            )
+
+    assert (await link_from_candidates([alpha])).selected == alpha
+    assert (await link_from_candidates([alpha, beta])).status == "ambiguous"
+    assert (await link_from_candidates([])).status == "not_found"
+
+    with patch.object(
+        graph_repository,
+        "get_schema",
+        AsyncMock(return_value=None),
+    ):
+        unavailable = await graph_query._build_graph_query_plan_impl(
+            SimpleNamespace(),
+            knowledge_base,
+            revision,
+            KnowledgeQueryRequest(query="anything"),
+            SimpleNamespace(),
+        )
+    assert unavailable.operation == "unavailable"
+
+    async def build_plan(payload, mentions, link=None):
+        patches = [
+            patch.object(
+                graph_repository,
+                "get_schema",
+                AsyncMock(return_value=schema),
+            ),
+            patch.object(
+                graph_repository,
+                "list_query_entity_mentions",
+                AsyncMock(return_value=list(mentions)),
+            ),
+        ]
+        if link is not None:
+            patches.append(
+                patch.object(
+                    graph_query,
+                    "_link_entity_text",
+                    AsyncMock(return_value=link),
+                )
+            )
+        with patches[0], patches[1]:
+            if len(patches) == 3:
+                with patches[2]:
+                    return await graph_query._build_graph_query_plan_impl(
+                        SimpleNamespace(),
+                        knowledge_base,
+                        revision,
+                        payload,
+                        SimpleNamespace(),
+                    )
+            return await graph_query._build_graph_query_plan_impl(
+                SimpleNamespace(),
+                knowledge_base,
+                revision,
+                payload,
+                SimpleNamespace(),
+            )
+
+    selected = graph_query.EntityLinkResult("selected", alpha, (alpha,), 1, 0)
+    ambiguous = graph_query.EntityLinkResult(
+        "ambiguous", None, (alpha, beta), 2, 0
+    )
+    not_found = graph_query.EntityLinkResult("not_found", None, (), 0, 0)
+    assert (
+        await build_plan(
+            KnowledgeQueryRequest(query="missing path", graph_mode="path"),
+            [],
+        )
+    ).operation == "not_found"
+    assert (
+        await build_plan(
+            KnowledgeQueryRequest(query="neighbors", graph_mode="neighborhood"),
+            [],
+        )
+    ).operation == "not_found"
+    assert (
+        await build_plan(
+            KnowledgeQueryRequest(query="Alpha related", graph_mode="neighborhood"),
+            [alpha],
+            selected,
+        )
+    ).operation == "neighborhood"
+    assert (
+        await build_plan(KnowledgeQueryRequest(query="Alpha Beta"), [alpha, beta])
+    ).operation == "path"
+    assert (
+        await build_plan(KnowledgeQueryRequest(query="Alpha 相关"), [alpha])
+    ).operation == "neighborhood"
+    assert (
+        await build_plan(KnowledgeQueryRequest(query="Alpha details"), [alpha])
+    ).operation == "profile"
+    assert (
+        await build_plan(
+            KnowledgeQueryRequest(query="Alpha Beta Gamma"),
+            [alpha, beta, gamma],
+        )
+    ).operation == "synthesis"
+    assert (
+        await build_plan(KnowledgeQueryRequest(query="Alpha"), [], selected)
+    ).operation == "profile"
+    assert (
+        await build_plan(KnowledgeQueryRequest(query="shared"), [], ambiguous)
+    ).operation == "synthesis"
+    assert (
+        await build_plan(KnowledgeQueryRequest(query="missing"), [], not_found)
+    ).operation == "none"
+
+    empty_timeout = graph_traversal.GraphTraversalResult(
+        revision_id=revision.id,
+        operation="neighborhood",
+        resolved_entities=(),
+        nodes=(),
+        claims=(),
+        paths=(),
+        evidence=(),
+        visited_nodes=1,
+        truncated=True,
+        limit_reason="timeout",
+    )
+    merged = graph_query._merge_traversals(
+        revision,
+        "profile",
+        (alpha,),
+        [empty_timeout],
+    )
+    assert merged.limit_reason == "timeout"
+    assert merged.visited_nodes == 1
+
+    neighborhood_plan = graph_query.ResolvedGraphQueryPlan(
+        graph_query._plan("neighborhood", KnowledgeQueryRequest(query="Alpha")),
+        "neighborhood",
+        (alpha,),
+        (alpha,),
+        1,
+        0,
+    )
+    profile_plan = graph_query.ResolvedGraphQueryPlan(
+        graph_query._plan("profile", KnowledgeQueryRequest(query="Alpha")),
+        "profile",
+        (alpha,),
+        (alpha,),
+        1,
+        0,
+    )
+    with patch.object(
+        graph_traversal,
+        "neighborhood",
+        AsyncMock(return_value=empty_timeout),
+    ) as neighborhood:
+        assert (
+            await graph_query.execute_graph_query_plan(
+                SimpleNamespace(), knowledge_base, revision, neighborhood_plan
+            )
+        ) is empty_timeout
+        assert (
+            await graph_query.execute_graph_query_plan(
+                SimpleNamespace(), knowledge_base, revision, profile_plan
+            )
+        ).operation == "profile"
+    assert neighborhood.await_count == 2
+
+    evidence_a = graph_traversal.GraphEvidenceView(
+        "query-edge-evidence-a", "doc-a", "a.md", "chunk-a", "A", 0, 1,
+        "explicit_text",
+    )
+    evidence_b = graph_traversal.GraphEvidenceView(
+        "query-edge-evidence-b", "doc-b", "b.md", "chunk-b", "B", 0, 1,
+        "explicit_text",
+    )
+    step = graph_traversal.GraphPathStep(
+        "query-edge-claim", "related_to", alpha.id, beta.id, "forward", 1.0, 2,
+        (evidence_a, evidence_b),
+    )
+    limited = graph_query._candidate_evidence(
+        graph_traversal.GraphTraversalResult(
+            revision.id,
+            "path",
+            (),
+            (),
+            (step,),
+            (),
+            (evidence_a, evidence_b),
+            0,
+            False,
+        ),
+        1,
+    )
+    assert limited[0] == ("chunk-a",)
+
+    with patch.object(
+        graph_repository,
+        "get_active_revision",
+        AsyncMock(side_effect=RuntimeError("database unavailable")),
+    ):
+        try:
+            await graph_query.retrieve_graph_candidates(
+                SimpleNamespace(),
+                knowledge_base,
+                KnowledgeQueryRequest(query="Alpha"),
+                SimpleNamespace(),
+                5,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 503
+        else:
+            raise AssertionError("unexpected graph failures must be normalized")
+
+
 def test_graph_profile_collection_is_knowledge_base_scoped() -> None:
     from app.capabilities.rag.vector_store import graph_profile_collection_name
 
@@ -3593,6 +3918,7 @@ async def main() -> None:
     await test_graph_retrieval_fuses_evidence_without_changing_off_mode()
     await test_graph_query_off_skips_graph_dependencies()
     await test_graph_query_drops_stale_profiles_and_rejects_unknown_relations()
+    await test_graph_query_planning_edge_paths()
     test_graph_profile_collection_is_knowledge_base_scoped()
     test_graph_profile_vectors_use_an_isolated_collection()
     await test_graph_storage_cleanup_removes_both_vector_collections()

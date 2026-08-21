@@ -689,6 +689,46 @@ describe("knowledge graph workspace", () => {
     await waitFor(() => expect(importStarted).toBe(true))
   })
 
+  test("searches entities and opens the selected entity detail", async () => {
+    installGraphFetch({
+      entities: [],
+      custom: (url) => {
+        if (url.includes("/graph/entities?") && url.includes("query=")) {
+          return jsonResponse({
+            items: [bankEntities[0]],
+            total: 1,
+            limit: 20,
+            offset: 0,
+          })
+        }
+        if (url.endsWith("/graph/entities/account-a")) {
+          return jsonResponse({
+            ...bankEntities[0],
+            aliases: ["账号甲"],
+            claims: [],
+            evidence: [],
+          })
+        }
+      },
+    })
+    renderGraph()
+
+    await screen.findByText("暂无实体")
+    const search = screen.getByLabelText("实体搜索")
+    fireEvent.change(search, { target: { value: "账户" } })
+    fireEvent.submit(search.closest("form")!)
+    fireEvent.click(await screen.findByRole("button", { name: /账户 A/ }))
+
+    await waitFor(() =>
+      expect(
+        requests.some((request) =>
+          request.url.endsWith("/graph/entities/account-a")
+        )
+      ).toBe(true)
+    )
+    expect(errors).toEqual([])
+  })
+
   test("aborts stale initial requests when the knowledge base changes", async () => {
     const pending: Array<(response: Response) => void> = []
     let staleSignal: AbortSignal | undefined
