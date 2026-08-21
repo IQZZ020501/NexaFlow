@@ -412,10 +412,14 @@ class BudgetedGraphChatProvider:
             self._task,
             reserved,
         )
-        aggregate = None
+        latest_usage: dict[str, Any] | None = None
         try:
             async for chunk in self._delegate.astream(messages, **kwargs):
-                aggregate = chunk if aggregate is None else aggregate + chunk
+                snapshot = usage_from_message(chunk)
+                if snapshot["reported_model_calls"]:
+                    # Streaming providers commonly repeat cumulative usage on
+                    # every chunk; the last reported snapshot is the call total.
+                    latest_usage = snapshot
                 yield chunk
         except ModelProviderStatusError:
             await finalize_graph_model_tokens(
@@ -440,7 +444,7 @@ class BudgetedGraphChatProvider:
             self._db,
             self._knowledge_base,
             self._revision,
-            usage=usage_from_message(aggregate),
+            usage=latest_usage,
             reserved_tokens=reserved,
         )
 

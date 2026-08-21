@@ -13,6 +13,7 @@ from app.shareddomain.agents.runtime.usage import usage_from_message
 from app.shareddomain.knowledge_graph.schema import GraphSchemaDefinition
 
 GRAPH_EXTRACTION_TIMEOUT_SECONDS = 90
+GRAPH_EXTRACTION_TOTAL_TIMEOUT_SECONDS = 180
 MAX_EXTRACTION_CHUNKS = 1
 MAX_EXTRACTION_CHARS = 24_000
 MAX_EXTRACTION_OUTPUT_TOKENS = 4_096
@@ -142,21 +143,54 @@ async def _stream_response(
     messages: list[Any],
 ) -> Any:
     aggregate: AIMessageChunk | None = None
-    async with aclosing(
-        provider.astream(messages, max_tokens=MAX_EXTRACTION_OUTPUT_TOKENS)
-    ) as stream:
-        while True:
-            try:
-                async with asyncio.timeout(GRAPH_EXTRACTION_TIMEOUT_SECONDS):
-                    chunk = await anext(stream)
-            except StopAsyncIteration:
-                break
-            except TimeoutError as exc:
-                raise ModelProviderTimeoutError("Model request timed out.") from exc
-            if not isinstance(chunk, AIMessageChunk):
-                raise ValueError("Graph extractor returned an invalid stream message.")
-            aggregate = chunk if aggregate is None else aggregate + chunk
-    return message_chunk_to_message(aggregate or AIMessageChunk(content=""))
+    latest_usage: dict[str, Any] | None = None
+    try:
+        async with asyncio.timeout(GRAPH_EXTRACTION_TOTAL_TIMEOUT_SECONDS):
+            async with aclosing(
+                provider.astream(messages, max_tokens=MAX_EXTRACTION_OUTPUT_TOKENS)
+            ) as stream:
+                while True:
+                    try:
+                        async with asyncio.timeout(GRAPH_EXTRACTION_TIMEOUT_SECONDS):
+                            chunk = await anext(stream)
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError as exc:
+                        raise ModelProviderTimeoutError(
+                            "Model request timed out."
+                        ) from exc
+                    if not isinstance(chunk, AIMessageChunk):
+                        raise ValueError(
+                            "Graph extractor returned an invalid stream message."
+                        )
+                    snapshot = usage_from_message(chunk)
+                    if snapshot["reported_model_calls"]:
+                        latest_usage = snapshot
+                    # OpenAI-compatible providers report cumulative usage on every
+                    # stream chunk; do not let LangChain add those snapshots.
+                    clean_chunk = chunk.model_copy(
+                        update={"usage_metadata": None, "response_metadata": {}}
+                    )
+                    aggregate = (
+                        clean_chunk
+                        if aggregate is None
+                        else aggregate + clean_chunk
+                    )
+    except TimeoutError as exc:
+        raise ModelProviderTimeoutError("Model request timed out.") from exc
+    response = message_chunk_to_message(aggregate or AIMessageChunk(content=""))
+    if latest_usage:
+        response.usage_metadata = {
+            key: latest_usage[key]
+            for key in (
+                "input_tokens",
+                "output_tokens",
+                "total_tokens",
+                "input_token_details",
+                "output_token_details",
+            )
+        }
+    return response
 
 
 async def extract_graph_batch(

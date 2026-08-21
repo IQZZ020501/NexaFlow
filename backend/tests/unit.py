@@ -422,6 +422,76 @@ def test_graph_extractor_allows_active_stream_past_total_timeout() -> None:
     assert result.batch == GraphExtractionBatch()
 
 
+def test_graph_extractor_uses_latest_stream_usage_snapshot() -> None:
+    content = "制度 A 定义术语 A。"
+
+    class Provider:
+        async def astream(self, _messages, **_kwargs):
+            payload = '{"entities": [], "claims": []}'
+            for part, total in zip(
+                (payload[:8], payload[8:16], payload[16:]),
+                (8, 16, 24),
+                strict=True,
+            ):
+                yield AIMessageChunk(
+                    content=part,
+                    usage_metadata={
+                        "input_tokens": 12,
+                        "output_tokens": total - 12,
+                        "total_tokens": total,
+                    },
+                )
+
+    result = asyncio.run(
+        extract_graph_batch(
+            Provider(),
+            default_policy_graph_schema(),
+            [ExtractionChunk("chunk-1", "doc-1", content)],
+        )
+    )
+    assert result.model_usage["input_tokens"] == 12
+    assert result.model_usage["output_tokens"] == 12
+    assert result.model_usage["total_tokens"] == 24
+
+
+def test_budgeted_graph_stream_uses_latest_usage_snapshot() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.application import knowledge_graph_build
+
+    class Provider:
+        async def astream(self, _messages, **_kwargs):
+            for total in (8, 16, 24):
+                yield AIMessageChunk(
+                    content="{}",
+                    usage_metadata={
+                        "input_tokens": 12,
+                        "output_tokens": total - 12,
+                        "total_tokens": total,
+                    },
+                )
+
+    finalize = AsyncMock()
+    provider = BudgetedGraphChatProvider(
+        SimpleNamespace(),
+        Provider(),
+        SimpleNamespace(),
+        SimpleNamespace(model_usage_json={}),
+        SimpleNamespace(),
+    )
+
+    async def consume() -> None:
+        async for _ in provider.astream([{"role": "user", "content": "test"}]):
+            pass
+
+    with (
+        patch.object(knowledge_graph_build, "reserve_graph_model_tokens", new=AsyncMock()),
+        patch.object(knowledge_graph_build, "finalize_graph_model_tokens", new=finalize),
+    ):
+        asyncio.run(consume())
+    assert finalize.await_args.kwargs["usage"]["total_tokens"] == 24
+
+
 def test_graph_extractor_times_out_an_idle_stream() -> None:
     from unittest.mock import patch
 
@@ -6287,6 +6357,8 @@ def main() -> None:
     test_graph_extraction_requires_exact_chunk_evidence()
     test_graph_extractor_parses_bounded_json_only_response()
     test_graph_extractor_allows_active_stream_past_total_timeout()
+    test_graph_extractor_uses_latest_stream_usage_snapshot()
+    test_budgeted_graph_stream_uses_latest_usage_snapshot()
     test_graph_extractor_times_out_an_idle_stream()
     test_graph_extractor_rejects_oversized_input_without_truncating_json()
     test_graph_extractor_retries_invalid_model_output_once()
