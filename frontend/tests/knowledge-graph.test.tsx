@@ -226,6 +226,8 @@ const graphStatus: KnowledgeGraphStatus = {
   pending_review_count: 0,
   last_error: null,
   published_at: "2026-01-01T00:00:00Z",
+  build_task_id: null,
+  build_task_status: null,
 }
 
 type GraphFetchOptions = {
@@ -614,6 +616,27 @@ describe("knowledge graph workspace", () => {
         claim_ids: [],
       })
     )
+  })
+
+  test("keeps rebuild disabled after refresh while a graph task is active", async () => {
+    installGraphFetch({
+      status: {
+        ...graphStatus,
+        revision_status: "building",
+        build_task_id: "task-rebuild",
+        build_task_status: "running",
+      },
+    })
+    renderGraph()
+
+    fireEvent.click(await screen.findByRole("tab", { name: "设置" }))
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "重新抽取全部文件",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
   })
 
   test("validates schema locally and refreshes after rebuild", async () => {

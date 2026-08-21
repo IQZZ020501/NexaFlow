@@ -1,6 +1,13 @@
 /* @jsxImportSource react */
 import { afterEach, describe, expect, test } from "bun:test"
-import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { useState } from "react"
 
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
@@ -154,13 +161,18 @@ function DialogsHarness({
   onGrant?: () => void
   onRevoke?: (userId: string) => void
 }) {
-  const [form, setForm] = useState<KnowledgeBaseForm>(initial?.form ?? emptyForm)
-  const [editFormState, setEditFormState] = useState<KnowledgeBaseEditForm | null>(
-    initial?.editForm ?? null,
+  const [form, setForm] = useState<KnowledgeBaseForm>(
+    initial?.form ?? emptyForm
   )
+  const [editFormState, setEditFormState] =
+    useState<KnowledgeBaseEditForm | null>(initial?.editForm ?? null)
   const [permissionFormState, setPermissionFormState] =
-    useState<KnowledgeBasePermissionForm | null>(initial?.permissionForm ?? null)
-  const [isDialogOpen, setIsDialogOpen] = useState(initial?.isDialogOpen ?? false)
+    useState<KnowledgeBasePermissionForm | null>(
+      initial?.permissionForm ?? null
+    )
+  const [isDialogOpen, setIsDialogOpen] = useState(
+    initial?.isDialogOpen ?? false
+  )
   const isSaving = initial?.isSaving ?? false
 
   return (
@@ -212,11 +224,13 @@ describe("KnowledgeBaseDialogs", () => {
         onCreate={() => {
           created += 1
         }}
-      />,
+      />
     )
 
     const dialog = screen.getByRole("dialog")
-    expect(within(dialog).getByText("配置知识库名称、描述和默认数据源。")).toBeTruthy()
+    expect(
+      within(dialog).getByText("配置知识库名称、描述和默认数据源。")
+    ).toBeTruthy()
 
     fireEvent.change(within(dialog).getByLabelText("知识库名称"), {
       target: { value: "New KB" },
@@ -247,7 +261,7 @@ describe("KnowledgeBaseDialogs", () => {
 
   test("disables the create submit while saving", () => {
     renderPage(
-      <DialogsHarness initial={{ isDialogOpen: true, isSaving: true }} />,
+      <DialogsHarness initial={{ isDialogOpen: true, isSaving: true }} />
     )
     const submit = screen.getByRole("button", {
       name: "新建知识库",
@@ -270,14 +284,16 @@ describe("KnowledgeBaseDialogs", () => {
         onUpdate={() => {
           updated += 1
         }}
-      />,
+      />
     )
 
     const dialog = screen.getByRole("dialog")
     expect(within(dialog).getByText("更新知识库名称和描述。")).toBeTruthy()
-    const nameInput = within(dialog).getByLabelText("知识库名称") as HTMLInputElement
+    const nameInput = within(dialog).getByLabelText(
+      "知识库名称"
+    ) as HTMLInputElement
     const descriptionInput = within(dialog).getByLabelText(
-      "描述",
+      "描述"
     ) as HTMLTextAreaElement
     expect(nameInput.value).toBe("KB Alpha")
     expect(descriptionInput.value).toBe("Alpha docs")
@@ -303,7 +319,7 @@ describe("KnowledgeBaseDialogs", () => {
         onRevoke={(userId) => {
           revoked.push(userId)
         }}
-      />,
+      />
     )
 
     const dialog = screen.getByRole("dialog")
@@ -314,7 +330,9 @@ describe("KnowledgeBaseDialogs", () => {
     expect(within(dialog).getByText("other")).toBeTruthy()
 
     // Grant list row with badge and revoke button.
-    expect(within(dialog).getAllByText("可查看").length).toBeGreaterThanOrEqual(1)
+    expect(within(dialog).getAllByText("可查看").length).toBeGreaterThanOrEqual(
+      1
+    )
     fireEvent.click(within(dialog).getByRole("button", { name: "撤销授权" }))
     expect(revoked).toEqual(["u-other"])
 
@@ -329,7 +347,7 @@ describe("KnowledgeBaseDialogs", () => {
         initial={{ permissionForm }}
         shareTargets={[otherMember]}
         permissions={[]}
-      />,
+      />
     )
 
     const dialog = screen.getByRole("dialog")
@@ -338,9 +356,9 @@ describe("KnowledgeBaseDialogs", () => {
     fireEvent.pointerDown(within(dialog).getByRole("button", { name: "权限" }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "可编辑" }))
     // The trigger is label-associated 权限; check its visible content.
-    expect(within(dialog).getByRole("button", { name: "权限" }).textContent).toContain(
-      "可编辑",
-    )
+    expect(
+      within(dialog).getByRole("button", { name: "权限" }).textContent
+    ).toContain("可编辑")
   })
 
   test("disables permission controls without share targets", () => {
@@ -349,7 +367,7 @@ describe("KnowledgeBaseDialogs", () => {
         initial={{ permissionForm }}
         shareTargets={[]}
         permissions={[]}
-      />,
+      />
     )
     const userSelect = screen.getByRole("button", {
       name: "用户",
@@ -379,28 +397,30 @@ describe("KnowledgeBaseDialogs", () => {
       <DialogsHarness
         initial={{ editForm }}
         registeredModels={[embeddingModel, rerankerModel]}
-      />,
+      />
     )
 
     const dialog = screen.getByRole("dialog")
     const descriptionInput = within(dialog).getByLabelText(
-      "描述",
+      "描述"
     ) as HTMLTextAreaElement
     fireEvent.change(descriptionInput, { target: { value: "Updated docs" } })
     expect(descriptionInput.value).toBe("Updated docs")
 
     // Re-select the embedding model (already selected → still fires onChange).
     fireEvent.pointerDown(
-      within(dialog).getByText("text-embedding-pro").closest("button")!,
+      within(dialog).getByText("text-embedding-pro").closest("button")!
     )
-    const embeddingItem = (await screen.findAllByText("text-embedding-pro")).find(
-      (element) => element.closest('[role="menuitem"]'),
-    )!
+    const embeddingItem = (
+      await screen.findAllByText("text-embedding-pro")
+    ).find((element) => element.closest('[role="menuitem"]'))!
     fireEvent.click(embeddingItem)
     expect(within(dialog).getByText("text-embedding-pro")).toBeTruthy()
 
     // Switch the reranker back to 不使用.
-    fireEvent.pointerDown(within(dialog).getByText("rerank-pro").closest("button")!)
+    fireEvent.pointerDown(
+      within(dialog).getByText("rerank-pro").closest("button")!
+    )
     fireEvent.click(await screen.findByRole("menuitem", { name: "不使用" }))
     expect(within(dialog).getByText("不使用 Rerank 模型")).toBeTruthy()
   })
@@ -418,12 +438,14 @@ describe("KnowledgeBaseDialogs", () => {
         initial={{ permissionForm }}
         shareTargets={[otherMember]}
         permissions={[]}
-      />,
+      />
     )
 
     const dialog = screen.getByRole("dialog")
     fireEvent.pointerDown(within(dialog).getByRole("button", { name: "用户" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Other User / other" }))
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Other User / other" })
+    )
     expect(within(dialog).getByText("Other User / other")).toBeTruthy()
   })
 
@@ -433,7 +455,7 @@ describe("KnowledgeBaseDialogs", () => {
         initial={{ permissionForm, isSaving: true }}
         shareTargets={[otherMember]}
         permissions={[]}
-      />,
+      />
     )
     const save = screen.getByRole("button", {
       name: "保存授权",
@@ -474,17 +496,27 @@ describe("MarkdownContent", () => {
           "",
           "---",
         ].join("\n")}
-      />,
+      />
     )
 
-    expect(screen.getByRole("heading", { level: 1, name: "Title One" })).toBeTruthy()
-    expect(screen.getByRole("heading", { level: 2, name: "Title Two" })).toBeTruthy()
-    expect(screen.getByRole("heading", { level: 3, name: "Title Three" })).toBeTruthy()
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Title One" })
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Title Two" })
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("heading", { level: 3, name: "Title Three" })
+    ).toBeTruthy()
     // RTL text matching only sees direct text nodes, so match by fragments.
-    expect(screen.getByText((content: string) => content.includes("Some"))).toBeTruthy()
+    expect(
+      screen.getByText((content: string) => content.includes("Some"))
+    ).toBeTruthy()
     expect(screen.getByText("bold")).toBeTruthy()
     expect(screen.getByText("inline code")).toBeTruthy()
-    const link = screen.getByRole("link", { name: "OpenAI" }) as HTMLAnchorElement
+    const link = screen.getByRole("link", {
+      name: "OpenAI",
+    }) as HTMLAnchorElement
     expect(link.href).toBe("https://openai.com/")
     expect(link.target).toBe("_blank")
     expect(screen.getByText("item a")).toBeTruthy()
@@ -504,7 +536,7 @@ describe("MarkdownContent", () => {
           "| a    | 1     |",
           "| b    | 2     |",
         ].join("\n")}
-      />,
+      />
     )
     const table = screen.getByRole("table")
     expect(table).toBeTruthy()
@@ -516,7 +548,7 @@ describe("MarkdownContent", () => {
 
   test("renders emphasis next to CJK text", () => {
     renderPage(
-      <MarkdownContent content="试用期按 **80%**发放，正式员工按 *标准*执行。" />,
+      <MarkdownContent content="试用期按 **80%**发放，正式员工按 *标准*执行。" />
     )
 
     expect(screen.getByText("80%").tagName).toBe("STRONG")
@@ -541,7 +573,7 @@ describe("MarkdownContent", () => {
             '    return f"Hello {name}"',
             "```",
           ].join("\n")}
-        />,
+        />
       )
 
       await waitFor(() => expect(document.querySelector(".shiki")).toBeTruthy())
@@ -549,7 +581,7 @@ describe("MarkdownContent", () => {
       await waitFor(() =>
         expect(written).toEqual([
           'def greet(name):\n    return f"Hello {name}"',
-        ]),
+        ])
       )
       expect(screen.getByText("已复制")).toBeTruthy()
     } finally {
@@ -573,10 +605,8 @@ describe("MarkdownContent", () => {
     try {
       renderPage(
         <MarkdownContent
-          content={["```made-up-language", "plain <code>", "```"].join(
-            "\n",
-          )}
-        />,
+          content={["```made-up-language", "plain <code>", "```"].join("\n")}
+        />
       )
 
       expect(screen.getByText("plain <code>")).toBeTruthy()
@@ -605,16 +635,15 @@ describe("MarkdownContent", () => {
     Object.defineProperty(navigator, "clipboard", {
       value: {
         writeText: async (value: string) => void writtenText.push(value),
-        write: async (items: ClipboardItems[]) => void writtenItems.push(...items),
+        write: async (items: ClipboardItems[]) =>
+          void writtenItems.push(...items),
       },
       configurable: true,
     })
     try {
       const source = "graph TD\n  A[Start] --> B[Done]"
       renderPage(
-        <MarkdownContent
-          content={["```mermaid", source, "```"].join("\n")}
-        />,
+        <MarkdownContent content={["```mermaid", source, "```"].join("\n")} />
       )
 
       const diagram = (await screen.findByRole("img", {
@@ -624,10 +653,12 @@ describe("MarkdownContent", () => {
       act(() => document.documentElement.classList.add("dark"))
       await waitFor(() =>
         expect(
-          (screen.getByRole("img", {
-            name: "Mermaid 图表",
-          }) as HTMLImageElement).src,
-        ).not.toBe(lightDiagram),
+          (
+            screen.getByRole("img", {
+              name: "Mermaid 图表",
+            }) as HTMLImageElement
+          ).src
+        ).not.toBe(lightDiagram)
       )
       fireEvent.click(screen.getByRole("button", { name: "复制图表" }))
       await waitFor(() => expect(writtenItems.length).toBe(1))
@@ -662,11 +693,11 @@ describe("MarkdownContent", () => {
       renderPage(
         <MarkdownContent
           content={["```mermaid", "this is not a diagram", "```"].join("\n")}
-        />,
+        />
       )
 
       expect((await screen.findByRole("alert")).textContent).toContain(
-        "图表渲染失败",
+        "图表渲染失败"
       )
       expect(screen.getByText("this is not a diagram")).toBeTruthy()
       fireEvent.click(screen.getByRole("button", { name: "复制源码" }))
@@ -687,9 +718,11 @@ describe("MarkdownContent", () => {
           "![embedded](data:image/png;base64,AAAA)",
           "![missing]()",
         ].join("\n")}
-      />,
+      />
     )
-    const external = screen.getByRole("img", { name: "external" }) as HTMLImageElement
+    const external = screen.getByRole("img", {
+      name: "external",
+    }) as HTMLImageElement
     expect(external.src).toContain("example.com/x.png")
     expect(screen.getAllByText("图片").length).toBe(2)
   })
@@ -742,12 +775,16 @@ describe("knowledge status helpers", () => {
     expect(taskStatusLabel("running", t)).toBe("运行中")
     expect(taskStatusLabel("succeeded", t)).toBe("成功")
     expect(taskStatusLabel("failed", t)).toBe("失败")
+    expect(taskStatusLabel("cancelling", t)).toBe("停止中")
+    expect(taskStatusLabel("cancelled", t)).toBe("已停止")
     expect(taskStatusLabel("unknown", t)).toBe("unknown")
 
     expect(taskStatusDotClassName("failed")).toBe("bg-destructive")
     expect(taskStatusDotClassName("succeeded")).toBe("bg-emerald-500")
     expect(taskStatusDotClassName("queued")).toBe("bg-sky-500")
     expect(taskStatusDotClassName("running")).toBe("bg-sky-500")
+    expect(taskStatusDotClassName("cancelling")).toBe("bg-sky-500")
+    expect(taskStatusDotClassName("cancelled")).toBe("bg-muted-foreground")
     expect(taskStatusDotClassName("paused")).toBe("bg-muted-foreground")
   })
 
@@ -766,7 +803,7 @@ describe("knowledge status helpers", () => {
         <StatusBadge status="archived" />
         <StatusBadge status="disabled" />
         <StatusBadge status="weird" />
-      </>,
+      </>
     )
     expect(screen.getByText("已启用")).toBeTruthy()
     expect(screen.getByText("已归档")).toBeTruthy()
@@ -779,7 +816,7 @@ describe("knowledge status helpers", () => {
       <>
         <PermissionBadge permission="edit" />
         <PermissionBadge permission="view" />
-      </>,
+      </>
     )
     expect(screen.getByText("可编辑")).toBeTruthy()
     expect(screen.getByText("可查看")).toBeTruthy()
@@ -810,7 +847,8 @@ afterEach(() => {
 
 describe("lib/api/knowledge", () => {
   test("lists knowledge bases with optional query parameters", async () => {
-    const calls: Array<{ url: string; method: string; auth: string | null }> = []
+    const calls: Array<{ url: string; method: string; auth: string | null }> =
+      []
     stubFetch((url, init) => {
       const headers = new Headers(init?.headers)
       calls.push({
@@ -822,11 +860,14 @@ describe("lib/api/knowledge", () => {
     })
 
     await knowledgeApi.listKnowledgeBases("tok", "ws-1")
-    await knowledgeApi.listKnowledgeBases("tok", "ws-1", { limit: 50, offset: 25 })
+    await knowledgeApi.listKnowledgeBases("tok", "ws-1", {
+      limit: 50,
+      offset: 25,
+    })
 
     expect(calls[0].url).toBe("/api/v1/workspaces/ws-1/knowledge-bases")
     expect(calls[1].url).toBe(
-      "/api/v1/workspaces/ws-1/knowledge-bases?limit=50&offset=25",
+      "/api/v1/workspaces/ws-1/knowledge-bases?limit=50&offset=25"
     )
     expect(calls.every((call) => call.auth === "Bearer tok")).toBe(true)
   })
@@ -887,10 +928,10 @@ describe("lib/api/knowledge", () => {
       includeStaged: true,
     })
     expect(urls[0]).toBe(
-      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents",
+      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents"
     )
     expect(urls[1]).toBe(
-      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents?include_staged=true",
+      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents?include_staged=true"
     )
   })
 
@@ -901,7 +942,12 @@ describe("lib/api/knowledge", () => {
       return new Response("{}", { status: 200 })
     })
 
-    await knowledgeApi.uploadKnowledgeAttachment("tok", "ws-1", "kb-1", new File(["x"], "a.txt"))
+    await knowledgeApi.uploadKnowledgeAttachment(
+      "tok",
+      "ws-1",
+      "kb-1",
+      new File(["x"], "a.txt")
+    )
     expect(body instanceof FormData).toBe(true)
   })
 
@@ -912,9 +958,28 @@ describe("lib/api/knowledge", () => {
       return new Response("[]", { status: 200 })
     })
 
-    await knowledgeApi.createKnowledgeDocuments("tok", "ws-1", "kb-1", ["att-1"], true)
-    await knowledgeApi.createKnowledgeDocuments("tok", "ws-1", "kb-1", ["att-2"], false)
-    await knowledgeApi.createKnowledgeDocuments("tok", "ws-1", "kb-1", ["att-3"], true, "qa")
+    await knowledgeApi.createKnowledgeDocuments(
+      "tok",
+      "ws-1",
+      "kb-1",
+      ["att-1"],
+      true
+    )
+    await knowledgeApi.createKnowledgeDocuments(
+      "tok",
+      "ws-1",
+      "kb-1",
+      ["att-2"],
+      false
+    )
+    await knowledgeApi.createKnowledgeDocuments(
+      "tok",
+      "ws-1",
+      "kb-1",
+      ["att-3"],
+      true,
+      "qa"
+    )
     expect(JSON.parse(calls[0].body)).toEqual({
       attachment_ids: ["att-1"],
       staged: true,
@@ -933,7 +998,9 @@ describe("lib/api/knowledge", () => {
   test("parses documents with and without explicit options", async () => {
     const calls: Array<{ body: string | undefined }> = []
     stubFetch((_url, init) => {
-      calls.push({ body: init?.body === undefined ? undefined : String(init?.body) })
+      calls.push({
+        body: init?.body === undefined ? undefined : String(init?.body),
+      })
       return new Response("{}", { status: 200 })
     })
 
@@ -968,7 +1035,13 @@ describe("lib/api/knowledge", () => {
     })
 
     await knowledgeApi.indexKnowledgeDocument("tok", "ws-1", "kb-1", "doc-1")
-    await knowledgeApi.setKnowledgeDocumentActive("tok", "ws-1", "kb-1", "doc-1", false)
+    await knowledgeApi.setKnowledgeDocumentActive(
+      "tok",
+      "ws-1",
+      "kb-1",
+      "doc-1",
+      false
+    )
     expect(calls[0].method).toBe("POST")
     expect(calls[1].method).toBe("PATCH")
     expect(JSON.parse(calls[1].body)).toEqual({ is_active: false })
@@ -989,9 +1062,15 @@ describe("lib/api/knowledge", () => {
         return new Response(new Blob(["content"]), { status: 200 })
       })
 
-      await knowledgeApi.downloadKnowledgeDocument("tok", "ws-1", "kb-1", "doc-1", "a.txt")
+      await knowledgeApi.downloadKnowledgeDocument(
+        "tok",
+        "ws-1",
+        "kb-1",
+        "doc-1",
+        "a.txt"
+      )
       expect(calls[0].url).toBe(
-        "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents/doc-1/download",
+        "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents/doc-1/download"
       )
       expect(calls[0].auth).toBe("Bearer tok")
       expect(clicked).toHaveLength(1)
@@ -1002,9 +1081,17 @@ describe("lib/api/knowledge", () => {
   })
 
   test("rejects downloads with a non-ok response", async () => {
-    stubFetch(() => new Response("nope", { status: 500, statusText: "Server Error" }))
+    stubFetch(
+      () => new Response("nope", { status: 500, statusText: "Server Error" })
+    )
     await expect(
-      knowledgeApi.downloadKnowledgeDocument("tok", "ws-1", "kb-1", "doc-1", "a.txt"),
+      knowledgeApi.downloadKnowledgeDocument(
+        "tok",
+        "ws-1",
+        "kb-1",
+        "doc-1",
+        "a.txt"
+      )
     ).rejects.toThrow("Server Error")
   })
 
@@ -1013,14 +1100,22 @@ describe("lib/api/knowledge", () => {
     stubFetch((url) => {
       urls.push(url)
       if (url.includes("offset=0")) {
-        return new Response(JSON.stringify(Array.from({ length: 200 }, () => ({}))), {
-          status: 200,
-        })
+        return new Response(
+          JSON.stringify(Array.from({ length: 200 }, () => ({}))),
+          {
+            status: 200,
+          }
+        )
       }
       return new Response(JSON.stringify([{}, {}, {}]), { status: 200 })
     })
 
-    const chunks = await knowledgeApi.listKnowledgeDocumentChunks("tok", "ws-1", "kb-1", "doc-1")
+    const chunks = await knowledgeApi.listKnowledgeDocumentChunks(
+      "tok",
+      "ws-1",
+      "kb-1",
+      "doc-1"
+    )
     expect(chunks).toHaveLength(203)
     expect(urls).toEqual([
       "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents/doc-1/chunks?limit=200&offset=0",
@@ -1034,9 +1129,15 @@ describe("lib/api/knowledge", () => {
       calledUrl = url
       return new Response(new Blob(["img"]), { status: 200 })
     })
-    const blob = await knowledgeApi.loadKnowledgeAsset("tok", "ws-1", "kb-1", "doc-1", "asset-1")
+    const blob = await knowledgeApi.loadKnowledgeAsset(
+      "tok",
+      "ws-1",
+      "kb-1",
+      "doc-1",
+      "asset-1"
+    )
     expect(calledUrl).toBe(
-      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents/doc-1/assets/asset-1",
+      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents/doc-1/assets/asset-1"
     )
     expect(await blob.text()).toBe("img")
   })
@@ -1055,19 +1156,38 @@ describe("lib/api/knowledge", () => {
     ])
   })
 
-  test("retries tasks and rebuilds the index", async () => {
+  test("mutates tasks and rebuilds the index", async () => {
     const calls: Array<{ url: string; method: string }> = []
+    let retryBody = ""
     stubFetch((url, init) => {
       calls.push({ url, method: init?.method ?? "GET" })
+      if (url.includes("/retry")) retryBody = String(init?.body ?? "")
       return new Response("{}", { status: 200 })
     })
-    await knowledgeApi.retryKnowledgeTask("tok", "ws-1", "kb-1", "task-1")
+    await knowledgeApi.retryKnowledgeTask(
+      "tok",
+      "ws-1",
+      "kb-1",
+      "task-1",
+      "unfinished"
+    )
+    await knowledgeApi.stopKnowledgeTask("tok", "ws-1", "kb-1", "task-1")
+    await knowledgeApi.deleteKnowledgeTask("tok", "ws-1", "kb-1", "task-1")
     await knowledgeApi.rebuildKnowledgeIndex("tok", "ws-1", "kb-1")
     expect(calls[0]).toEqual({
       url: "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/tasks/task-1/retry",
       method: "POST",
     })
+    expect(JSON.parse(retryBody)).toEqual({ mode: "unfinished" })
     expect(calls[1]).toEqual({
+      url: "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/tasks/task-1/stop",
+      method: "POST",
+    })
+    expect(calls[2]).toEqual({
+      url: "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/tasks/task-1",
+      method: "DELETE",
+    })
+    expect(calls[3]).toEqual({
       url: "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/rebuild-index",
       method: "POST",
     })
@@ -1083,7 +1203,9 @@ describe("lib/api/knowledge", () => {
       query: "hello",
       limit: 3,
     })
-    expect(calls[0].url).toBe("/api/v1/workspaces/ws-1/knowledge-bases/kb-1/query")
+    expect(calls[0].url).toBe(
+      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/query"
+    )
     expect(JSON.parse(calls[0].body)).toEqual({ query: "hello", limit: 3 })
   })
 
@@ -1101,7 +1223,7 @@ describe("lib/api/knowledge", () => {
       include_references: true,
     })
     expect(calls[0].url).toBe(
-      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/query/inspect",
+      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/query/inspect"
     )
     expect(JSON.parse(calls[0].body)).toEqual({
       query: "hello",
@@ -1134,8 +1256,19 @@ describe("lib/api/knowledge", () => {
     })
 
     await knowledgeApi.listKnowledgeBasePermissions("tok", "ws-1", "kb-1")
-    await knowledgeApi.upsertKnowledgeBasePermission("tok", "ws-1", "kb-1", "u-1", "edit")
-    await knowledgeApi.revokeKnowledgeBasePermission("tok", "ws-1", "kb-1", "u-1")
+    await knowledgeApi.upsertKnowledgeBasePermission(
+      "tok",
+      "ws-1",
+      "kb-1",
+      "u-1",
+      "edit"
+    )
+    await knowledgeApi.revokeKnowledgeBasePermission(
+      "tok",
+      "ws-1",
+      "kb-1",
+      "u-1"
+    )
 
     expect(calls[0]).toMatchObject({
       url: "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/permissions",
@@ -1153,18 +1286,18 @@ describe("lib/api/knowledge", () => {
   })
 
   test("throws ApiError with the detail message from error responses", async () => {
-    stubFetch(() =>
-      new Response(JSON.stringify({ detail: "denied" }), { status: 403 }),
+    stubFetch(
+      () => new Response(JSON.stringify({ detail: "denied" }), { status: 403 })
     )
     await expect(
-      knowledgeApi.listKnowledgeBases("tok", "ws-1"),
+      knowledgeApi.listKnowledgeBases("tok", "ws-1")
     ).rejects.toMatchObject({ status: 403, message: "denied" })
   })
 
   test("propagates a parse error for non-JSON success bodies", async () => {
     stubFetch(() => new Response("<html>oops</html>", { status: 200 }))
     await expect(
-      knowledgeApi.listKnowledgeBases("tok", "ws-1"),
+      knowledgeApi.listKnowledgeBases("tok", "ws-1")
     ).rejects.toThrow(SyntaxError)
   })
 })
@@ -1194,11 +1327,9 @@ describe("lib/api/llm", () => {
     })
     await llmApi.listModelProviderModelTypes("tok", "openai")
     await llmApi.listModelProviderBaseModels("tok", "openai", "EMBEDDING")
-    expect(urls[0]).toBe(
-      "/api/v1/model-providers/model-types?provider=openai",
-    )
+    expect(urls[0]).toBe("/api/v1/model-providers/model-types?provider=openai")
     expect(urls[1]).toBe(
-      "/api/v1/model-providers/base-models?provider=openai&model_type=EMBEDDING",
+      "/api/v1/model-providers/base-models?provider=openai&model_type=EMBEDDING"
     )
   })
 

@@ -101,6 +101,12 @@ function graphStatusLabel(status: string | null, t: TFunction) {
   return t("尚未构建")
 }
 
+function graphBuildActive(status: KnowledgeGraphStatus | null) {
+  return ["queued", "running", "cancelling"].includes(
+    status?.build_task_status ?? ""
+  )
+}
+
 function reviewKindLabel(kind: string, t: TFunction) {
   if (kind === "ambiguous_entity") return t("实体存在歧义")
   if (kind === "possible_duplicate") return t("可能重复实体")
@@ -266,6 +272,11 @@ export function KnowledgeGraph({
           setSchemaText(
             nextSchema ? JSON.stringify(nextSchema.schema_json, null, 2) : ""
           )
+          if (graphBuildActive(nextStatus)) {
+            pollAttemptsRef.current = 0
+            pollSawRunningRef.current = true
+            setPollBaseline(nextStatus.revision_no ?? 0)
+          }
         }
       )
       .catch((error) => {
@@ -297,9 +308,9 @@ export function KnowledgeGraph({
         )
         if (cancelled) return
         setStatus(next)
-        const running = ["building", "queued"].includes(
-          next.revision_status ?? ""
-        )
+        const running =
+          graphBuildActive(next) ||
+          ["building", "queued"].includes(next.revision_status ?? "")
         const changed = (next.revision_no ?? 0) > pollBaseline
         pollSawRunningRef.current ||= running
         if (!running && (changed || pollSawRunningRef.current)) {
@@ -320,9 +331,8 @@ export function KnowledgeGraph({
         }
 
         pollAttemptsRef.current += 1
-        // ponytail: the status endpoint has no queued task state; cap passive
-        // polling at two minutes and leave longer jobs visible in the task tab.
-        if (pollAttemptsRef.current < 40) {
+        // ponytail: cap passive polling at two minutes; task state survives refresh.
+        if (pollAttemptsRef.current < 40 || graphBuildActive(next)) {
           timeout = setTimeout(() => void poll(), 3000)
         } else {
           setPollBaseline(undefined)
@@ -371,11 +381,15 @@ export function KnowledgeGraph({
   const orderedEntityIds =
     queryResult?.paths[0]?.nodes.map((entity) => entity.id) ?? []
   const claimCount = numericStat(status?.stats, "claim_count")
+  const graphBusy = pollBaseline !== undefined || graphBuildActive(status)
 
-  function beginPolling() {
+  function beginPolling(
+    baseline = status?.revision_no ?? 0,
+    sawRunning = false
+  ) {
     pollAttemptsRef.current = 0
-    pollSawRunningRef.current = false
-    setPollBaseline(status?.revision_no ?? 0)
+    pollSawRunningRef.current = sawRunning
+    setPollBaseline(baseline)
   }
 
   function localError(message: string) {
@@ -668,7 +682,7 @@ export function KnowledgeGraph({
             </p>
           </div>
           <div className="flex items-center gap-2 text-sm">
-            {pollBaseline !== undefined ? (
+            {graphBusy ? (
               <LoaderCircleIcon className="size-4 animate-spin" />
             ) : status.enabled ? (
               <CheckCircle2Icon className="size-4 text-emerald-600" />
@@ -755,7 +769,9 @@ export function KnowledgeGraph({
             <section className="m-4 border p-5 lg:m-5">
               <h2 className="font-semibold">{t("知识关联尚未启用")}</h2>
               <p className="mt-2 text-sm text-muted-foreground">
-                {t("选择抽取模型并启用；已有文件会自动构建，后续上传文件会在索引完成后自动抽取")}
+                {t(
+                  "选择抽取模型并启用；已有文件会自动构建，后续上传文件会在索引完成后自动抽取"
+                )}
               </p>
               {canEdit ? (
                 <div className="mt-4 flex max-w-xl flex-col gap-3 sm:flex-row">
@@ -791,7 +807,7 @@ export function KnowledgeGraph({
                 <Button
                   type="button"
                   className="mt-4"
-                  disabled={busyAction !== null || pollBaseline !== undefined}
+                  disabled={busyAction !== null || graphBusy}
                   onClick={() => setView("settings")}
                 >
                   {t("前往设置")}
@@ -1231,9 +1247,7 @@ export function KnowledgeGraph({
                   <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
                     <Button
                       type="button"
-                      disabled={
-                        busyAction !== null || pollBaseline !== undefined
-                      }
+                      disabled={busyAction !== null || graphBusy}
                       onClick={() => void handleReviewDecision("approve_claim")}
                     >
                       {t("批准关系")}
@@ -1241,9 +1255,7 @@ export function KnowledgeGraph({
                     <Button
                       type="button"
                       variant="destructive"
-                      disabled={
-                        busyAction !== null || pollBaseline !== undefined
-                      }
+                      disabled={busyAction !== null || graphBusy}
                       onClick={() => void handleReviewDecision("reject_claim")}
                     >
                       {t("拒绝关系")}
@@ -1294,9 +1306,7 @@ export function KnowledgeGraph({
                         type="button"
                         className="mt-3"
                         disabled={
-                          busyAction !== null ||
-                          pollBaseline !== undefined ||
-                          !mergeTargetId
+                          busyAction !== null || graphBusy || !mergeTargetId
                         }
                         onClick={() =>
                           void handleReviewDecision("merge_entities")
@@ -1377,7 +1387,7 @@ export function KnowledgeGraph({
                           type="button"
                           disabled={
                             busyAction !== null ||
-                            pollBaseline !== undefined ||
+                            graphBusy ||
                             !splitName.trim() ||
                             !splitType ||
                             (!splitMentionIds.length && !splitClaimIds.length)
@@ -1455,17 +1465,15 @@ export function KnowledgeGraph({
           <section className="border-b p-4 lg:p-5">
             <h2 className="font-semibold">{t("自动抽取与高级设置")}</h2>
             <p className="mt-4 text-sm text-muted-foreground">
-              {t("启用后，上传文件会在索引完成后自动抽取实体和关系；首次启用会自动处理已有文件")}
+              {t(
+                "启用后，上传文件会在索引完成后自动抽取实体和关系；首次启用会自动处理已有文件"
+              )}
             </p>
             {canEdit ? (
               <Button
                 type="button"
                 className="mt-4"
-                disabled={
-                  busyAction !== null ||
-                  pollBaseline !== undefined ||
-                  !settings.enabled
-                }
+                disabled={busyAction !== null || graphBusy || !settings.enabled}
                 onClick={() => void handleRebuild()}
               >
                 {busyAction === "rebuild" ? (
@@ -1538,7 +1546,7 @@ export function KnowledgeGraph({
                   type="button"
                   disabled={
                     busyAction !== null ||
-                    pollBaseline !== undefined ||
+                    graphBusy ||
                     !settings.enabled ||
                     !importFile
                   }

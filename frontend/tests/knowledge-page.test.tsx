@@ -2033,6 +2033,37 @@ describe("KnowledgeBasePage documents tab", () => {
 // ---------------------------------------------------------------------------
 
 describe("KnowledgeBasePage tasks tab", () => {
+  test("polls running task progress without a processing document", async () => {
+    let taskFetches = 0
+    fetchHandler = (url) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse([])
+      if (url.includes("/tasks")) {
+        taskFetches += 1
+        return jsonResponse([
+          makeTask({
+            id: "graph-progress-task",
+            task_type: "graph_rebuild",
+            status: "running",
+            total_items: 175,
+            processed_items: taskFetches,
+          }),
+        ])
+      }
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    fireEvent.click(await screen.findByText("任务"))
+    await screen.findByText("1/175")
+    await waitFor(() => expect(screen.getByText("2/175")).toBeTruthy(), {
+      timeout: 4000,
+    })
+  })
+
   test("renders task rows with type, status, progress and retry", async () => {
     const tasks = [
       makeTask({
@@ -2058,11 +2089,21 @@ describe("KnowledgeBasePage tasks tab", () => {
       }),
     ]
     const retryCalls: string[] = []
+    const stopCalls: string[] = []
+    const deleteCalls: string[] = []
     fetchHandler = (url, init) => {
       const method = init?.method ?? "GET"
       if (method === "POST" && url.includes("/retry")) {
         retryCalls.push(url)
         return jsonResponse(makeTask({ id: "task-1", status: "queued" }))
+      }
+      if (method === "POST" && url.includes("/stop")) {
+        stopCalls.push(url)
+        return jsonResponse(makeTask({ id: "task-2", status: "cancelled" }))
+      }
+      if (method === "DELETE" && url.includes("/tasks/")) {
+        deleteCalls.push(url)
+        return new Response(null, { status: 204 })
       }
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?"))
@@ -2097,6 +2138,63 @@ describe("KnowledgeBasePage tasks tab", () => {
     })
     expect(retryCalls[0]).toContain("/tasks/task-1/retry")
     expect(notifications.some(([, msg]) => msg === "已重新提交任务")).toBe(true)
+
+    const enabledStop = screen
+      .getAllByRole("button", { name: "停止" })
+      .find((button) => !(button as HTMLButtonElement).disabled)
+    expect(enabledStop).toBeTruthy()
+    fireEvent.click(enabledStop!)
+    await waitFor(() => expect(stopCalls).toHaveLength(1))
+    expect(stopCalls[0]).toContain("/tasks/task-2/stop")
+    expect(notifications.some(([, msg]) => msg === "已停止任务")).toBe(true)
+
+    const enabledDelete = screen
+      .getAllByRole("button", { name: "删除任务" })
+      .find((button) => !(button as HTMLButtonElement).disabled)
+    expect(enabledDelete).toBeTruthy()
+    fireEvent.click(enabledDelete!)
+    await respondToConfirm("删除")
+    await waitFor(() => expect(deleteCalls).toHaveLength(1))
+    expect(deleteCalls[0]).toContain("/tasks/task-1")
+    expect(notifications.some(([, msg]) => msg === "已删除任务")).toBe(true)
+  })
+
+  test("offers retry-all and checkpoint retry for a failed graph task", async () => {
+    const retryModes: string[] = []
+    const task = makeTask({
+      id: "graph-retry-task",
+      task_type: "graph_rebuild",
+      status: "failed",
+      attempts: 1,
+      max_attempts: 3,
+      total_items: 175,
+      processed_items: 42,
+    })
+    fetchHandler = (url, init) => {
+      const method = init?.method ?? "GET"
+      if (method === "POST" && url.includes("/retry")) {
+        retryModes.push(JSON.parse(String(init?.body)).mode)
+        return jsonResponse({ ...task, status: "queued" })
+      }
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse([])
+      if (url.includes("/tasks")) return jsonResponse([task])
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    fireEvent.click(await screen.findByText("任务"))
+    const unfinished = await screen.findByRole("button", {
+      name: "重试未完成分片",
+    })
+    const all = screen.getByRole("button", { name: "重试全部分片" })
+    expect((unfinished as HTMLButtonElement).disabled).toBe(false)
+    expect((all as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(unfinished)
+    await waitFor(() => expect(retryModes).toEqual(["unfinished"]))
   })
 
   test("paginates tasks and changes the page size", async () => {

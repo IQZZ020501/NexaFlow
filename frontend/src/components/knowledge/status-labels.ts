@@ -8,7 +8,8 @@ import type { TFunction, TranslationKey } from "@/i18n"
  * @returns The translated label for a known status, or the original status for an unknown value
  */
 export function documentStatusLabel(status: string, t: TFunction) {
-  const labels: Record<string, TranslationKey> = { // values are TranslationKeys
+  const labels: Record<string, TranslationKey> = {
+    // values are TranslationKeys
     uploaded: "待解析",
     parse_queued: "解析排队中",
     parsing: "解析中",
@@ -56,10 +57,14 @@ export function documentStatusDotClassName(status: string) {
  * @returns The translated label for a known task type, or the original task type
  */
 export function taskTypeLabel(taskType: string, t: TFunction) {
-  const labels: Record<string, TranslationKey> = { // values are TranslationKeys
+  const labels: Record<string, TranslationKey> = {
+    // values are TranslationKeys
     parse: "解析",
     index: "向量化",
     rebuild_index: "重建索引",
+    evaluate: "检索评测",
+    graph_sync: "图谱同步",
+    graph_rebuild: "图谱重建",
   }
 
   const labelKey = labels[taskType]
@@ -74,11 +79,14 @@ export function taskTypeLabel(taskType: string, t: TFunction) {
  * @returns The translated label for a recognized status, or the original status
  */
 export function taskStatusLabel(status: string, t: TFunction) {
-  const labels: Record<string, TranslationKey> = { // values are TranslationKeys
+  const labels: Record<string, TranslationKey> = {
+    // values are TranslationKeys
     queued: "排队中",
     running: "运行中",
     succeeded: "成功",
     failed: "失败",
+    cancelling: "停止中",
+    cancelled: "已停止",
   }
 
   const labelKey = labels[status]
@@ -95,10 +103,13 @@ export function taskStatusDotClassName(status: string) {
   if (status === "failed") {
     return "bg-destructive"
   }
+  if (status === "cancelled") {
+    return "bg-muted-foreground"
+  }
   if (status === "succeeded") {
     return "bg-emerald-500"
   }
-  if (status === "queued" || status === "running") {
+  if (["queued", "running", "cancelling"].includes(status)) {
     return "bg-sky-500"
   }
   return "bg-muted-foreground"
