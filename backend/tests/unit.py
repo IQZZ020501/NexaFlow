@@ -61,7 +61,7 @@ from app.shareddomain.knowledge.services import (
 )
 from app.shareddomain.knowledge_graph.schema import (
     GraphSchemaDefinition,
-    default_policy_graph_schema,
+    default_graph_schema,
     graph_schema_hash,
     normalize_graph_name,
 )
@@ -139,10 +139,11 @@ def test_graph_schema_rejects_unknown_relation_endpoint() -> None:
         raise AssertionError("unknown endpoint type must fail")
 
 
-def test_default_policy_graph_schema_is_stable() -> None:
-    schema = default_policy_graph_schema()
-    assert "Regulation" in schema.relation("defines").source_types
-    assert "Regulation" in schema.relation("references").target_types
+def test_default_graph_schema_is_stable() -> None:
+    schema = default_graph_schema()
+    assert "Entity" in {item.name for item in schema.entity_types}
+    assert "Entity" in schema.relation("related_to").source_types
+    assert "Entity" in schema.relation("related_to").target_types
     assert schema.relation("supersedes").traversable is True
     assert schema.relation("conflicts_with").review_required is True
     assert normalize_graph_name("  信息\u3000科技部 ") == "信息 科技部"
@@ -295,6 +296,25 @@ def test_graph_extraction_requires_exact_chunk_evidence() -> None:
     )
     assert validate_extraction_batch(valid, chunks).claims[0].predicate == "uses_phone"
 
+    account_schema = GraphSchemaDefinition.model_validate(
+        {
+            "entity_types": [{"name": "Account"}, {"name": "Phone"}],
+            "relations": [
+                {
+                    "name": "uses_phone",
+                    "source_types": ["Account"],
+                    "target_types": ["Phone"],
+                }
+            ],
+        }
+    )
+    reversed_claim = valid.model_copy(deep=True)
+    reversed_claim.claims[0].subject_temp_id = "p"
+    reversed_claim.claims[0].object_temp_id = "a"
+    normalized = validate_extraction_batch(reversed_claim, chunks, account_schema)
+    assert normalized.claims[0].subject_temp_id == "a"
+    assert normalized.claims[0].object_temp_id == "p"
+
     misaligned = valid.model_copy(deep=True)
     misaligned.claims[0].start_offset = 1
     misaligned.claims[0].end_offset = 2
@@ -332,7 +352,7 @@ def test_graph_extraction_requires_exact_chunk_evidence() -> None:
     assert validate_extraction_batch(
         implicit_regulation,
         [ExtractionChunk("chunk-2", "doc-2", "本规定适用于学生。")],
-        default_policy_graph_schema(),
+        default_graph_schema(),
     ).claims[0].predicate == "applies_to"
 
     invalid = valid.model_copy(deep=True)
@@ -448,9 +468,11 @@ def test_graph_extractor_allows_active_stream_past_total_timeout() -> None:
 
     class Provider:
         chunks = 0
+        prompt = None
 
-        async def astream(self, _messages, **kwargs):
+        async def astream(self, messages, **kwargs):
             assert kwargs == {}
+            self.prompt = messages
             for chunk in ["", *parts]:
                 await asyncio.sleep(0.075)
                 self.chunks += 1
@@ -466,11 +488,15 @@ def test_graph_extractor_allows_active_stream_past_total_timeout() -> None:
         result = asyncio.run(
             extract_graph_batch(
                 provider,
-                default_policy_graph_schema(),
+                default_graph_schema(),
                 [ExtractionChunk("chunk-1", "doc-1", "制度 A。")],
             )
         )
     assert provider.chunks == 4
+    assert provider.prompt is not None
+    assert '"all_relations_allow_all_entity_types":true' in provider.prompt[0][
+        "content"
+    ]
     assert result.batch == GraphExtractionBatch()
 
 
@@ -497,7 +523,7 @@ def test_graph_extractor_uses_latest_stream_usage_snapshot() -> None:
     result = asyncio.run(
         extract_graph_batch(
             Provider(),
-            default_policy_graph_schema(),
+            default_graph_schema(),
             [ExtractionChunk("chunk-1", "doc-1", content)],
         )
     )
@@ -561,7 +587,7 @@ def test_graph_extractor_times_out_an_idle_stream() -> None:
             asyncio.run(
                 extract_graph_batch(
                     Provider(),
-                    default_policy_graph_schema(),
+                    default_graph_schema(),
                     [ExtractionChunk("chunk-1", "doc-1", "制度 A。")],
                 )
             )
@@ -580,7 +606,7 @@ def test_graph_extractor_rejects_oversized_input_without_truncating_json() -> No
             yield AIMessageChunk(content='{"entities": [], "claims": []}')
 
     provider = Provider()
-    schema = default_policy_graph_schema()
+    schema = default_graph_schema()
     try:
         asyncio.run(
             extract_graph_batch(
@@ -623,6 +649,24 @@ def test_graph_extractor_retries_invalid_model_output_once() -> None:
             }
         ],
     }
+    invalid = json.loads(json.dumps(valid))
+    invalid["entities"][1]["entity_type"] = "Role"
+    schema = GraphSchemaDefinition.model_validate(
+        {
+            "entity_types": [
+                {"name": "Document"},
+                {"name": "Concept"},
+                {"name": "Role"},
+            ],
+            "relations": [
+                {
+                    "name": "defines",
+                    "source_types": ["Document"],
+                    "target_types": ["Concept"],
+                }
+            ],
+        }
+    )
 
     class Provider:
         calls = 0
@@ -631,16 +675,21 @@ def test_graph_extractor_retries_invalid_model_output_once() -> None:
             self.calls += 1
             assert kwargs == {}
             if self.calls == 1:
-                yield AIMessageChunk(content="not json")
+                yield AIMessageChunk(content=json.dumps(invalid, ensure_ascii=False))
                 return
-            assert "failed server validation" in messages[-1]["content"]
+            assert messages[-2] == {
+                "role": "assistant",
+                "content": json.dumps(invalid, ensure_ascii=False),
+            }
+            assert "Claim object type 'Role'" in messages[-1]["content"]
+            assert "expected one of ['Concept']" in messages[-1]["content"]
             yield AIMessageChunk(content=json.dumps(valid, ensure_ascii=False))
 
     provider = Provider()
     result = asyncio.run(
         extract_graph_batch(
             provider,
-            default_policy_graph_schema(),
+            schema,
             [ExtractionChunk("chunk-1", "doc-1", quote)],
         )
     )
@@ -664,7 +713,7 @@ def test_graph_extractor_does_not_retry_provider_failure() -> None:
         asyncio.run(
             extract_graph_batch(
                 provider,
-                default_policy_graph_schema(),
+                default_graph_schema(),
                 [ExtractionChunk("chunk-1", "doc-1", "制度 A 定义术语 A。")],
             )
         )
@@ -6401,7 +6450,7 @@ def main() -> None:
     test_effective_permission_matrix()
     test_validate_permission_rejects_unknown()
     test_graph_schema_rejects_unknown_relation_endpoint()
-    test_default_policy_graph_schema_is_stable()
+    test_default_graph_schema_is_stable()
     test_graph_token_charge_uses_reported_or_conservative_estimate()
     test_graph_provider_rejection_releases_reserved_tokens()
     test_graph_streaming_provider_rejection_releases_reserved_tokens()

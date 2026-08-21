@@ -101,7 +101,7 @@ from app.shareddomain.knowledge_graph.revisions import (
     publish_revision as publish_graph_revision,
     stage_revision_change as stage_graph_revision_change,
 )
-from app.shareddomain.knowledge_graph.schema import default_policy_graph_schema
+from app.shareddomain.knowledge_graph.schema import default_graph_schema
 from app.shareddomain.knowledge_graph.services import create_graph_schema
 from app.shareddomain.knowledge.task_runner import (
     recover_knowledge_tasks,
@@ -203,7 +203,7 @@ async def seed_graph_api_fixture(
             schema = await create_graph_schema(
                 db,
                 knowledge_base,
-                default_policy_graph_schema(),
+                default_graph_schema(),
                 actor,
             )
         revision = await create_graph_revision(
@@ -2631,7 +2631,7 @@ def test_graph_api_permissions_and_scoping() -> None:
         )
         assert missing_revision.status_code == 409, missing_revision.text
 
-        schema_payload = default_policy_graph_schema().model_dump(mode="json")
+        schema_payload = default_graph_schema().model_dump(mode="json")
         schema_response = client.put(
             graph_url(workspace_id, knowledge_base_id, "/schema"),
             headers=auth_headers(alice_token),

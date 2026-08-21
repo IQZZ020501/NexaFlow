@@ -34,7 +34,7 @@ from app.schemas.knowledge_graph import (
 )
 from app.shareddomain.knowledge_graph import revisions as graph_revisions
 from app.shareddomain.knowledge_graph.revisions import GraphRevisionConflict
-from app.shareddomain.knowledge_graph.schema import default_policy_graph_schema
+from app.shareddomain.knowledge_graph.schema import default_graph_schema
 
 
 async def _expect_http(coroutine, status_code: int) -> None:

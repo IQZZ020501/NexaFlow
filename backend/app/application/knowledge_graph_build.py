@@ -92,7 +92,7 @@ from app.shareddomain.knowledge_graph.revisions import (
 )
 from app.shareddomain.knowledge_graph.schema import (
     GraphSchemaDefinition,
-    default_policy_graph_schema,
+    default_graph_schema,
     graph_schema_hash,
     normalize_graph_name,
 )
@@ -1582,7 +1582,7 @@ async def run_graph_build_task(
         schema_entity = await create_graph_schema(
             db,
             knowledge_base,
-            default_policy_graph_schema(),
+            default_graph_schema(),
             actor,
         )
     schema = GraphSchemaDefinition.model_validate(schema_entity.schema_json)

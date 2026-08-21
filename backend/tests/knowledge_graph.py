@@ -42,7 +42,7 @@ from app.entities.workspace import Workspace
 from app.entities.workspace_governance import WorkspaceGovernance
 from app.shareddomain.knowledge_graph.schema import (
     GraphSchemaDefinition,
-    default_policy_graph_schema,
+    default_graph_schema,
     graph_schema_hash,
 )
 from app.schemas.knowledge import (
@@ -1002,7 +1002,7 @@ async def test_graph_query_candidates_require_unique_entities_and_keep_hops() ->
             "get_schema",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    schema_json=default_policy_graph_schema().model_dump(
+                    schema_json=default_graph_schema().model_dump(
                         mode="json"
                     )
                 )
@@ -1060,7 +1060,7 @@ async def test_graph_query_candidates_require_unique_entities_and_keep_hops() ->
             "get_schema",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    schema_json=default_policy_graph_schema().model_dump(
+                    schema_json=default_graph_schema().model_dump(
                         mode="json"
                     )
                 )
@@ -1321,7 +1321,7 @@ async def test_graph_query_drops_stale_profiles_and_rejects_unknown_relations() 
         profile_hash="current-profile-hash",
     )
     schema = SimpleNamespace(
-        schema_json=default_policy_graph_schema().model_dump(mode="json")
+        schema_json=default_graph_schema().model_dump(mode="json")
     )
     with (
         patch.object(
@@ -1424,7 +1424,7 @@ async def test_graph_query_planning_edge_paths() -> None:
         stats_json={},
     )
     schema = SimpleNamespace(
-        schema_json=default_policy_graph_schema().model_dump(mode="json")
+        schema_json=default_graph_schema().model_dump(mode="json")
     )
     alpha = GraphEntityRecord(
         id="query-alpha",
@@ -1872,11 +1872,13 @@ async def test_versioned_graph_schemas() -> None:
             ),
         )
 
-        definition = default_policy_graph_schema()
+        definition = default_graph_schema()
         first = await create_graph_schema(db, knowledge_base, definition, actor)
         duplicate = await create_graph_schema(db, knowledge_base, definition, actor)
         changed_payload = definition.model_dump(mode="json")
-        changed_payload["entity_types"].append({"name": "Topic", "properties": []})
+        changed_payload["entity_types"].append(
+            {"name": "CustomEntity", "properties": []}
+        )
         second = await create_graph_schema(
             db,
             knowledge_base,
@@ -1898,7 +1900,7 @@ async def _graph_fixture(db):
     schema = await graph_repository.get_schema_by_hash(
         db,
         knowledge_base,
-        graph_schema_hash(default_policy_graph_schema()),
+        graph_schema_hash(default_graph_schema()),
     )
     assert schema is not None
     return knowledge_base, actor, schema
@@ -1938,7 +1940,7 @@ async def test_graph_maintenance_repairs_orphans_profiles_and_sources() -> None:
         schema = await create_graph_schema(
             db,
             knowledge_base,
-            default_policy_graph_schema(),
+            default_graph_schema(),
             actor,
         )
         active_revision = await graph_repository.create_revision(
@@ -2237,7 +2239,7 @@ async def test_review_decisions_publish_atomically_and_reset_on_failure() -> Non
         schema = await create_graph_schema(
             db,
             knowledge_base,
-            default_policy_graph_schema(),
+            default_graph_schema(),
             actor,
         )
         initial = await graph_revisions.create_revision(
@@ -3761,7 +3763,7 @@ async def test_graph_build_stops_before_workspace_monthly_limit() -> None:
         schema = await create_graph_schema(
             db,
             knowledge_base,
-            default_policy_graph_schema(),
+            default_graph_schema(),
             actor,
         )
         await graph_repository.create_revision(
@@ -4400,7 +4402,7 @@ async def test_claim_survives_until_last_evidence_is_deleted() -> None:
         schema = await create_graph_schema(
             db,
             knowledge_base,
-            default_policy_graph_schema(),
+            default_graph_schema(),
             actor,
         )
         revision = await graph_revisions.create_revision(
@@ -4515,7 +4517,7 @@ async def test_claim_survives_until_last_evidence_is_deleted() -> None:
                     end_offset=len(quote),
                     extractor_type="structured",
                     prompt_hash="structured-import",
-                    schema_hash=graph_schema_hash(default_policy_graph_schema()),
+                    schema_hash=graph_schema_hash(default_graph_schema()),
                     created_revision_id=revision.id,
                     last_published_revision_id=revision.id,
                 ),

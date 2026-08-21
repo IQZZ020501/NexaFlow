@@ -79,68 +79,59 @@ def graph_schema_hash(schema: GraphSchemaDefinition) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def default_policy_graph_schema() -> GraphSchemaDefinition:
+def default_graph_schema() -> GraphSchemaDefinition:
     entity_types = [
+        "Entity",
+        "Person",
+        "Organization",
+        "Location",
+        "Event",
+        "Product",
+        "Technology",
+        "Topic",
+        "Concept",
         "Document",
         "Regulation",
         "Clause",
-        "Concept",
         "Role",
         "Department",
         "Process",
         "System",
         "Form",
         "Date",
-        "Organization",
+    ]
+    relation_names = [
+        "related_to",
+        "part_of",
+        "located_in",
+        "created_by",
+        "owned_by",
+        "works_for",
+        "participates_in",
+        "uses",
+        "produces",
+        "causes",
+        "depends_on",
+        "precedes",
+        "defines",
+        "applies_to",
+        "requires",
+        "prohibits",
+        "exception_to",
+        "references",
+        "supersedes",
+        "conflicts_with",
+        "responsible_for",
     ]
     return GraphSchemaDefinition(
         entity_types=[{"name": name, "properties": []} for name in entity_types],
         relations=[
             {
-                "name": "defines",
-                "source_types": ["Document", "Regulation", "Clause"],
-                "target_types": ["Concept"],
-            },
-            {
-                "name": "applies_to",
-                "source_types": ["Document", "Regulation", "Clause"],
-                "target_types": ["Role", "Department", "Organization"],
-            },
-            {
-                "name": "requires",
-                "source_types": ["Document", "Regulation", "Clause"],
-                "target_types": ["Process", "Form", "System"],
-            },
-            {
-                "name": "prohibits",
-                "source_types": ["Document", "Regulation", "Clause"],
-                "target_types": ["Process"],
-            },
-            {
-                "name": "exception_to",
-                "source_types": ["Clause"],
-                "target_types": ["Clause"],
-            },
-            {
-                "name": "references",
-                "source_types": ["Document", "Regulation", "Clause"],
-                "target_types": ["Document", "Regulation", "Clause"],
-            },
-            {
-                "name": "supersedes",
-                "source_types": ["Document", "Regulation", "Clause"],
-                "target_types": ["Document", "Regulation", "Clause"],
-            },
-            {
-                "name": "conflicts_with",
-                "source_types": ["Document", "Regulation", "Clause"],
-                "target_types": ["Document", "Regulation", "Clause"],
-                "review_required": True,
-            },
-            {
-                "name": "responsible_for",
-                "source_types": ["Role", "Department"],
-                "target_types": ["Process", "System"],
-            },
+                "name": name,
+                "source_types": entity_types,
+                "target_types": entity_types,
+                "review_required": name == "conflicts_with",
+            }
+            for name in relation_names
         ],
     )
