@@ -278,6 +278,13 @@ function installGraphFetch(options: GraphFetchOptions = {}) {
         offset: 0,
       })
     }
+    if (url.endsWith("/graph/neighborhood") && method === "POST") {
+      return jsonResponse({
+        ...bankResult,
+        operation: "neighborhood",
+        paths: [],
+      })
+    }
     throw new Error(`Unexpected request: ${method} ${url}`)
   })
 }
@@ -383,7 +390,12 @@ describe("knowledge graph workspace", () => {
     })
     renderGraph()
 
-    await screen.findByText("输入起点探索邻域，或同时输入终点查找路径")
+    await screen.findByText("账户 A")
+    await waitFor(() =>
+      expect(
+        requests.some((request) => request.url.endsWith("/graph/neighborhood"))
+      ).toBe(true)
+    )
     fireEvent.change(screen.getByPlaceholderText("输入实体名称"), {
       target: { value: "账户 A" },
     })
@@ -394,7 +406,10 @@ describe("knowledge graph workspace", () => {
       target: { value: "5" },
     })
     fireEvent.click(screen.getByRole("checkbox", { name: "logged_in_on" }))
-    fireEvent.click(screen.getByRole("button", { name: "查找路径" }))
+    fireEvent.submit(
+      screen.getByRole("button", { name: "查找路径" }).closest("form")!
+    )
+    await waitFor(() => expect(pathBody).toBeTruthy())
 
     const edge = await screen.findByRole("button", {
       name: /账户 B → logged_in_on → 设备 D/,
@@ -780,6 +795,13 @@ describe("knowledge graph workspace", () => {
       if (url.includes("/graph/reviews")) {
         return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 })
       }
+      if (url.endsWith("/graph/neighborhood")) {
+        return jsonResponse({
+          ...bankResult,
+          operation: "neighborhood",
+          paths: [],
+        })
+      }
       throw new Error(`Unexpected request: ${url}`)
     })
     const rendered = renderGraph(true, "kb-old")
@@ -801,7 +823,7 @@ describe("knowledge graph workspace", () => {
     expect(staleSignal?.aborted).toBe(true)
     for (const resolve of pending) resolve(jsonResponse({}))
     await Promise.resolve()
-    expect(screen.getByText("公司 X")).toBeTruthy()
+    expect(screen.getAllByText("公司 X").length).toBeGreaterThan(0)
     expect(errors).toEqual([])
   })
 })
