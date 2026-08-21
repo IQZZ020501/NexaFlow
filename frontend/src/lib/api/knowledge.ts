@@ -120,6 +120,12 @@ export type KnowledgeTaskBulkDeleteResult = {
   deleted_task_ids: string[]
 }
 
+export type KnowledgeRetrievalSource =
+  | "vector"
+  | "keywords"
+  | "reference"
+  | "graph"
+
 export type KnowledgeQueryHit = {
   chunk_id: string
   document_id: string
@@ -127,15 +133,22 @@ export type KnowledgeQueryHit = {
   parent_id: string | null
   parent_title: string | null
   parent_index: number | null
+  section_path: string[]
   chunk_index: number
   content: string
+  content_truncated: boolean
+  evidence_start_offset: number | null
+  evidence_end_offset: number | null
+  contributing_chunk_ids: string[]
   distance: number | null
   similarity: number | null
-  kind: "document" | "qa"
+  kind: "document" | "qa" | "graph_record"
   question: string | null
   source: string | null
-  sources: Array<"vector" | "keywords" | "reference">
+  sources: KnowledgeRetrievalSource[]
   reference_hops: 0 | 1
+  graph_claim_ids: string[]
+  graph_hops: number
   rerank_score: number | null
 }
 
@@ -147,6 +160,11 @@ export type KnowledgeQueryInspectRequest = {
   search_mode: KnowledgeSearchMode
   similarity: number | null
   include_references: boolean
+  graph_mode?: KnowledgeGraphMode
+  source_entity?: string | null
+  target_entity?: string | null
+  max_hops?: number
+  relation_filters?: string[]
 }
 
 export type KnowledgeRetrievalTrace = {
@@ -158,9 +176,21 @@ export type KnowledgeRetrievalTrace = {
   vector_candidates: number
   keyword_candidates: number
   reference_candidates: number
+  graph_mode: KnowledgeGraphMode
+  graph_intent: string | null
+  graph_revision_id: string | null
+  graph_entity_candidates: number
+  graph_profile_candidates: number
+  graph_claim_candidates: number
+  graph_path_count: number
+  graph_visited_nodes: number
+  graph_hops: number
+  graph_truncated: boolean
+  graph_limit_reason: string | null
   fused_candidates: number
   rerank_status: "not_configured" | "applied" | "fallback" | "skipped"
   returned_hits: number
+  truncated_hits: number
   duration_ms: number
   stage_duration_ms: Record<string, number>
 }
@@ -168,6 +198,7 @@ export type KnowledgeRetrievalTrace = {
 export type KnowledgeQueryInspectResult = {
   hits: KnowledgeQueryHit[]
   trace: KnowledgeRetrievalTrace
+  graph: KnowledgeGraphQueryResult | null
 }
 
 export type KnowledgeGraphEvaluationExpectation = {

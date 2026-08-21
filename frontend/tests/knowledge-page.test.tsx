@@ -2437,8 +2437,10 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
               kind: "document",
               question: null,
               source: null,
-              sources: ["vector", "reference"],
+              sources: ["vector", "reference", "graph"],
               reference_hops: 1,
+              graph_claim_ids: ["claim-1"],
+              graph_hops: 2,
               rerank_score: 0.91,
             },
             {
@@ -2528,6 +2530,7 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     expect(within(secondCard).getByText("相似度：-")).toBeTruthy()
     expect(within(firstCard).getByText("向量检索")).toBeTruthy()
     expect(within(firstCard).getByText("文档引用")).toBeTruthy()
+    expect(within(firstCard).getByText("知识关联")).toBeTruthy()
     expect(within(firstCard).getByText("引用跳数：1")).toBeTruthy()
     expect(screen.queryByText("chunk-1", { exact: true })).toBeNull()
     expect(screen.queryByText("正文内容", { exact: true })).toBeNull()
