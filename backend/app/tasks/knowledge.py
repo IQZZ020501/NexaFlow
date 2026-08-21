@@ -5,10 +5,12 @@ import os
 from app.application.knowledge_evaluation import run_evaluation_task
 from app.application.knowledge_graph_build import run_graph_build_task
 from app.application.knowledge_graph_maintenance import reconcile_knowledge_graphs
+from app.entities.knowledge import TASK_GRAPH_REBUILD, TASK_GRAPH_SYNC
 from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import classify_error, log_error
 from app.infrastructure.logger import get_logger, log_event
+from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.infrastructure.session import get_session_factory
 from app.shareddomain.knowledge.task_runner import (
     TASK_LEASE_RENEW_SECONDS,
@@ -28,6 +30,9 @@ from app.shareddomain.workflows.uploads import (
 from app.tasks import configure_task_worker
 
 logger = get_logger(__name__)
+
+GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS = 28_800
+GRAPH_TASK_TIME_LIMIT_SECONDS = 29_100
 
 @celery_app.task(
     bind=True,
@@ -192,8 +197,23 @@ async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
         broker_url=settings.celery_broker_url,
         task_always_eager=False,
     )
+    async with get_session_factory()() as db:
+        task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
+    dispatch_options = (
+        {
+            "soft_time_limit": GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS,
+            "time_limit": GRAPH_TASK_TIME_LIMIT_SECONDS,
+        }
+        if task is not None
+        and task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
+        else {}
+    )
     try:
-        await asyncio.to_thread(run_knowledge_task_job.apply_async, args=(task_id,))
+        await asyncio.to_thread(
+            run_knowledge_task_job.apply_async,
+            args=(task_id,),
+            **dispatch_options,
+        )
     except Exception as exc:
         log_error(
             logger,

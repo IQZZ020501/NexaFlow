@@ -48,6 +48,7 @@ from app.entities.knowledge import (
     KnowledgeStorageCleanup,
     KnowledgeTask,
     TASK_FAILED_STATUS,
+    TASK_GRAPH_SYNC,
     TASK_INDEX,
     TASK_PARSE,
     TASK_QUEUED_STATUS,
@@ -3218,6 +3219,26 @@ def run_celery_job_tests(
         else:
             raise AssertionError("non-eager dispatch failure must propagate")
     asyncio.run(_assert_task_failed_dispatch(dispatch_fail_task.id))
+
+    graph_dispatch_task = asyncio.run(
+        create_task_row(
+            workspace_id,
+            no_model_kb_id,
+            None,
+            TASK_GRAPH_SYNC,
+            actor_user_id,
+        )
+    )
+    graph_dispatch = Mock()
+    with patch.object(
+        knowledge_tasks_module.run_knowledge_task_job,
+        "apply_async",
+        new=graph_dispatch,
+    ):
+        asyncio.run(enqueue_knowledge_task(graph_dispatch_task.id, non_eager_settings))
+    assert graph_dispatch.call_args.kwargs["soft_time_limit"] == 28_800
+    assert graph_dispatch.call_args.kwargs["time_limit"] == 29_100
+
     celery_app.conf.update(
         broker_url=settings.celery_broker_url,
         task_always_eager=True,
