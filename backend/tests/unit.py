@@ -302,6 +302,39 @@ def test_graph_extraction_requires_exact_chunk_evidence() -> None:
     assert repaired.claims[0].start_offset == content.index(quote)
     assert repaired.claims[0].end_offset == content.index(quote) + len(quote)
 
+    implicit_regulation = GraphExtractionBatch.model_validate(
+        {
+            "entities": [
+                {
+                    "temp_id": "regulation",
+                    "entity_type": "Regulation",
+                    "canonical_name": "校外培训管理规定",
+                },
+                {
+                    "temp_id": "role",
+                    "entity_type": "Role",
+                    "canonical_name": "学生",
+                },
+            ],
+            "claims": [
+                {
+                    "subject_temp_id": "regulation",
+                    "predicate": "applies_to",
+                    "object_temp_id": "role",
+                    "evidence_chunk_id": "chunk-2",
+                    "quote": "本规定适用于学生。",
+                    "start_offset": 0,
+                    "end_offset": 9,
+                }
+            ],
+        }
+    )
+    assert validate_extraction_batch(
+        implicit_regulation,
+        [ExtractionChunk("chunk-2", "doc-2", "本规定适用于学生。")],
+        default_policy_graph_schema(),
+    ).claims[0].predicate == "applies_to"
+
     invalid = valid.model_copy(deep=True)
     invalid.claims[0].quote = "账户 A 登录设备 D"
     try:

@@ -108,14 +108,18 @@ def validate_extraction_batch(
                 raise ValueError("Extracted claim quote does not match the evidence chunk.")
             claim.start_offset = start_offset
             claim.end_offset = start_offset + len(claim.quote)
-        for endpoint in (subject, target):
+        for is_subject, endpoint in ((True, subject), (False, target)):
             if endpoint is None:
+                continue
+            if is_subject and endpoint.entity_type in {
+                "Document",
+                "Regulation",
+                "Clause",
+            }:
                 continue
             surfaces = [endpoint.canonical_name, *endpoint.aliases]
             if not any(surface and surface in claim.quote for surface in surfaces):
-                raise ValueError(
-                    "Extracted claim quote does not mention both claim endpoints."
-                )
+                raise ValueError("Extracted claim quote misses a required claim endpoint.")
         if schema is None:
             continue
         try:
@@ -225,7 +229,9 @@ async def extract_graph_batch(
                 "Use the exact output field names; in particular, use temp_id, entity_type, "
                 "and canonical_name instead of id, type, or name. Each claim must set exactly "
                 "one non-null object: object_temp_id for an entity, or object_value for a "
-                "literal; never set both or neither. Required output JSON Schema: "
+                "literal; never set both or neither. Entity-object claim quotes must mention "
+                "the target entity and every non-document subject entity. Required output "
+                "JSON Schema: "
                 f"{output_schema}. "
                 "Allowed graph schema: "
                 f"{json.dumps(schema.model_dump(mode='json'), ensure_ascii=False)}"
@@ -259,7 +265,8 @@ async def extract_graph_batch(
                         "The response failed server validation. Re-evaluate the supplied "
                         "source and return one corrected JSON object only. Verify schema "
                         "names, exact output field names, temp ids, exact quotes, offsets, and "
-                        "that every claim has exactly one non-null object_temp_id or object_value."
+                        "that every claim has exactly one non-null object_temp_id or object_value. "
+                        "Entity-object quotes must mention the target and non-document subject."
                     ),
                 },
             ]
