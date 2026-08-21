@@ -74,6 +74,8 @@ from app.shareddomain.knowledge_graph.extraction import (
     ExtractionChunk,
     GraphExtractionBatch,
     GraphExtractionResult,
+    MAX_EXTRACTED_CLAIMS,
+    MAX_EXTRACTED_ENTITIES,
     extract_graph_batch,
     validate_extraction_batch,
 )
@@ -1450,6 +1452,10 @@ def build_structured_graph_result(
 def _graph_source_batches(
     chunks: list[KnowledgeDocumentChunk],
 ) -> list[tuple[bool, list[KnowledgeDocumentChunk]]]:
+    structured_batch_size = min(
+        MAX_EXTRACTED_ENTITIES // 2,
+        MAX_EXTRACTED_CLAIMS,
+    )
     result: list[tuple[bool, list[KnowledgeDocumentChunk]]] = []
     offset = 0
     while offset < len(chunks):
@@ -1457,7 +1463,7 @@ def _graph_source_batches(
         end = offset
         while (
             end < len(chunks)
-            and (structured or end - offset < 1)
+            and end - offset < (structured_batch_size if structured else 1)
             and (chunks[end].kind == "graph_record") == structured
         ):
             end += 1

@@ -210,23 +210,28 @@ def test_graph_import_parser_is_atomic_and_bounded() -> None:
 
 
 def test_graph_source_batches_keep_structured_and_text_chunks_separate() -> None:
+    structured_chunks = [
+        KnowledgeDocumentChunk(id=f"graph-{index}", kind="graph_record")
+        for index in range(51)
+    ]
     chunks = [
         KnowledgeDocumentChunk(id="text-1", kind="document"),
         KnowledgeDocumentChunk(id="text-1b", kind="document"),
-        KnowledgeDocumentChunk(id="graph-1", kind="graph_record"),
-        KnowledgeDocumentChunk(id="graph-2", kind="graph_record"),
+        *structured_chunks,
         KnowledgeDocumentChunk(id="text-2", kind="document"),
     ]
     batches = knowledge_graph_build._graph_source_batches(chunks)
-    assert [
-        (structured, [item.id for item in batch])
-        for structured, batch in batches
-    ] == [
-        (False, ["text-1"]),
-        (False, ["text-1b"]),
-        (True, ["graph-1", "graph-2"]),
-        (False, ["text-2"]),
+    assert [(structured, len(batch)) for structured, batch in batches] == [
+        (False, 1),
+        (False, 1),
+        (True, 50),
+        (True, 1),
+        (False, 1),
     ]
+    assert [item.id for item in batches[2][1]] == [
+        item.id for item in structured_chunks[:50]
+    ]
+    assert [item.id for item in batches[3][1]] == [structured_chunks[50].id]
 
 
 def test_graph_source_versions_are_stable_and_diffable() -> None:

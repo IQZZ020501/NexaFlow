@@ -55,9 +55,19 @@ class ExtractedClaim(BaseModel):
         return self
 
 
+MAX_EXTRACTED_ENTITIES = 100
+MAX_EXTRACTED_CLAIMS = 200
+
+
 class GraphExtractionBatch(BaseModel):
-    entities: list[ExtractedEntity] = Field(default_factory=list, max_length=100)
-    claims: list[ExtractedClaim] = Field(default_factory=list, max_length=200)
+    entities: list[ExtractedEntity] = Field(
+        default_factory=list,
+        max_length=MAX_EXTRACTED_ENTITIES,
+    )
+    claims: list[ExtractedClaim] = Field(
+        default_factory=list,
+        max_length=MAX_EXTRACTED_CLAIMS,
+    )
 
 
 @dataclass(frozen=True)
