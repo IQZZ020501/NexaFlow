@@ -17,6 +17,7 @@ import tests.support  # noqa: F401  (sets required env before app imports)
 from fastapi import HTTPException
 
 from app.application.knowledge_graph_build import (
+    BudgetedGraphChatProvider,
     charged_graph_tokens,
     estimate_graph_call_tokens,
 )
@@ -151,6 +152,45 @@ def test_graph_token_charge_uses_reported_or_conservative_estimate() -> None:
     assert estimate_graph_call_tokens(
         [{"role": "user", "content": "制度" * 1000}]
     ) >= 1000
+
+
+def test_graph_provider_rejection_releases_reserved_tokens() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.application import knowledge_graph_build
+    from app.ports.llm import ModelProviderStatusError
+
+    class RejectingProvider:
+        async def ainvoke(self, _messages, **_kwargs):
+            raise ModelProviderStatusError(402, "Insufficient Balance")
+
+    finalize = AsyncMock()
+    provider = BudgetedGraphChatProvider(
+        SimpleNamespace(),
+        RejectingProvider(),
+        SimpleNamespace(),
+        SimpleNamespace(model_usage_json={}),
+        SimpleNamespace(),
+    )
+    with (
+        patch.object(
+            knowledge_graph_build,
+            "reserve_graph_model_tokens",
+            new=AsyncMock(),
+        ),
+        patch.object(
+            knowledge_graph_build,
+            "finalize_graph_model_tokens",
+            new=finalize,
+        ),
+    ):
+        try:
+            asyncio.run(provider.ainvoke([{"role": "user", "content": "test"}]))
+        except ModelProviderStatusError as exc:
+            assert exc.status_code == 402
+        else:
+            raise AssertionError("provider rejection must escape immediately")
+    assert finalize.await_args.kwargs["charge_unreported"] is False
 
 
 def test_normalized_document_artifact_is_content_addressed() -> None:
@@ -6105,6 +6145,7 @@ def main() -> None:
     test_graph_schema_rejects_unknown_relation_endpoint()
     test_default_policy_graph_schema_is_stable()
     test_graph_token_charge_uses_reported_or_conservative_estimate()
+    test_graph_provider_rejection_releases_reserved_tokens()
     test_normalized_document_artifact_is_content_addressed()
     test_graph_extraction_requires_exact_chunk_evidence()
     test_graph_extractor_parses_bounded_json_only_response()

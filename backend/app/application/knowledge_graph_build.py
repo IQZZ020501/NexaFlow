@@ -47,7 +47,12 @@ from app.infrastructure.repositories import knowledge_graph as graph_repository
 from app.infrastructure.repositories import knowledge_reference as reference_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.infrastructure.repositories import workspace_governance as governance_repository
-from app.ports.llm import ChatProvider, RegisteredModel, build_chat_model
+from app.ports.llm import (
+    ChatProvider,
+    ModelProviderStatusError,
+    RegisteredModel,
+    build_chat_model,
+)
 from app.ports.parsing import KnowledgePipelineError
 from app.ports.vector_store import (
     GraphProfileVector,
@@ -300,6 +305,8 @@ async def finalize_graph_model_tokens(
     revision: KnowledgeGraphRevision,
     usage: dict[str, Any] | None,
     reserved_tokens: int,
+    *,
+    charge_unreported: bool = True,
 ) -> None:
     locked = await graph_repository.lock_revision(
         db,
@@ -311,7 +318,11 @@ async def finalize_graph_model_tokens(
     current = dict(locked.model_usage_json or {})
     current_reserved = _graph_usage_number(current, "reserved_tokens")
     normalized = usage or {"model_calls": 1, "reported_model_calls": 0}
-    charged, estimated = charged_graph_tokens(usage, reserved_tokens)
+    charged, estimated = (
+        charged_graph_tokens(usage, reserved_tokens)
+        if charge_unreported
+        else (0, False)
+    )
     merged = merge_usage(current, normalized)
     merged.update(
         reserved_tokens=max(0, current_reserved - reserved_tokens),
@@ -357,6 +368,16 @@ class BudgetedGraphChatProvider:
         )
         try:
             response = await self._delegate.ainvoke(messages, **kwargs)
+        except ModelProviderStatusError:
+            await finalize_graph_model_tokens(
+                self._db,
+                self._knowledge_base,
+                self._revision,
+                usage=None,
+                reserved_tokens=reserved,
+                charge_unreported=False,
+            )
+            raise
         except Exception:
             await finalize_graph_model_tokens(
                 self._db,
