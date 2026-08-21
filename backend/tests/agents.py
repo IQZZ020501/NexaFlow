@@ -624,6 +624,41 @@ class HangingStreamingProvider:
         yield AIMessageChunk(content="")
 
 
+class ActiveStreamingProvider:
+    def bind_tools(self, *_args, **_kwargs):
+        return self
+
+    async def astream(self, _messages: list[BaseMessage]):
+        for content in ("Still", " working", "."):
+            await asyncio.sleep(0.05)
+            yield AIMessageChunk(content=content)
+        yield AIMessageChunk(
+            content="",
+            response_metadata={"finish_reason": "stop"},
+        )
+
+
+async def assert_active_model_stream_does_not_time_out() -> None:
+    async def emit(_event: dict) -> None:
+        return None
+
+    original_timeout = agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS
+    agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS = 0.12
+    try:
+        result = await asyncio.wait_for(
+            run_agent(
+                ActiveStreamingProvider(),  # type: ignore[arg-type]
+                [{"role": "user", "content": "Run it"}],
+                [],
+                on_event=emit,
+            ),
+            timeout=5,
+        )
+        assert result.content == "Still working."
+    finally:
+        agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS = original_timeout
+
+
 async def assert_hanging_model_stream_times_out() -> None:
     async def emit(_event: dict) -> None:
         return None
@@ -3322,6 +3357,7 @@ def main() -> None:
     """
     Run the comprehensive agent, workflow, knowledge, MCP, streaming, persistence, authorization, and public-access integration assertions.
     """
+    asyncio.run(assert_active_model_stream_does_not_time_out())
     asyncio.run(assert_hanging_model_stream_times_out())
     asyncio.run(assert_required_knowledge_timeout_is_unavailable())
     asyncio.run(assert_truncated_tool_call_is_not_executed())

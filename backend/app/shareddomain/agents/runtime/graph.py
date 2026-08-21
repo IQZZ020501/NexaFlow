@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -171,10 +172,15 @@ async def agent_node(
         model.bind_tools(available_tools) if allow_tools and available_tools else model
     )
     try:
-        async with asyncio.timeout(MODEL_RESPONSE_TIMEOUT_SECONDS):
-            if callback.enabled:
+        if callback.enabled:
+            async with aclosing(bound_model.astream(state["messages"])) as stream:
                 aggregate: AIMessageChunk | None = None
-                async for chunk in bound_model.astream(state["messages"]):
+                while True:
+                    try:
+                        async with asyncio.timeout(MODEL_RESPONSE_TIMEOUT_SECONDS):
+                            chunk = await anext(stream)
+                    except StopAsyncIteration:
+                        break
                     if not isinstance(chunk, AIMessageChunk):
                         raise AgentRunnerError(
                             "Agent model returned an invalid stream message."
@@ -186,7 +192,8 @@ async def agent_node(
                 message = message_chunk_to_message(
                     aggregate or AIMessageChunk(content="")
                 )
-            else:
+        else:
+            async with asyncio.timeout(MODEL_RESPONSE_TIMEOUT_SECONDS):
                 message = await bound_model.ainvoke(state["messages"])
     except TimeoutError as exc:
         raise AgentRunnerError("Agent model response timed out.") from exc
