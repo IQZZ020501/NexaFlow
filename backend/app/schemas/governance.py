@@ -62,4 +62,7 @@ class AdminHealthResponse(BaseModel):
     components: dict[str, HealthComponent]
     pending_tasks: int
     failed_logs_24h: int
+    pending_graph_tasks: int
+    failed_graph_tasks_24h: int
+    pending_graph_profile_repairs: int
     checked_at: datetime

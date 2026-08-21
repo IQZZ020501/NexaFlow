@@ -313,6 +313,8 @@ async def retrieve_knowledge_base(
         candidate_limit,
     )
     stage_duration_ms["graph"] = _elapsed_ms(graph_started_at)
+    for stage in knowledge_graph_query.GRAPH_QUERY_STAGE_KEYS:
+        stage_duration_ms[stage] = graph_result.stage_duration_ms.get(stage, 0.0)
 
     ranked_hits = reciprocal_rank_fusion(
         vector_hits,
@@ -539,7 +541,9 @@ async def retrieve_knowledge_base(
         keyword_candidates=len(keyword_chunk_ids),
         reference_candidates=len(reference_chunk_ids),
         graph_mode=payload.graph_mode,
-        graph_intent=graph_result.operation,
+        graph_intent=(
+            None if graph_result.operation == "off" else graph_result.operation
+        ),
         graph_revision_id=graph_result.revision_id,
         graph_entity_candidates=graph_result.entity_candidate_count,
         graph_profile_candidates=graph_result.profile_candidate_count,

@@ -1,3 +1,4 @@
+import time
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any
@@ -352,6 +353,7 @@ async def publish_revision(
     knowledge_base: KnowledgeBase,
     revision: KnowledgeGraphRevision,
 ) -> KnowledgeGraphRevision:
+    publish_started_at = time.monotonic()
     try:
         locked_base = await graph_repository.lock_knowledge_base_graph(
             db, knowledge_base.id
@@ -392,6 +394,50 @@ async def publish_revision(
 
         locked_revision.status = GRAPH_REVISION_PUBLISHED
         locked_revision.published_at = utc_now()
+        entities = await graph_repository.list_active_entities(db, locked_base)
+        claims = await graph_repository.list_active_claims(db, locked_base)
+        evidence = await graph_repository.list_active_evidence_for_documents(
+            db,
+            locked_base,
+            None,
+        )
+        _, reviews_open = await graph_repository.list_pending_review_page(
+            db,
+            locked_base,
+            limit=1,
+            offset=0,
+        )
+        stage_duration_ms = (locked_revision.stats_json or {}).get(
+            "stage_duration_ms"
+        )
+        durations = (
+            dict(stage_duration_ms)
+            if isinstance(stage_duration_ms, dict)
+            else {}
+        )
+        durations["publish"] = round(
+            max(0.0, (time.monotonic() - publish_started_at) * 1000),
+            1,
+        )
+        locked_revision.stats_json = {
+            **(locked_revision.stats_json or {}),
+            "entities_active": len(entities),
+            "claims_active": len(claims),
+            "evidence_active": len(evidence),
+            "reviews_open": reviews_open,
+            "profile_count": sum(bool(entity.profile_markdown) for entity in entities),
+            "component_count": len(
+                {
+                    entity.component_id
+                    for entity in entities
+                    if entity.component_id
+                }
+            ),
+            "stage_duration_ms": {
+                key: round(float(value), 1)
+                for key, value in sorted(durations.items())
+            },
+        }
         published = await graph_repository.save_revision(db, locked_revision)
         locked_base.active_graph_schema_id = locked_revision.schema_id
         locked_base.active_graph_revision_id = locked_revision.id

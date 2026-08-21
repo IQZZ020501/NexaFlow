@@ -260,7 +260,7 @@ class KnowledgeRetrievalTraceResponse(BaseModel):
     returned_hits: int = Field(ge=0)
     truncated_hits: int = Field(default=0, ge=0)
     duration_ms: float = Field(ge=0)
-    stage_duration_ms: dict[str, float] = Field(max_length=8)
+    stage_duration_ms: dict[str, float] = Field(max_length=12)
 
 
 class KnowledgeQueryInspectResponse(BaseModel):

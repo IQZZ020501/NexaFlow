@@ -1,5 +1,7 @@
 import asyncio
-from dataclasses import dataclass
+import logging
+import time
+from dataclasses import dataclass, field
 from typing import Literal
 
 from fastapi import HTTPException, status
@@ -12,6 +14,8 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphRevision,
 )
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import classify_error, log_error
+from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.repositories import knowledge_graph as graph_repository
 from app.ports.vector_store import (
     GraphProfileVectorHit,
@@ -46,6 +50,14 @@ NEIGHBORHOOD_MARKERS = (
     "neighborhood",
 )
 ENTITY_CANDIDATE_LIMIT = 8
+GRAPH_QUERY_STAGE_KEYS = (
+    "graph_plan",
+    "graph_entity_link",
+    "graph_traversal",
+    "graph_profiles",
+)
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -80,6 +92,67 @@ class GraphCandidateResult:
     limit_reason: str | None
     entity_candidate_count: int
     profile_candidate_count: int
+    stage_duration_ms: dict[str, float] = field(default_factory=dict)
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return round(max(0.0, (time.monotonic() - started_at) * 1000), 3)
+
+
+def _add_stage_duration(
+    stage_duration_ms: dict[str, float] | None,
+    stage: str,
+    started_at: float,
+) -> None:
+    if stage_duration_ms is None:
+        return
+    stage_duration_ms[stage] = round(
+        stage_duration_ms.get(stage, 0.0) + _elapsed_ms(started_at),
+        3,
+    )
+
+
+def _log_graph_query_event(
+    knowledge_base: KnowledgeBase,
+    *,
+    revision_id: str | None,
+    duration_ms: float,
+    entity_count: int = 0,
+    claim_count: int = 0,
+    evidence_count: int = 0,
+    visited_nodes: int = 0,
+    graph_hops: int = 0,
+    truncated: bool = False,
+    limit_reason: str | None = None,
+    status_value: str,
+    exc: BaseException | None = None,
+) -> None:
+    context = {
+        "workspace_id": getattr(knowledge_base, "workspace_id", ""),
+        "knowledge_base_id": getattr(knowledge_base, "id", ""),
+        "revision_id": revision_id or "",
+        "stage": "query",
+        "entity_count": entity_count,
+        "claim_count": claim_count,
+        "evidence_count": evidence_count,
+        "duration_ms": duration_ms,
+        "visited_nodes": visited_nodes,
+        "graph_hops": graph_hops,
+        "truncated": truncated,
+        "limit_reason": limit_reason or "",
+        "status": status_value,
+    }
+    if exc is None:
+        log_event(logger, logging.INFO, "Knowledge graph query completed.", **context)
+        return
+    log_error(
+        logger,
+        "Knowledge graph query failed.",
+        None,
+        source=classify_error(exc),
+        **context,
+        error_type=type(exc).__name__,
+    )
 
 
 def _dedupe_entities(
@@ -97,7 +170,7 @@ def _node_view(entity: KnowledgeGraphEntity) -> graph_traversal.GraphNodeView:
     )
 
 
-async def _profile_candidates(
+async def _profile_candidates_impl(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     revision: KnowledgeGraphRevision,
@@ -141,18 +214,40 @@ async def _profile_candidates(
     return valid_hits, entities
 
 
+async def _profile_candidates(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    revision: KnowledgeGraphRevision,
+    query: str,
+    settings: Settings,
+    stage_duration_ms: dict[str, float] | None = None,
+) -> tuple[list[GraphProfileVectorHit], dict[str, KnowledgeGraphEntity]]:
+    started_at = time.monotonic()
+    try:
+        return await _profile_candidates_impl(
+            db,
+            knowledge_base,
+            revision,
+            query,
+            settings,
+        )
+    finally:
+        _add_stage_duration(stage_duration_ms, "graph_profiles", started_at)
+
+
 def _name_tokens_match_query(entity: KnowledgeGraphEntity, query: str) -> bool:
     normalized_query = normalize_graph_name(query)
     tokens = normalize_graph_name(entity.canonical_name).split()
     return bool(tokens) and all(token in normalized_query for token in tokens)
 
 
-async def _link_entity_text(
+async def _link_entity_text_impl(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     revision: KnowledgeGraphRevision,
     text: str,
     settings: Settings,
+    stage_duration_ms: dict[str, float] | None = None,
 ) -> EntityLinkResult:
     exact = await graph_repository.list_exact_entity_matches(
         db,
@@ -182,6 +277,7 @@ async def _link_entity_text(
         revision,
         text,
         settings,
+        stage_duration_ms,
     )
     entity_ids = set(bm25_ids) | {hit.entity_id for hit in profile_hits}
     entities = {
@@ -222,6 +318,28 @@ async def _link_entity_text(
         len(candidates),
         len(profile_hits),
     )
+
+
+async def _link_entity_text(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    revision: KnowledgeGraphRevision,
+    text: str,
+    settings: Settings,
+    stage_duration_ms: dict[str, float] | None = None,
+) -> EntityLinkResult:
+    started_at = time.monotonic()
+    try:
+        return await _link_entity_text_impl(
+            db,
+            knowledge_base,
+            revision,
+            text,
+            settings,
+            stage_duration_ms,
+        )
+    finally:
+        _add_stage_duration(stage_duration_ms, "graph_entity_link", started_at)
 
 
 async def _validated_schema(
@@ -277,12 +395,13 @@ def _link_counts(links: list[EntityLinkResult]) -> tuple[int, int]:
     return len(entity_ids), profile_count
 
 
-async def build_graph_query_plan(
+async def _build_graph_query_plan_impl(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     revision: KnowledgeGraphRevision,
     payload: KnowledgeQueryRequest,
     settings: Settings,
+    stage_duration_ms: dict[str, float] | None = None,
 ) -> ResolvedGraphQueryPlan:
     if await _validated_schema(
         db,
@@ -360,6 +479,7 @@ async def build_graph_query_plan(
                 revision,
                 source_text,
                 settings,
+                stage_duration_ms,
             ),
             await _link_entity_text(
                 db,
@@ -367,6 +487,7 @@ async def build_graph_query_plan(
                 revision,
                 target_text,
                 settings,
+                stage_duration_ms,
             ),
         ]
         count, profile_count = _link_counts(links)
@@ -414,6 +535,7 @@ async def build_graph_query_plan(
             revision,
             source_text,
             settings,
+            stage_duration_ms,
         )
         return ResolvedGraphQueryPlan(
             _plan(
@@ -496,6 +618,7 @@ async def build_graph_query_plan(
         revision,
         payload.query,
         settings,
+        stage_duration_ms,
     )
     if link.selected:
         return ResolvedGraphQueryPlan(
@@ -534,6 +657,28 @@ async def build_graph_query_plan(
         0,
         0,
     )
+
+
+async def build_graph_query_plan(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    revision: KnowledgeGraphRevision,
+    payload: KnowledgeQueryRequest,
+    settings: Settings,
+    stage_duration_ms: dict[str, float] | None = None,
+) -> ResolvedGraphQueryPlan:
+    started_at = time.monotonic()
+    try:
+        return await _build_graph_query_plan_impl(
+            db,
+            knowledge_base,
+            revision,
+            payload,
+            settings,
+            stage_duration_ms,
+        )
+    finally:
+        _add_stage_duration(stage_duration_ms, "graph_plan", started_at)
 
 
 def _empty_traversal(
@@ -718,36 +863,86 @@ async def retrieve_graph_candidates(
     settings: Settings,
     limit: int,
 ) -> GraphCandidateResult:
+    started_at = time.monotonic()
+    stage_duration_ms = {stage: 0.0 for stage in GRAPH_QUERY_STAGE_KEYS}
     if (
         not getattr(knowledge_base, "graph_enabled", False)
         or payload.graph_mode == "off"
     ):
-        return GraphCandidateResult(
-            (), {}, {}, None, "off", None, 0, False, None, 0, 0
+        result = GraphCandidateResult(
+            (), {}, {}, None, "off", None, 0, False, None, 0, 0,
+            stage_duration_ms,
         )
-    revision = await graph_repository.get_active_revision(db, knowledge_base)
-    if revision is None:
-        return GraphCandidateResult(
-            (), {}, {}, None, "unavailable", None, 0, False, None, 0, 0
+        _log_graph_query_event(
+            knowledge_base,
+            revision_id=None,
+            duration_ms=_elapsed_ms(started_at),
+            status_value="off",
         )
-    resolved = await build_graph_query_plan(
-        db,
-        knowledge_base,
-        revision,
-        payload,
-        settings,
-    )
-    traversal = await execute_graph_query_plan(
-        db,
-        knowledge_base,
-        revision,
-        resolved,
-    )
+        return result
+    revision: KnowledgeGraphRevision | None = None
+    try:
+        revision = await graph_repository.get_active_revision(db, knowledge_base)
+        if revision is None:
+            result = GraphCandidateResult(
+                (), {}, {}, None, "unavailable", None, 0, False, None, 0, 0,
+                stage_duration_ms,
+            )
+            _log_graph_query_event(
+                knowledge_base,
+                revision_id=None,
+                duration_ms=_elapsed_ms(started_at),
+                status_value="unavailable",
+            )
+            return result
+        resolved = await build_graph_query_plan(
+            db,
+            knowledge_base,
+            revision,
+            payload,
+            settings,
+            stage_duration_ms,
+        )
+        traversal_started_at = time.monotonic()
+        try:
+            traversal = await execute_graph_query_plan(
+                db,
+                knowledge_base,
+                revision,
+                resolved,
+            )
+        finally:
+            _add_stage_duration(
+                stage_duration_ms,
+                "graph_traversal",
+                traversal_started_at,
+            )
+    except HTTPException as exc:
+        _log_graph_query_event(
+            knowledge_base,
+            revision_id=revision.id if revision is not None else None,
+            duration_ms=_elapsed_ms(started_at),
+            status_value="failed",
+            exc=exc,
+        )
+        raise
+    except Exception as exc:
+        _log_graph_query_event(
+            knowledge_base,
+            revision_id=revision.id if revision is not None else None,
+            duration_ms=_elapsed_ms(started_at),
+            status_value="failed",
+            exc=exc,
+        )
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Knowledge graph query failed.",
+        ) from None
     chunk_ids, claim_ids_by_chunk, claim_hops = _candidate_evidence(
         traversal,
         limit,
     )
-    return GraphCandidateResult(
+    result = GraphCandidateResult(
         chunk_ids=chunk_ids,
         claim_ids_by_chunk=claim_ids_by_chunk,
         claim_hops=claim_hops,
@@ -759,7 +954,22 @@ async def retrieve_graph_candidates(
         limit_reason=traversal.limit_reason,
         entity_candidate_count=resolved.entity_candidate_count,
         profile_candidate_count=resolved.profile_candidate_count,
+        stage_duration_ms=stage_duration_ms,
     )
+    _log_graph_query_event(
+        knowledge_base,
+        revision_id=revision.id,
+        duration_ms=_elapsed_ms(started_at),
+        entity_count=resolved.entity_candidate_count,
+        claim_count=len(traversal.claims),
+        evidence_count=len(traversal.evidence),
+        visited_nodes=traversal.visited_nodes,
+        graph_hops=max(claim_hops.values(), default=0),
+        truncated=traversal.truncated,
+        limit_reason=traversal.limit_reason,
+        status_value="succeeded",
+    )
+    return result
 
 
 def graph_query_result_response(

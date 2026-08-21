@@ -19,6 +19,7 @@ SUITES = (
     "workspaces",
     "teams",
     "knowledge",
+    "knowledge_graph",
     "llm",
     "agents",
     "workflows",

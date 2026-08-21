@@ -7,7 +7,7 @@ from app.application.knowledge_graph_build import run_graph_build_task
 from app.application.knowledge_graph_maintenance import reconcile_knowledge_graphs
 from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
+from app.infrastructure.errors import classify_error, log_error
 from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.session import get_session_factory
 from app.shareddomain.knowledge.task_runner import (
@@ -58,7 +58,14 @@ def run_knowledge_task_job(self, task_id: str) -> None:
             )
         )
     except Exception as exc:
-        log_error(logger, "Knowledge task job crashed.", exc, task_id=task_id)
+        log_error(
+            logger,
+            "Knowledge task job crashed.",
+            None,
+            source=classify_error(exc),
+            task_id=task_id,
+            error_type=type(exc).__name__,
+        )
         raise
     if outcome == TASK_RUN_BUSY:
         log_event(
@@ -188,7 +195,14 @@ async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
     try:
         await asyncio.to_thread(run_knowledge_task_job.apply_async, args=(task_id,))
     except Exception as exc:
-        log_error(logger, "Failed to dispatch knowledge task.", exc, task_id=task_id)
+        log_error(
+            logger,
+            "Failed to dispatch knowledge task.",
+            None,
+            source=classify_error(exc),
+            task_id=task_id,
+            error_type=type(exc).__name__,
+        )
         try:
             await mark_task_dispatch_failed(task_id)
         except Exception:

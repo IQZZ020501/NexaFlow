@@ -1,7 +1,10 @@
 import asyncio
 import hashlib
 import json
-from collections.abc import Sequence
+import logging
+import time
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
@@ -32,6 +35,8 @@ from app.entities.knowledge_graph import (
 )
 from app.entities.user import User
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import classify_error, log_error
+from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import knowledge as knowledge_repository
 from app.infrastructure.repositories import knowledge_graph as graph_repository
@@ -47,6 +52,7 @@ from app.ports.vector_store import (
 )
 from app.schemas.knowledge_graph import KnowledgeGraphImportRecord
 from app.shareddomain.agents.runtime.usage import merge_usage, usage_from_message
+from app.shareddomain.audit.services import record_audit_log
 from app.shareddomain.knowledge.orchestration import resolve_embedding_model
 from app.shareddomain.knowledge.services import get_knowledge_model
 from app.shareddomain.knowledge.task_runner import ensure_knowledge_task_lease
@@ -81,6 +87,17 @@ PROFILE_TIMEOUT_SECONDS = 90
 GRAPH_SYNC_MAX_CHARGED_TOKENS = 250_000
 GRAPH_REBUILD_MAX_CHARGED_TOKENS = 2_000_000
 GRAPH_MODEL_OUTPUT_RESERVATION = 8_192
+GRAPH_BUILD_STAGES = (
+    "extract",
+    "resolve",
+    "references",
+    "profiles",
+    "components",
+    "profile_vectors",
+    "publish",
+)
+
+logger = get_logger(__name__)
 
 
 class _EntityProfileResponse(BaseModel):
@@ -121,6 +138,76 @@ def _graph_usage_number(usage: dict[str, Any], key: str) -> int:
         value
         if isinstance(value, int) and not isinstance(value, bool) and value > 0
         else 0
+    )
+
+
+@contextmanager
+def _measure_graph_stage(
+    stage_duration_ms: dict[str, float],
+    stage: str,
+) -> Iterator[None]:
+    started_at = time.monotonic()
+    try:
+        yield
+    finally:
+        stage_duration_ms[stage] = round(
+            stage_duration_ms.get(stage, 0.0)
+            + max(0.0, (time.monotonic() - started_at) * 1000),
+            1,
+        )
+
+
+def _log_graph_build_stage(
+    knowledge_base: KnowledgeBase,
+    task: KnowledgeTask,
+    revision: KnowledgeGraphRevision,
+    *,
+    stage: str,
+    duration_ms: float,
+    document_count: int,
+    chunk_count: int,
+    entity_count: int = 0,
+    claim_count: int = 0,
+    evidence_count: int = 0,
+    review_count: int = 0,
+    status_value: str = "succeeded",
+    exc: BaseException | None = None,
+) -> None:
+    usage = revision.model_usage_json or {}
+    context = {
+        "workspace_id": knowledge_base.workspace_id,
+        "knowledge_base_id": knowledge_base.id,
+        "task_id": task.id,
+        "revision_id": revision.id,
+        "revision_no": revision.revision_no,
+        "stage": stage,
+        "task_type": task.task_type,
+        "document_count": document_count,
+        "chunk_count": chunk_count,
+        "entity_count": entity_count,
+        "claim_count": claim_count,
+        "evidence_count": evidence_count,
+        "review_count": review_count,
+        "model_calls": _graph_usage_number(usage, "model_calls"),
+        "charged_tokens": _graph_usage_number(usage, "charged_tokens"),
+        "duration_ms": duration_ms,
+        "status": status_value,
+    }
+    if exc is None:
+        log_event(
+            logger,
+            logging.INFO,
+            "Knowledge graph build stage completed.",
+            **context,
+        )
+        return
+    log_error(
+        logger,
+        "Knowledge graph build stage failed.",
+        None,
+        source=classify_error(exc),
+        **context,
+        error_type=type(exc).__name__,
     )
 
 
@@ -1428,6 +1515,13 @@ async def run_graph_build_task(
     await knowledge_repository.save_knowledge_task(db, task)
     await db.commit()
     affected_entities: set[str] = set()
+    document_count = (
+        len(changed_document_ids)
+        if task.task_type == TASK_GRAPH_SYNC
+        else len(source_versions)
+    )
+    stage_duration_ms = {stage: 0.0 for stage in GRAPH_BUILD_STAGES}
+    current_stage = "extract"
     published = False
     review_decision = (task.options or {}).get("review_decision")
     try:
@@ -1439,108 +1533,169 @@ async def run_graph_build_task(
                 revision,
                 task,
             )
-        affected_entities.update(
-            await stage_changed_document_retirements(
-                db,
-                knowledge_base,
-                revision,
-                changed_document_ids if task.task_type == TASK_GRAPH_SYNC else None,
-            )
-        )
-        for structured, batch_chunks in _graph_source_batches(chunks):
-            ensure_knowledge_task_lease(lease_lost)
-            extraction = (
-                build_structured_graph_result(schema, batch_chunks, task.options)
-                if structured
-                else await extract_graph_batch(
-                    provider,
-                    schema,
-                    [
-                        ExtractionChunk(item.id, item.document_id, item.content)
-                        for item in batch_chunks
-                    ],
-                )
-            )
+        current_stage = "resolve"
+        with _measure_graph_stage(stage_duration_ms, current_stage):
             affected_entities.update(
-                await stage_extraction_batch(
+                await stage_changed_document_retirements(
                     db,
                     knowledge_base,
                     revision,
-                    schema,
-                    None if structured else model,
-                    extraction.prompt_hash,
-                    batch_chunks,
-                    extraction.batch,
-                    source_kind=(
-                        "structured_import" if structured else "explicit_text"
+                    (
+                        changed_document_ids
+                        if task.task_type == TASK_GRAPH_SYNC
+                        else None
                     ),
                 )
             )
+        for structured, batch_chunks in _graph_source_batches(chunks):
+            ensure_knowledge_task_lease(lease_lost)
+            current_stage = "extract"
+            with _measure_graph_stage(stage_duration_ms, current_stage):
+                extraction = (
+                    build_structured_graph_result(schema, batch_chunks, task.options)
+                    if structured
+                    else await extract_graph_batch(
+                        provider,
+                        schema,
+                        [
+                            ExtractionChunk(item.id, item.document_id, item.content)
+                            for item in batch_chunks
+                        ],
+                    )
+                )
+            current_stage = "resolve"
+            with _measure_graph_stage(stage_duration_ms, current_stage):
+                affected_entities.update(
+                    await stage_extraction_batch(
+                        db,
+                        knowledge_base,
+                        revision,
+                        schema,
+                        None if structured else model,
+                        extraction.prompt_hash,
+                        batch_chunks,
+                        extraction.batch,
+                        source_kind=(
+                            "structured_import" if structured else "explicit_text"
+                        ),
+                    )
+                )
             await graph_repository.save_revision(db, revision)
             task.processed_items += len(batch_chunks)
             await knowledge_repository.save_knowledge_task(db, task)
             await db.commit()
-        affected_entities.update(
-            await stage_document_reference_claims(
+        current_stage = "references"
+        with _measure_graph_stage(stage_duration_ms, current_stage):
+            affected_entities.update(
+                await stage_document_reference_claims(
+                    db,
+                    knowledge_base,
+                    revision,
+                    schema,
+                )
+            )
+        current_stage = "resolve"
+        with _measure_graph_stage(stage_duration_ms, current_stage):
+            affected_entities.update(
+                await knowledge_graph_application.stage_review_decision(
+                    db,
+                    knowledge_base,
+                    revision,
+                    review_decision,
+                )
+            )
+        for completed_stage in ("extract", "resolve", "references"):
+            _log_graph_build_stage(
+                knowledge_base,
+                task,
+                revision,
+                stage=completed_stage,
+                duration_ms=round(stage_duration_ms.get(completed_stage, 0.0), 1),
+                document_count=document_count,
+                chunk_count=task.processed_items,
+                entity_count=len(affected_entities),
+            )
+        current_stage = "components"
+        with _measure_graph_stage(stage_duration_ms, current_stage):
+            affected_entities.update(
+                await stage_connected_components(db, knowledge_base, revision)
+            )
+        _log_graph_build_stage(
+            knowledge_base,
+            task,
+            revision,
+            stage=current_stage,
+            duration_ms=stage_duration_ms[current_stage],
+            document_count=document_count,
+            chunk_count=task.processed_items,
+            entity_count=len(affected_entities),
+        )
+        current_stage = "profiles"
+        with _measure_graph_stage(stage_duration_ms, current_stage):
+            await stage_entity_profiles(
                 db,
                 knowledge_base,
                 revision,
                 schema,
+                (
+                    None
+                    if (task.options or {}).get("trusted_structured_import") is True
+                    else provider
+                ),
+                affected_entities,
             )
+        _log_graph_build_stage(
+            knowledge_base,
+            task,
+            revision,
+            stage=current_stage,
+            duration_ms=stage_duration_ms[current_stage],
+            document_count=document_count,
+            chunk_count=task.processed_items,
+            entity_count=len(affected_entities),
         )
-        affected_entities.update(
-            await knowledge_graph_application.stage_review_decision(
+        current_stage = "profile_vectors"
+        with _measure_graph_stage(stage_duration_ms, current_stage):
+            profiles = await _projected_profile_vectors(
                 db,
                 knowledge_base,
                 revision,
-                review_decision,
+                affected_entities,
             )
-        )
-        affected_entities.update(
-            await stage_connected_components(db, knowledge_base, revision)
-        )
-        await stage_entity_profiles(
-            db,
-            knowledge_base,
-            revision,
-            schema,
-            (
-                None
-                if (task.options or {}).get("trusted_structured_import") is True
-                else provider
-            ),
-            affected_entities,
-        )
-        profiles = await _projected_profile_vectors(
-            db,
-            knowledge_base,
-            revision,
-            affected_entities,
-        )
-        embedding_model = await resolve_embedding_model(db, knowledge_base)
-        if embedding_model is None:
-            raise KnowledgePipelineError("Embedding model is required.")
-        if (
-            task.task_type == TASK_GRAPH_SYNC
-            and active_profile_model_id
-            and active_profile_model_id != embedding_model.id
-        ):
-            raise KnowledgePipelineError(
-                "Embedding model changed; graph rebuild is required."
-            )
-        if task.task_type == TASK_GRAPH_REBUILD:
+            embedding_model = await resolve_embedding_model(db, knowledge_base)
+            if embedding_model is None:
+                raise KnowledgePipelineError("Embedding model is required.")
+            if (
+                task.task_type == TASK_GRAPH_SYNC
+                and active_profile_model_id
+                and active_profile_model_id != embedding_model.id
+            ):
+                raise KnowledgePipelineError(
+                    "Embedding model changed; graph rebuild is required."
+                )
+            if task.task_type == TASK_GRAPH_REBUILD:
+                await asyncio.to_thread(
+                    delete_graph_profile_collection,
+                    settings,
+                    knowledge_base.id,
+                )
             await asyncio.to_thread(
-                delete_graph_profile_collection,
+                upsert_graph_profile_vectors,
                 settings,
                 knowledge_base.id,
+                knowledge_base.workspace_id,
+                embedding_model,
+                profiles,
             )
-        await asyncio.to_thread(
-            upsert_graph_profile_vectors,
-            settings,
-            knowledge_base.id,
-            knowledge_base.workspace_id,
-            embedding_model,
-            profiles,
+        _log_graph_build_stage(
+            knowledge_base,
+            task,
+            revision,
+            stage=current_stage,
+            duration_ms=stage_duration_ms[current_stage],
+            document_count=document_count,
+            chunk_count=task.processed_items,
+            entity_count=len(profiles),
         )
         profile_entity_ids = {profile.entity_id for profile in profiles}
         profile_delete_entity_ids = sorted(
@@ -1553,15 +1708,73 @@ async def run_graph_build_task(
             "profile_repair_pending": True,
             "profile_delete_entity_ids": profile_delete_entity_ids,
             "profile_delete_pending": bool(profile_delete_entity_ids),
+            "documents_processed": document_count,
+            "chunks_processed": task.processed_items,
+            "stage_duration_ms": {
+                key: round(value, 1)
+                for key, value in sorted(stage_duration_ms.items())
+            },
         }
         await graph_repository.save_revision(db, revision)
-        await publish_revision(db, knowledge_base, revision)
+        record_audit_log(
+            db,
+            actor,
+            "knowledge_graph.revision.publish",
+            "knowledge_graph_revision",
+            revision.id,
+            str(revision.revision_no),
+            {
+                "knowledge_base_id": knowledge_base.id,
+                "revision_id": revision.id,
+                "task_id": task.id,
+                "action": "publish",
+                "record_count": len(
+                    await graph_repository.list_revision_changes(db, revision)
+                ),
+                "status": "published",
+            },
+            workspace_id=knowledge_base.workspace_id,
+        )
+        current_stage = "publish"
+        revision = await publish_revision(db, knowledge_base, revision)
         published = True
+        published_stats = revision.stats_json or {}
+        published_durations = published_stats.get("stage_duration_ms")
+        if isinstance(published_durations, dict):
+            stage_duration_ms = {
+                str(key): float(value)
+                for key, value in published_durations.items()
+            }
+        _log_graph_build_stage(
+            knowledge_base,
+            task,
+            revision,
+            stage=current_stage,
+            duration_ms=stage_duration_ms.get(current_stage, 0.0),
+            document_count=document_count,
+            chunk_count=task.processed_items,
+            entity_count=int(published_stats.get("entities_active") or 0),
+            claim_count=int(published_stats.get("claims_active") or 0),
+            evidence_count=int(published_stats.get("evidence_active") or 0),
+            review_count=int(published_stats.get("reviews_open") or 0),
+        )
         try:
             await mark_profile_index_ready(db, revision.id)
         except Exception:
             await db.rollback()
     except Exception as exc:
+        _log_graph_build_stage(
+            knowledge_base,
+            task,
+            revision,
+            stage=current_stage,
+            duration_ms=round(stage_duration_ms.get(current_stage, 0.0), 1),
+            document_count=document_count,
+            chunk_count=task.processed_items,
+            entity_count=len(affected_entities),
+            status_value="failed",
+            exc=exc,
+        )
         if not published:
             await db.rollback()
             await knowledge_graph_application.reset_review_decision(
@@ -1576,6 +1789,12 @@ async def run_graph_build_task(
                 stats_patch={
                     "profile_repair_entity_ids": sorted(affected_entities),
                     "profile_repair_pending": True,
+                    "documents_processed": document_count,
+                    "chunks_processed": task.processed_items,
+                    "stage_duration_ms": {
+                        key: round(value, 1)
+                        for key, value in sorted(stage_duration_ms.items())
+                    },
                 },
             )
         else:

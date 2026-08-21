@@ -44,6 +44,9 @@ const health = {
   },
   pending_tasks: 2,
   failed_logs_24h: 3,
+  pending_graph_tasks: 4,
+  failed_graph_tasks_24h: 1,
+  pending_graph_profile_repairs: 2,
   checked_at: "2026-08-20T12:00:00Z",
 }
 
@@ -93,6 +96,8 @@ describe("system health", () => {
     expect(healthCard("向量数据库").getByText("未配置")).toBeTruthy()
     expect(healthCard("文件存储").getByText("服务不可用")).toBeTruthy()
     expect(healthCard("后台 Worker").getByText("正常")).toBeTruthy()
+    expect(healthCard("图谱任务").getByText("4")).toBeTruthy()
+    expect(healthCard("待清理知识页").getByText("2")).toBeTruthy()
     expect(healthCard("Redis").getByText("检查超时")).toBeTruthy()
     expect(screen.getByText(/最后检查：/)).toBeTruthy()
     expect(screen.getByText(/每 30 秒自动刷新/)).toBeTruthy()

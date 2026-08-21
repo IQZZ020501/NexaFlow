@@ -2970,6 +2970,45 @@ def test_graph_api_permissions_and_scoping() -> None:
         assert resolved.status_code == 202, resolved.text
         assert repeated.status_code == 409, repeated.text
 
+        allowed_graph_audit_keys = {
+            "knowledge_base_id",
+            "schema_id",
+            "revision_id",
+            "task_id",
+            "review_id",
+            "action",
+            "record_count",
+            "status",
+            "source_entity_id",
+            "target_entity_id",
+        }
+        for action in (
+            "knowledge_graph.settings.update",
+            "knowledge_graph.schema.create",
+            "knowledge_graph.rebuild.enqueue",
+            "knowledge_graph.review.resolve",
+        ):
+            audit_response = client.get(
+                "/api/v1/admin/audit-logs"
+                f"?workspace_id={workspace_id}&action={action}&limit=200",
+                headers=auth_headers(admin_token),
+            )
+            assert audit_response.status_code == 200, audit_response.text
+            audit_logs = audit_response.json()
+            assert audit_logs, action
+            assert all(
+                set(item["details"]) <= allowed_graph_audit_keys
+                for item in audit_logs
+            )
+        review_audit = client.get(
+            "/api/v1/admin/audit-logs"
+            f"?workspace_id={workspace_id}"
+            "&action=knowledge_graph.review.resolve&limit=200",
+            headers=auth_headers(admin_token),
+        ).json()[0]
+        assert review_audit["details"]["record_count"] == 1
+        assert review_audit["details"]["status"] == "approved"
+
 
 def main() -> None:
     test_rerank_child_hits_edge_paths()

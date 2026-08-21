@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
+from app.infrastructure.errors import classify_error, log_error
 from app.infrastructure.logger import get_logger, log_event
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure.session import get_session_factory
@@ -400,6 +400,20 @@ async def mark_knowledge_task_failed(
     await knowledge_base_repository.save_knowledge_task(db, task)
     actor = await user_repository.get_user_by_id(db, task.created_by_user_id)
     if actor is not None:
+        details = (
+            {
+                "knowledge_base_id": task.knowledge_base_id,
+                "task_id": task.id,
+                "action": "fail",
+                "status": "failed",
+            }
+            if task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
+            else {
+                "knowledge_base_id": task.knowledge_base_id,
+                "document_id": task.document_id,
+                "error": message,
+            }
+        )
         record_audit_log(
             db,
             actor,
@@ -407,11 +421,7 @@ async def mark_knowledge_task_failed(
             "knowledge_task",
             task.id,
             task.task_type,
-            {
-                "knowledge_base_id": task.knowledge_base_id,
-                "document_id": task.document_id,
-                "error": message,
-            },
+            details,
             workspace_id=task.workspace_id,
         )
     await db.commit()
@@ -492,6 +502,7 @@ async def run_knowledge_task(
         lease_heartbeat = asyncio.create_task(
             maintain_knowledge_task_lease(task_id, worker_task_id, lease_lost)
         )
+        task: KnowledgeTask | None = None
 
         try:
             task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
@@ -641,19 +652,37 @@ async def run_knowledge_task(
                     log_error(
                         logger,
                         "Knowledge graph chain enqueue failed.",
-                        exc,
+                        None,
+                        source=classify_error(exc),
                         task_id=task.id,
+                        task_type=task.task_type,
+                        error_type=type(exc).__name__,
                     )
                     await db.rollback()
         except Exception as exc:
             await db.rollback()
-            log_error(
-                logger,
-                "Knowledge task failed.",
-                exc,
-                task_id=task_id,
-                worker_task_id=worker_task_id,
-            )
+            if task is not None and task.task_type in {
+                TASK_GRAPH_SYNC,
+                TASK_GRAPH_REBUILD,
+            }:
+                log_error(
+                    logger,
+                    "Knowledge task failed.",
+                    None,
+                    source=classify_error(exc),
+                    task_id=task_id,
+                    worker_task_id=worker_task_id,
+                    task_type=task.task_type,
+                    error_type=type(exc).__name__,
+                )
+            else:
+                log_error(
+                    logger,
+                    "Knowledge task failed.",
+                    exc,
+                    task_id=task_id,
+                    worker_task_id=worker_task_id,
+                )
             await mark_knowledge_task_failed(
                 db,
                 task_id,

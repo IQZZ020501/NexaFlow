@@ -61,6 +61,7 @@ from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphEntity,
     KnowledgeGraphRevision,
 )
+from app.shareddomain.audit.models import AuditLog
 from app.infrastructure.model_utils import utc_now
 from app.shareddomain.knowledge.orchestration import (
     enqueue_graph_rebuild,
@@ -942,8 +943,45 @@ async def test_graph_retrieval_fuses_evidence_without_changing_off_mode() -> Non
     assert related.graph_claim_ids == [step.claim_id]
     assert related.graph_hops == 1
     assert blended.trace.graph_claim_candidates == 1
+    assert baseline.trace.graph_intent is None
+    assert explicit_off.trace.graph_intent is None
+    assert all(
+        explicit_off.trace.stage_duration_ms.get(stage, 0.0) == 0.0
+        for stage in graph_query.GRAPH_QUERY_STAGE_KEYS
+    )
     assert blended.graph is not None
     assert blended.graph.operation == "path"
+
+
+async def test_graph_query_off_skips_graph_dependencies() -> None:
+    knowledge_base = KnowledgeBase(
+        id="graph-off-kb",
+        workspace_id="graph-off-workspace",
+        graph_enabled=False,
+    )
+    with (
+        patch.object(
+            graph_repository,
+            "get_active_revision",
+            AsyncMock(side_effect=AssertionError("off mode queried revisions")),
+        ),
+        patch.object(
+            graph_query,
+            "query_graph_profile_vectors",
+            side_effect=AssertionError("off mode queried profiles"),
+        ),
+    ):
+        result = await graph_query.retrieve_graph_candidates(
+            SimpleNamespace(),
+            knowledge_base,
+            KnowledgeQueryRequest(query="anything", graph_mode="auto"),
+            SimpleNamespace(),
+            5,
+        )
+    assert result.operation == "off"
+    assert result.stage_duration_ms == {
+        stage: 0.0 for stage in graph_query.GRAPH_QUERY_STAGE_KEYS
+    }
 
 
 async def test_graph_query_drops_stale_profiles_and_rejects_unknown_relations() -> None:
@@ -2633,6 +2671,34 @@ async def test_structured_graph_build_publishes_evidence_and_profiles() -> None:
         assert revision.stats_json["source_versions"][document.id] == (
             "2:structured-content-hash:1:indexed"
         )
+        assert revision.stats_json["documents_processed"] == 1
+        assert revision.stats_json["chunks_processed"] == 1
+        assert set(revision.stats_json["stage_duration_ms"]) == set(
+            knowledge_graph_build.GRAPH_BUILD_STAGES
+        )
+        assert all(
+            value >= 0
+            for value in revision.stats_json["stage_duration_ms"].values()
+        )
+        publish_audit = await db.scalar(
+            select(AuditLog)
+            .where(
+                AuditLog.workspace_id == knowledge_base.workspace_id,
+                AuditLog.action == "knowledge_graph.revision.publish",
+                AuditLog.resource_id == revision.id,
+            )
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        )
+        assert publish_audit is not None
+        assert set(publish_audit.details) <= {
+            "knowledge_base_id",
+            "revision_id",
+            "task_id",
+            "action",
+            "record_count",
+            "status",
+        }
+        assert publish_audit.details["status"] == "published"
 
 
 async def test_graph_build_stops_before_workspace_monthly_limit() -> None:
@@ -3156,6 +3222,9 @@ async def test_failed_profile_write_keeps_revision_unpublished_for_repair() -> N
         assert revision.status == "failed"
         assert revision.stats_json["profile_repair_pending"] is True
         assert revision.stats_json["profile_repair_entity_ids"]
+        assert set(revision.stats_json["stage_duration_ms"]) == set(
+            knowledge_graph_build.GRAPH_BUILD_STAGES
+        )
 
 
 async def test_graph_import_persists_immutable_records_and_queues_sync() -> None:
@@ -3231,6 +3300,22 @@ async def test_graph_import_persists_immutable_records_and_queues_sync() -> None
         assert all(item.status == "indexed" for item in chunks)
         assert all(item.vector_id is None for item in chunks)
         assert "制度 A\ndefines\n术语 A" in chunks[0].search_text
+        import_audit = await db.scalar(
+            select(AuditLog)
+            .where(
+                AuditLog.workspace_id == knowledge_base.workspace_id,
+                AuditLog.action == "knowledge_graph.records.import",
+                AuditLog.resource_id == document.id,
+            )
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        )
+        assert import_audit is not None
+        assert import_audit.details == {
+            "knowledge_base_id": knowledge_base.id,
+            "action": "import",
+            "record_count": 2,
+            "status": "queued",
+        }
         try:
             await enqueue_index_knowledge_document(
                 db,
@@ -3506,6 +3591,7 @@ async def main() -> None:
     await test_graph_traversal_bounds_scoping_and_truncation()
     await test_graph_query_candidates_require_unique_entities_and_keep_hops()
     await test_graph_retrieval_fuses_evidence_without_changing_off_mode()
+    await test_graph_query_off_skips_graph_dependencies()
     await test_graph_query_drops_stale_profiles_and_rejects_unknown_relations()
     test_graph_profile_collection_is_knowledge_base_scoped()
     test_graph_profile_vectors_use_an_isolated_collection()

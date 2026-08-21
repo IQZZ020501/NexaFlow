@@ -19,7 +19,7 @@ NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队�
 ## 核心能力
 
 - **应用构建**：统一管理 Agent 与工作流，支持草稿、发布快照、公开访问和 API 调用。
-- **知识库与 RAG**：文档与显式 QA 导入、OCR、Parent/Child 分段、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/重排、权限过滤、显式一跳引用与离线评测。
+- **知识库与 RAG**：文档与显式 QA 导入、OCR、Parent/Child 分段、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/重排、权限过滤、显式引用、证据图谱与有界多跳路径；支持持久知识页、后台增量整理和离线评测。
 - **Agent 运行时**：基于 Celery 的耐久执行、运行租约、checkpoint、可重放事件、对话记忆和模型用量记录。
 - **可视化工作流**：React Flow 画布、不可变发布版本、节点审计，以及隔离的 Python Code 节点沙箱。
 - **模型管理**：支持 OpenAI-compatible、Anthropic、Amazon Bedrock、Azure OpenAI、DeepSeek、Gemini 和 Ollama。
@@ -64,9 +64,9 @@ Agent 和工作流都可以发布为公开访问页面，也可以通过独立 A
 flowchart LR
     Browser[Browser] --> Web[Next.js frontend]
     Web --> API[FastAPI API]
-    API --> DB[("PostgreSQL 17 + pg_search")]
+    API --> DB[("PostgreSQL 17 + pg_search + Graph authority")]
     API --> Redis[(Redis)]
-    API --> Qdrant[(Qdrant)]
+    API --> Qdrant[("Qdrant derived vectors")]
     API --> Storage[("Shared upload storage")]
     Redis <--> Worker["Celery worker + embedded Beat"]
     Worker --> DB
@@ -85,7 +85,7 @@ flowchart LR
 | API | Python 3.11+、FastAPI、SQLAlchemy Async、Alembic |
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
 | 工具 | builtin / Python / MCP 统一目录、不可变版本、授权、策略、绑定与 ToolInvocation |
-| 检索 | Qdrant、PostgreSQL `pg_search` 0.25.2（Jieba/BM25）、RRF、显式引用一跳扩展、可选 reranker |
+| 检索 | PostgreSQL（权威文档、证据图谱与 revision）+ Qdrant（可重建的文档/Profile 派生向量）、`pg_search` 0.25.2（Jieba/BM25）、RRF、引用扩展、有界多跳路径、可选 reranker；不需要 Neo4j 或新数据库 |
 | 部署 | PostgreSQL 17 + `pg_search`、Docker Compose、Nginx、独立无网络 Python 沙箱 |
 
 ## 快速开始

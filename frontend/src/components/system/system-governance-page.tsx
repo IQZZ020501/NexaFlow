@@ -373,8 +373,27 @@ function OperationsPanel() {
               </div>
             )
           })}
-          <div className="rounded-lg border bg-muted/20 p-3"><div className="text-sm font-medium">{t("待处理任务")}</div><div className="mt-2 text-2xl font-semibold">{health?.pending_tasks ?? "—"}</div></div>
-          <div className="rounded-lg border bg-muted/20 p-3"><div className="text-sm font-medium">{t("近 24 小时错误")}</div><div className="mt-2 text-2xl font-semibold">{health?.failed_logs_24h ?? "—"}</div></div>
+        </CardContent>
+        <CardContent className="grid gap-3 pt-0 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="text-sm font-medium">{t("待处理任务")}</div>
+            <div className="mt-2 text-2xl font-semibold">{health?.pending_tasks ?? "—"}</div>
+          </div>
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="text-sm font-medium">{t("近 24 小时错误")}</div>
+            <div className="mt-2 text-2xl font-semibold">{health?.failed_logs_24h ?? "—"}</div>
+          </div>
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="text-sm font-medium">{t("图谱任务")}</div>
+            <div className="mt-2 text-2xl font-semibold">{health?.pending_graph_tasks ?? "—"}</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {t("图谱任务失败（24小时）")}：{health?.failed_graph_tasks_24h ?? "—"}
+            </div>
+          </div>
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="text-sm font-medium">{t("待清理知识页")}</div>
+            <div className="mt-2 text-2xl font-semibold">{health?.pending_graph_profile_repairs ?? "—"}</div>
+          </div>
         </CardContent>
       </Card>
       <Card className="min-w-0">

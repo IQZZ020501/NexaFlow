@@ -258,8 +258,9 @@ async def update_graph_settings(
         locked.id,
         locked.name,
         {
-            "enabled": locked.graph_enabled,
-            "extraction_model_id": locked.graph_extraction_model_id,
+            "knowledge_base_id": locked.id,
+            "action": "enable" if locked.graph_enabled else "disable",
+            "status": "enabled" if locked.graph_enabled else "disabled",
         },
         workspace_id=locked.workspace_id,
     )
@@ -297,13 +298,15 @@ async def update_graph_schema(
     record_audit_log(
         db,
         actor,
-        "knowledge_graph.schema.update",
+        "knowledge_graph.schema.create",
         "knowledge_graph_schema",
         schema.id,
         str(schema.version),
         {
             "knowledge_base_id": knowledge_base.id,
-            "schema_hash": schema.schema_hash,
+            "schema_id": schema.id,
+            "action": "create",
+            "status": schema.status,
         },
         workspace_id=knowledge_base.workspace_id,
     )
@@ -351,6 +354,22 @@ async def rebuild_graph(
         knowledge_base.graph_extraction_model_id,
     )
     task = await enqueue_graph_rebuild(db, knowledge_base, actor)
+    record_audit_log(
+        db,
+        actor,
+        "knowledge_graph.rebuild.enqueue",
+        "knowledge_task",
+        task.id,
+        task.task_type,
+        {
+            "knowledge_base_id": knowledge_base.id,
+            "task_id": task.id,
+            "action": "enqueue",
+            "status": task.status,
+        },
+        workspace_id=knowledge_base.workspace_id,
+    )
+    await db.commit()
     await _dispatch_graph_task(task.id, settings)
     return task_to_response(task)
 
@@ -455,28 +474,21 @@ async def _execute_graph_query(
     payload: KnowledgeQueryRequest,
     settings: Settings,
 ) -> KnowledgeGraphQueryResultResponse:
-    if not knowledge_base.graph_enabled:
+    result = await knowledge_graph_query.retrieve_graph_candidates(
+        db,
+        knowledge_base,
+        payload,
+        settings,
+        1,
+    )
+    if result.operation == "off":
         raise HTTPException(status.HTTP_409_CONFLICT, "Graph RAG is disabled.")
-    revision = await graph_repository.get_active_revision(db, knowledge_base)
-    if revision is None:
+    if result.traversal is None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Knowledge graph has no active revision.",
         )
-    plan = await knowledge_graph_query.build_graph_query_plan(
-        db,
-        knowledge_base,
-        revision,
-        payload,
-        settings,
-    )
-    traversal = await knowledge_graph_query.execute_graph_query_plan(
-        db,
-        knowledge_base,
-        revision,
-        plan,
-    )
-    response = knowledge_graph_query.graph_query_result_response(traversal)
+    response = knowledge_graph_query.graph_query_result_response(result.traversal)
     assert response is not None
     return response
 
@@ -728,13 +740,15 @@ async def import_graph_records(
         record_audit_log(
             db,
             actor,
-            "knowledge_graph.import",
+            "knowledge_graph.records.import",
             "knowledge_document",
             document.id,
             document.filename,
             {
                 "knowledge_base_id": knowledge_base.id,
+                "action": "import",
                 "record_count": len(records),
+                "status": "queued",
             },
             workspace_id=knowledge_base.workspace_id,
         )
@@ -833,6 +847,7 @@ async def _normalize_review_decision(
         if len(claims) != len(selected_claim_ids):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Graph claim not found.")
         decision["claim_ids"] = sorted(selected_claim_ids)
+        decision["record_count"] = len(selected_claim_ids)
         return decision
 
     if review_kind not in {"ambiguous_entity", "possible_duplicate"}:
@@ -874,6 +889,22 @@ async def _normalize_review_decision(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Merge source and target must differ.",
             )
+        aliases = await graph_repository.list_active_aliases_for_entity_ids(
+            db,
+            knowledge_base,
+            {source.id},
+        )
+        mentions = await graph_repository.list_active_mentions_for_entity_ids(
+            db,
+            knowledge_base,
+            {source.id},
+        )
+        claims = await graph_repository.list_current_claims_for_entity_ids(
+            db,
+            knowledge_base,
+            {source.id},
+        )
+        decision["record_count"] = len(aliases) + len(mentions) + len(claims)
         return decision
 
     mentions = await graph_repository.list_active_mentions_for_entity_ids(
@@ -916,6 +947,7 @@ async def _normalize_review_decision(
             ),
         )
     )
+    decision["record_count"] = len(payload.mention_ids) + len(payload.claim_ids)
     return decision
 
 
@@ -973,6 +1005,21 @@ async def resolve_graph_review(
     review.reviewed_by_user_id = actor.id
     review.reviewed_at = utc_now()
     await graph_repository.save_review_item(db, review)
+    audit_details = {
+        "knowledge_base_id": locked.id,
+        "review_id": review.id,
+        "action": payload.action,
+        "record_count": int(decision.get("record_count") or 0),
+        "status": review.status,
+    }
+    source_entity_id = decision.get("source_entity_id")
+    if source_entity_id:
+        audit_details["source_entity_id"] = str(source_entity_id)
+    target_entity_id = decision.get("target_entity_id") or decision.get(
+        "new_entity_id"
+    )
+    if target_entity_id:
+        audit_details["target_entity_id"] = str(target_entity_id)
     record_audit_log(
         db,
         actor,
@@ -980,10 +1027,7 @@ async def resolve_graph_review(
         "knowledge_graph_review",
         review.id,
         review.kind,
-        {
-            "knowledge_base_id": locked.id,
-            "action": payload.action,
-        },
+        audit_details,
         workspace_id=locked.workspace_id,
     )
     try:

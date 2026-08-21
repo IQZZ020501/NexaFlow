@@ -84,6 +84,10 @@ Correctness, safety, evidence, and validation take priority over speed.
   migrations and preload `pg_search` before PostgreSQL starts. Qdrant remains
   the application vector store. Do not silently fall back to `ts_rank_cd`,
   because that changes the declared ranking semantics.
+- Evidence Graph entities, claims, evidence, reviews, schemas, revisions and
+  relationships are authoritative in PostgreSQL. Qdrant's graph Profile
+  collection is a derived, rebuildable index; never use it as the source of
+  truth or delete PostgreSQL Graph history to repair it.
 - Regression suites live in `backend/tests/` and run from `backend/` with
   `uv run python -m tests.<suite>`.
 - Knowledge parsing, indexing, and durable deletion cleanup run through Celery
@@ -91,6 +95,10 @@ Correctness, safety, evidence, and validation take priority over speed.
   use the same `QDRANT_URL`. Deletion cleanup intent is persisted in
   `knowledge_storage_cleanups`; Celery Beat redispatches due records, so do not
   replace it with best-effort post-commit cleanup.
+- Graph incremental and rebuild work uses the leased `KnowledgeTask` runner
+  (`graph_sync` / `graph_rebuild`). Celery Beat's graph reconcile recovers
+  expired work, orphaned revisions, and Profile repair intents; it must remain
+  persistent and retryable rather than becoming best-effort post-commit work.
 - Knowledge retrieval evaluation also runs through the leased Celery knowledge
   task runner and reuses the production retrieval path. Evaluation is mutually
   exclusive with parse/index/rebuild work for the same knowledge base; result
@@ -312,7 +320,7 @@ broad. Never claim a check passed unless it completed successfully.
   identity, workspaces, teams, knowledge, llm, agents, workflows, mcp_transports, test_main,
   agent_access, workflow_run_coverage, workflow_node_coverage,
   workspace_admin_coverage,
-  knowledge_domain_coverage, knowledge_api_coverage, agent_services_coverage,
+  knowledge_graph, knowledge_domain_coverage, knowledge_api_coverage, agent_services_coverage,
   agent_runtime_coverage, infra_unit_coverage). For migration changes,
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on

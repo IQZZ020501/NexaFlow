@@ -15,7 +15,7 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphRevision,
 )
 from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
+from app.infrastructure.errors import classify_error, log_error
 from app.infrastructure.logger import get_logger
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import knowledge as knowledge_repository
@@ -132,9 +132,11 @@ async def enqueue_due_graph_tasks(db: AsyncSession) -> list[str]:
             log_error(
                 logger,
                 "Knowledge graph source reconciliation failed.",
-                exc,
+                None,
+                source=classify_error(exc),
                 workspace_id=knowledge_base.workspace_id,
                 knowledge_base_id=knowledge_base.id,
+                error_type=type(exc).__name__,
             )
     await db.commit()
     return list(dict.fromkeys(task_ids))
@@ -212,9 +214,11 @@ async def recover_orphaned_graph_revisions(db: AsyncSession) -> None:
             log_error(
                 logger,
                 "Orphaned graph revision recovery failed.",
-                exc,
+                None,
+                source=classify_error(exc),
                 revision_id=revision.id,
                 knowledge_base_id=revision.knowledge_base_id,
+                error_type=type(exc).__name__,
             )
 
 
@@ -342,9 +346,11 @@ async def repair_pending_graph_profiles(
             log_error(
                 logger,
                 "Knowledge graph profile reconciliation failed.",
-                exc,
+                None,
+                source=classify_error(exc),
                 revision_id=revision.id,
                 knowledge_base_id=revision.knowledge_base_id,
+                error_type=type(exc).__name__,
             )
 
 

@@ -307,7 +307,13 @@ def assert_external_progress_events() -> None:
                         "content": "release notes",
                     },
                     "not-a-dict",
-                ]
+                ],
+                "graph_revision_id": "revision-secret",
+                "entity_id": "entity-secret",
+                "claim_id": "claim-secret",
+                "evidence_id": "evidence-secret",
+                "profile_markdown": "SECRET_GRAPH_PROFILE",
+                "quote": "SECRET_GRAPH_QUOTE",
             },
         },
         # 294-295: count parse ValueError keeps count None.
@@ -350,6 +356,17 @@ def assert_external_progress_events() -> None:
     assert len(knowledge.hits) == 1
     assert knowledge.hits[0].knowledge_base == "kb-1"
     assert knowledge.hits[0].document == "doc-1"
+    assert knowledge.output is None
+    serialized_knowledge = json.dumps(knowledge.model_dump(), ensure_ascii=False)
+    for marker in (
+        "revision-secret",
+        "entity-secret",
+        "claim-secret",
+        "evidence-secret",
+        "SECRET_GRAPH_PROFILE",
+        "SECRET_GRAPH_QUOTE",
+    ):
+        assert marker not in serialized_knowledge
 
     bad_count = next(item for item in progress if item.turn == 6)
     assert bad_count.count is None
