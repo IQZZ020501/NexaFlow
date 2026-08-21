@@ -835,6 +835,32 @@ def test_registry_basics() -> None:
     assert llm_registry.validate_status("disabled") == "disabled"
     expect_http_error(lambda: llm_registry.validate_status("archived"), 422)
 
+    assert llm_registry.normalize_model_request_params(
+        {"max_tokens": 4096, "extra_body": {"enable_thinking": False}},
+        "LLM",
+    ) == {"max_tokens": 4096, "extra_body": {"enable_thinking": False}}
+    expect_http_error(
+        lambda: llm_registry.normalize_model_request_params(
+            {"max_tokens": 0},
+            "LLM",
+        ),
+        422,
+    )
+    expect_http_error(
+        lambda: llm_registry.normalize_model_request_params(
+            {"max_tokens": 4096},
+            "EMBEDDING",
+        ),
+        422,
+    )
+    expect_http_error(
+        lambda: llm_registry.normalize_model_request_params(
+            {"api_key": "secret"},
+            "LLM",
+        ),
+        422,
+    )
+
     assert llm_registry.normalize_url_credential("https://x.com/", "api_base") == "https://x.com"
     assert llm_registry.normalize_url_credential("", "api_base") == ""
     expect_http_error(lambda: llm_registry.normalize_url_credential("ftp://x.com", "api_base"), 422)
@@ -4070,6 +4096,7 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
         assert created.name == "Unit Created Model"
         assert created.api_base == "https://api.deepseek.com"
         assert created.credential["api_key"] == "****5678"
+        assert created.request_params == {"max_tokens": 4096}
         assert created.meta["stream_usage_supported"] is False
         created_id = created.id
 

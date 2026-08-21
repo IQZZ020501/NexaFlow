@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import Any
 from urllib.parse import urlparse
 
@@ -26,6 +27,38 @@ DISABLED_STATUS = "disabled"
 STATUSES = {ACTIVE_STATUS, DISABLED_STATUS}
 PROVIDER_TYPES = SUPPORTED_PROVIDER_TYPES
 MODEL_TYPES = {"LLM", "EMBEDDING", "RERANKER"}
+RESERVED_MODEL_REQUEST_PARAMS = {
+    "api_base",
+    "api_key",
+    "api_version",
+    "aws_access_key_id",
+    "aws_secret_access_key",
+    "aws_session_token",
+    "azure_deployment",
+    "azure_endpoint",
+    "base_url",
+    "callbacks",
+    "client_kwargs",
+    "config",
+    "endpoint_url",
+    "max_retries",
+    "messages",
+    "metadata",
+    "model",
+    "model_name",
+    "region_name",
+    "request_timeout",
+    "retries",
+    "stream",
+    "stream_options",
+    "stream_usage",
+    "tags",
+    "timeout",
+    "tool_choice",
+    "tools",
+}
+MAX_MODEL_REQUEST_PARAM_KEYS = 32
+MAX_MODEL_REQUEST_PARAMS_BYTES = 16_384
 URL_CREDENTIAL_FIELDS = {"api_base", "azure_endpoint", "endpoint_url"}
 DEFAULT_CREDENTIAL_FIELDS = [
     {
@@ -78,6 +111,62 @@ def validate_status(value: str) -> str:
     if value not in STATUSES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid status.")
     return value
+
+
+def normalize_model_request_params(
+    value: dict[str, Any] | None,
+    model_type: str,
+) -> dict[str, Any]:
+    params = dict(value or {})
+    if not params:
+        return {}
+    if model_type != "LLM":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Extra request parameters are only supported for LLM models.",
+        )
+    if len(params) > MAX_MODEL_REQUEST_PARAM_KEYS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Too many model request parameters.",
+        )
+    invalid = sorted(
+        key
+        for key in params
+        if not key or len(key) > 80 or key in RESERVED_MODEL_REQUEST_PARAMS
+    )
+    if invalid:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Unsupported model request parameter: {invalid[0]}.",
+        )
+    try:
+        encoded = json.dumps(
+            params,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Model request parameters must be valid JSON.",
+        ) from exc
+    if len(encoded) > MAX_MODEL_REQUEST_PARAMS_BYTES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Model request parameters are too large.",
+        )
+    max_tokens = params.get("max_tokens")
+    if max_tokens is not None and (
+        isinstance(max_tokens, bool)
+        or not isinstance(max_tokens, int)
+        or max_tokens < 1
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Model request parameter max_tokens must be a positive integer.",
+        )
+    return params
 
 
 def normalize_url_credential(value: str, field: str) -> str:
@@ -287,6 +376,7 @@ def run_model_test(
     credentials: dict[str, str],
     model_name: str,
     model_type: str,
+    request_params: dict[str, Any] | None = None,
 ) -> dict[str, bool]:
     try:
         return test_model_connection(
@@ -294,6 +384,7 @@ def run_model_test(
             credentials,
             model_name,
             model_type,
+            request_params,
         )
     except ModelProviderStatusError as exc:
         raise HTTPException(
@@ -311,6 +402,7 @@ async def test_registered_model(
     credentials: dict[str, str],
     model_name: str,
     model_type: str,
+    request_params: dict[str, Any] | None = None,
 ) -> dict[str, bool]:
     return await asyncio.to_thread(
         run_model_test,
@@ -318,4 +410,5 @@ async def test_registered_model(
         credentials,
         model_name,
         model_type,
+        request_params,
     )

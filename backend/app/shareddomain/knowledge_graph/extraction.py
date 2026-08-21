@@ -16,7 +16,6 @@ GRAPH_EXTRACTION_TIMEOUT_SECONDS = 90
 GRAPH_EXTRACTION_TOTAL_TIMEOUT_SECONDS = 180
 MAX_EXTRACTION_CHUNKS = 1
 MAX_EXTRACTION_CHARS = 24_000
-MAX_EXTRACTION_OUTPUT_TOKENS = 4_096
 MAX_EXTRACTION_ATTEMPTS = 2
 
 
@@ -147,7 +146,7 @@ async def _stream_response(
     try:
         async with asyncio.timeout(GRAPH_EXTRACTION_TOTAL_TIMEOUT_SECONDS):
             async with aclosing(
-                provider.astream(messages, max_tokens=MAX_EXTRACTION_OUTPUT_TOKENS)
+                provider.astream(messages)
             ) as stream:
                 while True:
                     try:

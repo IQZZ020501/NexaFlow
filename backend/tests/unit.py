@@ -337,7 +337,7 @@ def test_graph_extractor_parses_bounded_json_only_response() -> None:
 
         async def astream(self, messages, **kwargs):
             self.prompt = messages
-            assert kwargs == {"max_tokens": 4096}
+            assert kwargs == {}
             yield AIMessageChunk(
                 content=f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```",
                 usage_metadata={
@@ -398,7 +398,7 @@ def test_graph_extractor_allows_active_stream_past_total_timeout() -> None:
         chunks = 0
 
         async def astream(self, _messages, **kwargs):
-            assert kwargs == {"max_tokens": 4096}
+            assert kwargs == {}
             for chunk in ["", *parts]:
                 await asyncio.sleep(0.075)
                 self.chunks += 1
@@ -577,7 +577,7 @@ def test_graph_extractor_retries_invalid_model_output_once() -> None:
 
         async def astream(self, messages, **kwargs):
             self.calls += 1
-            assert kwargs == {"max_tokens": 4096}
+            assert kwargs == {}
             if self.calls == 1:
                 yield AIMessageChunk(content="not json")
                 return

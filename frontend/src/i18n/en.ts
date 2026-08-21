@@ -1414,6 +1414,11 @@ export const en = {
   仅取本节点历史: "This node's history only",
   整条流程历史: "Whole workflow history",
   模型参数: "Model parameters",
+  额外请求参数: "Extra request parameters",
+  "以 JSON 对象传入模型接口参数，例如 max_tokens；供应商扩展参数可放在 extra_body 中。":
+    "Pass model API parameters as JSON, such as max_tokens; put provider extensions in extra_body.",
+  "额外请求参数必须是有效的 JSON 对象。":
+    "Extra request parameters must be a valid JSON object.",
   温度: "Temperature",
   "Top P": "Top P",
   "最大输出 Token": "Max output tokens",

@@ -173,8 +173,11 @@ type ModelForm = {
   model_name: string
   credential: Record<string, string>
   credential_hints: Record<string, string>
+  request_params_json: string
   status: string
 }
+
+const DEFAULT_LLM_REQUEST_PARAMS = '{\n  "max_tokens": 4096\n}'
 
 const EMPTY_MODEL_FORM: ModelForm = {
   id: null,
@@ -185,6 +188,7 @@ const EMPTY_MODEL_FORM: ModelForm = {
   model_name: "",
   credential: {},
   credential_hints: {},
+  request_params_json: DEFAULT_LLM_REQUEST_PARAMS,
   status: "active",
 }
 
@@ -485,6 +489,7 @@ export function LlmPage() {
       model_name: model.model_name,
       credential: {},
       credential_hints: {},
+      request_params_json: JSON.stringify(model.request_params ?? {}, null, 2),
       status: model.status,
     })
     setCredentialFields([])
@@ -508,6 +513,8 @@ export function LlmPage() {
       model_name: "",
       credential: {},
       credential_hints: {},
+      request_params_json:
+        modelType === "LLM" ? DEFAULT_LLM_REQUEST_PARAMS : "{}",
     }))
     setCredentialFields([])
     void loadBaseModels(providerCode, modelType)
@@ -521,6 +528,8 @@ export function LlmPage() {
       name: "",
       model_type: modelType,
       model_name: "",
+      request_params_json:
+        modelType === "LLM" ? DEFAULT_LLM_REQUEST_PARAMS : "{}",
     }))
     void loadBaseModels(providerCode, modelType)
   }
@@ -539,6 +548,18 @@ export function LlmPage() {
           : [[field.field, value]]
       })
     )
+    const requestParams: Record<string, unknown> = {}
+    try {
+      const parsed: unknown = JSON.parse(modelForm.request_params_json)
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+        throw new Error("not-object")
+      }
+      Object.assign(requestParams, parsed)
+    } catch {
+      notify("error", t("额外请求参数必须是有效的 JSON 对象。"))
+      return
+    }
+
     const payload = {
       name: modelForm.name,
       provider: modelForm.provider,
@@ -548,6 +569,7 @@ export function LlmPage() {
       credential,
       status: modelForm.status,
       meta: {},
+      request_params: requestParams,
     }
 
     setIsSaving(true)
@@ -1247,6 +1269,32 @@ function ModelDialog({
                 )
               })
             )}
+
+            {form.model_type === "LLM" ? (
+              <Field>
+                <FieldLabel htmlFor="model-request-params">
+                  {t("额外请求参数")}
+                </FieldLabel>
+                <textarea
+                  id="model-request-params"
+                  value={form.request_params_json}
+                  onChange={(event) =>
+                    onFormChange({
+                      ...form,
+                      request_params_json: event.target.value,
+                    })
+                  }
+                  className="min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  spellCheck={false}
+                  aria-describedby="model-request-params-description"
+                />
+                <FieldDescription id="model-request-params-description">
+                  {t(
+                    "以 JSON 对象传入模型接口参数，例如 max_tokens；供应商扩展参数可放在 extra_body 中。"
+                  )}
+                </FieldDescription>
+              </Field>
+            ) : null}
 
             {isEditing ? (
               <Field>
