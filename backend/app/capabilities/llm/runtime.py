@@ -629,13 +629,17 @@ def _registered_model_credentials(
 def build_registered_chat_model(
     model: RegisteredModel,
     settings: Settings,
+    *,
+    timeout: float | None = None,
 ) -> BaseChatModel:
     return build_chat_model(
         model.provider_type,
         _registered_model_credentials(model, settings, "LLM"),
         model.model_name,
         stream_usage=(model.meta or {}).get(STREAM_USAGE_SUPPORTED_META_KEY) is True,
-        timeout=settings.model_request_timeout_seconds,
+        timeout=(
+            settings.model_request_timeout_seconds if timeout is None else timeout
+        ),
     )
 
 

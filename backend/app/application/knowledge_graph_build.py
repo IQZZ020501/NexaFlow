@@ -69,6 +69,7 @@ from app.shareddomain.knowledge.task_runner import (
     persist_owned_knowledge_task_progress,
 )
 from app.shareddomain.knowledge_graph.extraction import (
+    GRAPH_EXTRACTION_TIMEOUT_SECONDS,
     ExtractedClaim,
     ExtractedEntity,
     ExtractionChunk,
@@ -1632,7 +1633,14 @@ async def run_graph_build_task(
         if model is not None:
             provider = BudgetedGraphChatProvider(
                 db,
-                build_chat_model(settings, model),
+                build_chat_model(
+                    settings,
+                    model,
+                    timeout=max(
+                        GRAPH_EXTRACTION_TIMEOUT_SECONDS,
+                        PROFILE_TIMEOUT_SECONDS,
+                    ),
+                ),
                 knowledge_base,
                 revision,
                 task,

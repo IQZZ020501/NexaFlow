@@ -58,6 +58,10 @@ def test_registered_chat_model_uses_configured_timeout() -> None:
     chat_model = build_registered_chat_model(model, runtime_settings)
 
     assert chat_model.request_timeout == 77
+    assert (
+        build_registered_chat_model(model, runtime_settings, timeout=90).request_timeout
+        == 90
+    )
 
 
 class ModelTestHandler(BaseHTTPRequestHandler):

@@ -43,8 +43,13 @@ def build_reranker(settings: Settings, model: RegisteredModel) -> RerankProvider
     return build_registered_reranker(model, settings)
 
 
-def build_chat_model(settings: Settings, model: RegisteredModel) -> ChatProvider:
-    return build_registered_chat_model(model, settings)
+def build_chat_model(
+    settings: Settings,
+    model: RegisteredModel,
+    *,
+    timeout: float | None = None,
+) -> ChatProvider:
+    return build_registered_chat_model(model, settings, timeout=timeout)
 
 
 __all__ = [

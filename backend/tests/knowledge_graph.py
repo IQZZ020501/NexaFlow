@@ -8,7 +8,7 @@ from datetime import timedelta
 from io import BytesIO
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import tests.support  # noqa: F401
 from fastapi import HTTPException, UploadFile
@@ -420,7 +420,7 @@ async def test_graph_source_reconcile_queues_sync_and_model_rebuild() -> None:
     log_error.assert_called_once()
 
 
-async def test_graph_source_reconcile_does_not_retry_failed_task() -> None:
+async def test_graph_source_reconcile_waits_for_active_and_failed_tasks() -> None:
     knowledge_base = KnowledgeBase(
         id="reconcile-failed-kb",
         workspace_id="reconcile-workspace",
@@ -458,9 +458,11 @@ async def test_graph_source_reconcile_does_not_retry_failed_task() -> None:
             AsyncMock(),
         ) as enqueue_sync,
     ):
-        task_ids = await knowledge_graph_maintenance.enqueue_due_graph_tasks(db)
+        for status in ("queued", "running", "cancelling", "failed", "cancelled"):
+            failed_task.status = status
+            task_ids = await knowledge_graph_maintenance.enqueue_due_graph_tasks(db)
+            assert task_ids == []
 
-    assert task_ids == []
     enqueue_rebuild.assert_not_awaited()
     enqueue_sync.assert_not_awaited()
 
@@ -3986,6 +3988,8 @@ async def test_unreported_graph_usage_is_charged_once_and_persisted() -> None:
                 )
 
         provider = UnreportedProvider()
+        build_chat_model_mock = MagicMock(return_value=provider)
+        runtime_settings = tests.support.settings()
 
         async def fake_embedding_model(*_args, **_kwargs):
             return SimpleNamespace(id="graph-budget-embedding")
@@ -4004,7 +4008,7 @@ async def test_unreported_graph_usage_is_charged_once_and_persisted() -> None:
             patch.object(
                 knowledge_graph_build,
                 "build_chat_model",
-                return_value=provider,
+                new=build_chat_model_mock,
             ),
             patch.object(
                 knowledge_graph_build,
@@ -4021,11 +4025,16 @@ async def test_unreported_graph_usage_is_charged_once_and_persisted() -> None:
                 task,
                 knowledge_base,
                 actor,
-                tests.support.settings(),
+                runtime_settings,
                 asyncio.Event(),
             )
 
         assert provider.calls == 3
+        build_chat_model_mock.assert_called_once_with(
+            runtime_settings,
+            ANY,
+            timeout=90,
+        )
 
     async with get_session_factory()() as db:
         knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
@@ -4626,7 +4635,7 @@ async def main() -> None:
     test_graph_source_batches_keep_structured_and_text_chunks_separate()
     test_graph_source_versions_are_stable_and_diffable()
     await test_graph_source_reconcile_queues_sync_and_model_rebuild()
-    await test_graph_source_reconcile_does_not_retry_failed_task()
+    await test_graph_source_reconcile_waits_for_active_and_failed_tasks()
     await test_graph_source_reconcile_keeps_deleted_failed_task_stopped()
     test_bank_path_preserves_relation_direction_and_evidence()
     test_policy_graph_evaluation_preserves_fixed_citations()

@@ -10,6 +10,7 @@ from app.application.knowledge_graph_build import (
 )
 from app.entities.knowledge import (
     TASK_CANCELLED_STATUS,
+    TASK_CANCELLING_STATUS,
     TASK_FAILED_STATUS,
     TASK_QUEUED_STATUS,
     TASK_RUNNING_STATUS,
@@ -88,6 +89,9 @@ async def enqueue_due_graph_tasks(db: AsyncSession) -> list[str]:
                 knowledge_base,
             )
             if latest_task is not None and latest_task.status in {
+                TASK_QUEUED_STATUS,
+                TASK_RUNNING_STATUS,
+                TASK_CANCELLING_STATUS,
                 TASK_FAILED_STATUS,
                 TASK_CANCELLED_STATUS,
             }:
