@@ -3,7 +3,7 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -398,6 +398,51 @@ class BudgetedGraphChatProvider:
             reserved_tokens=reserved,
         )
         return response
+
+    async def astream(
+        self,
+        messages: list[Any],
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        reserved = estimate_graph_call_tokens(messages)
+        await reserve_graph_model_tokens(
+            self._db,
+            self._knowledge_base,
+            self._revision,
+            self._task,
+            reserved,
+        )
+        aggregate = None
+        try:
+            async for chunk in self._delegate.astream(messages, **kwargs):
+                aggregate = chunk if aggregate is None else aggregate + chunk
+                yield chunk
+        except ModelProviderStatusError:
+            await finalize_graph_model_tokens(
+                self._db,
+                self._knowledge_base,
+                self._revision,
+                usage=None,
+                reserved_tokens=reserved,
+                charge_unreported=False,
+            )
+            raise
+        except (Exception, asyncio.CancelledError, GeneratorExit):
+            await finalize_graph_model_tokens(
+                self._db,
+                self._knowledge_base,
+                self._revision,
+                usage=None,
+                reserved_tokens=reserved,
+            )
+            raise
+        await finalize_graph_model_tokens(
+            self._db,
+            self._knowledge_base,
+            self._revision,
+            usage=usage_from_message(aggregate),
+            reserved_tokens=reserved,
+        )
 
 
 def graph_document_source_version(document: KnowledgeDocument) -> str:

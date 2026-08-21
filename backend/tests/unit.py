@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import tests.support  # noqa: F401  (sets required env before app imports)
 
 from fastapi import HTTPException
+from langchain_core.messages import AIMessageChunk
 
 from app.application.knowledge_graph_build import (
     BudgetedGraphChatProvider,
@@ -193,6 +194,50 @@ def test_graph_provider_rejection_releases_reserved_tokens() -> None:
     assert finalize.await_args.kwargs["charge_unreported"] is False
 
 
+def test_graph_streaming_provider_rejection_releases_reserved_tokens() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.application import knowledge_graph_build
+    from app.ports.llm import ModelProviderStatusError
+
+    class RejectingProvider:
+        async def astream(self, _messages, **_kwargs):
+            raise ModelProviderStatusError(402, "Insufficient Balance")
+            yield AIMessageChunk(content="")
+
+    async def consume(provider):
+        async for _ in provider.astream([{"role": "user", "content": "test"}]):
+            pass
+
+    finalize = AsyncMock()
+    provider = BudgetedGraphChatProvider(
+        SimpleNamespace(),
+        RejectingProvider(),
+        SimpleNamespace(),
+        SimpleNamespace(model_usage_json={}),
+        SimpleNamespace(),
+    )
+    with (
+        patch.object(
+            knowledge_graph_build,
+            "reserve_graph_model_tokens",
+            new=AsyncMock(),
+        ),
+        patch.object(
+            knowledge_graph_build,
+            "finalize_graph_model_tokens",
+            new=finalize,
+        ),
+    ):
+        try:
+            asyncio.run(consume(provider))
+        except ModelProviderStatusError as exc:
+            assert exc.status_code == 402
+        else:
+            raise AssertionError("streaming provider rejection must escape immediately")
+    assert finalize.await_args.kwargs["charge_unreported"] is False
+
+
 def test_normalized_document_artifact_is_content_addressed() -> None:
     artifact = normalized_document_artifact(
         workspace_id="ws-1",
@@ -290,12 +335,16 @@ def test_graph_extractor_parses_bounded_json_only_response() -> None:
     class Provider:
         prompt = None
 
-        async def ainvoke(self, messages, **kwargs):
+        async def astream(self, messages, **kwargs):
             self.prompt = messages
             assert kwargs == {"max_tokens": 4096}
-            return SimpleNamespace(
-                text=f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```",
-                usage_metadata={"input_tokens": 12, "output_tokens": 8},
+            yield AIMessageChunk(
+                content=f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```",
+                usage_metadata={
+                    "input_tokens": 12,
+                    "output_tokens": 8,
+                    "total_tokens": 20,
+                },
             )
 
     provider = Provider()
@@ -332,13 +381,81 @@ def test_graph_extractor_parses_bounded_json_only_response() -> None:
     assert len(json.loads(provider.prompt[1]["content"])) == 1
 
 
+def test_graph_extractor_allows_active_stream_past_total_timeout() -> None:
+    from unittest.mock import patch
+
+    from app.shareddomain.knowledge_graph import extraction
+
+    payload = json.dumps({"entities": [], "claims": []})
+    split_at = len(payload) // 3
+    parts = [
+        payload[:split_at],
+        payload[split_at : split_at * 2],
+        payload[split_at * 2 :],
+    ]
+
+    class Provider:
+        chunks = 0
+
+        async def astream(self, _messages, **kwargs):
+            assert kwargs == {"max_tokens": 4096}
+            for chunk in ["", *parts]:
+                await asyncio.sleep(0.075)
+                self.chunks += 1
+                yield AIMessageChunk(
+                    content=chunk,
+                    additional_kwargs=(
+                        {"reasoning_content": "still working"} if not chunk else {}
+                    ),
+                )
+
+    provider = Provider()
+    with patch.object(extraction, "GRAPH_EXTRACTION_TIMEOUT_SECONDS", 0.2):
+        result = asyncio.run(
+            extract_graph_batch(
+                provider,
+                default_policy_graph_schema(),
+                [ExtractionChunk("chunk-1", "doc-1", "制度 A。")],
+            )
+        )
+    assert provider.chunks == 4
+    assert result.batch == GraphExtractionBatch()
+
+
+def test_graph_extractor_times_out_an_idle_stream() -> None:
+    from unittest.mock import patch
+
+    from app.ports.llm import ModelProviderTimeoutError
+    from app.shareddomain.knowledge_graph import extraction
+
+    class Provider:
+        async def astream(self, _messages, **_kwargs):
+            yield AIMessageChunk(content='{"entities": [], "claims": []}')
+            await asyncio.Event().wait()
+            yield AIMessageChunk(content="")
+
+    with patch.object(extraction, "GRAPH_EXTRACTION_TIMEOUT_SECONDS", 0.02):
+        try:
+            asyncio.run(
+                extract_graph_batch(
+                    Provider(),
+                    default_policy_graph_schema(),
+                    [ExtractionChunk("chunk-1", "doc-1", "制度 A。")],
+                )
+            )
+        except ModelProviderTimeoutError as exc:
+            assert str(exc) == "Model request timed out."
+        else:
+            raise AssertionError("an idle graph model stream must time out")
+
+
 def test_graph_extractor_rejects_oversized_input_without_truncating_json() -> None:
     class Provider:
         called = False
 
-        async def ainvoke(self, messages, **kwargs):
+        async def astream(self, messages, **kwargs):
             self.called = True
-            return SimpleNamespace(text='{"entities": [], "claims": []}')
+            yield AIMessageChunk(content='{"entities": [], "claims": []}')
 
     provider = Provider()
     schema = default_policy_graph_schema()
@@ -388,13 +505,14 @@ def test_graph_extractor_retries_invalid_model_output_once() -> None:
     class Provider:
         calls = 0
 
-        async def ainvoke(self, messages, **kwargs):
+        async def astream(self, messages, **kwargs):
             self.calls += 1
             assert kwargs == {"max_tokens": 4096}
             if self.calls == 1:
-                return SimpleNamespace(text="not json")
+                yield AIMessageChunk(content="not json")
+                return
             assert "failed server validation" in messages[-1]["content"]
-            return SimpleNamespace(text=json.dumps(valid, ensure_ascii=False))
+            yield AIMessageChunk(content=json.dumps(valid, ensure_ascii=False))
 
     provider = Provider()
     result = asyncio.run(
@@ -414,9 +532,10 @@ def test_graph_extractor_does_not_retry_provider_failure() -> None:
     class Provider:
         calls = 0
 
-        async def ainvoke(self, _messages, **_kwargs):
+        async def astream(self, _messages, **_kwargs):
             self.calls += 1
             raise ModelProviderStatusError(402, "Insufficient Balance")
+            yield AIMessageChunk(content="")
 
     provider = Provider()
     try:
@@ -6163,9 +6282,12 @@ def main() -> None:
     test_default_policy_graph_schema_is_stable()
     test_graph_token_charge_uses_reported_or_conservative_estimate()
     test_graph_provider_rejection_releases_reserved_tokens()
+    test_graph_streaming_provider_rejection_releases_reserved_tokens()
     test_normalized_document_artifact_is_content_addressed()
     test_graph_extraction_requires_exact_chunk_evidence()
     test_graph_extractor_parses_bounded_json_only_response()
+    test_graph_extractor_allows_active_stream_past_total_timeout()
+    test_graph_extractor_times_out_an_idle_stream()
     test_graph_extractor_rejects_oversized_input_without_truncating_json()
     test_graph_extractor_retries_invalid_model_output_once()
     test_graph_extractor_does_not_retry_provider_failure()

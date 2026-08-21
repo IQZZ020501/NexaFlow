@@ -1,12 +1,14 @@
 import asyncio
 import hashlib
 import json
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any
 
+from langchain_core.messages import AIMessageChunk, message_chunk_to_message
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
-from app.ports.llm import ChatProvider
+from app.ports.llm import ChatProvider, ModelProviderTimeoutError
 from app.shareddomain.agents.runtime.usage import usage_from_message
 from app.shareddomain.knowledge_graph.schema import GraphSchemaDefinition
 
@@ -135,6 +137,28 @@ def _response_text(response: Any) -> str:
     raise ValueError("Graph extractor returned non-text output.")
 
 
+async def _stream_response(
+    provider: ChatProvider,
+    messages: list[Any],
+) -> Any:
+    aggregate: AIMessageChunk | None = None
+    async with aclosing(
+        provider.astream(messages, max_tokens=MAX_EXTRACTION_OUTPUT_TOKENS)
+    ) as stream:
+        while True:
+            try:
+                async with asyncio.timeout(GRAPH_EXTRACTION_TIMEOUT_SECONDS):
+                    chunk = await anext(stream)
+            except StopAsyncIteration:
+                break
+            except TimeoutError as exc:
+                raise ModelProviderTimeoutError("Model request timed out.") from exc
+            if not isinstance(chunk, AIMessageChunk):
+                raise ValueError("Graph extractor returned an invalid stream message.")
+            aggregate = chunk if aggregate is None else aggregate + chunk
+    return message_chunk_to_message(aggregate or AIMessageChunk(content=""))
+
+
 async def extract_graph_batch(
     provider: ChatProvider,
     schema: GraphSchemaDefinition,
@@ -164,11 +188,7 @@ async def extract_graph_batch(
     ]
     messages = prompt
     for attempt in range(MAX_EXTRACTION_ATTEMPTS):
-        async with asyncio.timeout(GRAPH_EXTRACTION_TIMEOUT_SECONDS):
-            response = await provider.ainvoke(
-                messages,
-                max_tokens=MAX_EXTRACTION_OUTPUT_TOKENS,
-            )
+        response = await _stream_response(provider, messages)
         try:
             stripped = _response_text(response).strip()
             if stripped.startswith("```"):

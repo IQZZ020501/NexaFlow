@@ -12,6 +12,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import tests.support  # noqa: F401
 from fastapi import HTTPException, UploadFile
+from langchain_core.messages import AIMessageChunk
 from sqlalchemy import select, text
 
 from app.infrastructure.base import Base
@@ -3327,7 +3328,7 @@ async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
             self.fail_chunk_id = fail_chunk_id
             self.chunk_ids: list[str] = []
 
-        async def ainvoke(self, messages, **_kwargs):
+        async def astream(self, messages, **_kwargs):
             payload = json.loads(messages[1]["content"])
             chunk_id = payload[0]["chunk_id"]
             self.chunk_ids.append(chunk_id)
@@ -3335,7 +3336,7 @@ async def test_graph_retry_can_resume_from_the_last_committed_chunk() -> None:
                 raise RuntimeError("second chunk failed")
             suffix = "A" if chunk_id.endswith("-a") else "B"
             quote = contents[chunk_id]
-            return SimpleNamespace(
+            yield AIMessageChunk(
                 content=json.dumps(
                     {
                         "entities": [
@@ -3830,9 +3831,9 @@ async def test_graph_build_stops_before_workspace_monthly_limit() -> None:
         class CountingProvider:
             calls = 0
 
-            async def ainvoke(self, _messages, **_kwargs):
+            async def astream(self, _messages, **_kwargs):
                 self.calls += 1
-                return SimpleNamespace(content="{}")
+                yield AIMessageChunk(content="{}")
 
         provider = CountingProvider()
         with (
@@ -3948,39 +3949,41 @@ async def test_unreported_graph_usage_is_charged_once_and_persisted() -> None:
         class UnreportedProvider:
             calls = 0
 
-            async def ainvoke(self, messages, **_kwargs):
+            async def astream(self, messages, **_kwargs):
                 self.calls += 1
-                if "Extract only explicitly stated" in messages[0]["content"]:
-                    return SimpleNamespace(
-                        content=json.dumps(
-                            {
-                                "entities": [
-                                    {
-                                        "temp_id": "document-a",
-                                        "entity_type": "Document",
-                                        "canonical_name": "制度 A",
-                                    },
-                                    {
-                                        "temp_id": "concept-a",
-                                        "entity_type": "Concept",
-                                        "canonical_name": "术语 A",
-                                    },
-                                ],
-                                "claims": [
-                                    {
-                                        "subject_temp_id": "document-a",
-                                        "predicate": "defines",
-                                        "object_temp_id": "concept-a",
-                                        "evidence_chunk_id": "graph-budget-usage-chunk",
-                                        "quote": quote,
-                                        "start_offset": 0,
-                                        "end_offset": len(quote),
-                                    }
-                                ],
-                            },
-                            ensure_ascii=False,
-                        )
+                yield AIMessageChunk(
+                    content=json.dumps(
+                        {
+                            "entities": [
+                                {
+                                    "temp_id": "document-a",
+                                    "entity_type": "Document",
+                                    "canonical_name": "制度 A",
+                                },
+                                {
+                                    "temp_id": "concept-a",
+                                    "entity_type": "Concept",
+                                    "canonical_name": "术语 A",
+                                },
+                            ],
+                            "claims": [
+                                {
+                                    "subject_temp_id": "document-a",
+                                    "predicate": "defines",
+                                    "object_temp_id": "concept-a",
+                                    "evidence_chunk_id": "graph-budget-usage-chunk",
+                                    "quote": quote,
+                                    "start_offset": 0,
+                                    "end_offset": len(quote),
+                                }
+                            ],
+                        },
+                        ensure_ascii=False,
                     )
+                )
+
+            async def ainvoke(self, _messages, **_kwargs):
+                self.calls += 1
                 return SimpleNamespace(
                     content=json.dumps(
                         {"profile_markdown": "# Evidence profile", "claim_ids": []}
