@@ -49,6 +49,7 @@ def create_celery_app() -> Celery:
             "app.tasks.agents",
             "app.tasks.tools",
             "app.tasks.email",
+            "app.tasks.maintenance",
         ],
     )
     app.conf.update(
@@ -60,39 +61,13 @@ def create_celery_app() -> Celery:
         worker_pool=worker_pool_for_platform(sys.platform),
         worker_prefetch_multiplier=1,
         beat_schedule={
-            "recover-knowledge-tasks": {
-                "task": "app.knowledge.recover",
+            "recover-frequent-maintenance": {
+                "task": "app.maintenance.recover_frequent",
                 "schedule": 30.0,
             },
-            "reconcile-knowledge-graphs": {
-                "task": "app.knowledge.reconcile_graphs",
+            "recover-minutely-maintenance": {
+                "task": "app.maintenance.recover_minutely",
                 "schedule": 60.0,
-            },
-            "recover-knowledge-storage-cleanups": {
-                "task": "app.knowledge.recover_storage_cleanups",
-                "schedule": 60.0,
-            },
-            "recover-upload-storage-cleanups": {
-                "task": "app.uploads.recover_storage_cleanups",
-                "schedule": 60.0,
-            },
-            "recover-agent-runs": {
-                "task": "app.agents.recover",
-                "schedule": 30.0,
-                "options": {"queue": "agents-v2"},
-            },
-            "recover-legacy-agent-runs": {
-                "task": "app.agents.recover_legacy",
-                "schedule": 30.0,
-                "options": {"queue": "agents-legacy"},
-            },
-            "recover-tool-invocations": {
-                "task": "app.tools.recover",
-                "schedule": 30.0,
-            },
-            "recover-email-deliveries": {
-                "task": "app.email.recover",
-                "schedule": 30.0,
             },
         },
     )

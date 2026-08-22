@@ -92,6 +92,10 @@ Agent runs.
 Celery uses `solo` automatically on macOS (HTTPS trust evaluation is unsafe
 after a multithreaded process fork) and Windows (`prefork` needs `os.fork()`,
 which Windows lacks); Linux containers keep `prefork`.
+The Compose worker keeps zero prefork children while idle, grows to at most ten
+for queued work, and removes idle children after five seconds. Beat groups the
+30-second and 60-second recovery scans so maintenance alone does not fan out
+the full worker pool.
 
 ### Migrating from split environment files
 

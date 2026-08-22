@@ -94,9 +94,10 @@ services:
     build:
       context: ..
       dockerfile: deploy/dockerfiles/backend.Dockerfile
-    command: celery -A app.infrastructure.celery:celery_app worker --beat --autoscale=5,1 --queues=celery,agents-legacy,agents-v2 --loglevel=INFO
+    command: celery -A app.infrastructure.celery:celery_app worker --beat --autoscale=10,0 --queues=celery,agents-legacy,agents-v2 --loglevel=INFO
     env_file: ../.env
     environment:
+      AUTOSCALE_KEEPALIVE: "5"
       ENVIRONMENT: production
       DATABASE_URL: ""
       POSTGRES_DB: ${POSTGRES_DB:-nexaflow}

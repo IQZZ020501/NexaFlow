@@ -871,8 +871,8 @@ def main() -> None:
         assert "app.email.send" in celery_app.tasks
         assert "app.email.recover" in celery_app.tasks
         assert (
-            celery_app.conf.beat_schedule["recover-email-deliveries"]["task"]
-            == "app.email.recover"
+            celery_app.conf.beat_schedule["recover-frequent-maintenance"]["task"]
+            == "app.maintenance.recover_frequent"
         )
 
     print("email tests passed")
