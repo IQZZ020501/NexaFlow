@@ -1,6 +1,7 @@
 import asyncio
 import tempfile
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,6 +21,13 @@ from app.application.governance import (
     _probe_storage_sync,
     _probe_worker,
     get_admin_health,
+)
+from app.infrastructure.model_utils import new_id, utc_now
+from app.infrastructure.session import get_session_factory
+from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeTask
+from app.shareddomain.knowledge_graph.models import (
+    KnowledgeGraphRevision,
+    KnowledgeGraphSchema,
 )
 
 
@@ -131,13 +139,18 @@ async def check_health_degradation() -> None:
         patch("app.application.governance._probe_worker", healthy_probe),
         patch(
             "app.application.governance.governance_repository.health_counts",
-            new=AsyncMock(return_value=(2, 3)),
+            new=AsyncMock(return_value=(2, 3, 4, 5, 6)),
         ) as counts,
     ):
         response = await get_admin_health(db, settings)
     assert response.status == "ok"
     assert all(component.status == "ok" for component in response.components.values())
     assert (response.pending_tasks, response.failed_logs_24h) == (2, 3)
+    assert (
+        response.pending_graph_tasks,
+        response.failed_graph_tasks_24h,
+        response.pending_graph_profile_repairs,
+    ) == (4, 5, 6)
     counts.assert_awaited_once()
 
     db = AsyncMock()
@@ -172,9 +185,9 @@ async def check_health_degradation() -> None:
         response = await get_admin_health(db, settings)
     assert response.components["database"].detail == "unavailable"
 
-    async def slow_counts(*_args) -> tuple[int, int]:
+    async def slow_counts(*_args) -> tuple[int, int, int, int, int]:
         await asyncio.sleep(0.02)
-        return 0, 0
+        return 0, 0, 0, 0, 0
 
     with (
         patch("app.application.governance._probe_redis", healthy_probe),
@@ -216,6 +229,91 @@ def main() -> None:
             component["status"] == "ok"
             for component in health.json()["components"].values()
         )
+
+        admin_user_id = client.get(
+            "/api/v1/auth/me", headers=admin_headers
+        ).json()["user"]["id"]
+
+        async def seed_graph_health() -> None:
+            async with get_session_factory()() as db:
+                knowledge_base_id = new_id()
+                schema_id = new_id()
+                db.add(
+                    KnowledgeBase(
+                        id=knowledge_base_id,
+                        workspace_id=workspace_id,
+                        name="Graph health KB",
+                        graph_enabled=True,
+                        created_by_user_id=admin_user_id,
+                    )
+                )
+                await db.flush()
+                db.add(
+                    KnowledgeGraphSchema(
+                        id=schema_id,
+                        workspace_id=workspace_id,
+                        knowledge_base_id=knowledge_base_id,
+                        version=1,
+                        schema_json={},
+                        schema_hash="graph-health-schema",
+                        status="active",
+                        created_by_user_id=admin_user_id,
+                    )
+                )
+                await db.flush()
+                db.add_all(
+                    [
+                        KnowledgeTask(
+                            id=new_id(),
+                            workspace_id=workspace_id,
+                            knowledge_base_id=knowledge_base_id,
+                            task_type="graph_sync",
+                            status="queued",
+                            options={},
+                            created_by_user_id=admin_user_id,
+                        ),
+                        KnowledgeTask(
+                            id=new_id(),
+                            workspace_id=workspace_id,
+                            knowledge_base_id=knowledge_base_id,
+                            task_type="graph_rebuild",
+                            status="running",
+                            options={},
+                            created_by_user_id=admin_user_id,
+                        ),
+                        KnowledgeTask(
+                            id=new_id(),
+                            workspace_id=workspace_id,
+                            knowledge_base_id=knowledge_base_id,
+                            task_type="graph_sync",
+                            status="failed",
+                            options={},
+                            finished_at=utc_now() - timedelta(hours=1),
+                            created_by_user_id=admin_user_id,
+                        ),
+                        KnowledgeGraphRevision(
+                            id=new_id(),
+                            workspace_id=workspace_id,
+                            knowledge_base_id=knowledge_base_id,
+                            revision_no=1,
+                            schema_id=schema_id,
+                            status="published",
+                            source_watermark="health",
+                            stats_json={"profile_repair_pending": True},
+                            created_by_user_id=admin_user_id,
+                        ),
+                    ]
+                )
+                await db.commit()
+
+        asyncio.run(seed_graph_health())
+        health = client.get(
+            "/api/v1/admin/governance/health", headers=admin_headers
+        )
+        assert health.status_code == 200, health.text
+        assert health.json()["pending_graph_tasks"] == 2
+        assert health.json()["failed_graph_tasks_24h"] == 1
+        assert health.json()["pending_graph_profile_repairs"] == 1
 
         updated = client.patch(
             f"/api/v1/workspaces/{workspace_id}/governance",

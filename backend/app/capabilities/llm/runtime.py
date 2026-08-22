@@ -46,6 +46,8 @@ logger = get_logger(__name__)
 
 MODEL_REQUEST_TIMEOUT_SECONDS = 60
 STREAM_USAGE_SUPPORTED_META_KEY = "stream_usage_supported"
+MODEL_REQUEST_PARAMS_META_KEY = "request_params"
+DEFAULT_MODEL_REQUEST_PARAMS = {"max_tokens": 4_096}
 SUPPORTED_PROVIDER_TYPES = {
     "openai_compatible",
     "anthropic",
@@ -453,7 +455,9 @@ def build_chat_model(
     *,
     stream_usage: bool = False,
     timeout: float = MODEL_REQUEST_TIMEOUT_SECONDS,
+    request_params: dict[str, Any] | None = None,
 ) -> BaseChatModel:
+    request_params = request_params or {}
     if provider_type == "openai_compatible":
         return OpenAICompatibleChatModel(
             model=model_name,
@@ -462,6 +466,7 @@ def build_chat_model(
             stream_usage=stream_usage,
             timeout=timeout,
             max_retries=0,
+            **request_params,
         )
     if provider_type == "anthropic":
         return AnthropicChatModel(
@@ -470,6 +475,7 @@ def build_chat_model(
             base_url=_optional(credentials, "api_base"),
             timeout=timeout,
             max_retries=0,
+            **request_params,
         )
     if provider_type == "bedrock":
         return BedrockChatModel(
@@ -478,6 +484,7 @@ def build_chat_model(
             timeout=timeout,
             max_retries=0,
             **_bedrock_credentials(credentials, timeout),
+            **request_params,
         )
     if provider_type == "azure_openai":
         return AzureChatModel(
@@ -488,6 +495,7 @@ def build_chat_model(
             api_key=_required(credentials, "api_key"),
             timeout=timeout,
             max_retries=0,
+            **request_params,
         )
     if provider_type == "deepseek":
         return DeepSeekChatModel(
@@ -496,6 +504,7 @@ def build_chat_model(
             base_url=openai_compatible_base(_required(credentials, "api_base")),
             timeout=timeout,
             max_retries=0,
+            **request_params,
         )
     if provider_type == "google_genai":
         return GoogleChatModel(
@@ -505,12 +514,14 @@ def build_chat_model(
             api_version=_optional(credentials, "api_version"),
             request_timeout=timeout,
             retries=0,
+            **request_params,
         )
     if provider_type == "ollama":
         return OllamaChatModel(
             model=model_name,
             base_url=_required(credentials, "api_base"),
             client_kwargs={"timeout": timeout},
+            **request_params,
         )
     raise ModelProviderError("Model provider type is not supported.")
 
@@ -629,13 +640,22 @@ def _registered_model_credentials(
 def build_registered_chat_model(
     model: RegisteredModel,
     settings: Settings,
+    *,
+    timeout: float | None = None,
 ) -> BaseChatModel:
+    request_params = (model.meta or {}).get(
+        MODEL_REQUEST_PARAMS_META_KEY,
+        DEFAULT_MODEL_REQUEST_PARAMS,
+    )
     return build_chat_model(
         model.provider_type,
         _registered_model_credentials(model, settings, "LLM"),
         model.model_name,
         stream_usage=(model.meta or {}).get(STREAM_USAGE_SUPPORTED_META_KEY) is True,
-        timeout=settings.model_request_timeout_seconds,
+        timeout=(
+            settings.model_request_timeout_seconds if timeout is None else timeout
+        ),
+        request_params=request_params if isinstance(request_params, dict) else {},
     )
 
 
@@ -668,6 +688,7 @@ def test_model_connection(
     credentials: dict[str, str],
     model_name: str,
     model_type: str,
+    request_params: dict[str, Any] | None = None,
 ) -> dict[str, bool]:
     if model_type == "LLM":
         output_limit = (
@@ -675,25 +696,28 @@ def test_model_connection(
             if provider_type == "ollama"
             else {"max_tokens": 1}
         )
+
+        def chat(*, stream_usage: bool = False) -> Any:
+            return build_chat_model(
+                provider_type,
+                credentials,
+                model_name,
+                stream_usage=stream_usage,
+                request_params=request_params,
+            )
+
         if provider_type == "openai_compatible":
             try:
                 chunks = list(
-                    build_chat_model(
-                        provider_type,
-                        credentials,
-                        model_name,
-                        stream_usage=True,
-                    ).stream([("human", "Hello")], **output_limit)
+                    chat(stream_usage=True).stream(
+                        [("human", "Hello")], **output_limit
+                    )
                 )
             except ModelProviderStatusError as exc:
                 if exc.status_code not in {400, 422}:
                     raise
                 list(
-                    build_chat_model(
-                        provider_type,
-                        credentials,
-                        model_name,
-                    ).stream([("human", "Hello")], **output_limit)
+                    chat().stream([("human", "Hello")], **output_limit)
                 )
                 return {STREAM_USAGE_SUPPORTED_META_KEY: False}
             return {
@@ -701,7 +725,7 @@ def test_model_connection(
                     chunk.usage_metadata is not None for chunk in chunks
                 )
             }
-        build_chat_model(provider_type, credentials, model_name).invoke(
+        chat().invoke(
             [("human", "Hello")],
             **output_limit,
         )

@@ -3,6 +3,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
+from app.schemas.knowledge_graph import KnowledgeGraphQueryResultResponse
 from app.schemas.user import UserResponse
 
 
@@ -14,6 +15,10 @@ class KnowledgeBaseResponse(BaseModel):
     status: str
     embedding_model_id: str | None
     reranker_model_id: str | None
+    graph_enabled: bool = False
+    active_graph_schema_id: str | None = None
+    active_graph_revision_id: str | None = None
+    graph_extraction_model_id: str | None = None
     created_by_user_id: str
     created_at: datetime
     updated_at: datetime
@@ -30,6 +35,7 @@ class KnowledgeBaseCreateRequest(BaseModel):
     description: str = Field(default="", max_length=2000)
     embedding_model_id: str | None = Field(default=None, max_length=36)
     reranker_model_id: str | None = Field(default=None, max_length=36)
+    graph_enabled: Literal[False] = False
 
 
 class KnowledgeBaseUpdateRequest(BaseModel):
@@ -139,7 +145,7 @@ class KnowledgeDocumentChunkResponse(BaseModel):
     start_offset: int | None = None
     end_offset: int | None = None
     content: str
-    kind: Literal["document", "qa"] = "document"
+    kind: Literal["document", "qa", "graph_record"] = "document"
     question: str | None = None
     source: str | None = None
     row_number: int | None = None
@@ -183,6 +189,26 @@ class KnowledgeTaskResponse(BaseModel):
     updated_at: datetime
 
 
+class KnowledgeTaskRetryRequest(BaseModel):
+    mode: Literal["all", "unfinished"] = "all"
+
+
+class KnowledgeTaskBulkDeleteRequest(BaseModel):
+    task_ids: list[
+        Annotated[
+            str,
+            StringConstraints(strip_whitespace=True, min_length=1, max_length=36),
+        ]
+    ] = Field(min_length=1, max_length=200)
+
+
+class KnowledgeTaskBulkDeleteResponse(BaseModel):
+    deleted_task_ids: list[str]
+
+
+GraphMode = Literal["off", "auto", "path", "neighborhood"]
+
+
 class KnowledgeQueryRequest(BaseModel):
     query: Annotated[
         str,
@@ -193,6 +219,11 @@ class KnowledgeQueryRequest(BaseModel):
     # 归一化余弦相似度阈值（0–1，保留相似度不低于该值的命中）
     similarity: float | None = Field(default=None, ge=0, le=1)
     include_references: bool = False
+    graph_mode: GraphMode = "auto"
+    source_entity: str | None = Field(default=None, max_length=500)
+    target_entity: str | None = Field(default=None, max_length=500)
+    max_hops: int = Field(default=6, ge=1, le=8)
+    relation_filters: list[str] = Field(default_factory=list, max_length=32)
 
 
 class KnowledgeQueryHitResponse(BaseModel):
@@ -211,11 +242,13 @@ class KnowledgeQueryHitResponse(BaseModel):
     contributing_chunk_ids: list[str] = Field(default_factory=list, max_length=20)
     distance: float | None = None
     similarity: float | None = Field(default=None, ge=0, le=1)
-    kind: Literal["document", "qa"] = "document"
+    kind: Literal["document", "qa", "graph_record"] = "document"
     question: str | None = None
     source: str | None = None
-    sources: list[str] = Field(default_factory=list, max_length=3)
+    sources: list[str] = Field(default_factory=list, max_length=4)
     reference_hops: int = Field(default=0, ge=0, le=1)
+    graph_claim_ids: list[str] = Field(default_factory=list, max_length=400)
+    graph_hops: int = Field(default=0, ge=0, le=8)
     rerank_score: float | None = None
 
 
@@ -228,20 +261,49 @@ class KnowledgeRetrievalTraceResponse(BaseModel):
     vector_candidates: int = Field(ge=0)
     keyword_candidates: int = Field(ge=0)
     reference_candidates: int = Field(ge=0)
+    graph_mode: GraphMode = "auto"
+    graph_intent: str | None = None
+    graph_revision_id: str | None = None
+    graph_entity_candidates: int = Field(default=0, ge=0)
+    graph_profile_candidates: int = Field(default=0, ge=0)
+    graph_claim_candidates: int = Field(default=0, ge=0)
+    graph_path_count: int = Field(default=0, ge=0)
+    graph_visited_nodes: int = Field(default=0, ge=0)
+    graph_hops: int = Field(default=0, ge=0, le=8)
+    graph_truncated: bool = False
+    graph_limit_reason: str | None = None
     fused_candidates: int = Field(ge=0)
     rerank_status: Literal["not_configured", "applied", "fallback", "skipped"]
     returned_hits: int = Field(ge=0)
     truncated_hits: int = Field(default=0, ge=0)
     duration_ms: float = Field(ge=0)
-    stage_duration_ms: dict[str, float] = Field(max_length=8)
+    stage_duration_ms: dict[str, float] = Field(max_length=12)
 
 
 class KnowledgeQueryInspectResponse(BaseModel):
     hits: list[KnowledgeQueryHitResponse]
     trace: KnowledgeRetrievalTraceResponse
+    graph: KnowledgeGraphQueryResultResponse | None = None
 
 
 KnowledgeEvaluationId = Annotated[str, Field(min_length=1, max_length=36)]
+
+
+class KnowledgeGraphEvaluationExpectation(BaseModel):
+    entity_names: list[str] = Field(default_factory=list, max_length=32)
+    predicates: list[str] = Field(default_factory=list, max_length=32)
+    path_entity_names: list[str] = Field(default_factory=list, max_length=16)
+    path_predicates: list[str] = Field(default_factory=list, max_length=15)
+
+
+class KnowledgeGraphEvaluationMetrics(BaseModel):
+    entity_precision: float = Field(default=0, ge=0, le=1)
+    entity_recall: float = Field(default=0, ge=0, le=1)
+    claim_precision: float = Field(default=0, ge=0, le=1)
+    claim_recall: float = Field(default=0, ge=0, le=1)
+    path_exact_match: int = Field(default=0, ge=0, le=1)
+    path_edge_accuracy: float = Field(default=0, ge=0, le=1)
+    citation_coverage: float = Field(default=0, ge=0, le=1)
 
 
 class KnowledgeEvaluationCaseCreateRequest(BaseModel):
@@ -250,6 +312,7 @@ class KnowledgeEvaluationCaseCreateRequest(BaseModel):
         min_length=1,
         max_length=20,
     )
+    graph_expectation: KnowledgeGraphEvaluationExpectation | None = None
 
 
 class KnowledgeEvaluationCaseResponse(BaseModel):
@@ -258,6 +321,7 @@ class KnowledgeEvaluationCaseResponse(BaseModel):
     knowledge_base_id: str
     question: str
     expected_document_ids: list[str]
+    graph_expectation: KnowledgeGraphEvaluationExpectation | None = None
     created_by_user_id: str
     created_at: datetime
     updated_at: datetime
@@ -269,6 +333,8 @@ class KnowledgeEvaluationRunRequest(BaseModel):
     search_mode: Literal["embedding", "keywords", "blend"] = "blend"
     similarity: float | None = Field(default=None, ge=0, le=1)
     include_references: bool = True
+    graph_mode: Literal["off", "auto", "path", "neighborhood"] = "auto"
+    max_hops: int = Field(default=6, ge=1, le=8)
 
 
 class KnowledgeEvaluationResultResponse(BaseModel):
@@ -283,6 +349,7 @@ class KnowledgeEvaluationResultResponse(BaseModel):
     ndcg_at_k: float
     latency_ms: float
     trace: dict[str, Any]
+    graph_metrics: KnowledgeGraphEvaluationMetrics | None = None
     error: str | None
     created_at: datetime
 

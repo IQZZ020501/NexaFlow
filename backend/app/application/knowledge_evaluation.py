@@ -32,11 +32,13 @@ from app.schemas.knowledge import (
     KnowledgeEvaluationResultResponse,
     KnowledgeEvaluationRunRequest,
     KnowledgeEvaluationSummaryResponse,
+    KnowledgeGraphEvaluationExpectation,
     KnowledgeQueryRequest,
 )
 from app.shareddomain.knowledge.evaluation import (
     EVALUATION_SIMILARITY_SEMANTICS,
     get_evaluation_task,
+    graph_evaluation_metrics,
 )
 from app.shareddomain.knowledge.orchestration import (
     task_error_message,
@@ -95,6 +97,16 @@ async def run_evaluation_task(
     if len(cases) != len(case_ids):
         raise KnowledgePipelineError("Evaluation case no longer exists.")
     cases_by_id = {case.id: case for case in cases}
+    graph_expectations = {
+        case.id: (
+            KnowledgeGraphEvaluationExpectation.model_validate(
+                case.graph_expectation
+            )
+            if case.graph_expectation
+            else None
+        )
+        for case in cases
+    }
     expectations = await evaluation_repository.list_expectations_for_cases(
         db,
         knowledge_base,
@@ -137,6 +149,8 @@ async def run_evaluation_task(
                     search_mode=payload.search_mode,
                     similarity=payload.similarity,
                     include_references=payload.include_references,
+                    graph_mode=payload.graph_mode,
+                    max_hops=payload.max_hops,
                 ),
                 settings,
             )
@@ -163,7 +177,23 @@ async def run_evaluation_task(
             result.reciprocal_rank = metrics.reciprocal_rank
             result.ndcg_at_k = metrics.ndcg_at_k
             result.latency_ms = retrieval.trace.duration_ms
-            result.trace = retrieval.trace.model_dump(mode="json")
+            result.trace = {
+                **retrieval.trace.model_dump(mode="json"),
+                "graph": (
+                    retrieval.graph.model_dump(mode="json")
+                    if retrieval.graph is not None
+                    else None
+                ),
+            }
+            graph_metrics = graph_evaluation_metrics(
+                graph_expectations[case_id],
+                retrieval.graph,
+            )
+            result.graph_metrics = (
+                graph_metrics.model_dump(mode="json")
+                if graph_metrics is not None
+                else {}
+            )
             result.error = None
         except Exception as exc:
             if lease_lost.is_set():
@@ -187,6 +217,7 @@ async def run_evaluation_task(
                 3,
             )
             result.trace = {}
+            result.graph_metrics = {}
             result.error = task_error_message(exc)
 
         if existing is None:
@@ -267,6 +298,7 @@ async def get_evaluation_summary(
                 ndcg_at_k=result.ndcg_at_k,
                 latency_ms=result.latency_ms,
                 trace=result.trace,
+                graph_metrics=result.graph_metrics or None,
                 error=result.error,
                 created_at=result.created_at,
             )

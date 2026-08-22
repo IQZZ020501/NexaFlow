@@ -19,12 +19,15 @@ import {
   FlaskConicalIcon,
   LoaderCircleIcon,
   MoreHorizontalIcon,
+  NetworkIcon,
   PencilIcon,
+  PlayIcon,
   PlusIcon,
   RotateCcwIcon,
   SearchIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
+  SquareIcon,
   Trash2Icon,
   UploadIcon,
   UsersIcon,
@@ -36,10 +39,7 @@ import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { isEventFromDropdownMenu } from "@/lib/dom"
-import {
-  CARD_BATCH_SIZE,
-  useInfiniteScroll,
-} from "@/lib/use-infinite-scroll"
+import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
@@ -63,6 +63,8 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
   createKnowledgeBase,
   deleteKnowledgeDocument,
+  deleteKnowledgeTask,
+  deleteKnowledgeTasks,
   deleteKnowledgeBase,
   downloadKnowledgeDocument,
   indexKnowledgeDocument,
@@ -73,6 +75,7 @@ import {
   parseKnowledgeDocument,
   rebuildKnowledgeIndex,
   retryKnowledgeTask,
+  stopKnowledgeTask,
   revokeKnowledgeBasePermission,
   setKnowledgeDocumentActive,
   testKnowledgeBaseModels,
@@ -85,6 +88,7 @@ import type {
   KnowledgeDocument,
   KnowledgeModelTestResult,
   KnowledgeTask,
+  KnowledgeTaskRetryMode,
   ResourcePermission,
 } from "@/lib/api/knowledge"
 import { listRegisteredModels } from "@/lib/api/llm"
@@ -105,6 +109,7 @@ import { knowledgeBaseDetailPath } from "@/lib/knowledge-views"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
+import { KnowledgeGraph } from "@/components/knowledge/knowledge-graph"
 import {
   getDocumentFileIcon,
   getDocumentFileIconColor,
@@ -129,11 +134,7 @@ import type {
 } from "@/lib/api/knowledge"
 
 type DocumentSortKey =
-  | "name"
-  | "size_bytes"
-  | "chunk_count"
-  | "created_at"
-  | "updated_at"
+  "name" | "size_bytes" | "chunk_count" | "created_at" | "updated_at"
 
 const DOCUMENT_SORT_OPTIONS: Array<{
   key: DocumentSortKey
@@ -161,6 +162,12 @@ const PROCESSING_DOCUMENT_STATUSES: Record<string, true> = {
   indexing: true,
 }
 
+const PROCESSING_TASK_STATUSES: Record<string, true> = {
+  queued: true,
+  running: true,
+  cancelling: true,
+}
+
 export const DOCUMENT_PAGE_SIZES = [10, 20, 50, 100] as const
 export type DocumentPageSize = (typeof DOCUMENT_PAGE_SIZES)[number]
 
@@ -175,7 +182,7 @@ export type DocumentPageSize = (typeof DOCUMENT_PAGE_SIZES)[number]
 export function paginateDocuments<T>(
   items: readonly T[],
   page: number,
-  pageSize: number,
+  pageSize: number
 ): T[] {
   return items.slice((page - 1) * pageSize, page * pageSize)
 }
@@ -407,8 +414,7 @@ function KnowledgeBasePageContent({
   const [knowledgeBases, setKnowledgeBases] = React.useState<
     KnowledgeBaseListItem[]
   >([])
-  const [knowledgeBasesHasMore, setKnowledgeBasesHasMore] =
-    React.useState(true)
+  const [knowledgeBasesHasMore, setKnowledgeBasesHasMore] = React.useState(true)
   const [isKnowledgeBasesLoadingMore, setIsKnowledgeBasesLoadingMore] =
     React.useState(false)
   const knowledgeBasesLoadingRef = React.useRef(false)
@@ -419,6 +425,8 @@ function KnowledgeBasePageContent({
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<
     string[]
   >([])
+  const [selectedKnowledgeTaskIds, setSelectedKnowledgeTaskIds] =
+    React.useState<string[]>([])
   const [registeredModels, setRegisteredModels] = React.useState<
     RegisteredModel[]
   >([])
@@ -468,10 +476,13 @@ function KnowledgeBasePageContent({
   const [splitSeparator, setSplitSeparator] = React.useState(
     SMART_SPLIT_SEPARATOR
   )
-  const [cleaningRules, setCleaningRules] = React.useState<string[]>(
-    SMART_CLEANING_RULES
-  )
-  const [isRetryingTask, setIsRetryingTask] = React.useState(false)
+  const [cleaningRules, setCleaningRules] =
+    React.useState<string[]>(SMART_CLEANING_RULES)
+  const [busyKnowledgeTaskId, setBusyKnowledgeTaskId] = React.useState<
+    string | null
+  >(null)
+  const [isDeletingKnowledgeTasks, setIsDeletingKnowledgeTasks] =
+    React.useState(false)
   const [isTestingModels, setIsTestingModels] = React.useState(false)
   const [modelTestResult, setModelTestResult] =
     React.useState<KnowledgeModelTestResult | null>(null)
@@ -481,6 +492,7 @@ function KnowledgeBasePageContent({
   const [isSaving, setIsSaving] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const selectAllDocumentsRef = React.useRef<HTMLInputElement>(null)
+  const selectAllKnowledgeTasksRef = React.useRef<HTMLInputElement>(null)
 
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
   const selectedKnowledgeBaseId = activeKnowledgeBaseId
@@ -545,13 +557,32 @@ function KnowledgeBasePageContent({
   const visibleDocuments = paginateDocuments(
     filteredDocuments,
     documentPage,
-    documentPageSize,
+    documentPageSize
   )
   const visibleKnowledgeTasks = paginateDocuments(
     knowledgeTasks,
     knowledgeTaskPage,
-    knowledgeTaskPageSize,
+    knowledgeTaskPageSize
   )
+  const selectedKnowledgeTasks = knowledgeTasks.filter(
+    (task) =>
+      selectedKnowledgeTaskIds.includes(task.id) &&
+      !PROCESSING_TASK_STATUSES[task.status]
+  )
+  const visibleDeletableKnowledgeTasks = visibleKnowledgeTasks.filter(
+    (task) => !PROCESSING_TASK_STATUSES[task.status]
+  )
+  const isAllVisibleKnowledgeTasksSelected =
+    visibleDeletableKnowledgeTasks.length > 0 &&
+    visibleDeletableKnowledgeTasks.every((task) =>
+      selectedKnowledgeTaskIds.includes(task.id)
+    )
+  const isSomeVisibleKnowledgeTaskSelected =
+    visibleDeletableKnowledgeTasks.some((task) =>
+      selectedKnowledgeTaskIds.includes(task.id)
+    )
+  const isKnowledgeTaskMutationBusy =
+    busyKnowledgeTaskId !== null || isDeletingKnowledgeTasks
   const isAllFilteredDocumentsSelected =
     visibleDocuments.length > 0 &&
     visibleDocuments.every((document) =>
@@ -567,6 +598,17 @@ function KnowledgeBasePageContent({
         isSomeFilteredDocumentSelected && !isAllFilteredDocumentsSelected
     }
   }, [isAllFilteredDocumentsSelected, isSomeFilteredDocumentSelected])
+
+  React.useEffect(() => {
+    if (selectAllKnowledgeTasksRef.current) {
+      selectAllKnowledgeTasksRef.current.indeterminate =
+        isSomeVisibleKnowledgeTaskSelected &&
+        !isAllVisibleKnowledgeTasksSelected
+    }
+  }, [
+    isAllVisibleKnowledgeTasksSelected,
+    isSomeVisibleKnowledgeTaskSelected,
+  ])
 
   const reportError = React.useCallback(
     (error: unknown) => {
@@ -639,59 +681,79 @@ function KnowledgeBasePageContent({
 
   const knowledgeBasesListEndRef = useInfiniteScroll(loadMoreKnowledgeBases)
 
-  const loadDocuments = React.useCallback(async (silent = false) => {
-    if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
-      setDocuments([])
-      return
-    }
+  const loadDocuments = React.useCallback(
+    async (silent = false) => {
+      if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
+        setDocuments([])
+        return
+      }
 
-    if (!silent) {
-      setIsDocumentLoading(true)
-    }
-    try {
-      setDocuments(
-        await listKnowledgeDocuments(
+      if (!silent) {
+        setIsDocumentLoading(true)
+      }
+      try {
+        setDocuments(
+          await listKnowledgeDocuments(
+            token,
+            selectedWorkspaceId,
+            selectedKnowledgeBaseId
+          )
+        )
+      } catch (error) {
+        if (!silent) {
+          setDocuments([])
+          reportError(error)
+        }
+      } finally {
+        if (!silent) {
+          setIsDocumentLoading(false)
+        }
+      }
+    },
+    [reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token]
+  )
+
+  const loadKnowledgeTasks = React.useCallback(
+    async (silent = false) => {
+      if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
+        setKnowledgeTasks([])
+        setSelectedKnowledgeTaskIds([])
+        return
+      }
+
+      if (!silent) {
+        setIsKnowledgeTaskLoading(true)
+      }
+      try {
+        const tasks = await listKnowledgeTasks(
           token,
           selectedWorkspaceId,
           selectedKnowledgeBaseId
         )
-      )
-    } catch (error) {
-      if (!silent) {
-        setDocuments([])
-        reportError(error)
+        setKnowledgeTasks(tasks)
+        setSelectedKnowledgeTaskIds((current) =>
+          current.filter((taskId) =>
+            tasks.some(
+              (task) =>
+                task.id === taskId &&
+                !PROCESSING_TASK_STATUSES[task.status]
+            )
+          )
+        )
+      } catch (error) {
+        if (!silent) {
+          setKnowledgeTasks([])
+          setSelectedKnowledgeTaskIds([])
+          reportError(error)
+        }
+      } finally {
+        if (!silent) {
+          setIsKnowledgeTaskLoading(false)
+        }
       }
-    } finally {
-      if (!silent) {
-        setIsDocumentLoading(false)
-      }
-    }
-  }, [reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token])
-
-  const loadKnowledgeTasks = React.useCallback(async (silent = false) => {
-    if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
-      setKnowledgeTasks([])
-      return
-    }
-
-    if (!silent) {
-      setIsKnowledgeTaskLoading(true)
-    }
-    try {
-      setKnowledgeTasks(
-        await listKnowledgeTasks(token, selectedWorkspaceId, selectedKnowledgeBaseId)
-      )
-    } catch (error) {
-      if (!silent) {
-        setKnowledgeTasks([])
-        reportError(error)
-      }
-    } finally {
-      if (!silent) {
-        setIsKnowledgeTaskLoading(false)
-      }
-    }
-  }, [reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token])
+    },
+    [reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token]
+  )
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -742,9 +804,13 @@ function KnowledgeBasePageContent({
   const hasProcessingDocuments = documents.some(
     (document) => PROCESSING_DOCUMENT_STATUSES[document.status]
   )
+  const hasProcessingTasks = knowledgeTasks.some(
+    (task) => PROCESSING_TASK_STATUSES[task.status]
+  )
+  const shouldPollTasks = activeDetailTab === "tasks" && hasProcessingTasks
 
   React.useEffect(() => {
-    if (!hasProcessingDocuments) {
+    if (!hasProcessingDocuments && !shouldPollTasks) {
       return
     }
 
@@ -753,7 +819,12 @@ function KnowledgeBasePageContent({
       void loadKnowledgeTasks(true)
     }, 3000)
     return () => window.clearInterval(timer)
-  }, [hasProcessingDocuments, loadDocuments, loadKnowledgeTasks])
+  }, [
+    hasProcessingDocuments,
+    loadDocuments,
+    loadKnowledgeTasks,
+    shouldPollTasks,
+  ])
 
   const cancelUpload = React.useCallback(() => {
     if (selectedKnowledgeBaseId) {
@@ -803,6 +874,27 @@ function KnowledgeBasePageContent({
     )
   }
 
+  function toggleKnowledgeTaskSelection(taskId: string, checked: boolean) {
+    setSelectedKnowledgeTaskIds((current) =>
+      checked
+        ? current.includes(taskId)
+          ? current
+          : [...current, taskId]
+        : current.filter((id) => id !== taskId)
+    )
+  }
+
+  function toggleAllVisibleKnowledgeTasks(checked: boolean) {
+    const visibleTaskIds = visibleDeletableKnowledgeTasks.map(
+      (task) => task.id
+    )
+    setSelectedKnowledgeTaskIds((current) =>
+      checked
+        ? Array.from(new Set([...current, ...visibleTaskIds]))
+        : current.filter((id) => !visibleTaskIds.includes(id))
+    )
+  }
+
   function canManagePermissions(knowledgeBase: KnowledgeBase) {
     return (
       workspaceRole === "admin" ||
@@ -831,11 +923,13 @@ function KnowledgeBasePageContent({
     setActiveDetailTab("documents")
     setDocumentSearch("")
     setSelectedDocumentIds([])
+    setSelectedKnowledgeTaskIds([])
     setKnowledgeTasks([])
     router.push(`/app/knowledge/${knowledgeBase.id}`)
   }
 
   function closeKnowledgeBase() {
+    setSelectedKnowledgeTaskIds([])
     setKnowledgeTasks([])
     router.push("/app/knowledge")
   }
@@ -1021,7 +1115,11 @@ function KnowledgeBasePageContent({
   }
 
   async function handleIndexDocuments(targetDocuments: KnowledgeDocument[]) {
-    if (!selectedWorkspaceId || !selectedKnowledgeBase || !targetDocuments.length) {
+    if (
+      !selectedWorkspaceId ||
+      !selectedKnowledgeBase ||
+      !targetDocuments.length
+    ) {
       return
     }
 
@@ -1098,7 +1196,11 @@ function KnowledgeBasePageContent({
   }
 
   async function handleDeleteSelectedDocuments() {
-    if (!selectedWorkspaceId || !selectedKnowledgeBase || !selectedDocuments.length) {
+    if (
+      !selectedWorkspaceId ||
+      !selectedKnowledgeBase ||
+      !selectedDocuments.length
+    ) {
       return
     }
 
@@ -1126,13 +1228,18 @@ function KnowledgeBasePageContent({
           )
         )
       )
-      const deletedIds = new Set(selectedDocuments.map((document) => document.id))
+      const deletedIds = new Set(
+        selectedDocuments.map((document) => document.id)
+      )
       setDocuments((current) =>
         current.filter((item) => !deletedIds.has(item.id))
       )
       setSelectedDocumentIds([])
       await loadKnowledgeTasks()
-      notify("success", t("已删除 {value} 个文档", { value: selectedDocuments.length }))
+      notify(
+        "success",
+        t("已删除 {value} 个文档", { value: selectedDocuments.length })
+      )
     } catch (error) {
       reportError(error)
     } finally {
@@ -1161,28 +1268,130 @@ function KnowledgeBasePageContent({
     }
   }
 
-  async function handleRetryKnowledgeTask(task: KnowledgeTask) {
+  async function handleRetryKnowledgeTask(
+    task: KnowledgeTask,
+    mode: KnowledgeTaskRetryMode = "all"
+  ) {
     if (!selectedWorkspaceId || !selectedKnowledgeBase) {
       return
     }
 
-    setIsRetryingTask(true)
+    setBusyKnowledgeTaskId(task.id)
     try {
       await retryKnowledgeTask(
         token,
         selectedWorkspaceId,
         selectedKnowledgeBase.id,
-        task.id
+        task.id,
+        mode
       )
-      await Promise.all([
-        loadDocuments(),
-        loadKnowledgeTasks(),
-      ])
+      await Promise.all([loadDocuments(), loadKnowledgeTasks()])
       notify("success", t("已重新提交任务"))
     } catch (error) {
       reportError(error)
     } finally {
-      setIsRetryingTask(false)
+      setBusyKnowledgeTaskId(null)
+    }
+  }
+
+  async function handleStopKnowledgeTask(task: KnowledgeTask) {
+    if (!selectedWorkspaceId || !selectedKnowledgeBase) return
+    setBusyKnowledgeTaskId(task.id)
+    try {
+      const stopped = await stopKnowledgeTask(
+        token,
+        selectedWorkspaceId,
+        selectedKnowledgeBase.id,
+        task.id
+      )
+      setKnowledgeTasks((current) =>
+        current.map((item) => (item.id === stopped.id ? stopped : item))
+      )
+      await loadDocuments()
+      notify("success", t("已停止任务"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setBusyKnowledgeTaskId(null)
+    }
+  }
+
+  async function handleDeleteKnowledgeTask(task: KnowledgeTask) {
+    if (!selectedWorkspaceId || !selectedKnowledgeBase) return
+    if (
+      !(await confirmAction({
+        description: t("删除此任务记录？此操作不可恢复。"),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
+    ) {
+      return
+    }
+    setBusyKnowledgeTaskId(task.id)
+    try {
+      await deleteKnowledgeTask(
+        token,
+        selectedWorkspaceId,
+        selectedKnowledgeBase.id,
+        task.id
+      )
+      setKnowledgeTasks((current) =>
+        current.filter((item) => item.id !== task.id)
+      )
+      setSelectedKnowledgeTaskIds((current) =>
+        current.filter((id) => id !== task.id)
+      )
+      notify("success", t("已删除任务"))
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setBusyKnowledgeTaskId(null)
+    }
+  }
+
+  async function handleDeleteSelectedKnowledgeTasks() {
+    if (
+      !selectedWorkspaceId ||
+      !selectedKnowledgeBase ||
+      !selectedKnowledgeTasks.length
+    ) {
+      return
+    }
+    if (
+      !(await confirmAction({
+        description: t("删除选中的 {value} 个任务？此操作不可恢复。", {
+          value: selectedKnowledgeTasks.length,
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
+    ) {
+      return
+    }
+
+    setIsDeletingKnowledgeTasks(true)
+    try {
+      const result = await deleteKnowledgeTasks(
+        token,
+        selectedWorkspaceId,
+        selectedKnowledgeBase.id,
+        selectedKnowledgeTasks.map((task) => task.id)
+      )
+      const deletedIds = new Set(result.deleted_task_ids)
+      setKnowledgeTasks((current) =>
+        current.filter((task) => !deletedIds.has(task.id))
+      )
+      setSelectedKnowledgeTaskIds((current) =>
+        current.filter((taskId) => !deletedIds.has(taskId))
+      )
+      notify(
+        "success",
+        t("已删除 {value} 个任务", { value: result.deleted_task_ids.length })
+      )
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsDeletingKnowledgeTasks(false)
     }
   }
 
@@ -1312,6 +1521,7 @@ function KnowledgeBasePageContent({
     icon: React.ElementType
   }> = [
     { key: "documents", label: t("文档"), icon: FileTextIcon },
+    { key: "graph", label: t("知识关联"), icon: NetworkIcon },
     { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
     { key: "evaluation", label: t("检索评测"), icon: FlaskConicalIcon },
     { key: "settings", label: t("设置"), icon: SettingsIcon },
@@ -1413,7 +1623,9 @@ function KnowledgeBasePageContent({
                         selectedDocumentCount === 0 ||
                         isSubmittingDocumentTask
                       }
-                      onClick={() => void handleIndexDocuments(selectedDocuments)}
+                      onClick={() =>
+                        void handleIndexDocuments(selectedDocuments)
+                      }
                     >
                       {isSubmittingDocumentTask ? (
                         <LoaderCircleIcon
@@ -1422,7 +1634,9 @@ function KnowledgeBasePageContent({
                         />
                       ) : null}
                       {t("向量化")}
-                      {selectedDocumentCount ? `(${selectedDocumentCount})` : ""}
+                      {selectedDocumentCount
+                        ? `(${selectedDocumentCount})`
+                        : ""}
                     </Button>
                     <Button
                       type="button"
@@ -1452,7 +1666,9 @@ function KnowledgeBasePageContent({
                     >
                       <Trash2Icon data-icon="inline-start" />
                       {t("删除")}
-                      {selectedDocumentCount ? `(${selectedDocumentCount})` : ""}
+                      {selectedDocumentCount
+                        ? `(${selectedDocumentCount})`
+                        : ""}
                     </Button>
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1613,7 +1829,9 @@ function KnowledgeBasePageContent({
                               <input
                                 type="checkbox"
                                 className="size-4"
-                                aria-label={t("选择 {value}", { value: document.filename })}
+                                aria-label={t("选择 {value}", {
+                                  value: document.filename,
+                                })}
                                 checked={selectedDocumentIds.includes(
                                   document.id
                                 )}
@@ -1633,9 +1851,11 @@ function KnowledgeBasePageContent({
                                     "aria-hidden": true,
                                     className: cn(
                                       "size-4 shrink-0 text-base leading-none",
-                                      getDocumentFileIconColor(document.filename),
+                                      getDocumentFileIconColor(
+                                        document.filename
+                                      )
                                     ),
-                                  },
+                                  }
                                 )}
                                 <button
                                   type="button"
@@ -1667,11 +1887,7 @@ function KnowledgeBasePageContent({
                                   )}
                                 />
                               )}
-                              {documentStatusText(
-                                document,
-                                knowledgeTasks,
-                                t
-                              )}
+                              {documentStatusText(document, knowledgeTasks, t)}
                             </span>
                             <span>{formatBytes(document.size_bytes)}</span>
                             <span>{document.chunk_count}</span>
@@ -1681,10 +1897,14 @@ function KnowledgeBasePageContent({
                                 role="switch"
                                 aria-checked={document.is_active}
                                 aria-label={t(
-                                  document.is_active ? "停用 {value}" : "启用 {value}",
+                                  document.is_active
+                                    ? "停用 {value}"
+                                    : "启用 {value}",
                                   { value: document.filename }
                                 )}
-                                disabled={!canEditDocuments || isSubmittingDocumentTask}
+                                disabled={
+                                  !canEditDocuments || isSubmittingDocumentTask
+                                }
                                 onClick={() =>
                                   void handleToggleDocumentActive(document)
                                 }
@@ -1698,7 +1918,9 @@ function KnowledgeBasePageContent({
                                 <span
                                   className={cn(
                                     "block size-4 rounded-full bg-background shadow-sm transition-transform",
-                                    document.is_active ? "translate-x-[18px]" : "translate-x-0.5"
+                                    document.is_active
+                                      ? "translate-x-[18px]"
+                                      : "translate-x-0.5"
                                   )}
                                 />
                               </button>
@@ -1718,11 +1940,14 @@ function KnowledgeBasePageContent({
                                 variant="ghost"
                                 size="icon-sm"
                                 disabled={
-                                  !canEditDocuments ||
-                                  isSubmittingDocumentTask
+                                  !canEditDocuments || isSubmittingDocumentTask
                                 }
-                                aria-label={t("重新分段 {value}", { value: document.filename })}
-                                title={t("重新分段 {value}", { value: document.filename })}
+                                aria-label={t("重新分段 {value}", {
+                                  value: document.filename,
+                                })}
+                                title={t("重新分段 {value}", {
+                                  value: document.filename,
+                                })}
                                 onClick={() => {
                                   setChunkSize(SMART_CHUNK_SIZE)
                                   setChunkOverlap(SMART_CHUNK_OVERLAP)
@@ -1739,11 +1964,14 @@ function KnowledgeBasePageContent({
                                 variant="ghost"
                                 size="icon-sm"
                                 disabled={
-                                  !canEditDocuments ||
-                                  isSubmittingDocumentTask
+                                  !canEditDocuments || isSubmittingDocumentTask
                                 }
-                                aria-label={t("向量化 {value}", { value: document.filename })}
-                                title={t("向量化 {value}", { value: document.filename })}
+                                aria-label={t("向量化 {value}", {
+                                  value: document.filename,
+                                })}
+                                title={t("向量化 {value}", {
+                                  value: document.filename,
+                                })}
                                 onClick={() =>
                                   void handleIndexDocuments([document])
                                 }
@@ -1760,8 +1988,12 @@ function KnowledgeBasePageContent({
                                       !canEditDocuments ||
                                       isSubmittingDocumentTask
                                     }
-                                    aria-label={t("操作 {value}", { value: document.filename })}
-                                    title={t("操作 {value}", { value: document.filename })}
+                                    aria-label={t("操作 {value}", {
+                                      value: document.filename,
+                                    })}
+                                    title={t("操作 {value}", {
+                                      value: document.filename,
+                                    })}
                                   >
                                     <MoreHorizontalIcon />
                                   </Button>
@@ -1982,15 +2214,13 @@ function KnowledgeBasePageContent({
                                   <span className="truncate">
                                     {cleaningRules.length
                                       ? cleaningRules
-                                          .map(
-                                            (rule) =>
-                                              t(
-                                                CLEANING_RULE_OPTIONS.find(
-                                                  (option) =>
-                                                    option.value === rule
-                                                )?.labelKey ??
-                                                  "去除行首尾空白"
-                                              )
+                                          .map((rule) =>
+                                            t(
+                                              CLEANING_RULE_OPTIONS.find(
+                                                (option) =>
+                                                  option.value === rule
+                                              )?.labelKey ?? "去除行首尾空白"
+                                            )
                                           )
                                           .join(t("列表分隔符"))
                                       : t("不使用")}
@@ -2079,6 +2309,31 @@ function KnowledgeBasePageContent({
                     <Button
                       type="button"
                       variant="outline"
+                      disabled={
+                        !canEditDocuments ||
+                        selectedKnowledgeTasks.length === 0 ||
+                        isKnowledgeTaskMutationBusy
+                      }
+                      onClick={() =>
+                        void handleDeleteSelectedKnowledgeTasks()
+                      }
+                    >
+                      {isDeletingKnowledgeTasks ? (
+                        <LoaderCircleIcon
+                          className="animate-spin"
+                          data-icon="inline-start"
+                        />
+                      ) : (
+                        <Trash2Icon data-icon="inline-start" />
+                      )}
+                      {t("批量删除")}
+                      {selectedKnowledgeTasks.length
+                        ? `(${selectedKnowledgeTasks.length})`
+                        : ""}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
                       disabled={!canEditDocuments || isSubmittingDocumentTask}
                       onClick={() => void handleRebuildIndex()}
                     >
@@ -2089,8 +2344,27 @@ function KnowledgeBasePageContent({
                 </div>
 
                 <div className="mt-4 overflow-x-auto rounded-lg border bg-background">
-                  <div className="min-w-[860px]">
-                    <div className="grid grid-cols-[120px_120px_140px_120px_minmax(220px,1fr)_120px] border-b px-4 py-3 text-sm font-medium text-muted-foreground">
+                  <div className="min-w-[920px]">
+                    <div className="grid grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_176px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
+                      <label className="flex items-center justify-center">
+                        <input
+                          ref={selectAllKnowledgeTasksRef}
+                          type="checkbox"
+                          className="size-4"
+                          aria-label={t("选择所有可删除任务")}
+                          checked={isAllVisibleKnowledgeTasksSelected}
+                          disabled={
+                            !canEditDocuments ||
+                            !visibleDeletableKnowledgeTasks.length ||
+                            isKnowledgeTaskMutationBusy
+                          }
+                          onChange={(event) =>
+                            toggleAllVisibleKnowledgeTasks(
+                              event.target.checked
+                            )
+                          }
+                        />
+                      </label>
                       <span>{t("类型")}</span>
                       <span>{t("状态")}</span>
                       <span>{t("进度")}</span>
@@ -2106,8 +2380,33 @@ function KnowledgeBasePageContent({
                       visibleKnowledgeTasks.map((task) => (
                         <div
                           key={task.id}
-                          className="grid min-h-16 grid-cols-[120px_120px_140px_120px_minmax(220px,1fr)_120px] items-center border-b px-4 py-3 text-sm last:border-b-0"
+                          className="grid min-h-16 grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_176px] items-center border-b px-4 py-3 text-sm last:border-b-0"
                         >
+                          <label className="flex items-center justify-center">
+                            <input
+                              type="checkbox"
+                              className="size-4"
+                              aria-label={t("选择任务 {value}", {
+                                value: task.id,
+                              })}
+                              checked={selectedKnowledgeTaskIds.includes(
+                                task.id
+                              )}
+                              disabled={
+                                !canEditDocuments ||
+                                Boolean(
+                                  PROCESSING_TASK_STATUSES[task.status]
+                                ) ||
+                                isKnowledgeTaskMutationBusy
+                              }
+                              onChange={(event) =>
+                                toggleKnowledgeTaskSelection(
+                                  task.id,
+                                  event.target.checked
+                                )
+                              }
+                            />
+                          </label>
                           <span className="font-medium">
                             {taskTypeLabel(task.task_type, t)}
                           </span>
@@ -2120,7 +2419,9 @@ function KnowledgeBasePageContent({
                             />
                             {taskStatusLabel(task.status, t)}
                           </span>
-                          <span>{task.processed_items}/{task.total_items}</span>
+                          <span>
+                            {task.processed_items}/{task.total_items}
+                          </span>
                           <span>
                             {task.attempts}/{task.max_attempts}
                           </span>
@@ -2134,21 +2435,88 @@ function KnowledgeBasePageContent({
                               </span>
                             ) : null}
                           </span>
-                          <span>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
+                          <span className="flex items-center gap-1">
+                            <IconButton
+                              label={t("停止")}
                               disabled={
                                 !canEditDocuments ||
-                                isRetryingTask ||
-                                task.status !== "failed"
+                                isKnowledgeTaskMutationBusy ||
+                                !["queued", "running"].includes(task.status)
                               }
-                              onClick={() => void handleRetryKnowledgeTask(task)}
+                              onClick={() => void handleStopKnowledgeTask(task)}
                             >
-                              <RotateCcwIcon data-icon="inline-start" />
-                              {t("重试")}
-                            </Button>
+                              <SquareIcon className="size-4 fill-current" />
+                            </IconButton>
+                            {["graph_sync", "graph_rebuild"].includes(
+                              task.task_type
+                            ) ? (
+                              <>
+                                <IconButton
+                                  label={t("重试未完成分片")}
+                                  disabled={
+                                    !canEditDocuments ||
+                                    isKnowledgeTaskMutationBusy ||
+                                    !["failed", "cancelled"].includes(
+                                      task.status
+                                    ) ||
+                                    task.processed_items <= 0 ||
+                                    task.processed_items >= task.total_items
+                                  }
+                                  onClick={() =>
+                                    void handleRetryKnowledgeTask(
+                                      task,
+                                      "unfinished"
+                                    )
+                                  }
+                                >
+                                  <PlayIcon className="size-4" />
+                                </IconButton>
+                                <IconButton
+                                  label={t("重试全部分片")}
+                                  disabled={
+                                    !canEditDocuments ||
+                                    isKnowledgeTaskMutationBusy ||
+                                    !["failed", "cancelled"].includes(
+                                      task.status
+                                    )
+                                  }
+                                  onClick={() =>
+                                    void handleRetryKnowledgeTask(task, "all")
+                                  }
+                                >
+                                  <RotateCcwIcon className="size-4" />
+                                </IconButton>
+                              </>
+                            ) : (
+                              <IconButton
+                                label={t("重试")}
+                                disabled={
+                                  !canEditDocuments ||
+                                  isKnowledgeTaskMutationBusy ||
+                                  !["failed", "cancelled"].includes(task.status)
+                                }
+                                onClick={() =>
+                                  void handleRetryKnowledgeTask(task)
+                                }
+                              >
+                                <RotateCcwIcon className="size-4" />
+                              </IconButton>
+                            )}
+                            <IconButton
+                              label={t("删除任务")}
+                              disabled={
+                                !canEditDocuments ||
+                                isKnowledgeTaskMutationBusy ||
+                                ["queued", "running", "cancelling"].includes(
+                                  task.status
+                                )
+                              }
+                              onClick={() =>
+                                void handleDeleteKnowledgeTask(task)
+                              }
+                            >
+                              <Trash2Icon className="size-4" />
+                            </IconButton>
                           </span>
                         </div>
                       ))
@@ -2179,6 +2547,18 @@ function KnowledgeBasePageContent({
                 knowledgeBaseId={selectedKnowledgeBase.id}
                 documents={documents}
                 canEdit={canEditDocuments}
+                reportError={reportError}
+              />
+            ) : null}
+
+            {activeDetailTab === "graph" ? (
+              <KnowledgeGraph
+                key={selectedKnowledgeBase.id}
+                token={token}
+                workspaceId={selectedKnowledgeBase.workspace_id}
+                knowledgeBaseId={selectedKnowledgeBase.id}
+                canEdit={canEditDocuments}
+                notify={notify}
                 reportError={reportError}
               />
             ) : null}
@@ -2284,7 +2664,7 @@ function KnowledgeBasePageContent({
                           <AlertCircleIcon className="size-4 shrink-0" />
                           {t("模型测试失败")}
                         </div>
-                        <p className="break-words leading-6">
+                        <p className="leading-6 break-words">
                           {modelTestError}
                         </p>
                       </div>
@@ -2298,13 +2678,17 @@ function KnowledgeBasePageContent({
                           <div className="flex items-center gap-1.5">
                             <dt className="text-muted-foreground">Embedding</dt>
                             <dd className="font-medium">
-                              {t("{value} 维", { value: modelTestResult.embedding_dimensions })}
+                              {t("{value} 维", {
+                                value: modelTestResult.embedding_dimensions,
+                              })}
                             </dd>
                           </div>
                           <div className="flex items-center gap-1.5">
                             <dt className="text-muted-foreground">Rerank</dt>
                             <dd className="font-medium">
-                              {t("{value} 条", { value: modelTestResult.reranker_results })}
+                              {t("{value} 条", {
+                                value: modelTestResult.reranker_results,
+                              })}
                             </dd>
                           </div>
                         </dl>
@@ -2409,7 +2793,7 @@ function KnowledgeBasePageContent({
                         key={knowledgeBase.id}
                         role="button"
                         tabIndex={0}
-                        className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                        className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
                         onClick={(event) => {
                           if (isEventFromDropdownMenu(event)) return
                           openKnowledgeBase(knowledgeBase)
@@ -2432,9 +2816,7 @@ function KnowledgeBasePageContent({
                                 <h2 className="truncate text-sm font-semibold">
                                   {knowledgeBase.name}
                                 </h2>
-                                <StatusBadge
-                                  status={knowledgeBase.status}
-                                />
+                                <StatusBadge status={knowledgeBase.status} />
                                 <PermissionBadge
                                   permission={knowledgeBase.permission}
                                 />
@@ -2574,7 +2956,9 @@ function KnowledgeBasePageContent({
               <div className="flex flex-col gap-2">
                 <p className="text-base font-semibold">{t("还没有知识库")}</p>
                 <p className="text-sm leading-6 text-muted-foreground">
-                  {t("创建知识库后，你可以上传文档、配置检索方式，并让应用调用这些知识。")}
+                  {t(
+                    "创建知识库后，你可以上传文档、配置检索方式，并让应用调用这些知识。"
+                  )}
                 </p>
               </div>
               <Button type="button" onClick={() => setIsDialogOpen(true)}>

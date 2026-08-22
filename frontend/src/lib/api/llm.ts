@@ -37,6 +37,7 @@ export type RegisteredModel = {
   has_api_key: boolean
   api_key_hint: string | null
   meta: Record<string, unknown>
+  request_params?: Record<string, unknown>
   created_by_user_id: string
   created_at: string
   updated_at: string
@@ -50,6 +51,7 @@ export type RegisteredModelPayload = {
   model_name: string
   credential: Record<string, unknown>
   meta?: Record<string, unknown>
+  request_params?: Record<string, unknown>
   status?: string
 }
 

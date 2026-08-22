@@ -940,6 +940,36 @@ function renderDetailPage(
     if (url.includes("/models")) return jsonResponse(options.models ?? models)
     if (url.includes("/knowledge-bases?")) return jsonResponse(knowledgeBases)
     if (url.includes("/documents")) return jsonResponse(documents)
+    if (url.endsWith("/graph/settings")) {
+      return jsonResponse({
+        enabled: false,
+        extraction_model_id: null,
+        active_schema_id: null,
+        active_revision_id: null,
+      })
+    }
+    if (url.endsWith("/graph/status")) {
+      return jsonResponse({
+        enabled: false,
+        active_schema_id: null,
+        active_revision_id: null,
+        revision_no: null,
+        revision_status: null,
+        source_watermark: null,
+        stats: {},
+        model_usage: {},
+        pending_review_count: 0,
+        last_error: null,
+        published_at: null,
+      })
+    }
+    if (url.endsWith("/graph/schema")) return jsonResponse(null)
+    if (url.includes("/graph/entities")) {
+      return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 })
+    }
+    if (url.includes("/graph/reviews")) {
+      return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 })
+    }
     if (url.includes("/tasks")) return jsonResponse([])
     if (url.includes("/members")) return jsonResponse([])
     return jsonResponse([])
@@ -953,6 +983,7 @@ function renderDetailPage(
 describe("KnowledgeBasePage documents tab", () => {
   test("routes every knowledge base detail page", async () => {
     expect(parseKnowledgeBaseDetailTab("tasks")).toBe("tasks")
+    expect(parseKnowledgeBaseDetailTab("graph")).toBe("graph")
     expect(parseKnowledgeBaseDetailTab("unknown")).toBeNull()
     expect(knowledgeBaseDetailPath(KB_ID, "documents")).toBe(
       `/app/knowledge/${KB_ID}`
@@ -960,8 +991,17 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(knowledgeBaseDetailPath(KB_ID, "evaluation")).toBe(
       `/app/knowledge/${KB_ID}/evaluation`
     )
+    expect(knowledgeBaseDetailPath(KB_ID, "graph")).toBe(
+      `/app/knowledge/${KB_ID}/graph`
+    )
 
     renderDetailPage()
+    fireEvent.click(await screen.findByText("知识关联"))
+    expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}/graph`)
+    await waitFor(() =>
+      expect(screen.getByText("知识关联尚未启用")).toBeTruthy()
+    )
+
     fireEvent.click(await screen.findByText("任务"))
     expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}/tasks`)
     await waitFor(() => expect(screen.getByText("暂无任务")).toBeTruthy())
@@ -1993,6 +2033,37 @@ describe("KnowledgeBasePage documents tab", () => {
 // ---------------------------------------------------------------------------
 
 describe("KnowledgeBasePage tasks tab", () => {
+  test("polls running task progress without a processing document", async () => {
+    let taskFetches = 0
+    fetchHandler = (url) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse([])
+      if (url.includes("/tasks")) {
+        taskFetches += 1
+        return jsonResponse([
+          makeTask({
+            id: "graph-progress-task",
+            task_type: "graph_rebuild",
+            status: "running",
+            total_items: 175,
+            processed_items: taskFetches,
+          }),
+        ])
+      }
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    fireEvent.click(await screen.findByText("任务"))
+    await screen.findByText("1/175")
+    await waitFor(() => expect(screen.getByText("2/175")).toBeTruthy(), {
+      timeout: 4000,
+    })
+  })
+
   test("renders task rows with type, status, progress and retry", async () => {
     const tasks = [
       makeTask({
@@ -2018,11 +2089,21 @@ describe("KnowledgeBasePage tasks tab", () => {
       }),
     ]
     const retryCalls: string[] = []
+    const stopCalls: string[] = []
+    const deleteCalls: string[] = []
     fetchHandler = (url, init) => {
       const method = init?.method ?? "GET"
       if (method === "POST" && url.includes("/retry")) {
         retryCalls.push(url)
         return jsonResponse(makeTask({ id: "task-1", status: "queued" }))
+      }
+      if (method === "POST" && url.includes("/stop")) {
+        stopCalls.push(url)
+        return jsonResponse(makeTask({ id: "task-2", status: "cancelled" }))
+      }
+      if (method === "DELETE" && url.includes("/tasks/")) {
+        deleteCalls.push(url)
+        return new Response(null, { status: 204 })
       }
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?"))
@@ -2057,6 +2138,123 @@ describe("KnowledgeBasePage tasks tab", () => {
     })
     expect(retryCalls[0]).toContain("/tasks/task-1/retry")
     expect(notifications.some(([, msg]) => msg === "已重新提交任务")).toBe(true)
+
+    const enabledStop = screen
+      .getAllByRole("button", { name: "停止" })
+      .find((button) => !(button as HTMLButtonElement).disabled)
+    expect(enabledStop).toBeTruthy()
+    fireEvent.click(enabledStop!)
+    await waitFor(() => expect(stopCalls).toHaveLength(1))
+    expect(stopCalls[0]).toContain("/tasks/task-2/stop")
+    expect(notifications.some(([, msg]) => msg === "已停止任务")).toBe(true)
+
+    const enabledDelete = screen
+      .getAllByRole("button", { name: "删除任务" })
+      .find((button) => !(button as HTMLButtonElement).disabled)
+    expect(enabledDelete).toBeTruthy()
+    fireEvent.click(enabledDelete!)
+    await respondToConfirm("删除")
+    await waitFor(() => expect(deleteCalls).toHaveLength(1))
+    expect(deleteCalls[0]).toContain("/tasks/task-1")
+    expect(notifications.some(([, msg]) => msg === "已删除任务")).toBe(true)
+  })
+
+  test("bulk deletes selected terminal tasks", async () => {
+    const tasks = [
+      makeTask({
+        id: "failed-task",
+        status: "failed",
+        last_error: "failed task marker",
+      }),
+      makeTask({
+        id: "succeeded-task",
+        status: "succeeded",
+        last_error: "succeeded task marker",
+      }),
+      makeTask({
+        id: "running-task",
+        status: "running",
+        last_error: "running task marker",
+      }),
+    ]
+    let bulkDeleteBody: { task_ids: string[] } | null = null
+    fetchHandler = (url, init) => {
+      const method = init?.method ?? "GET"
+      if (method === "POST" && url.endsWith("/tasks/bulk-delete")) {
+        bulkDeleteBody = JSON.parse(String(init?.body))
+        return jsonResponse({
+          deleted_task_ids: bulkDeleteBody?.task_ids ?? [],
+        })
+      }
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse([])
+      if (url.includes("/tasks")) return jsonResponse(tasks)
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    fireEvent.click(await screen.findByText("任务"))
+    await screen.findByText("failed task marker")
+    fireEvent.click(screen.getByLabelText("选择所有可删除任务"))
+    expect(
+      (screen.getByLabelText("选择任务 running-task") as HTMLInputElement)
+        .disabled
+    ).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: /批量删除/ }))
+    await respondToConfirm("删除")
+
+    await waitFor(() =>
+      expect(bulkDeleteBody).toEqual({
+        task_ids: ["failed-task", "succeeded-task"],
+      })
+    )
+    expect(screen.queryByText("failed task marker")).toBeNull()
+    expect(screen.queryByText("succeeded task marker")).toBeNull()
+    expect(screen.getByText("running task marker")).toBeTruthy()
+    expect(
+      notifications.some(([, message]) => message === "已删除 2 个任务")
+    ).toBe(true)
+  })
+
+  test("offers retry-all and checkpoint retry for a failed graph task", async () => {
+    const retryModes: string[] = []
+    const task = makeTask({
+      id: "graph-retry-task",
+      task_type: "graph_rebuild",
+      status: "failed",
+      attempts: 1,
+      max_attempts: 3,
+      total_items: 175,
+      processed_items: 42,
+    })
+    fetchHandler = (url, init) => {
+      const method = init?.method ?? "GET"
+      if (method === "POST" && url.includes("/retry")) {
+        retryModes.push(JSON.parse(String(init?.body)).mode)
+        return jsonResponse({ ...task, status: "queued" })
+      }
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse([])
+      if (url.includes("/tasks")) return jsonResponse([task])
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    fireEvent.click(await screen.findByText("任务"))
+    const unfinished = await screen.findByRole("button", {
+      name: "重试未完成分片",
+    })
+    const all = screen.getByRole("button", { name: "重试全部分片" })
+    expect((unfinished as HTMLButtonElement).disabled).toBe(false)
+    expect((all as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(unfinished)
+    await waitFor(() => expect(retryModes).toEqual(["unfinished"]))
   })
 
   test("paginates tasks and changes the page size", async () => {
@@ -2239,8 +2437,10 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
               kind: "document",
               question: null,
               source: null,
-              sources: ["vector", "reference"],
+              sources: ["vector", "reference", "graph"],
               reference_hops: 1,
+              graph_claim_ids: ["claim-1"],
+              graph_hops: 2,
               rerank_score: 0.91,
             },
             {
@@ -2330,6 +2530,7 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     expect(within(secondCard).getByText("相似度：-")).toBeTruthy()
     expect(within(firstCard).getByText("向量检索")).toBeTruthy()
     expect(within(firstCard).getByText("文档引用")).toBeTruthy()
+    expect(within(firstCard).getByText("知识关联")).toBeTruthy()
     expect(within(firstCard).getByText("引用跳数：1")).toBeTruthy()
     expect(screen.queryByText("chunk-1", { exact: true })).toBeNull()
     expect(screen.queryByText("正文内容", { exact: true })).toBeNull()

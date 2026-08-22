@@ -172,6 +172,7 @@ Accept: application/x-ndjson
 
 {"type":"progress","event":{"id":"opaque-id","type":"knowledge","status":"succeeded","stage":"succeeded","turn":1,"count":3,"hits":[{"knowledge_base":"string","document":"string","content":"string"}]}}
 {"type":"answer_delta","delta":"string"}
+{"type":"answer_reset"}
 {"type":"complete","run":${runResponse.replaceAll("\n", "")}}`,
         },
       ]

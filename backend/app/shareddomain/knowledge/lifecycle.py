@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shareddomain.audit.services import record_audit_log
 from app.infrastructure.config import Settings
+from app.infrastructure.errors import log_error
+from app.infrastructure.logger import get_logger
 from app.entities.user import User
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.entities.knowledge import (
@@ -15,11 +17,37 @@ from app.entities.knowledge import (
 )
 from app.ports.vector_store import delete_vectors
 from app.shareddomain.knowledge.permissions import require_knowledge_base_active
+from app.shareddomain.knowledge.orchestration import enqueue_graph_sync
 from app.shareddomain.knowledge.references import (
     detach_document_references,
     resolve_references_matching_document,
 )
 from app.shareddomain.knowledge.services import knowledge_object_storage
+
+logger = get_logger(__name__)
+
+
+async def _enqueue_document_graph_sync(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    actor: User,
+    document_id: str,
+) -> None:
+    if not knowledge_base.graph_enabled:
+        return
+    try:
+        await enqueue_graph_sync(db, knowledge_base, actor, [document_id])
+    except Exception as exc:
+        # The committed document tombstone remains authoritative; maintenance
+        # reconciles a missed graph task from source versions.
+        await db.rollback()
+        log_error(
+            logger,
+            "Knowledge graph sync enqueue failed after document change.",
+            exc,
+            knowledge_base_id=knowledge_base.id,
+            document_id=document_id,
+        )
 
 
 async def delete_knowledge_document(
@@ -54,6 +82,9 @@ async def delete_knowledge_document(
         db,
         document.id,
     )
+    normalized_object_key = str(
+        (document.meta or {}).get("normalized_artifact_key") or ""
+    )
     await knowledge_base_repository.delete_document_chunks(db, document.id)
     document.status = DOCUMENT_DELETED_STATUS
     document.last_error = None
@@ -78,10 +109,18 @@ async def delete_knowledge_document(
         workspace_id=knowledge_base.workspace_id,
     )
     await db.commit()
+    await _enqueue_document_graph_sync(
+        db,
+        knowledge_base,
+        actor,
+        document.id,
+    )
     storage = knowledge_object_storage(settings)
     storage.delete(document.storage_path)
     for object_key in asset_object_keys:
         storage.delete(object_key)
+    if normalized_object_key:
+        storage.delete(normalized_object_key)
     await asyncio.to_thread(
         delete_vectors,
         settings,
@@ -131,4 +170,10 @@ async def set_knowledge_document_active(
         workspace_id=knowledge_base.workspace_id,
     )
     await db.commit()
+    await _enqueue_document_graph_sync(
+        db,
+        knowledge_base,
+        actor,
+        document.id,
+    )
     return document

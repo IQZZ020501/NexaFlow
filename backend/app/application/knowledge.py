@@ -15,6 +15,7 @@ from app.application.knowledge_retrieval import (
     query_knowledge_base,
     retrieve_knowledge_base,
 )
+from app.application.knowledge_graph import import_graph_records
 from app.application.knowledge_evaluation import (
     get_evaluation_summary,
     get_latest_evaluation_summary,
@@ -25,8 +26,8 @@ from app.infrastructure.logger import get_logger
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.schemas.knowledge import KnowledgeDocumentResponse
 from app.shareddomain.knowledge.lifecycle import (
-    delete_knowledge_document,
-    set_knowledge_document_active,
+    delete_knowledge_document as delete_knowledge_document_record,
+    set_knowledge_document_active as set_knowledge_document_active_record,
 )
 from app.shareddomain.knowledge.evaluation import (
     create_evaluation_case,
@@ -45,6 +46,9 @@ from app.shareddomain.knowledge.orchestration import (
     list_knowledge_document_chunks,
     list_knowledge_tasks,
     retry_knowledge_task,
+    stop_knowledge_task,
+    delete_knowledge_task,
+    delete_knowledge_tasks,
 )
 from app.entities.knowledge import (
     KnowledgeAsset,
@@ -106,6 +110,71 @@ async def dispatch_knowledge_task(task_id: str, settings: Settings) -> None:
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Knowledge task queue is unavailable.",
         ) from exc
+
+
+async def _dispatch_queued_document_graph_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    settings: Settings,
+) -> None:
+    if not knowledge_base.graph_enabled:
+        return
+    task = await knowledge_base_repository.get_queued_graph_sync(
+        db,
+        knowledge_base,
+    ) or await knowledge_base_repository.get_queued_graph_rebuild(
+        db,
+        knowledge_base,
+    )
+    if task is None:
+        return
+    try:
+        await enqueue_knowledge_task(task.id, settings)
+    except Exception as exc:
+        log_error(
+            logger,
+            "Knowledge graph task dispatch deferred after document change.",
+            exc,
+            task_id=task.id,
+        )
+
+
+async def delete_knowledge_document(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document: KnowledgeDocument,
+    actor: User,
+    settings: Settings,
+) -> None:
+    await delete_knowledge_document_record(
+        db,
+        knowledge_base,
+        document,
+        actor,
+        settings,
+    )
+    await _dispatch_queued_document_graph_task(db, knowledge_base, settings)
+
+
+async def set_knowledge_document_active(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document: KnowledgeDocument,
+    actor: User,
+    is_active: bool,
+    settings: Settings,
+) -> KnowledgeDocument:
+    changed = document.is_active != is_active
+    document = await set_knowledge_document_active_record(
+        db,
+        knowledge_base,
+        document,
+        actor,
+        is_active,
+    )
+    if changed:
+        await _dispatch_queued_document_graph_task(db, knowledge_base, settings)
+    return document
 
 
 async def list_knowledge_documents_with_counts(
@@ -192,6 +261,7 @@ __all__ = [
     "get_latest_evaluation_summary",
     "get_knowledge_base",
     "get_knowledge_document",
+    "import_graph_records",
     "knowledge_document_path",
     "list_knowledge_bases",
     "list_evaluation_cases",
@@ -206,6 +276,9 @@ __all__ = [
     "require_can_manage_permissions",
     "require_knowledge_base_permission",
     "retry_knowledge_task",
+    "stop_knowledge_task",
+    "delete_knowledge_task",
+    "delete_knowledge_tasks",
     "revoke_resource_permission",
     "set_knowledge_document_active",
     "test_knowledge_base_models",

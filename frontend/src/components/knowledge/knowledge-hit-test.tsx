@@ -19,6 +19,7 @@ import { inspectKnowledgeBase } from "@/lib/api/knowledge"
 import type {
   KnowledgeQueryInspectResult,
   KnowledgeQueryHit,
+  KnowledgeRetrievalSource,
   KnowledgeRetrievalTrace,
   KnowledgeSearchMode,
 } from "@/lib/api/knowledge"
@@ -81,11 +82,12 @@ function hitSummary(hit: KnowledgeQueryHit) {
  */
 function sourceLabel(
   t: TFunction,
-  source: "vector" | "keywords" | "reference"
+  source: KnowledgeRetrievalSource
 ) {
   if (source === "vector") return t("向量检索")
   if (source === "keywords") return t("关键词检索")
-  return t("文档引用")
+  if (source === "reference") return t("文档引用")
+  return t("知识关联")
 }
 
 /**

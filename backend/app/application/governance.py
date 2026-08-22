@@ -258,10 +258,19 @@ async def get_admin_health(
 
     pending_tasks = 0
     failed_logs_24h = 0
+    pending_graph_tasks = 0
+    failed_graph_tasks_24h = 0
+    pending_graph_profile_repairs = 0
     if components["database"].status == "ok":
         try:
             async with asyncio.timeout(HEALTH_PROBE_TIMEOUT_SECONDS):
-                pending_tasks, failed_logs_24h = (
+                (
+                    pending_tasks,
+                    failed_logs_24h,
+                    pending_graph_tasks,
+                    failed_graph_tasks_24h,
+                    pending_graph_profile_repairs,
+                ) = (
                     await governance_repository.health_counts(
                         db,
                         checked_at - timedelta(days=1),
@@ -284,6 +293,9 @@ async def get_admin_health(
         components=components,
         pending_tasks=pending_tasks,
         failed_logs_24h=failed_logs_24h,
+        pending_graph_tasks=pending_graph_tasks,
+        failed_graph_tasks_24h=failed_graph_tasks_24h,
+        pending_graph_profile_repairs=pending_graph_profile_repairs,
         checked_at=checked_at,
     )
 

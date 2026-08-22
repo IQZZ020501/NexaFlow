@@ -46,6 +46,7 @@ class RegisteredModelResponse(BaseModel):
     has_api_key: bool
     api_key_hint: str | None
     meta: dict[str, Any]
+    request_params: dict[str, Any]
     created_by_user_id: str
     created_at: datetime
     updated_at: datetime
@@ -59,6 +60,7 @@ class RegisteredModelCreateRequest(BaseModel):
     model_name: str = Field(min_length=1, max_length=160)
     credential: dict[str, Any] = Field(default_factory=dict)
     meta: dict[str, Any] = Field(default_factory=dict)
+    request_params: dict[str, Any] = Field(default_factory=dict)
 
 
 class RegisteredModelUpdateRequest(BaseModel):
@@ -69,4 +71,5 @@ class RegisteredModelUpdateRequest(BaseModel):
     model_name: str | None = Field(default=None, min_length=1, max_length=160)
     credential: dict[str, Any] | None = None
     meta: dict[str, Any] | None = None
+    request_params: dict[str, Any] | None = None
     status: str | None = Field(default=None, min_length=1, max_length=20)

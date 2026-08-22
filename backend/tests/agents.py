@@ -55,6 +55,12 @@ from app.schemas.knowledge import (
     KnowledgeQueryInspectResponse,
     KnowledgeRetrievalTraceResponse,
 )
+from app.schemas.knowledge_graph import (
+    KnowledgeGraphEntityResponse,
+    KnowledgeGraphPathResponse,
+    KnowledgeGraphPathStepResponse,
+    KnowledgeGraphQueryResultResponse,
+)
 from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ToolInvocation
@@ -618,6 +624,88 @@ class HangingStreamingProvider:
         yield AIMessageChunk(content="")
 
 
+class ActiveStreamingProvider:
+    def bind_tools(self, *_args, **_kwargs):
+        return self
+
+    async def astream(self, _messages: list[BaseMessage]):
+        for content in ("Still", " working", "."):
+            await asyncio.sleep(0.05)
+            yield AIMessageChunk(content=content)
+        yield AIMessageChunk(
+            content="",
+            response_metadata={"finish_reason": "stop"},
+        )
+
+
+class GatedStreamingProvider:
+    def __init__(self, chunk_emitted: asyncio.Event, finish: asyncio.Event) -> None:
+        self.chunk_emitted = chunk_emitted
+        self.finish = finish
+
+    def bind_tools(self, *_args, **_kwargs):
+        return self
+
+    async def astream(self, _messages: list[BaseMessage]):
+        yield AIMessageChunk(content="Live")
+        self.chunk_emitted.set()
+        await self.finish.wait()
+        yield AIMessageChunk(
+            content=" answer.",
+            response_metadata={"finish_reason": "stop"},
+        )
+
+
+async def assert_answer_delta_is_emitted_before_stream_completion() -> None:
+    chunk_emitted = asyncio.Event()
+    finish = asyncio.Event()
+    answer_emitted = asyncio.Event()
+    deltas: list[str] = []
+
+    async def emit(event: dict) -> None:
+        if event.get("type") == "answer_delta":
+            deltas.append(str(event.get("delta") or ""))
+            answer_emitted.set()
+
+    task = asyncio.create_task(
+        run_agent(
+            GatedStreamingProvider(chunk_emitted, finish),  # type: ignore[arg-type]
+            [{"role": "user", "content": "Run it"}],
+            [],
+            on_event=emit,
+        )
+    )
+    await chunk_emitted.wait()
+    try:
+        await asyncio.wait_for(answer_emitted.wait(), timeout=0.1)
+    finally:
+        finish.set()
+        result = await task
+    assert result.content == "Live answer."
+    assert deltas == ["Live", " answer."]
+
+
+async def assert_active_model_stream_does_not_time_out() -> None:
+    async def emit(_event: dict) -> None:
+        return None
+
+    original_timeout = agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS
+    agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS = 0.12
+    try:
+        result = await asyncio.wait_for(
+            run_agent(
+                ActiveStreamingProvider(),  # type: ignore[arg-type]
+                [{"role": "user", "content": "Run it"}],
+                [],
+                on_event=emit,
+            ),
+            timeout=5,
+        )
+        assert result.content == "Still working."
+    finally:
+        agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS = original_timeout
+
+
 async def assert_hanging_model_stream_times_out() -> None:
     async def emit(_event: dict) -> None:
         return None
@@ -1034,7 +1122,7 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
         def __call__(self):
             return FakeSession()
 
-    retrieve_calls: list[str] = []
+    retrieve_calls: list[tuple[str, str, str | None, str | None, int]] = []
 
     def hit(knowledge_base: KnowledgeBase) -> KnowledgeQueryHitResponse:
         return KnowledgeQueryHitResponse(
@@ -1046,13 +1134,34 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             distance=0.1,
             sources=["vector", "reference"],
             reference_hops=1,
+            graph_claim_ids=[f"claim-{knowledge_base.id}"],
+            graph_hops=2,
             rerank_score=1.0 if knowledge_base.id == "base-applied" else None,
         )
 
     async def fake_retrieve(_db, knowledge_base, payload, _settings):
-        retrieve_calls.append(knowledge_base.id)
+        assert payload.relation_filters == ["references"]
+        retrieve_calls.append(
+            (
+                knowledge_base.id,
+                payload.graph_mode,
+                payload.source_entity,
+                payload.target_entity,
+                payload.max_hops,
+            )
+        )
         rerank_status = (
             "applied" if knowledge_base.id == "base-applied" else "fallback"
+        )
+        source = KnowledgeGraphEntityResponse(
+            id="entity-source",
+            entity_type="Document",
+            canonical_name="Release policy",
+        )
+        target = KnowledgeGraphEntityResponse(
+            id="entity-target",
+            entity_type="Document",
+            canonical_name="Rollback guide",
         )
         return KnowledgeQueryInspectResponse(
             hits=[hit(knowledge_base)],
@@ -1075,6 +1184,37 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
                 duration_ms=1,
                 stage_duration_ms={"rerank": 0.5},
             ),
+            graph=(
+                KnowledgeGraphQueryResultResponse(
+                    revision_id="revision-applied",
+                    operation="path",
+                    resolved_entities=[source, target],
+                    nodes=[source, target],
+                    claims=[],
+                    paths=[
+                        KnowledgeGraphPathResponse(
+                            nodes=[source, target],
+                            steps=[
+                                KnowledgeGraphPathStepResponse(
+                                    claim_id="claim-base-applied",
+                                    predicate="references",
+                                    source_entity_id=source.id,
+                                    target_entity_id=target.id,
+                                    semantic_direction="forward",
+                                    quality_score=1,
+                                    support_count=1,
+                                    evidence_ids=["evidence-1"],
+                                )
+                            ],
+                        )
+                    ],
+                    evidence=[],
+                    visited_nodes=2,
+                    truncated=False,
+                )
+                if knowledge_base.id == "base-applied"
+                else None
+            ),
         )
 
     async def fake_accessible(*_args, **_kwargs):
@@ -1093,13 +1233,38 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             SimpleNamespace(id="user-1"),  # type: ignore[arg-type]
             None,
             test_settings(),
-        ).ainvoke({"query": "release", "limit": 2})
+        ).ainvoke(
+            {
+                "query": "release",
+                "limit": 2,
+                "graph_mode": "path",
+                "source_entity": "Release policy",
+                "target_entity": "Rollback guide",
+                "max_hops": 4,
+                "relation_filters": ["references"],
+            }
+        )
     finally:
         agent_tools.get_session_factory = original_factory
         agent_tools.accessible_agent_knowledge_bases = original_accessible
         agent_tools.retrieve_knowledge_base = original_retrieve
 
-    assert retrieve_calls == ["base-applied", "base-fallback"]
+    assert retrieve_calls == [
+        (
+            "base-applied",
+            "path",
+            "Release policy",
+            "Rollback guide",
+            4,
+        ),
+        (
+            "base-fallback",
+            "path",
+            "Release policy",
+            "Rollback guide",
+            4,
+        ),
+    ]
     assert [item["chunk_id"] for item in result.output["hits"]] == [
         "chunk-base-applied",
         "chunk-base-fallback",
@@ -1111,6 +1276,8 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             item["rerank_status"],
             item["sources"],
             item["reference_hops"],
+            item["graph_claim_ids"],
+            item["graph_hops"],
         )
         for item in result.output["hits"]
     ] == [
@@ -1120,6 +1287,8 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             "applied",
             ["vector", "reference"],
             1,
+            ["claim-base-applied"],
+            2,
         ),
         (
             "chunk-base-fallback",
@@ -1127,7 +1296,13 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             "fallback",
             ["vector", "reference"],
             1,
+            ["claim-base-fallback"],
+            2,
         ),
+    ]
+    assert result.output["graph"]["revision_id"] == "revision-applied"
+    assert result.output["graph"]["paths"][0]["steps"][0]["evidence_ids"] == [
+        "evidence-1"
     ]
     assert result.output["retrieval_stats"] == [
         {
@@ -1151,6 +1326,49 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             "status": "available",
         },
     ]
+
+    path = result.output["graph"]["paths"][0]
+    oversized_graph = {
+        **result.output["graph"],
+        "paths": [
+            {
+                **path,
+                "nodes": [*(path["nodes"] * 5), {"profile": "x" * 2_000}],
+                "steps": path["steps"] * 9,
+            }
+        ]
+        * 4,
+    }
+    bounded = agent_tools.bounded_knowledge_output(
+        {"graph": oversized_graph, "hits": result.output["hits"]},
+        max_chars=100_000,
+    )
+    assert len(bounded["graph"]["paths"]) == 3
+    assert len(bounded["graph"]["paths"][0]["steps"]) == 8
+    assert len(bounded["graph"]["paths"][0]["nodes"]) == 9
+    atomic_hit = {"chunk_id": "atomic", "content": "complete evidence"}
+    expected = {
+        "graph": {
+            "revision_id": "revision-applied",
+            "operation": "path",
+            "paths": [],
+            "truncated": True,
+        },
+        "hits": [atomic_hit],
+        "context_truncated": True,
+    }
+    bounded = agent_tools.bounded_knowledge_output(
+        {
+            "graph": {
+                **expected["graph"],
+                "truncated": False,
+                "paths": [{"nodes": [{"profile": "x" * 2_000}], "steps": []}],
+            },
+            "hits": [atomic_hit],
+        },
+        max_chars=len(json.dumps(expected, ensure_ascii=False)),
+    )
+    assert bounded == expected
 
 
 def assert_tool_routing_context_is_explicit() -> None:
@@ -1314,6 +1532,9 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
     assert [event["type"] for event in emitted] == [
         "process",
         "process",
+        "answer_delta",
+        "answer_reset",
+        "process",
         "process",
         "process",
         "process",
@@ -1323,18 +1544,20 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
         "answer_delta",
     ]
     assert emitted[0]["event"]["type"] == "thought"
-    assert emitted[2]["event"]["type"] == "tool"
-    assert emitted[5] == {
+    assert emitted[2]["delta"] == "I will search again. "
+    assert emitted[3] == {"type": "answer_reset"}
+    assert emitted[5]["event"]["type"] == "tool"
+    assert emitted[8] == {
         "type": "reasoning_delta",
         "turn": 2,
         "delta": "Inspect ",
     }
-    assert len(emitted[6]["delta"]) == MAX_REASONING_CHARS - len("Inspect ")
-    assert len(emitted[7]["event"]["reasoning"]) == MAX_REASONING_CHARS
+    assert len(emitted[9]["delta"]) == MAX_REASONING_CHARS - len("Inspect ")
+    assert len(emitted[10]["event"]["reasoning"]) == MAX_REASONING_CHARS
     assert emitted[-1]["delta"] == "Streamed answer."
 
 
-async def assert_streaming_tool_preamble_is_not_emitted_on_failure() -> None:
+async def assert_streaming_tool_preamble_is_reset_on_failure() -> None:
     emitted: list[dict] = []
 
     async def emit(event: dict) -> None:
@@ -1372,7 +1595,18 @@ async def assert_streaming_tool_preamble_is_not_emitted_on_failure() -> None:
         assert str(exc) == "Agent returned an empty response."
     else:
         raise AssertionError("Empty final response was accepted.")
-    assert not [event for event in emitted if event["type"] == "answer_delta"]
+    visible_answer = ""
+    for event in emitted:
+        if event["type"] == "answer_delta":
+            visible_answer += event["delta"]
+        elif event["type"] == "answer_reset":
+            visible_answer = ""
+    assert visible_answer == ""
+    assert [
+        event["type"]
+        for event in emitted
+        if event["type"] in {"answer_delta", "answer_reset"}
+    ] == ["answer_delta", "answer_reset"]
 
 
 async def assert_parallel_policy_is_enforced() -> None:
@@ -3186,6 +3420,8 @@ def main() -> None:
     """
     Run the comprehensive agent, workflow, knowledge, MCP, streaming, persistence, authorization, and public-access integration assertions.
     """
+    asyncio.run(assert_answer_delta_is_emitted_before_stream_completion())
+    asyncio.run(assert_active_model_stream_does_not_time_out())
     asyncio.run(assert_hanging_model_stream_times_out())
     asyncio.run(assert_required_knowledge_timeout_is_unavailable())
     asyncio.run(assert_truncated_tool_call_is_not_executed())
@@ -3200,7 +3436,7 @@ def main() -> None:
     assert_tool_routing_context_is_explicit()
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
     asyncio.run(assert_streaming_run_emits_process_and_answer())
-    asyncio.run(assert_streaming_tool_preamble_is_not_emitted_on_failure())
+    asyncio.run(assert_streaming_tool_preamble_is_reset_on_failure())
     asyncio.run(assert_parallel_policy_is_enforced())
     asyncio.run(assert_runtime_budgets_are_enforced())
     asyncio.run(assert_retrieval_progress_uses_evidence_ids())

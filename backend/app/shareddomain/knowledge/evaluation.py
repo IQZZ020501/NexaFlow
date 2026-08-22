@@ -20,16 +20,129 @@ from app.schemas.knowledge import (
     KnowledgeEvaluationCaseCreateRequest,
     KnowledgeEvaluationCaseResponse,
     KnowledgeEvaluationRunRequest,
+    KnowledgeGraphEvaluationExpectation,
+    KnowledgeGraphEvaluationMetrics,
     KnowledgeTaskResponse,
 )
+from app.schemas.knowledge_graph import KnowledgeGraphQueryResultResponse
 from app.shareddomain.audit.services import record_audit_log
 from app.shareddomain.knowledge.permissions import require_knowledge_base_active
 from app.shareddomain.knowledge.orchestration import (
     create_knowledge_task,
     task_to_response,
 )
+from app.shareddomain.knowledge_graph.schema import normalize_graph_name
 
 EVALUATION_SIMILARITY_SEMANTICS = "normalized_cosine"
+
+
+def _normalized_graph_values(values: list[str]) -> set[str]:
+    return {
+        normalized
+        for value in values
+        if (normalized := normalize_graph_name(value))
+    }
+
+
+def _set_precision_recall(
+    returned: set[str],
+    expected: set[str],
+) -> tuple[float, float]:
+    matched = len(returned & expected)
+    return (
+        matched / len(returned) if returned else 0.0,
+        matched / len(expected) if expected else 0.0,
+    )
+
+
+def graph_evaluation_metrics(
+    expectation: KnowledgeGraphEvaluationExpectation | None,
+    graph: KnowledgeGraphQueryResultResponse | None,
+) -> KnowledgeGraphEvaluationMetrics | None:
+    if expectation is None or not any(
+        (
+            expectation.entity_names,
+            expectation.predicates,
+            expectation.path_entity_names,
+            expectation.path_predicates,
+        )
+    ):
+        return None
+
+    expected_entities = _normalized_graph_values(
+        [*expectation.entity_names, *expectation.path_entity_names]
+    )
+    expected_predicates = _normalized_graph_values(
+        [*expectation.predicates, *expectation.path_predicates]
+    )
+    returned_entities = _normalized_graph_values(
+        [item.canonical_name for item in graph.nodes]
+    ) if graph is not None else set()
+    returned_predicates = _normalized_graph_values(
+        [item.predicate for item in graph.claims]
+    ) if graph is not None else set()
+    entity_precision, entity_recall = _set_precision_recall(
+        returned_entities,
+        expected_entities,
+    )
+    claim_precision, claim_recall = _set_precision_recall(
+        returned_predicates,
+        expected_predicates,
+    )
+
+    expected_path_entities = [
+        normalize_graph_name(item) for item in expectation.path_entity_names
+    ]
+    expected_path_predicates = [
+        normalize_graph_name(item) for item in expectation.path_predicates
+    ]
+    path_exact_match = 0
+    path_edge_accuracy = 0.0
+    if (
+        graph is not None
+        and len(expected_path_entities) >= 2
+        and len(expected_path_predicates) == len(expected_path_entities) - 1
+    ):
+        for path in graph.paths:
+            path_entities = [
+                normalize_graph_name(item.canonical_name) for item in path.nodes
+            ]
+            path_predicates = [
+                normalize_graph_name(item.predicate) for item in path.steps
+            ]
+            if (
+                path_entities == expected_path_entities
+                and path_predicates == expected_path_predicates
+            ):
+                path_exact_match = 1
+            matched_edges = sum(
+                index < len(path.steps)
+                and index + 1 < len(path.nodes)
+                and path_entities[index] == expected_path_entities[index]
+                and path_predicates[index] == expected_path_predicates[index]
+                and path_entities[index + 1] == expected_path_entities[index + 1]
+                for index in range(len(expected_path_predicates))
+            )
+            path_edge_accuracy = max(
+                path_edge_accuracy,
+                matched_edges / len(expected_path_predicates),
+            )
+
+    claims = graph.claims if graph is not None else []
+    citation_coverage = (
+        sum(bool(item.evidence_ids) for item in claims) / len(claims)
+        if claims
+        else 0.0
+    )
+    return KnowledgeGraphEvaluationMetrics(
+        entity_precision=entity_precision,
+        entity_recall=entity_recall,
+        claim_precision=claim_precision,
+        claim_recall=claim_recall,
+        path_exact_match=path_exact_match,
+        path_edge_accuracy=path_edge_accuracy,
+        citation_coverage=citation_coverage,
+    )
 
 
 def _case_responses(
@@ -48,6 +161,13 @@ def _case_responses(
             knowledge_base_id=case.knowledge_base_id,
             question=case.question,
             expected_document_ids=expected_by_case.get(case.id, []),
+            graph_expectation=(
+                KnowledgeGraphEvaluationExpectation.model_validate(
+                    case.graph_expectation
+                )
+                if case.graph_expectation
+                else None
+            ),
             created_by_user_id=case.created_by_user_id,
             created_at=case.created_at,
             updated_at=case.updated_at,
@@ -111,6 +231,11 @@ async def create_evaluation_case(
         knowledge_base_id=knowledge_base.id,
         question=question,
         answer_points=[],
+        graph_expectation=(
+            payload.graph_expectation.model_dump(mode="json")
+            if payload.graph_expectation is not None
+            else {}
+        ),
         created_by_user_id=actor.id,
     )
     expectations = [
@@ -133,6 +258,7 @@ async def create_evaluation_case(
         {
             "knowledge_base_id": knowledge_base.id,
             "expected_document_count": len(document_ids),
+            "has_graph_expectation": payload.graph_expectation is not None,
         },
         workspace_id=knowledge_base.workspace_id,
     )
@@ -229,6 +355,8 @@ async def enqueue_evaluation_run(
             "similarity": payload.similarity,
             "similarity_semantics": EVALUATION_SIMILARITY_SEMANTICS,
             "include_references": payload.include_references,
+            "graph_mode": payload.graph_mode,
+            "max_hops": payload.max_hops,
         },
     )
 

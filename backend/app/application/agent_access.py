@@ -358,7 +358,7 @@ def external_progress_events(
                 tool_kind=tool_kind,
                 server_name=str(event.get("server_name") or ""),
                 input=bounded_input,
-                output=event.get("output"),
+                output=None if progress_type == "knowledge" else event.get("output"),
                 input_truncated=input_truncated,
                 hits=hits,
             )
@@ -415,6 +415,10 @@ async def sanitize_external_agent_stream(
                 "type": "answer_delta",
                 "delta": str(event.get("delta") or ""),
             }
+            _copy_external_stream_metadata(event, sanitized)
+            yield sanitized
+        elif event_type == "answer_reset":
+            sanitized = {"type": "answer_reset"}
             _copy_external_stream_metadata(event, sanitized)
             yield sanitized
         elif event_type == "reasoning_delta":

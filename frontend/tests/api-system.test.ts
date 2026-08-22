@@ -430,6 +430,9 @@ describe("audit and system logs", () => {
       components: {},
       pending_tasks: 0,
       failed_logs_24h: 0,
+      pending_graph_tasks: 0,
+      failed_graph_tasks_24h: 0,
+      pending_graph_profile_repairs: 0,
       checked_at: "2026-08-19T00:00:00Z",
     }
     install(() => jsonResponse(health))

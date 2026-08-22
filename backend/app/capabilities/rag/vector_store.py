@@ -32,8 +32,39 @@ class VectorHit:
     distance: float | None
 
 
+@dataclass(frozen=True)
+class GraphProfileVector:
+    entity_id: str
+    profile_hash: str
+    content: str
+
+
+@dataclass(frozen=True)
+class GraphProfileVectorHit:
+    entity_id: str
+    profile_hash: str
+    distance: float | None
+
+
 def vector_collection_name(knowledge_base_id: str) -> str:
     return f"kb_{knowledge_base_id.replace('-', '')}"
+
+
+def graph_profile_collection_name(knowledge_base_id: str) -> str:
+    return f"{vector_collection_name(knowledge_base_id)}_graph"
+
+
+def validate_embedding_vectors(
+    vectors: list[list[float]],
+    expected_count: int,
+) -> None:
+    vector_size = len(vectors[0]) if vectors else 0
+    if (
+        len(vectors) != expected_count
+        or vector_size == 0
+        or any(len(vector) != vector_size for vector in vectors)
+    ):
+        raise ValueError("Embedding provider returned invalid vectors.")
 
 
 @cache
@@ -189,12 +220,10 @@ def upsert_vectors(
         return
     embeddings = build_registered_embeddings(embedding_model, settings)
     vectors = embeddings.embed_documents([chunk.content for chunk in chunks])
-    vector_size = len(vectors[0]) if vectors else 0
-    if (
-        len(vectors) != len(chunks)
-        or vector_size == 0
-        or any(len(vector) != vector_size for vector in vectors)
-    ):
+    try:
+        validate_embedding_vectors(vectors, len(chunks))
+    except ValueError as exc:
+        vector_size = len(vectors[0]) if vectors else 0
         log_error(
             logger,
             "Embedding provider returned invalid document vectors.",
@@ -204,11 +233,11 @@ def upsert_vectors(
             received_count=len(vectors),
             vector_size=vector_size,
         )
-        raise ValueError("Embedding provider returned invalid document vectors.")
+        raise ValueError("Embedding provider returned invalid document vectors.") from exc
 
     client = _client(settings)
     collection_name = vector_collection_name(knowledge_base_id)
-    _ensure_collection(client, collection_name, vector_size)
+    _ensure_collection(client, collection_name, len(vectors[0]))
     started = time.monotonic()
     try:
         client.upsert(
@@ -321,6 +350,114 @@ def query_vectors(
     ]
 
 
+def upsert_graph_profile_vectors(
+    settings: Settings,
+    knowledge_base_id: str,
+    workspace_id: str,
+    embedding_model: RegisteredModel,
+    profiles: list[GraphProfileVector],
+) -> None:
+    if not profiles:
+        return
+    vectors = build_registered_embeddings(
+        embedding_model,
+        settings,
+    ).embed_documents([item.content for item in profiles])
+    validate_embedding_vectors(vectors, len(profiles))
+    client = _client(settings)
+    collection_name = graph_profile_collection_name(knowledge_base_id)
+    _ensure_collection(client, collection_name, len(vectors[0]))
+    client.upsert(
+        collection_name,
+        points=[
+            models.PointStruct(
+                id=item.entity_id,
+                vector=vector,
+                payload={
+                    "entity_id": item.entity_id,
+                    "profile_hash": item.profile_hash,
+                    "workspace_id": workspace_id,
+                    "knowledge_base_id": knowledge_base_id,
+                },
+            )
+            for item, vector in zip(profiles, vectors, strict=True)
+        ],
+        wait=True,
+    )
+
+
+def query_graph_profile_vectors(
+    settings: Settings,
+    knowledge_base_id: str,
+    workspace_id: str,
+    embedding_model: RegisteredModel,
+    query: str,
+    limit: int,
+) -> list[GraphProfileVectorHit]:
+    if limit <= 0:
+        return []
+    client = _client(settings)
+    collection_name = graph_profile_collection_name(knowledge_base_id)
+    if not client.collection_exists(collection_name):
+        return []
+    query_embedding = build_registered_embeddings(
+        embedding_model,
+        settings,
+    ).embed_query(query)
+    points = client.query_points(
+        collection_name,
+        query=models.NearestQuery(nearest=query_embedding),
+        limit=limit,
+        with_payload=["entity_id", "profile_hash"],
+        query_filter=models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="workspace_id",
+                    match=models.MatchValue(value=workspace_id),
+                ),
+                models.FieldCondition(
+                    key="knowledge_base_id",
+                    match=models.MatchValue(value=knowledge_base_id),
+                ),
+            ]
+        ),
+    ).points
+    return [
+        GraphProfileVectorHit(
+            entity_id=entity_id,
+            profile_hash=profile_hash,
+            distance=1.0 - point.score,
+        )
+        for point in points
+        if isinstance(point.payload, dict)
+        and isinstance(entity_id := point.payload.get("entity_id"), str)
+        and isinstance(profile_hash := point.payload.get("profile_hash"), str)
+    ]
+
+
+def delete_graph_profile_vectors(
+    settings: Settings,
+    knowledge_base_id: str,
+    entity_ids: list[str],
+) -> None:
+    if not entity_ids:
+        return
+    client = _client(settings)
+    collection_name = graph_profile_collection_name(knowledge_base_id)
+    if client.collection_exists(collection_name):
+        client.delete(collection_name, points_selector=entity_ids, wait=True)
+
+
+def delete_graph_profile_collection(
+    settings: Settings,
+    knowledge_base_id: str,
+) -> None:
+    client = _client(settings)
+    collection_name = graph_profile_collection_name(knowledge_base_id)
+    if client.collection_exists(collection_name):
+        client.delete_collection(collection_name)
+
+
 class QdrantVectorStore:
     """Adapter implementing the ``app.ports.vector_store.VectorStore`` contract."""
 
@@ -373,3 +510,49 @@ class QdrantVectorStore:
             score_threshold,
             document_ids,
         )
+
+    def upsert_graph_profile_vectors(
+        self,
+        knowledge_base_id: str,
+        workspace_id: str,
+        embedding_model: RegisteredModel,
+        profiles: list[GraphProfileVector],
+    ) -> None:
+        upsert_graph_profile_vectors(
+            self._settings,
+            knowledge_base_id,
+            workspace_id,
+            embedding_model,
+            profiles,
+        )
+
+    def query_graph_profile_vectors(
+        self,
+        knowledge_base_id: str,
+        workspace_id: str,
+        embedding_model: RegisteredModel,
+        query: str,
+        limit: int,
+    ) -> list[GraphProfileVectorHit]:
+        return query_graph_profile_vectors(
+            self._settings,
+            knowledge_base_id,
+            workspace_id,
+            embedding_model,
+            query,
+            limit,
+        )
+
+    def delete_graph_profile_vectors(
+        self,
+        knowledge_base_id: str,
+        entity_ids: list[str],
+    ) -> None:
+        delete_graph_profile_vectors(
+            self._settings,
+            knowledge_base_id,
+            entity_ids,
+        )
+
+    def delete_graph_profile_collection(self, knowledge_base_id: str) -> None:
+        delete_graph_profile_collection(self._settings, knowledge_base_id)

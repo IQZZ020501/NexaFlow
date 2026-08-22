@@ -112,6 +112,9 @@ export type AdminHealth = {
   >
   pending_tasks: number
   failed_logs_24h: number
+  pending_graph_tasks: number
+  failed_graph_tasks_24h: number
+  pending_graph_profile_repairs: number
   checked_at: string
 }
 

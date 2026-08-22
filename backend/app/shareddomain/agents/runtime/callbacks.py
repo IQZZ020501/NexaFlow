@@ -62,6 +62,9 @@ class NexaFlowCallback:
     async def answer_delta(self, delta: str) -> None:
         await self._event_bus.publish({"type": "answer_delta", "delta": delta})
 
+    async def answer_reset(self) -> None:
+        await self._event_bus.publish({"type": "answer_reset"})
+
     async def reasoning_delta(self, turn: int, delta: str) -> None:
         await self._event_bus.publish(
             {"type": "reasoning_delta", "turn": turn, "delta": delta}

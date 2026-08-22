@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -32,6 +33,30 @@ class KnowledgeBase(Base):
             "status IN ('active', 'archived')",
             name="ck_knowledge_bases_status",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "id", "active_graph_schema_id"],
+            [
+                "knowledge_graph_schemas.workspace_id",
+                "knowledge_graph_schemas.knowledge_base_id",
+                "knowledge_graph_schemas.id",
+            ],
+            name="fk_knowledge_active_graph_schema",
+            use_alter=True,
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "id", "active_graph_revision_id"],
+            [
+                "knowledge_graph_revisions.workspace_id",
+                "knowledge_graph_revisions.knowledge_base_id",
+                "knowledge_graph_revisions.id",
+            ],
+            name="fk_knowledge_active_graph_revision",
+            use_alter=True,
+            deferrable=True,
+            initially="DEFERRED",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -48,6 +73,21 @@ class KnowledgeBase(Base):
         ForeignKey("model.id"),
         nullable=True,
         index=True,
+    )
+    graph_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=false(),
+    )
+    active_graph_schema_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    active_graph_revision_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    graph_extraction_model_id: Mapped[str | None] = mapped_column(
+        ForeignKey("model.id"), nullable=True, index=True
     )
     created_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id"),
@@ -274,7 +314,7 @@ class KnowledgeDocumentChunk(Base):
             name="ck_knowledge_document_chunks_status",
         ),
         CheckConstraint(
-            "kind IN ('document', 'qa')",
+            "kind IN ('document', 'qa', 'graph_record')",
             name="ck_knowledge_document_chunks_kind",
         ),
         CheckConstraint(
@@ -458,11 +498,13 @@ class KnowledgeTask(Base):
             name="fk_knowledge_tasks_knowledge_workspace",
         ),
         CheckConstraint(
-            "task_type IN ('parse', 'index', 'rebuild_index', 'evaluate')",
+            "task_type IN ('parse', 'index', 'rebuild_index', 'evaluate', "
+            "'graph_sync', 'graph_rebuild')",
             name="ck_knowledge_tasks_task_type",
         ),
         CheckConstraint(
-            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            "status IN ('queued', 'running', 'succeeded', 'failed', "
+            "'cancelling', 'cancelled')",
             name="ck_knowledge_tasks_status",
         ),
         UniqueConstraint(
@@ -525,6 +567,12 @@ class KnowledgeEvaluationCase(Base):
         JSON,
         nullable=False,
         server_default="[]",
+    )
+    graph_expectation: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default="{}",
     )
     created_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id"), nullable=False, index=True
@@ -629,6 +677,12 @@ class KnowledgeEvaluationResult(Base):
     ndcg_at_k: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     trace: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    graph_metrics: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default="{}",
+    )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -660,3 +714,8 @@ class KnowledgeStorageCleanup(Base):
         default=utc_now,
         onupdate=utc_now,
     )
+
+
+# The knowledge table owns active graph foreign keys, so its metadata import must
+# also register the referenced graph tables for application and test startup.
+from app.shareddomain.knowledge_graph import models as _knowledge_graph_models  # noqa: E402,F401

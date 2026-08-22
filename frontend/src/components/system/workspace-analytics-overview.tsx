@@ -201,7 +201,8 @@ export function AnalyticsKeyMetricsPanel({
               : formatDecimal(derived.averageTokens, locale)
           }
           detail={
-            data.summary.tokens.unreported_runs
+            data.summary.tokens.unreported_runs ||
+            data.summary.tokens.unreported_graph_builds
               ? t("存在用量缺报")
               : undefined
           }
@@ -271,12 +272,32 @@ export function WorkspaceAnalyticsOverview({
                 })}
               </p>
               <p>
+                {t("应用运行 {value}", {
+                  value: formatNumber(
+                    data.summary.tokens.application_total,
+                    locale
+                  ),
+                })}
+              </p>
+              <p>
+                {t("知识整理 {value}", {
+                  value: formatNumber(data.summary.tokens.graph_total, locale),
+                })}
+              </p>
+              <p>
                 <Comparison value={data.summary.tokens.change_percent} />
               </p>
               {data.summary.tokens.unreported_runs ? (
                 <p className="text-amber-600 dark:text-amber-400">
                   {t("{value} 次运行的用量未完整上报", {
                     value: data.summary.tokens.unreported_runs,
+                  })}
+                </p>
+              ) : null}
+              {data.summary.tokens.unreported_graph_builds ? (
+                <p className="text-amber-600 dark:text-amber-400">
+                  {t("{value} 次知识整理使用估算 Token", {
+                    value: data.summary.tokens.unreported_graph_builds,
                   })}
                 </p>
               ) : null}

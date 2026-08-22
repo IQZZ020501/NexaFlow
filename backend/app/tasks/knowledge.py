@@ -3,10 +3,14 @@ import logging
 import os
 
 from app.application.knowledge_evaluation import run_evaluation_task
+from app.application.knowledge_graph_build import run_graph_build_task
+from app.application.knowledge_graph_maintenance import reconcile_knowledge_graphs
+from app.entities.knowledge import TASK_GRAPH_REBUILD, TASK_GRAPH_SYNC
 from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
+from app.infrastructure.errors import classify_error, log_error
 from app.infrastructure.logger import get_logger, log_event
+from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.infrastructure.session import get_session_factory
 from app.shareddomain.knowledge.task_runner import (
     TASK_LEASE_RENEW_SECONDS,
@@ -26,6 +30,9 @@ from app.shareddomain.workflows.uploads import (
 from app.tasks import configure_task_worker
 
 logger = get_logger(__name__)
+
+GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS = 28_800
+GRAPH_TASK_TIME_LIMIT_SECONDS = 29_100
 
 @celery_app.task(
     bind=True,
@@ -52,10 +59,18 @@ def run_knowledge_task_job(self, task_id: str) -> None:
                 settings,
                 enqueue_knowledge_task,
                 evaluation_runner=run_evaluation_task,
+                graph_runner=run_graph_build_task,
             )
         )
     except Exception as exc:
-        log_error(logger, "Knowledge task job crashed.", exc, task_id=task_id)
+        log_error(
+            logger,
+            "Knowledge task job crashed.",
+            None,
+            source=classify_error(exc),
+            task_id=task_id,
+            error_type=type(exc).__name__,
+        )
         raise
     if outcome == TASK_RUN_BUSY:
         log_event(
@@ -75,6 +90,18 @@ def recover_knowledge_tasks_job() -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
     task_ids = asyncio.run(list_recoverable_knowledge_task_ids(settings))
+    for task_id in task_ids:
+        run_knowledge_task_job.apply_async(args=(task_id,))
+
+
+@celery_app.task(
+    name="app.knowledge.reconcile_graphs",
+    ignore_result=True,
+)
+def reconcile_knowledge_graphs_job() -> None:
+    settings = Settings.from_env(require_bootstrap=False)
+    configure_task_worker(settings)
+    task_ids = asyncio.run(reconcile_knowledge_graphs(settings))
     for task_id in task_ids:
         run_knowledge_task_job.apply_async(args=(task_id,))
 
@@ -162,6 +189,7 @@ async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
             settings,
             enqueue_knowledge_task,
             evaluation_runner=run_evaluation_task,
+            graph_runner=run_graph_build_task,
         )
         return
 
@@ -169,10 +197,32 @@ async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
         broker_url=settings.celery_broker_url,
         task_always_eager=False,
     )
+    async with get_session_factory()() as db:
+        task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
+    dispatch_options = (
+        {
+            "soft_time_limit": GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS,
+            "time_limit": GRAPH_TASK_TIME_LIMIT_SECONDS,
+        }
+        if task is not None
+        and task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
+        else {}
+    )
     try:
-        await asyncio.to_thread(run_knowledge_task_job.apply_async, args=(task_id,))
+        await asyncio.to_thread(
+            run_knowledge_task_job.apply_async,
+            args=(task_id,),
+            **dispatch_options,
+        )
     except Exception as exc:
-        log_error(logger, "Failed to dispatch knowledge task.", exc, task_id=task_id)
+        log_error(
+            logger,
+            "Failed to dispatch knowledge task.",
+            None,
+            source=classify_error(exc),
+            task_id=task_id,
+            error_type=type(exc).__name__,
+        )
         try:
             await mark_task_dispatch_failed(task_id)
         except Exception:

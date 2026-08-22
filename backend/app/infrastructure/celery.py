@@ -64,6 +64,10 @@ def create_celery_app() -> Celery:
                 "task": "app.knowledge.recover",
                 "schedule": 30.0,
             },
+            "reconcile-knowledge-graphs": {
+                "task": "app.knowledge.reconcile_graphs",
+                "schedule": 60.0,
+            },
             "recover-knowledge-storage-cleanups": {
                 "task": "app.knowledge.recover_storage_cleanups",
                 "schedule": 60.0,
@@ -96,3 +100,5 @@ def create_celery_app() -> Celery:
 
 
 celery_app = create_celery_app()
+if "app.tasks.knowledge" not in sys.modules:
+    celery_app.loader.import_task_module("app.tasks.knowledge")

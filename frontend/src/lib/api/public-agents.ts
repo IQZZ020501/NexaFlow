@@ -84,6 +84,7 @@ export type PublicAgentRunStreamEvent =
       type: "answer_delta"
       delta: string
     })
+  | (PublicAgentStreamCursor & { type: "answer_reset" })
   | (PublicAgentStreamCursor & {
       type: "reasoning_delta"
       turn: number

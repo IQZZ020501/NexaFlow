@@ -9,11 +9,15 @@ from app.domain.user import User as UserOrm
 from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.analytics import (
     WorkspaceAnalyticsCounts,
+    WorkspaceAnalyticsGraphBuild,
     WorkspaceAnalyticsRun,
     WorkspaceAnalyticsTeamMember,
 )
 from app.shareddomain.agents.models import Agent as AgentOrm
 from app.shareddomain.agents.models import AgentRun as AgentRunOrm
+from app.shareddomain.knowledge_graph.models import (
+    KnowledgeGraphRevision as KnowledgeGraphRevisionOrm,
+)
 from app.shareddomain.workflows.models import WorkflowRunDetail as WorkflowRunDetailOrm
 
 
@@ -147,6 +151,40 @@ async def list_workspace_analytics_runs(
             workflow_token_usage=row.workflow_token_usage,
             started_at=row.started_at,
             finished_at=row.finished_at,
+            created_at=row.created_at,
+        )
+        for row in rows.all()
+    ]
+
+
+async def list_workspace_analytics_graph_builds(
+    db: AsyncSession,
+    workspace_id: str,
+    start_at: datetime,
+    end_at: datetime,
+) -> list[WorkspaceAnalyticsGraphBuild]:
+    rows = await db.execute(
+        select(
+            KnowledgeGraphRevisionOrm.id,
+            KnowledgeGraphRevisionOrm.status,
+            KnowledgeGraphRevisionOrm.model_usage_json,
+            KnowledgeGraphRevisionOrm.created_at,
+        )
+        .where(
+            KnowledgeGraphRevisionOrm.workspace_id == workspace_id,
+            KnowledgeGraphRevisionOrm.created_at >= start_at,
+            KnowledgeGraphRevisionOrm.created_at < end_at,
+        )
+        .order_by(
+            KnowledgeGraphRevisionOrm.created_at,
+            KnowledgeGraphRevisionOrm.id,
+        )
+    )
+    return [
+        WorkspaceAnalyticsGraphBuild(
+            id=row.id,
+            status=row.status,
+            model_usage=dict(row.model_usage_json or {}),
             created_at=row.created_at,
         )
         for row in rows.all()

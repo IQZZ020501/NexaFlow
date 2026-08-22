@@ -43,7 +43,6 @@ export type KnowledgeAttachment = {
   updated_at: string
 }
 
-
 export type KnowledgeDocument = {
   id: string
   workspace_id: string
@@ -70,7 +69,6 @@ export type KnowledgeAsset = {
   size_bytes: number
   alt_text: string
 }
-
 
 export type KnowledgeDocumentChunk = {
   id: string
@@ -116,6 +114,15 @@ export type KnowledgeTask = {
   updated_at: string
 }
 
+export type KnowledgeTaskRetryMode = "all" | "unfinished"
+
+export type KnowledgeTaskBulkDeleteResult = {
+  deleted_task_ids: string[]
+}
+
+export type KnowledgeRetrievalSource =
+  "vector" | "keywords" | "reference" | "graph"
+
 export type KnowledgeQueryHit = {
   chunk_id: string
   document_id: string
@@ -123,15 +130,22 @@ export type KnowledgeQueryHit = {
   parent_id: string | null
   parent_title: string | null
   parent_index: number | null
+  section_path: string[]
   chunk_index: number
   content: string
+  content_truncated: boolean
+  evidence_start_offset: number | null
+  evidence_end_offset: number | null
+  contributing_chunk_ids: string[]
   distance: number | null
   similarity: number | null
-  kind: "document" | "qa"
+  kind: "document" | "qa" | "graph_record"
   question: string | null
   source: string | null
-  sources: Array<"vector" | "keywords" | "reference">
+  sources: KnowledgeRetrievalSource[]
   reference_hops: 0 | 1
+  graph_claim_ids: string[]
+  graph_hops: number
   rerank_score: number | null
 }
 
@@ -143,6 +157,11 @@ export type KnowledgeQueryInspectRequest = {
   search_mode: KnowledgeSearchMode
   similarity: number | null
   include_references: boolean
+  graph_mode?: KnowledgeGraphMode
+  source_entity?: string | null
+  target_entity?: string | null
+  max_hops?: number
+  relation_filters?: string[]
 }
 
 export type KnowledgeRetrievalTrace = {
@@ -154,9 +173,21 @@ export type KnowledgeRetrievalTrace = {
   vector_candidates: number
   keyword_candidates: number
   reference_candidates: number
+  graph_mode: KnowledgeGraphMode
+  graph_intent: string | null
+  graph_revision_id: string | null
+  graph_entity_candidates: number
+  graph_profile_candidates: number
+  graph_claim_candidates: number
+  graph_path_count: number
+  graph_visited_nodes: number
+  graph_hops: number
+  graph_truncated: boolean
+  graph_limit_reason: string | null
   fused_candidates: number
   rerank_status: "not_configured" | "applied" | "fallback" | "skipped"
   returned_hits: number
+  truncated_hits: number
   duration_ms: number
   stage_duration_ms: Record<string, number>
 }
@@ -164,6 +195,149 @@ export type KnowledgeRetrievalTrace = {
 export type KnowledgeQueryInspectResult = {
   hits: KnowledgeQueryHit[]
   trace: KnowledgeRetrievalTrace
+  graph: KnowledgeGraphQueryResult | null
+}
+
+export type KnowledgeGraphEvaluationExpectation = {
+  entity_names: string[]
+  predicates: string[]
+  path_entity_names: string[]
+  path_predicates: string[]
+}
+
+export type KnowledgeGraphEvaluationMetrics = {
+  entity_precision: number
+  entity_recall: number
+  claim_precision: number
+  claim_recall: number
+  path_exact_match: number
+  path_edge_accuracy: number
+  citation_coverage: number
+}
+
+export type KnowledgeGraphMode = "off" | "auto" | "path" | "neighborhood"
+
+export type KnowledgeGraphSettings = {
+  enabled: boolean
+  extraction_model_id: string | null
+  active_schema_id: string | null
+  active_revision_id: string | null
+}
+
+export type KnowledgeGraphStatus = {
+  enabled: boolean
+  active_schema_id: string | null
+  active_revision_id: string | null
+  revision_no: number | null
+  revision_status: string | null
+  source_watermark: string | null
+  stats: Record<string, unknown>
+  model_usage: Record<string, unknown>
+  pending_review_count: number
+  last_error: string | null
+  published_at: string | null
+  build_task_id: string | null
+  build_task_status: string | null
+}
+
+export type KnowledgeGraphSchema = {
+  id: string
+  version: number
+  status: "draft" | "active" | "retired"
+  schema_json: Record<string, unknown>
+  schema_hash: string
+}
+
+export type KnowledgeGraphEntity = {
+  id: string
+  entity_type: string
+  canonical_name: string
+  aliases: string[]
+  properties: Record<string, unknown>
+  profile_markdown: string
+  component_id: string | null
+  degree: number
+}
+
+export type KnowledgeGraphEvidence = {
+  id: string
+  claim_id: string
+  document_id: string
+  document_filename: string
+  chunk_id: string
+  quote: string
+  start_offset: number
+  end_offset: number
+  source_kind: string
+}
+
+export type KnowledgeGraphClaim = {
+  id: string
+  subject_entity_id: string
+  predicate: string
+  object_entity_id: string | null
+  object_value: unknown
+  properties: Record<string, unknown>
+  quality_score: number
+  support_count: number
+  evidence_ids: string[]
+}
+
+export type KnowledgeGraphEntityDetail = KnowledgeGraphEntity & {
+  claims: KnowledgeGraphClaim[]
+  evidence: KnowledgeGraphEvidence[]
+}
+
+export type KnowledgeGraphPathStep = {
+  claim_id: string
+  predicate: string
+  source_entity_id: string
+  target_entity_id: string
+  semantic_direction: "forward" | "reverse"
+  quality_score: number
+  support_count: number
+  evidence_ids: string[]
+}
+
+export type KnowledgeGraphPath = {
+  nodes: KnowledgeGraphEntity[]
+  steps: KnowledgeGraphPathStep[]
+}
+
+export type KnowledgeGraphQueryResult = {
+  revision_id: string
+  operation: string
+  resolved_entities: KnowledgeGraphEntity[]
+  nodes: KnowledgeGraphEntity[]
+  claims: KnowledgeGraphClaim[]
+  paths: KnowledgeGraphPath[]
+  evidence: KnowledgeGraphEvidence[]
+  visited_nodes: number
+  truncated: boolean
+  limit_reason: string | null
+}
+
+export type KnowledgeGraphEntityList = {
+  items: KnowledgeGraphEntity[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type KnowledgeGraphReviewItem = {
+  id: string
+  kind: string
+  payload: Record<string, unknown>
+  status: string
+  revision_id: string
+  created_at: string
+}
+
+export type KnowledgeGraphReviewList = {
+  items: KnowledgeGraphReviewItem[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export type KnowledgeEvaluationCase = {
@@ -172,6 +346,7 @@ export type KnowledgeEvaluationCase = {
   knowledge_base_id: string
   question: string
   expected_document_ids: string[]
+  graph_expectation: KnowledgeGraphEvaluationExpectation | null
   created_by_user_id: string
   created_at: string
   updated_at: string
@@ -183,6 +358,8 @@ export type KnowledgeEvaluationRunRequest = {
   search_mode: KnowledgeSearchMode
   similarity: number | null
   include_references: boolean
+  graph_mode: KnowledgeGraphMode
+  max_hops: number
 }
 
 export type KnowledgeEvaluationResult = {
@@ -197,6 +374,7 @@ export type KnowledgeEvaluationResult = {
   ndcg_at_k: number
   latency_ms: number
   trace: Record<string, unknown>
+  graph_metrics: KnowledgeGraphEvaluationMetrics | null
   error: string | null
   created_at: string
 }
@@ -232,7 +410,7 @@ export type KnowledgeBasePermissionForm = {
 }
 
 export type KnowledgeBaseDetailTab =
-  "documents" | "tasks" | "evaluation" | "settings"
+  "documents" | "graph" | "tasks" | "evaluation" | "settings"
 
 export type KnowledgeModelTestResult = {
   embedding_model_id: string
@@ -252,11 +430,11 @@ export type KnowledgeModelTestResult = {
 export function listKnowledgeBases(
   token: string,
   workspaceId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number } = {}
 ) {
   return request<KnowledgeBaseListItem[]>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases${listQuery(options)}`,
-    { token },
+    { token }
   )
 }
 
@@ -275,7 +453,7 @@ export function createKnowledgeBase(
     description: string
     embedding_model_id?: string | null
     reranker_model_id?: string | null
-  },
+  }
 ) {
   return request<KnowledgeBase>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases`,
@@ -283,7 +461,7 @@ export function createKnowledgeBase(
       method: "POST",
       token,
       body: JSON.stringify(payload),
-    },
+    }
   )
 }
 
@@ -305,7 +483,7 @@ export function updateKnowledgeBase(
     status?: string
     embedding_model_id?: string | null
     reranker_model_id?: string | null
-  },
+  }
 ) {
   return request<KnowledgeBase>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}`,
@@ -313,7 +491,7 @@ export function updateKnowledgeBase(
       method: "PATCH",
       token,
       body: JSON.stringify(payload),
-    },
+    }
   )
 }
 
@@ -323,14 +501,14 @@ export function updateKnowledgeBase(
 export function deleteKnowledgeBase(
   token: string,
   workspaceId: string,
-  knowledgeBaseId: string,
+  knowledgeBaseId: string
 ) {
   return request<void>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}`,
     {
       method: "DELETE",
       token,
-    },
+    }
   )
 }
 
@@ -344,12 +522,12 @@ export function listKnowledgeDocuments(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  options: { includeStaged?: boolean } = {},
+  options: { includeStaged?: boolean } = {}
 ) {
   const query = options.includeStaged ? "?include_staged=true" : ""
   return request<KnowledgeDocument[]>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents${query}`,
-    { token },
+    { token }
   )
 }
 
@@ -363,7 +541,7 @@ export function uploadKnowledgeAttachment(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  file: File,
+  file: File
 ) {
   const formData = new FormData()
   formData.append("file", file)
@@ -373,7 +551,7 @@ export function uploadKnowledgeAttachment(
       method: "POST",
       token,
       body: formData,
-    },
+    }
   )
 }
 
@@ -388,11 +566,11 @@ export function deleteKnowledgeAttachment(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  attachmentId: string,
+  attachmentId: string
 ) {
   return request<void>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/attachments/${attachmentId}`,
-    { method: "DELETE", token },
+    { method: "DELETE", token }
   )
 }
 
@@ -410,7 +588,7 @@ export function createKnowledgeDocuments(
   knowledgeBaseId: string,
   attachmentIds: string[],
   staged = true,
-  importMode?: "document" | "qa",
+  importMode?: "document" | "qa"
 ) {
   return request<KnowledgeDocument[]>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents`,
@@ -422,7 +600,7 @@ export function createKnowledgeDocuments(
         staged,
         ...(importMode ? { import_mode: importMode } : {}),
       }),
-    },
+    }
   )
 }
 
@@ -447,7 +625,7 @@ export function parseKnowledgeDocument(
     split_separator?: string
     cleaning_rules: string[]
     auto_index: boolean
-  },
+  }
 ) {
   return request<KnowledgeTask>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/parse`,
@@ -455,10 +633,9 @@ export function parseKnowledgeDocument(
       method: "POST",
       token,
       body: payload ? JSON.stringify(payload) : undefined,
-    },
+    }
   )
 }
-
 
 /**
  * Starts indexing for a knowledge-base document.
@@ -473,14 +650,14 @@ export function indexKnowledgeDocument(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  documentId: string,
+  documentId: string
 ) {
   return request<KnowledgeTask>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/index`,
     {
       method: "POST",
       token,
-    },
+    }
   )
 }
 
@@ -491,14 +668,14 @@ export function deleteKnowledgeDocument(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  documentId: string,
+  documentId: string
 ) {
   return request<void>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`,
     {
       method: "DELETE",
       token,
-    },
+    }
   )
 }
 
@@ -513,7 +690,7 @@ export function setKnowledgeDocumentActive(
   workspaceId: string,
   knowledgeBaseId: string,
   documentId: string,
-  isActive: boolean,
+  isActive: boolean
 ) {
   return request<KnowledgeDocument>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`,
@@ -521,7 +698,7 @@ export function setKnowledgeDocumentActive(
       method: "PATCH",
       token,
       body: JSON.stringify({ is_active: isActive }),
-    },
+    }
   )
 }
 
@@ -536,13 +713,13 @@ export async function downloadKnowledgeDocument(
   workspaceId: string,
   knowledgeBaseId: string,
   documentId: string,
-  filename: string,
+  filename: string
 ) {
   const response = await fetch(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/download`,
     {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    },
+    }
   )
   if (!response.ok) {
     throw new ApiError(response.status, response.statusText)
@@ -569,14 +746,14 @@ export async function listKnowledgeDocumentChunks(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  documentId: string,
+  documentId: string
 ) {
   const chunks: KnowledgeDocumentChunk[] = []
   const limit = 200
   while (true) {
     const page = await request<KnowledgeDocumentChunk[]>(
       `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/chunks?limit=${limit}&offset=${chunks.length}`,
-      { token },
+      { token }
     )
     chunks.push(...page)
     if (page.length < limit) {
@@ -584,7 +761,6 @@ export async function listKnowledgeDocumentChunks(
     }
   }
 }
-
 
 /**
  * Loads an asset associated with a knowledge document.
@@ -600,11 +776,11 @@ export function loadKnowledgeAsset(
   workspaceId: string,
   knowledgeBaseId: string,
   documentId: string,
-  assetId: string,
+  assetId: string
 ) {
   return requestBlob(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/assets/${assetId}`,
-    { token },
+    { token }
   )
 }
 
@@ -618,7 +794,7 @@ export function listKnowledgeTasks(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  documentId?: string,
+  documentId?: string
 ) {
   const path = documentId
     ? `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/tasks`
@@ -641,13 +817,61 @@ export function retryKnowledgeTask(
   workspaceId: string,
   knowledgeBaseId: string,
   taskId: string,
+  mode: KnowledgeTaskRetryMode = "all"
 ) {
   return request<KnowledgeTask>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/tasks/${taskId}/retry`,
     {
       method: "POST",
       token,
-    },
+      body: JSON.stringify({ mode }),
+    }
+  )
+}
+
+export function stopKnowledgeTask(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  taskId: string
+) {
+  return request<KnowledgeTask>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/tasks/${taskId}/stop`,
+    {
+      method: "POST",
+      token,
+    }
+  )
+}
+
+export function deleteKnowledgeTask(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  taskId: string
+) {
+  return request<void>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/tasks/${taskId}`,
+    {
+      method: "DELETE",
+      token,
+    }
+  )
+}
+
+export function deleteKnowledgeTasks(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  taskIds: string[]
+) {
+  return request<KnowledgeTaskBulkDeleteResult>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/tasks/bulk-delete`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify({ task_ids: taskIds }),
+    }
   )
 }
 
@@ -661,14 +885,14 @@ export function retryKnowledgeTask(
 export function rebuildKnowledgeIndex(
   token: string,
   workspaceId: string,
-  knowledgeBaseId: string,
+  knowledgeBaseId: string
 ) {
   return request<KnowledgeTask>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/rebuild-index`,
     {
       method: "POST",
       token,
-    },
+    }
   )
 }
 
@@ -685,7 +909,7 @@ export function queryKnowledgeBase(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  payload: { query: string; limit: number },
+  payload: { query: string; limit: number }
 ) {
   return request<KnowledgeQueryHit[]>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/query`,
@@ -693,7 +917,7 @@ export function queryKnowledgeBase(
       method: "POST",
       token,
       body: JSON.stringify(payload),
-    },
+    }
   )
 }
 
@@ -707,7 +931,7 @@ export function inspectKnowledgeBase(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  payload: KnowledgeQueryInspectRequest,
+  payload: KnowledgeQueryInspectRequest
 ) {
   return request<KnowledgeQueryInspectResult>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/query/inspect`,
@@ -715,7 +939,227 @@ export function inspectKnowledgeBase(
       method: "POST",
       token,
       body: JSON.stringify(payload),
-    },
+    }
+  )
+}
+
+function knowledgeGraphPath(
+  workspaceId: string,
+  knowledgeBaseId: string,
+  suffix = ""
+) {
+  return `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/graph${suffix}`
+}
+
+export function getKnowledgeGraphSettings(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  signal?: AbortSignal
+) {
+  return request<KnowledgeGraphSettings>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/settings"),
+    { token, signal }
+  )
+}
+
+export function updateKnowledgeGraphSettings(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  payload: { enabled: boolean }
+) {
+  return request<KnowledgeGraphSettings>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/settings"),
+    { method: "PATCH", token, body: JSON.stringify(payload) }
+  )
+}
+
+export function getKnowledgeGraphStatus(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  signal?: AbortSignal
+) {
+  return request<KnowledgeGraphStatus>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/status"),
+    { token, signal }
+  )
+}
+
+export function getKnowledgeGraphSchema(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  signal?: AbortSignal
+) {
+  return request<KnowledgeGraphSchema | null>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/schema"),
+    { token, signal }
+  )
+}
+
+export function updateKnowledgeGraphSchema(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  schemaJson: Record<string, unknown>
+) {
+  return request<KnowledgeGraphSchema>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/schema"),
+    {
+      method: "PUT",
+      token,
+      body: JSON.stringify({ schema_json: schemaJson }),
+    }
+  )
+}
+
+export function rebuildKnowledgeGraph(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string
+) {
+  return request<KnowledgeTask>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/rebuild"),
+    { method: "POST", token }
+  )
+}
+
+export function listKnowledgeGraphEntities(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  options: {
+    query?: string
+    entity_type?: string
+    limit?: number
+    offset?: number
+  } = {},
+  signal?: AbortSignal
+) {
+  const params = new URLSearchParams()
+  if (options.query) params.set("query", options.query)
+  if (options.entity_type) params.set("entity_type", options.entity_type)
+  if (options.limit !== undefined) params.set("limit", String(options.limit))
+  if (options.offset !== undefined) params.set("offset", String(options.offset))
+  const query = params.toString()
+  return request<KnowledgeGraphEntityList>(
+    `${knowledgeGraphPath(workspaceId, knowledgeBaseId, "/entities")}${query ? `?${query}` : ""}`,
+    { token, signal }
+  )
+}
+
+export function getKnowledgeGraphOverview(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  signal?: AbortSignal
+) {
+  return request<KnowledgeGraphQueryResult>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/overview"),
+    { token, signal }
+  )
+}
+
+export function getKnowledgeGraphEntity(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  entityId: string,
+  signal?: AbortSignal
+) {
+  return request<KnowledgeGraphEntityDetail>(
+    knowledgeGraphPath(
+      workspaceId,
+      knowledgeBaseId,
+      `/entities/${encodeURIComponent(entityId)}`
+    ),
+    { token, signal }
+  )
+}
+
+export function queryKnowledgeGraphPath(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  payload: {
+    source_entity: string
+    target_entity: string
+    max_hops: number
+    relation_filters: string[]
+  }
+) {
+  return request<KnowledgeGraphQueryResult>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/path"),
+    { method: "POST", token, body: JSON.stringify(payload) }
+  )
+}
+
+export function queryKnowledgeGraphNeighborhood(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  payload: {
+    entity: string
+    max_hops: number
+    relation_filters: string[]
+  }
+) {
+  return request<KnowledgeGraphQueryResult>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/neighborhood"),
+    { method: "POST", token, body: JSON.stringify(payload) }
+  )
+}
+
+export function importKnowledgeGraphRecords(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  file: File
+) {
+  const body = new FormData()
+  body.set("file", file)
+  return request<KnowledgeTask>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/import"),
+    { method: "POST", token, body }
+  )
+}
+
+export function listKnowledgeGraphReviews(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  options: { limit?: number; offset?: number } = {},
+  signal?: AbortSignal
+) {
+  return request<KnowledgeGraphReviewList>(
+    `${knowledgeGraphPath(workspaceId, knowledgeBaseId, "/reviews")}${listQuery(options)}`,
+    { token, signal }
+  )
+}
+
+export function resolveKnowledgeGraphReview(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  reviewId: string,
+  payload: {
+    action: "approve_claim" | "reject_claim" | "merge_entities" | "split_entity"
+    target_entity_id?: string | null
+    canonical_name?: string | null
+    entity_type?: string | null
+    mention_ids?: string[]
+    claim_ids?: string[]
+  }
+) {
+  return request<KnowledgeTask>(
+    knowledgeGraphPath(
+      workspaceId,
+      knowledgeBaseId,
+      `/reviews/${encodeURIComponent(reviewId)}/resolve`
+    ),
+    { method: "POST", token, body: JSON.stringify(payload) }
   )
 }
 
@@ -730,7 +1174,7 @@ export function inspectKnowledgeBase(
 function evaluationPath(
   workspaceId: string,
   knowledgeBaseId: string,
-  suffix = "",
+  suffix = ""
 ) {
   return `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/evaluations${suffix}`
 }
@@ -743,11 +1187,11 @@ function evaluationPath(
 export function listKnowledgeEvaluationCases(
   token: string,
   workspaceId: string,
-  knowledgeBaseId: string,
+  knowledgeBaseId: string
 ) {
   return request<KnowledgeEvaluationCase[]>(
     evaluationPath(workspaceId, knowledgeBaseId, "/cases"),
-    { token },
+    { token }
   )
 }
 
@@ -764,11 +1208,12 @@ export function createKnowledgeEvaluationCase(
   payload: {
     question: string
     expected_document_ids: string[]
-  },
+    graph_expectation?: KnowledgeGraphEvaluationExpectation | null
+  }
 ) {
   return request<KnowledgeEvaluationCase>(
     evaluationPath(workspaceId, knowledgeBaseId, "/cases"),
-    { method: "POST", token, body: JSON.stringify(payload) },
+    { method: "POST", token, body: JSON.stringify(payload) }
   )
 }
 
@@ -784,11 +1229,11 @@ export function deleteKnowledgeEvaluationCase(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  caseId: string,
+  caseId: string
 ) {
   return request<void>(
     evaluationPath(workspaceId, knowledgeBaseId, `/cases/${caseId}`),
-    { method: "DELETE", token },
+    { method: "DELETE", token }
   )
 }
 
@@ -800,11 +1245,11 @@ export function deleteKnowledgeEvaluationCase(
 export function listKnowledgeEvaluationRuns(
   token: string,
   workspaceId: string,
-  knowledgeBaseId: string,
+  knowledgeBaseId: string
 ) {
   return request<KnowledgeTask[]>(
     evaluationPath(workspaceId, knowledgeBaseId, "/runs"),
-    { token },
+    { token }
   )
 }
 
@@ -818,11 +1263,11 @@ export function createKnowledgeEvaluationRun(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  payload: KnowledgeEvaluationRunRequest,
+  payload: KnowledgeEvaluationRunRequest
 ) {
   return request<KnowledgeTask>(
     evaluationPath(workspaceId, knowledgeBaseId, "/runs"),
-    { method: "POST", token, body: JSON.stringify(payload) },
+    { method: "POST", token, body: JSON.stringify(payload) }
   )
 }
 
@@ -839,11 +1284,11 @@ export function getKnowledgeEvaluationRun(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  taskId: string,
+  taskId: string
 ) {
   return request<KnowledgeTask>(
     evaluationPath(workspaceId, knowledgeBaseId, `/runs/${taskId}`),
-    { token },
+    { token }
   )
 }
 
@@ -856,11 +1301,11 @@ export function deleteKnowledgeEvaluationRun(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  taskId: string,
+  taskId: string
 ) {
   return request<void>(
     evaluationPath(workspaceId, knowledgeBaseId, `/runs/${taskId}`),
-    { method: "DELETE", token },
+    { method: "DELETE", token }
   )
 }
 
@@ -874,11 +1319,11 @@ export function getKnowledgeEvaluationSummary(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  taskId: string,
+  taskId: string
 ) {
   return request<KnowledgeEvaluationSummary>(
     evaluationPath(workspaceId, knowledgeBaseId, `/runs/${taskId}/results`),
-    { token },
+    { token }
   )
 }
 
@@ -890,7 +1335,7 @@ export function getKnowledgeEvaluationSummary(
 export function testKnowledgeBaseModels(
   token: string,
   workspaceId: string,
-  knowledgeBaseId: string,
+  knowledgeBaseId: string
 ) {
   return request<KnowledgeModelTestResult>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/model-test`,
@@ -898,7 +1343,7 @@ export function testKnowledgeBaseModels(
       method: "POST",
       token,
       body: JSON.stringify({ query: "Hello", documents: ["Hello"] }),
-    },
+    }
   )
 }
 
@@ -912,11 +1357,11 @@ export function testKnowledgeBaseModels(
 export function listKnowledgeBasePermissions(
   token: string,
   workspaceId: string,
-  knowledgeBaseId: string,
+  knowledgeBaseId: string
 ) {
   return request<ResourcePermission[]>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/permissions`,
-    { token },
+    { token }
   )
 }
 
@@ -935,7 +1380,7 @@ export function upsertKnowledgeBasePermission(
   workspaceId: string,
   knowledgeBaseId: string,
   userId: string,
-  permission: "view" | "edit",
+  permission: "view" | "edit"
 ) {
   return request<ResourcePermission>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/permissions/${userId}`,
@@ -943,7 +1388,7 @@ export function upsertKnowledgeBasePermission(
       method: "PUT",
       token,
       body: JSON.stringify({ permission }),
-    },
+    }
   )
 }
 
@@ -956,13 +1401,13 @@ export function revokeKnowledgeBasePermission(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  userId: string,
+  userId: string
 ) {
   return request<void>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/permissions/${userId}`,
     {
       method: "DELETE",
       token,
-    },
+    }
   )
 }

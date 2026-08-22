@@ -618,7 +618,7 @@ export function WorkspaceAnalyticsPage() {
             })}
           </p>
 
-          {data.summary.runs.value === 0 ? (
+          {data.summary.runs.value === 0 && data.summary.tokens.graph_total === 0 ? (
             <Card className="border-dashed py-14 shadow-none">
               <CardContent className="flex flex-col items-center gap-2 text-center text-sm text-muted-foreground">
                 <ActivityIcon aria-hidden="true" className="size-6" />

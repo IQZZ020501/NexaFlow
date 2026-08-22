@@ -7,6 +7,7 @@ from app.capabilities.llm.models import RegisteredModel
 from app.domain.resource_permission import ResourcePermission
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure import object_storage as object_storage_module
+from app.infrastructure.repositories import knowledge_graph as graph_repository
 from app.infrastructure.session import get_session_factory
 from app.shareddomain.audit.models import AuditLog
 from app.shareddomain.agents.models import (
@@ -20,6 +21,10 @@ from app.shareddomain.knowledge.models import (
     KnowledgeBase,
     KnowledgeStorageCleanup,
     KnowledgeTask,
+)
+from app.shareddomain.knowledge_graph.models import (
+    KnowledgeGraphRevision,
+    KnowledgeGraphSchema,
 )
 from app.shareddomain.knowledge.services import knowledge_object_storage
 from app.shareddomain.tools.models import McpServer, ToolSource
@@ -513,7 +518,70 @@ async def seed_workspace_analytics(
                 updated_at=workflow_run.finished_at or workflow_run.created_at,
             )
         )
+        graph_knowledge = KnowledgeBase(
+            id="analytics-graph-kb",
+            workspace_id=workspace_id,
+            name="Analytics Graph KB",
+            graph_enabled=True,
+            created_by_user_id=global_admin_id,
+        )
+        graph_schema = KnowledgeGraphSchema(
+            id="analytics-graph-schema",
+            workspace_id=workspace_id,
+            knowledge_base_id=graph_knowledge.id,
+            version=1,
+            schema_json={},
+            schema_hash="analytics-graph-schema-hash",
+            status="active",
+            created_by_user_id=global_admin_id,
+        )
+        db.add(graph_knowledge)
+        await db.flush()
+        db.add(graph_schema)
+        await db.flush()
+        db.add_all(
+            [
+                KnowledgeGraphRevision(
+                    id="analytics-graph-previous",
+                    workspace_id=workspace_id,
+                    knowledge_base_id=graph_knowledge.id,
+                    revision_no=1,
+                    schema_id=graph_schema.id,
+                    status="failed",
+                    source_watermark="previous",
+                    model_usage_json={"charged_tokens": 10},
+                    created_by_user_id=global_admin_id,
+                    created_at=current_start - timedelta(days=2),
+                ),
+                KnowledgeGraphRevision(
+                    id="analytics-graph-current",
+                    workspace_id=workspace_id,
+                    knowledge_base_id=graph_knowledge.id,
+                    revision_no=2,
+                    schema_id=graph_schema.id,
+                    status="published",
+                    source_watermark="current",
+                    model_usage_json={
+                        "charged_tokens": 40,
+                        "estimated_tokens": 40,
+                    },
+                    created_by_user_id=global_admin_id,
+                    created_at=current_start + timedelta(days=2),
+                ),
+            ]
+        )
         await db.commit()
+        monthly = await graph_repository.monthly_workspace_model_tokens(
+            db,
+            workspace_id,
+            datetime(2026, 8, 1, tzinfo=UTC),
+            datetime(2026, 9, 1, tzinfo=UTC),
+        )
+        assert monthly == {
+            "application_tokens": 1_057,
+            "graph_charged_tokens": 40,
+            "graph_reserved_tokens": 0,
+        }
 
 
 async def get_analytics_audit_details(workspace_id: str) -> dict:
@@ -651,10 +719,13 @@ def exercise_workspace_analytics() -> None:
         assert summary["tokens"] == {
             "input": 140,
             "output": 75,
-            "total": 280,
+            "application_total": 280,
+            "graph_total": 40,
+            "total": 320,
             "unreported_runs": 1,
-            "previous_total": 50,
-            "change_percent": 460.0,
+            "unreported_graph_builds": 1,
+            "previous_total": 60,
+            "change_percent": 433.3,
         }
         assert summary["success_rate"] == {
             "value": 0.5,
@@ -671,9 +742,22 @@ def exercise_workspace_analytics() -> None:
         assert trend_by_date["2026-08-05"] == {
             "date": "2026-08-05",
             "runs": 1,
+            "graph_builds": 0,
             "input_tokens": 10,
             "output_tokens": 5,
+            "application_tokens": 80,
+            "graph_tokens": 0,
             "total_tokens": 80,
+        }
+        assert trend_by_date["2026-08-03"] == {
+            "date": "2026-08-03",
+            "runs": 1,
+            "graph_builds": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "application_tokens": 0,
+            "graph_tokens": 40,
+            "total_tokens": 40,
         }
         assert len(payload["hourly_runs"]) == 24
         assert [item["hour"] for item in payload["hourly_runs"]] == list(range(24))

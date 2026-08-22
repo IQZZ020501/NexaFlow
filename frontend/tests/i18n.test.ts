@@ -28,6 +28,8 @@ describe("i18n", () => {
     expect(translate("zh-Hans", "分段 {value}", { value: 1 })).toBe("分段 1")
     expect(translate("zh-Hant", "分段 {value}", { value: 1 })).toBe("分段 1")
     expect(translate("en", "分段 {value}", { value: 1 })).toBe("Segment 1")
+    expect(translate("zh-Hant", "知识关联")).toBe("知識關聯")
+    expect(translate("en", "知识关联")).toBe("Knowledge graph")
   })
 
   test("falls back to the source key when a runtime translation is missing", () => {

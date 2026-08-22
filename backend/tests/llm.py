@@ -58,6 +58,11 @@ def test_registered_chat_model_uses_configured_timeout() -> None:
     chat_model = build_registered_chat_model(model, runtime_settings)
 
     assert chat_model.request_timeout == 77
+    assert chat_model.max_tokens == 4096
+    assert (
+        build_registered_chat_model(model, runtime_settings, timeout=90).request_timeout
+        == 90
+    )
 
 
 class ModelTestHandler(BaseHTTPRequestHandler):
@@ -578,7 +583,13 @@ def main() -> None:
         model = client.post(
             models_url(workspace_id),
             headers=auth_headers(admin_token),
-            json=model_payload(model_base_url),
+            json={
+                **model_payload(model_base_url),
+                "request_params": {
+                    "max_tokens": 4096,
+                    "extra_body": {"enable_thinking": False},
+                },
+            },
         )
         assert model.status_code == 201, model.text
         model_payload_response = model.json()
@@ -589,6 +600,10 @@ def main() -> None:
             "api_key": "****1234",
         }
         assert model_payload_response["model_type"] == "LLM"
+        assert model_payload_response["request_params"] == {
+            "max_tokens": 4096,
+            "extra_body": {"enable_thinking": False},
+        }
         assert "currency" not in model_payload_response
         assert "supports_tool_calling" not in model_payload_response
         assert "model_params_form" not in model_payload_response
@@ -601,6 +616,8 @@ def main() -> None:
         asyncio.run(assert_model_api_key(model_id, "sk-deepseek-test-1234"))
         asyncio.run(assert_registered_model_runtime_call(model_id, "LLM"))
         assert ModelTestHandler.calls[-1]["path"] == "/v1/chat/completions"
+        assert ModelTestHandler.calls[-1]["body"]["max_tokens"] == 4096
+        assert ModelTestHandler.calls[-1]["body"]["enable_thinking"] is False
 
         duplicate_model = client.post(
             models_url(workspace_id),

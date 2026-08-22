@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -130,7 +131,6 @@ async def agent_node(
     thought = callback.thought(turn)
     await callback.process(thought)
     answer_started = False
-    answer_deltas: list[str] = []
     reasoning = ""
 
     async def emit_reasoning_delta(delta: str) -> None:
@@ -171,22 +171,28 @@ async def agent_node(
         model.bind_tools(available_tools) if allow_tools and available_tools else model
     )
     try:
-        async with asyncio.timeout(MODEL_RESPONSE_TIMEOUT_SECONDS):
-            if callback.enabled:
+        if callback.enabled:
+            async with aclosing(bound_model.astream(state["messages"])) as stream:
                 aggregate: AIMessageChunk | None = None
-                async for chunk in bound_model.astream(state["messages"]):
+                while True:
+                    try:
+                        async with asyncio.timeout(MODEL_RESPONSE_TIMEOUT_SECONDS):
+                            chunk = await anext(stream)
+                    except StopAsyncIteration:
+                        break
                     if not isinstance(chunk, AIMessageChunk):
                         raise AgentRunnerError(
                             "Agent model returned an invalid stream message."
                         )
                     await emit_reasoning_delta(reasoning_content(chunk))
-                    if chunk.text:
-                        answer_deltas.append(chunk.text)
+                    if chunk.text and not runtime.context.defer_answer:
+                        await emit_answer_delta(chunk.text)
                     aggregate = chunk if aggregate is None else aggregate + chunk
                 message = message_chunk_to_message(
                     aggregate or AIMessageChunk(content="")
                 )
-            else:
+        else:
+            async with asyncio.timeout(MODEL_RESPONSE_TIMEOUT_SECONDS):
                 message = await bound_model.ainvoke(state["messages"])
     except TimeoutError as exc:
         raise AgentRunnerError("Agent model response timed out.") from exc
@@ -204,6 +210,9 @@ async def agent_node(
         > runtime.context.max_model_tokens
     ):
         raise AgentRunnerError("Agent model token limit reached.")
+    if tool_calls and answer_started:
+        await callback.answer_reset()
+        answer_started = False
     if tool_calls:
         call_ids = [call["id"] for call in tool_calls]
         if any(not call_id for call_id in call_ids) or len(set(call_ids)) != len(
@@ -225,11 +234,6 @@ async def agent_node(
         raise AgentRunnerError("Agent response was truncated.")
     if not completion.content.strip():
         raise AgentRunnerError("Agent returned an empty response.")
-    # ponytail: buffer one model turn; add provisional deltas only if token-level
-    # answer latency matters more than keeping tool preambles out of the answer.
-    if not runtime.context.defer_answer:
-        for delta in answer_deltas:
-            await emit_answer_delta(delta)
     draft_answer = completion.content
     return {
         "messages": messages,

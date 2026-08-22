@@ -27,6 +27,7 @@ class RankedHit:
     vector_rank: int | None
     keyword_rank: int | None
     reference_rank: int | None
+    graph_rank: int | None
     sources: tuple[str, ...]
     rerank_score: float | None = None
 
@@ -59,6 +60,7 @@ def reciprocal_rank_fusion(
     vector_hits: list[VectorHit],
     keyword_chunk_ids: list[str],
     reference_chunk_ids: Sequence[str] = (),
+    graph_chunk_ids: Sequence[str] = (),
 ) -> list[RankedHit]:
     scores: dict[str, float] = {}
     first_seen: dict[str, int] = {}
@@ -67,6 +69,7 @@ def reciprocal_rank_fusion(
         ("vector", [hit.chunk_id for hit in vector_hits]),
         ("keywords", keyword_chunk_ids),
         ("reference", reference_chunk_ids),
+        ("graph", graph_chunk_ids),
     )
     for source, ranking in rankings:
         for rank, chunk_id in enumerate(dict.fromkeys(ranking), start=1):
@@ -83,6 +86,7 @@ def reciprocal_rank_fusion(
             vector_rank=ranks[chunk_id].get("vector"),
             keyword_rank=ranks[chunk_id].get("keywords"),
             reference_rank=ranks[chunk_id].get("reference"),
+            graph_rank=ranks[chunk_id].get("graph"),
             sources=tuple(
                 source for source, _ in rankings if source in ranks[chunk_id]
             ),

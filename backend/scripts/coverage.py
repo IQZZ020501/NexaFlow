@@ -19,6 +19,8 @@ SUITES = (
     "workspaces",
     "teams",
     "knowledge",
+    "knowledge_graph",
+    "knowledge_graph_edge_coverage",
     "llm",
     "agents",
     "workflows",

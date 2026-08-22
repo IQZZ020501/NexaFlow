@@ -880,7 +880,7 @@ async def _execute_claimed_agent_run(
 
     async def record_event(event: dict[str, Any]) -> None:
         event_type = event.get("type")
-        if event_type in {"answer_delta", "reasoning_delta"}:
+        if event_type in {"answer_delta", "answer_reset", "reasoning_delta"}:
             await live_stream.publish({**event, "stream_epoch": worker_task_id})
             return
         if event_type != "process":

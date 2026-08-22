@@ -176,3 +176,25 @@ async def list_resolved_references_for_chunks(
             item.id,
         ),
     )[:limit]
+
+
+async def list_resolved_references(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> list[KnowledgeDocumentReference]:
+    rows = await db.scalars(
+        select(KnowledgeDocumentReferenceORM)
+        .where(
+            KnowledgeDocumentReferenceORM.workspace_id
+            == knowledge_base.workspace_id,
+            KnowledgeDocumentReferenceORM.knowledge_base_id
+            == knowledge_base.id,
+            KnowledgeDocumentReferenceORM.target_document_id.is_not(None),
+        )
+        .order_by(
+            KnowledgeDocumentReferenceORM.source_document_id,
+            KnowledgeDocumentReferenceORM.source_ordinal,
+            KnowledgeDocumentReferenceORM.id,
+        )
+    )
+    return [to_entity(KnowledgeDocumentReference, row) for row in rows.all()]

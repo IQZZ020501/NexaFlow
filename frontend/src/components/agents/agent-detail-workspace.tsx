@@ -524,7 +524,7 @@ function RunExchange({
   return (
     <article className="flex flex-col gap-5">
       <div className="ml-auto flex max-w-[88%] flex-col items-end gap-1">
-        <div className="rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 text-background shadow-sm">
+        <div className="rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-background shadow-sm">
           {run.goal}
         </div>
         <CopyMessageButton value={run.goal} t={t} />

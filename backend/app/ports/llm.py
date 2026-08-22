@@ -5,6 +5,7 @@ functions here and consumes them through the structural protocols, so a
 provider swap stays inside ``app.capabilities.llm``.
 """
 
+from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from app.capabilities.llm.models import RegisteredModel
@@ -34,6 +35,12 @@ class RerankProvider(Protocol):
 class ChatProvider(Protocol):
     async def ainvoke(self, messages: list[Any], **kwargs: Any) -> Any: ...
 
+    def astream(
+        self,
+        messages: list[Any],
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]: ...
+
 
 def build_embeddings(settings: Settings, model: RegisteredModel) -> EmbeddingProvider:
     return build_registered_embeddings(model, settings)
@@ -43,8 +50,13 @@ def build_reranker(settings: Settings, model: RegisteredModel) -> RerankProvider
     return build_registered_reranker(model, settings)
 
 
-def build_chat_model(settings: Settings, model: RegisteredModel) -> ChatProvider:
-    return build_registered_chat_model(model, settings)
+def build_chat_model(
+    settings: Settings,
+    model: RegisteredModel,
+    *,
+    timeout: float | None = None,
+) -> ChatProvider:
+    return build_registered_chat_model(model, settings, timeout=timeout)
 
 
 __all__ = [

@@ -49,7 +49,6 @@ MAX_KNOWLEDGE_CONTENT_CHARS = 12_000
 MAX_KNOWLEDGE_CONTEXT_CHARS = 48_000
 MAX_KNOWLEDGE_SOURCE_METADATA_CHARS = 240
 MAX_KNOWLEDGE_TOOL_DESCRIPTION_CHARS = 1800
-KNOWLEDGE_TRUNCATION_MARKER = "\n[… evidence truncated …]"
 
 _tool_idempotency_key: ContextVar[str | None] = ContextVar(
     "agent_tool_idempotency_key", default=None
@@ -65,6 +64,11 @@ class KnowledgeSearchInput(BaseModel):
     limit: int = Field(default=3, ge=1, le=MAX_KNOWLEDGE_HITS_PER_CALL)
     search_mode: Literal["embedding", "keywords", "blend"] = "blend"
     similarity: float | None = Field(default=None, ge=0, le=1)
+    graph_mode: Literal["off", "auto", "path", "neighborhood"] = "auto"
+    source_entity: str | None = Field(default=None, max_length=500)
+    target_entity: str | None = Field(default=None, max_length=500)
+    max_hops: int = Field(default=6, ge=1, le=8)
+    relation_filters: list[str] = Field(default_factory=list, max_length=32)
 
 
 def bounded_knowledge_output(
@@ -80,53 +84,67 @@ def bounded_knowledge_output(
     hits = payload.get("hits")
     if not isinstance(hits, list):
         return payload
-    result = {
+    result: dict[str, Any] = {
         key: value
         for key, value in payload.items()
         if key not in {"hits", "context_truncated"}
     }
-    selected: list[dict[str, Any]] = []
     truncated = bool(payload.get("context_truncated"))
-    for raw_hit in hits:
-        if not isinstance(raw_hit, dict):
+    graph = result.get("graph")
+    if isinstance(graph, dict) and isinstance(graph.get("paths"), list):
+        graph = dict(graph)
+        graph_trimmed = False
+        raw_paths = graph["paths"]
+        paths: list[dict[str, Any]] = []
+        for raw_path in raw_paths[:3]:
+            if not isinstance(raw_path, dict):
+                graph_trimmed = True
+                truncated = True
+                continue
+            path = dict(raw_path)
+            steps = path.get("steps")
+            if isinstance(steps, list):
+                if len(steps) > 8:
+                    graph_trimmed = True
+                    truncated = True
+                path["steps"] = steps[:8]
+                nodes = path.get("nodes")
+                if isinstance(nodes, list):
+                    path["nodes"] = nodes[: len(path["steps"]) + 1]
+            paths.append(path)
+        if len(raw_paths) > 3:
+            graph_trimmed = True
             truncated = True
-            continue
-        candidate = {**result, "hits": [*selected, raw_hit]}
-        if len(json.dumps(candidate, ensure_ascii=False)) <= max_chars:
-            selected.append(raw_hit)
-            continue
-        truncated = True
-        if not selected:
-            reduced = dict(raw_hit)
-            content = reduced.get("content")
-            if isinstance(content, str):
-                reduced["content"] = ""
-                reduced["content_truncated"] = True
-                fixed_size = len(
-                    json.dumps(
-                        {
-                            **result,
-                            "hits": [reduced],
-                            "context_truncated": True,
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-                budget = max(
-                    0,
-                    max_chars - fixed_size - len(KNOWLEDGE_TRUNCATION_MARKER),
-                )
-                reduced["content"] = content[:budget] + KNOWLEDGE_TRUNCATION_MARKER
-                candidate = {
-                    **result,
-                    "hits": [reduced],
-                    "context_truncated": True,
-                }
-                if len(json.dumps(candidate, ensure_ascii=False)) <= max_chars:
-                    selected.append(reduced)
-        break
+        graph["paths"] = paths
+        if graph_trimmed:
+            graph["truncated"] = True
+        result["graph"] = graph
+
+    selected = [item for item in hits if isinstance(item, dict)]
+    truncated = truncated or len(selected) < len(hits)
     result["hits"] = selected
-    result["context_truncated"] = truncated or len(selected) < len(hits)
+
+    def encoded_size() -> int:
+        return len(
+            json.dumps(
+                {**result, "context_truncated": truncated},
+                ensure_ascii=False,
+            )
+        )
+
+    graph_paths = (
+        result["graph"].get("paths")
+        if isinstance(result.get("graph"), dict)
+        else None
+    )
+    while isinstance(graph_paths, list) and graph_paths and encoded_size() > max_chars:
+        graph_paths.pop()
+        result["graph"]["truncated"] = True
+        truncated = True
+    while selected and encoded_size() > max_chars:
+        selected.pop()
+        truncated = True
+    result["context_truncated"] = truncated
     return result
 
 
@@ -296,6 +314,7 @@ def build_knowledge_search_tool(
                 }
                 retrieval_stats.append(stats_entry)
             hit_groups = []
+            graph_results: dict[str, Any] = {}
             failed_sources = 0
             for knowledge_base in available_knowledge_bases:
                 stats_entry = next(
@@ -313,6 +332,11 @@ def build_knowledge_search_tool(
                             search_mode=payload.search_mode,
                             similarity=payload.similarity,
                             include_references=True,
+                            graph_mode=payload.graph_mode,
+                            source_entity=payload.source_entity,
+                            target_entity=payload.target_entity,
+                            max_hops=payload.max_hops,
+                            relation_filters=payload.relation_filters,
                         ),
                         settings,
                     )
@@ -325,6 +349,8 @@ def build_knowledge_search_tool(
                 stats_entry["reranked"] = result.trace.rerank_status == "applied"
                 stats_entry["trace_id"] = result.trace.trace_id
                 hit_groups.append((knowledge_base, result.hits))
+                if result.graph is not None:
+                    graph_results[knowledge_base.id] = result.graph
 
             selected_hits: list[tuple[KnowledgeBase, Any]] = []
             for index in range(payload.limit):
@@ -370,6 +396,8 @@ def build_knowledge_search_tool(
                         "rerank_status": stats_entry["rerank_status"],
                         "sources": hit.sources[:3],
                         "reference_hops": hit.reference_hops,
+                        "graph_claim_ids": hit.graph_claim_ids,
+                        "graph_hops": hit.graph_hops,
                     }
                 )
 
@@ -381,9 +409,35 @@ def build_knowledge_search_tool(
                 evidence_status = "partial_failure"
             else:
                 evidence_status = "not_found"
+            graph_result = next(
+                (
+                    graph_results[knowledge_base.id]
+                    for knowledge_base, _ in selected_hits
+                    if knowledge_base.id in graph_results
+                ),
+                next(iter(graph_results.values()), None),
+            )
+            graph_output = (
+                {
+                    "revision_id": graph_result.revision_id,
+                    "operation": graph_result.operation,
+                    "paths": [
+                        path.model_dump(mode="json")
+                        for path in graph_result.paths[:3]
+                    ],
+                    "truncated": (
+                        graph_result.truncated
+                        or len(graph_result.paths) > 3
+                        or len(graph_results) > 1
+                    ),
+                }
+                if graph_result is not None
+                else None
+            )
             output = bounded_knowledge_output({
                 "query": payload.query,
                 "hits": tool_hits,
+                "graph": graph_output,
                 "retrieval_stats": retrieval_stats,
                 "evidence_status": evidence_status,
             })

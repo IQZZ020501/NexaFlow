@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities.llm.models import RegisteredModel
@@ -12,6 +12,9 @@ from app.shareddomain.agents.models import Agent as AgentOrm
 from app.shareddomain.agents.models import AgentRun as AgentRunOrm
 from app.shareddomain.knowledge.models import KnowledgeBase as KnowledgeBaseOrm
 from app.shareddomain.knowledge.models import KnowledgeTask as KnowledgeTaskOrm
+from app.shareddomain.knowledge_graph.models import (
+    KnowledgeGraphRevision as KnowledgeGraphRevisionOrm,
+)
 from app.shareddomain.tools.models import Tool as ToolOrm
 from app.shareddomain.workflows.models import WorkflowDefinition as WorkflowDefinitionOrm
 
@@ -87,7 +90,10 @@ async def workspace_inventory_counts(
     }
 
 
-async def health_counts(db: AsyncSession, since: datetime) -> tuple[int, int]:
+async def health_counts(
+    db: AsyncSession,
+    since: datetime,
+) -> tuple[int, int, int, int, int]:
     """
     Count pending knowledge tasks and agent runs, along with recent error and critical system logs.
     
@@ -95,7 +101,8 @@ async def health_counts(db: AsyncSession, since: datetime) -> tuple[int, int]:
         since (datetime): Start time for counting system logs.
     
     Returns:
-        tuple[int, int]: The number of pending tasks and runs, followed by the number of error or critical logs created since ``since``.
+        tuple[int, int, int, int, int]: Pending work, recent failed logs,
+        pending Graph tasks, recent failed Graph tasks, and Graph profile repairs.
     """
     pending = int(
         await db.scalar(
@@ -122,7 +129,55 @@ async def health_counts(db: AsyncSession, since: datetime) -> tuple[int, int]:
         )
         or 0
     )
-    return pending, failed_logs
+    graph_task_types = {"graph_sync", "graph_rebuild"}
+    pending_graph_tasks = int(
+        await db.scalar(
+            select(func.count()).select_from(KnowledgeTaskOrm).where(
+                KnowledgeTaskOrm.task_type.in_(graph_task_types),
+                KnowledgeTaskOrm.status.in_({"queued", "running"}),
+            )
+        )
+        or 0
+    )
+    failed_graph_tasks_24h = int(
+        await db.scalar(
+            select(func.count()).select_from(KnowledgeTaskOrm).where(
+                KnowledgeTaskOrm.task_type.in_(graph_task_types),
+                KnowledgeTaskOrm.status == "failed",
+                func.coalesce(
+                    KnowledgeTaskOrm.finished_at,
+                    KnowledgeTaskOrm.updated_at,
+                    KnowledgeTaskOrm.created_at,
+                )
+                >= since,
+            )
+        )
+        or 0
+    )
+    pending_graph_profile_repairs = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(KnowledgeGraphRevisionOrm)
+            .where(
+                or_(
+                    KnowledgeGraphRevisionOrm.stats_json[
+                        "profile_repair_pending"
+                    ].as_boolean().is_(True),
+                    KnowledgeGraphRevisionOrm.stats_json[
+                        "profile_delete_pending"
+                    ].as_boolean().is_(True),
+                )
+            )
+        )
+        or 0
+    )
+    return (
+        pending,
+        failed_logs,
+        pending_graph_tasks,
+        failed_graph_tasks_24h,
+        pending_graph_profile_repairs,
+    )
 
 
 async def daily_run_count(db: AsyncSession, workspace_id: str, since: datetime) -> int:

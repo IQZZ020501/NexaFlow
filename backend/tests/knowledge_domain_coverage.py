@@ -48,6 +48,7 @@ from app.entities.knowledge import (
     KnowledgeStorageCleanup,
     KnowledgeTask,
     TASK_FAILED_STATUS,
+    TASK_GRAPH_SYNC,
     TASK_INDEX,
     TASK_PARSE,
     TASK_QUEUED_STATUS,
@@ -74,6 +75,7 @@ from app.tasks.knowledge import (
     enqueue_knowledge_storage_cleanup,
     enqueue_knowledge_task,
     recover_knowledge_tasks_job,
+    reconcile_knowledge_graphs_job,
     enqueue_upload_storage_cleanups,
     recover_knowledge_storage_cleanups_job,
     recover_upload_storage_cleanups_job,
@@ -2783,15 +2785,21 @@ async def run_parse_task_direct_tests(
         await db.commit()
         assert doc.status == DOCUMENT_PARSED_STATUS
         assert task.total_items == 1 and task.processed_items == 1
+        initial_normalized_key = str(doc.meta["normalized_artifact_key"])
+        initial_normalized_path = settings.knowledge_storage_dir / initial_normalized_key
+        initial_document_version = int(doc.meta["document_version"])
+        assert len(str(doc.meta["normalized_content_hash"])) == 64
+        assert doc.meta["normalized_text_version"] == "normalized-markdown-v1"
+        assert initial_normalized_path.exists()
 
     with_assets = DocumentChunkDrafts(
-        parents=[ParentChunkDraft(title="P", content="index me please")],
+        parents=[ParentChunkDraft(title="P", content="index me revised")],
         children=[
             ChildChunkDraft(
-                content="index me please",
+                content="index me revised",
                 parent_index=0,
                 start_offset=0,
-                end_offset=15,
+                end_offset=16,
                 asset_indexes=[0],
             )
         ],
@@ -2804,19 +2812,21 @@ async def run_parse_task_direct_tests(
                 alt_text="",
             )
         ],
+        normalized_text="index me revised",
     )
     without_assets = DocumentChunkDrafts(
-        parents=[ParentChunkDraft(title="P", content="index me please")],
+        parents=[ParentChunkDraft(title="P", content="index me changed")],
         children=[
             ChildChunkDraft(
-                content="index me please",
+                content="index me changed",
                 parent_index=0,
                 start_offset=0,
-                end_offset=15,
+                end_offset=16,
                 asset_indexes=[],
             )
         ],
         assets=[],
+        normalized_text="index me changed",
     )
 
     async def reset_for_run(db, task, doc) -> None:
@@ -2856,6 +2866,12 @@ async def run_parse_task_direct_tests(
         asset_rows = await knowledge_repository.list_document_assets(db, kb, document_id)
         assert asset_rows, "asset must be persisted"
         asset_object_key = asset_rows[0].object_key
+        with_assets_normalized_key = str(doc.meta["normalized_artifact_key"])
+        assert int(doc.meta["document_version"]) == initial_document_version + 1
+        assert not initial_normalized_path.exists()
+        assert (
+            settings.knowledge_storage_dir / with_assets_normalized_key
+        ).read_text(encoding="utf-8") == "index me revised"
 
         # third parse without assets -> stale asset cleanup
         await reset_for_run(db, task, doc)
@@ -2884,6 +2900,13 @@ async def run_parse_task_direct_tests(
         assert not (
             test_settings().knowledge_storage_dir / asset_object_key
         ).exists()
+        current_normalized_key = str(doc.meta["normalized_artifact_key"])
+        current_normalized_path = settings.knowledge_storage_dir / current_normalized_key
+        assert int(doc.meta["document_version"]) == initial_document_version + 2
+        assert not (
+            settings.knowledge_storage_dir / with_assets_normalized_key
+        ).exists()
+        assert current_normalized_path.read_text(encoding="utf-8") == "index me changed"
 
         # commit failure -> rollback + written assets cleanup
         await reset_for_run(db, task, doc)
@@ -2918,12 +2941,24 @@ async def run_parse_task_direct_tests(
         finally:
             db.commit = original_commit  # type: ignore[method-assign]
         await db.rollback()
+        assert not (
+            settings.knowledge_storage_dir / with_assets_normalized_key
+        ).exists()
+        assert current_normalized_path.exists()
         # the direct runs never claimed the task; close it so later enqueues
         # for the same document do not see an open task
         task.status = TASK_SUCCEEDED_STATUS
         task.finished_at = utc_now()
         await knowledge_repository.save_knowledge_task(db, task)
         await db.commit()
+
+    async with get_session_factory()() as db:
+        persisted_doc = await knowledge_repository.get_knowledge_document_by_id(
+            db, document_id
+        )
+        assert persisted_doc is not None
+        assert persisted_doc.meta["normalized_artifact_key"] == current_normalized_key
+        assert int(persisted_doc.meta["document_version"]) == initial_document_version + 2
 
 
 # ---------------------------------------------------------------------------
@@ -3059,6 +3094,23 @@ def run_celery_job_tests(
         {"args": ("task-recover-2",)},
     ]
 
+    with (
+        patch.object(
+            knowledge_tasks_module,
+            "reconcile_knowledge_graphs",
+            new=AsyncMock(return_value=["graph-task-1", "graph-task-2"]),
+        ),
+        patch.object(
+            knowledge_tasks_module.run_knowledge_task_job,
+            "apply_async",
+        ) as apply_async,
+    ):
+        reconcile_knowledge_graphs_job()
+    assert [call.kwargs for call in apply_async.call_args_list] == [
+        {"args": ("graph-task-1",)},
+        {"args": ("graph-task-2",)},
+    ]
+
     # run_knowledge_storage_cleanup_job: success
     cleanup_kb_id = _create_kb(client, research_token, workspace_id, "Cleanup Job KB")
     cleanup_id = asyncio.run(create_cleanup_record(workspace_id, cleanup_kb_id))
@@ -3167,6 +3219,26 @@ def run_celery_job_tests(
         else:
             raise AssertionError("non-eager dispatch failure must propagate")
     asyncio.run(_assert_task_failed_dispatch(dispatch_fail_task.id))
+
+    graph_dispatch_task = asyncio.run(
+        create_task_row(
+            workspace_id,
+            no_model_kb_id,
+            None,
+            TASK_GRAPH_SYNC,
+            actor_user_id,
+        )
+    )
+    graph_dispatch = Mock()
+    with patch.object(
+        knowledge_tasks_module.run_knowledge_task_job,
+        "apply_async",
+        new=graph_dispatch,
+    ):
+        asyncio.run(enqueue_knowledge_task(graph_dispatch_task.id, non_eager_settings))
+    assert graph_dispatch.call_args.kwargs["soft_time_limit"] == 28_800
+    assert graph_dispatch.call_args.kwargs["time_limit"] == 29_100
+
     celery_app.conf.update(
         broker_url=settings.celery_broker_url,
         task_always_eager=True,
@@ -4550,6 +4622,18 @@ async def run_direct_shareddomain_tests(
             direct_doc.id,
         )
         assert doc_entity is not None
+        normalized_key = (
+            f"{workspace_id}/{direct_kb.id}/normalized/{direct_doc.id}/delete.md"
+        )
+        normalized_path = settings.knowledge_storage_dir / normalized_key
+        normalized_path.parent.mkdir(parents=True, exist_ok=True)
+        normalized_path.write_text("delete me", encoding="utf-8")
+        doc_entity.meta = {
+            **(doc_entity.meta or {}),
+            "normalized_artifact_key": normalized_key,
+        }
+        await knowledge_repository.save_knowledge_document(db, doc_entity)
+        await db.commit()
         await lifecycle_service.delete_knowledge_document(
             db,
             direct_kb,
@@ -4563,6 +4647,7 @@ async def run_direct_shareddomain_tests(
         )
         assert after_delete is not None
         assert after_delete.status == DOCUMENT_DELETED_STATUS
+        assert not normalized_path.exists()
         assert (
             await knowledge_repository.list_document_chunks(
                 db,

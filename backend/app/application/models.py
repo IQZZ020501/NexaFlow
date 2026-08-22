@@ -18,6 +18,7 @@ from app.capabilities.llm.registry import (
     ACTIVE_STATUS,
     apply_model_credentials,
     credential_fields,
+    normalize_model_request_params,
     normalize_model_type,
     normalize_provider_credentials,
     provider_catalog_entry,
@@ -26,6 +27,10 @@ from app.capabilities.llm.registry import (
     validate_provider_support,
     validate_provider_type,
     validate_status,
+)
+from app.capabilities.llm.runtime import (
+    DEFAULT_MODEL_REQUEST_PARAMS,
+    MODEL_REQUEST_PARAMS_META_KEY,
 )
 from app.domain.user import User
 from app.infrastructure.config import Settings
@@ -50,6 +55,10 @@ def model_to_response(model: RegisteredModel) -> RegisteredModelResponse:
     hints = model.credential_secret_hints or (
         {"api_key": model.api_key_hint} if model.api_key_hint else {}
     )
+    request_params = (model.meta or {}).get(
+        MODEL_REQUEST_PARAMS_META_KEY,
+        DEFAULT_MODEL_REQUEST_PARAMS,
+    )
     return RegisteredModelResponse(
         id=model.id,
         workspace_id=model.workspace_id,
@@ -64,6 +73,7 @@ def model_to_response(model: RegisteredModel) -> RegisteredModelResponse:
         has_api_key=model.api_key_ciphertext is not None,
         api_key_hint=model.api_key_hint,
         meta=model.meta,
+        request_params=request_params if isinstance(request_params, dict) else {},
         created_by_user_id=model.created_by_user_id,
         created_at=model.created_at,
         updated_at=model.updated_at,
@@ -164,6 +174,13 @@ async def create_registered_model(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid provider type for provider.")
     model_type = normalize_model_type(payload.model_type)
     validate_provider_support(entry, model_type)
+    raw_request_params = payload.request_params
+    if "request_params" not in payload.model_fields_set and model_type == "LLM":
+        raw_request_params = DEFAULT_MODEL_REQUEST_PARAMS
+    request_params = normalize_model_request_params(
+        raw_request_params,
+        model_type,
+    )
     config, secrets, hints, _ = normalize_provider_credentials(
         entry,
         payload.credential,
@@ -180,6 +197,7 @@ async def create_registered_model(
         {**config, **secrets},
         model_name,
         model_type,
+        request_params,
     )
 
     model = RegisteredModel(
@@ -191,7 +209,11 @@ async def create_registered_model(
         model_type=model_type,
         model_name=model_name,
         status=ACTIVE_STATUS,
-        meta={**payload.meta, **capabilities},
+        meta={
+            **payload.meta,
+            MODEL_REQUEST_PARAMS_META_KEY: request_params,
+            **capabilities,
+        },
         created_by_user_id=actor.id,
     )
     apply_model_credentials(
@@ -249,6 +271,21 @@ async def update_registered_model(
 
     model_type = normalize_model_type(payload.model_type) if payload.model_type is not None else model.model_type
     validate_provider_support(entry, model_type)
+    raw_request_params = payload.request_params
+    if raw_request_params is None:
+        if model_type != model.model_type:
+            raw_request_params = (
+                DEFAULT_MODEL_REQUEST_PARAMS if model_type == "LLM" else {}
+            )
+        else:
+            raw_request_params = (model.meta or {}).get(
+                MODEL_REQUEST_PARAMS_META_KEY,
+                DEFAULT_MODEL_REQUEST_PARAMS if model_type == "LLM" else {},
+            )
+    request_params = normalize_model_request_params(
+        raw_request_params,
+        model_type,
+    )
     model_name = payload.model_name.strip() if payload.model_name is not None else model.model_name
     if not model_name:
         raise HTTPException(
@@ -284,6 +321,7 @@ async def update_registered_model(
         {**config, **secrets},
         model_name,
         model_type,
+        request_params,
     )
 
     model.name = name
@@ -295,6 +333,7 @@ async def update_registered_model(
         model.status = validate_status(payload.status)
     model.meta = {
         **(payload.meta if payload.meta is not None else (model.meta or {})),
+        MODEL_REQUEST_PARAMS_META_KEY: request_params,
         **capabilities,
     }
     apply_model_credentials(
@@ -311,6 +350,8 @@ async def update_registered_model(
             "config_fields": sorted(config),
             "secret_fields_updated": sorted(changed_secrets),
         }
+    if "request_params" in details:
+        details["request_params"] = {"keys": sorted(request_params)}
 
     record_audit_log(
         db,

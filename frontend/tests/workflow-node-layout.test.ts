@@ -534,7 +534,7 @@ test("knowledge search mode uses the anchored app dropdown", () => {
   expect(source).not.toMatch(/<select\s+id=\{`\$\{nodeId\}-knowledge-mode`\}/)
 })
 
-test("knowledge node presents grouped settings and four documented outputs", () => {
+test("knowledge node presents graph settings and seven documented outputs", () => {
   expectStringArray(source, [
     "llm",
     "knowledge",
@@ -559,10 +559,24 @@ test("knowledge node presents grouped settings and four documented outputs", () 
   expect(source).toContain(
     '{ field: "directly_return", label: "满足直接回答的分段内容" }'
   )
+  expect(source).toContain('{ field: "graph", label: "图谱结果" }')
+  expect(source).toContain(
+    '{ field: "graph_revision_id", label: "图谱修订 ID" }'
+  )
+  expect(source).toContain('{ field: "graph_paths", label: "图谱路径" }')
+  expect(source).toContain('t("图谱检索模式")')
+  expect(source).toContain(
+    'graphMode === "path" || graphMode === "neighborhood"'
+  )
+  expect(source).toContain(
+    "updateConfig({ relation_filters: relationFiltersValue })"
+  )
+  expect(graphSource).toContain('graph_mode: "auto"')
+  expect(graphSource).toContain("relation_filters: []")
   expect(source).toContain("displayValue={t(item.label)}")
   expect(source).toContain("reference={`{{${nodeId}.${item.field}}}`}")
   expect(source).toContain("<OutputFieldRow")
-  expect(source.match(/<NumberStepper/g)?.length).toBe(4)
+  expect(source.match(/<NumberStepper/g)?.length).toBe(5)
   expect(source).toContain("grid h-8 w-20 grid-cols-[minmax(0,1fr)_1.25rem]")
   expect(source).toContain("px-1 text-center text-xs")
   expect(source).toContain('aria-label={t("增加数值")}')
