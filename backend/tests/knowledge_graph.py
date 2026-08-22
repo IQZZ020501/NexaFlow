@@ -28,6 +28,7 @@ from app.entities.knowledge import (
     KnowledgeTask,
 )
 from app.entities.knowledge_graph import (
+    GRAPH_REVIEW_OPEN,
     KnowledgeGraphAlias as GraphAliasRecord,
     KnowledgeGraphClaim as GraphClaimRecord,
     KnowledgeGraphClaimEvidence as GraphEvidenceRecord,
@@ -4531,6 +4532,572 @@ async def test_claim_survives_until_last_evidence_is_deleted() -> None:
         ]
 
 
+async def test_graph_review_decision_normalization_paths() -> None:
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_user_by_id(db, "graph-user")
+        assert actor is not None
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-review-app-kb",
+                workspace_id="graph-workspace",
+                name="Graph Review App KB",
+                graph_enabled=True,
+                created_by_user_id=actor.id,
+            ),
+        )
+        schema = await create_graph_schema(
+            db,
+            knowledge_base,
+            default_graph_schema(),
+            actor,
+        )
+        initial = await graph_revisions.create_revision(
+            db,
+            knowledge_base,
+            schema,
+            actor.id,
+            "review-app-initial",
+        )
+        await db.commit()
+        initial = await graph_revisions.publish_revision(
+            db,
+            knowledge_base,
+            initial,
+        )
+        document = await knowledge_repository.create_knowledge_document(
+            db,
+            KnowledgeDocument(
+                id="graph-review-app-document",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                filename="review-app.txt",
+                content_type="text/plain",
+                size_bytes=20,
+                status="indexed",
+                created_by_user_id=actor.id,
+            ),
+        )
+        chunk = KnowledgeDocumentChunk(
+            id="graph-review-app-chunk",
+            workspace_id=knowledge_base.workspace_id,
+            knowledge_base_id=knowledge_base.id,
+            document_id=document.id,
+            content="源制度、目标制度。",
+            search_text="源制度 目标制度",
+            char_count=9,
+            token_count=6,
+            status="indexed",
+        )
+        await knowledge_repository.save_knowledge_document_chunk(db, chunk)
+        for entity_id, name in (
+            ("norm-source", "源制度"),
+            ("norm-target", "目标制度"),
+            ("norm-object", "对象"),
+        ):
+            await graph_repository.create_entity(
+                db,
+                GraphEntityRecord(
+                    id=entity_id,
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    entity_type="Document",
+                    canonical_name=name,
+                    normalized_name=name,
+                    search_text=name,
+                    created_revision_id=initial.id,
+                    last_published_revision_id=initial.id,
+                ),
+            )
+        await graph_repository.create_alias(
+            db,
+            GraphAliasRecord(
+                id="norm-source-alias",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                entity_id="norm-source",
+                alias="源规",
+                normalized_alias="源规",
+                created_revision_id=initial.id,
+                last_published_revision_id=initial.id,
+            ),
+        )
+        await graph_repository.create_mention(
+            db,
+            GraphMentionRecord(
+                id="norm-mention",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                entity_id="norm-source",
+                document_id=document.id,
+                chunk_id=chunk.id,
+                surface_text="源制度",
+                start_offset=0,
+                end_offset=3,
+                quote=chunk.content,
+                resolution_method="exact",
+                created_revision_id=initial.id,
+                last_published_revision_id=initial.id,
+            ),
+        )
+        await graph_repository.create_claim(
+            db,
+            GraphClaimRecord(
+                id="norm-claim",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                subject_entity_id="norm-source",
+                predicate="applies_to",
+                object_entity_id="norm-object",
+                status="active",
+                source_kind="explicit_text",
+                quality_score=0.9,
+                fingerprint=claim_fingerprint(
+                    "norm-source",
+                    "applies_to",
+                    "norm-object",
+                    None,
+                    None,
+                    None,
+                ),
+                created_revision_id=initial.id,
+                last_published_revision_id=initial.id,
+            ),
+        )
+        review_specs = (
+            ("norm-rev-scope", "implicit_relation", {"claim_ids": ["norm-claim"]}),
+            (
+                "norm-rev-ghost-claim",
+                "implicit_relation",
+                {"claim_ids": ["norm-ghost-claim"]},
+            ),
+            ("norm-rev-conflict", "conflict", {}),
+            (
+                "norm-rev-missing-source",
+                "ambiguous_entity",
+                {"entity_id": "norm-ghost"},
+            ),
+            (
+                "norm-rev-merge",
+                "possible_duplicate",
+                {
+                    "entity_id": "norm-source",
+                    "candidate_entity_ids": ["norm-target"],
+                },
+            ),
+            ("norm-rev-split", "ambiguous_entity", {"entity_id": "norm-source"}),
+        )
+        for review_id, kind, payload in review_specs:
+            await graph_repository.create_review_item(
+                db,
+                GraphReviewRecord(
+                    id=review_id,
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    kind=kind,
+                    payload_json=payload,
+                    status=GRAPH_REVIEW_OPEN,
+                    revision_id=initial.id,
+                    created_by_user_id=actor.id,
+                ),
+            )
+        await db.commit()
+
+        def expect_http(callback, status_code: int, message_part: str) -> None:
+            try:
+                callback()
+            except HTTPException as exc:
+                assert exc.status_code == status_code, (exc.status_code, exc.detail)
+                assert message_part.lower() in str(exc.detail).lower(), exc.detail
+            else:
+                raise AssertionError(f"expected {status_code}: {message_part}")
+
+        await asyncio.wait_for(
+            asyncio.gather(asyncio.sleep(0)),
+            timeout=5,
+        )
+
+        async def normalized(review_id, kind, payload, request):
+            return await knowledge_graph._normalize_review_decision(
+                db,
+                knowledge_base,
+                review_id,
+                kind,
+                payload,
+                request,
+                actor,
+            )
+
+        outside = KnowledgeGraphReviewDecisionRequest(
+            action="approve_claim",
+            claim_ids=["norm-ghost-claim"],
+        )
+        try:
+            await normalized(
+                "norm-rev-scope",
+                "implicit_relation",
+                {"claim_ids": ["norm-claim"]},
+                outside,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 422
+        else:
+            raise AssertionError("out-of-scope claim ids must fail")
+        ghost_claim = KnowledgeGraphReviewDecisionRequest(
+            action="approve_claim",
+            claim_ids=["norm-ghost-claim"],
+        )
+        try:
+            await normalized(
+                "norm-rev-ghost-claim",
+                "implicit_relation",
+                {"claim_ids": ["norm-ghost-claim"]},
+                ghost_claim,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("missing review claim must fail")
+        try:
+            await normalized(
+                "norm-rev-conflict",
+                "conflict",
+                {},
+                KnowledgeGraphReviewDecisionRequest(
+                    action="merge_entities",
+                    target_entity_id="norm-target",
+                ),
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 422
+            assert "incompatible" in str(exc.detail)
+        else:
+            raise AssertionError("merge on conflict review must fail")
+        try:
+            await normalized(
+                "norm-rev-missing-source",
+                "ambiguous_entity",
+                {"entity_id": "norm-ghost"},
+                KnowledgeGraphReviewDecisionRequest(
+                    action="merge_entities",
+                    target_entity_id="norm-target",
+                ),
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("missing merge source must fail")
+        merge_decision = await normalized(
+            "norm-rev-merge",
+            "possible_duplicate",
+            {
+                "entity_id": "norm-source",
+                "candidate_entity_ids": ["norm-target"],
+            },
+            KnowledgeGraphReviewDecisionRequest(
+                action="merge_entities",
+                target_entity_id="norm-target",
+            ),
+        )
+        assert merge_decision["source_entity_id"] == "norm-source"
+        assert merge_decision["target_entity_id"] == "norm-target"
+        assert merge_decision["record_count"] == 3
+        try:
+            await normalized(
+                "norm-rev-split",
+                "ambiguous_entity",
+                {"entity_id": "norm-source"},
+                KnowledgeGraphReviewDecisionRequest(
+                    action="split_entity",
+                    canonical_name="新制度",
+                    entity_type="Document",
+                    mention_ids=["norm-ghost-mention"],
+                ),
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("unknown split mention must fail")
+        try:
+            await normalized(
+                "norm-rev-split",
+                "ambiguous_entity",
+                {"entity_id": "norm-source"},
+                KnowledgeGraphReviewDecisionRequest(
+                    action="split_entity",
+                    canonical_name="新制度",
+                    entity_type="Document",
+                    mention_ids=["norm-mention"],
+                    claim_ids=["norm-ghost-claim"],
+                ),
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("unknown split claim must fail")
+        split_decision = await normalized(
+            "norm-rev-split",
+            "ambiguous_entity",
+            {"entity_id": "norm-source"},
+            KnowledgeGraphReviewDecisionRequest(
+                action="split_entity",
+                canonical_name="新制度",
+                entity_type="Document",
+                mention_ids=["norm-mention"],
+                claim_ids=["norm-claim"],
+            ),
+        )
+        assert split_decision["new_entity_id"]
+        assert split_decision["record_count"] == 2
+
+
+async def test_graph_review_resolution_gates_and_enqueue_failure() -> None:
+    settings = tests.support.settings()
+    async with get_session_factory()() as db:
+        actor = await user_repository.get_user_by_id(db, "graph-user")
+        assert actor is not None
+        knowledge_base = await knowledge_repository.create_knowledge_base(
+            db,
+            KnowledgeBase(
+                id="graph-review-gates-kb",
+                workspace_id="graph-workspace",
+                name="Graph Review Gates KB",
+                graph_enabled=False,
+                created_by_user_id=actor.id,
+            ),
+        )
+        request = KnowledgeGraphReviewDecisionRequest(action="approve_claim")
+        try:
+            await knowledge_graph.resolve_graph_review(
+                db,
+                knowledge_base,
+                "gates-rev",
+                request,
+                actor,
+                settings,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+            assert "disabled" in str(exc.detail)
+        else:
+            raise AssertionError("review resolution must require graph enabled")
+        knowledge_base.graph_enabled = True
+        await knowledge_repository.save_knowledge_base(db, knowledge_base)
+        await db.commit()
+        try:
+            await knowledge_graph.resolve_graph_review(
+                db,
+                knowledge_base,
+                "gates-rev",
+                request,
+                actor,
+                settings,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+            assert "no active revision" in str(exc.detail)
+        else:
+            raise AssertionError("review resolution must require an active revision")
+
+        schema = await create_graph_schema(
+            db,
+            knowledge_base,
+            default_graph_schema(),
+            actor,
+        )
+        revision = await graph_revisions.create_revision(
+            db,
+            knowledge_base,
+            schema,
+            actor.id,
+            "gates-watermark",
+        )
+        await db.commit()
+        revision = await graph_revisions.publish_revision(
+            db,
+            knowledge_base,
+            revision,
+        )
+        await graph_repository.create_entity(
+            db,
+            GraphEntityRecord(
+                id="gates-source",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                entity_type="Document",
+                canonical_name="门禁制度",
+                normalized_name="门禁制度",
+                search_text="门禁制度",
+                created_revision_id=revision.id,
+                last_published_revision_id=revision.id,
+            ),
+        )
+        await graph_repository.create_claim(
+            db,
+            GraphClaimRecord(
+                id="gates-claim",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                subject_entity_id="gates-source",
+                predicate="requires",
+                object_entity_id=None,
+                object_value_json="登记",
+                status="candidate",
+                source_kind="explicit_text",
+                quality_score=0.9,
+                fingerprint=claim_fingerprint(
+                    "gates-source",
+                    "requires",
+                    None,
+                    "登记",
+                    None,
+                    None,
+                ),
+                created_revision_id=revision.id,
+                last_published_revision_id=revision.id,
+            ),
+        )
+        await graph_repository.create_review_item(
+            db,
+            GraphReviewRecord(
+                id="gates-rev",
+                workspace_id=knowledge_base.workspace_id,
+                knowledge_base_id=knowledge_base.id,
+                kind="implicit_relation",
+                payload_json={"claim_ids": ["gates-claim"]},
+                status=GRAPH_REVIEW_OPEN,
+                revision_id=revision.id,
+                created_by_user_id=actor.id,
+            ),
+        )
+        await db.commit()
+        with (
+            patch.object(
+                knowledge_graph,
+                "enqueue_graph_sync",
+                new=AsyncMock(side_effect=RuntimeError("dispatch down")),
+            ),
+            patch.object(
+                knowledge_graph,
+                "_dispatch_graph_task",
+                new=AsyncMock(),
+            ),
+        ):
+            try:
+                await knowledge_graph.resolve_graph_review(
+                    db,
+                    knowledge_base,
+                    "gates-rev",
+                    request,
+                    actor,
+                    settings,
+                )
+            except RuntimeError as exc:
+                assert "dispatch down" in str(exc)
+            else:
+                raise AssertionError("enqueue failure must propagate")
+        refreshed = await graph_repository.get_review_item(
+            db,
+            revision,
+            "gates-rev",
+        )
+        assert refreshed is not None
+        assert refreshed.status == GRAPH_REVIEW_OPEN
+        assert refreshed.decision_json == {}
+
+
+async def test_graph_rebuild_returns_queued_task() -> None:
+    settings = tests.support.settings()
+    async with get_session_factory()() as db:
+        knowledge_base, actor, _ = await _graph_fixture(db)
+        with (
+            patch.object(
+                knowledge_graph,
+                "_validate_graph_build_requirements",
+                new=AsyncMock(return_value="embedding-stub"),
+            ),
+            patch.object(
+                knowledge_graph,
+                "_dispatch_graph_task",
+                new=AsyncMock(),
+            ),
+        ):
+            first = await knowledge_graph.rebuild_graph(
+                db,
+                knowledge_base,
+                actor,
+                settings,
+            )
+            second = await knowledge_graph.rebuild_graph(
+                db,
+                knowledge_base,
+                actor,
+                settings,
+            )
+        assert first.id == second.id
+
+
+async def test_graph_repository_guards_and_unavailable_query() -> None:
+    settings = tests.support.settings()
+    async with get_session_factory()() as db:
+        knowledge_base = KnowledgeBase(
+            id="graph-guard-kb",
+            workspace_id="graph-guard-ws",
+        )
+        assert await graph_repository.list_active_entities_by_ids(
+            db, knowledge_base, set()
+        ) == []
+        assert await graph_repository.list_exact_entity_matches(
+            db, knowledge_base, ""
+        ) == []
+        assert await graph_repository.list_query_entity_mentions(
+            db, knowledge_base, "", limit=0
+        ) == []
+        assert await graph_repository.list_active_claims_by_ids(
+            db, knowledge_base, set()
+        ) == []
+        assert await graph_repository.list_current_claims_by_ids(
+            db, knowledge_base, set()
+        ) == []
+        assert await graph_repository.query_entity_candidate_ids(
+            db, knowledge_base, "query", candidate_limit=0
+        ) == []
+        try:
+            await graph_repository.query_shortest_path_rows(
+                db,
+                knowledge_base,
+                "source",
+                "target",
+                2,
+                None,
+            )
+        except RuntimeError as exc:
+            assert "PostgreSQL" in str(exc)
+        else:
+            raise AssertionError("traversal must require PostgreSQL")
+        records = json.dumps(
+            [GRAPH_IMPORT_RECORD, GRAPH_IMPORT_RECORD]
+        ).encode("utf-8")
+        with patch.object(knowledge_graph, "MAX_GRAPH_IMPORT_RECORDS", 1):
+            try:
+                knowledge_graph.parse_graph_import_records("records.json", records)
+            except HTTPException as exc:
+                assert exc.status_code == 413
+            else:
+                raise AssertionError("oversized graph import must fail")
+        knowledge_base.graph_enabled = True
+        payload = KnowledgeQueryRequest(query="术语", graph_mode="auto")
+        result = await graph_query.retrieve_graph_candidates(
+            db,
+            knowledge_base,
+            payload,
+            settings,
+            5,
+        )
+        assert result.operation == "unavailable"
+        assert result.traversal is None
+        await db.rollback()
+
 async def main() -> None:
     test_graph_import_parser_is_atomic_and_bounded()
     test_graph_source_batches_keep_structured_and_text_chunks_separate()
@@ -4570,6 +5137,10 @@ async def main() -> None:
     await test_failed_profile_write_keeps_revision_unpublished_for_repair()
     await test_graph_import_persists_immutable_records_and_queues_sync()
     await test_claim_survives_until_last_evidence_is_deleted()
+    await test_graph_review_decision_normalization_paths()
+    await test_graph_review_resolution_gates_and_enqueue_failure()
+    await test_graph_rebuild_returns_queued_task()
+    await test_graph_repository_guards_and_unavailable_query()
     print("OK: knowledge_graph")
 
 

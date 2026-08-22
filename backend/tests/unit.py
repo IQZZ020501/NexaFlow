@@ -73,6 +73,26 @@ from app.shareddomain.knowledge_graph.resolution import (
     choose_automatic_entity_match,
     initial_claim_status,
 )
+from app.shareddomain.knowledge_graph.extraction import (
+    ExtractedClaim,
+    _entity_type,
+)
+from app.shareddomain.knowledge_graph import traversal as graph_traversal
+from app.shareddomain.knowledge_graph.traversal import (
+    GraphEvidenceView,
+    _collect_result_items,
+    _load_path_records,
+    assemble_path,
+)
+from app.infrastructure.repositories import knowledge_graph as graph_repository
+from unittest.mock import AsyncMock, patch
+from app.application.knowledge_graph_build import (
+    _EntityResolutionContext,
+    _parse_datetime,
+    _unique_surface_span,
+    finalize_abandoned_graph_reservations,
+)
+from app.application.knowledge_graph_maintenance import _revision_source_versions
 
 
 def expect_http_error(callback, status_code: int) -> None:
@@ -459,6 +479,563 @@ def test_graph_claim_fingerprint_and_initial_status_are_deterministic() -> None:
         object_resolved=True,
         evidence_verified=True,
     ) == ("candidate", "ambiguous_entity")
+
+
+def test_graph_extracted_claim_requires_exactly_one_object_and_bounded_span() -> None:
+    base = {
+        "subject_temp_id": "a",
+        "predicate": "owns",
+        "evidence_chunk_id": "chunk-1",
+    }
+    for object_kwargs in ({}, {"object_temp_id": "b", "object_value": "v"}):
+        try:
+            ExtractedClaim(evidence_span=(0, 4), **base, **object_kwargs)
+        except ValueError as exc:
+            assert "Exactly one claim object" in str(exc)
+        else:
+            raise AssertionError("claim object cardinality must be enforced")
+    for span in ((4, 4), (5, 3), (0, 4_001)):
+        try:
+            ExtractedClaim(
+                object_temp_id="b",
+                evidence_span=span,
+                **base,
+            )
+        except ValueError as exc:
+            assert "Evidence offsets are invalid." in str(exc)
+        else:
+            raise AssertionError("evidence span bounds must be enforced")
+
+
+def test_graph_entity_dedup_merges_aliases_and_filters_invalid_ones() -> None:
+    first = ExtractedEntity(
+        temp_id="a",
+        entity_type="Organization",
+        canonical_name="人力资源部",
+        aliases=["HR", "!!"],
+        properties={"src": 1},
+    )
+    second = ExtractedEntity(
+        temp_id="b",
+        entity_type="Organization",
+        canonical_name="人力资源部",
+        aliases=["HR", " ", "人事部"],
+        properties={"owner": "bob"},
+    )
+    deduplicated, representative_ids = deduplicate_extracted_entities([first, second])
+    assert representative_ids == {"a": "a", "b": "a"}
+    merged = deduplicated[0]
+    assert merged.temp_id == "a"
+    assert merged.aliases == ["HR", "!!", "人事部"]
+    assert merged.properties == {"src": 1, "owner": "bob"}
+
+
+def test_graph_rule_extractor_dedupes_entities_within_a_call() -> None:
+    content = "制度 A 定义术语 A。制度 A 定义术语 B。"
+    result = extract_graph_batch(
+        default_graph_schema(),
+        [ExtractionChunk("chunk-1", "doc-1", content)],
+    )
+    regulations = [
+        item for item in result.batch.entities if item.canonical_name == "制度 A"
+    ]
+    assert len(regulations) == 1
+    assert len(result.batch.claims) == 2
+
+
+def test_graph_batch_validation_rejects_broken_references() -> None:
+    chunks = [ExtractionChunk("chunk-1", "doc-1", "账户 A 共用手机号 P。")]
+    account_schema = GraphSchemaDefinition.model_validate(
+        {
+            "entity_types": [{"name": "Account"}, {"name": "Phone"}],
+            "relations": [
+                {
+                    "name": "uses_phone",
+                    "source_types": ["Account"],
+                    "target_types": ["Phone"],
+                }
+            ],
+        }
+    )
+    entities = [
+        {
+            "temp_id": "a",
+            "entity_type": "Account",
+            "canonical_name": "账户 A",
+        },
+        {
+            "temp_id": "p",
+            "entity_type": "Phone",
+            "canonical_name": "手机号 P",
+        },
+    ]
+    claim = {
+        "subject_temp_id": "a",
+        "predicate": "uses_phone",
+        "object_temp_id": "p",
+        "evidence_chunk_id": "chunk-1",
+        "evidence_span": (0, 4),
+    }
+
+    def expect_value_error(batch, message_part: str, schema=None) -> None:
+        try:
+            validate_extraction_batch(batch, chunks, schema)
+        except ValueError as exc:
+            assert message_part.lower() in str(exc).lower(), str(exc)
+        else:
+            raise AssertionError(f"expected failure: {message_part}")
+
+    expect_value_error(
+        GraphExtractionBatch.model_validate(
+            {"entities": [*entities, dict(entities[0])], "claims": [claim]}
+        ),
+        "unique",
+    )
+    ghost_type = GraphExtractionBatch.model_validate(
+        {
+            "entities": [{**entities[0], "entity_type": "Ghost"}, entities[1]],
+            "claims": [claim],
+        }
+    )
+    expect_value_error(ghost_type, "not allowed by the graph schema", account_schema)
+    unknown_subject = GraphExtractionBatch.model_validate(
+        {
+            "entities": entities,
+            "claims": [{**claim, "subject_temp_id": "zz"}],
+        }
+    )
+    expect_value_error(unknown_subject, "unknown entity")
+    unknown_chunk = GraphExtractionBatch.model_validate(
+        {
+            "entities": entities,
+            "claims": [{**claim, "evidence_chunk_id": "chunk-x"}],
+        }
+    )
+    expect_value_error(unknown_chunk, "unknown evidence chunk")
+    bad_predicate = GraphExtractionBatch.model_validate(
+        {
+            "entities": entities,
+            "claims": [{**claim, "predicate": "hates"}],
+        }
+    )
+    try:
+        validate_extraction_batch(bad_predicate, chunks, account_schema)
+    except ValueError as exc:
+        assert "not allowed by the graph schema" in str(exc)
+    else:
+        raise AssertionError("unsupported predicate must fail")
+    inverse_without_entity = GraphExtractionBatch.model_validate(
+        {
+            "entities": [
+                {
+                    "temp_id": "term",
+                    "entity_type": "Concept",
+                    "canonical_name": "术语 A",
+                }
+            ],
+            "claims": [
+                {
+                    "subject_temp_id": "term",
+                    "predicate": "defined_by",
+                    "object_temp_id": None,
+                    "object_value": "制度文本",
+                    "evidence_chunk_id": "chunk-2",
+                    "evidence_span": (0, 4),
+                }
+            ],
+        }
+    )
+    try:
+        validate_extraction_batch(
+            inverse_without_entity,
+            [ExtractionChunk("chunk-2", "doc-2", "术语 A 由制度 A 定义。")],
+            default_graph_schema(),
+        )
+    except ValueError as exc:
+        assert "requires an entity object" in str(exc)
+    else:
+        raise AssertionError("inverse predicate without entity object must fail")
+
+
+def test_graph_entity_type_inference_and_fallback() -> None:
+    known = {
+        "Department",
+        "Process",
+        "Regulation",
+        "Concept",
+        "Organization",
+        "System",
+        "Form",
+        "Event",
+    }
+    expectations = {
+        "人力资源部": "Department",
+        "员工入职流程": "Process",
+        "校外培训管理规定": "Regulation",
+        "基本概念": "Concept",
+        "示例公司": "Organization",
+        "审批系统": "System",
+        "入库表单": "Form",
+        "评审会议": "Event",
+    }
+    allowed = sorted(known)
+    for surface, expected in expectations.items():
+        assert _entity_type(surface, "X", allowed, known) == expected
+    assert _entity_type("普通名词", "Ghost", ["Ghost"], known) == "Ghost"
+
+
+def test_graph_rule_extractor_guards_skip_noise_clauses() -> None:
+    content = (
+        "制度 A 不定义术语 A。　。定义术语 A。"
+        "制度 C 定义"
+        + "长" * 501
+        + "。制度 B 定义术语 B。"
+    )
+    result = extract_graph_batch(
+        default_graph_schema(),
+        [ExtractionChunk("chunk-1", "doc-1", content)],
+    )
+    predicates = {claim.predicate for claim in result.batch.claims}
+    assert predicates == {"defines"}
+    names = {item.canonical_name for item in result.batch.entities}
+    assert names == {"制度 B", "术语 B"}
+    claim = result.batch.claims[0]
+    assert content[claim.start_offset : claim.end_offset] == "制度 B 定义术语 B"
+
+
+
+def test_graph_rule_extractor_caps_entities_and_claims() -> None:
+    from app.shareddomain.knowledge_graph import extraction as extraction_module
+
+    with patch.object(extraction_module, "MAX_EXTRACTED_CLAIMS", 1):
+        result = extraction_module.extract_graph_batch(
+            default_graph_schema(),
+            [
+                ExtractionChunk(
+                    "chunk-1",
+                    "doc-1",
+                    "制度 A 定义术语 A。制度 B 定义术语 B。",
+                )
+            ],
+        )
+    assert len(result.batch.claims) <= 1
+
+
+def test_graph_surface_span_requires_unique_occurrence() -> None:
+    entity = ExtractedEntity(
+        temp_id="a",
+        entity_type="Account",
+        canonical_name="账户 A",
+    )
+    assert _unique_surface_span(entity, "账户 A 与他人共用。") == (0, 4, "账户 A")
+    assert _unique_surface_span(entity, "账户 A 与账户 A 共用。") is None
+    aliased = entity.model_copy(update={"aliases": ["甲"]})
+    assert _unique_surface_span(aliased, "他称甲。") == (2, 3, "甲")
+
+
+def test_graph_resolution_context_skips_non_human_aliases() -> None:
+    entity = SimpleNamespace(
+        id="e1",
+        entity_type="Account",
+        external_key=None,
+        normalized_name="账户 a",
+    )
+    generated_only = _EntityResolutionContext.build(
+        {"e1": entity},
+        [
+            SimpleNamespace(
+                entity_id="e1",
+                source="generated",
+                normalized_alias="账户 a",
+            ),
+            SimpleNamespace(
+                entity_id="ghost",
+                source="human",
+                normalized_alias="幽灵",
+            ),
+        ],
+    )
+    assert generated_only.human_alias_ids == {}
+    human = _EntityResolutionContext.build(
+        {"e1": entity},
+        [
+            SimpleNamespace(
+                entity_id="e1",
+                source="human",
+                normalized_alias="账户 a",
+            )
+        ],
+    )
+    assert human.human_alias_ids == {("Account", "账户 a"): {"e1"}}
+
+
+def test_graph_build_pure_helpers_are_bounded() -> None:
+    merged = finalize_abandoned_graph_reservations(
+        {
+            "reserved_tokens": 500,
+            "charged_tokens": 100,
+            "estimated_tokens": 50,
+            "unreported_model_calls": 1,
+        }
+    )
+    assert merged["reserved_tokens"] == 0
+    assert merged["charged_tokens"] == 600
+    assert merged["estimated_tokens"] == 550
+    assert merged["unreported_model_calls"] == 2
+    unchanged = finalize_abandoned_graph_reservations({"reserved_tokens": 0})
+    assert unchanged == {"reserved_tokens": 0}
+    assert finalize_abandoned_graph_reservations(None) == {}
+
+    parsed = _parse_datetime("2024-01-02T03:04:05Z")
+    assert parsed is not None and parsed.year == 2024
+    assert _parse_datetime(None) is None
+    try:
+        _parse_datetime("not-a-date")
+    except ValueError as exc:
+        assert "timestamp is invalid" in str(exc)
+    else:
+        raise AssertionError("invalid graph timestamp must fail")
+
+    assert _revision_source_versions(None) is None
+    assert (
+        _revision_source_versions(SimpleNamespace(stats_json={})) is None
+    )
+    broken = _revision_source_versions(
+        SimpleNamespace(stats_json={"source_versions": ["bad"]})
+    )
+    assert broken is None
+    versions = _revision_source_versions(
+        SimpleNamespace(stats_json={"source_versions": {"d1": 3}})
+    )
+    assert versions == {"d1": "3"}
+
+
+def test_graph_assemble_path_rejects_inconsistent_paths() -> None:
+    def node(entity_id: str, name: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=entity_id,
+            entity_type="Account",
+            canonical_name=name,
+            properties_json={"k": "v"},
+        )
+
+    entities = {"a": node("a", "账户 A"), "b": node("b", "账户 B")}
+    claims = {
+        "c1": SimpleNamespace(
+            id="c1",
+            predicate="uses_phone",
+            subject_entity_id="a",
+            object_entity_id="b",
+            quality_score=0.9,
+            support_count=1,
+        ),
+        "c-self": SimpleNamespace(
+            id="c-self",
+            predicate="uses_phone",
+            subject_entity_id="a",
+            object_entity_id="a",
+            quality_score=0.9,
+            support_count=1,
+        ),
+    }
+    assert assemble_path(["a", "b"], [], entities, claims, {}) is None
+    assert assemble_path(["a", "zz"], ["c1"], entities, claims, {}) is None
+    assert assemble_path(["a", "b"], ["c-self"], entities, claims, {}) is None
+    forward = assemble_path(["a", "b"], ["c1"], entities, claims, {})
+    assert forward is not None
+    assert forward.steps[0].semantic_direction == "forward"
+    reverse = assemble_path(["b", "a"], ["c1"], entities, claims, {})
+    assert reverse is not None
+    assert reverse.steps[0].semantic_direction == "reverse"
+
+
+def test_graph_traversal_timeout_and_empty_source_branches() -> None:
+    async def scenario() -> None:
+        knowledge_base = KnowledgeBase(id="trav-kb", workspace_id="trav-ws")
+        revision = SimpleNamespace(id="trav-rev")
+        endpoints = [
+            SimpleNamespace(
+                id="a",
+                entity_type="Account",
+                canonical_name="账户 A",
+                properties_json={},
+            ),
+            SimpleNamespace(
+                id="b",
+                entity_type="Account",
+                canonical_name="账户 B",
+                properties_json={},
+            ),
+        ]
+        try:
+            await graph_traversal.shortest_path(
+                None,
+                knowledge_base,
+                revision,
+                "a",
+                "b",
+                max_hops=0,
+            )
+        except ValueError as exc:
+            assert "between 1 and 8" in str(exc)
+        else:
+            raise AssertionError("path max_hops bounds must be enforced")
+        with patch.object(
+            graph_repository,
+            "list_active_entities_by_ids",
+            new=AsyncMock(return_value=endpoints),
+        ):
+            with patch.object(
+                graph_repository,
+                "query_shortest_path_rows",
+                new=AsyncMock(return_value=([], 7, True)),
+            ):
+                timed_out = await graph_traversal.shortest_path(
+                    None,
+                    knowledge_base,
+                    revision,
+                    "a",
+                    "b",
+                    max_hops=2,
+                )
+        assert timed_out.truncated is True
+        assert timed_out.limit_reason == "timeout"
+        assert timed_out.visited_nodes == 7
+        assert timed_out.paths == ()
+        with patch.object(
+            graph_repository,
+            "list_active_entities_by_ids",
+            new=AsyncMock(return_value=[]),
+        ):
+            missing = await graph_traversal.neighborhood(
+                None,
+                knowledge_base,
+                revision,
+                "ghost",
+                max_hops=1,
+            )
+        assert missing.resolved_entities == ()
+        assert missing.visited_nodes == 0
+        try:
+            await graph_traversal.neighborhood(
+                None,
+                knowledge_base,
+                revision,
+                "a",
+                max_hops=4,
+            )
+        except ValueError as exc:
+            assert "between 1 and 3" in str(exc)
+        else:
+            raise AssertionError("neighborhood max_hops bounds must be enforced")
+        with patch.object(
+            graph_repository,
+            "list_active_entities_by_ids",
+            new=AsyncMock(return_value=[endpoints[0]]),
+        ):
+            with patch.object(
+                graph_repository,
+                "query_neighborhood_rows",
+                new=AsyncMock(return_value=([], 0, True)),
+            ):
+                neighborhood_timeout = await graph_traversal.neighborhood(
+                    None,
+                    knowledge_base,
+                    revision,
+                    "a",
+                    max_hops=1,
+                )
+        assert neighborhood_timeout.limit_reason == "timeout"
+
+    asyncio.run(scenario())
+
+
+def test_graph_evidence_views_are_capped_per_claim() -> None:
+    async def scenario() -> None:
+        knowledge_base = KnowledgeBase(id="ev-kb", workspace_id="ev-ws")
+        rows = [(["a", "b"], ["c1"]), (["b", "c"], ["c2"])]
+        entities = [
+            SimpleNamespace(
+                id=entity_id,
+                entity_type="Account",
+                canonical_name=name,
+                properties_json={},
+            )
+            for entity_id, name in (("a", "A"), ("b", "B"), ("c", "C"))
+        ]
+        claims = [
+            SimpleNamespace(
+                id="c1",
+                predicate="uses_phone",
+                subject_entity_id="a",
+                object_entity_id="b",
+                quality_score=1.0,
+                support_count=1,
+            ),
+            SimpleNamespace(
+                id="c2",
+                predicate="uses_phone",
+                subject_entity_id="b",
+                object_entity_id="c",
+                quality_score=1.0,
+                support_count=1,
+            ),
+        ]
+        evidence_rows = [
+            (
+                SimpleNamespace(
+                    id=f"ev-{index}",
+                    claim_id="c1" if index < 6 else "c2",
+                    document_id="d1",
+                    document_filename="d1.md",
+                    chunk_id=f"ch-{index}",
+                    quote="q",
+                    start_offset=0,
+                    end_offset=1,
+                    source_kind="explicit_text",
+                ),
+                "d1.md",
+                "explicit_text",
+                1.0,
+                None,
+            )
+            for index in range(7)
+        ]
+        with (
+            patch.object(
+                graph_repository,
+                "list_active_entities_by_ids",
+                new=AsyncMock(return_value=entities),
+            ),
+            patch.object(
+                graph_repository,
+                "list_active_claims_by_ids",
+                new=AsyncMock(return_value=claims),
+            ),
+            patch.object(
+                graph_repository,
+                "list_ranked_evidence_for_claim_ids",
+                new=AsyncMock(return_value=evidence_rows),
+            ),
+        ):
+            loaded_entities, loaded_claims, evidence = (
+                await _load_path_records(None, knowledge_base, rows)
+            )
+        assert set(loaded_entities) == {"a", "b", "c"}
+        assert set(loaded_claims) == {"c1", "c2"}
+        assert len(evidence["c1"]) == 5
+        paths = [
+            path
+            for entity_ids, claim_ids in rows
+            if (path := assemble_path(entity_ids, claim_ids, loaded_entities, loaded_claims, evidence))
+            is not None
+        ]
+        nodes, step_views, evidence_views = _collect_result_items(paths)
+        assert {item.id for item in nodes} == {"a", "b", "c"}
+        assert {item.claim_id for item in step_views} == {"c1", "c2"}
+        assert len(evidence_views) == 6
+
+    asyncio.run(scenario())
 
 
 def test_graph_review_decision_request_is_bounded() -> None:
@@ -6121,6 +6698,19 @@ def main() -> None:
     test_graph_rule_extractor_rejects_oversized_input()
     test_graph_entity_auto_match_requires_deterministic_identity()
     test_graph_claim_fingerprint_and_initial_status_are_deterministic()
+    test_graph_extracted_claim_requires_exactly_one_object_and_bounded_span()
+    test_graph_entity_dedup_merges_aliases_and_filters_invalid_ones()
+    test_graph_batch_validation_rejects_broken_references()
+    test_graph_entity_type_inference_and_fallback()
+    test_graph_rule_extractor_guards_skip_noise_clauses()
+    test_graph_rule_extractor_dedupes_entities_within_a_call()
+    test_graph_rule_extractor_caps_entities_and_claims()
+    test_graph_surface_span_requires_unique_occurrence()
+    test_graph_resolution_context_skips_non_human_aliases()
+    test_graph_build_pure_helpers_are_bounded()
+    test_graph_assemble_path_rejects_inconsistent_paths()
+    test_graph_traversal_timeout_and_empty_source_branches()
+    test_graph_evidence_views_are_capped_per_claim()
     test_graph_review_decision_request_is_bounded()
     test_graph_import_record_requires_one_object_kind()
     test_tool_ref_requires_stable_ids()
