@@ -55,8 +55,6 @@ services:
       QDRANT_URL: http://qdrant:6333
     volumes:
       - ./data/uploads:/data
-    ports:
-      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -133,7 +131,9 @@ services:
     environment:
       NEXAFLOW_API_PROXY: http://api:8000
     ports:
-      - "3000:3000"
+      # Single public entrypoint. Next.js rewrites API/health/docs requests
+      # to the internal api service.
+      - "8000:3000"
     depends_on:
       - api
 

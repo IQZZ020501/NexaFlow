@@ -122,11 +122,15 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 
 最后一条命令会启动 API、前端、Worker 和无网络沙箱；Python Tool 与 Workflow Python 需要 Worker 和沙箱同时运行。
 
-启动完成后访问：
+启动完成后通过唯一对外端口访问：
 
-- Web：<http://localhost:3000>
+- Web：<http://localhost:8000>
 - API 健康检查：<http://localhost:8000/health>
 - OpenAPI：<http://localhost:8000/docs>
+
+生产 Compose 只发布宿主机 `8000` 端口。API 通过前端同源路径（如
+`/api/v1/...`）转发到 Compose 内部的 `api:8000`；PostgreSQL、Redis、Qdrant、
+Worker 和沙箱均不发布宿主机端口。
 
 使用根目录 `.env` 中的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 登录。首次登录必须修改初始密码。
 
