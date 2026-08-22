@@ -11,8 +11,15 @@ cp .env.example .env   # then edit secrets
 docker compose --env-file .env -f deploy/docker-compose.yml up --build
 ```
 
-- API: http://localhost:8000 (`/health`, `/api/v1/...`)
-- Frontend: http://localhost:3000
+- Public entrypoint: http://localhost:8000
+- API routes: http://localhost:8000/api/v1/...
+- Health/OpenAPI: http://localhost:8000/health and http://localhost:8000/docs
+
+The production Compose file publishes only host port `8000` from the Next.js
+frontend (`8000:3000`). Next.js rewrites API, health, and OpenAPI requests to
+the internal `api:8000` service. PostgreSQL, Redis, Qdrant, and the worker remain
+reachable only on the Compose network; the sandbox has no network namespace or
+host port.
 
 ## Local development (infrastructure only)
 
@@ -155,10 +162,12 @@ stdio children receive shutdown and are reaped.
 
 ## Split hosting with Nginx
 
-`deploy/nginx/default.conf` routes `/api/` and `/health` to the API and
-everything else to the frontend. With compose, either publish the ports and
-point the proxy at `api:8000` / `frontend:3000`, or run the stack on an
-internal network and expose only the proxy.
+The default Compose deployment already uses the frontend as the single public
+entrypoint on port `8000`. `deploy/nginx/default.conf` remains an optional
+alternative for deployments that need a separate edge proxy: it routes
+`/api/` and `/health` to the API and everything else to the frontend. Keep all
+application services on an internal network and publish only the proxy when
+using that topology.
 
 ## Building images manually
 
