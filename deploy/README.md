@@ -183,7 +183,7 @@ stdio children receive shutdown and are reaped.
 ## Split hosting with Nginx
 
 The default Compose deployment already uses the frontend as the single public
-entrypoint on port `8000`. `deploy/nginx/default.conf` remains an optional
+entrypoint on port `8080`. `deploy/nginx/default.conf` remains an optional
 alternative for deployments that need a separate edge proxy: it routes
 `/api/` and `/health` to the API and everything else to the frontend. Keep all
 application services on an internal network and publish only the proxy when
@@ -244,7 +244,7 @@ docker compose --env-file .env -f deploy/docker-compose.server.yml pull
 docker compose --env-file .env -f deploy/docker-compose.server.yml up -d
 ```
 
-Only frontend port `8000` is published. Override it with `NEXAFLOW_PORT`.
+Only frontend port `8080` is published by default. Override it with `NEXAFLOW_PORT`.
 
 Copy the repository's `deploy/docker-compose.yml` and `.env.example` to the
 server, create `.env`, replace all secrets, and set the published image tags:
