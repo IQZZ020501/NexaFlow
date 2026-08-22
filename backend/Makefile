@@ -5,7 +5,9 @@ PORT ?= 8000
 COMPOSE ?= docker compose --env-file ../.env -f ../deploy/docker-compose.yml -f ../deploy/docker-compose.dev.yml
 WORKER_LOG_TAIL ?= 20
 
-dev: migrate
+dev:
+	$(COMPOSE) up -d --wait db redis qdrant
+	$(MAKE) migrate
 	uv run python scripts/dev.py --host $(HOST) --port $(PORT) --worker-log-tail $(WORKER_LOG_TAIL) --compose $(COMPOSE)
 
 migrate:
@@ -15,8 +17,7 @@ worker:
 	uv run celery -A app.infrastructure.celery:celery_app worker --beat --queues=celery,agents-legacy,agents-v2 --loglevel=INFO
 
 worker-compose:
-	$(COMPOSE) build api
-	$(COMPOSE) up sandbox worker
+	$(COMPOSE) up --build sandbox worker
 
 coverage:
 	uv run python scripts/coverage.py

@@ -78,6 +78,10 @@ Correctness, safety, evidence, and validation take priority over speed.
   initial passwords must come from env values, not Python constants.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
+- The build-capable and pull-only Compose topologies both run Alembic through a
+  one-shot `migrate` service. API and worker startup depends on its successful
+  completion; the service reuses the application image rather than requiring a
+  separate migration image.
 - Knowledge keyword retrieval uses `pg_search` 0.25.2 BM25 over
   `knowledge_document_chunks.search_text` with the Jieba tokenizer. The bundled
   PostgreSQL 17 image installs that pinned extension plus its `pgvector`
@@ -104,13 +108,16 @@ Correctness, safety, evidence, and validation take priority over speed.
   task runner and reuses the production retrieval path. Evaluation is mutually
   exclusive with parse/index/rebuild work for the same knowledge base; result
   and progress writes must remain in one lease-checked transaction.
-- `backend/make dev` automatically follows logs from a running Compose worker
-  into the API terminal and stops that follower when Uvicorn exits; it does not
-  start or replace the worker. The process orchestration lives in
-  `backend/scripts/dev.py` so the Make target does not depend on a POSIX shell
-  and works with GNU Make on Windows.
-- `cd backend && make worker-compose` starts the Compose sandbox and its
-  socket-mounted worker for Python Tool and Workflow code execution. The
+- `backend/make dev` starts and waits for the development Compose PostgreSQL,
+  Redis, and Qdrant services, applies Alembic migrations, then follows logs from
+  a running Compose worker into the API terminal and stops that follower when
+  Uvicorn exits. It does not build, start, or replace the worker or sandbox. The
+  API and Worker-log process orchestration lives in `backend/scripts/dev.py` so
+  the Make target does not depend on a POSIX shell and works with GNU Make on
+  Windows.
+- `cd backend && make worker-compose` builds the shared application image and
+  starts the Compose sandbox and its socket-mounted worker with one Compose
+  invocation for Python Tool and Workflow code execution. The
   host-only `make worker` has no sandbox socket and must not be presented as
   supporting those executions.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup

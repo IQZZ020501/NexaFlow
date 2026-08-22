@@ -8,11 +8,13 @@ the Next.js frontend.
 
 ```bash
 cp .env.example .env   # then edit secrets
-docker compose --env-file .env -f deploy/docker-compose.yml build db api
-docker compose --env-file .env -f deploy/docker-compose.yml up -d db redis qdrant sandbox
-docker compose --env-file .env -f deploy/docker-compose.yml run --rm api alembic upgrade head
-docker compose --env-file .env -f deploy/docker-compose.yml up -d
+docker compose --env-file .env -f deploy/docker-compose.server.yml up -d
 ```
+
+The one-shot `migrate` service uses the application image and must finish
+successfully before the API and worker start. Compose pulls missing images
+automatically; for an existing deployment, run `pull` before `up -d` when
+updating the image tag.
 
 - Public entrypoint: http://localhost:8000
 - API routes: http://localhost:8000/api/v1/...
@@ -29,23 +31,24 @@ application image. This preserves independent commands, scaling, network
 namespaces, filesystems, and security options while requiring only one
 application artifact in the image registry.
 
-## Local development (infrastructure only)
+## Local development
 
-To run only PostgreSQL, Redis, and Qdrant (while running the backend and
-frontend directly on the host, e.g. `make dev` + `bun dev`), use the dev
-override. It publishes PostgreSQL on `POSTGRES_PORT` (default `5432`) plus
-Redis/Qdrant on `6379`/`6333`, and pins readable container names
+Use the dev override once to start PostgreSQL, Redis, Qdrant, the sandbox, and
+the Compose worker; run the API and frontend directly on the host. It publishes
+PostgreSQL on `POSTGRES_PORT` (default `5432`) plus Redis/Qdrant on `6379`/`6333`,
+and pins readable container names
 (`nexaflow-db`, `nexaflow-redis`, `nexaflow-qdrant`):
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d db redis qdrant
+docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d --build --wait db redis qdrant sandbox worker
 ```
 
 The host backend and Compose use the same root `.env`. `POSTGRES_*` configures
 both the published PostgreSQL service and the backend connection; the backend
 safely constructs the URL, so credentials are not duplicated inside a
-hand-written `DATABASE_URL`. Run migrations with
-`cd backend && uv run python -m alembic upgrade head`.
+hand-written `DATABASE_URL`. The Compose `migrate` service applies pending
+Alembic revisions before the worker starts; `make dev` safely verifies the
+same migration state before starting the host API.
 When the API runs on the host and the Compose worker is enabled, the dev
 override mounts `backend/storage` at the worker's `/data`; keep
 `KNOWLEDGE_STORAGE_DIR=./storage/knowledge` so both processes read the same
@@ -259,8 +262,6 @@ the server:
 
 ```bash
 docker compose --env-file .env -f deploy/docker-compose.yml pull
-docker compose --env-file .env -f deploy/docker-compose.yml up -d db redis qdrant sandbox
-docker compose --env-file .env -f deploy/docker-compose.yml run --rm api alembic upgrade head
 docker compose --env-file .env -f deploy/docker-compose.yml up -d --no-build
 ```
 
@@ -269,10 +270,11 @@ private.
 
 ## Migrations
 
-Run migrations before first start or after upgrading:
+Both Compose deployment files run migrations automatically before the API and
+worker start. To retry the migration manually:
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml run --rm api alembic upgrade head
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm migrate
 ```
 
 Knowledge BM25 migrations require `pg_search` 0.25.2. The bundled database
