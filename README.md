@@ -112,15 +112,11 @@ cp .env.example .env
 ### 2. 初始化并启动
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml build db api
-docker compose --env-file .env -f deploy/docker-compose.yml up -d db redis qdrant sandbox
-docker compose --env-file .env -f deploy/docker-compose.yml run --rm api alembic upgrade head
-docker compose --env-file .env -f deploy/docker-compose.yml up -d
+docker compose --env-file .env -f deploy/docker-compose.server.yml up -d
 ```
 
-`db` 镜像内置 PostgreSQL 17、`pg_search` 0.25.2 及 `pgvector`，并在数据库启动时预加载 `pg_search`。使用外部 PostgreSQL 时必须先安装 `pg_search` 与 `pgvector`，将 `pg_search` 加入 `shared_preload_libraries` 并重启数据库，再执行 Alembic 迁移。
-
-最后一条命令会启动 API、前端、Worker 和无网络沙箱；Python Tool 与 Workflow Python 需要 Worker 和沙箱同时运行。
+`up -d` 会自动等待数据库、执行尚未应用的 Alembic 迁移，再启动 API、前端、Worker 和沙箱。迁移复用应用镜像，不需要单独构建迁移镜像。
+首次启动会自动拉取缺失镜像；升级已有部署时先执行 `pull`，再执行同一条 `up -d`。
 
 启动完成后通过唯一对外端口访问：
 
@@ -128,28 +124,21 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d
 - API 健康检查：<http://localhost:8000/health>
 - OpenAPI：<http://localhost:8000/docs>
 
-生产 Compose 只发布宿主机 `8000` 端口。API 通过前端同源路径（如
-`/api/v1/...`）转发到 Compose 内部的 `api:8000`；PostgreSQL、Redis、Qdrant、
-Worker 和沙箱均不发布宿主机端口。
-
-API、Worker、前端和沙箱使用同一个应用镜像，但继续运行在四个独立容器中。
-从 Docker Hub 部署时，在 `.env` 设置 `NEXAFLOW_APP_IMAGE` 和
-`NEXAFLOW_POSTGRES_IMAGE`，然后执行 `docker compose pull`；完整发布命令见
-[`deploy/README.md`](deploy/README.md)。
+生产 Compose 只发布宿主机 `8000` 端口，其余服务仅在内部网络访问。自定义镜像、外部数据库和 Nginx 配置见 [`deploy/README.md`](deploy/README.md)。
 
 使用根目录 `.env` 中的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 登录。首次登录必须修改初始密码。
 
 ### 3. 查看状态与日志
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml ps
-docker compose --env-file .env -f deploy/docker-compose.yml logs -f api worker frontend
+docker compose --env-file .env -f deploy/docker-compose.server.yml ps
+docker compose --env-file .env -f deploy/docker-compose.server.yml logs -f api worker frontend
 ```
 
 停止服务：
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml down
+docker compose --env-file .env -f deploy/docker-compose.server.yml down
 ```
 
 数据保存在 `deploy/data` 的 bind mount 中，`down` 不会删除它。如需重置本地数据，必须先停止相关容器；不要在 Redis、PostgreSQL 或 Qdrant 运行时删除其挂载目录。
@@ -160,40 +149,24 @@ docker compose --env-file .env -f deploy/docker-compose.yml down
 
 本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。Windows 需要额外安装 GNU Make；Makefile 目标通过 Python 编排，不依赖 Bash。此模式只在 Docker 中运行 PostgreSQL、Redis、Qdrant、Worker 和沙箱，API 与前端直接在宿主机运行；宿主机和容器共用根目录 `.env`。
 
-### 1. 首次初始化
+### 1. 首次安装依赖
 
 ```bash
 test -f .env || cp .env.example .env
-docker compose --env-file .env \
-  -f deploy/docker-compose.yml \
-  -f deploy/docker-compose.dev.yml \
-  up -d --build db redis qdrant
-
-cd backend
-uv sync --dev --frozen
-uv run python -m alembic upgrade head
-
-cd ../frontend
-bun install --frozen-lockfile
+(cd backend && uv sync --dev --frozen)
+(cd frontend && bun install --frozen-lockfile)
 ```
 
-默认配置使用本机端口 `5432`、`6379` 和 `6333`。后端会从同一份 `POSTGRES_*` 组件安全构造宿主机连接串，Compose 则显式覆盖容器内主机名，无需重复维护数据库账号。
-
-### 2. 启动容器服务
+### 2. 启动开发依赖
 
 ```bash
 docker compose --env-file .env \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.dev.yml \
-  build api
-
-docker compose --env-file .env \
-  -f deploy/docker-compose.yml \
-  -f deploy/docker-compose.dev.yml \
-  up -d db redis qdrant sandbox worker
+  up -d --build --wait db redis qdrant sandbox worker
 ```
 
-这条命令会一起启动全部开发容器。Compose Worker 内嵌唯一的 Celery Beat，并挂载沙箱 socket 和 `backend/storage`。不要同时运行宿主 `make worker`；宿主 Worker 没有沙箱 socket，不能执行 Python Tool 或 Workflow Python。
+这是一条 Compose 命令，会启动数据库、Redis、Qdrant、Worker 和沙箱，并自动完成迁移。不要再运行宿主 `make worker`。
 
 ### 3. 启动 API
 
@@ -202,7 +175,7 @@ cd backend
 make dev
 ```
 
-`make dev` 会先执行 Alembic 迁移，再在 <http://127.0.0.1:8000> 启动 API，并自动把 Compose Worker 日志同步到同一个终端。
+`make dev` 会再次确认基础服务和迁移状态，然后在 <http://127.0.0.1:8000> 启动 API，并同步 Worker 日志。
 如果端口已被其他 API 占用，先停止旧进程，或使用 `make dev PORT=8001` 启动到其他端口。
 
 ### 4. 启动前端

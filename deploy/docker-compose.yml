@@ -39,6 +39,27 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    <<: *app-image
+    init: true
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    env_file: ../.env
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: ""
+      POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
+      POSTGRES_USER: ${POSTGRES_USER:-nexaflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexaflow}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      KNOWLEDGE_STORAGE_DIR: /data/knowledge
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     <<: *app-image
     init: true
@@ -62,8 +83,8 @@ services:
     volumes:
       - ./data/uploads:/data
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       qdrant:
@@ -123,8 +144,8 @@ services:
     group_add:
       - "65533"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       qdrant:

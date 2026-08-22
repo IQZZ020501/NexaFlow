@@ -57,8 +57,11 @@ On Windows the API and worker also install the `WindowsSelectorEventLoopPolicy`
 so psycopg async connections work (Windows defaults to the Proactor loop,
 which psycopg rejects).
 
-The `dev` and `coverage` Makefile targets delegate process orchestration to
-Python standard-library scripts, so GNU Make can run them from Windows
+The `dev` target starts and waits for the Compose PostgreSQL, Redis, and Qdrant
+services, applies Alembic migrations, and then delegates API and Worker-log
+orchestration to a Python standard-library script. It does not build or start
+the Compose Worker or sandbox. The `coverage` target also delegates process
+orchestration to Python, so GNU Make can run both targets from Windows
 PowerShell or Command Prompt without Bash. GNU Make itself must still be
 installed separately on Windows.
 
@@ -78,7 +81,8 @@ fail, the client still receives the durable terminal answer.
 
 Python Tools and Workflow code nodes require the network-disabled sandbox Unix
 socket, which is mounted only into the Compose worker. For local development,
-start the sandbox-capable worker from `backend/`:
+build the shared application image and start the sandbox-capable worker from
+`backend/` with one Compose invocation:
 
 ```bash
 make worker-compose

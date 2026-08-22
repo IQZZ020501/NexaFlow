@@ -2,12 +2,11 @@
 #
 # Publishes the infrastructure ports to the host (so backend processes run
 # directly on the host, e.g. `make dev`, can reach them) and pins readable
-# container names. Production deployments should use docker-compose.yml alone.
+# container names. Production deployments should use docker-compose.server.yml
+# (or the base file for a custom image build) instead.
 #
-# Usage (infrastructure only):
-#   docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d db redis qdrant
-# Sandbox-capable worker for Python Tools and Workflow code nodes:
-#   cd backend && make worker-compose
+# Usage (full local container dependencies):
+#   docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d --build --wait db redis qdrant sandbox worker
 
 services:
   db:
@@ -26,6 +25,11 @@ services:
       - "6333:6333"
 
   worker:
+    build:
+      context: ..
+      dockerfile: deploy/dockerfiles/app.Dockerfile
+      args:
+        NEXAFLOW_API_PROXY: http://api:8000
     environment:
       ENVIRONMENT: development
     volumes:
