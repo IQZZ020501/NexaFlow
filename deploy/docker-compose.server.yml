@@ -71,7 +71,7 @@ services:
     env_file: ../.env
     environment: *backend-environment
     volumes:
-      - ./data/uploads:/data
+      - ./data/uploads:/data/knowledge
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
       interval: 10s
@@ -134,7 +134,7 @@ services:
       <<: *backend-environment
       AUTOSCALE_KEEPALIVE: "5"
     volumes:
-      - ./data/uploads:/data
+      - ./data/uploads:/data/knowledge
       - sandbox-socket:/run/sandbox
     group_add:
       - "65533"
@@ -157,7 +157,7 @@ services:
       HOSTNAME: 0.0.0.0
       NEXAFLOW_API_PROXY: http://api:8000
     ports:
-      - "${NEXAFLOW_PORT:-8000}:3000"
+      - "${NEXAFLOW_PORT:-8080}:3000"
     depends_on:
       api:
         condition: service_healthy
