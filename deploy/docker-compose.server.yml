@@ -154,6 +154,7 @@ services:
     working_dir: /opt/frontend
     command: ["/opt/node/bin/node", "server.js"]
     environment:
+      HOSTNAME: 0.0.0.0
       NEXAFLOW_API_PROXY: http://api:8000
     ports:
       - "${NEXAFLOW_PORT:-8000}:3000"
