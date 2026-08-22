@@ -112,10 +112,10 @@ cp .env.example .env
 ### 2. 初始化并启动
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml build db
+docker compose --env-file .env -f deploy/docker-compose.yml build db api
 docker compose --env-file .env -f deploy/docker-compose.yml up -d db redis qdrant sandbox
-docker compose --env-file .env -f deploy/docker-compose.yml run --rm --build api alembic upgrade head
-docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm api alembic upgrade head
+docker compose --env-file .env -f deploy/docker-compose.yml up -d
 ```
 
 `db` 镜像内置 PostgreSQL 17、`pg_search` 0.25.2 及 `pgvector`，并在数据库启动时预加载 `pg_search`。使用外部 PostgreSQL 时必须先安装 `pg_search` 与 `pgvector`，将 `pg_search` 加入 `shared_preload_libraries` 并重启数据库，再执行 Alembic 迁移。
@@ -131,6 +131,11 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 生产 Compose 只发布宿主机 `8000` 端口。API 通过前端同源路径（如
 `/api/v1/...`）转发到 Compose 内部的 `api:8000`；PostgreSQL、Redis、Qdrant、
 Worker 和沙箱均不发布宿主机端口。
+
+API、Worker、前端和沙箱使用同一个应用镜像，但继续运行在四个独立容器中。
+从 Docker Hub 部署时，在 `.env` 设置 `NEXAFLOW_APP_IMAGE` 和
+`NEXAFLOW_POSTGRES_IMAGE`，然后执行 `docker compose pull`；完整发布命令见
+[`deploy/README.md`](deploy/README.md)。
 
 使用根目录 `.env` 中的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 登录。首次登录必须修改初始密码。
 
@@ -180,7 +185,12 @@ bun install --frozen-lockfile
 docker compose --env-file .env \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.dev.yml \
-  up -d --build db redis qdrant sandbox worker
+  build api
+
+docker compose --env-file .env \
+  -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.dev.yml \
+  up -d db redis qdrant sandbox worker
 ```
 
 这条命令会一起启动全部开发容器。Compose Worker 内嵌唯一的 Celery Beat，并挂载沙箱 socket 和 `backend/storage`。不要同时运行宿主 `make worker`；宿主 Worker 没有沙箱 socket，不能执行 Python Tool 或 Workflow Python。

@@ -5215,8 +5215,8 @@ def test_tool_tasks_are_registered() -> None:
     assert "app.tools.run" in celery_app.tasks
     assert "app.tools.recover" in celery_app.tasks
     assert (
-        celery_app.conf.beat_schedule["recover-tool-invocations"]["task"]
-        == "app.tools.recover"
+        celery_app.conf.beat_schedule["recover-frequent-maintenance"]["task"]
+        == "app.maintenance.recover_frequent"
     )
 
 

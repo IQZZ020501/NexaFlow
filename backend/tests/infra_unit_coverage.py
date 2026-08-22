@@ -2560,37 +2560,50 @@ def test_celery() -> None:
     assert app.conf.broker_url == settings().celery_broker_url
     assert app.conf.worker_pool in {"solo", "prefork"}
     beat = app.conf.beat_schedule
-    assert set(beat) == {
-        "recover-knowledge-tasks",
-        "reconcile-knowledge-graphs",
-        "recover-knowledge-storage-cleanups",
-        "recover-upload-storage-cleanups",
-        "recover-agent-runs",
-        "recover-legacy-agent-runs",
-        "recover-tool-invocations",
-        "recover-email-deliveries",
-    }
-    assert beat["recover-knowledge-tasks"]["schedule"] == 30.0
-    assert beat["reconcile-knowledge-graphs"] == {
-        "task": "app.knowledge.reconcile_graphs",
-        "schedule": 60.0,
-    }
-    assert beat["recover-agent-runs"]["schedule"] == 30.0
-    assert beat["recover-tool-invocations"] == {
-        "task": "app.tools.recover",
-        "schedule": 30.0,
-    }
-    assert beat["recover-email-deliveries"] == {
-        "task": "app.email.recover",
-        "schedule": 30.0,
-    }
-    assert beat["recover-legacy-agent-runs"] == {
-        "task": "app.agents.recover_legacy",
-        "schedule": 30.0,
-        "options": {"queue": "agents-legacy"},
+    assert beat == {
+        "recover-frequent-maintenance": {
+            "task": "app.maintenance.recover_frequent",
+            "schedule": 30.0,
+        },
+        "recover-minutely-maintenance": {
+            "task": "app.maintenance.recover_minutely",
+            "schedule": 60.0,
+        },
     }
     assert app.conf.accept_content == ["json"]
     assert app.conf.task_acks_late is True
+
+
+def test_maintenance_recovery_sweeps() -> None:
+    from app.tasks import maintenance
+
+    first = SimpleNamespace(name="first", run=MagicMock())
+    broken = SimpleNamespace(
+        name="broken",
+        run=MagicMock(side_effect=RuntimeError("boom")),
+    )
+    last = SimpleNamespace(name="last", run=MagicMock())
+
+    with (
+        patch.object(
+            maintenance,
+            "FREQUENT_RECOVERY_TASKS",
+            (first, broken, last),
+        ),
+        patch.object(maintenance, "log_error") as mocked_log_error,
+    ):
+        maintenance.recover_frequent_jobs.run()
+
+    first.run.assert_called_once_with()
+    broken.run.assert_called_once_with()
+    last.run.assert_called_once_with()
+    mocked_log_error.assert_called_once()
+    assert mocked_log_error.call_args.kwargs["task_name"] == "broken"
+
+    minutely = SimpleNamespace(name="minutely", run=MagicMock())
+    with patch.object(maintenance, "MINUTELY_RECOVERY_TASKS", (minutely,)):
+        maintenance.recover_minutely_jobs.run()
+    minutely.run.assert_called_once_with()
 
 
 # ================================================================ tasks
@@ -4581,6 +4594,7 @@ def main() -> None:
     test_session_configuration()
     test_validation_normalizers()
     test_celery()
+    test_maintenance_recovery_sweeps()
     test_configure_task_worker()
 
     test_deps()

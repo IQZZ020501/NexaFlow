@@ -8,7 +8,10 @@ the Next.js frontend.
 
 ```bash
 cp .env.example .env   # then edit secrets
-docker compose --env-file .env -f deploy/docker-compose.yml up --build
+docker compose --env-file .env -f deploy/docker-compose.yml build db api
+docker compose --env-file .env -f deploy/docker-compose.yml up -d db redis qdrant sandbox
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm api alembic upgrade head
+docker compose --env-file .env -f deploy/docker-compose.yml up -d
 ```
 
 - Public entrypoint: http://localhost:8000
@@ -20,6 +23,11 @@ frontend (`8000:3000`). Next.js rewrites API, health, and OpenAPI requests to
 the internal `api:8000` service. PostgreSQL, Redis, Qdrant, and the worker remain
 reachable only on the Compose network; the sandbox has no network namespace or
 host port.
+
+API, worker, frontend, and sandbox are four containers created from the same
+application image. This preserves independent commands, scaling, network
+namespaces, filesystems, and security options while requiring only one
+application artifact in the image registry.
 
 ## Local development (infrastructure only)
 
@@ -47,16 +55,19 @@ uploaded files.
 
 | Service | Image / build | Command |
 |---|---|---|
-| `db` | `deploy/dockerfiles/postgres.Dockerfile`（PostgreSQL 17 + `pg_search` 0.25.2） | BM25 keyword search |
+| `db` | `${NEXAFLOW_POSTGRES_IMAGE}` / `deploy/dockerfiles/postgres.Dockerfile` | PostgreSQL 17 + `pg_search` 0.25.2 + `pgvector` |
 | `redis` | redis:7-alpine | — |
 | `qdrant` | qdrant/qdrant:v1.19.0 | vector database |
-| `api` | `deploy/dockerfiles/backend.Dockerfile` | uvicorn |
-| `worker` | same backend image | celery worker with embedded Beat |
-| `sandbox` | `deploy/dockerfiles/sandbox.Dockerfile` | isolated Python runner over a Unix socket |
-| `frontend` | `deploy/dockerfiles/frontend.Dockerfile` | Next.js standalone |
+| `api` | `${NEXAFLOW_APP_IMAGE}` / `deploy/dockerfiles/app.Dockerfile` | uvicorn |
+| `worker` | same application image | celery worker with embedded Beat |
+| `sandbox` | same application image | isolated Python runner over a Unix socket |
+| `frontend` | same application image | Next.js standalone |
 
-The backend image includes Tesseract Chinese and English language data for
-PyMuPDF PDF/image OCR fallback.
+The unified application image includes the backend virtual environment,
+Next.js standalone output, the Node.js runtime, the sandbox source, and
+Tesseract Chinese and English language data for PyMuPDF PDF/image OCR fallback.
+The complete topology has four unique images: the unified application image,
+the custom PostgreSQL image, official Redis, and official Qdrant.
 
 Persistent volumes: `db-data` (PostgreSQL), `redis-data`, `qdrant-data`, and
 `uploads` (shared `KNOWLEDGE_STORAGE_DIR` for the API and worker).
@@ -68,6 +79,11 @@ All runtime configuration comes from the repository-root `.env` (see
 the optional host `DATABASE_URL`, and overrides `POSTGRES_HOST`, Redis, Qdrant,
 and upload-storage locations for the container network. The development
 override sets the worker back to `ENVIRONMENT=development`.
+
+`NEXAFLOW_APP_IMAGE` selects the image shared by API, worker, frontend, and
+sandbox. `NEXAFLOW_POSTGRES_IMAGE` selects the PostgreSQL image containing the
+required extensions. Keep the local defaults when building on the deployment
+host; set both to registry tags before running a pull-only server deployment.
 
 Leave `DATABASE_URL` empty for the normal setup. The backend safely constructs
 it from `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, and
@@ -92,6 +108,10 @@ Agent runs.
 Celery uses `solo` automatically on macOS (HTTPS trust evaluation is unsafe
 after a multithreaded process fork) and Windows (`prefork` needs `os.fork()`,
 which Windows lacks); Linux containers keep `prefork`.
+The Compose worker keeps zero prefork children while idle, grows to at most ten
+for queued work, and removes idle children after five seconds. Beat groups the
+30-second and 60-second recovery scans so maintenance alone does not fan out
+the full worker pool.
 
 ### Migrating from split environment files
 
@@ -141,7 +161,7 @@ Run the standalone self-check locally or in the built image:
 
 ```bash
 python3 -m sandbox.self_check
-docker build -f deploy/dockerfiles/sandbox.Dockerfile -t nexaflow-sandbox .
+docker build -f deploy/dockerfiles/app.Dockerfile --target sandbox-runtime -t nexaflow-sandbox .
 docker run --rm --network none --entrypoint python nexaflow-sandbox -m sandbox.self_check
 ```
 
@@ -150,10 +170,10 @@ docker run --rm --network none --entrypoint python nexaflow-sandbox -m sandbox.s
 Workspace admins enter stdio commands, arguments, working directories, and
 environment values when registering an MCP Server. The full configuration is
 encrypted in PostgreSQL and is not returned by the API. Install and pin each
-server executable in a derived backend image; the API performs discovery and
-the worker performs Agent calls, so both must expose the same absolute command
-and working-directory paths. Avoid shells and runtime downloaders such as
-`npx`/`uvx` in production.
+server executable in a derived application image; the API performs discovery
+and the worker performs Agent calls, so both must expose the same absolute
+command and working-directory paths. Avoid shells and runtime downloaders such
+as `npx`/`uvx` in production.
 
 stdio commands run with the backend container's filesystem and network access,
 so deployments must treat workspace admins as trusted code-execution
@@ -172,18 +192,80 @@ using that topology.
 ## Building images manually
 
 ```bash
-docker build -f deploy/dockerfiles/backend.Dockerfile -t app/backend .
-docker build -f deploy/dockerfiles/frontend.Dockerfile -t app/frontend .
+docker build -f deploy/dockerfiles/app.Dockerfile \
+  --build-arg NEXAFLOW_API_PROXY=http://api:8000 \
+  -t nexaflow/app:local .
+docker build -f deploy/dockerfiles/postgres.Dockerfile \
+  -t nexaflow/postgres-pg-search:0.25.2 .
 ```
 
 `NEXAFLOW_API_PROXY` is baked into the Next.js routes manifest at build time,
-so a custom API origin must be passed as a build arg (a runtime env var has no
-effect):
+so a runtime environment variable cannot change it. The default
+`http://api:8000` is portable across Compose deployments because `api` is the
+internal service name.
+
+## Publishing to Docker Hub
+
+Only the unified application image and custom PostgreSQL image need to be
+published by the project. Redis and Qdrant are pulled from their official
+repositories.
 
 ```bash
-docker build -f deploy/dockerfiles/frontend.Dockerfile \
-  --build-arg NEXAFLOW_API_PROXY=https://api.example.com -t app/frontend .
+docker login
+
+export DOCKERHUB_NAMESPACE=your-dockerhub-name
+export NEXAFLOW_RELEASE=v0.1.0
+
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f deploy/dockerfiles/app.Dockerfile \
+  --build-arg NEXAFLOW_API_PROXY=http://api:8000 \
+  -t "$DOCKERHUB_NAMESPACE/nexaflow-app:$NEXAFLOW_RELEASE" \
+  --push .
+
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f deploy/dockerfiles/postgres.Dockerfile \
+  -t "$DOCKERHUB_NAMESPACE/nexaflow-postgres:0.25.2" \
+  --push .
 ```
+
+Use immutable release tags rather than replacing an existing tag; rollback is
+then an `.env` image-tag change followed by `docker compose up -d --no-build`.
+
+## Pull-only server deployment
+
+For the images under `registry.cn-shanghai.aliyuncs.com/ai-studios`, keep the
+repository layout on the server, create the root `.env`, and use the dedicated
+Compose file. Its one-shot `migrate` service runs Alembic before the API and
+worker start:
+
+```bash
+docker login registry.cn-shanghai.aliyuncs.com
+docker compose --env-file .env -f deploy/docker-compose.server.yml pull
+docker compose --env-file .env -f deploy/docker-compose.server.yml up -d
+```
+
+Only frontend port `8000` is published. Override it with `NEXAFLOW_PORT`.
+
+Copy the repository's `deploy/docker-compose.yml` and `.env.example` to the
+server, create `.env`, replace all secrets, and set the published image tags:
+
+```dotenv
+NEXAFLOW_APP_IMAGE=your-dockerhub-name/nexaflow-app:v0.1.0
+NEXAFLOW_POSTGRES_IMAGE=your-dockerhub-name/nexaflow-postgres:0.25.2
+```
+
+Then pull and start the four-image topology without building source code on
+the server:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml pull
+docker compose --env-file .env -f deploy/docker-compose.yml up -d db redis qdrant sandbox
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm api alembic upgrade head
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --no-build
+```
+
+Run `docker login` on the server first only when either Docker Hub repository is
+private.
 
 ## Migrations
 

@@ -1479,8 +1479,8 @@ def test_upload_cleanup_tasks_are_registered() -> None:
     assert "app.uploads.cleanup_storage" in celery_app.tasks
     assert "app.uploads.recover_storage_cleanups" in celery_app.tasks
     assert (
-        celery_app.conf.beat_schedule["recover-upload-storage-cleanups"]["task"]
-        == "app.uploads.recover_storage_cleanups"
+        celery_app.conf.beat_schedule["recover-minutely-maintenance"]["task"]
+        == "app.maintenance.recover_minutely"
     )
 
 
