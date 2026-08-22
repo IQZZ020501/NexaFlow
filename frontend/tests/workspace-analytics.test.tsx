@@ -236,6 +236,12 @@ describe("workspace analytics", () => {
     expect(screen.getByText("公开/API 调用")).toBeTruthy()
     expect(screen.getByText("How do I deploy?")).toBeTruthy()
     expect(screen.getByText("时段活跃曲线")).toBeTruthy()
+    const statusSection = screen.getByText("运行状态").closest("section")!
+    const succeededRow = within(statusSection)
+      .getByText("运行成功")
+      .closest("li")!
+    expect(within(succeededRow).getByText("2")).toBeTruthy()
+    expect(within(succeededRow).getByText("50%")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "团队" }))
     expect(screen.getByText("Analytics Team")).toBeTruthy()
     expect(screen.getByText("单日最高 3")).toBeTruthy()
@@ -350,6 +356,11 @@ describe("workspace analytics", () => {
     renderPage(<TopBar />)
     const link = screen.getByRole("link", { name: "数据大屏" })
     expect(link.getAttribute("href")).toBe("/system/analytics")
+    expect(link.className).toContain("min-w-10")
+    expect(link.className).toContain("sm:min-w-28")
+    const navigation = link.closest("nav")
+    expect(navigation?.className).toContain("justify-start")
+    expect(navigation?.className).toContain("sm:justify-center")
   })
 
   test("derives key metrics from the correct distributions and handles zero denominators", () => {

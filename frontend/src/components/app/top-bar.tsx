@@ -155,7 +155,7 @@ export function TopBar() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <nav className="flex min-w-0 flex-1 justify-center gap-2 overflow-x-auto overflow-y-hidden">
+        <nav className="flex min-w-0 flex-1 justify-start gap-2 overflow-x-auto overflow-y-hidden sm:justify-center">
           {featurePages.map((page) => {
             const Icon = page.icon
             const isActive = pathname.startsWith(PAGE_LINKS[page.key])
@@ -166,9 +166,9 @@ export function TopBar() {
                 type="button"
                 variant={isActive ? "secondary" : "ghost"}
                 asChild
-                className="h-10 min-w-28 px-4 text-sm"
+                className="h-10 min-w-10 px-0 text-sm has-data-[icon=inline-start]:pl-0 sm:min-w-28 sm:px-4 sm:has-data-[icon=inline-start]:pl-2"
               >
-                <Link href={PAGE_LINKS[page.key]}>
+                <Link href={PAGE_LINKS[page.key]} aria-label={page.label}>
                   <Icon data-icon="inline-start" />
                   <span className="hidden sm:inline">{page.label}</span>
                 </Link>
@@ -180,9 +180,9 @@ export function TopBar() {
               type="button"
               variant={isAnalyticsActive ? "secondary" : "ghost"}
               asChild
-              className="h-10 min-w-28 px-4 text-sm"
+              className="h-10 min-w-10 px-0 text-sm has-data-[icon=inline-start]:pl-0 sm:min-w-28 sm:px-4 sm:has-data-[icon=inline-start]:pl-2"
             >
-              <Link href="/system/analytics">
+              <Link href="/system/analytics" aria-label={t("数据大屏")}>
                 <BarChart3Icon data-icon="inline-start" />
                 <span className="hidden sm:inline">{t("数据大屏")}</span>
               </Link>

@@ -11,6 +11,7 @@ import {
   PieChart,
   ResponsiveContainer,
   Tooltip,
+  type TooltipContentProps,
 } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -163,6 +164,39 @@ function itemColor(kind: DistributionKind, key: string, index: number) {
   return COLORS.status[index % COLORS.status.length]
 }
 
+function DistributionTooltip({
+  active,
+  payload,
+  items,
+  kind,
+  locale,
+}: Pick<TooltipContentProps, "active" | "payload"> & {
+  items: DistributionItem[]
+  kind: DistributionKind
+  locale: string
+}) {
+  const { t } = useLanguage()
+  const item = payload[0]?.payload as DistributionItem | undefined
+  if (!active || !item) return null
+  const total = distributionTotal(items)
+  const index = items.findIndex((candidate) => candidate.key === item.key)
+
+  return (
+    <div className="flex items-center gap-2 whitespace-nowrap rounded-md border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg">
+      <span
+        aria-hidden="true"
+        className="size-2 rounded-full"
+        style={{ backgroundColor: itemColor(kind, item.key, index) }}
+      />
+      <span className="font-medium">{distributionLabel(item.key, kind, t)}</span>
+      <span className="tabular-nums">{formatNumber(item.count, locale)}</span>
+      <span className="tabular-nums text-muted-foreground">
+        {formatPercent(total ? item.count / total : null, locale)}
+      </span>
+    </div>
+  )
+}
+
 /**
  * Renders a donut chart with localized labels, percentages, and a summary value for distribution data.
  *
@@ -199,8 +233,8 @@ function DonutChart({
       : "—"
 
   return (
-    <div className="min-w-0 rounded-lg border bg-muted/10 p-3">
-      <div className="relative h-44">
+    <div className="grid min-w-0 grid-cols-[7rem_minmax(0,1fr)] items-center gap-4">
+      <div className="relative size-28 shrink-0">
         {items.length ? (
           <ResponsiveContainer width="100%" height="100%">
             <PieChart accessibilityLayer>
@@ -208,9 +242,12 @@ function DonutChart({
                 data={items}
                 dataKey="count"
                 nameKey="key"
-                innerRadius="58%"
-                outerRadius="82%"
-                paddingAngle={2}
+                rootTabIndex={-1}
+                className="outline-none"
+                innerRadius="66%"
+                outerRadius="90%"
+                paddingAngle={items.length > 1 ? 3 : 0}
+                cornerRadius={3}
                 stroke="var(--card)"
                 strokeWidth={2}
                 isAnimationActive={false}
@@ -223,38 +260,67 @@ function DonutChart({
                 ))}
               </Pie>
               <Tooltip
-                formatter={(value) => formatNumber(Number(value ?? 0), locale)}
-                labelFormatter={(value) =>
-                  distributionLabel(String(value), kind, t)
-                }
+                allowEscapeViewBox={{ x: false, y: true }}
+                cursor={false}
+                offset={10}
+                reverseDirection={{ x: false, y: false }}
+                wrapperStyle={{
+                  outline: "none",
+                  pointerEvents: "none",
+                  zIndex: 20,
+                }}
+                content={({ active, payload }) => (
+                  <DistributionTooltip
+                    active={active}
+                    payload={payload}
+                    items={items}
+                    kind={kind}
+                    locale={locale}
+                  />
+                )}
               />
             </PieChart>
           </ResponsiveContainer>
         ) : null}
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <strong className="text-xl tabular-nums">{centerValue}</strong>
-          <span className="max-w-24 truncate text-center text-[11px] text-muted-foreground">
+          <strong className="text-xl font-semibold leading-none tabular-nums">
+            {centerValue}
+          </strong>
+          <span className="mt-1 flex h-6 max-w-20 items-start text-center text-[10px] leading-3 text-muted-foreground">
             {centerLabel}
           </span>
         </div>
       </div>
-      <ul className="mt-2 space-y-1.5 text-xs">
+      <ul className="min-w-0 divide-y text-xs">
         {items.length ? (
-          items.map((item, index) => (
-            <li key={item.key} className="flex items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-2">
-                <span
-                  aria-hidden="true"
-                  className="size-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: itemColor(kind, item.key, index) }}
-                />
-                <span className="truncate">{distributionLabel(item.key, kind, t)}</span>
-              </span>
-              <span className="shrink-0 tabular-nums text-muted-foreground">
-                {formatPercent(total ? item.count / total : null, locale)}
-              </span>
-            </li>
-          ))
+          items.map((item, index) => {
+            const label = distributionLabel(item.key, kind, t)
+            return (
+              <li
+                key={item.key}
+                className="flex min-w-0 items-center justify-between gap-3 py-2 first:pt-0 last:pb-0"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="size-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: itemColor(kind, item.key, index) }}
+                  />
+                  <span className="truncate" title={label}>
+                    {label}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2 tabular-nums">
+                  <span className="font-medium text-foreground">
+                    {formatNumber(item.count, locale)}
+                  </span>
+                  <span className="w-10 text-right text-muted-foreground">
+                    {formatPercent(total ? item.count / total : null, locale)}
+                  </span>
+                </span>
+              </li>
+            )
+          })
         ) : (
           <li className="text-muted-foreground">{t("暂无数据")}</li>
         )}
@@ -278,24 +344,24 @@ export function RunDistributionPanel({
 }) {
   const { t } = useLanguage()
   return (
-    <Card className="min-w-0 gap-4 py-5 shadow-none">
-      <CardHeader className="px-5">
+    <Card className="min-w-0 gap-0 py-0 shadow-none">
+      <CardHeader className="border-b px-5 py-5">
         <CardTitle>{t("运行分布")}</CardTitle>
         <CardDescription>{t("按类型、来源和状态查看运行构成")}</CardDescription>
       </CardHeader>
-      <CardContent className="grid min-w-0 gap-4 px-5 lg:grid-cols-3">
-        <div className="min-w-0">
-          <h3 className="mb-2 text-sm font-medium">{t("运行类型")}</h3>
+      <CardContent className="grid min-w-0 divide-y px-0 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+        <section className="min-w-0 px-5 py-4">
+          <h3 className="mb-4 text-sm font-medium">{t("运行类型")}</h3>
           <DonutChart items={data.run_types} kind="type" locale={locale} />
-        </div>
-        <div className="min-w-0">
-          <h3 className="mb-2 text-sm font-medium">{t("访问来源")}</h3>
+        </section>
+        <section className="min-w-0 px-5 py-4">
+          <h3 className="mb-4 text-sm font-medium">{t("访问来源")}</h3>
           <DonutChart items={data.access_sources} kind="source" locale={locale} />
-        </div>
-        <div className="min-w-0">
-          <h3 className="mb-2 text-sm font-medium">{t("运行状态")}</h3>
+        </section>
+        <section className="min-w-0 px-5 py-4">
+          <h3 className="mb-4 text-sm font-medium">{t("运行状态")}</h3>
           <DonutChart items={data.statuses} kind="status" locale={locale} />
-        </div>
+        </section>
       </CardContent>
     </Card>
   )
