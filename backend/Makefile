@@ -15,7 +15,8 @@ worker:
 	uv run celery -A app.infrastructure.celery:celery_app worker --beat --queues=celery,agents-legacy,agents-v2 --loglevel=INFO
 
 worker-compose:
-	$(COMPOSE) up --build sandbox worker
+	$(COMPOSE) build api
+	$(COMPOSE) up sandbox worker
 
 coverage:
 	uv run python scripts/coverage.py

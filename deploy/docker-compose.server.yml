@@ -1,69 +1,85 @@
+name: nexaflow
+
 x-app-image: &app-image
-  image: ${NEXAFLOW_APP_IMAGE:-nexaflow/app:local}
+  image: registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow:latest
+
+x-backend-environment: &backend-environment
+  ENVIRONMENT: production
+  DATABASE_URL: ""
+  POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
+  POSTGRES_USER: ${POSTGRES_USER:-nexaflow}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+  CELERY_BROKER_URL: redis://redis:6379/0
+  KNOWLEDGE_STORAGE_DIR: /data/knowledge
+  QDRANT_URL: http://qdrant:6333
 
 services:
   db:
-    image: ${NEXAFLOW_POSTGRES_IMAGE:-nexaflow/postgres-pg-search:0.25.2}
-    build:
-      context: ..
-      dockerfile: deploy/dockerfiles/postgres.Dockerfile
+    image: registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow-postgres:0.25.2
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
       POSTGRES_USER: ${POSTGRES_USER:-nexaflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexaflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
       - ./data/postgresql:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "PGAPPNAME=nexaflow-healthcheck pg_isready -U ${POSTGRES_USER:-nexaflow} -d ${POSTGRES_DB:-nexaflow}"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     volumes:
       - ./data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   qdrant:
     image: qdrant/qdrant:v1.19.0
+    restart: unless-stopped
     volumes:
       - ./data/qdrant:/qdrant/storage
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+
+  migrate:
+    <<: *app-image
+    init: true
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    env_file: ../.env
+    environment: *backend-environment
+    depends_on:
+      db:
+        condition: service_healthy
 
   api:
     <<: *app-image
     init: true
-    build:
-      context: ..
-      dockerfile: deploy/dockerfiles/app.Dockerfile
-      args:
-        NEXAFLOW_API_PROXY: http://api:8000
+    restart: unless-stopped
     env_file: ../.env
-    environment:
-      ENVIRONMENT: production
-      DATABASE_URL: ""
-      POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
-      POSTGRES_USER: ${POSTGRES_USER:-nexaflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexaflow}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: "5432"
-      CELERY_BROKER_URL: redis://redis:6379/0
-      KNOWLEDGE_STORAGE_DIR: /data/knowledge
-      QDRANT_URL: http://qdrant:6333
+    environment: *backend-environment
     volumes:
       - ./data/uploads:/data
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       qdrant:
@@ -72,13 +88,14 @@ services:
   sandbox:
     <<: *app-image
     init: true
+    restart: unless-stopped
     working_dir: /opt/sandbox
     command: ["/usr/local/bin/python", "-m", "sandbox.server"]
     healthcheck:
       test: ["CMD", "/usr/local/bin/python", "-m", "sandbox.healthcheck"]
       interval: 5s
       timeout: 2s
-      retries: 10
+      retries: 20
     network_mode: none
     read_only: true
     tmpfs:
@@ -98,33 +115,32 @@ services:
     pids_limit: 64
     mem_limit: 512m
     cpus: 1.0
-    restart: unless-stopped
 
   worker:
     <<: *app-image
     init: true
-    command: celery -A app.infrastructure.celery:celery_app worker --beat --autoscale=10,0 --queues=celery,agents-legacy,agents-v2 --loglevel=INFO
+    restart: unless-stopped
+    command:
+      - celery
+      - -A
+      - app.infrastructure.celery:celery_app
+      - worker
+      - --beat
+      - --autoscale=10,0
+      - --queues=celery,agents-legacy,agents-v2
+      - --loglevel=INFO
     env_file: ../.env
     environment:
+      <<: *backend-environment
       AUTOSCALE_KEEPALIVE: "5"
-      ENVIRONMENT: production
-      DATABASE_URL: ""
-      POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
-      POSTGRES_USER: ${POSTGRES_USER:-nexaflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexaflow}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: "5432"
-      CELERY_BROKER_URL: redis://redis:6379/0
-      KNOWLEDGE_STORAGE_DIR: /data/knowledge
-      QDRANT_URL: http://qdrant:6333
     volumes:
       - ./data/uploads:/data
       - sandbox-socket:/run/sandbox
     group_add:
       - "65533"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       qdrant:
@@ -134,16 +150,16 @@ services:
 
   frontend:
     <<: *app-image
+    restart: unless-stopped
     working_dir: /opt/frontend
     command: ["/opt/node/bin/node", "server.js"]
     environment:
       NEXAFLOW_API_PROXY: http://api:8000
     ports:
-      # Single public entrypoint. Next.js rewrites API/health/docs requests
-      # to the internal api service.
-      - "8000:3000"
+      - "${NEXAFLOW_PORT:-8000}:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   sandbox-socket:

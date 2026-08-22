@@ -95,7 +95,7 @@ jobs:
       - name: Run sandbox self-check
         working-directory: .
         run: |
-          docker build --file deploy/dockerfiles/sandbox.Dockerfile --tag nexaflow-sandbox-ci .
+          docker build --file deploy/dockerfiles/app.Dockerfile --target sandbox-runtime --tag nexaflow-sandbox-ci .
           docker run --rm --network none --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=0711,uid=0,gid=0 \
             --tmpfs /dev/shm:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=0,gid=0 \

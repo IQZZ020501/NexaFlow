@@ -72,9 +72,10 @@ Correctness, safety, evidence, and validation take priority over speed.
   binding in Python services.
 - Root `.env.example` is the only environment template; host backend commands
   and Compose both read root `.env`, while Compose explicitly overrides
-  container-only endpoints. Real `.env` files are local-only and gitignored;
-  bootstrap admin credentials and managed-user initial passwords must come from
-  env values, not Python constants.
+  container-only endpoints. It also selects the unified application and custom
+  PostgreSQL image tags for pull-only deployments. Real `.env` files are
+  local-only and gitignored; bootstrap admin credentials and managed-user
+  initial passwords must come from env values, not Python constants.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
 - Knowledge keyword retrieval uses `pg_search` 0.25.2 BM25 over
@@ -123,7 +124,8 @@ Correctness, safety, evidence, and validation take priority over speed.
   conversion uses PyMuPDF4LLM/PyMuPDF with native text first and page-level OCR
   fallback. The upload UI and parser accept DOCX, PDF, Markdown, text, PPTX,
   XLSX, XLS, HTML, CSV, JSON, XML, IPYNB, EPUB, ZIP, PNG, JPG, JPEG, and WEBP.
-  The backend image must include Tesseract Chinese/English data for OCR fallback.
+  The unified application image must include Tesseract Chinese/English data for
+  OCR fallback.
 - QA-table import is opt-in (`import_mode=qa`) and uses read-only openpyxl for
   XLSX plus the Python CSV module for UTF-8 CSV. It requires question/answer
   headers, ignores document segmentation settings, and indexes question plus
@@ -154,9 +156,12 @@ Correctness, safety, evidence, and validation take priority over speed.
   file, wall-clock, input, and output limits. Keep it independent from
   `backend/app/`; only the Celery worker may mount its socket.
 - `docs/` stores project planning and product/engineering documentation.
-- `deploy/` holds the Docker Compose topology, Dockerfiles, and Nginx examples,
-  including the network-disabled sandbox service and its worker-only Unix
-  socket volume; `scripts/setup-hooks.sh` enables the repository Git hooks.
+- `deploy/` holds the Docker Compose topology, the unified application
+  Dockerfile shared by API/worker/frontend/sandbox containers, the custom
+  PostgreSQL Dockerfile, and Nginx examples. The sandbox remains a separate
+  network-disabled container with a worker-only Unix socket volume even though
+  it shares the application image; `scripts/setup-hooks.sh` enables the
+  repository Git hooks.
 - Use `rg` / `rg --files` for code search. Do not invent project commands;
   inspect local scripts first.
 
@@ -326,6 +331,10 @@ broad. Never claim a check passed unless it completed successfully.
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
+- `deploy/` changes: render the base, development, and pull-only server Compose
+  configurations, verify the unique image list, build the affected image, and
+  run the `sandbox-runtime` target's container self-check when the unified
+  application image or sandbox wiring changes.
 - Coverage gates (do not claim a percentage unless measured):
   - Backend: `make coverage` / `backend/scripts/coverage.sh` — both use the
     cross-platform `backend/scripts/coverage.py` runner to execute all suites
