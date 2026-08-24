@@ -15,6 +15,7 @@ from app.entities.analytics import (
 )
 from app.shareddomain.agents.models import Agent as AgentOrm
 from app.shareddomain.agents.models import AgentRun as AgentRunOrm
+from app.shareddomain.agents.models import AgentRunState as AgentRunStateOrm
 from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphRevision as KnowledgeGraphRevisionOrm,
 )
@@ -103,12 +104,12 @@ async def list_workspace_analytics_runs(
             UserOrm.username.label("requester_username"),
             UserOrm.name.label("requester_name"),
             AgentRunOrm.access_source,
-            AgentRunOrm.status,
+            AgentRunStateOrm.status,
             AgentRunOrm.goal,
-            AgentRunOrm.model_usage,
+            AgentRunStateOrm.model_usage,
             WorkflowRunDetailOrm.token_usage.label("workflow_token_usage"),
-            AgentRunOrm.started_at,
-            AgentRunOrm.finished_at,
+            AgentRunStateOrm.started_at,
+            AgentRunStateOrm.finished_at,
             AgentRunOrm.created_at,
         )
         .select_from(AgentRunOrm)
@@ -117,6 +118,13 @@ async def list_workspace_analytics_runs(
             and_(
                 AgentOrm.workspace_id == AgentRunOrm.workspace_id,
                 AgentOrm.id == AgentRunOrm.agent_id,
+            ),
+        )
+        .join(
+            AgentRunStateOrm,
+            and_(
+                AgentRunStateOrm.workspace_id == AgentRunOrm.workspace_id,
+                AgentRunStateOrm.run_id == AgentRunOrm.id,
             ),
         )
         .outerjoin(UserOrm, UserOrm.id == AgentRunOrm.requested_by_user_id)

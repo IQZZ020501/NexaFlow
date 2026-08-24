@@ -12,7 +12,8 @@ from app.shareddomain.agents.models import (  # noqa: F401
     AgentPublicationVersion,
     AgentRun,
     AgentRunEvent,
-    AgentToolCall,
+    AgentRunSnapshot,
+    AgentRunState,
 )
 from app.shareddomain.audit.models import AuditLog  # noqa: F401
 from app.infrastructure.base import Base

@@ -587,7 +587,10 @@ describe("KnowledgeBasePage list view", () => {
     fetchHandler = (url, init) => {
       const method = init?.method ?? "GET"
       if (method === "PATCH" && url.includes("/knowledge-bases")) {
-        return jsonResponse({ detail: "update boom" }, 500)
+        return jsonResponse(
+          { detail: "Knowledge base name already exists." },
+          409
+        )
       }
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?"))
@@ -608,7 +611,7 @@ describe("KnowledgeBasePage list view", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "update boom"
+      "知识库名称已存在"
     )
   })
 
@@ -981,7 +984,13 @@ function renderDetailPage(
 }
 
 describe("KnowledgeBasePage documents tab", () => {
-  test("routes every knowledge base detail page", async () => {
+  test("switches every knowledge base detail tab without leaving the detail page", async () => {
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL(
+      `https://nexaflow.example/app/knowledge/${KB_ID}`
+    )
     expect(parseKnowledgeBaseDetailTab("tasks")).toBe("tasks")
     expect(parseKnowledgeBaseDetailTab("graph")).toBe("graph")
     expect(parseKnowledgeBaseDetailTab("unknown")).toBeNull()
@@ -997,21 +1006,21 @@ describe("KnowledgeBasePage documents tab", () => {
 
     renderDetailPage()
     fireEvent.click(await screen.findByText("知识关联"))
-    expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}/graph`)
+    expect(window.location.pathname).toBe(`/app/knowledge/${KB_ID}/graph`)
     await waitFor(() =>
       expect(screen.getByText("知识关联尚未启用")).toBeTruthy()
     )
 
     fireEvent.click(await screen.findByText("任务"))
-    expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}/tasks`)
+    expect(window.location.pathname).toBe(`/app/knowledge/${KB_ID}/tasks`)
     await waitFor(() => expect(screen.getByText("暂无任务")).toBeTruthy())
 
     fireEvent.click(screen.getByText("设置"))
-    expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}/settings`)
+    expect(window.location.pathname).toBe(`/app/knowledge/${KB_ID}/settings`)
     await waitFor(() => expect(screen.getByText("Alpha docs")).toBeTruthy())
 
     fireEvent.click(screen.getByText("文档"))
-    expect(pushes[pushes.length - 1]).toBe(`/app/knowledge/${KB_ID}`)
+    expect(window.location.pathname).toBe(`/app/knowledge/${KB_ID}`)
     await waitFor(() => expect(screen.getByText("暂无文档")).toBeTruthy())
   })
 

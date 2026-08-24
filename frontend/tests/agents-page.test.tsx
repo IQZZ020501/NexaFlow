@@ -1201,6 +1201,64 @@ describe("AgentsPage create flow", () => {
 })
 
 describe("AgentsPage detail view", () => {
+  test("switches Agent detail tabs without returning to the application list", async () => {
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL(
+      "https://nexaflow.example/app/apps/agent-1"
+    )
+    await renderDetail({
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/logs`,
+          exact: false,
+          respond: () =>
+            jsonResponse({ items: [], total: 0, offset: 0, limit: 20 }),
+        },
+      ],
+    })
+
+    const logsNavButton = screen
+      .getAllByRole("button", { name: "对话日志" })
+      .find((button) => Boolean(button.closest("nav")))
+    expect(logsNavButton).toBeTruthy()
+    fireEvent.click(logsNavButton!)
+
+    expect(await screen.findByText("暂无对话日志")).toBeTruthy()
+    expect(window.location.pathname).toBe("/app/apps/agent-1/logs")
+    expect(screen.queryByRole("heading", { name: "应用" })).toBeNull()
+  })
+
+  test("stores the resolved conversation in the URL without leaving Agent detail", async () => {
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL(
+      "https://nexaflow.example/app/apps/agent-1/settings"
+    )
+    await renderDetail({
+      initialView: "settings",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([]),
+        },
+      ],
+    })
+
+    await waitFor(() =>
+      expect(
+        new URLSearchParams(window.location.search).get("conversation_id")
+      ).toBeTruthy()
+    )
+    expect(window.location.pathname).toBe("/app/apps/agent-1/settings")
+    expect(screen.queryByRole("heading", { name: "应用" })).toBeNull()
+  })
+
   test("surfaces a failed Tool detail in the Workflow palette and retries it", async () => {
     const workflow = makeWorkflow()
     const callableAgent = makeAgent({
@@ -1305,8 +1363,6 @@ describe("AgentsPage detail view", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy()
     )
-    expect(navState.replaceCalls).toContain("/app/apps/agent-1/settings")
-
     const nameInput = screen.getByLabelText("Agent 名称") as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: "Renamed Assistant" } })
     await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
@@ -2691,6 +2747,12 @@ describe("AgentsPage run flows", () => {
   })
 
   test("starts a new conversation and resets the preview", async () => {
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL(
+      "https://nexaflow.example/app/apps/agent-1/settings"
+    )
     const agent = makeAgent()
     const succeededRun = makeRun({ status: "succeeded", result: "Old answer" })
     await renderDetail({
@@ -2706,16 +2768,20 @@ describe("AgentsPage run flows", () => {
       ],
     })
     await waitFor(() => expect(screen.getByText("Old answer")).toBeTruthy())
+    const previousConversationId = new URLSearchParams(
+      window.location.search
+    ).get("conversation_id")
+    expect(previousConversationId).toBe("conversation-1")
 
     fireEvent.click(screen.getByLabelText("新建对话"))
     await waitFor(() =>
       expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
     )
+    expect(window.location.pathname).toBe("/app/apps/agent-1/settings")
     expect(
-      navState.pushCalls.some((href) =>
-        href.startsWith("/app/apps/agent-1/settings?conversation_id=")
-      )
-    ).toBe(true)
+      new URLSearchParams(window.location.search).get("conversation_id")
+    ).not.toBe(previousConversationId)
+    expect(screen.queryByRole("heading", { name: "应用" })).toBeNull()
   })
 
   test("ignores empty ask submissions", async () => {

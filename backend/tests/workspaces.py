@@ -5,8 +5,10 @@ from sqlalchemy import select
 
 from app.capabilities.llm.models import RegisteredModel
 from app.domain.resource_permission import ResourcePermission
+from app.entities.agents import AgentRun
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure import object_storage as object_storage_module
+from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import knowledge_graph as graph_repository
 from app.infrastructure.session import get_session_factory
 from app.shareddomain.audit.models import AuditLog
@@ -14,7 +16,9 @@ from app.shareddomain.agents.models import (
     Agent,
     AgentKnowledgeBase,
     AgentMcpTool,
-    AgentRun,
+    AgentRun as AgentRunOrm,
+    AgentRunSnapshot,
+    AgentRunState,
 )
 from app.shareddomain.knowledge import cleanup as knowledge_cleanup
 from app.shareddomain.knowledge.models import (
@@ -62,7 +66,9 @@ async def assert_workspace_cascade_deleted(
         assert await db.get(KnowledgeBase, knowledge_base_id) is None
         assert await db.get(RegisteredModel, model_id) is None
         assert await db.get(Agent, agent_id) is None
-        assert await db.get(AgentRun, agent_run_id) is None
+        assert await db.get(AgentRunOrm, agent_run_id) is None
+        assert await db.get(AgentRunState, agent_run_id) is None
+        assert await db.get(AgentRunSnapshot, agent_run_id) is None
         assert await db.get(McpServer, mcp_server_id) is None
         for model in (AgentKnowledgeBase, AgentMcpTool, ToolSource):
             rows = await db.scalars(
@@ -171,10 +177,10 @@ async def seed_workspace_dependencies(
                     mcp_server_id=mcp_server.id,
                     tool_name="lookup",
                 ),
-                agent_run,
                 task,
             ]
         )
+        await agent_repository.create_agent_run(db, agent_run)
         await db.commit()
         return model.id, agent.id, agent_run.id, mcp_server.id, task.id
 
@@ -482,20 +488,18 @@ async def seed_workspace_analytics(
             duration_seconds=1,
             model_usage={"total_tokens": 888},
         )
-        db.add_all(
-            [
-                previous,
-                first,
-                unreported,
-                public,
-                workflow_run,
-                child,
-                other,
-                boundary_end,
-                boundary_before_previous,
-            ]
-        )
-        await db.flush()
+        for run in (
+            previous,
+            first,
+            unreported,
+            public,
+            workflow_run,
+            child,
+            other,
+            boundary_end,
+            boundary_before_previous,
+        ):
+            await agent_repository.create_agent_run(db, run)
         db.add(
             WorkflowRunDetail(
                 workspace_id=workspace_id,
