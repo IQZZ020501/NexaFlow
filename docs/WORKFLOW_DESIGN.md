@@ -208,7 +208,7 @@ Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全�
 沙箱进程边界：
 
 - Linux Worker 在启动 Celery 前创建独立 mount/network/PID/IPC/UTS namespace 与最小 chroot；macOS 开发对每个子进程应用 Seatbelt；原生 Windows 不启动，使用 WSL2；
-- Compose 默认 capability 全删，只恢复 namespace/chroot、降权和清理所需能力；Broker 就绪后 supervisor 在启动 Celery 前再次全部丢弃；保留默认 seccomp 与 `no-new-privileges`；
+- Compose 默认 capability 全删，只恢复 namespace/chroot、降权和清理所需能力；关闭会拦截 mount 的 Docker 默认 AppArmor profile；Broker 就绪后 supervisor 在启动 Celery 前再次全部丢弃；保留默认 seccomp 与 `no-new-privileges`；
 - 用户程序以 UID/GID 65532、隔离 Python 模式、最小环境运行；服务一次只执行一个同 UID 任务；
 - 5 秒墙钟/CPU、256 MiB 地址空间、16 进程、64 文件描述符、5 MiB 单文件、stdout/stderr 各 64 KiB；
 - 整个进程组在超时或输出超限时强制终止；请求只能降低、不能提高硬限制；

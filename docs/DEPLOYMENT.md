@@ -29,7 +29,7 @@
 ## 关键约定
 
 - 仓库根 `.env` 是宿主机后端与 Compose 的唯一配置源；Compose 命令显式传 `--env-file .env`，并通过 `NEXAFLOW_APP_IMAGE` / `NEXAFLOW_POSTGRES_IMAGE` 选择本地或镜像仓库标签。
-- API、Worker 与 Frontend 共享同一应用镜像并保持三个独立容器；Sandbox 不是 Compose 服务。Worker 必须保留 namespace/chroot 所需 capability、`no-new-privileges` 和默认 seccomp，并在启动 Celery 前丢弃 capability。
+- API、Worker 与 Frontend 共享同一应用镜像并保持三个独立容器；Sandbox 不是 Compose 服务。Worker 必须保留 namespace/chroot 所需 capability，关闭会拦截 mount 的 Docker 默认 AppArmor profile，保留 `no-new-privileges` 和默认 seccomp，并在启动 Celery 前丢弃 capability。
 - API 与 Worker 必须共享 `KNOWLEDGE_STORAGE_DIR` 并连接同一个 `QDRANT_URL`，否则 worker 会漏读上传文件或写入不同向量库。
 - API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL/Redis；该组合 Worker 只运行一个实例，由 Beat 重新派发 queued/租约过期的 Knowledge Task 与 Agent Run。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
 - `AGENT_EXECUTOR_HEARTBEAT_SECONDS` 必须小于 `AGENT_EXECUTOR_LEASE_SECONDS` 的一半。部署更新应先执行 Alembic，再滚动更新 API/Worker；回滚则先回滚进程，再降级 migration。

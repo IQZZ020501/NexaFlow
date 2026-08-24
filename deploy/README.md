@@ -135,7 +135,9 @@ keeps its Unix socket private to the Worker process tree. In Linux production,
 the launcher creates private mount, network, PID, IPC, and UTS namespaces,
 mounts only the Python runtime and sandbox source into a chroot, then reduces
 the Broker to `CHOWN`, `KILL`, `SETGID`, and `SETUID`. The supervisor drops all
-capabilities before starting Celery. Docker's default seccomp profile and
+capabilities before starting Celery. The Worker disables Docker's outer
+AppArmor profile because its default policy blocks the mount operations needed
+to build the private namespace; Docker's default seccomp profile and
 `no-new-privileges` remain enabled. There is no sandbox Compose service, image,
 network attachment, business-data mount, or shared socket volume.
 
@@ -186,6 +188,7 @@ docker run --rm --network none --read-only \
 docker run --rm --network none --cap-drop ALL \
   --cap-add CHOWN --cap-add KILL --cap-add SETGID --cap-add SETPCAP \
   --cap-add SETUID --cap-add SYS_ADMIN --cap-add SYS_CHROOT \
+  --security-opt apparmor=unconfined \
   --security-opt no-new-privileges:true \
   --env ENVIRONMENT=production \
   --env DATABASE_URL=postgresql://sandbox-must-not-see-this \

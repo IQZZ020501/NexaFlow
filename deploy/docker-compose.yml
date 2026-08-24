@@ -120,6 +120,7 @@ services:
       - SYS_ADMIN
       - SYS_CHROOT
     security_opt:
+      - apparmor=unconfined
       - no-new-privileges:true
     depends_on:
       migrate:

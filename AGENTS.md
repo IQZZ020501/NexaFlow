@@ -166,8 +166,10 @@ Correctness, safety, evidence, and validation take priority over speed.
   Dockerfile shared by API/worker/frontend containers, the custom PostgreSQL
   Dockerfile, and Nginx examples. The production Worker supervises the sandbox
   source inside its own container and creates a private network/mount/PID/IPC/UTS
-  namespace plus chroot before starting Celery; there is no sandbox service or
-  socket volume. `scripts/setup-hooks.sh` enables the repository Git hooks.
+  namespace plus chroot before starting Celery. Its outer Docker AppArmor
+  profile is unconfined so those mount operations are permitted; default seccomp
+  and `no-new-privileges` remain enabled. There is no sandbox service or socket
+  volume. `scripts/setup-hooks.sh` enables the repository Git hooks.
 - Use `rg` / `rg --files` for code search. Do not invent project commands;
   inspect local scripts first.
 
