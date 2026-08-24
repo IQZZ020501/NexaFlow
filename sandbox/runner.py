@@ -2,23 +2,34 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import asdict, dataclass
 import ctypes
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import selectors
+import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
 import time
 from typing import Any
+import zipfile
 
 RUNNER_UID = int(os.environ.get("SANDBOX_RUNNER_UID", "65532"))
 RUNNER_GID = int(os.environ.get("SANDBOX_RUNNER_GID", "65532"))
 MAX_CODE_BYTES = 256 * 1024
 MAX_STDIN_BYTES = 256 * 1024
+MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
+MAX_SKILLS = 8
+MAX_SKILL_FILES = 128
+MAX_SKILL_BYTES = 2 * 1024 * 1024
+SKILL_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
 PR_SET_CHILD_SUBREAPER = 36
 
 
@@ -30,7 +41,7 @@ class Limits:
     cpu_seconds: int = 5
     memory_bytes: int = 256 * 1024 * 1024
     max_output_bytes: int = 64 * 1024
-    max_file_bytes: int = 1 * 1024 * 1024
+    max_file_bytes: int = MAX_ARTIFACT_BYTES
     max_processes: int = 16
     max_open_files: int = 64
 
@@ -71,15 +82,191 @@ class ExecutionResult:
     stderr: str
     exit_code: int | None
     error: str | None = None
+    artifact: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "ok": self.ok,
             "stdout": self.stdout,
             "stderr": self.stderr,
             "exit_code": self.exit_code,
             "error": self.error,
         }
+        if self.artifact is not None:
+            payload["artifact"] = self.artifact
+        return payload
+
+
+def _artifact_spec(raw: Any) -> tuple[str, str] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or set(raw) != {"format", "filename"}:
+        raise ValueError("artifact must contain format and filename")
+    artifact_format = raw.get("format")
+    filename = raw.get("filename")
+    if artifact_format not in {"docx", "html"}:
+        raise ValueError("artifact.format must be docx or html")
+    if (
+        not isinstance(filename, str)
+        or not filename
+        or len(filename) > 120
+        or Path(filename).name != filename
+        or "\x00" in filename
+        or not filename.lower().endswith(f".{artifact_format}")
+    ):
+        raise ValueError("artifact.filename is invalid")
+    return artifact_format, filename
+
+
+def _skill_names(raw: Any) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if (
+        not isinstance(raw, list)
+        or len(raw) > MAX_SKILLS
+        or any(not isinstance(name, str) or not SKILL_NAME.fullmatch(name) for name in raw)
+        or len(set(raw)) != len(raw)
+    ):
+        raise ValueError("skills must contain up to 8 unique safe names")
+    return tuple(raw)
+
+
+def _stage_skills(workdir: Path, names: tuple[str, ...]) -> tuple[Path, str | None]:
+    target_root = workdir / "skills"
+    target_root.mkdir()
+    if not names:
+        return target_root, None
+
+    configured_root = os.environ.get("SANDBOX_SKILLS_DIR", "")
+    try:
+        source_root = Path(configured_root).resolve(strict=True)
+    except (FileNotFoundError, OSError):
+        return target_root, "skill_not_found"
+    if not source_root.is_dir():
+        return target_root, "skill_not_found"
+
+    file_count = 0
+    total_bytes = 0
+    for name in names:
+        source = source_root / name
+        try:
+            resolved = source.resolve(strict=True)
+        except (FileNotFoundError, OSError):
+            return target_root, "skill_not_found"
+        if source.is_symlink() or resolved.parent != source_root or not resolved.is_dir():
+            return target_root, "skill_invalid"
+        for current, directories, files in os.walk(resolved, followlinks=False):
+            current_path = Path(current)
+            paths = [current_path / item for item in (*directories, *files)]
+            if any(path.is_symlink() for path in paths):
+                return target_root, "skill_invalid"
+            for filename in files:
+                path = current_path / filename
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    return target_root, "skill_invalid"
+                file_count += 1
+                total_bytes += size
+                if file_count > MAX_SKILL_FILES or total_bytes > MAX_SKILL_BYTES:
+                    return target_root, "skill_too_large"
+        shutil.copytree(resolved, target_root / name)
+    return target_root, None
+
+
+def _restrict_read_only_tree(path: Path) -> None:
+    root = os.geteuid() == 0
+    for current, directories, files in os.walk(path):
+        current_path = Path(current)
+        if root:  # pragma: no cover - requires root (CI Docker only)
+            os.chown(current_path, 0, RUNNER_GID)
+            for name in (*directories, *files):
+                os.chown(current_path / name, 0, RUNNER_GID)
+        current_path.chmod(0o550 if root else 0o500)
+        for name in files:
+            (current_path / name).chmod(0o440 if root else 0o400)
+
+
+def _read_artifact(path: Path, artifact_format: str, filename: str) -> dict[str, Any]:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError as exc:
+        raise ValueError("artifact_missing") from exc
+    if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
+        raise ValueError("artifact_invalid")
+    if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
+        os.chown(path, 0, RUNNER_GID, follow_symlinks=False)
+        path.chmod(0o440)
+    if metadata.st_size <= 0:
+        raise ValueError("artifact_empty")
+    if metadata.st_size > MAX_ARTIFACT_BYTES:
+        raise ValueError("artifact_too_large")
+    content = path.read_bytes()
+    if artifact_format == "html":
+        try:
+            content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("artifact_invalid") from exc
+    else:
+        try:
+            with zipfile.ZipFile(path) as archive:
+                names = set(archive.namelist())
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise ValueError("artifact_invalid") from exc
+        if not {"[Content_Types].xml", "word/document.xml"}.issubset(names):
+            raise ValueError("artifact_invalid")
+    return {
+        "format": artifact_format,
+        "filename": filename,
+        "size_bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "content_base64": base64.b64encode(content).decode("ascii"),
+    }
+
+
+def _sandboxed_child_command(command: list[str], workdir: Path) -> list[str]:
+    if sys.platform != "darwin":
+        return command
+    sandbox_exec = shutil.which("sandbox-exec")
+    if sandbox_exec is None:
+        raise RuntimeError("macOS sandbox-exec is required for code execution")
+
+    def quoted(path: Path) -> str:
+        return json.dumps(str(path.resolve()))
+
+    home = Path.home().resolve()
+    base_prefix = Path(sys.base_prefix).resolve()
+    readable = {
+        Path(__file__).parent.resolve(),
+        Path(sys.prefix).resolve(),
+        base_prefix,
+        workdir.resolve(),
+    }
+    denied_home_entries: list[Path] = []
+    current = home
+    base_parts = (
+        base_prefix.relative_to(home).parts if base_prefix.is_relative_to(home) else ()
+    )
+    for part in base_parts:
+        allowed = current / part
+        denied_home_entries.extend(path for path in current.iterdir() if path != allowed)
+        current = allowed
+    if not base_parts:
+        denied_home_entries.extend(home.iterdir())
+    profile = [
+        "(version 1)",
+        "(allow default)",
+        "(deny network*)",
+        "(deny file-write*)",
+        f"(allow file-write* (subpath {quoted(workdir)}))",
+        '(allow file-write* (literal "/dev/null"))',
+        *(
+            f"(deny file-read* (subpath {quoted(path)}))"
+            for path in denied_home_entries
+        ),
+        *(f"(allow file-read* (subpath {quoted(path)}))" for path in readable),
+    ]
+    return [sandbox_exec, "-p", "\n".join(profile), *command]
 
 
 def _terminate(process: subprocess.Popen[bytes]) -> None:
@@ -220,7 +407,14 @@ def _collect_output(
     )
 
 
-def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> ExecutionResult:
+def run_code(
+    code: str,
+    stdin: str = "",
+    limits: Limits | None = None,
+    *,
+    artifact: tuple[str, str] | None = None,
+    skills: tuple[str, ...] = (),
+) -> ExecutionResult:
     """Execute a UTF-8 Python program and return bounded output."""
 
     if os.name != "posix":
@@ -247,6 +441,9 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
         stdin_path = workdir / "stdin"
         code_path.write_text(code, encoding="utf-8")
         stdin_path.write_text(stdin, encoding="utf-8")
+        skills_path, skill_error = _stage_skills(workdir, skills)
+        if skill_error is not None:
+            return ExecutionResult(False, "", "", None, skill_error)
         if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
             os.chown(workdir, 0, RUNNER_GID)
             os.chown(code_path, 0, RUNNER_GID)
@@ -257,6 +454,7 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
         else:
             code_path.chmod(0o400)
             stdin_path.chmod(0o400)
+        _restrict_read_only_tree(skills_path)
 
         environment = {
             "PATH": "/usr/local/bin:/usr/bin:/bin",
@@ -264,6 +462,14 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
             "PYTHONNOUSERSITE": "1",
             "TMPDIR": str(workdir),
         }
+        if artifact is not None:
+            environment.update(
+                {
+                    "NEXAFLOW_ALLOW_SITE_PACKAGES": "1",
+                    "NEXAFLOW_OUTPUT_PATH": str(workdir / artifact[1]),
+                    "NEXAFLOW_SKILLS_DIR": str(skills_path),
+                }
+            )
         child_path = Path(__file__).with_name("child.py")
         identity: dict[str, Any] = {}
         if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
@@ -274,7 +480,7 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
                 "umask": 0o077,
             }
         with stdin_path.open("rb") as input_stream:
-            process = subprocess.Popen(
+            command = _sandboxed_child_command(
                 [
                     sys.executable,
                     "-I",
@@ -284,6 +490,10 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
                     json.dumps(asdict(limits), separators=(",", ":")),
                     str(code_path),
                 ],
+                workdir,
+            )
+            process = subprocess.Popen(
+                command,
                 cwd=workdir,
                 env=environment,
                 stdin=input_stream,
@@ -305,6 +515,15 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
                 _terminate(process)
                 _terminate_linux_descendants()
 
+        artifact_payload = None
+        if error is None and process.returncode == 0 and artifact is not None:
+            try:
+                artifact_payload = _read_artifact(
+                    workdir / artifact[1], artifact[0], artifact[1]
+                )
+            except ValueError as exc:
+                error = str(exc)
+
     exit_code = process.returncode
     return ExecutionResult(
         ok=error is None and exit_code == 0,
@@ -312,6 +531,7 @@ def run_code(code: str, stdin: str = "", limits: Limits | None = None) -> Execut
         stderr=stderr.decode("utf-8", errors="replace"),
         exit_code=exit_code,
         error=error,
+        artifact=artifact_payload,
     )
 
 
@@ -324,7 +544,17 @@ def execute_request(request: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("code must be a string")
     if not isinstance(stdin, str):
         raise ValueError("stdin must be a string")
-    result = run_code(code, stdin, Limits.from_request(request.get("limits")))
+    artifact = _artifact_spec(request.get("artifact"))
+    skills = _skill_names(request.get("skills"))
+    if skills and artifact is None:
+        raise ValueError("skills require an artifact request")
+    result = run_code(
+        code,
+        stdin,
+        Limits.from_request(request.get("limits")),
+        artifact=artifact,
+        skills=skills,
+    )
     return {"version": 1, **result.as_dict()}
 
 

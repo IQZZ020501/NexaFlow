@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+import hmac
 import secrets
 from typing import Any
 
@@ -9,6 +10,7 @@ from pwdlib import PasswordHash
 from app.infrastructure.config import Settings
 
 ALGORITHM = "HS256"
+ARTIFACT_TOKEN_SCOPE = "artifact:download"
 REFRESH_TOKEN_BYTES = 48
 _password_hash = PasswordHash.recommended()
 
@@ -42,3 +44,40 @@ def decode_access_token(token: str, settings: Settings) -> str | None:
         return None
     subject = payload.get("sub")
     return subject if isinstance(subject, str) else None
+
+
+def _artifact_signing_key(settings: Settings) -> bytes:
+    return hmac.digest(
+        settings.jwt_secret_key.encode(),
+        b"nexaflow-generated-artifact-v1",
+        sha256,
+    )
+
+
+def create_artifact_download_token(
+    artifact_id: str,
+    expires_at: datetime,
+    settings: Settings,
+) -> str:
+    return jwt.encode(
+        {"sub": artifact_id, "scope": ARTIFACT_TOKEN_SCOPE, "exp": expires_at},
+        _artifact_signing_key(settings),
+        algorithm=ALGORITHM,
+    )
+
+
+def decode_artifact_download_token(token: str, settings: Settings) -> str | None:
+    try:
+        payload = jwt.decode(
+            token,
+            _artifact_signing_key(settings),
+            algorithms=[ALGORITHM],
+        )
+    except jwt.PyJWTError:
+        return None
+    subject = payload.get("sub")
+    return (
+        subject
+        if isinstance(subject, str) and payload.get("scope") == ARTIFACT_TOKEN_SCOPE
+        else None
+    )

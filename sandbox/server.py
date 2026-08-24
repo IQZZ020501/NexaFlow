@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import socketserver
 import stat
 import threading
@@ -29,7 +30,7 @@ class SandboxRequestHandler(socketserver.StreamRequestHandler):
         self.connection.settimeout(5)
         try:
             line = self.rfile.readline(MAX_REQUEST_BYTES + 1)
-        except TimeoutError:
+        except (TimeoutError, socket.timeout):
             self.wfile.write(
                 encode_response(
                     {"version": 1, "ok": False, "error": "request_timeout"}

@@ -5,8 +5,8 @@
 # container names. Production deployments should use docker-compose.server.yml
 # (or the base file for a custom image build) instead.
 #
-# Usage (full local container dependencies):
-#   docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d --build --wait db redis qdrant sandbox worker
+# Usage (local infrastructure; run API, Worker, and frontend on the host):
+#   docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d --wait db redis qdrant
 
 services:
   db:
@@ -23,14 +23,3 @@ services:
     container_name: nexaflow-qdrant
     ports:
       - "6333:6333"
-
-  worker:
-    build:
-      context: ..
-      dockerfile: deploy/dockerfiles/app.Dockerfile
-      args:
-        NEXAFLOW_API_PROXY: http://api:8000
-    environment:
-      ENVIRONMENT: development
-    volumes:
-      - ../backend/storage:/data

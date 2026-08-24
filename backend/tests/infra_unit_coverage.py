@@ -12,9 +12,13 @@ SQLite database (schema created per ``with`` block).
 """
 
 import asyncio
+import base64
+import hashlib
+import importlib.util
 import json
 import logging
 import os
+import sys
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -2072,6 +2076,78 @@ def test_code_sandbox_execute() -> None:
         lambda: _run_sandbox(_FakeSandboxReader(b"", error=TimeoutError("slow")))
     )
     assert isinstance(reader_error, code_sandbox.WorkflowSandboxError)
+
+
+def test_code_sandbox_artifact_execute() -> None:
+    content = b"<html><body>ready</body></html>"
+    writer = _FakeSandboxWriter()
+    response = _sandbox_response(
+        artifact={
+            "format": "html",
+            "filename": "page.html",
+            "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "content_base64": base64.b64encode(content).decode(),
+        }
+    )
+
+    async def execute():
+        with patch(
+            "asyncio.open_unix_connection",
+            new=AsyncMock(return_value=(_FakeSandboxReader(response), writer)),
+        ):
+            return await code_sandbox.execute_artifact_code(
+                replace(settings(), workflow_sandbox_timeout_seconds=5),
+                "open(output_path, 'w').write('ready')",
+                "html",
+                "page.html",
+                ["documents"],
+            )
+
+    result = run(execute())
+    request = json.loads(writer.data)
+    assert request["artifact"] == {"format": "html", "filename": "page.html"}
+    assert request["skills"] == ["documents"]
+    assert "output_path" in request["code"]
+    assert result.content == content
+    assert result.filename == "page.html"
+
+
+def test_worker_supervisor_sandbox_commands() -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "worker.py"
+    spec = importlib.util.spec_from_file_location("nexaflow_worker_script", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    sandbox_root = Path(__file__).resolve().parents[2]
+    socket_path = Path("/tmp/nexaflow-worker-test/sandbox.sock")
+
+    soft = module.build_sandbox_command(
+        sandbox_python=Path(sys.executable),
+        sandbox_root=sandbox_root,
+        socket_path=socket_path,
+        hard_isolation=False,
+        skills_dir=None,
+    )
+    assert soft[-4:] == [
+        "-m",
+        "sandbox.server",
+        "--socket",
+        str(socket_path),
+    ]
+
+    hard = module.build_sandbox_command(
+        sandbox_python=Path(sys.executable),
+        sandbox_root=sandbox_root,
+        socket_path=socket_path,
+        hard_isolation=True,
+        skills_dir=Path("/srv/nexaflow-skills"),
+    )
+    assert hard[:4] == [str(Path(sys.executable)), "-B", "-m", "sandbox.launcher"]
+    assert "--sandbox-root" in hard
+    assert "--skills-dir" in hard
+    assert hard[-2:] == ["--socket", str(socket_path)]
 
 
 class _BrokenSandboxWriter:
@@ -4581,6 +4657,8 @@ def main() -> None:
 
     test_code_sandbox_program_wrapping()
     test_code_sandbox_execute()
+    test_code_sandbox_artifact_execute()
+    test_worker_supervisor_sandbox_commands()
     test_code_sandbox_write_failure()
 
     test_object_storage()

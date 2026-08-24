@@ -86,7 +86,7 @@ flowchart LR
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
 | 工具 | builtin / Python / MCP 统一目录、不可变版本、授权、策略、绑定与 ToolInvocation |
 | 检索 | PostgreSQL（权威文档、证据图谱与 revision）+ Qdrant（可重建的文档/Profile 派生向量）、`pg_search` 0.25.2（Jieba/BM25）、RRF、引用扩展、有界多跳路径、可选 reranker；不需要 Neo4j 或新数据库 |
-| 部署 | PostgreSQL 17 + `pg_search`、Docker Compose、Nginx、独立无网络 Python 沙箱 |
+| 部署 | PostgreSQL 17 + `pg_search`、Docker Compose、Nginx、Worker 监管的源码 Python 沙箱 |
 
 ## 快速开始
 
@@ -147,7 +147,7 @@ docker compose --env-file .env -f deploy/docker-compose.server.yml down
 
 ## 本地开发
 
-本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。Windows 需要额外安装 GNU Make；Makefile 目标通过 Python 编排，不依赖 Bash。此模式只在 Docker 中运行 PostgreSQL、Redis、Qdrant、Worker 和沙箱，API 与前端直接在宿主机运行；宿主机和容器共用根目录 `.env`。
+本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。Docker 只运行 PostgreSQL、Redis 和 Qdrant；API、Worker 与前端分别从源码启动，并共用根目录 `.env`。macOS Worker 使用系统 Seatbelt 隔离代码子进程；Linux Worker 使用 namespace/chroot，需以 root 启动。Windows 请在 WSL2 内启动 API 与 Worker，原生 Windows Worker 会拒绝启动。
 
 ### 1. 首次安装依赖
 
@@ -163,10 +163,10 @@ test -f .env || cp .env.example .env
 docker compose --env-file .env \
   -f deploy/docker-compose.yml \
   -f deploy/docker-compose.dev.yml \
-  up -d --build --wait db redis qdrant sandbox worker
+  up -d --build --wait db redis qdrant
 ```
 
-这是一条 Compose 命令，会启动数据库、Redis、Qdrant、Worker 和沙箱，并自动完成迁移。不要再运行宿主 `make worker`。
+这条命令只启动数据库、Redis 和 Qdrant。API 启动时会执行迁移。
 
 ### 3. 启动 API
 
@@ -175,10 +175,19 @@ cd backend
 make dev
 ```
 
-`make dev` 会再次确认基础服务和迁移状态，然后在 <http://127.0.0.1:8000> 启动 API，并同步 Worker 日志。
+`make dev` 会再次确认基础服务和迁移状态，然后在 <http://127.0.0.1:8000> 启动 API。
 如果端口已被其他 API 占用，先停止旧进程，或使用 `make dev PORT=8001` 启动到其他端口。
 
-### 4. 启动前端
+### 4. 启动 Worker
+
+```bash
+cd backend
+make worker
+```
+
+Worker 会从 `sandbox/` 源码启动并监管沙箱 Broker；无需单独启动 sandbox 服务。
+
+### 5. 启动前端
 
 ```bash
 cd frontend
@@ -238,7 +247,7 @@ python3 -m sandbox.self_check
 - API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL、Redis、Qdrant，并共享上传存储和加密密钥；不要同时运行第二个 Beat。
 - 远程 MCP 默认拒绝私网与回环地址；只有明确可信的部署才应启用 `MCP_ALLOW_PRIVATE_NETWORKS`。
 - stdio MCP 配置允许工作空间管理员启动后端进程，因此只应向可信管理员开放管理权限。
-- Python Tool 与 Python Code 节点必须运行在独立沙箱服务中；不要把沙箱 socket 暴露给 API 或宿主外部网络。
+- Python Tool 与 Python Code 节点必须运行在 Worker 监管的源码沙箱中；socket 只能存在于 Worker 进程树，不能暴露给 API 或宿主外部网络。
 - 不要提交根目录 `.env`、模型凭据或其他真实密钥。
 
 ## 贡献

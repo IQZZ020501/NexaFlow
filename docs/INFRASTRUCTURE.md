@@ -10,13 +10,13 @@
 
 - `backend/app/infrastructure/config.py` — Settings 配置 dataclass：加载仓库根 `.env`、从 PostgreSQL 组件安全构造连接串、数据库/JWT/Qdrant/Celery、Agent 外部请求限流等全部环境配置与生产强校验
 - `backend/app/infrastructure/session.py` — 异步数据库引擎与会话工厂，提供 FastAPI 依赖 `get_db`
-- `backend/app/infrastructure/security.py` — 密码哈希（pwdlib）、JWT access token 签发/校验、refresh token 生成与哈希
+- `backend/app/infrastructure/security.py` — 密码哈希（pwdlib）、JWT access token 签发/校验、refresh token 生成与哈希、隔离密钥派生的 Artifact 下载 token
 - `backend/app/infrastructure/errors.py` — 错误日志入口 `log_error`：内部/外部（上游服务）错误来源分类与 `ExternalServiceError` 基类
 - `backend/app/infrastructure/logger.py` — 全局日志初始化 `setup_logging`、项目前缀 logger 与结构化事件 `log_event`
 - `backend/app/infrastructure/secrets.py` — Fernet 对称加解密工具与密钥尾号提示 `secret_hint`
 - `backend/app/infrastructure/model_utils.py` — 通用工具：UUID 主键 `new_id` 与 UTC 时间 `utc_now`
 - `backend/app/infrastructure/mcp_stdio.py` — stdio 配置序列化、输入边界校验及可执行文件/工作目录运行时校验
-- `backend/app/infrastructure/code_sandbox.py` — 通过 worker 独占 Unix socket 调用无网络、只读文件系统的 Python sandbox；API 进程不执行用户代码
+- `backend/app/infrastructure/code_sandbox.py` — 通过 Worker 私有 Unix socket 调用 Python sandbox，支持有界 JSON 结果与 DOCX/HTML Artifact；API 进程不执行用户代码
 - `backend/app/infrastructure/validation.py` — 输入规范化：email/username/name 校验与 trim
 - `backend/app/infrastructure/system_log.py` — SystemLog ORM 模型与 `record_system_log` 系统日志落库
 - `backend/app/infrastructure/celery.py` — Celery 应用工厂（broker、序列化、ack 策略）与任务失败全局错误钩子
@@ -34,6 +34,7 @@
 - `backend/app/infrastructure/repositories/team.py` — 团队及成员关系数据访问层（含级联删除）
 - `backend/app/infrastructure/repositories/workspace.py` — 工作空间与成员关系数据访问层（含管理员计数）
 - `backend/app/infrastructure/repositories/tools.py` — Tool Source/Tool/Version/Policy/授权绑定与 durable ToolInvocation 的租约、恢复和审计数据访问层
+- `backend/app/infrastructure/repositories/artifacts.py` — 24 小时 Agent 生成 Artifact 的二进制持久化、幂等读取与过期清理
 
 ### infrastructure/sql/（手写 SQL）
 
@@ -84,14 +85,16 @@
   - `202608170002_workflow_tool_resources.py` — Workflow 发布版本冻结 canonical Tool 资源快照
   - `202608170003_workflow_agent_children.py` — Workflow Agent 节点的 root/parent/depth lineage 与等待子 Run 状态
   - `202608240001_agent_run_four_table_storage.py` — 拆分 Run 身份、可变状态、不可变快照和事件，并把旧 Agent 工具调用合并到 ToolInvocation
+  - `202608240002_generated_artifacts.py` — Agent 生成 Artifact 表、索引与既有工作空间内置 `python_artifact` Tool 回填
 
 ## 仓库与 backend 配置
 
 - `.env.example` — 唯一环境变量模板：PostgreSQL 组件、环境/日志/JWT/模型密钥/知识存储/Qdrant/Redis/MCP/CORS/Agent 外部请求限流与引导管理员；宿主机与 Compose 共用根 `.env`
 - `backend/pyproject.toml` — 项目元数据与依赖声明（FastAPI/Celery/LangChain/LangGraph/MCP/Qdrant/Alembic 等）
 - `backend/README.md` — 后台 worker 运行说明（Celery 命令与共享 `KNOWLEDGE_STORAGE_DIR`/`QDRANT_URL` 要求）
-- `backend/Makefile` — 跨平台开发入口；`make worker-compose` 启动带 sandbox socket 的 Compose worker，host `make worker` 不支持 Python Tool/Workflow Code 执行
-- `backend/scripts/dev.py` — `make dev` 的跨平台 Uvicorn 与 Compose Worker 日志编排
+- `backend/Makefile` — 开发入口；`make dev` 启动基础设施/迁移/API，`make worker` 从源码启动 Celery 与受监管 Sandbox Broker
+- `backend/scripts/dev.py` — `make dev` 的跨平台 Uvicorn 编排
+- `backend/scripts/worker.py` — Worker/Sandbox 进程监管、平台隔离选择、启动探针与 capability 收敛
 - `backend/scripts/coverage.py` — `make coverage` 的跨平台并行套件、隔离存储与覆盖率合并
 - `backend/scripts/coverage.sh` — POSIX 环境兼容入口，转发到 Python coverage runner
 - `backend/uv.lock` — uv 依赖锁文件

@@ -90,41 +90,10 @@ services:
       qdrant:
         condition: service_healthy
 
-  sandbox:
-    <<: *app-image
-    init: true
-    working_dir: /opt/sandbox
-    command: ["/usr/local/bin/python", "-m", "sandbox.server"]
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/python", "-m", "sandbox.healthcheck"]
-      interval: 5s
-      timeout: 2s
-      retries: 10
-    network_mode: none
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=0711,uid=0,gid=0
-      - /dev/shm:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=0,gid=0
-    volumes:
-      - sandbox-socket:/run/sandbox
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - KILL
-      - SETGID
-      - SETUID
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 64
-    mem_limit: 512m
-    cpus: 1.0
-    restart: unless-stopped
-
   worker:
     <<: *app-image
     init: true
-    command: celery -A app.infrastructure.celery:celery_app worker --beat --autoscale=10,0 --queues=celery,agents-legacy,agents-v2 --loglevel=INFO
+    command: python scripts/worker.py --autoscale=10,0
     env_file: ../.env
     environment:
       AUTOSCALE_KEEPALIVE: "5"
@@ -140,17 +109,25 @@ services:
       QDRANT_URL: http://qdrant:6333
     volumes:
       - ./data/uploads:/data
-      - sandbox-socket:/run/sandbox
-    group_add:
-      - "65533"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - KILL
+      - SETGID
+      - SETPCAP
+      - SETUID
+      - SYS_ADMIN
+      - SYS_CHROOT
+    security_opt:
+      - apparmor=unconfined
+      - no-new-privileges:true
     depends_on:
       migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
-      sandbox:
         condition: service_healthy
 
   frontend:
@@ -166,6 +143,3 @@ services:
       - "8000:3000"
     depends_on:
       - api
-
-volumes:
-  sandbox-socket:

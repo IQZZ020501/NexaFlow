@@ -17,6 +17,7 @@ from tests.support import (
     activate_admin,
     auth_headers,
     create_active_user,
+    settings as test_settings,
     test_client,
 )
 
@@ -1011,7 +1012,11 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             ("python", None),
         ]
         tools = await repository.list_tools(db, workspace_id)
-        assert {tool.stable_key for tool in tools} == {"current_time", "inline_python"}
+        assert {tool.stable_key for tool in tools} == {
+            "current_time",
+            "inline_python",
+            "python_artifact",
+        }
         tool = next(tool for tool in tools if tool.stable_key == "current_time")
         assert tool.stable_key == "current_time"
         assert tool.availability == "available"
@@ -1026,6 +1031,65 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert policy.definition_hash == version.definition_hash
         assert policy.approval == "auto"
         assert policy.effect == "pure"
+
+        artifact_tool = next(
+            item for item in tools if item.stable_key == "python_artifact"
+        )
+        artifact_version = await repository.get_tool_version(
+            db,
+            workspace_id,
+            artifact_tool.current_version_id or "",
+        )
+        assert artifact_version is not None
+        assert artifact_version.execution_spec == {"builtin": "python_artifact"}
+        assert set(artifact_version.input_schema["properties"]["format"]["enum"]) == {
+            "docx",
+            "html",
+        }
+
+
+def test_generated_artifact_link_serves_static_html() -> None:
+    from app.application.artifacts import create_generated_artifact
+    from app.infrastructure.session import get_session_factory
+
+    with test_client() as client:
+        _admin_token, workspace_id = activate_admin(client)
+
+        async def create():
+            async with get_session_factory()() as db:
+                first = await create_generated_artifact(
+                    db,
+                    test_settings(),
+                    workspace_id=workspace_id,
+                    run_id="run-1",
+                    idempotency_key="artifact-idempotency-key",
+                    artifact_format="html",
+                    filename="page.html",
+                    content=b"<html><style>body{color:#123}</style><body>ready</body></html>",
+                )
+                second = await create_generated_artifact(
+                    db,
+                    test_settings(),
+                    workspace_id=workspace_id,
+                    run_id="run-1",
+                    idempotency_key="artifact-idempotency-key",
+                    artifact_format="html",
+                    filename="page.html",
+                    content=b"ignored retry",
+                )
+                await db.commit()
+                return first, second
+
+        first, second = asyncio.run(create())
+        assert first.artifact_id == second.artifact_id
+        assert first.download_url == second.download_url
+        response = client.get(first.download_url)
+        assert response.status_code == 200, response.text
+        assert response.content.endswith(b"</html>")
+        assert response.headers["content-type"].startswith("text/html")
+        assert "sandbox" in response.headers["content-security-policy"]
+        assert "default-src 'none'" in response.headers["content-security-policy"]
+        assert response.headers["x-content-type-options"] == "nosniff"
 
 
 def test_private_catalog_filters_before_pagination_for_every_role() -> None:
@@ -4384,6 +4448,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     )
     from app.entities.tools import McpServer
     from app.infrastructure.code_sandbox import (
+        ArtifactSandboxResult,
         WorkflowSandboxBusyError,
         WorkflowSandboxError,
         WorkflowSandboxResult,
@@ -4468,6 +4533,53 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     result = await builtin.invoke(snapshot, {}, context)
     assert result.ok is True
     assert "iso8601" in result.data
+    artifact_snapshot = dataclasses.replace(
+        snapshot,
+        execution_spec={"builtin": "python_artifact"},
+    )
+    artifact_content = b"<html><body>ready</body></html>"
+    with patch(
+        "app.application.tool_adapters.execute_artifact_code",
+        new=AsyncMock(
+            return_value=ArtifactSandboxResult(
+                content=artifact_content,
+                format="html",
+                filename="page.html",
+                size_bytes=len(artifact_content),
+                sha256="ignored-by-adapter",
+                stdout="",
+                stderr="",
+                exit_code=0,
+            )
+        ),
+    ) as artifact_sandbox:
+        result = await builtin.invoke(
+            artifact_snapshot,
+            {
+                "code": "open(output_path, 'w').write('ready')",
+                "format": "html",
+                "filename": "page.html",
+                "skills": ["documents"],
+            },
+            context,
+        )
+    assert result.ok is True
+    assert result.data["filename"] == "page.html"
+    assert result.data["download_url"].startswith("/api/v1/artifacts/")
+    assert result.usage == {"exit_code": 0, "size_bytes": len(artifact_content)}
+    assert artifact_sandbox.await_count == 1
+    with patch(
+        "app.application.tool_adapters.execute_artifact_code",
+        new=AsyncMock(side_effect=WorkflowSandboxError("NameError: missing value")),
+    ):
+        result = await builtin.invoke(
+            artifact_snapshot,
+            {"code": "missing", "format": "html", "filename": "page.html"},
+            dataclasses.replace(context, idempotency_key="adapter-failed"),
+        )
+    assert result.ok is False
+    assert result.error_code == "python_artifact_failed"
+    assert "NameError" in result.error_message
     # Unsupported builtin (tool_adapters.py:47-48).
     result = await builtin.invoke(
         dataclasses.replace(snapshot, execution_spec={"builtin": "other"}),
@@ -5211,9 +5323,11 @@ def test_tool_boundaries_reject_unsafe_payloads() -> None:
 
 def test_tool_tasks_are_registered() -> None:
     from app.infrastructure.celery import celery_app
+    from app.tasks.maintenance import cleanup_expired_generated_artifacts_job
 
     assert "app.tools.run" in celery_app.tasks
     assert "app.tools.recover" in celery_app.tasks
+    assert cleanup_expired_generated_artifacts_job.name in celery_app.tasks
     assert (
         celery_app.conf.beat_schedule["recover-frequent-maintenance"]["task"]
         == "app.maintenance.recover_frequent"
@@ -5241,6 +5355,7 @@ def main() -> None:
     test_mcp_resolution_requires_current_binding_owner_use_permission()
     test_mcp_resolution_rejects_missing_authorization_context()
     test_workspace_creation_initializes_system_catalog()
+    test_generated_artifact_link_serves_static_html()
     test_python_tool_http_lifecycle_and_private_grants()
     test_canonical_mcp_policy_allows_owner_read_only_attestation()
     test_tool_tasks_never_execute_inline_and_recover_queued_tests()

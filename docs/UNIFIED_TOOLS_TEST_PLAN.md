@@ -95,7 +95,7 @@ git log --oneline --decorate -20
 - PostgreSQL 17 临时数据库，名称包含测试批次号；禁止使用开发共享库或生产库。
 - Redis、Celery worker、Celery Beat。
 - Qdrant；涉及知识库的 Agent 场景使用独立 collection 前缀。
-- sandbox 容器：`network_mode: none`、read-only、cap drop、非 root，socket 只挂给 worker。
+- Worker 监管的源码 sandbox：Linux namespace/chroot、capability 收敛、私有 socket；macOS Seatbelt；Windows 走 WSL2。
 - Backend API 与 Frontend 开发/预发布构建。
 - 两个 MCP fixture：
   - 公网语义的 Streamable HTTP/SSE fixture，包含只读、外部写、错误和慢响应 Tool。
@@ -348,7 +348,7 @@ git log --oneline --decorate -20
 | SEC-005 | P0 | MCP DNS rebinding、redirect 到私网、IPv4/IPv6 loopback | 每次连接/redirect 均执行网络策略，普通成员入口拒绝 |
 | SEC-006 | P0 | MCP 响应中的 prompt injection | 作为不可信 Tool data，不改变系统策略或泄露上下文 |
 | SEC-007 | P0 | Python import socket/subprocess/ctypes、读取 `/proc`/env | sandbox 与解释器限制阻断 |
-| SEC-008 | P0 | sandbox socket 从 API 容器访问 | API 无挂载；只有 worker 可访问 |
+| SEC-008 | P0 | API 进程访问 sandbox socket | socket 只存在于 Worker 进程树；API 无路径可达 |
 | SEC-009 | P1 | secret/token 出现在 validation、trace、audit、SSE、前端错误 | 全部脱敏 |
 | SEC-010 | P0 | 参数原型污染键、超深 JSON、NaN/Infinity、非字符串 key | schema/JSON 边界拒绝 |
 | SEC-011 | P1 | 审批 invocation_id 重放或跨用户使用 | 只允许当前 actor、Run、turn、call 精确匹配 |
@@ -366,9 +366,9 @@ git log --oneline --decorate -20
 | OPS-003 | P1 | sandbox 单槽下批量 Python 测试 | 有界排队/退避；busy、等待、失败有指标或结构化日志 |
 | OPS-004 | P1 | Celery worker/Beat 重启 | queued test、Tool invocation、Agent/Workflow Run 可恢复 |
 | OPS-005 | P1 | API 与 worker 使用不同版本 | 部署代际闸门阻断旧 worker claim canonical Run |
-| OPS-006 | P1 | Compose 配置检查 | sandbox 无网络、只读、cap drop；socket 仅 worker；依赖健康检查正确 |
-| OPS-007 | P1 | host worker 执行 Python Tool | 文档明确不支持或明确失败，不伪装成功 |
-| OPS-008 | P1 | Compose worker + sandbox 开发命令 | 能启动必要服务，退出/重启无孤儿容器 |
+| OPS-006 | P1 | Compose 配置检查 | 无 sandbox 服务/卷；Worker capability 最小化、默认 seccomp 与 no-new-privileges 保留 |
+| OPS-007 | P1 | host worker 执行 Python Tool | macOS Seatbelt/Linux namespace/WSL2 路径真实自检，其他平台失败关闭 |
+| OPS-008 | P1 | 源码 Worker + sandbox 开发命令 | 能启动必要进程，退出/重启无孤儿子进程或 socket |
 | OPS-009 | P1 | invocation/Run 日志 | 含 trace/run/invocation/tool version、attempt、duration、outcome；不含敏感值 |
 | OPS-010 | P1 | audit 查询 | 创建、发布、授权、撤权、policy、启停、归档均可追踪 actor 与目标 |
 | OPS-011 | P2 | 运行取消/失败后的临时资源 | 无残留 lease、测试数据库、MCP fixture、sandbox 子进程或临时容器 |
@@ -525,7 +525,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 | AUD-008 | P1 | binder 稳定 | 未变化 binding 保留原 `bound_by_user_id`；管理员普通保存不会接管；历史 binder 删除有 409/保留策略 |
 | AUD-009 | P0 | worker 代际隔离 | legacy 与 canonical Agent task/queue/claim 有明确 fence；滚动部署时旧 worker 不能 claim 新 Run |
 | AUD-010 | P0 | durable child Run | child 唯一键、父 checkpoint/`awaiting_child`、requeue、Beat reconciler、取消/deadline race 均有持久状态而非 inline wait |
-| AUD-011 | P1 | Python sandbox 边界 | API 不执行代码；worker-only socket；network none/read-only/cap drop/非 root/大小与时间限制明确 |
+| AUD-011 | P1 | Python sandbox 边界 | API 不执行代码；Worker 私有 socket；namespace/chroot 或 Seatbelt、cap drop、低权限、大小与时间限制明确 |
 | AUD-012 | P1 | secret 与不可信输出 | MCP token/stdio env/code/stdout/stderr 不进入公开响应、模型上下文、审计或未截断日志 |
 
 源码审计必须给出文件与行号。只看到类、表或测试名称不能判定实现已接入生产调用链。
@@ -551,9 +551,9 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 | DB-002 | P0 | backfill 语义 | disabled、missing leaf/server、stale version、publication-only binding、撤权证据均按 MIG 预期处理 |
 | DB-003 | P0 | downgrade 安全 | 新 canonical 写入、活跃 Run、ledger 漂移或副作用风险存在时明确拒绝回滚 |
 | DB-004 | P1 | 历史审计 | Source 删除、用户/Agent/workspace 删除不会级联丢失仍需保留的 Version/Policy/Invocation |
-| DEP-001 | P1 | Compose | worker 订阅正确队列；Beat 单例；sandbox 隔离和 socket 挂载符合设计 |
-| DEP-002 | P1 | 开发启动 | 文档中的 worker/sandbox 命令可执行；host worker 的限制明确 |
-| DEP-003 | P1 | 恢复 | API/worker/Beat/sandbox 分别重启后 queued/leased/awaiting_child 状态可恢复 |
+| DEP-001 | P1 | Compose | worker 订阅正确队列；Beat 单例；无 sandbox 服务且 Worker 内隔离符合设计 |
+| DEP-002 | P1 | 开发启动 | 文档中的源码 Worker 命令可执行；macOS/Linux/WSL2 限制明确 |
+| DEP-003 | P1 | 恢复 | API/worker/Beat 与受监管 Broker 重启后 queued/leased/awaiting_child 状态可恢复 |
 
 ## 14. 自动化门禁与证据
 

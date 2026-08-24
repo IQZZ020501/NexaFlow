@@ -25,15 +25,18 @@ def main() -> None:
     set_limit("RLIMIT_NPROC", limits["max_processes"], limits["max_processes"])
     set_limit("RLIMIT_NOFILE", limits["max_open_files"], limits["max_open_files"])
     set_limit("RLIMIT_CORE", 0, 0)
-    os.execve(
-        sys.executable,
-        [sys.executable, "-I", "-B", "-S", program],
-        {
-            "PATH": "/usr/local/bin:/usr/bin:/bin",
-            "PYTHONHASHSEED": "0",
-            "PYTHONNOUSERSITE": "1",
-        },
-    )
+    environment = {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "PYTHONHASHSEED": "0",
+        "PYTHONNOUSERSITE": "1",
+    }
+    for name in ("TMPDIR", "NEXAFLOW_OUTPUT_PATH", "NEXAFLOW_SKILLS_DIR"):
+        if name in os.environ:
+            environment[name] = os.environ[name]
+    flags = [sys.executable, "-I", "-B"]
+    if os.environ.get("NEXAFLOW_ALLOW_SITE_PACKAGES") != "1":
+        flags.append("-S")
+    os.execve(sys.executable, [*flags, program], environment)
 
 
 if __name__ == "__main__":
