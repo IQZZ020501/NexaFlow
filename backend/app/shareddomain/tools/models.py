@@ -407,6 +407,11 @@ class ToolInvocation(Base):
             name="ck_tool_invocations_arguments_hash",
         ),
         CheckConstraint(
+            "(tool_id IS NULL AND tool_version_id IS NULL) OR "
+            "(tool_id IS NOT NULL AND tool_version_id IS NOT NULL)",
+            name="ck_tool_invocations_tool_version_pair",
+        ),
+        CheckConstraint(
             "(approved_by_user_id IS NULL AND approved_at IS NULL) OR "
             "(approved_by_user_id IS NOT NULL AND approved_at IS NOT NULL)",
             name="ck_tool_invocations_approval",
@@ -429,8 +434,10 @@ class ToolInvocation(Base):
         ForeignKey("users.id"), nullable=False, index=True
     )
     access_source: Mapped[str] = mapped_column(String(20), nullable=False)
-    tool_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    tool_version_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    tool_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    tool_version_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
     policy_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     arguments: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     arguments_hash: Mapped[str] = mapped_column(String(64), nullable=False)

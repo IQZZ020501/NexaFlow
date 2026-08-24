@@ -71,6 +71,16 @@ ApplicationToolSnapshotRow = tuple[
 ]
 
 
+def _tool_invocation_effect(invocation: ToolInvocationOrm) -> str | None:
+    snapshot = invocation.policy_snapshot.get("tool_snapshot", {})
+    if isinstance(snapshot, dict) and snapshot.get("effect"):
+        return str(snapshot["effect"])
+    internal = invocation.policy_snapshot.get("internal_tool", {})
+    if isinstance(internal, dict) and internal.get("effect"):
+        return str(internal["effect"])
+    return None
+
+
 async def get_tool_source(
     db: AsyncSession,
     workspace_id: str,
@@ -1152,8 +1162,7 @@ async def settle_exhausted_agent_tool_invocations(
     )
     invocations = list(rows.all())
     for invocation in invocations:
-        snapshot = invocation.policy_snapshot.get("tool_snapshot", {})
-        effect = snapshot.get("effect") if isinstance(snapshot, dict) else None
+        effect = _tool_invocation_effect(invocation)
         status, outcome, summary, message = (
             exhausted_tool_invocation_terminal_state(invocation.status, effect)
         )
@@ -1189,8 +1198,7 @@ async def settle_cancelled_agent_tool_invocations(
     )
     invocations = list(rows.all())
     for invocation in invocations:
-        snapshot = invocation.policy_snapshot.get("tool_snapshot", {})
-        effect = snapshot.get("effect") if isinstance(snapshot, dict) else None
+        effect = _tool_invocation_effect(invocation)
         status, outcome, summary, _message = exhausted_tool_invocation_terminal_state(
             invocation.status,
             effect,

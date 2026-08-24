@@ -911,14 +911,15 @@ export function AgentsPage({
       return
     }
     let isCurrent = true
-    let expectedConversationId = activeConversationIdRef.current
+    const requestedConversationId = activeConversationIdRef.current
+    let expectedConversationId = requestedConversationId
     const observers: AbortController[] = []
     setIsRunsLoading(true)
     listAgentRuns(
       token,
       selectedWorkspaceId,
       selectedAgentId,
-      initialConversationId
+      requestedConversationId
     )
       .then((nextRuns) => {
         if (
@@ -931,7 +932,7 @@ export function AgentsPage({
           return
         }
         const resolvedConversationId =
-          initialConversationId ??
+          requestedConversationId ??
           nextRuns[0]?.conversation_id ??
           crypto.randomUUID()
         activeConversationIdRef.current = resolvedConversationId
@@ -942,8 +943,10 @@ export function AgentsPage({
           )
         )
         setRuns(visibleRuns)
-        if (!initialConversationId) {
-          router.replace(
+        if (!requestedConversationId) {
+          window.history.replaceState(
+            null,
+            "",
             appViewPath(
               selectedAgentId,
               "agent",
@@ -1029,7 +1032,6 @@ export function AgentsPage({
     applyStreamEvent,
     loadRunToolCalls,
     reportError,
-    router,
     initialConversationId,
     selectedAgentId,
     selectedAppType,
@@ -1200,7 +1202,7 @@ export function AgentsPage({
       return
     }
     setActiveView(view)
-    router.replace(path)
+    window.history.replaceState(null, "", path)
   }
 
   async function handleBackFromAgent() {
@@ -1357,11 +1359,11 @@ export function AgentsPage({
       initialConversationId ??
       crypto.randomUUID()
     activeConversationIdRef.current = conversationId
-    if (!initialConversationId) {
-      router.replace(
-        appViewPath(selectedAgent.id, "agent", "settings", conversationId)
-      )
-    }
+    window.history.replaceState(
+      null,
+      "",
+      appViewPath(selectedAgent.id, "agent", "settings", conversationId)
+    )
     setQuestion("")
     setPendingQuestion(nextQuestion)
     setIsAsking(true)
@@ -1664,7 +1666,9 @@ export function AgentsPage({
     setRegeneratingRunId(null)
     setFeedbackPendingRunId(null)
     setResolvingCallId(null)
-    router.push(
+    window.history.pushState(
+      null,
+      "",
       appViewPath(selectedAgentId, "agent", "settings", conversationId)
     )
   }

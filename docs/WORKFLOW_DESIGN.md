@@ -87,10 +87,11 @@ flowchart LR
 | 表 | 工作流用途 |
 | --- | --- |
 | `agents` | 应用目录；`app_type='workflow'`；模型为 LLM/Classifier 默认模型；类型创建后不可变 |
-| `agent_runs` | 运行主记录、状态、执行用户、租约、attempt、worker、checkpoint、trace、模型 usage、时间戳 |
+| `agent_runs` | 运行身份、调用者、会话、父子谱系、反馈、trace 与创建时间 |
+| `agent_run_states` | 可变状态、租约、attempt、worker、checkpoint、结果、模型 usage 与终态时间 |
+| `agent_run_snapshots` | 创建时冻结的模型、知识库、Tool、发布版本与应用配置 |
 | `agent_run_events` | 有序持久事件与断线重放游标 |
-| `tool_invocations` | Tool/LLM Tool/Inline Python 的统一参数、幂等键、租约、结果与 uncertain 账本；不替代节点审计 |
-| `agent_tool_calls` | 仅保留 legacy MCP/旧运行兼容，不参与 canonical Tool 的重复记账 |
+| `tool_invocations` | Agent/Workflow/测试 Tool 的统一参数、幂等键、审批、租约、结果与 uncertain 账本；兼容旧调用的 API 投影，但不保留第二张调用表 |
 | 工作流图节点配置 | 直接引用知识库、固定 Tool/Version 和固定 Agent 发布版本；发布与运行保存资源快照并重新校验 live kill switch |
 
 工作流不复用 Agent 的 LangGraph `agent -> tool -> agent` 业务图，只复用它的持久执行外壳。

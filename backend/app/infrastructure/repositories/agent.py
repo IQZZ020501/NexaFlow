@@ -1,9 +1,12 @@
+from dataclasses import fields
 from datetime import datetime
+import hashlib
+import json
+from typing import Any
 
 from sqlalchemy import and_, case, delete, exists, func, or_, select, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, load_only
+from sqlalchemy.orm import aliased
 
 from app.domain.resource_permission import ResourcePermission as ResourcePermissionORM
 from app.entities.agents import Agent as AgentEntity
@@ -14,6 +17,7 @@ from app.entities.agents import (
 from app.entities.agents import AgentRun as AgentRunEntity
 from app.entities.agents import AgentRunEvent as AgentRunEventEntity
 from app.entities.agents import AgentToolCall as AgentToolCallEntity
+from app.entities.tools import ToolInvocation as ToolInvocationEntity
 from app.infrastructure.repositories.mapping import (
     refresh_entity,
     save,
@@ -49,45 +53,196 @@ from app.shareddomain.agents.models import (
     AgentPublicationVersion,
     AgentRun,
     AgentRunEvent,
-    AgentToolCall,
+    AgentRunSnapshot,
+    AgentRunState,
 )
+from app.shareddomain.tools.models import ToolInvocation
 from app.shareddomain.workflows.models import WorkflowNodeExecution
 
-_CONVERSATION_MEMORY_COLUMNS = (
-    AgentRun.id,
-    AgentRun.workspace_id,
-    AgentRun.agent_id,
-    AgentRun.requested_by_user_id,
-    AgentRun.execution_user_id,
-    AgentRun.access_source,
-    AgentRun.consumer_id,
-    AgentRun.conversation_id,
-    AgentRun.status,
-    AgentRun.goal,
-    AgentRun.attachment_context,
-    AgentRun.result,
-    AgentRun.context_summary,
-    AgentRun.created_at,
+_RUN_CORE_FIELDS = (
+    "id",
+    "workspace_id",
+    "agent_id",
+    "requested_by_user_id",
+    "execution_user_id",
+    "access_source",
+    "consumer_id",
+    "conversation_id",
+    "root_run_id",
+    "parent_run_id",
+    "parent_node_id",
+    "regenerated_from_run_id",
+    "depth",
+    "goal",
+    "attachment_context",
+    "feedback",
+    "feedback_updated_at",
+    "trace_id",
+    "created_at",
 )
+_RUN_CORE_MUTABLE_FIELDS = (
+    "goal",
+    "attachment_context",
+    "feedback",
+    "feedback_updated_at",
+    "trace_id",
+)
+_RUN_STATE_FIELDS = (
+    "status",
+    "attempts",
+    "max_attempts",
+    "worker_task_id",
+    "lease_expires_at",
+    "checkpoint",
+    "checkpoint_phase",
+    "grounding_status",
+    "grounding_meta",
+    "plan",
+    "result",
+    "context_summary",
+    "model_usage",
+    "last_error",
+    "planned_at",
+    "started_at",
+    "finished_at",
+    "updated_at",
+)
+_RUN_SNAPSHOT_FIELDS = (
+    "snapshot_schema_version",
+    "configuration_source",
+    "agent_publication_version_id",
+    "instructions",
+    "knowledge_base_ids",
+    "knowledge_query_mode",
+    "mcp_tools",
+    "application_snapshot",
+    "application_snapshot_hash",
+    "tool_snapshots",
+    "model_id",
+    "model_name",
+)
+_INTERNAL_TOOL_LEDGER = "agent_internal_v1"
 
 
-def _to_conversation_memory_entity(row: AgentRun) -> AgentRunEntity:
-    return AgentRunEntity(
-        id=row.id,
-        workspace_id=row.workspace_id,
-        agent_id=row.agent_id,
-        requested_by_user_id=row.requested_by_user_id,
-        execution_user_id=row.execution_user_id,
-        access_source=row.access_source,
-        consumer_id=row.consumer_id,
-        conversation_id=row.conversation_id,
-        status=row.status,
-        goal=row.goal,
-        attachment_context=row.attachment_context,
-        result=row.result,
-        context_summary=row.context_summary,
-        created_at=row.created_at,
+def _entity_values(entity: Any, names: tuple[str, ...]) -> dict[str, Any]:
+    return {name: getattr(entity, name) for name in names}
+
+
+def _run_query():
+    return (
+        select(AgentRun, AgentRunState, AgentRunSnapshot)
+        .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
+        .join(AgentRunSnapshot, AgentRunSnapshot.run_id == AgentRun.id)
     )
+
+
+def _memory_run_query():
+    return select(
+        AgentRun.id,
+        AgentRun.workspace_id,
+        AgentRun.agent_id,
+        AgentRun.access_source,
+        AgentRun.consumer_id,
+        AgentRun.conversation_id,
+        AgentRun.goal,
+        AgentRun.attachment_context,
+        AgentRun.created_at,
+        AgentRunState.status,
+        AgentRunState.result,
+        AgentRunState.context_summary,
+    ).join(AgentRunState, AgentRunState.run_id == AgentRun.id)
+
+
+def _to_memory_run_entity(row: Any) -> AgentRunEntity:
+    return AgentRunEntity(**dict(row))
+
+
+def _to_agent_run_entity(
+    run: AgentRun,
+    state: AgentRunState,
+    snapshot: AgentRunSnapshot,
+    *,
+    events: list[dict[str, Any]] | None = None,
+) -> AgentRunEntity:
+    sources = (run, state, snapshot)
+    values: dict[str, Any] = {}
+    for field in fields(AgentRunEntity):
+        if field.name == "events":
+            values[field.name] = events or []
+            continue
+        for source in sources:
+            if hasattr(source, field.name):
+                values[field.name] = getattr(source, field.name)
+                break
+    return AgentRunEntity(**values)
+
+
+def _project_process_events(stored_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    projected: list[dict[str, Any]] = []
+    for stored in stored_events:
+        if stored.get("type") != "process" or not isinstance(stored.get("event"), dict):
+            continue
+        event = stored["event"]
+        call_id = event.get("call_id")
+        for index, current in enumerate(projected):
+            same_event = (
+                current.get("call_id") == call_id
+                if call_id
+                else current.get("type") == event.get("type")
+                and current.get("turn") == event.get("turn")
+                and current.get("tool_name") == event.get("tool_name")
+            )
+            if same_event:
+                projected[index] = event
+                break
+        else:
+            projected.append(event)
+    return [event for event in projected if event.get("status") != "running"]
+
+
+async def _run_event_projections(
+    db: AsyncSession,
+    run_ids: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    if not run_ids:
+        return {}
+    rows = await db.execute(
+        select(AgentRunEvent.run_id, AgentRunEvent.event)
+        .where(AgentRunEvent.run_id.in_(run_ids))
+        .order_by(AgentRunEvent.id)
+    )
+    stored: dict[str, list[dict[str, Any]]] = {run_id: [] for run_id in run_ids}
+    for run_id, event in rows.all():
+        stored.setdefault(run_id, []).append(event)
+    return {
+        run_id: _project_process_events(events)
+        for run_id, events in stored.items()
+    }
+
+
+async def _to_agent_run_entities(
+    db: AsyncSession,
+    rows: list[tuple[AgentRun, AgentRunState, AgentRunSnapshot]],
+) -> list[AgentRunEntity]:
+    projections = await _run_event_projections(db, [row[0].id for row in rows])
+    return [
+        _to_agent_run_entity(run, state, snapshot, events=projections.get(run.id))
+        for run, state, snapshot in rows
+    ]
+
+
+def _worker_generation(configuration_source: str) -> str:
+    return "unified" if configuration_source in {"draft", "published"} else "legacy"
+
+
+async def _load_run_rows(
+    db: AsyncSession,
+    run_id: str,
+) -> tuple[AgentRun, AgentRunState, AgentRunSnapshot] | None:
+    row = (
+        await db.execute(_run_query().where(AgentRun.id == run_id))
+    ).first()
+    return tuple(row) if row is not None else None
 
 
 async def list_agents(
@@ -232,7 +387,7 @@ async def has_agent_publication_audit_references(
             for tool in tools
         ):
             return True
-    run_snapshots = await db.scalars(select(AgentRun.tool_snapshots))
+    run_snapshots = await db.scalars(select(AgentRunSnapshot.tool_snapshots))
     for tool_snapshots in run_snapshots.all():
         if isinstance(tool_snapshots, list) and any(
             isinstance(tool, dict) and tool.get("bound_by_user_id") == user_id
@@ -453,7 +608,7 @@ async def list_agent_runs(
     	list[AgentRunEntity]: Runs matching the specified filters, ordered from newest to oldest.
     """
     statement = (
-        select(AgentRun)
+        _run_query()
         .where(
             AgentRun.agent_id == agent_id,
             AgentRun.access_source == access_source,
@@ -464,29 +619,34 @@ async def list_agent_runs(
         .offset(offset)
     )
     if status is not None:
-        statement = statement.where(AgentRun.status.in_(agent_run_storage_statuses(status)))
+        statement = statement.where(
+            AgentRunState.status.in_(agent_run_storage_statuses(status))
+        )
     if conversation_id is not None:
         statement = statement.where(AgentRun.conversation_id == conversation_id)
     if latest_versions_only:
         successor = aliased(AgentRun)
+        successor_state = aliased(AgentRunState)
         statement = statement.where(
             (
                 AgentRun.regenerated_from_run_id.is_(None)
-                | AgentRun.status.notin_(
+                | AgentRunState.status.notin_(
                     (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
                 )
             ),
             ~exists(
-                select(successor.id).where(
+                select(successor.id)
+                .join(successor_state, successor_state.run_id == successor.id)
+                .where(
                     successor.regenerated_from_run_id == AgentRun.id,
-                    successor.status.notin_(
+                    successor_state.status.notin_(
                         (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
                     ),
                 )
             )
         )
-    result = await db.scalars(statement)
-    return [to_entity(AgentRunEntity, row) for row in result.all()]
+    result = await db.execute(statement)
+    return await _to_agent_run_entities(db, [tuple(row) for row in result.all()])
 
 
 async def count_agent_runs(
@@ -507,8 +667,11 @@ async def count_agent_runs(
     Returns:
         int: The number of matching runs.
     """
-    statement = select(func.count()).select_from(AgentRun).where(
-        AgentRun.agent_id == agent_id
+    statement = (
+        select(func.count())
+        .select_from(AgentRun)
+        .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
+        .where(AgentRun.agent_id == agent_id)
     )
     if access_source is not None:
         statement = statement.where(AgentRun.access_source == access_source)
@@ -518,17 +681,20 @@ async def count_agent_runs(
         statement = statement.where(AgentRun.conversation_id == conversation_id)
     if latest_versions_only:
         successor = aliased(AgentRun)
+        successor_state = aliased(AgentRunState)
         statement = statement.where(
             (
                 AgentRun.regenerated_from_run_id.is_(None)
-                | AgentRun.status.notin_(
+                | AgentRunState.status.notin_(
                     (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
                 )
             ),
             ~exists(
-                select(successor.id).where(
+                select(successor.id)
+                .join(successor_state, successor_state.run_id == successor.id)
+                .where(
                     successor.regenerated_from_run_id == AgentRun.id,
-                    successor.status.notin_(
+                    successor_state.status.notin_(
                         (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
                     ),
                 )
@@ -544,8 +710,8 @@ async def list_agent_runs_for_management(
     limit: int,
     offset: int,
 ) -> list[AgentRunEntity]:
-    rows = await db.scalars(
-        select(AgentRun)
+    rows = await db.execute(
+        _run_query()
         .where(
             AgentRun.workspace_id == workspace_id,
             AgentRun.agent_id == agent_id,
@@ -554,7 +720,7 @@ async def list_agent_runs_for_management(
         .limit(limit)
         .offset(offset)
     )
-    return [to_entity(AgentRunEntity, row) for row in rows.all()]
+    return await _to_agent_run_entities(db, [tuple(row) for row in rows.all()])
 
 
 async def list_agent_consumer_stats(
@@ -606,9 +772,11 @@ async def list_agent_monitoring_rows(
             AgentRun.access_source,
             AgentRun.consumer_id,
             AgentRun.conversation_id,
-            AgentRun.status,
-            AgentRun.model_usage,
-        ).where(
+            AgentRunState.status,
+            AgentRunState.model_usage,
+        )
+        .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
+        .where(
             AgentRun.workspace_id == workspace_id,
             AgentRun.agent_id == agent_id,
             AgentRun.created_at >= since,
@@ -641,17 +809,20 @@ async def list_consumer_conversations(
         AgentRun.consumer_id == consumer_id,
     )
     successor = aliased(AgentRun)
+    successor_state = aliased(AgentRunState)
     visible = (
         (
             AgentRun.regenerated_from_run_id.is_(None)
-            | AgentRun.status.notin_(
+            | AgentRunState.status.notin_(
                 (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
             )
         )
         & ~exists(
-            select(successor.id).where(
+            select(successor.id)
+            .join(successor_state, successor_state.run_id == successor.id)
+            .where(
                 successor.regenerated_from_run_id == AgentRun.id,
-                successor.status.notin_(
+                successor_state.status.notin_(
                     (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
                 ),
             )
@@ -662,8 +833,9 @@ async def list_consumer_conversations(
             AgentRun.conversation_id.label("conversation_id"),
             func.count().label("run_count"),
             func.min(AgentRun.created_at).label("created_at"),
-            func.max(AgentRun.updated_at).label("updated_at"),
+            func.max(AgentRunState.updated_at).label("updated_at"),
         )
+        .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
         .where(*scope, visible)
         .group_by(AgentRun.conversation_id)
         .subquery()
@@ -673,8 +845,8 @@ async def list_consumer_conversations(
             AgentRun.id.label("run_id"),
             AgentRun.conversation_id.label("conversation_id"),
             AgentRun.goal.label("goal"),
-            AgentRun.status.label("status"),
-            AgentRun.result.label("result"),
+            AgentRunState.status.label("status"),
+            AgentRunState.result.label("result"),
             func.row_number()
             .over(
                 partition_by=AgentRun.conversation_id,
@@ -682,6 +854,7 @@ async def list_consumer_conversations(
             )
             .label("rank"),
         )
+        .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
         .where(*scope, visible)
         .subquery()
     )
@@ -733,19 +906,23 @@ async def get_active_agent_run(
     consumer_id: str,
     conversation_id: str,
 ) -> AgentRunEntity | None:
-    row = await db.scalar(
-        select(AgentRun)
+    row = (
+        await db.execute(
+            _run_query()
         .where(
             AgentRun.agent_id == agent_id,
             AgentRun.access_source == access_source,
             AgentRun.consumer_id == consumer_id,
             AgentRun.conversation_id == conversation_id,
-            AgentRun.status.in_(AGENT_RUN_ACTIVE_STATUSES),
+            AgentRunState.status.in_(AGENT_RUN_ACTIVE_STATUSES),
         )
         .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         .limit(1)
-    )
-    return to_entity(AgentRunEntity, row) if row is not None else None
+        )
+    ).first()
+    if row is None:
+        return None
+    return (await _to_agent_run_entities(db, [tuple(row)]))[0]
 
 
 async def list_conversation_memory_runs(
@@ -772,22 +949,25 @@ async def list_conversation_memory_runs(
         AgentRun.conversation_id == run.conversation_id,
     )
     successor = aliased(AgentRun)
+    successor_state = aliased(AgentRunState)
     before_current = or_(
         AgentRun.created_at < run.created_at,
         and_(AgentRun.created_at == run.created_at, AgentRun.id < run.id),
     )
-    anchor_row = await db.scalar(
-        select(AgentRun)
-        .options(load_only(*_CONVERSATION_MEMORY_COLUMNS))
+    anchor_row = (
+        await db.execute(
+        _memory_run_query()
         .where(
             *scope,
-            AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
-            AgentRun.context_summary != "",
+            AgentRunState.status == AGENT_RUN_SUCCEEDED_STATUS,
+            AgentRunState.context_summary != "",
             before_current,
             ~exists(
-                select(successor.id).where(
+                select(successor.id)
+                .join(successor_state, successor_state.run_id == successor.id)
+                .where(
                     successor.regenerated_from_run_id == AgentRun.id,
-                    successor.status.notin_(
+                    successor_state.status.notin_(
                         (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS)
                     ),
                 )
@@ -795,27 +975,30 @@ async def list_conversation_memory_runs(
         )
         .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
         .limit(1)
-    )
+        )
+    ).mappings().first()
     after_anchor = None
     if anchor_row is not None:
+        anchor_run = _to_memory_run_entity(anchor_row)
         after_anchor = or_(
-            AgentRun.created_at > anchor_row.created_at,
+            AgentRun.created_at > anchor_run.created_at,
             and_(
-                AgentRun.created_at == anchor_row.created_at,
-                AgentRun.id > anchor_row.id,
+                AgentRun.created_at == anchor_run.created_at,
+                AgentRun.id > anchor_run.id,
             ),
         )
     statement = (
-        select(AgentRun)
-        .options(load_only(*_CONVERSATION_MEMORY_COLUMNS))
+        _memory_run_query()
         .where(
             *scope,
-            AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
+            AgentRunState.status == AGENT_RUN_SUCCEEDED_STATUS,
             before_current,
             ~exists(
-                select(successor.id).where(
+                select(successor.id)
+                .join(successor_state, successor_state.run_id == successor.id)
+                .where(
                     successor.regenerated_from_run_id == AgentRun.id,
-                    successor.status.notin_(
+                    successor_state.status.notin_(
                         (AGENT_RUN_FAILED_STATUS, AGENT_RUN_CANCELLED_STATUS),
                     ),
                 )
@@ -826,12 +1009,12 @@ async def list_conversation_memory_runs(
     )
     if after_anchor is not None:
         statement = statement.where(after_anchor)
-    rows = await db.scalars(statement)
+    rows = (await db.execute(statement)).mappings().all()
     return (
-        _to_conversation_memory_entity(anchor_row)
+        _to_memory_run_entity(anchor_row)
         if anchor_row is not None
         else None,
-        [_to_conversation_memory_entity(row) for row in reversed(rows.all())],
+        [_to_memory_run_entity(row) for row in reversed(rows)],
     )
 
 
@@ -841,32 +1024,40 @@ async def save_conversation_summary(
     summary: str,
 ) -> bool:
     updated = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == anchor_run.id,
-            AgentRun.workspace_id == anchor_run.workspace_id,
-            AgentRun.agent_id == anchor_run.agent_id,
-            AgentRun.access_source == anchor_run.access_source,
-            AgentRun.consumer_id == anchor_run.consumer_id,
-            AgentRun.conversation_id == anchor_run.conversation_id,
-            AgentRun.status == AGENT_RUN_SUCCEEDED_STATUS,
+            AgentRunState.run_id == anchor_run.id,
+            AgentRunState.workspace_id == anchor_run.workspace_id,
+            AgentRunState.agent_id == anchor_run.agent_id,
+            AgentRunState.access_source == anchor_run.access_source,
+            AgentRunState.consumer_id == anchor_run.consumer_id,
+            AgentRunState.conversation_id == anchor_run.conversation_id,
+            AgentRunState.status == AGENT_RUN_SUCCEEDED_STATUS,
         )
-        .values(context_summary=summary, updated_at=func.now())
+        .values(
+            context_summary=summary,
+            state_version=AgentRunState.state_version + 1,
+            updated_at=func.now(),
+        )
     )
     if not updated.rowcount:
         return False
     await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.workspace_id == anchor_run.workspace_id,
-            AgentRun.agent_id == anchor_run.agent_id,
-            AgentRun.access_source == anchor_run.access_source,
-            AgentRun.consumer_id == anchor_run.consumer_id,
-            AgentRun.conversation_id == anchor_run.conversation_id,
-            AgentRun.id != anchor_run.id,
-            AgentRun.context_summary != "",
+            AgentRunState.workspace_id == anchor_run.workspace_id,
+            AgentRunState.agent_id == anchor_run.agent_id,
+            AgentRunState.access_source == anchor_run.access_source,
+            AgentRunState.consumer_id == anchor_run.consumer_id,
+            AgentRunState.conversation_id == anchor_run.conversation_id,
+            AgentRunState.run_id != anchor_run.id,
+            AgentRunState.context_summary != "",
         )
-        .values(context_summary="", updated_at=func.now())
+        .values(
+            context_summary="",
+            state_version=AgentRunState.state_version + 1,
+            updated_at=func.now(),
+        )
     )
     return True
 
@@ -875,13 +1066,44 @@ async def get_agent_run_by_id(
     db: AsyncSession,
     run_id: str,
 ) -> AgentRunEntity | None:
-    row = await db.get(AgentRun, run_id)
-    return to_entity(AgentRunEntity, row) if row is not None else None
+    row = await _load_run_rows(db, run_id)
+    if row is None:
+        return None
+    projections = await _run_event_projections(db, [run_id])
+    return _to_agent_run_entity(*row, events=projections.get(run_id))
 
 
 async def create_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
-    orm = await save(db, AgentRun, entity)
-    return to_entity(AgentRunEntity, orm)
+    run = AgentRun(**_entity_values(entity, _RUN_CORE_FIELDS))
+    state = AgentRunState(
+        run_id=entity.id,
+        workspace_id=entity.workspace_id,
+        agent_id=entity.agent_id,
+        access_source=entity.access_source,
+        consumer_id=entity.consumer_id,
+        conversation_id=entity.conversation_id,
+        worker_generation=_worker_generation(entity.configuration_source),
+        state_version=1,
+        **_entity_values(entity, _RUN_STATE_FIELDS),
+    )
+    snapshot = AgentRunSnapshot(
+        run_id=entity.id,
+        workspace_id=entity.workspace_id,
+        agent_id=entity.agent_id,
+        created_at=entity.created_at,
+        **_entity_values(entity, _RUN_SNAPSHOT_FIELDS),
+    )
+    db.add_all((run, state, snapshot))
+    for event in entity.events:
+        db.add(
+            AgentRunEvent(
+                workspace_id=entity.workspace_id,
+                run_id=entity.id,
+                event={"type": "process", "event": event},
+            )
+        )
+    await db.flush()
+    return _to_agent_run_entity(run, state, snapshot, events=list(entity.events))
 
 
 async def get_agent_child_run(
@@ -890,14 +1112,18 @@ async def get_agent_child_run(
     parent_run_id: str,
     parent_node_id: str,
 ) -> AgentRunEntity | None:
-    row = await db.scalar(
-        select(AgentRun).where(
+    row = (
+        await db.execute(
+        _run_query().where(
             AgentRun.workspace_id == workspace_id,
             AgentRun.parent_run_id == parent_run_id,
             AgentRun.parent_node_id == parent_node_id,
         )
-    )
-    return to_entity(AgentRunEntity, row) if row is not None else None
+        )
+    ).first()
+    if row is None:
+        return None
+    return (await _to_agent_run_entities(db, [tuple(row)]))[0]
 
 
 async def list_agent_child_runs(
@@ -905,15 +1131,15 @@ async def list_agent_child_runs(
     workspace_id: str,
     parent_run_id: str,
 ) -> list[AgentRunEntity]:
-    rows = await db.scalars(
-        select(AgentRun)
+    rows = await db.execute(
+        _run_query()
         .where(
             AgentRun.workspace_id == workspace_id,
             AgentRun.parent_run_id == parent_run_id,
         )
         .order_by(AgentRun.created_at, AgentRun.id)
     )
-    return [to_entity(AgentRunEntity, row) for row in rows.all()]
+    return await _to_agent_run_entities(db, [tuple(row) for row in rows.all()])
 
 
 async def list_terminal_children_for_waiting_parents(
@@ -921,8 +1147,9 @@ async def list_terminal_children_for_waiting_parents(
     limit: int = 200,
 ) -> list[AgentRunEntity]:
     parent = aliased(AgentRun)
-    rows = await db.scalars(
-        select(AgentRun)
+    parent_state = aliased(AgentRunState)
+    rows = await db.execute(
+        _run_query()
         .join(
             parent,
             and_(
@@ -930,29 +1157,53 @@ async def list_terminal_children_for_waiting_parents(
                 parent.id == AgentRun.parent_run_id,
             ),
         )
+        .join(parent_state, parent_state.run_id == parent.id)
         .where(
-            AgentRun.status.in_(
+            AgentRunState.status.in_(
                 (
                     AGENT_RUN_SUCCEEDED_STATUS,
                     AGENT_RUN_FAILED_STATUS,
                     AGENT_RUN_CANCELLED_STATUS,
                 )
             ),
-            parent.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
+            parent_state.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
         )
-        .order_by(AgentRun.finished_at, AgentRun.id)
+        .order_by(AgentRunState.finished_at, AgentRun.id)
         .limit(limit)
     )
-    return [to_entity(AgentRunEntity, row) for row in rows.all()]
+    return await _to_agent_run_entities(db, [tuple(row[:3]) for row in rows.all()])
 
 
 async def save_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
-    orm = await save(db, AgentRun, entity)
-    return to_entity(AgentRunEntity, orm)
+    rows = await _load_run_rows(db, entity.id)
+    if rows is None:
+        return await create_agent_run(db, entity)
+    run, state, snapshot = rows
+    for name in _RUN_CORE_MUTABLE_FIELDS:
+        setattr(run, name, getattr(entity, name))
+    for name in _RUN_STATE_FIELDS:
+        setattr(state, name, getattr(entity, name))
+    state.state_version += 1
+    if entity.events:
+        current = (await _run_event_projections(db, [entity.id])).get(entity.id, [])
+        if current != entity.events:
+            for event in entity.events:
+                db.add(
+                    AgentRunEvent(
+                        workspace_id=entity.workspace_id,
+                        run_id=entity.id,
+                        event={"type": "process", "event": event},
+                    )
+                )
+    await db.flush()
+    return _to_agent_run_entity(run, state, snapshot, events=list(entity.events))
 
 
 async def refresh_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
-    return await refresh_entity(db, AgentRun, AgentRunEntity, entity)
+    current = await get_agent_run_by_id(db, entity.id)
+    if current is None:
+        raise RuntimeError("Agent run no longer exists.")
+    return current
 
 
 async def claim_agent_run(
@@ -975,27 +1226,29 @@ async def claim_agent_run(
         else AGENT_RUN_RUNNING_STATUS
     )
     result = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.attempts < AgentRun.max_attempts,
+            AgentRunState.run_id == run_id,
+            AgentRunState.worker_generation == generation,
+            AgentRunState.attempts < AgentRunState.max_attempts,
             or_(
-                AgentRun.status == claimable_statuses[0],
+                AgentRunState.status == claimable_statuses[0],
                 and_(
-                    AgentRun.status == claimable_statuses[1],
+                    AgentRunState.status == claimable_statuses[1],
                     or_(
-                        AgentRun.lease_expires_at.is_(None),
-                        AgentRun.lease_expires_at <= started_at,
+                        AgentRunState.lease_expires_at.is_(None),
+                        AgentRunState.lease_expires_at <= started_at,
                     ),
                 ),
             ),
         )
         .values(
             status=running_status,
-            attempts=AgentRun.attempts + 1,
+            attempts=AgentRunState.attempts + 1,
+            state_version=AgentRunState.state_version + 1,
             worker_task_id=worker_task_id,
             lease_expires_at=lease_expires_at,
-            started_at=func.coalesce(AgentRun.started_at, started_at),
+            started_at=func.coalesce(AgentRunState.started_at, started_at),
             finished_at=None,
             updated_at=started_at,
         )
@@ -1010,13 +1263,17 @@ async def renew_agent_run_lease(
     lease_expires_at: datetime,
 ) -> bool:
     result = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
-        .values(lease_expires_at=lease_expires_at, updated_at=func.now())
+        .values(
+            lease_expires_at=lease_expires_at,
+            state_version=AgentRunState.state_version + 1,
+            updated_at=func.now(),
+        )
     )
     return bool(result.rowcount)
 
@@ -1031,6 +1288,7 @@ async def save_agent_run_checkpoint(
     values = {
         "checkpoint": checkpoint,
         "checkpoint_phase": checkpoint_phase,
+        "state_version": AgentRunState.state_version + 1,
         "updated_at": func.now(),
     }
     if "model_usage" in checkpoint:
@@ -1040,11 +1298,11 @@ async def save_agent_run_checkpoint(
     if "grounding_meta" in checkpoint:
         values["grounding_meta"] = checkpoint["grounding_meta"] or {}
     result = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
         .values(**values)
     )
@@ -1065,10 +1323,11 @@ async def finalize_agent_run(
     grounding_status: str | None = None,
     grounding_meta: dict | None = None,
 ) -> bool:
+    del events
     values = {
         "status": status,
         "result": result,
-        "events": events,
+        "state_version": AgentRunState.state_version + 1,
         "last_error": last_error,
         "finished_at": finished_at,
         "worker_task_id": None,
@@ -1082,11 +1341,11 @@ async def finalize_agent_run(
     if grounding_meta is not None:
         values["grounding_meta"] = grounding_meta
     updated = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
         .values(**values)
     )
@@ -1100,24 +1359,25 @@ async def pause_agent_run(
     reason: str,
 ) -> bool:
     updated = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
         .values(
             status=case(
                 (
-                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AgentRunState.worker_generation == "unified",
                     AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
                 ),
                 else_=AGENT_RUN_AWAITING_APPROVAL_STATUS,
             ),
             attempts=case(
-                (AgentRun.attempts > 0, AgentRun.attempts - 1),
+                (AgentRunState.attempts > 0, AgentRunState.attempts - 1),
                 else_=0,
             ),
+            state_version=AgentRunState.state_version + 1,
             last_error=reason,
             worker_task_id=None,
             lease_expires_at=None,
@@ -1133,24 +1393,25 @@ async def pause_agent_run_for_input(
     worker_task_id: str,
 ) -> bool:
     updated = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
         .values(
             status=case(
                 (
-                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AgentRunState.worker_generation == "unified",
                     AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
                 ),
                 else_=AGENT_RUN_AWAITING_INPUT_STATUS,
             ),
             attempts=case(
-                (AgentRun.attempts > 0, AgentRun.attempts - 1),
+                (AgentRunState.attempts > 0, AgentRunState.attempts - 1),
                 else_=0,
             ),
+            state_version=AgentRunState.state_version + 1,
             last_error=None,
             worker_task_id=None,
             lease_expires_at=None,
@@ -1166,24 +1427,25 @@ async def pause_agent_run_for_child(
     worker_task_id: str,
 ) -> bool:
     updated = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
         .values(
             status=case(
                 (
-                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AgentRunState.worker_generation == "unified",
                     AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
                 ),
                 else_=AGENT_RUN_AWAITING_CHILD_STATUS,
             ),
             attempts=case(
-                (AgentRun.attempts > 0, AgentRun.attempts - 1),
+                (AgentRunState.attempts > 0, AgentRunState.attempts - 1),
                 else_=0,
             ),
+            state_version=AgentRunState.state_version + 1,
             last_error=None,
             worker_task_id=None,
             lease_expires_at=None,
@@ -1199,24 +1461,25 @@ async def requeue_owned_agent_run(
     worker_task_id: str,
 ) -> bool:
     updated = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
         .values(
             status=case(
                 (
-                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AgentRunState.worker_generation == "unified",
                     AGENT_RUN_UNIFIED_QUEUED_STATUS,
                 ),
                 else_=AGENT_RUN_QUEUED_STATUS,
             ),
             attempts=case(
-                (AgentRun.attempts > 0, AgentRun.attempts - 1),
+                (AgentRunState.attempts > 0, AgentRunState.attempts - 1),
                 else_=0,
             ),
+            state_version=AgentRunState.state_version + 1,
             worker_task_id=None,
             lease_expires_at=None,
             updated_at=func.now(),
@@ -1230,19 +1493,20 @@ async def queue_agent_run(
     run_id: str,
 ) -> bool:
     updated = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_AWAITING_APPROVAL_STATUSES),
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_AWAITING_APPROVAL_STATUSES),
         )
         .values(
             status=case(
                 (
-                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AgentRunState.worker_generation == "unified",
                     AGENT_RUN_UNIFIED_QUEUED_STATUS,
                 ),
                 else_=AGENT_RUN_QUEUED_STATUS,
             ),
+            state_version=AgentRunState.state_version + 1,
             last_error=None,
             worker_task_id=None,
             lease_expires_at=None,
@@ -1258,20 +1522,21 @@ async def queue_agent_run_from_input(
     checkpoint: dict,
 ) -> bool:
     updated = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_AWAITING_INPUT_STATUSES),
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_AWAITING_INPUT_STATUSES),
         )
         .values(
             status=case(
                 (
-                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AgentRunState.worker_generation == "unified",
                     AGENT_RUN_UNIFIED_QUEUED_STATUS,
                 ),
                 else_=AGENT_RUN_QUEUED_STATUS,
             ),
             checkpoint=checkpoint,
+            state_version=AgentRunState.state_version + 1,
             last_error=None,
             worker_task_id=None,
             lease_expires_at=None,
@@ -1286,19 +1551,20 @@ async def queue_agent_run_from_child(
     run_id: str,
 ) -> bool:
     updated = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
         )
         .values(
             status=case(
                 (
-                    AgentRun.configuration_source.in_(("draft", "published")),
+                    AgentRunState.worker_generation == "unified",
                     AGENT_RUN_UNIFIED_QUEUED_STATUS,
                 ),
                 else_=AGENT_RUN_QUEUED_STATUS,
             ),
+            state_version=AgentRunState.state_version + 1,
             last_error=None,
             worker_task_id=None,
             lease_expires_at=None,
@@ -1315,13 +1581,14 @@ async def fail_agent_run_waiting_for_child(
     finished_at: datetime,
 ) -> bool:
     updated = await db.execute(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
         )
         .values(
             status=AGENT_RUN_FAILED_STATUS,
+            state_version=AgentRunState.state_version + 1,
             last_error=error,
             worker_task_id=None,
             lease_expires_at=None,
@@ -1339,60 +1606,34 @@ async def cancel_agent_run_tree(
 ) -> list[str]:
     cancelled = list(
         await db.scalars(
-            update(AgentRun)
+            select(AgentRun.id)
+            .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
             .where(
                 or_(AgentRun.id == run_id, AgentRun.root_run_id == run_id),
-                AgentRun.status.in_(AGENT_RUN_ACTIVE_STATUSES),
+                AgentRunState.status.in_(AGENT_RUN_ACTIVE_STATUSES),
             )
-            .values(
-                status=AGENT_RUN_CANCELLED_STATUS,
-                last_error="Cancelled by user.",
-                worker_task_id=None,
-                lease_expires_at=None,
-                finished_at=finished_at,
-                updated_at=finished_at,
-            )
-            .returning(AgentRun.id)
+            .with_for_update()
         )
     )
     if not cancelled:
         return []
     await db.execute(
-        update(AgentToolCall)
-        .where(
-            AgentToolCall.run_id.in_(cancelled),
-            AgentToolCall.status == "running",
-            AgentToolCall.approval_required.is_(True),
-        )
+        update(AgentRunState)
+        .where(AgentRunState.run_id.in_(cancelled))
         .values(
-            status="uncertain",
-            last_error=(
-                "Tool execution was interrupted by cancellation; confirm the "
-                "external state."
-            ),
+            status=AGENT_RUN_CANCELLED_STATUS,
+            state_version=AgentRunState.state_version + 1,
+            last_error="Cancelled by user.",
             worker_task_id=None,
             lease_expires_at=None,
             finished_at=finished_at,
             updated_at=finished_at,
         )
     )
-    await db.execute(
-        update(AgentToolCall)
-        .where(
-            AgentToolCall.run_id.in_(cancelled),
-            AgentToolCall.status.in_(("pending", "approved", "running")),
-        )
-        .values(
-            status="failed",
-            result_content="Tool invocation was cancelled before completion.",
-            result_summary="Tool invocation cancelled.",
-            result_is_error=True,
-            last_error="Agent run was cancelled.",
-            worker_task_id=None,
-            lease_expires_at=None,
-            finished_at=finished_at,
-            updated_at=finished_at,
-        )
+    from app.infrastructure.repositories import tools as tool_repository
+
+    await tool_repository.settle_cancelled_agent_tool_invocations(
+        db, cancelled, finished_at
     )
     await db.execute(
         update(WorkflowNodeExecution)
@@ -1425,16 +1666,18 @@ async def list_recoverable_agent_run_ids(
         else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
     )
     rows = await db.scalars(
-        select(AgentRun.id)
+        select(AgentRunState.run_id)
+        .join(AgentRun, AgentRun.id == AgentRunState.run_id)
         .where(
-            AgentRun.attempts < AgentRun.max_attempts,
+            AgentRunState.worker_generation == generation,
+            AgentRunState.attempts < AgentRunState.max_attempts,
             or_(
-                AgentRun.status == claimable_statuses[0],
+                AgentRunState.status == claimable_statuses[0],
                 and_(
-                    AgentRun.status == claimable_statuses[1],
+                    AgentRunState.status == claimable_statuses[1],
                     or_(
-                        AgentRun.lease_expires_at.is_(None),
-                        AgentRun.lease_expires_at <= now,
+                        AgentRunState.lease_expires_at.is_(None),
+                        AgentRunState.lease_expires_at <= now,
                     ),
                 ),
             ),
@@ -1457,73 +1700,39 @@ async def fail_exhausted_agent_run_ids(
         else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
     )
     updated = await db.scalars(
-        update(AgentRun)
+        update(AgentRunState)
         .where(
-            AgentRun.attempts >= AgentRun.max_attempts,
+            AgentRunState.worker_generation == generation,
+            AgentRunState.attempts >= AgentRunState.max_attempts,
             or_(
-                AgentRun.status == claimable_statuses[0],
+                AgentRunState.status == claimable_statuses[0],
                 and_(
-                    AgentRun.status == claimable_statuses[1],
+                    AgentRunState.status == claimable_statuses[1],
                     or_(
-                        AgentRun.lease_expires_at.is_(None),
-                        AgentRun.lease_expires_at <= now,
+                        AgentRunState.lease_expires_at.is_(None),
+                        AgentRunState.lease_expires_at <= now,
                     ),
                 ),
             ),
         )
         .values(
             status=AGENT_RUN_FAILED_STATUS,
+            state_version=AgentRunState.state_version + 1,
             last_error="Agent run retry limit reached.",
             worker_task_id=None,
             lease_expires_at=None,
             finished_at=now,
             updated_at=now,
         )
-        .returning(AgentRun.id)
+        .returning(AgentRunState.run_id)
     )
     exhausted_run_ids = list(updated.all())
     if not exhausted_run_ids:
         return []
-    await db.execute(
-        update(AgentToolCall)
-        .where(
-            AgentToolCall.run_id.in_(exhausted_run_ids),
-            AgentToolCall.status == "running",
-            AgentToolCall.approval_required.is_(False),
-        )
-        .values(
-            status="failed",
-            result_content=(
-                "Tool execution was interrupted before a durable result was recorded."
-            ),
-            result_summary="Tool execution interrupted.",
-            result_is_error=True,
-            last_error=(
-                "Agent run retry limit reached before the tool result was durably recorded."
-            ),
-            worker_task_id=None,
-            lease_expires_at=None,
-            finished_at=now,
-            updated_at=now,
-        )
-    )
-    await db.execute(
-        update(AgentToolCall)
-        .where(
-            AgentToolCall.run_id.in_(exhausted_run_ids),
-            AgentToolCall.status == "running",
-            AgentToolCall.approval_required.is_(True),
-        )
-        .values(
-            status="uncertain",
-            last_error=(
-                "Tool execution was interrupted after dispatch; confirm the external state."
-            ),
-            worker_task_id=None,
-            lease_expires_at=None,
-            finished_at=now,
-            updated_at=now,
-        )
+    from app.infrastructure.repositories import tools as tool_repository
+
+    await tool_repository.settle_exhausted_agent_tool_invocations(
+        db, exhausted_run_ids, now
     )
     await db.execute(
         update(WorkflowNodeExecution)
@@ -1569,12 +1778,12 @@ async def append_owned_agent_run_event(
 ) -> AgentRunEventEntity | None:
     """Append an event only while the worker still owns the run lease."""
     run = await db.scalar(
-        select(AgentRun)
+        select(AgentRunState)
         .where(
-            AgentRun.workspace_id == workspace_id,
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+            AgentRunState.workspace_id == workspace_id,
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
         .with_for_update()
     )
@@ -1598,6 +1807,83 @@ async def list_agent_run_events(
     return [to_entity(AgentRunEventEntity, row) for row in rows.all()]
 
 
+def _internal_tool_metadata(invocation: ToolInvocation) -> dict[str, Any]:
+    metadata = invocation.policy_snapshot.get("internal_tool", {})
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _is_internal_tool_invocation(invocation: ToolInvocation) -> bool:
+    return invocation.policy_snapshot.get("ledger_kind") == _INTERNAL_TOOL_LEDGER
+
+
+def _tool_invocation_status(status: str) -> str:
+    return "queued" if status == "pending" else status
+
+
+def _agent_tool_call_status(status: str) -> str:
+    return "pending" if status == "queued" else status
+
+
+def _normalized_arguments_hash(
+    arguments: dict[str, Any],
+    value: str,
+) -> str:
+    if len(value) == 64:
+        return value
+    return hashlib.sha256(
+        json.dumps(
+            arguments,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
+def _internal_tool_idempotency_key(entity: AgentToolCallEntity) -> str:
+    if entity.idempotency_key:
+        return entity.idempotency_key
+    return hashlib.sha256(
+        f"agent-internal:{entity.run_id}:{entity.turn}:{entity.call_id}".encode()
+    ).hexdigest()
+
+
+def _to_agent_tool_call_entity(invocation: ToolInvocation) -> AgentToolCallEntity:
+    metadata = _internal_tool_metadata(invocation)
+    result = invocation.result_data if isinstance(invocation.result_data, dict) else {}
+    return AgentToolCallEntity(
+        id=invocation.id,
+        workspace_id=invocation.workspace_id,
+        run_id=invocation.run_id or "",
+        turn=int(metadata.get("turn", 0)),
+        call_id=str(metadata.get("call_id", invocation.invocation_id)),
+        tool_name=str(metadata.get("tool_name", "")),
+        tool_kind=str(metadata.get("tool_kind", "unknown")),
+        server_name=str(metadata.get("server_name", "")),
+        arguments=invocation.arguments,
+        arguments_hash=invocation.arguments_hash,
+        definition_hash=str(metadata.get("definition_hash", "")),
+        policy_mode=str(metadata.get("policy_mode", "")),
+        idempotency_key=invocation.idempotency_key,
+        status=_agent_tool_call_status(invocation.status),
+        approval_required=bool(metadata.get("approval_required", False)),
+        approved_by_user_id=invocation.approved_by_user_id,
+        approved_at=invocation.approved_at,
+        worker_task_id=invocation.worker_task_id,
+        lease_expires_at=invocation.lease_expires_at,
+        result_content=str(result.get("content", "")),
+        result_summary=invocation.result_summary,
+        result_output=result.get("output"),
+        result_is_error=bool(result.get("is_error", False)),
+        result_evidence_ids=list(result.get("evidence_ids", [])),
+        last_error=invocation.error_message,
+        started_at=invocation.started_at,
+        finished_at=invocation.finished_at,
+        created_at=invocation.created_at,
+        updated_at=invocation.updated_at,
+    )
+
+
 async def get_agent_tool_call(
     db: AsyncSession,
     run_id: str,
@@ -1605,13 +1891,14 @@ async def get_agent_tool_call(
     call_id: str,
 ) -> AgentToolCallEntity | None:
     row = await db.scalar(
-        select(AgentToolCall).where(
-            AgentToolCall.run_id == run_id,
-            AgentToolCall.turn == turn,
-            AgentToolCall.call_id == call_id,
+        select(ToolInvocation).where(
+            ToolInvocation.run_id == run_id,
+            ToolInvocation.invocation_id == f"{turn}:{call_id}",
         )
     )
-    return to_entity(AgentToolCallEntity, row) if row is not None else None
+    if row is None or not _is_internal_tool_invocation(row):
+        return None
+    return _to_agent_tool_call_entity(row)
 
 
 async def get_agent_tool_call_by_call_id(
@@ -1619,13 +1906,18 @@ async def get_agent_tool_call_by_call_id(
     run_id: str,
     call_id: str,
 ) -> AgentToolCallEntity | None:
-    row = await db.scalar(
-        select(AgentToolCall)
-        .where(AgentToolCall.run_id == run_id, AgentToolCall.call_id == call_id)
-        .order_by(AgentToolCall.turn.desc())
-        .limit(1)
+    rows = await db.scalars(
+        select(ToolInvocation)
+        .where(ToolInvocation.run_id == run_id)
+        .order_by(ToolInvocation.created_at.desc(), ToolInvocation.id.desc())
     )
-    return to_entity(AgentToolCallEntity, row) if row is not None else None
+    for row in rows.all():
+        if (
+            _is_internal_tool_invocation(row)
+            and _internal_tool_metadata(row).get("call_id") == call_id
+        ):
+            return _to_agent_tool_call_entity(row)
+    return None
 
 
 async def list_agent_tool_calls(
@@ -1633,24 +1925,94 @@ async def list_agent_tool_calls(
     run_id: str,
 ) -> list[AgentToolCallEntity]:
     rows = await db.scalars(
-        select(AgentToolCall)
-        .where(AgentToolCall.run_id == run_id)
-        .order_by(AgentToolCall.turn, AgentToolCall.created_at, AgentToolCall.id)
+        select(ToolInvocation)
+        .where(ToolInvocation.run_id == run_id)
+        .order_by(ToolInvocation.created_at, ToolInvocation.id)
     )
-    return [to_entity(AgentToolCallEntity, row) for row in rows.all()]
+    calls = [
+        _to_agent_tool_call_entity(row)
+        for row in rows.all()
+        if _is_internal_tool_invocation(row)
+    ]
+    return sorted(calls, key=lambda call: (call.turn, call.created_at, call.id))
 
 
 async def create_agent_tool_call(
     db: AsyncSession,
     entity: AgentToolCallEntity,
 ) -> AgentToolCallEntity:
-    try:
-        async with db.begin_nested():
-            row = to_orm(AgentToolCall, entity)
-            db.add(row)
-            await db.flush()
-    except IntegrityError:
-        pass
+    run = await db.get(AgentRun, entity.run_id)
+    if run is None:
+        raise RuntimeError("Agent run no longer exists.")
+    from app.infrastructure.repositories import tools as tool_repository
+
+    effect = (
+        "pure"
+        if entity.tool_kind == "knowledge"
+        else "external_write"
+        if entity.approval_required
+        else "external_read"
+    )
+    await tool_repository.create_or_get_tool_invocation(
+        db,
+        ToolInvocationEntity(
+            id=entity.id,
+            workspace_id=entity.workspace_id,
+            origin="agent",
+            root_run_id=run.root_run_id,
+            run_id=entity.run_id,
+            invocation_id=f"{entity.turn}:{entity.call_id}",
+            execution_user_id=run.execution_user_id,
+            access_source=run.access_source,
+            tool_id=None,
+            tool_version_id=None,
+            policy_snapshot={
+                "ledger_kind": _INTERNAL_TOOL_LEDGER,
+                "internal_tool": {
+                    "turn": entity.turn,
+                    "call_id": entity.call_id,
+                    "tool_name": entity.tool_name,
+                    "tool_kind": entity.tool_kind,
+                    "server_name": entity.server_name,
+                    "definition_hash": entity.definition_hash,
+                    "policy_mode": entity.policy_mode,
+                    "approval_required": entity.approval_required,
+                    "effect": effect,
+                },
+            },
+            arguments=entity.arguments,
+            arguments_hash=_normalized_arguments_hash(
+                entity.arguments, entity.arguments_hash
+            ),
+            idempotency_key=_internal_tool_idempotency_key(entity),
+            status=_tool_invocation_status(entity.status),
+            approved_by_user_id=entity.approved_by_user_id,
+            approved_at=entity.approved_at,
+            worker_task_id=entity.worker_task_id,
+            lease_expires_at=(
+                entity.lease_expires_at if entity.worker_task_id else None
+            ),
+            result_data={
+                "content": entity.result_content,
+                "output": entity.result_output,
+                "is_error": entity.result_is_error,
+                "evidence_ids": entity.result_evidence_ids,
+            },
+            result_summary=entity.result_summary,
+            outcome=(
+                "uncertain"
+                if entity.status == "uncertain"
+                else "confirmed"
+                if entity.status in {"succeeded", "failed", "rejected"}
+                else None
+            ),
+            error_message=entity.last_error,
+            started_at=entity.started_at,
+            finished_at=entity.finished_at,
+            created_at=entity.created_at,
+            updated_at=entity.updated_at,
+        ),
+    )
     current = await get_agent_tool_call(db, entity.run_id, entity.turn, entity.call_id)
     assert current is not None
     return current
@@ -1664,16 +2026,18 @@ async def claim_agent_tool_call(
     lease_expires_at: datetime,
 ) -> bool:
     updated = await db.execute(
-        update(AgentToolCall)
+        update(ToolInvocation)
         .where(
-            AgentToolCall.id == tool_call_id,
-            AgentToolCall.status.in_(("pending", "approved")),
+            ToolInvocation.id == tool_call_id,
+            ToolInvocation.status.in_(("queued", "approved")),
+            ToolInvocation.attempts < ToolInvocation.max_attempts,
         )
         .values(
             status="running",
+            attempts=ToolInvocation.attempts + 1,
             worker_task_id=worker_task_id,
             lease_expires_at=lease_expires_at,
-            started_at=func.coalesce(AgentToolCall.started_at, started_at),
+            started_at=func.coalesce(ToolInvocation.started_at, started_at),
             updated_at=started_at,
         )
     )
@@ -1687,20 +2051,24 @@ async def save_agent_tool_call_result(
     result: AgentToolCallEntity,
 ) -> bool:
     updated = await db.execute(
-        update(AgentToolCall)
+        update(ToolInvocation)
         .where(
-            AgentToolCall.id == tool_call_id,
-            AgentToolCall.status == "running",
-            AgentToolCall.worker_task_id == worker_task_id,
+            ToolInvocation.id == tool_call_id,
+            ToolInvocation.status == "running",
+            ToolInvocation.worker_task_id == worker_task_id,
         )
         .values(
             status=result.status,
-            result_content=result.result_content,
+            result_data={
+                "content": result.result_content,
+                "output": result.result_output,
+                "is_error": result.result_is_error,
+                "evidence_ids": result.result_evidence_ids,
+            },
             result_summary=result.result_summary,
-            result_output=result.result_output,
-            result_is_error=result.result_is_error,
-            result_evidence_ids=result.result_evidence_ids,
-            last_error=result.last_error,
+            outcome="uncertain" if result.status == "uncertain" else "confirmed",
+            error_code="agent_tool_error" if result.last_error else None,
+            error_message=result.last_error,
             worker_task_id=None,
             lease_expires_at=None,
             finished_at=result.finished_at,
@@ -1715,46 +2083,35 @@ async def mark_expired_agent_tool_calls(
     run_id: str,
     now: datetime,
 ) -> None:
-    await db.execute(
-        update(AgentToolCall)
+    rows = await db.scalars(
+        select(ToolInvocation)
         .where(
-            AgentToolCall.run_id == run_id,
-            AgentToolCall.status == "running",
-            AgentToolCall.approval_required.is_(False),
+            ToolInvocation.run_id == run_id,
+            ToolInvocation.status == "running",
             or_(
-                AgentToolCall.lease_expires_at.is_(None),
-                AgentToolCall.lease_expires_at <= now,
+                ToolInvocation.lease_expires_at.is_(None),
+                ToolInvocation.lease_expires_at <= now,
             ),
         )
-        .values(
-            status="approved",
-            worker_task_id=None,
-            lease_expires_at=None,
-            updated_at=now,
-        )
+        .with_for_update()
     )
-    await db.execute(
-        update(AgentToolCall)
-        .where(
-            AgentToolCall.run_id == run_id,
-            AgentToolCall.status == "running",
-            AgentToolCall.approval_required.is_(True),
-            or_(
-                AgentToolCall.lease_expires_at.is_(None),
-                AgentToolCall.lease_expires_at <= now,
-            ),
+    for row in rows.all():
+        if not _is_internal_tool_invocation(row):
+            continue
+        approval_required = bool(
+            _internal_tool_metadata(row).get("approval_required", False)
         )
-        .values(
-            status="uncertain",
-            last_error=(
-                "Tool execution was interrupted after dispatch; confirm the external state "
-                "before retrying."
-            ),
-            worker_task_id=None,
-            lease_expires_at=None,
-            updated_at=now,
+        row.status = "uncertain" if approval_required else "approved"
+        row.error_message = (
+            "Tool execution was interrupted after dispatch; confirm the external state "
+            "before retrying."
+            if approval_required
+            else None
         )
-    )
+        row.worker_task_id = None
+        row.lease_expires_at = None
+        row.updated_at = now
+    await db.flush()
 
 
 async def approve_agent_tool_call(
@@ -1764,16 +2121,17 @@ async def approve_agent_tool_call(
     approved_at: datetime,
 ) -> bool:
     updated = await db.execute(
-        update(AgentToolCall)
+        update(ToolInvocation)
         .where(
-            AgentToolCall.id == tool_call_id,
-            AgentToolCall.status == "awaiting_approval",
+            ToolInvocation.id == tool_call_id,
+            ToolInvocation.status == "awaiting_approval",
         )
         .values(
             status="approved",
             approved_by_user_id=actor_id,
             approved_at=approved_at,
-            last_error=None,
+            error_code=None,
+            error_message=None,
             updated_at=approved_at,
         )
     )
@@ -1787,16 +2145,19 @@ async def reject_agent_tool_call(
     rejected_at: datetime,
 ) -> bool:
     updated = await db.execute(
-        update(AgentToolCall)
+        update(ToolInvocation)
         .where(
-            AgentToolCall.id == tool_call_id,
-            AgentToolCall.status.in_(("awaiting_approval", "uncertain")),
+            ToolInvocation.id == tool_call_id,
+            ToolInvocation.status.in_(("awaiting_approval", "uncertain")),
         )
         .values(
             status="rejected",
             approved_by_user_id=actor_id,
             approved_at=rejected_at,
-            last_error="Tool call rejected by user.",
+            result_summary="Tool call rejected by user.",
+            outcome="confirmed",
+            error_code="tool_call_rejected",
+            error_message="Tool call rejected by user.",
             finished_at=rejected_at,
             updated_at=rejected_at,
         )
@@ -1812,19 +2173,25 @@ async def block_agent_tool_call(
     result_summary: str,
 ) -> bool:
     updated = await db.execute(
-        update(AgentToolCall)
+        update(ToolInvocation)
         .where(
-            AgentToolCall.id == tool_call_id,
-            AgentToolCall.status.in_(
-                ("pending", "awaiting_approval", "approved")
+            ToolInvocation.id == tool_call_id,
+            ToolInvocation.status.in_(
+                ("queued", "awaiting_approval", "approved")
             ),
         )
         .values(
             status="rejected",
-            last_error=reason,
-            result_content=reason,
+            result_data={
+                "content": reason,
+                "output": None,
+                "is_error": True,
+                "evidence_ids": [],
+            },
             result_summary=result_summary,
-            result_is_error=True,
+            outcome="confirmed",
+            error_code="tool_call_blocked",
+            error_message=reason,
             finished_at=blocked_at,
             updated_at=blocked_at,
         )
@@ -1838,21 +2205,31 @@ async def require_agent_tool_call_approval(
     policy_mode: str,
     updated_at: datetime,
 ) -> bool:
-    updated = await db.execute(
-        update(AgentToolCall)
+    row = await db.scalar(
+        select(ToolInvocation)
         .where(
-            AgentToolCall.id == tool_call_id,
-            AgentToolCall.status.in_(("pending", "approved")),
-            AgentToolCall.approved_by_user_id.is_(None),
+            ToolInvocation.id == tool_call_id,
+            ToolInvocation.status.in_(("queued", "approved")),
+            ToolInvocation.approved_by_user_id.is_(None),
         )
-        .values(
-            status="awaiting_approval",
-            approval_required=True,
-            policy_mode=policy_mode,
-            updated_at=updated_at,
-        )
+        .with_for_update()
     )
-    return bool(updated.rowcount)
+    if row is None or not _is_internal_tool_invocation(row):
+        return False
+    metadata = _internal_tool_metadata(row)
+    row.policy_snapshot = {
+        **row.policy_snapshot,
+        "internal_tool": {
+            **metadata,
+            "approval_required": True,
+            "policy_mode": policy_mode,
+            "effect": "external_write",
+        },
+    }
+    row.status = "awaiting_approval"
+    row.updated_at = updated_at
+    await db.flush()
+    return True
 
 
 async def delete_agent_graph(
@@ -1890,26 +2267,27 @@ async def has_unsettled_agent_execution(
 ) -> bool:
     active_run = await db.scalar(
         select(AgentRun.id)
+        .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
         .where(
             AgentRun.agent_id == agent_id,
-            AgentRun.status.in_(AGENT_RUN_ACTIVE_STATUSES),
+            AgentRunState.status.in_(AGENT_RUN_ACTIVE_STATUSES),
         )
         .limit(1)
     )
     if active_run is not None:
         return True
-    legacy_call = await db.scalar(
-        select(AgentToolCall.id)
-        .join(AgentRun, AgentRun.id == AgentToolCall.run_id)
+    unsettled_call = await db.scalar(
+        select(ToolInvocation.id)
+        .join(AgentRun, AgentRun.id == ToolInvocation.run_id)
         .where(
             AgentRun.agent_id == agent_id,
-            AgentToolCall.status.in_(
-                ("pending", "approved", "running", "awaiting_approval")
+            ToolInvocation.status.in_(
+                ("queued", "approved", "running", "awaiting_approval")
             ),
         )
         .limit(1)
     )
-    return legacy_call is not None
+    return unsettled_call is not None
 
 
 async def list_agent_run_ids(db: AsyncSession, agent_id: str) -> list[str]:

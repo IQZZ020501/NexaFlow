@@ -6052,18 +6052,20 @@ def test_agent_memory_query_is_bounded_and_projected() -> None:
 
     statements = []
 
-    class EmptyScalars:
+    class EmptyResult:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return None
+
         def all(self):
             return []
 
     class FakeDatabase:
-        async def scalar(self, statement):
+        async def execute(self, statement):
             statements.append(statement)
-            return None
-
-        async def scalars(self, statement):
-            statements.append(statement)
-            return EmptyScalars()
+            return EmptyResult()
 
     asyncio.run(
         agent_repository.list_conversation_memory_runs(
@@ -6089,11 +6091,12 @@ def test_agent_memory_query_is_bounded_and_projected() -> None:
     assert "LIMIT 7" in compiled[-1]
     for sql in compiled:
         assert "agent_runs.goal" in sql
-        assert "agent_runs.result" in sql
-        assert "agent_runs.context_summary" in sql
-        assert "agent_runs.events" not in sql
-        assert "agent_runs.plan" not in sql
-        assert "agent_runs.checkpoint" not in sql
+        assert "agent_run_states.result" in sql
+        assert "agent_run_states.context_summary" in sql
+        assert "agent_run_snapshots" not in sql
+        assert "agent_run_events" not in sql
+        assert "agent_run_states.plan" not in sql
+        assert "agent_run_states.checkpoint" not in sql
 
 
 # ---------------------------------------------------------------- DTO mappings

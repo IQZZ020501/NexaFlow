@@ -58,6 +58,12 @@ Correctness, safety, evidence, and validation take priority over speed.
   (`db.commit()`/`db.rollback()`). New models: add the entity to
   `app/entities/`, keep the ORM class in its current models module, and
   expose create/save/refresh/delete wrappers on the repository.
+- Agent Run persistence separates identity/caller/lineage in `agent_runs`,
+  mutable lease/checkpoint/result data in `agent_run_states`, immutable
+  execution configuration in `agent_run_snapshots`, and append-only history
+  in `agent_run_events`. All Agent, Workflow, and test Tool executions use
+  `tool_invocations`; do not recreate an `agent_tool_calls` table or dual-write
+  ledger.
 - `backend/tests/unit.py` is a pure unit suite (no DB, no HTTP, no network)
   for business rules and services with mocked ports/repositories; run it like
   the other suites with `uv run python -m tests.unit`.

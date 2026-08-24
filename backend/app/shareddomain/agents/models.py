@@ -355,15 +355,6 @@ class AgentRun(Base):
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
-            ["workspace_id", "agent_id", "agent_publication_version_id"],
-            [
-                "agent_publication_versions.workspace_id",
-                "agent_publication_versions.agent_id",
-                "agent_publication_versions.id",
-            ],
-            name="fk_agent_runs_publication_workspace",
-        ),
-        ForeignKeyConstraint(
             ["workspace_id", "root_run_id"],
             ["agent_runs.workspace_id", "agent_runs.id"],
             name="fk_agent_runs_root_workspace",
@@ -381,14 +372,25 @@ class AgentRun(Base):
             name="fk_agent_runs_regenerated_from",
             ondelete="SET NULL",
         ),
-        CheckConstraint(
-            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'awaiting_child', 'queued_v2', 'running_v2', 'awaiting_approval_v2', 'awaiting_input_v2', 'awaiting_child_v2', 'succeeded', 'failed', 'cancelled')",
-            name="ck_agent_runs_status",
-        ),
         UniqueConstraint(
             "workspace_id",
             "id",
             name="uq_agent_runs_workspace_id",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            "agent_id",
+            name="uq_agent_runs_workspace_agent_id",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            "agent_id",
+            "access_source",
+            "consumer_id",
+            "conversation_id",
+            name="uq_agent_runs_state_identity",
         ),
         UniqueConstraint(
             "parent_run_id",
@@ -403,39 +405,12 @@ class AgentRun(Base):
             name="ck_agent_runs_parent_depth",
         ),
         CheckConstraint(
-            "knowledge_query_mode IN ('required', 'agentic')",
-            name="ck_agent_runs_knowledge_query_mode",
-        ),
-        CheckConstraint(
             "access_source IN ('console', 'public', 'api')",
             name="ck_agent_runs_access_source",
         ),
         CheckConstraint(
             "feedback IS NULL OR feedback IN ('positive', 'negative')",
             name="ck_agent_runs_feedback",
-        ),
-        CheckConstraint(
-            "configuration_source IN ('draft', 'published', 'legacy')",
-            name="ck_agent_runs_configuration_source",
-        ),
-        CheckConstraint(
-            "snapshot_schema_version >= 1",
-            name="ck_agent_runs_snapshot_schema_version",
-        ),
-        CheckConstraint(
-            "(configuration_source = 'published' AND agent_publication_version_id IS NOT NULL) "
-            "OR (configuration_source IN ('draft', 'legacy') "
-            "AND agent_publication_version_id IS NULL)",
-            name="ck_agent_runs_publication_source",
-        ),
-        CheckConstraint(
-            "(configuration_source IN ('draft', 'published') AND status IN "
-            "('queued_v2', 'running_v2', 'awaiting_approval_v2', "
-            "'awaiting_input_v2', 'awaiting_child_v2', 'succeeded', 'failed', 'cancelled')) OR "
-            "(configuration_source = 'legacy' AND status IN "
-            "('queued', 'planning', 'planned', 'running', 'awaiting_approval', "
-            "'awaiting_input', 'awaiting_child', 'succeeded', 'failed', 'cancelled'))",
-            name="ck_agent_runs_worker_generation",
         ),
         CheckConstraint(
             "(access_source = 'console' AND requested_by_user_id IS NOT NULL "
@@ -447,17 +422,6 @@ class AgentRun(Base):
         Index(
             "ix_agent_runs_conversation_id",
             "conversation_id",
-        ),
-        Index(
-            "uq_agent_runs_active_conversation",
-            "workspace_id",
-            "agent_id",
-            "access_source",
-            "consumer_id",
-            "conversation_id",
-            unique=True,
-            postgresql_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
-            sqlite_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
         ),
     )
 
@@ -496,41 +460,103 @@ class AgentRun(Base):
     attachment_context: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=""
     )
-    instructions: Mapped[str] = mapped_column(Text, nullable=False)
-    knowledge_base_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    knowledge_query_mode: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="required", server_default="required"
+    feedback: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    feedback_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
-    mcp_tools: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list)
-    snapshot_schema_version: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1
+    trace_id: Mapped[str] = mapped_column(
+        String(36), nullable=False, default="", server_default=""
     )
-    configuration_source: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="legacy"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AgentRunState(Base):
+    __tablename__ = "agent_run_states"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            [
+                "workspace_id",
+                "run_id",
+                "agent_id",
+                "access_source",
+                "consumer_id",
+                "conversation_id",
+            ],
+            [
+                "agent_runs.workspace_id",
+                "agent_runs.id",
+                "agent_runs.agent_id",
+                "agent_runs.access_source",
+                "agent_runs.consumer_id",
+                "agent_runs.conversation_id",
+            ],
+            name="fk_agent_run_states_run_identity",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'planning', 'planned', 'running', 'awaiting_approval', 'awaiting_input', 'awaiting_child', 'queued_v2', 'running_v2', 'awaiting_approval_v2', 'awaiting_input_v2', 'awaiting_child_v2', 'succeeded', 'failed', 'cancelled')",
+            name="ck_agent_run_states_status",
+        ),
+        CheckConstraint(
+            "worker_generation IN ('legacy', 'unified')",
+            name="ck_agent_run_states_generation",
+        ),
+        CheckConstraint(
+            "(worker_generation = 'unified' AND status IN "
+            "('queued_v2', 'running_v2', 'awaiting_approval_v2', "
+            "'awaiting_input_v2', 'awaiting_child_v2', 'succeeded', 'failed', 'cancelled')) OR "
+            "(worker_generation = 'legacy' AND status IN "
+            "('queued', 'planning', 'planned', 'running', 'awaiting_approval', "
+            "'awaiting_input', 'awaiting_child', 'succeeded', 'failed', 'cancelled'))",
+            name="ck_agent_run_states_worker_generation",
+        ),
+        CheckConstraint(
+            "attempts >= 0 AND max_attempts > 0 AND attempts <= max_attempts",
+            name="ck_agent_run_states_attempts",
+        ),
+        CheckConstraint(
+            "state_version >= 1", name="ck_agent_run_states_version"
+        ),
+        CheckConstraint(
+            "lease_expires_at IS NULL OR worker_task_id IS NOT NULL",
+            name="ck_agent_run_states_lease",
+        ),
+        Index(
+            "uq_agent_run_states_active_conversation",
+            "workspace_id",
+            "agent_id",
+            "access_source",
+            "consumer_id",
+            "conversation_id",
+            unique=True,
+            postgresql_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
+            sqlite_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
+        ),
     )
-    agent_publication_version_id: Mapped[str | None] = mapped_column(
-        String(36), nullable=True, index=True
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    access_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    consumer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    worker_generation: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    state_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
     )
-    application_snapshot: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
-    application_snapshot_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False, default=""
-    )
-    tool_snapshots: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSON, nullable=False, default=list
-    )
-    model_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    model_name: Mapped[str] = mapped_column(String(160), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)
     attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
     max_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=3, server_default="3"
     )
-    worker_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
-    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    worker_task_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     checkpoint: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )
@@ -543,15 +569,9 @@ class AgentRun(Base):
     grounding_meta: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )
-    feedback: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    feedback_updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+    plan: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
     )
-    trace_id: Mapped[str] = mapped_column(
-        String(36), nullable=False, default="", server_default=""
-    )
-    plan: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
-    events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     result: Mapped[str] = mapped_column(Text, nullable=False, default="")
     context_summary: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=""
@@ -560,12 +580,87 @@ class AgentRun(Base):
         JSON, nullable=False, default=dict, server_default="{}"
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    planned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class AgentRunSnapshot(Base):
+    __tablename__ = "agent_run_snapshots"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "run_id", "agent_id"],
+            ["agent_runs.workspace_id", "agent_runs.id", "agent_runs.agent_id"],
+            name="fk_agent_run_snapshots_run_workspace",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "agent_id", "agent_publication_version_id"],
+            [
+                "agent_publication_versions.workspace_id",
+                "agent_publication_versions.agent_id",
+                "agent_publication_versions.id",
+            ],
+            name="fk_agent_run_snapshots_publication_workspace",
+        ),
+        CheckConstraint(
+            "knowledge_query_mode IN ('required', 'agentic')",
+            name="ck_agent_run_snapshots_knowledge_query_mode",
+        ),
+        CheckConstraint(
+            "configuration_source IN ('draft', 'published', 'legacy')",
+            name="ck_agent_run_snapshots_configuration_source",
+        ),
+        CheckConstraint(
+            "snapshot_schema_version >= 1",
+            name="ck_agent_run_snapshots_schema_version",
+        ),
+        CheckConstraint(
+            "(configuration_source = 'published' AND agent_publication_version_id IS NOT NULL) "
+            "OR (configuration_source IN ('draft', 'legacy') "
+            "AND agent_publication_version_id IS NULL)",
+            name="ck_agent_run_snapshots_publication_source",
+        ),
+    )
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    snapshot_schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    configuration_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    agent_publication_version_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    knowledge_base_ids: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    knowledge_query_mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    mcp_tools: Mapped[list[dict[str, str]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    application_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    application_snapshot_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    tool_snapshots: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    model_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now
     )
 
 
@@ -585,55 +680,3 @@ class AgentRunEvent(Base):
     run_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     event: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-
-
-class AgentToolCall(Base):
-    __tablename__ = "agent_tool_calls"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["workspace_id", "run_id"],
-            ["agent_runs.workspace_id", "agent_runs.id"],
-            name="fk_agent_tool_calls_run_workspace",
-            ondelete="CASCADE",
-        ),
-        UniqueConstraint(
-            "run_id",
-            "turn",
-            "call_id",
-            name="uq_agent_tool_calls_run_turn_call",
-        ),
-        CheckConstraint(
-            "status IN ('pending', 'awaiting_approval', 'approved', 'running', 'succeeded', 'failed', 'rejected', 'uncertain')",
-            name="ck_agent_tool_calls_status",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    run_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    turn: Mapped[int] = mapped_column(Integer, nullable=False)
-    call_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    tool_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    tool_kind: Mapped[str] = mapped_column(String(30), nullable=False, default="unknown")
-    server_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    arguments: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    arguments_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    definition_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
-    policy_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="")
-    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending", index=True)
-    approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    approved_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    worker_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    result_content: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    result_summary: Mapped[str] = mapped_column(String(2000), nullable=False, default="")
-    result_output: Mapped[Any] = mapped_column(JSON, nullable=True)
-    result_is_error: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    result_evidence_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

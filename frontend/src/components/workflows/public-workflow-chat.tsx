@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 import {
   CircleAlertIcon,
   CircleCheckIcon,
@@ -197,7 +196,6 @@ export function PublicWorkflowChat({
   workflowId: string
   initialConversationId?: string | null
 }) {
-  const router = useRouter()
   const { language, t } = useLanguage()
   const { token, isSessionRestored } = useSession()
   const [profile, setProfile] = React.useState<PublicWorkflowProfile | null>(
@@ -280,7 +278,9 @@ export function PublicWorkflowChat({
     setConversationId(nextId)
     setError(null)
     setHistoryOpen(false)
-    router.replace(
+    window.history.replaceState(
+      null,
+      "",
       nextId
         ? `/chat/${workflowId}?conversation_id=${encodeURIComponent(nextId)}`
         : `/chat/${workflowId}`
@@ -308,7 +308,9 @@ export function PublicWorkflowChat({
       const nextConversationId = run.conversation_id
       setConversationId(nextConversationId)
       setRuns((current) => [run, ...current])
-      router.replace(
+      window.history.replaceState(
+        null,
+        "",
         `/chat/${workflowId}?conversation_id=${encodeURIComponent(nextConversationId)}`
       )
       if (!["succeeded", "failed", "cancelled"].includes(run.status)) {

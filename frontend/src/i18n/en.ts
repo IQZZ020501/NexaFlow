@@ -29,6 +29,7 @@ export const en = {
   密码重置链接无效或已过期: "Password reset link is invalid or expired",
   新密码不能与原密码相同:
     "The new password must differ from the previous password",
+  知识库名称已存在: "Knowledge base name already exists",
   资源不存在或无权访问: "Resource not found or access denied",
   页面不存在: "Page not found",
   请求的页面不存在或已移动: "The requested page does not exist or has moved.",

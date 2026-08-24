@@ -939,7 +939,11 @@ function KnowledgeBasePageContent({
       return
     }
     setActiveDetailTab(tab)
-    router.push(knowledgeBaseDetailPath(selectedKnowledgeBaseId, tab))
+    window.history.pushState(
+      null,
+      "",
+      knowledgeBaseDetailPath(selectedKnowledgeBaseId, tab)
+    )
   }
 
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {

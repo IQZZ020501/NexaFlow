@@ -279,7 +279,7 @@ git log --oneline --decorate -20
 | AGT-009 | P1 | public/API Agent 含 auto read Tool | 可运行 |
 | AGT-010 | P0 | public/API Agent 含 each_call/write/unknown Tool | 整次 Run 在模型调用前拒绝，不能静默过滤危险 Tool |
 | AGT-011 | P1 | console Agent 含 each_call Tool | 进入 awaiting approval，批准后继续，拒绝后明确终止/返回工具错误 |
-| AGT-012 | P1 | knowledge Tool + canonical Tool 混用 | knowledge 历史与 ToolInvocation 均可在 tool-calls API 查看 |
+| AGT-012 | P1 | knowledge Tool + canonical Tool 混用 | 两类调用都由 `tool_invocations` 持久化，并可在 tool-calls API 查看 |
 | AGT-013 | P1 | Tool grant revoke/disable/policy drift | 新调用 fail closed；已成功 ledger 仍可重放 |
 | AGT-014 | P1 | Agent Run 重复投递、lease 到期、max attempts | 不重复已确认 Tool；unsafe 未知结果保留 uncertain |
 | AGT-015 | P1 | 取消 root Agent Run | active child、节点和 invocation 一并收口；重复取消返回 409 |
@@ -518,7 +518,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 | AUD-001 | P1 | API 路由依赖方向 | `api/` 只调用 application/schema/deps；无 ORM 或业务规则直连 |
 | AUD-002 | P1 | Tool domain 边界 | 业务状态与策略位于 `shareddomain/tools`；repository 只负责持久化/CAS，不复制 effect 判定 |
 | AUD-003 | P0 | 唯一 Tool Runtime | Agent、Workflow direct/LLM、Python test 均进入同一 application ToolExecution 边界；provider adapter 内才区分 builtin/Python/MCP |
-| AUD-004 | P0 | 统一 ledger | canonical 调用只写 `tool_invocations`；旧 `agent_tool_calls` 仅服务明确的 legacy/knowledge 兼容，不存在同一副作用双账执行 |
+| AUD-004 | P0 | 统一 ledger | Agent、Workflow 与测试调用只写 `tool_invocations`；旧 API 通过投影兼容，不存在 `agent_tool_calls` 双账执行 |
 | AUD-005 | P1 | 不可变版本 | ToolVersion、Agent publication、WorkflowVersion 与 Run snapshot append-only；current pointer 更新不改旧版本 |
 | AUD-006 | P0 | tenant 约束 | Tool/Version/Policy/Binding/Invocation、Agent publication/Run、Workflow child 具备 workspace/parent 组合校验或 FK |
 | AUD-007 | P0 | live kill switch | Tool/Source disabled、grant revoke、membership 失效和 policy/hash drift 在每次未执行 dispatch 前重新检查 |
