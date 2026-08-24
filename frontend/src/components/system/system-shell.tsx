@@ -82,6 +82,12 @@ export type SystemTab = "workspaces" | "teams" | "users" | "audit"
 export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
   const session = useSession()
   const router = useRouter()
+  const [currentTab, setCurrentTab] = React.useState(activeTab)
+
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCurrentTab(activeTab)
+  }, [activeTab])
 
   const canAccessSystem = Boolean(
     session.me &&
@@ -107,19 +113,19 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
     }
 
     if (
-      (activeTab === "users" &&
+      (currentTab === "users" &&
         !session.isSessionLoading &&
         !canAccessUsers) ||
-      (activeTab === "audit" &&
+      (currentTab === "audit" &&
         !session.me?.user.is_global_admin &&
         getMembershipRole(session.me, session.selectedWorkspaceId) !== "admin")
     ) {
       router.replace("/system/teams")
     }
   }, [
-    activeTab,
     canAccessSystem,
     canAccessUsers,
+    currentTab,
     router,
     session.isSessionLoading,
     session.me,
@@ -132,7 +138,7 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
 
   return (
     <SystemPageContent
-      activeTab={activeTab}
+      activeTab={currentTab}
       me={session.me}
       token={session.token}
       workspaces={session.workspaces}
@@ -140,7 +146,10 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
       selectedWorkspaceId={session.selectedWorkspaceId}
       isTeamsLoading={session.isTeamsLoading}
       onSelectWorkspace={session.selectWorkspace}
-      onSystemTabChange={(tab) => router.push(`/system/${tab}`)}
+      onSystemTabChange={(tab) => {
+        setCurrentTab(tab)
+        window.history.pushState(null, "", `/system/${tab}`)
+      }}
       onWorkspaceCreated={session.workspaceCreated}
       onWorkspaceUpdated={session.workspaceUpdated}
       onWorkspaceDeleted={session.workspaceDeleted}

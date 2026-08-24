@@ -758,7 +758,6 @@ export function PublicAgentChat({
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const initialConversationIdRef = React.useRef(initialConversationId)
-  const routerRef = React.useRef(router)
   const tRef = React.useRef(t)
   const tokenRef = React.useRef(token)
   const initializedAgentIdRef = React.useRef<string | null>(null)
@@ -778,10 +777,9 @@ export function PublicAgentChat({
   )
 
   React.useEffect(() => {
-    routerRef.current = router
     tRef.current = t
     tokenRef.current = token
-  }, [router, t, token])
+  }, [t, token])
 
   React.useEffect(() => {
     if (!isSessionRestored || token) return
@@ -826,7 +824,9 @@ export function PublicAgentChat({
         setIsRunsLoading(Boolean(nextConversationId))
         setSessionReady(true)
         if (nextConversationId && !initialConversationIdRef.current) {
-          routerRef.current.replace(
+          window.history.replaceState(
+            null,
+            "",
             `/chat/${agentId}?conversation_id=${encodeURIComponent(nextConversationId)}`
           )
         }
@@ -890,7 +890,9 @@ export function PublicAgentChat({
     setIsRunsLoading(true)
     setActiveConversationId(conversationId)
     setIsHistoryOpen(false)
-    router.replace(
+    window.history.replaceState(
+      null,
+      "",
       `/chat/${agentId}?conversation_id=${encodeURIComponent(conversationId)}`
     )
   }
@@ -907,7 +909,7 @@ export function PublicAgentChat({
     setIsSending(false)
     setIsRunsLoading(false)
     setIsHistoryOpen(false)
-    router.replace(`/chat/${agentId}`)
+    window.history.replaceState(null, "", `/chat/${agentId}`)
   }
 
   async function handleToolCallDecision(
@@ -1128,7 +1130,9 @@ export function PublicAgentChat({
             liveRunId = streamEvent.run.id
             if (!activeConversationId) {
               setActiveConversationId(streamEvent.run.conversation_id)
-              router.replace(
+              window.history.replaceState(
+                null,
+                "",
                 `/chat/${agentId}?conversation_id=${encodeURIComponent(streamEvent.run.conversation_id)}`
               )
             }

@@ -21,6 +21,7 @@ import {
   mergePublicRunEvent,
   publicToolName,
 } from "@/components/agents/public-agent-chat"
+import { PublicWorkflowChat } from "@/components/workflows/public-workflow-chat"
 import { ApiError } from "@/lib/api-client"
 import { copyText } from "@/lib/clipboard"
 import {
@@ -1309,6 +1310,54 @@ describe("public-agent-chat helpers", () => {
 // PublicAgentChat DOM
 // ---------------------------------------------------------------------------
 
+describe("PublicWorkflowChat", () => {
+  test("switches conversations without remounting the public chat page", async () => {
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL("https://nexaflow.example/chat/wf-1")
+    const workflowConversation = (conversationId: string, question: string) => ({
+      conversation_id: conversationId,
+      inputs: { question },
+      outputs: {},
+      status: "succeeded",
+      run_count: 1,
+      created_at: "2026-08-10T00:00:00Z",
+      updated_at: "2026-08-10T00:00:01Z",
+    })
+    fetchHandler = (url) => {
+      if (url.endsWith("/profile")) return jsonResponse(workflowProfile())
+      if (url.includes("/conversations")) {
+        return jsonResponse({
+          items: [
+            workflowConversation("conv-1", "第一个流程"),
+            workflowConversation("conv-2", "第二个流程"),
+          ],
+        })
+      }
+      if (url.includes("/runs?")) return jsonResponse({ items: [] })
+      return jsonResponse({})
+    }
+
+    renderPage(<PublicWorkflowChat workflowId="wf-1" />)
+    expect(await screen.findByRole("heading", { name: "公开流程" })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: /第二个流程/ }))
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: /第二个流程/ })
+          .getAttribute("aria-current")
+      ).toBe("page")
+    )
+    expect(new URLSearchParams(window.location.search).get("conversation_id")).toBe(
+      "conv-2"
+    )
+    expect(replaced).toEqual([])
+  })
+})
+
 describe("PublicAgentChat", () => {
   test("shows the loading state while the profile loads", () => {
     fetchHandler = () => new Promise<Response>(() => {})
@@ -1355,6 +1404,10 @@ describe("PublicAgentChat", () => {
   })
 
   test("renders history runs, selects conversations, and starts fresh", async () => {
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL("https://nexaflow.example/chat/agent-1")
     const historyByConversation: Record<string, ExternalAgentRun[]> = {
       "conv-1": [
         run({
@@ -1447,6 +1500,9 @@ describe("PublicAgentChat", () => {
     // An answer-only timeline synthesizes an analysis step before it.
     expect(screen.getByText("已完成分析")).toBeTruthy()
     expect(screen.getByText("回答已生成")).toBeTruthy()
+    expect(new URLSearchParams(window.location.search).get("conversation_id")).toBe(
+      "conv-1"
+    )
     const currentConversationButton = screen
       .getByText("第一个会话")
       .closest("button")!
@@ -1461,12 +1517,15 @@ describe("PublicAgentChat", () => {
     fireEvent.click(screen.getByRole("button", { name: /第二个会话/ }))
     expect(await screen.findByText("第二个会话的问题")).toBeTruthy()
     expect(screen.queryByText("第一个问题")).toBeNull()
-    expect(replaced.at(-1)).toBe("/chat/agent-1?conversation_id=conv-2")
+    expect(new URLSearchParams(window.location.search).get("conversation_id")).toBe(
+      "conv-2"
+    )
 
     // Start a brand-new conversation.
     fireEvent.click(screen.getByTitle("新建对话"))
     expect(await screen.findByText("开始新对话")).toBeTruthy()
-    expect(replaced.at(-1)).toBe("/chat/agent-1")
+    expect(window.location.pathname).toBe("/chat/agent-1")
+    expect(window.location.search).toBe("")
   })
 
   test("streams a full run and renders the execution timeline", async () => {
@@ -1608,6 +1667,10 @@ describe("PublicAgentChat", () => {
   })
 
   test("starts a conversation from the empty state and records the new id", async () => {
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL("https://nexaflow.example/chat/agent-1")
     const createBodies: Array<Record<string, unknown>> = []
     fetchHandler = agentFetchHandler({
       conversations: { items: [] },
@@ -1669,13 +1732,12 @@ describe("PublicAgentChat", () => {
     renderPage(<PublicAgentChat agentId="agent-1" />)
     await screen.findByText("开始新对话")
 
-    const originalReplace = replaced.length
     sendMessage("开始吧")
 
     expect(await screen.findByText("新会话回答")).toBeTruthy()
     expect(createBodies[0]).toEqual({ goal: "开始吧" })
-    expect(replaced.slice(originalReplace)).toContain(
-      "/chat/agent-1?conversation_id=conv-new"
+    expect(new URLSearchParams(window.location.search).get("conversation_id")).toBe(
+      "conv-new"
     )
   })
 
@@ -2244,6 +2306,10 @@ describe("PublicAgentChat", () => {
   })
 
   test("opens the mobile history dialog and selects a conversation", async () => {
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL("https://nexaflow.example/chat/agent-1")
     const historyByConversation: Record<string, ExternalAgentRun[]> = {
       "conv-1": [run({ result: "来自对话的记录" })],
       "conv-2": [run({ id: "run-2", question: "第二个问题", result: "第二个会话的记录" })],
@@ -2289,6 +2355,8 @@ describe("PublicAgentChat", () => {
     await waitFor(() =>
       expect(document.querySelector('[data-slot="dialog-content"]')).toBeNull()
     )
-    expect(replaced.at(-1)).toBe("/chat/agent-1?conversation_id=conv-2")
+    expect(new URLSearchParams(window.location.search).get("conversation_id")).toBe(
+      "conv-2"
+    )
   })
 })

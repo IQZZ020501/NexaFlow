@@ -389,7 +389,11 @@ describe("SystemShell access control", () => {
 // ---------------------------------------------------------------------------
 
 describe("workspaces tab", () => {
-  test("renders workspaces, links and switches tabs via router push", async () => {
+  test("keeps the system shell mounted while switching tabs", async () => {
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL("https://nexaflow.example/system/workspaces")
     handler = routeHandler([
       { path: "/api/v1/admin/users", handle: () => jsonResponse(allUsers) },
     ])
@@ -406,9 +410,16 @@ describe("workspaces tab", () => {
     }
 
     fireEvent.click(screen.getByRole("tab", { name: "团队" }))
-    fireEvent.click(screen.getByRole("tab", { name: "用户管理" }))
-    fireEvent.click(screen.getByRole("tab", { name: "审计日志" }))
-    expect(pushes).toEqual(["/system/teams", "/system/users", "/system/audit"])
+    expect(window.location.pathname).toBe("/system/teams")
+    expect(await screen.findByText("Team One")).toBeTruthy()
+    expect(
+      screen.getByRole("tab", { name: "团队" }).getAttribute("aria-selected")
+    ).toBe("true")
+
+    fireEvent.click(screen.getByRole("tab", { name: "工作空间" }))
+    expect(window.location.pathname).toBe("/system/workspaces")
+    expect(await screen.findByText("Test Workspace")).toBeTruthy()
+    expect(pushes).toEqual([])
   })
 
   test("creates a workspace with a selected admin", async () => {
