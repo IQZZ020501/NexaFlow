@@ -58,12 +58,12 @@ so psycopg async connections work (Windows defaults to the Proactor loop,
 which psycopg rejects).
 
 The `dev` target starts and waits for the Compose PostgreSQL, Redis, and Qdrant
-services, applies Alembic migrations, and then delegates API and Worker-log
-orchestration to a Python standard-library script. It does not build or start
-the Compose Worker or sandbox. The `coverage` target also delegates process
+services, applies Alembic migrations, and then starts the API through a Python
+standard-library script. It does not start the Worker. The `coverage` target also delegates process
 orchestration to Python, so GNU Make can run both targets from Windows
 PowerShell or Command Prompt without Bash. GNU Make itself must still be
-installed separately on Windows.
+installed separately on Windows. Run the API and Worker inside WSL2 when code
+execution is required; the native Windows Worker fails closed.
 
 Set `CELERY_BROKER_URL` for Redis. The API process and every worker must share
 the configured `KNOWLEDGE_STORAGE_DIR` and connect to the same `QDRANT_URL`;
@@ -79,18 +79,16 @@ events, and terminal answers stay in PostgreSQL. Closing an Agent event stream
 only stops observation; it does not cancel the durable run. If Redis live reads
 fail, the client still receives the durable terminal answer.
 
-Python Tools and Workflow code nodes require the network-disabled sandbox Unix
-socket, which is mounted only into the Compose worker. For local development,
-build the shared application image and start the sandbox-capable worker from
-`backend/` with one Compose invocation:
+Python artifact Tools and Workflow code nodes use a private Unix socket owned by
+the Worker-supervised sandbox Broker. Start the source Worker from `backend/`:
 
 ```bash
-make worker-compose
+make worker
 ```
 
-The host-only `make worker` command remains useful for tasks that do not execute
-Python code, but it cannot run Python Tools or Workflow code nodes because the
-sandbox socket is intentionally unavailable on the host.
+`make worker` syncs the separate `sandbox/` runtime and starts both the Broker
+and Celery. Linux uses namespace/chroot isolation and requires root startup;
+macOS uses Seatbelt per child. Native Windows is unsupported; use WSL2.
 
 ## MCP transports
 

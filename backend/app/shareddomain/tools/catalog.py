@@ -569,6 +569,116 @@ def build_inline_python_tool(
     )
 
 
+def build_python_artifact_tool(
+    workspace_id: str,
+    created_at: datetime | None = None,
+) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    timestamp = created_at or utc_now()
+    source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
+    tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:python_artifact")
+    description = (
+        "Create a DOCX or self-contained static HTML file by running Python in "
+        "the isolated sandbox. Write the final file to the global output_path. "
+        "python-docx is available for DOCX files. HTML must use inline CSS and "
+        "must not use JavaScript or external resources. Requested administrator "
+        "Skills are readable below the global skills_dir. Include the returned "
+        "download_url verbatim in the final answer."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "code": {"type": "string", "maxLength": 32768},
+            "format": {
+                "type": "string",
+                "enum": ["docx", "html"],
+                "maxLength": 10,
+            },
+            "filename": {"type": "string", "maxLength": 120},
+            "skills": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 64},
+                "maxItems": 8,
+            },
+        },
+        "required": ["code", "format", "filename"],
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string", "maxLength": 36},
+            "format": {"type": "string", "maxLength": 10},
+            "filename": {"type": "string", "maxLength": 120},
+            "download_url": {"type": "string", "maxLength": 4096},
+            "expires_at": {"type": "string", "maxLength": 64},
+            "size_bytes": {"type": "integer"},
+        },
+        "required": [
+            "artifact_id",
+            "format",
+            "filename",
+            "download_url",
+            "expires_at",
+            "size_bytes",
+        ],
+        "additionalProperties": False,
+    }
+    execution_spec = {"builtin": "python_artifact"}
+    definition_hash = canonical_definition_hash(
+        {
+            "name": "create_artifact",
+            "description": description,
+            "input_schema": input_schema,
+            "output_schema": output_schema,
+            "execution_spec": execution_spec,
+        }
+    )
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+    return (
+        Tool(
+            id=tool_id,
+            workspace_id=workspace_id,
+            source_id=source_id,
+            kind="builtin",
+            stable_key="python_artifact",
+            function_name="create_artifact",
+            current_version_id=version_id,
+            status="active",
+            availability="available",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        ToolVersion(
+            id=version_id,
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            revision=1,
+            display_name="Create document or page",
+            description=description,
+            input_schema=input_schema,
+            output_schema=output_schema,
+            execution_spec=execution_spec,
+            definition_hash=definition_hash,
+            created_at=timestamp,
+        ),
+        ToolPolicy(
+            id=stable_catalog_id(f"policy:{tool_id}"),
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            tool_version_id=version_id,
+            definition_hash=definition_hash,
+            revision=1,
+            approval="auto",
+            effect="pure",
+            allowed_access_sources=["console", "public", "api"],
+            workflow_callable=True,
+            parallel_safe=False,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+
+
 async def ensure_workspace_system_catalog(
     db: AsyncSession,
     workspace_id: str,
@@ -602,6 +712,7 @@ async def ensure_workspace_system_catalog(
 
     await ensure_tool(catalog.tool, catalog.version, catalog.policy)
     await ensure_tool(*build_inline_python_tool(workspace_id))
+    await ensure_tool(*build_python_artifact_tool(workspace_id))
 
 
 async def _tombstone_mcp_sources(

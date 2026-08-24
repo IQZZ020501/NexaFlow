@@ -1,11 +1,18 @@
-# Unified application image. API, worker, frontend, and sandbox run as
-# separate containers whose commands and isolation are defined by Compose.
+# Unified application image. API, worker, and frontend run as separate
+# containers; the worker supervises the isolated sandbox broker.
 
 FROM ghcr.io/astral-sh/uv:0.11.3@sha256:90bbb3c16635e9627f49eec6539f956d70746c409209041800a0280b93152823 AS uv
 
+FROM python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91 AS sandbox-builder
+WORKDIR /opt/sandbox
+COPY --from=uv /uv /usr/local/bin/uv
+COPY sandbox/pyproject.toml sandbox/uv.lock ./
+RUN uv sync --no-dev --no-install-project --frozen
+
 FROM python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91 AS sandbox-base
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/sandbox/.venv/bin:$PATH
 RUN addgroup --system --gid 65532 sandbox \
     && addgroup --system --gid 65533 sandbox-socket \
     && adduser --system --uid 65532 --gid 65532 --no-create-home \
@@ -14,16 +21,18 @@ RUN addgroup --system --gid 65532 sandbox \
     && chown root:sandbox-socket /run/sandbox \
     && chmod 0750 /run/sandbox
 WORKDIR /opt/sandbox
+COPY --from=sandbox-builder /opt/sandbox/.venv ./.venv
 COPY sandbox ./sandbox
 RUN chown root:sandbox /opt/sandbox \
     && chmod 0750 /opt/sandbox \
-    && chown -R root:sandbox /opt/sandbox/sandbox \
-    && chmod -R g+rX,o-rwx /opt/sandbox/sandbox
+    && chown -R root:sandbox /opt/sandbox/.venv /opt/sandbox/sandbox \
+    && chmod -R g+rX,o-rwx /opt/sandbox/.venv /opt/sandbox/sandbox
 
 FROM sandbox-base AS sandbox-runtime
-ENTRYPOINT ["/usr/local/bin/python", "-m", "sandbox.server"]
+COPY backend/scripts/worker.py /opt/sandbox/worker.py
+ENTRYPOINT ["/opt/sandbox/.venv/bin/python", "-m", "sandbox.server"]
 HEALTHCHECK --interval=5s --timeout=2s --retries=10 \
-    CMD ["/usr/local/bin/python", "-m", "sandbox.healthcheck"]
+    CMD ["/opt/sandbox/.venv/bin/python", "-m", "sandbox.healthcheck"]
 
 FROM python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91 AS backend-builder
 WORKDIR /app
@@ -56,6 +65,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         libatomic1 \
+        libcap2 \
         libstdc++6 \
         tesseract-ocr \
         tesseract-ocr-chi-sim \
@@ -66,6 +76,7 @@ RUN apt-get update \
 COPY --from=backend-builder /app/.venv /app/.venv
 COPY backend/app /app/app
 COPY backend/alembic /app/alembic
+COPY backend/scripts/worker.py /app/scripts/worker.py
 COPY backend/alembic.ini backend/main.py /app/
 
 COPY --from=frontend-builder /app/.next/standalone /opt/frontend

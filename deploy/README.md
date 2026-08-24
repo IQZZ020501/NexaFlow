@@ -1,7 +1,7 @@
 # NexaFlow container deployment
 
 Runs the full stack with Docker Compose: PostgreSQL, Redis, Qdrant, FastAPI
-(`api`), a Celery worker with embedded Beat, the isolated Python sandbox, and
+(`api`), a Celery worker with embedded Beat and supervised Python sandbox, and
 the Next.js frontend.
 
 ## Quick start
@@ -23,36 +23,33 @@ updating the image tag.
 The production Compose file publishes only host port `8000` from the Next.js
 frontend (`8000:3000`). Next.js rewrites API, health, and OpenAPI requests to
 the internal `api:8000` service. PostgreSQL, Redis, Qdrant, and the worker remain
-reachable only on the Compose network; the sandbox has no network namespace or
-host port.
+reachable only on the Compose network. User code runs in a private network and
+mount namespace created inside the Worker container and has no host port.
 
-API, worker, frontend, and sandbox are four containers created from the same
-application image. This preserves independent commands, scaling, network
-namespaces, filesystems, and security options while requiring only one
-application artifact in the image registry.
+API, worker, and frontend are three application containers created from the
+same image. The sandbox is source supervised by the Worker rather than a fourth
+service, so it cannot be started or reached independently.
 
 ## Local development
 
-Use the dev override once to start PostgreSQL, Redis, Qdrant, the sandbox, and
-the Compose worker; run the API and frontend directly on the host. It publishes
+Use the dev override to start PostgreSQL, Redis, and Qdrant; run the API, Worker,
+and frontend directly from source. It publishes
 PostgreSQL on `POSTGRES_PORT` (default `5432`) plus Redis/Qdrant on `6379`/`6333`,
 and pins readable container names
 (`nexaflow-db`, `nexaflow-redis`, `nexaflow-qdrant`):
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d --build --wait db redis qdrant sandbox worker
+docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d --build --wait db redis qdrant
 ```
 
 The host backend and Compose use the same root `.env`. `POSTGRES_*` configures
 both the published PostgreSQL service and the backend connection; the backend
 safely constructs the URL, so credentials are not duplicated inside a
-hand-written `DATABASE_URL`. The Compose `migrate` service applies pending
-Alembic revisions before the worker starts; `make dev` safely verifies the
-same migration state before starting the host API.
-When the API runs on the host and the Compose worker is enabled, the dev
-override mounts `backend/storage` at the worker's `/data`; keep
-`KNOWLEDGE_STORAGE_DIR=./storage/knowledge` so both processes read the same
-uploaded files.
+hand-written `DATABASE_URL`. `make dev` applies pending Alembic revisions before
+starting the host API. Run `make worker` in a second backend terminal; it starts
+Celery and its private sandbox Broker. macOS uses Seatbelt, Linux requires root
+for namespace/chroot isolation, and Windows uses WSL2 rather than a native
+Worker.
 
 ## Services
 
@@ -62,8 +59,7 @@ uploaded files.
 | `redis` | redis:7-alpine | — |
 | `qdrant` | qdrant/qdrant:v1.19.0 | vector database |
 | `api` | `${NEXAFLOW_APP_IMAGE}` / `deploy/dockerfiles/app.Dockerfile` | uvicorn |
-| `worker` | same application image | celery worker with embedded Beat |
-| `sandbox` | same application image | isolated Python runner over a Unix socket |
+| `worker` | same application image | sandbox supervisor + Celery worker with embedded Beat |
 | `frontend` | same application image | Next.js standalone |
 
 The unified application image includes the backend virtual environment,
@@ -80,11 +76,10 @@ Persistent volumes: `db-data` (PostgreSQL), `redis-data`, `qdrant-data`, and
 All runtime configuration comes from the repository-root `.env` (see
 `.env.example`). The base compose file forces `ENVIRONMENT=production`, clears
 the optional host `DATABASE_URL`, and overrides `POSTGRES_HOST`, Redis, Qdrant,
-and upload-storage locations for the container network. The development
-override sets the worker back to `ENVIRONMENT=development`.
+and upload-storage locations for the container network.
 
-`NEXAFLOW_APP_IMAGE` selects the image shared by API, worker, frontend, and
-sandbox. `NEXAFLOW_POSTGRES_IMAGE` selects the PostgreSQL image containing the
+`NEXAFLOW_APP_IMAGE` selects the image shared by API, worker, and frontend.
+`NEXAFLOW_POSTGRES_IMAGE` selects the PostgreSQL image containing the
 required extensions. Keep the local defaults when building on the deployment
 host; set both to registry tags before running a pull-only server deployment.
 
@@ -109,8 +104,8 @@ worker embeds Beat, so keep that combined worker at one instance and do not run
 a separate Beat process. It redispatches queued and expired Knowledge tasks and
 Agent runs.
 Celery uses `solo` automatically on macOS (HTTPS trust evaluation is unsafe
-after a multithreaded process fork) and Windows (`prefork` needs `os.fork()`,
-which Windows lacks); Linux containers keep `prefork`.
+after a multithreaded process fork); Linux containers keep `prefork`. Native
+Windows Worker startup is rejected; run it in WSL2.
 The Compose worker keeps zero prefork children while idle, grows to at most ten
 for queued work, and removes idle children after five seconds. Beat groups the
 30-second and 60-second recovery scans so maintenance alone does not fan out
@@ -135,13 +130,20 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 
 ### Python code sandbox
 
-Workflow Python nodes run in the separate `sandbox` container. The container
-has no network namespace, a read-only root filesystem, a size-limited `/tmp`,
-drops all default capabilities and restores only `CHOWN`, `KILL`, `SETGID`, and
-`SETUID` for child isolation and cleanup. It also has explicit container CPU,
-memory, and PID limits. Both the sandbox and Celery worker mount the
-`sandbox-socket` volume at `/run/sandbox`; the worker joins the dedicated socket
-group. These container limits are separate from the per-request limits below.
+The Worker starts the sandbox Broker from `sandbox/` source before Celery and
+keeps its Unix socket private to the Worker process tree. In Linux production,
+the launcher creates private mount, network, PID, IPC, and UTS namespaces,
+mounts only the Python runtime and sandbox source into a chroot, then reduces
+the Broker to `CHOWN`, `KILL`, `SETGID`, and `SETUID`. The supervisor drops all
+capabilities before starting Celery. Docker's default seccomp profile and
+`no-new-privileges` remain enabled. There is no sandbox Compose service, image,
+network attachment, business-data mount, or shared socket volume.
+
+macOS development applies a Seatbelt profile to every user-code child: network
+is denied, writes are limited to that run's temporary directory, and user-home
+content is hidden except for the sandbox Python runtime. Linux source workers
+require root so the namespace launcher can fail closed. Native Windows is not
+supported; run the API and Worker in WSL2.
 
 The sandbox accepts one JSON object per Unix-socket line at
 `/run/sandbox/sandbox.sock`:
@@ -156,16 +158,39 @@ The response is one JSON line with `ok`, `stdout`, `stderr`, `exit_code`, and
 `memory_bytes`, `max_output_bytes`, `max_file_bytes`, `max_processes`, and
 `max_open_files`; unknown keys are rejected. Requested limits may only reduce
 the hard defaults: 5 seconds wall time, 5 CPU seconds, 256 MiB address space,
-16 processes, 64 open files, 1 MiB per file, and 64 KiB each for stdout and
+16 processes, 64 open files, 5 MiB per file, and 64 KiB each for stdout and
 stderr. Child Python processes run as UID/GID 65532 with isolated imports and a
 minimal environment.
+
+Agent artifact requests add `artifact: {format, filename}` and optional
+administrator-managed `skills`. The sandbox exposes only a controlled output
+path and staged read-only Skill copies. DOCX generation uses the pinned
+`python-docx` runtime; HTML must be self-contained static HTML/CSS. Successful
+artifacts are validated, stored in PostgreSQL for at most 24 hours, and returned
+as a scoped signed download link. DOCX is downloaded as an attachment; HTML is
+rendered inline with a restrictive no-script/no-external-resource CSP.
 
 Run the standalone self-check locally or in the built image:
 
 ```bash
-python3 -m sandbox.self_check
+cd backend
+uv run python scripts/worker.py --sandbox-self-check
+
+# Test-only image target; it is not a deployed service.
 docker build -f deploy/dockerfiles/app.Dockerfile --target sandbox-runtime -t nexaflow-sandbox .
-docker run --rm --network none --entrypoint python nexaflow-sandbox -m sandbox.self_check
+docker run --rm --network none --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=0711,uid=0,gid=0 \
+  --tmpfs /dev/shm:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=0,gid=0 \
+  --tmpfs /run/sandbox:rw,noexec,nosuid,nodev,size=1m,mode=0750,uid=0,gid=65533 \
+  --entrypoint python nexaflow-sandbox -m sandbox.self_check
+docker run --rm --network none --cap-drop ALL \
+  --cap-add CHOWN --cap-add KILL --cap-add SETGID --cap-add SETPCAP \
+  --cap-add SETUID --cap-add SYS_ADMIN --cap-add SYS_CHROOT \
+  --security-opt no-new-privileges:true \
+  --env ENVIRONMENT=production \
+  --env DATABASE_URL=postgresql://sandbox-must-not-see-this \
+  --entrypoint python nexaflow-sandbox \
+  /opt/sandbox/worker.py --sandbox-self-check
 ```
 
 ### MCP stdio Servers

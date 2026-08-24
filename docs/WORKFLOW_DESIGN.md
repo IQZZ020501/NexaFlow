@@ -52,8 +52,8 @@ flowchart LR
     TOOL --> LEDGER["tool_invocations"]
     TOOL --> MCP["MCP servers"]
     NODES --> CHILD["durable Agent child Run"]
-    NODES --> SOCKET["worker-only Unix socket"]
-    SOCKET --> SANDBOX["无网络 Python sandbox"]
+    NODES --> SOCKET["Worker 内私有 Unix socket"]
+    SOCKET --> SANDBOX["受监管源码 Python sandbox"]
     ENGINE -->|"checkpoint、节点审计、事件"| PG
 ```
 
@@ -203,14 +203,14 @@ erDiagram
 
 ## 7. Inline Python（持久化 `code`）生产沙箱
 
-Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全局变量 `result` 赋值。worker 通过 `/run/sandbox/sandbox.sock` 发送单行 JSON；API 和 frontend 不挂载该 socket。
+Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全局变量 `result` 赋值。Worker 通过私有 Unix socket 发送单行 JSON；API 和 frontend 无法访问该 socket。
 
-沙箱容器边界：
+沙箱进程边界：
 
-- `network_mode: none`、只读根文件系统、`/tmp` 为 32 MiB `noexec/nosuid/nodev`；
-- 默认 capability 全删，仅 root supervisor 保留降权和清理子进程所需能力；`no-new-privileges`；
+- Linux Worker 在启动 Celery 前创建独立 mount/network/PID/IPC/UTS namespace 与最小 chroot；macOS 开发对每个子进程应用 Seatbelt；原生 Windows 不启动，使用 WSL2；
+- Compose 默认 capability 全删，只恢复 namespace/chroot、降权和清理所需能力；Broker 就绪后 supervisor 在启动 Celery 前再次全部丢弃；保留默认 seccomp 与 `no-new-privileges`；
 - 用户程序以 UID/GID 65532、隔离 Python 模式、最小环境运行；服务一次只执行一个同 UID 任务；
-- 5 秒墙钟/CPU、256 MiB 地址空间、16 进程、64 文件描述符、1 MiB 单文件、stdout/stderr 各 64 KiB；
+- 5 秒墙钟/CPU、256 MiB 地址空间、16 进程、64 文件描述符、5 MiB 单文件、stdout/stderr 各 64 KiB；
 - 整个进程组在超时或输出超限时强制终止；请求只能降低、不能提高硬限制；
 - 沙箱不可用、超时、超限、无 `result`、结果不是 JSON 时节点失败并中止工作流。
 
@@ -290,7 +290,7 @@ Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_r
 
 | 阶段 | 目标 | 验收标准 | 主要风险 | 回滚方式 |
 | --- | --- | --- | --- | --- |
-| 0 基础隔离 | 类型不可变、运行分派、Code 沙箱、部署依赖 | Agent 路由拒绝 workflow；沙箱无网络且资源自检通过；Beat 有 DB | 旧 worker 误接 workflow；沙箱权限不足 | 停止创建/运行 workflow；保留类型保护；停用 sandbox 服务 |
+| 0 基础隔离 | 类型不可变、运行分派、Code 沙箱、部署依赖 | Agent 路由拒绝 workflow；沙箱无网络且资源自检通过；Beat 有 DB | 旧 worker 误接 workflow；沙箱权限不足 | 停止创建/运行 workflow；保留类型保护；停用代码执行 Tool |
 | 1 引擎与存储 | 图校验、三态调度、审计、租约/checkpoint | 引擎分支/汇聚/预算测试；迁移 fresh upgrade/downgrade/upgrade；API 运行落库 | checkpoint 重放、并行写顺序、历史图漂移 | 新表为加法迁移；无生产 workflow 数据时可 downgrade；已有数据时保留表和类型保护 |
 | 2 画布与发布 | 三页签节点库、草稿调试、状态回显、版本发布/恢复 | 三语 typecheck/test/build；Tool/Agent 固定版本快照与新草稿隔离；真实 API 冒烟 | React Flow 状态序列化、多人保存冲突 | 下线 workflow UI；API 与表保留只读，避免历史运行不可查 |
 | 3 高级能力 | HITL、Loop/Iteration、失败分支/兜底、子流 | 暂停跨进程恢复；迭代帧审计；恢复 CAS；独立限额与测试 | 状态空间和副作用重放显著增加 | 每项用独立 schema/feature gate 发布，不改变第一批 DAG 语义 |
@@ -300,7 +300,7 @@ Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_r
 ## 11. 安全与运维注意事项
 
 - 内嵌 Beat 的 worker 与 API 必须使用同一 PostgreSQL/Redis 配置；Compose 必须显式传入相同数据库组件并覆盖容器内主机名；
-- 只有 worker 挂载 sandbox socket；沙箱不得接入 Compose 网络或业务数据卷；
+- Sandbox socket 只存在于 Worker 进程树；沙箱 namespace/chroot 不得映射应用源码、业务数据卷或 Compose 网络；
 - MCP 管理员仍具备项目既有的 worker 进程级 stdio 执行权限；Workflow 只接受当前可用、允许调用且不需要逐次审批的固定 ToolSnapshot；
 - Redis 负责队列，不作为审计真源；运行、checkpoint、事件和节点记录均以 PostgreSQL 为准；
 - 事件协议是 `application/x-ndjson`，不是 SSE。客户端用 `after` 游标重放，不依赖进程内内存；

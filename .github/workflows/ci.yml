@@ -106,6 +106,15 @@ jobs:
             --tmpfs /dev/shm:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=0,gid=0 \
             --tmpfs /run/sandbox:rw,noexec,nosuid,nodev,size=1m,mode=0750,uid=0,gid=65533 \
             --entrypoint python nexaflow-sandbox-ci -m sandbox.tests
+          docker run --rm --network none \
+            --cap-drop ALL \
+            --cap-add CHOWN --cap-add KILL --cap-add SETGID --cap-add SETPCAP \
+            --cap-add SETUID --cap-add SYS_ADMIN --cap-add SYS_CHROOT \
+            --security-opt no-new-privileges:true \
+            --env ENVIRONMENT=production \
+            --env DATABASE_URL=postgresql://sandbox-must-not-see-this \
+            --entrypoint python nexaflow-sandbox-ci \
+            /opt/sandbox/worker.py --sandbox-self-check
 
       - name: Run main smoke tests
         run: uv run python -m tests.test_main

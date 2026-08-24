@@ -11,6 +11,7 @@ root/Linux-gated branches execute).
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import signal
@@ -97,6 +98,31 @@ def check_run_code_validation() -> None:
         (lambda: execute_request("x"), ValueError, "request must be an object"),
         (lambda: execute_request({"code": 123}), ValueError, "code must be a string"),
         (lambda: execute_request({"code": "x", "stdin": 1}), ValueError, "stdin must be a string"),
+        (
+            lambda: execute_request({"code": "pass", "artifact": []}),
+            ValueError,
+            "artifact must contain",
+        ),
+        (
+            lambda: execute_request(
+                {
+                    "code": "pass",
+                    "artifact": {"format": "pdf", "filename": "x.pdf"},
+                }
+            ),
+            ValueError,
+            "artifact.format",
+        ),
+        (
+            lambda: execute_request({"code": "pass", "skills": ["../documents"]}),
+            ValueError,
+            "skills must contain",
+        ),
+        (
+            lambda: execute_request({"code": "pass", "skills": ["documents"]}),
+            ValueError,
+            "skills require",
+        ),
     ]
     for call, exc_type, fragment in cases:
         try:
@@ -109,6 +135,223 @@ def check_run_code_validation() -> None:
     payload = execute_request({"code": "print(40 + 2)"})
     assert payload["ok"] is True and payload["stdout"].strip() == "42"
     assert execute_request({"code": "x"})["version"] == 1
+
+    with tempfile.TemporaryDirectory() as directory:
+        workdir = Path(directory)
+        command = [sys.executable, "-c", "pass"]
+        with mock.patch.object(runner_module.sys, "platform", "linux"):
+            assert runner_module._sandboxed_child_command(command, workdir) == command
+        with mock.patch.object(runner_module.sys, "platform", "darwin"), mock.patch.object(
+            runner_module.shutil, "which", return_value=None
+        ):
+            try:
+                runner_module._sandboxed_child_command(command, workdir)
+            except RuntimeError as exc:
+                assert "sandbox-exec" in str(exc)
+            else:
+                raise AssertionError("missing macOS sandbox-exec was accepted")
+
+
+def check_artifact_outputs_and_skills() -> None:
+    html = execute_request(
+        {
+            "code": (
+                "import os\n"
+                "open(os.environ['NEXAFLOW_OUTPUT_PATH'], 'w', encoding='utf-8').write("
+                "'<html><style>body{color:#123}</style><body>ready</body></html>')\n"
+            ),
+            "artifact": {"format": "html", "filename": "page.html"},
+        }
+    )
+    assert html["ok"] is True, html
+    assert html["artifact"]["filename"] == "page.html"
+    assert html["artifact"]["format"] == "html"
+    assert base64.b64decode(html["artifact"]["content_base64"]).endswith(
+        b"</html>"
+    )
+
+    docx = execute_request(
+        {
+            "code": (
+                "import os, zipfile\n"
+                "with zipfile.ZipFile(os.environ['NEXAFLOW_OUTPUT_PATH'], 'w') as archive:\n"
+                "    archive.writestr('[Content_Types].xml', '<Types/>')\n"
+                "    archive.writestr('word/document.xml', '<document/>')\n"
+            ),
+            "artifact": {"format": "docx", "filename": "report.docx"},
+        }
+    )
+    assert docx["ok"] is True, docx
+    assert docx["artifact"]["filename"] == "report.docx"
+
+    with tempfile.TemporaryDirectory() as directory:
+        skill = Path(directory) / "documents"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("skill-ready", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"SANDBOX_SKILLS_DIR": directory}):
+            skilled = execute_request(
+                {
+                    "code": (
+                        "import os\n"
+                        "from pathlib import Path\n"
+                        "text = (Path(os.environ['NEXAFLOW_SKILLS_DIR']) / "
+                        "'documents' / 'SKILL.md').read_text()\n"
+                        "open(os.environ['NEXAFLOW_OUTPUT_PATH'], 'w').write(text)\n"
+                    ),
+                    "skills": ["documents"],
+                    "artifact": {"format": "html", "filename": "skill.html"},
+                }
+            )
+            assert skilled["ok"] is True, skilled
+            assert (
+                base64.b64decode(skilled["artifact"]["content_base64"])
+                == b"skill-ready"
+            )
+
+            missing = execute_request(
+                {
+                    "code": "pass",
+                    "skills": ["missing"],
+                    "artifact": {"format": "html", "filename": "missing.html"},
+                }
+            )
+            assert missing["ok"] is False
+            assert missing["error"] == "skill_not_found"
+
+    try:
+        execute_request(
+            {
+                "code": "pass",
+                "artifact": {"format": "html", "filename": "../page.html"},
+            }
+        )
+    except ValueError as exc:
+        assert "filename" in str(exc)
+    else:
+        raise AssertionError("artifact path traversal was accepted")
+
+
+def check_artifact_error_paths() -> None:
+    for code, artifact_format, filename, expected_error in [
+        ("pass", "html", "missing.html", "artifact_missing"),
+        (
+            "import os\nopen(os.environ['NEXAFLOW_OUTPUT_PATH'], 'wb').close()",
+            "html",
+            "empty.html",
+            "artifact_empty",
+        ),
+        (
+            "import os\nopen(os.environ['NEXAFLOW_OUTPUT_PATH'], 'wb').write(b'\\xff')",
+            "html",
+            "invalid.html",
+            "artifact_invalid",
+        ),
+        (
+            "import os\n"
+            "open(os.environ['NEXAFLOW_OUTPUT_PATH'], 'wb').write(b'not-a-zip')",
+            "docx",
+            "invalid.docx",
+            "artifact_invalid",
+        ),
+        (
+            "import os, zipfile\n"
+            "with zipfile.ZipFile(os.environ['NEXAFLOW_OUTPUT_PATH'], 'w') as archive:\n"
+            "    archive.writestr('other.xml', '<x/>')\n",
+            "docx",
+            "incomplete.docx",
+            "artifact_invalid",
+        ),
+    ]:
+        result = execute_request(
+            {
+                "code": code,
+                "artifact": {"format": artifact_format, "filename": filename},
+            }
+        )
+        assert result["ok"] is False, result
+        assert result["error"] == expected_error, result
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+
+        def expect_artifact_error(path: Path, expected: str) -> None:
+            try:
+                runner_module._read_artifact(path, "html", "page.html")
+            except ValueError as exc:
+                assert str(exc) == expected, exc
+            else:
+                raise AssertionError(f"{path} was accepted as an artifact")
+
+        expect_artifact_error(root, "artifact_invalid")
+        oversized = root / "oversized.html"
+        oversized.write_bytes(b"x" * (runner_module.MAX_ARTIFACT_BYTES + 1))
+        expect_artifact_error(oversized, "artifact_too_large")
+
+        root_file = root / "skills-file"
+        root_file.write_text("not a directory", encoding="utf-8")
+        with mock.patch.dict(
+            os.environ,
+            {"SANDBOX_SKILLS_DIR": str(root / "missing-skills")},
+        ):
+            missing_root = execute_request(
+                {
+                    "code": "pass",
+                    "skills": ["documents"],
+                    "artifact": {"format": "html", "filename": "missing-root.html"},
+                }
+            )
+        assert missing_root["error"] == "skill_not_found", missing_root
+
+        with mock.patch.dict(os.environ, {"SANDBOX_SKILLS_DIR": str(root_file)}):
+            file_root = execute_request(
+                {
+                    "code": "pass",
+                    "skills": ["documents"],
+                    "artifact": {"format": "html", "filename": "file-root.html"},
+                }
+            )
+        assert file_root["error"] == "skill_not_found", file_root
+
+        skills_root = root / "skills"
+        skills_root.mkdir()
+        outside = root / "outside"
+        outside.mkdir()
+        (skills_root / "linked").symlink_to(outside, target_is_directory=True)
+        with mock.patch.dict(os.environ, {"SANDBOX_SKILLS_DIR": str(skills_root)}):
+            linked = execute_request(
+                {
+                    "code": "pass",
+                    "skills": ["linked"],
+                    "artifact": {"format": "html", "filename": "linked.html"},
+                }
+            )
+        assert linked["error"] == "skill_invalid", linked
+
+        nested = skills_root / "nested"
+        nested.mkdir()
+        (nested / "linked-file").symlink_to(root_file)
+        with mock.patch.dict(os.environ, {"SANDBOX_SKILLS_DIR": str(skills_root)}):
+            nested_link = execute_request(
+                {
+                    "code": "pass",
+                    "skills": ["nested"],
+                    "artifact": {"format": "html", "filename": "nested.html"},
+                }
+            )
+        assert nested_link["error"] == "skill_invalid", nested_link
+
+        large = skills_root / "large"
+        large.mkdir()
+        (large / "large.bin").write_bytes(b"x" * (runner_module.MAX_SKILL_BYTES + 1))
+        with mock.patch.dict(os.environ, {"SANDBOX_SKILLS_DIR": str(skills_root)}):
+            too_large = execute_request(
+                {
+                    "code": "pass",
+                    "skills": ["large"],
+                    "artifact": {"format": "html", "filename": "large.html"},
+                }
+            )
+        assert too_large["error"] == "skill_too_large", too_large
 
 
 def check_run_limits() -> None:
@@ -192,6 +435,39 @@ def check_non_posix() -> None:
             assert "POSIX" in str(exc)
         else:
             raise AssertionError("non-POSIX run_code accepted")
+
+
+def check_macos_seatbelt() -> None:
+    if sys.platform != "darwin":
+        return
+    secret = HERE.parent / ".sandbox-seatbelt-secret"
+    target = HERE.parent / ".sandbox-seatbelt-write"
+    secret.write_text("must-not-read", encoding="utf-8")
+    target.unlink(missing_ok=True)
+    try:
+        result = run_code(
+            "from pathlib import Path\n"
+            f"secret = Path({str(secret)!r})\n"
+            f"target = Path({str(target)!r})\n"
+            "try:\n"
+            "    secret.read_text()\n"
+            "except OSError:\n"
+            "    print('read-blocked')\n"
+            "else:\n"
+            "    print('read-open')\n"
+            "try:\n"
+            "    target.write_text('polluted')\n"
+            "except OSError:\n"
+            "    print('write-blocked')\n"
+            "else:\n"
+            "    print('write-open')\n"
+        )
+        assert result.ok, result
+        assert result.stdout.splitlines() == ["read-blocked", "write-blocked"]
+        assert not target.exists()
+    finally:
+        secret.unlink(missing_ok=True)
+        target.unlink(missing_ok=True)
 
 
 def _raw_request(socket_path: Path, payload: bytes, read_response: bool = True) -> bytes | None:
@@ -427,6 +703,11 @@ def check_healthcheck_branches() -> None:
         socket_path = start_server(Path(directory), b"y" * MAX_RESPONSE_BYTES)
         assert not probe(socket_path)
 
+    # Empty response -> explicit false branch before JSON parsing.
+    with tempfile.TemporaryDirectory() as directory:
+        socket_path = start_server(Path(directory), b"")
+        assert not probe(socket_path)
+
     # Healthcheck CLI exits 1 when the default socket is absent.
     env = dict(os.environ)
     prefix = _coverage_prefix()
@@ -491,10 +772,13 @@ def check_server_cli_subprocess() -> None:
 def main() -> None:
     check_limits_validation()
     check_run_code_validation()
+    check_artifact_outputs_and_skills()
+    check_artifact_error_paths()
     check_run_limits()
     check_terminate()
     check_blocking_io_retry()
     check_non_posix()
+    check_macos_seatbelt()
     check_server_error_paths()
     check_server_lifecycle()
     check_main_cli()

@@ -3,14 +3,17 @@
 import json
 from typing import Any
 
+from app.application.artifacts import create_generated_artifact
 from app.entities.tools import McpServer, ToolSnapshot
 from app.infrastructure.code_sandbox import (
     WorkflowSandboxBusyError,
     WorkflowSandboxError,
+    execute_artifact_code,
     execute_workflow_code,
 )
 from app.infrastructure.config import Settings
 from app.infrastructure.model_utils import utc_now
+from app.infrastructure.session import get_session_factory
 from app.ports.mcp import McpClientError, call_mcp_tool
 from app.ports.tool_runtime import (
     ToolAdapter,
@@ -43,6 +46,58 @@ class BuiltinToolAdapter:
                 error_message=None,
                 outcome="confirmed",
                 usage={},
+            )
+        if builtin == "python_artifact":
+            try:
+                artifact = await execute_artifact_code(
+                    self.settings,
+                    arguments["code"],
+                    arguments["format"],
+                    arguments["filename"],
+                    arguments.get("skills", []),
+                )
+            except WorkflowSandboxBusyError as exc:
+                raise ToolAdapterBusy("Python sandbox is busy.") from exc
+            except WorkflowSandboxError as exc:
+                return _failure("python_artifact_failed", str(exc)[:1000])
+            except (KeyError, TypeError):
+                return _failure(
+                    "python_artifact_failed",
+                    "Artifact Tool parameters are invalid.",
+                )
+            try:
+                async with get_session_factory()() as db:
+                    link = await create_generated_artifact(
+                        db,
+                        self.settings,
+                        workspace_id=context.workspace_id,
+                        run_id=context.run_id,
+                        idempotency_key=context.idempotency_key,
+                        artifact_format=artifact.format,
+                        filename=artifact.filename,
+                        content=artifact.content,
+                    )
+                    await db.commit()
+            except ValueError as exc:
+                return _failure("python_artifact_failed", str(exc)[:1000])
+            return ToolRuntimeResult(
+                ok=True,
+                data={
+                    "artifact_id": link.artifact_id,
+                    "format": link.format,
+                    "filename": link.filename,
+                    "download_url": link.download_url,
+                    "expires_at": link.expires_at.isoformat(),
+                    "size_bytes": link.size_bytes,
+                },
+                summary="Artifact created.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={
+                    "exit_code": artifact.exit_code,
+                    "size_bytes": artifact.size_bytes,
+                },
             )
         if builtin != "inline_python" or context.origin != "workflow":
             return _failure("unsupported_builtin", "Built-in Tool is unavailable.")

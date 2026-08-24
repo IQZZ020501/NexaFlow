@@ -4,6 +4,7 @@ from app.api.v1.admin import audit, governance, smtp, system_logs, users
 from app.api.v1.endpoints import (
     agent_access,
     agents,
+    artifacts,
     auth,
     knowledge,
     knowledge_evaluation,
@@ -31,6 +32,7 @@ admin_router.include_router(smtp.router)
 api_router.include_router(admin_router)
 
 api_router.include_router(auth.router)
+api_router.include_router(artifacts.router)
 api_router.include_router(workspaces.router)
 api_router.include_router(teams.router)
 api_router.include_router(knowledge.router)

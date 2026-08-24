@@ -109,20 +109,19 @@ Correctness, safety, evidence, and validation take priority over speed.
   exclusive with parse/index/rebuild work for the same knowledge base; result
   and progress writes must remain in one lease-checked transaction.
 - `backend/make dev` starts and waits for the development Compose PostgreSQL,
-  Redis, and Qdrant services, applies Alembic migrations, then follows logs from
-  a running Compose worker into the API terminal and stops that follower when
-  Uvicorn exits. It does not build, start, or replace the worker or sandbox. The
-  API and Worker-log process orchestration lives in `backend/scripts/dev.py` so
-  the Make target does not depend on a POSIX shell and works with GNU Make on
-  Windows.
-- `cd backend && make worker-compose` builds the shared application image and
-  starts the Compose sandbox and its socket-mounted worker with one Compose
-  invocation for Python Tool and Workflow code execution. The
-  host-only `make worker` has no sandbox socket and must not be presented as
-  supporting those executions.
+  Redis, and Qdrant services, applies Alembic migrations, then starts Uvicorn.
+  It does not start the Worker. The API process orchestration lives in
+  `backend/scripts/dev.py` so the Make target does not depend on a POSIX shell.
+- `cd backend && make worker` syncs the separate `sandbox/` Python runtime and
+  starts the Celery worker plus its supervised source sandbox Broker. Linux uses
+  namespace/chroot isolation and requires root startup; macOS uses Seatbelt per
+  child; native Windows fails closed and must use WSL2.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
   intent is persisted in `workflow_upload_storage_cleanups` and recovered by
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
+- Agent-generated DOCX and static HTML artifacts are stored in PostgreSQL for at
+  most 24 hours and downloaded through scoped signed bearer URLs. HTML downloads
+  use a restrictive CSP and must remain script-free and self-contained.
 - Identity email uses the global administrator SMTP settings and trusted site
   URL. Invitation, welcome, and password-change messages are persisted as
   encrypted `email_deliveries` and recovered by Celery Beat; password-reset
@@ -157,18 +156,18 @@ Correctness, safety, evidence, and validation take priority over speed.
   under `frontend/src/app/`; do not leave navigation-level views only in component
   state. Dialogs and responsive panels remain component states unless they are
   intentionally promoted to pages.
-- `sandbox/` is a standard-library Python execution service for Workflow code
-  nodes. It accepts bounded JSON-line requests over a shared Unix socket and
-  runs each program in a deprivileged subprocess with CPU, memory, process,
-  file, wall-clock, input, and output limits. Keep it independent from
-  `backend/app/`; only the Celery worker may mount its socket.
+- `sandbox/` is an independent Python execution service for Workflow code nodes
+  and Agent-generated DOCX/static HTML artifacts. It accepts bounded JSON-line
+  requests over a private Unix socket and runs each program with CPU, memory,
+  process, file, wall-clock, input, and output limits. Keep it independent from
+  `backend/app/`; only the Worker supervisor may start or reach its socket.
 - `docs/` stores project planning and product/engineering documentation.
 - `deploy/` holds the Docker Compose topology, the unified application
-  Dockerfile shared by API/worker/frontend/sandbox containers, the custom
-  PostgreSQL Dockerfile, and Nginx examples. The sandbox remains a separate
-  network-disabled container with a worker-only Unix socket volume even though
-  it shares the application image; `scripts/setup-hooks.sh` enables the
-  repository Git hooks.
+  Dockerfile shared by API/worker/frontend containers, the custom PostgreSQL
+  Dockerfile, and Nginx examples. The production Worker supervises the sandbox
+  source inside its own container and creates a private network/mount/PID/IPC/UTS
+  namespace plus chroot before starting Celery; there is no sandbox service or
+  socket volume. `scripts/setup-hooks.sh` enables the repository Git hooks.
 - Use `rg` / `rg --files` for code search. Do not invent project commands;
   inspect local scripts first.
 
@@ -340,8 +339,9 @@ broad. Never claim a check passed unless it completed successfully.
   `celery_app`.
 - `deploy/` changes: render the base, development, and pull-only server Compose
   configurations, verify the unique image list, build the affected image, and
-  run the `sandbox-runtime` target's container self-check when the unified
-  application image or sandbox wiring changes.
+  run the `sandbox-runtime` target's direct container checks plus embedded-Worker
+  hard-isolation self-check when the unified application image or sandbox wiring
+  changes.
 - Coverage gates (do not claim a percentage unless measured):
   - Backend: `make coverage` / `backend/scripts/coverage.sh` — both use the
     cross-platform `backend/scripts/coverage.py` runner to execute all suites
@@ -349,10 +349,11 @@ broad. Never claim a check passed unless it completed successfully.
     threads and SQLAlchemy greenlets, and merge with coverage.py. Backend coverage
     is at 97%+.
   - Sandbox: `sandbox/run_coverage.sh` — `sandbox/tests.py` extends
-    `self_check.py`; `sandbox/child.py` is excluded from measurement because
-    `os.execve(..., "-S")` cannot host a coverage tracer (its rlimits are
-    verified behaviorally). Root/Linux-gated lines carry
-    `# pragma: no cover` and are exercised by the CI Docker run.
+    `self_check.py`; `sandbox/child.py` and the Linux-only `sandbox/launcher.py`
+    are excluded from measurement because their exec/chroot boundary cannot
+    retain a coverage tracer. Their limits and namespace isolation are verified
+    behaviorally by the CI Docker runs. Other root/Linux-gated lines carry
+    `# pragma: no cover`.
   - Frontend: `frontend/scripts/coverage.sh` — runs `bun test --isolate
     --coverage` (serial + per-file fresh globals; bun's parallel-worker lcov
     aggregation under-reports and inflates the line denominator). Frontend
