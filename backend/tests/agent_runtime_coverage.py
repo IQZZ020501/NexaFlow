@@ -1378,6 +1378,8 @@ async def prepare_console_run(
     workspace_id: str,
     agent_id: str,
     goal: str,
+    *,
+    persist: bool = True,
 ) -> tuple[AgentRun, Any]:
     actor = await get_admin_actor()
     async with get_session_factory()() as db:
@@ -1388,9 +1390,11 @@ async def prepare_console_run(
             goal,
             actor,
             "admin",
+            persist=persist,
         )
-        await db.commit()
-        run = await agent_repository.refresh_agent_run(db, run)
+        if persist:
+            await db.commit()
+            run = await agent_repository.refresh_agent_run(db, run)
         return run, model
 
 
@@ -2108,6 +2112,7 @@ async def assert_run_orchestration_paths(
             "List me",
             actor,
             "admin",
+            persist=False,
         )
         run.knowledge_base_ids = []
         run.knowledge_query_mode = "agentic"
@@ -2474,6 +2479,7 @@ async def assert_run_orchestration_paths(
             "legacy calls",
             actor,
             "admin",
+            persist=False,
         )
         legacy_run.status = agent_run_display_status(legacy_run.status)
         legacy_run.configuration_source = "legacy"
@@ -2567,6 +2573,7 @@ async def assert_approval_paths(
             "approve me",
             actor,
             "admin",
+            persist=False,
         )
         run.status = agent_run_display_status(run.status)
         run.configuration_source = "legacy"
@@ -2988,6 +2995,7 @@ async def assert_approval_paths(
                 "wrapper goal",
                 actor,
                 "admin",
+                persist=False,
             )
             wrapper_run.status = agent_run_display_status(wrapper_run.status)
             wrapper_run.configuration_source = "legacy"
@@ -3349,7 +3357,9 @@ async def assert_durable_execution_paths(
     settings = test_settings()
 
     # -- happy path with required knowledge and MCP tools in scope --
-    run, _ = await prepare_console_run(workspace_id, agent_id, "Happy durable run")
+    run, _ = await prepare_console_run(
+        workspace_id, agent_id, "Happy durable run", persist=False
+    )
     run.mcp_tools = [{"server_id": mcp_server_id, "tool_name": "lookup_release"}]
     async with get_session_factory()() as db:
         await agent_repository.save_agent_run(db, run)
@@ -3393,7 +3403,7 @@ async def assert_durable_execution_paths(
     )
     assert events[-1].event["type"] == "complete"
 
-    # -- canonical runs keep knowledge calls in the durable legacy ledger --
+    # -- canonical runs keep knowledge calls in the unified Tool ledger --
     holder.model = RuntimeModelStub(
         [
             tool_completion(
@@ -3408,6 +3418,7 @@ async def assert_durable_execution_paths(
         workspace_id,
         agent_id,
         "Search the knowledge base",
+        persist=False,
     )
     run.mcp_tools = []
     run.knowledge_base_ids = [knowledge_base_id]
@@ -3427,11 +3438,10 @@ async def assert_durable_execution_paths(
         agent_tools.retrieve_knowledge_base = original_retrieve
     assert outcome == agent_executor.RUN_FINISHED
     async with get_session_factory()() as db:
-        stored_knowledge_call = await agent_repository.get_agent_tool_call(
+        stored_knowledge_calls = await tool_repository.list_tool_invocations(
             db,
+            workspace_id,
             run.id,
-            1,
-            "call-knowledge-1",
         )
         actor = await get_admin_actor()
         visible_calls = await agent_runs.list_agent_run_tool_calls(
@@ -3442,8 +3452,9 @@ async def assert_durable_execution_paths(
             actor,
             "admin",
         )
-    assert stored_knowledge_call is not None
-    assert stored_knowledge_call.status == "succeeded"
+    assert [
+        (item.invocation_id, item.status) for item in stored_knowledge_calls
+    ] == [("1:call-knowledge-1", "succeeded")], stored_knowledge_calls
     assert [(item.call_id, item.tool_kind) for item in visible_calls] == [
         ("call-knowledge-1", "knowledge")
     ]
@@ -3455,7 +3466,9 @@ async def assert_durable_execution_paths(
     holder.model = RuntimeModelStub(
         [tool_completion(mcp_name, "call-mcp-1", '{"topic": "release"}')]
     )
-    run, _ = await prepare_console_run(workspace_id, agent_id, "Approve the MCP call")
+    run, _ = await prepare_console_run(
+        workspace_id, agent_id, "Approve the MCP call", persist=False
+    )
     run.mcp_tools = [{"server_id": mcp_server_id, "tool_name": "lookup_release"}]
     run.knowledge_base_ids = []
     run.knowledge_query_mode = "agentic"
@@ -3660,6 +3673,7 @@ async def assert_durable_execution_paths(
         workspace_id,
         agent_id,
         "SECRET_GOAL_MARKER review the release",
+        persist=False,
     )
     run.mcp_tools = [{"server_id": mcp_server_id, "tool_name": "lookup_release"}]
     run.knowledge_base_ids = []
@@ -3772,7 +3786,9 @@ async def assert_durable_execution_paths(
     # -- run timeout (781) --
     short_settings = dataclasses.replace(settings, agent_run_timeout_seconds=0.2)
     holder.model = HangingStreamingProvider()
-    run, _ = await prepare_console_run(workspace_id, agent_id, "Timeout this run")
+    run, _ = await prepare_console_run(
+        workspace_id, agent_id, "Timeout this run", persist=False
+    )
     run.knowledge_base_ids = []
     run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
@@ -3798,7 +3814,9 @@ async def assert_durable_execution_paths(
     original_record = agent_executor.record_system_log
     agent_executor.record_system_log = raise_runtime_error
     try:
-        run, _ = await prepare_console_run(workspace_id, agent_id, "Log failure run")
+        run, _ = await prepare_console_run(
+            workspace_id, agent_id, "Log failure run", persist=False
+        )
         run.knowledge_base_ids = []
         run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
@@ -3821,7 +3839,9 @@ async def assert_durable_execution_paths(
     agent_repository.finalize_agent_run = async_false_finalize
     holder.model = RuntimeModelStub([ok_completion("Finalized?")])
     try:
-        run, _ = await prepare_console_run(workspace_id, agent_id, "Finalize race")
+        run, _ = await prepare_console_run(
+            workspace_id, agent_id, "Finalize race", persist=False
+        )
         run.knowledge_base_ids = []
         run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
@@ -3844,7 +3864,9 @@ async def assert_durable_execution_paths(
     agent_repository.save_agent_run_checkpoint = async_false_checkpoint
     holder.model = RuntimeModelStub([ok_completion("Checkpointed?")])
     try:
-        run, _ = await prepare_console_run(workspace_id, agent_id, "Checkpoint race")
+        run, _ = await prepare_console_run(
+            workspace_id, agent_id, "Checkpoint race", persist=False
+        )
         run.knowledge_base_ids = []
         run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
@@ -3864,7 +3886,9 @@ async def assert_durable_execution_paths(
     agent_executor.prepare_conversation_memory = raise_runtime_error_async
     holder.model = RuntimeModelStub([ok_completion("No memory answer.")])
     try:
-        run, _ = await prepare_console_run(workspace_id, agent_id, "Memory failure")
+        run, _ = await prepare_console_run(
+            workspace_id, agent_id, "Memory failure", persist=False
+        )
         run.knowledge_base_ids = []
         run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
@@ -3894,6 +3918,7 @@ async def assert_durable_execution_paths(
             "Approval race",
             race_actor,
             "admin",
+            persist=False,
         )
         race_run.knowledge_base_ids = []
         race_run.knowledge_query_mode = "agentic"
@@ -3915,6 +3940,7 @@ async def assert_durable_execution_paths(
                 status="approved",
                 approval_required=True,
                 approved_by_user_id=race_actor.id,
+                approved_at=utc_now(),
             ),
         )
         await db.commit()
@@ -3937,7 +3963,9 @@ async def assert_durable_execution_paths(
     original_pause = agent_repository.pause_agent_run
     agent_repository.pause_agent_run = async_false_pause
     try:
-        run, _ = await prepare_console_run(workspace_id, agent_id, "Pause failure")
+        run, _ = await prepare_console_run(
+            workspace_id, agent_id, "Pause failure", persist=False
+        )
         run.knowledge_base_ids = []
         run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
@@ -3957,7 +3985,9 @@ async def assert_durable_execution_paths(
         agent_repository.pause_agent_run = original_pause
 
     # -- lease_lost set before the graph starts (751, 812-815) --
-    run, _ = await prepare_console_run(workspace_id, agent_id, "Lost lease run")
+    run, _ = await prepare_console_run(
+        workspace_id, agent_id, "Lost lease run", persist=False
+    )
     run.knowledge_base_ids = []
     run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
@@ -4045,7 +4075,9 @@ async def assert_durable_execution_paths(
     # -- _fail_unhandled_claimed_run: run deleted mid-flight (913) --
     original_execute = agent_executor._execute_claimed_agent_run
     original_get = agent_repository.get_agent_run_by_id
-    run, _ = await prepare_console_run(workspace_id, agent_id, "Delete mid-flight")
+    run, _ = await prepare_console_run(
+        workspace_id, agent_id, "Delete mid-flight", persist=False
+    )
     run.knowledge_base_ids = []
     run.knowledge_query_mode = "agentic"
 
@@ -4073,7 +4105,9 @@ async def assert_durable_execution_paths(
 
     # -- _fail_unhandled_claimed_run: error event appended (917-918, 929-946) --
     original_execute = agent_executor._execute_claimed_agent_run
-    run, _ = await prepare_console_run(workspace_id, agent_id, "Unhandled failure")
+    run, _ = await prepare_console_run(
+        workspace_id, agent_id, "Unhandled failure", persist=False
+    )
     run.knowledge_base_ids = []
     run.knowledge_query_mode = "agentic"
 
@@ -4130,7 +4164,9 @@ async def assert_durable_execution_paths(
     original_finalize = agent_repository.finalize_agent_run
     agent_repository.finalize_agent_run = async_false_finalize
     original_execute = agent_executor._execute_claimed_agent_run
-    run, _ = await prepare_console_run(workspace_id, agent_id, "Unhandled finalize")
+    run, _ = await prepare_console_run(
+        workspace_id, agent_id, "Unhandled finalize", persist=False
+    )
     run.knowledge_base_ids = []
     run.knowledge_query_mode = "agentic"
 
@@ -4258,7 +4294,9 @@ async def assert_durable_execution_paths(
         agent_repository.renew_agent_run_lease = original_renew
 
     # -- _load_execution_scope: run not executable (455) --
-    queued_run, _ = await prepare_console_run(workspace_id, agent_id, "Scope queued")
+    queued_run, _ = await prepare_console_run(
+        workspace_id, agent_id, "Scope queued", persist=False
+    )
     queued_run.knowledge_base_ids = []
     queued_run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
@@ -4272,7 +4310,9 @@ async def assert_durable_execution_paths(
         raise AssertionError("Queued run was executed.")
 
     # -- _load_execution_scope: user unavailable (458) --
-    run, _ = await prepare_console_run(workspace_id, agent_id, "Scope actor gone")
+    run, _ = await prepare_console_run(
+        workspace_id, agent_id, "Scope actor gone", persist=False
+    )
     run.knowledge_base_ids = []
     run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:

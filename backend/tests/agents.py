@@ -2248,6 +2248,7 @@ async def assert_exhausted_run_closes_tool_ledger(
             "Verify exhausted tool cleanup",
             actor,
             "admin",
+            persist=False,
         )
         legacy_run.configuration_source = "legacy"
         legacy_run.status = "running"
@@ -2283,6 +2284,7 @@ async def assert_exhausted_run_closes_tool_ledger(
             "Verify exhausted unified Tool cleanup",
             actor,
             "admin",
+            persist=False,
         )
         run.status = "running_v2"
         run.attempts = run.max_attempts
@@ -2425,6 +2427,7 @@ async def assert_approval_before_pause_requeues_run(
             "Verify approval race recovery",
             actor,
             "admin",
+            persist=False,
         )
         run.configuration_source = "legacy"
         run.status = "queued"

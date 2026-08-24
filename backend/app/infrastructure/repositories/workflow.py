@@ -17,7 +17,7 @@ from app.shareddomain.agents.models import (
     AGENT_RUN_AWAITING_INPUT_STATUSES,
     AGENT_RUN_RUNNING_STATUSES,
     Agent,
-    AgentRun,
+    AgentRunState,
 )
 from app.shareddomain.workflows.models import (
     WorkflowDefinition,
@@ -362,10 +362,10 @@ async def set_first_run_deadline(
         update(WorkflowRunDetail)
         .where(
             WorkflowRunDetail.run_id == run_id,
-            select(AgentRun.attempts)
+            select(AgentRunState.attempts)
             .where(
-                AgentRun.id == run_id,
-                AgentRun.worker_task_id == worker_task_id,
+                AgentRunState.run_id == run_id,
+                AgentRunState.worker_task_id == worker_task_id,
             )
             .scalar_subquery()
             == 1,
@@ -380,10 +380,10 @@ async def save_owned_run_detail(
     worker_task_id: str,
 ) -> bool:
     owned = await db.scalar(
-        select(AgentRun.id).where(
-            AgentRun.id == entity.run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+        select(AgentRunState.run_id).where(
+            AgentRunState.run_id == entity.run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
     )
     if owned is None:
@@ -407,9 +407,9 @@ async def reset_waiting_run_deadline(
     deadline_at: datetime,
 ) -> bool:
     waiting = await db.scalar(
-        select(AgentRun.id).where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_AWAITING_INPUT_STATUSES),
+        select(AgentRunState.run_id).where(
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_AWAITING_INPUT_STATUSES),
         )
     )
     if waiting is None:
@@ -434,10 +434,10 @@ async def start_node_execution(
     started_at: datetime,
 ) -> WorkflowNodeExecutionEntity | None:
     owned = await db.scalar(
-        select(AgentRun.id).where(
-            AgentRun.id == run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+        select(AgentRunState.run_id).where(
+            AgentRunState.run_id == run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
     )
     if owned is None:
@@ -484,10 +484,10 @@ async def finish_node_execution(
     worker_task_id: str,
 ) -> bool:
     owned = await db.scalar(
-        select(AgentRun.id).where(
-            AgentRun.id == entity.run_id,
-            AgentRun.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRun.worker_task_id == worker_task_id,
+        select(AgentRunState.run_id).where(
+            AgentRunState.run_id == entity.run_id,
+            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+            AgentRunState.worker_task_id == worker_task_id,
         )
     )
     if owned is None:

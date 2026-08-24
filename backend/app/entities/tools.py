@@ -390,8 +390,8 @@ class ToolVersion:
 class ToolPolicy:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""
-    tool_id: str = ""
-    tool_version_id: str = ""
+    tool_id: str | None = None
+    tool_version_id: str | None = None
     definition_hash: str = ""
     revision: int = 1
     approval: str = "each_call"

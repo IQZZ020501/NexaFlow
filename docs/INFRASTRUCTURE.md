@@ -26,7 +26,7 @@
 
 ### infrastructure/repositories/（数据访问层）
 
-- `backend/app/infrastructure/repositories/agent.py` — Agent/绑定/API 凭据、按来源主体隔离的 Run、原子租约、checkpoint、事件游标、对话统计与工具调用账本数据访问层
+- `backend/app/infrastructure/repositories/agent.py` — Agent/绑定/API 凭据，以及跨 Run 身份、状态、快照、事件和统一 ToolInvocation 投影的数据访问层
 - `backend/app/infrastructure/repositories/knowledge.py` — 知识库/文档/分块/任务数据访问层，含关键词命中 chunk 查询
 - `backend/app/infrastructure/repositories/user.py` — 用户与刷新会话、工作空间/团队成员关系数据访问层
 - `backend/app/infrastructure/repositories/mcp.py` — MCP Server 与本地审核工具策略数据访问层
@@ -83,6 +83,7 @@
   - `202608170001_agent_worker_generation_fence.py` — 隔离 legacy/unified Agent worker 队列与状态代际
   - `202608170002_workflow_tool_resources.py` — Workflow 发布版本冻结 canonical Tool 资源快照
   - `202608170003_workflow_agent_children.py` — Workflow Agent 节点的 root/parent/depth lineage 与等待子 Run 状态
+  - `202608240001_agent_run_four_table_storage.py` — 拆分 Run 身份、可变状态、不可变快照和事件，并把旧 Agent 工具调用合并到 ToolInvocation
 
 ## 仓库与 backend 配置
 

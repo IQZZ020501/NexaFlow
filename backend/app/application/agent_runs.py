@@ -613,15 +613,7 @@ async def set_agent_run_feedback(
 
 
 def tool_call_to_response(call: Any) -> AgentToolCallResponse:
-    """
-    Convert an agent tool-call entity into its API response representation.
-    
-    Parameters:
-    	call (Any): The tool-call entity to convert.
-    
-    Returns:
-    	AgentToolCallResponse: The response containing the tool call's details and execution state.
-    """
+    """Convert a compatibility tool-call entity into its API response."""
     return AgentToolCallResponse(
         call_id=call.call_id,
         turn=call.turn,
@@ -639,6 +631,22 @@ def tool_call_to_response(call: Any) -> AgentToolCallResponse:
 
 
 def tool_invocation_to_response(invocation: Any) -> AgentToolCallResponse:
+    internal = invocation.policy_snapshot.get("internal_tool")
+    if isinstance(internal, dict):
+        return AgentToolCallResponse(
+            call_id=str(internal.get("call_id", invocation.invocation_id)),
+            turn=int(internal.get("turn", 0)),
+            tool_name=str(internal.get("tool_name", "")),
+            tool_kind=str(internal.get("tool_kind", "unknown")),
+            server_name=str(internal.get("server_name", "")),
+            arguments=invocation.arguments,
+            status="pending" if invocation.status == "queued" else invocation.status,
+            approval_required=bool(internal.get("approval_required", False)),
+            last_error=invocation.error_message,
+            approved_at=invocation.approved_at,
+            started_at=invocation.started_at,
+            finished_at=invocation.finished_at,
+        )
     snapshot = tool_snapshot_from_payload(
         invocation.policy_snapshot.get("tool_snapshot")
     )
@@ -672,19 +680,10 @@ async def list_canonical_agent_run_tool_calls(
         run.workspace_id,
         run.id,
     )
-    knowledge_calls = [
-        call
-        for call in await agent_repository.list_agent_tool_calls(db, run.id)
-        if call.tool_kind == "knowledge"
-    ]
     responses = [
-        (call.created_at, call.id, tool_call_to_response(call))
-        for call in knowledge_calls
-    ]
-    responses.extend(
         (invocation.created_at, invocation.id, tool_invocation_to_response(invocation))
         for invocation in invocations
-    )
+    ]
     return [item[2] for item in sorted(responses, key=lambda item: (item[0], item[1]))]
 
 
@@ -1137,25 +1136,25 @@ async def prepare_agent_run(
         context_summary="",
         model_usage={},
     )
-    try:
-        run = await agent_repository.create_agent_run(db, run)
-        if persist:
+    if persist:
+        try:
+            run = await agent_repository.create_agent_run(db, run)
             await db.commit()
             run = await agent_repository.refresh_agent_run(db, run)
-    except IntegrityError as exc:
-        await db.rollback()
-        if await agent_repository.get_active_agent_run(
-            db,
-            agent.id,
-            access_source,
-            consumer_id,
-            conversation_id,
-        ) is None:
-            raise
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "This conversation already has an active run.",
-        ) from exc
+        except IntegrityError as exc:
+            await db.rollback()
+            if await agent_repository.get_active_agent_run(
+                db,
+                agent.id,
+                access_source,
+                consumer_id,
+                conversation_id,
+            ) is None:
+                raise
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "This conversation already has an active run.",
+            ) from exc
     return run, model
 
 

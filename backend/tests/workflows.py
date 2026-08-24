@@ -4045,8 +4045,11 @@ def test_workflow_executor_recovery_paths() -> None:
             from app.infrastructure.session import get_session_factory
             from app.shareddomain.agents.models import (
                 AGENT_RUN_FAILED_STATUS,
+                AgentRunSnapshot,
+                AgentRunState,
                 agent_run_display_status,
             )
+            from sqlalchemy import update
             from app.shareddomain.workflows.models import (
                 WorkflowRunDetail as DetailORM,
             )
@@ -4165,14 +4168,19 @@ def test_workflow_executor_recovery_paths() -> None:
                 # and completes the run.
                 legacy_run_id = create_run(simple_base, "legacy claim")
                 async with get_session_factory()() as db:
-                    legacy = await agent_repository.get_agent_run_by_id(
-                        db,
-                        legacy_run_id,
+                    await db.execute(
+                        update(AgentRunSnapshot)
+                        .where(AgentRunSnapshot.run_id == legacy_run_id)
+                        .values(
+                            configuration_source="legacy",
+                            agent_publication_version_id=None,
+                        )
                     )
-                    assert legacy is not None
-                    legacy.status = "queued"
-                    legacy.configuration_source = "legacy"
-                    await agent_repository.save_agent_run(db, legacy)
+                    await db.execute(
+                        update(AgentRunState)
+                        .where(AgentRunState.run_id == legacy_run_id)
+                        .values(status="queued", worker_generation="legacy")
+                    )
                     await db.commit()
                 outcome = await run_durable_workflow_run(
                     legacy_run_id,

@@ -21,7 +21,7 @@ application/agent_memory.py（会话历史 → token 预算 → 摘要 + 最近�
 
 ### shareddomain/agents/
 
-- `backend/app/shareddomain/agents/models.py` — Agent/绑定/Run、事件游标与工具调用账本 ORM 模型
+- `backend/app/shareddomain/agents/models.py` — Agent/绑定、Run 身份、可变状态、不可变快照与事件游标 ORM 模型
 - `backend/app/shareddomain/agents/services.py` — Agent 服务层：CRUD、权限校验、知识库/工具绑定、编排运行参数
 
 ### shareddomain/agents/runtime/（LangGraph 执行内核）
@@ -54,6 +54,7 @@ application/agent_memory.py（会话历史 → token 预算 → 摘要 + 最近�
 - `model_usage` 累加 Agent loop 与摘要调用的实际供应商用量，并单列 compaction、cache read/create 与未上报调用数。系统不会为未返回 usage 的供应商猜测计费 token；服务端 prompt cache 的写法仍由各供应商 SDK 决定，不伪造跨供应商通用的 `cache_control`。
 - 每次工具调用与整次在线运行都有硬超时；达到最后一轮时不再向模型暴露工具。连续两轮没有新知识证据后停止继续检索，保留 MCP 外部能力供模型决定是否需要。
 - HTTP 只提交/观察 Run；Celery worker 用数据库租约执行，节点 checkpoint、过程事件游标和工具账本均持久化。答案与推理 delta 不写 PostgreSQL，而是进入按 Run 隔离、限长并带 15 分钟 TTL 的 Redis Stream；API 把 Redis 增量与数据库事件合并为同一 NDJSON。客户端分别用 `after` 和 `live_after` 恢复持久与实时游标，终态数据库快照负责最终校正；Redis 不可用时自动降级为过程事件加完整终态答案。断开 NDJSON 不会取消 Run。
+- Run 持久层按职责拆分：`agent_runs` 只保存身份、调用者、谱系、反馈和 trace；`agent_run_states` 保存状态、租约、checkpoint、结果与模型用量；`agent_run_snapshots` 保存创建时冻结的执行配置；`agent_run_events` 只追加事件。所有 Agent/Workflow/测试工具执行统一写入 `tool_invocations`，不再维护 `agent_tool_calls` 双账本。
 - Agent 草稿保存稳定的 `ToolRef(tool_id, version_id)`；发布版本和 Run 再冻结完整 ToolSnapshot。Tool/Source 禁用、授权撤销、成员失效或策略漂移会在 dispatch 前 fail closed，不静默换到新版本。
 - 新发现的 MCP 工具默认逐次审批；只有管理员按当前定义哈希显式设置为 `read_only` 才会自动运行，远端 `readOnlyHint` 等注解不会单独改变审批策略。管理员可按当前定义哈希设置为只读、审批或禁用，工具定义变化后已有策略回落到逐次审批。副作用调用携带稳定幂等键；传输超时、worker 在外部调用后崩溃或结果未落账时标记 `uncertain`，禁止自动重试，只能人工确认后“不重试并继续”。远端 MCP 若不兑现幂等键，系统提供的是保守恢复而非跨系统 exactly-once。
 - 发布和 API 凭据写操作仅工作空间管理员可执行。发布固化当时的模型、知识库和 ToolSnapshot；后续草稿变化不撤销既有发布，公开/API 继续运行上一发布版本，直到重新发布、取消发布或停用应用。外部运行使用发布者快照身份受审计，但不冒充访问者；仅允许仍有效、无需逐次审批的只读工具，不开放外部审批路径。
