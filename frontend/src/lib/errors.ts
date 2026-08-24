@@ -18,6 +18,7 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "Too many password reset requests.": "密码重置请求过于频繁，请稍后重试",
   "Password reset link is invalid or expired.": "密码重置链接无效或已过期",
   "New password must be different.": "新密码不能与原密码相同",
+  "Knowledge base name already exists.": "知识库名称已存在",
 }
 
 /**

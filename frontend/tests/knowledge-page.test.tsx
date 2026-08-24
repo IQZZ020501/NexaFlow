@@ -587,7 +587,10 @@ describe("KnowledgeBasePage list view", () => {
     fetchHandler = (url, init) => {
       const method = init?.method ?? "GET"
       if (method === "PATCH" && url.includes("/knowledge-bases")) {
-        return jsonResponse({ detail: "update boom" }, 500)
+        return jsonResponse(
+          { detail: "Knowledge base name already exists." },
+          409
+        )
       }
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?"))
@@ -608,7 +611,7 @@ describe("KnowledgeBasePage list view", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "update boom"
+      "知识库名称已存在"
     )
   })
 
