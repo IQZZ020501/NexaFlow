@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities.llm.models import RegisteredModel
@@ -8,8 +8,15 @@ from app.domain.team import Team as TeamOrm
 from app.domain.user import User as UserOrm
 from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipOrm
 from app.infrastructure.system_log import SystemLog
-from app.shareddomain.agents.models import Agent as AgentOrm
-from app.shareddomain.agents.models import AgentRun as AgentRunOrm
+from app.shareddomain.agents.models import (
+    AGENT_RUN_ACTIVE_STATUSES,
+    AGENT_RUN_FAILED_STATUS,
+    AGENT_RUN_LEGACY_CLAIMABLE_STATUSES,
+    AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES,
+    Agent as AgentOrm,
+    AgentRun as AgentRunOrm,
+    AgentRunState as AgentRunStateOrm,
+)
 from app.shareddomain.knowledge.models import KnowledgeBase as KnowledgeBaseOrm
 from app.shareddomain.knowledge.models import KnowledgeTask as KnowledgeTaskOrm
 from app.shareddomain.knowledge_graph.models import (
@@ -63,11 +70,25 @@ async def workspace_inventory_counts(
             .where(WorkspaceMembershipOrm.workspace_id == workspace_id)
         )
     ).one()
-    active_statuses = {
-        "queued", "planning", "planned", "running", "awaiting_approval",
-        "awaiting_input", "awaiting_child", "queued_v2", "running_v2",
-        "awaiting_approval_v2", "awaiting_input_v2", "awaiting_child_v2",
-    }
+    failed_runs_24h = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(AgentRunStateOrm)
+            .join(
+                AgentRunOrm,
+                and_(
+                    AgentRunOrm.workspace_id == AgentRunStateOrm.workspace_id,
+                    AgentRunOrm.id == AgentRunStateOrm.run_id,
+                ),
+            )
+            .where(
+                AgentRunStateOrm.workspace_id == workspace_id,
+                AgentRunStateOrm.status == AGENT_RUN_FAILED_STATUS,
+                AgentRunOrm.created_at >= day_ago,
+            )
+        )
+        or 0
+    )
     return {
         "members_total": int(member_row.total or 0),
         "members_active": int(member_row.active or 0),
@@ -78,11 +99,13 @@ async def workspace_inventory_counts(
         "models_total": await _count(db, RegisteredModel, workspace_id),
         "tools_total": await _count(db, ToolOrm, workspace_id),
         "workflows_total": await _count(db, WorkflowDefinitionOrm, workspace_id),
-        "active_runs": await _count(db, AgentRunOrm, workspace_id, AgentRunOrm.status.in_(active_statuses)),
-        "failed_runs_24h": await _count(
-            db, AgentRunOrm, workspace_id,
-            AgentRunOrm.status == "failed", AgentRunOrm.created_at >= day_ago,
+        "active_runs": await _count(
+            db,
+            AgentRunStateOrm,
+            workspace_id,
+            AgentRunStateOrm.status.in_(AGENT_RUN_ACTIVE_STATUSES),
         ),
+        "failed_runs_24h": failed_runs_24h,
         "failed_tasks_24h": await _count(
             db, KnowledgeTaskOrm, workspace_id,
             KnowledgeTaskOrm.status == "failed", KnowledgeTaskOrm.created_at >= day_ago,
@@ -114,8 +137,11 @@ async def health_counts(
     )
     pending += int(
         await db.scalar(
-            select(func.count()).select_from(AgentRunOrm).where(
-                AgentRunOrm.status.in_({"queued", "queued_v2", "running", "running_v2"})
+            select(func.count()).select_from(AgentRunStateOrm).where(
+                AgentRunStateOrm.status.in_(
+                    AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
+                    + AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
+                )
             )
         )
         or 0

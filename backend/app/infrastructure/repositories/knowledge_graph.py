@@ -44,6 +44,7 @@ from app.entities.knowledge_graph import (
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories.mapping import save, to_entity
 from app.shareddomain.agents.models import AgentRun as AgentRunORM
+from app.shareddomain.agents.models import AgentRunState as AgentRunStateORM
 from app.shareddomain.knowledge.models import KnowledgeBase as KnowledgeBaseORM
 from app.shareddomain.knowledge.models import (
     KnowledgeDocument as KnowledgeDocumentORM,
@@ -100,7 +101,7 @@ async def monthly_workspace_model_tokens(
 ) -> dict[str, int]:
     dialect_name = db.get_bind().dialect.name
     agent_tokens = _nonnegative_json_integer(
-        AgentRunORM.model_usage,
+        AgentRunStateORM.model_usage,
         "total_tokens",
         dialect_name,
     )
@@ -112,6 +113,13 @@ async def monthly_workspace_model_tokens(
     application_tokens = await db.scalar(
         select(func.coalesce(func.sum(application_value), 0))
         .select_from(AgentRunORM)
+        .join(
+            AgentRunStateORM,
+            and_(
+                AgentRunStateORM.workspace_id == AgentRunORM.workspace_id,
+                AgentRunStateORM.run_id == AgentRunORM.id,
+            ),
+        )
         .outerjoin(
             WorkflowRunDetailORM,
             and_(
