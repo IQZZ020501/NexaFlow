@@ -52,6 +52,7 @@ def knowledge_base_to_response(
         id=knowledge_base.id,
         workspace_id=knowledge_base.workspace_id,
         name=knowledge_base.name,
+        folder_id=knowledge_base.folder_id,
         description=knowledge_base.description,
         status=knowledge_base.status,
         embedding_model_id=knowledge_base.embedding_model_id,

@@ -11,6 +11,7 @@ class KnowledgeBaseResponse(BaseModel):
     id: str
     workspace_id: str
     name: str
+    folder_id: str | None = None
     description: str
     status: str
     embedding_model_id: str | None

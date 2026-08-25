@@ -47,6 +47,7 @@ from app.shareddomain.knowledge_graph.models import (  # noqa: F401
     KnowledgeGraphRevisionChange,
     KnowledgeGraphSchema,
 )
+from app.shareddomain.resource_folders.models import ResourceFolder  # noqa: F401
 from app.shareddomain.tools.models import (  # noqa: F401
     ApplicationToolBinding,
     McpServer,

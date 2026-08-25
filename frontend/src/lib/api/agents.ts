@@ -21,6 +21,7 @@ export type Agent = {
   id: string
   workspace_id: string
   name: string
+  folder_id?: string | null
   app_type: AppType
   description: string
   interaction_config: AgentInteractionConfig

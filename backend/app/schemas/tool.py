@@ -50,6 +50,7 @@ class ToolSourceDetailResponse(ToolSourceSummaryResponse):
 class ToolSummaryResponse(_PublicToolResponse):
     id: str
     workspace_id: str
+    folder_id: str | None = None
     kind: ToolKind
     function_name: str
     display_name: str

@@ -408,6 +408,12 @@ function fetchRouter(
         : u.pathname === c.pathname || u.pathname.startsWith(`${c.pathname}/`)
       if (matches) return c.respond(init, u.pathname, u.searchParams)
     }
+    if (
+      method === "GET" &&
+      u.pathname === `/api/v1/workspaces/${WS}/resource-folders`
+    ) {
+      return jsonResponse([])
+    }
     if (fallback) return fallback(url, init)
     throw new Error(`Unhandled ${method} ${u.pathname}`)
   }

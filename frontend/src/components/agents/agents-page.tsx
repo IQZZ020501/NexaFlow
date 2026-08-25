@@ -6,6 +6,7 @@ import dynamic from "next/dynamic"
 import { useParams, useRouter } from "next/navigation"
 import {
   BotIcon,
+  FolderInputIcon,
   LoaderCircleIcon,
   PencilIcon,
   PlusIcon,
@@ -25,6 +26,10 @@ import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
+import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
+import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
+import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
+import { useResourceFolders } from "@/components/resource-folders/use-resource-folders"
 import { Badge } from "@/components/ui/badge"
 import { IconButton } from "@/components/ui/icon-button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
@@ -411,6 +416,7 @@ export function AgentsPage({
   const selectedAgentId = params.id ?? null
   const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
+  const resourceFolders = useResourceFolders("application")
   const [confirmAction, confirmDialog] = useConfirmDialog()
   const [agents, setAgents] = React.useState<Agent[]>([])
   const [models, setModels] = React.useState<RegisteredModel[]>([])
@@ -444,6 +450,7 @@ export function AgentsPage({
   const [isPublishing, setIsPublishing] = React.useState(false)
   const [deleteAgentTarget, setDeleteAgentTarget] =
     React.useState<Agent | null>(null)
+  const [moveAgentTarget, setMoveAgentTarget] = React.useState<Agent | null>(null)
   const [isDeletingAgent, setIsDeletingAgent] = React.useState(false)
   const [isAsking, setIsAsking] = React.useState(false)
   const [regeneratingRunId, setRegeneratingRunId] = React.useState<
@@ -500,15 +507,18 @@ export function AgentsPage({
   )
   const filteredAgents = React.useMemo(() => {
     const search = agentSearch.trim().toLowerCase()
-    if (!search) return agents
+    const inFolder = agents.filter(
+      (agent) => (agent.folder_id ?? null) === resourceFolders.selectedFolderId
+    )
+    if (!search) return inFolder
 
-    return agents.filter((agent) => {
+    return inFolder.filter((agent) => {
       const model = models.find((item) => item.id === agent.model_id)
       return [agent.name, agent.description, model?.name ?? ""].some((value) =>
         value.toLowerCase().includes(search)
       )
     })
-  }, [agentSearch, agents, models])
+  }, [agentSearch, agents, models, resourceFolders.selectedFolderId])
 
   const reportError = React.useCallback(
     (error: unknown) => notify("error", getErrorMessage(error, t)),
@@ -1860,7 +1870,30 @@ export function AgentsPage({
       </div>
       {isAgentListBusy ? <TopLoadingBar progress={35} /> : null}
 
-      <div className="rounded-lg border bg-background p-3 shadow-sm">
+      <ResourceFolderLayout
+        sidebar={
+          <ResourceFolderTree
+            folders={resourceFolders.folders}
+            selectedFolderId={resourceFolders.selectedFolderId}
+            canManage={workspaceRole === "admin"}
+            isLoading={resourceFolders.isLoading}
+            onSelect={resourceFolders.setSelectedFolderId}
+            onCreate={resourceFolders.create}
+            onRename={resourceFolders.rename}
+            onDelete={resourceFolders.remove}
+            onFolderDeleted={(folderId, parentId) =>
+              setAgents((current) =>
+                current.map((agent) =>
+                  agent.folder_id === folderId
+                    ? { ...agent, folder_id: parentId }
+                    : agent
+                )
+              )
+            }
+          />
+        }
+      >
+        <div className="rounded-lg border bg-background p-3 shadow-sm">
         <div className="relative min-w-0 sm:w-[320px]">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -1991,21 +2024,27 @@ export function AgentsPage({
                     </dl>
                     {agent.can_edit ? (
                       <CardMoreMenu label={t("更多")}>
-                        <DropdownMenuItem
+                          <DropdownMenuItem
+                            onSelect={() => setMoveAgentTarget(agent)}
+                          >
+                            <FolderInputIcon />
+                            {t("移动到文件夹")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
                           onSelect={() =>
                             void handleOpenAgentPermissions(agent)
                           }
-                        >
-                          <ShieldCheckIcon />
-                          {t("资源授权")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => setDeleteAgentTarget(agent)}
-                        >
-                          <Trash2Icon />
-                          {t("删除")}
-                        </DropdownMenuItem>
+                          >
+                            <ShieldCheckIcon />
+                            {t("资源授权")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setDeleteAgentTarget(agent)}
+                          >
+                            <Trash2Icon />
+                            {t("删除")}
+                          </DropdownMenuItem>
                       </CardMoreMenu>
                     ) : null}
                   </div>
@@ -2028,6 +2067,25 @@ export function AgentsPage({
           </>
         )}
       </div>
+      </ResourceFolderLayout>
+
+      <ResourceFolderPickerDialog
+        open={moveAgentTarget !== null}
+        folders={resourceFolders.folders}
+        currentFolderId={moveAgentTarget?.folder_id ?? null}
+        onOpenChange={(open) => !open && setMoveAgentTarget(null)}
+        onMove={async (folderId) => {
+          if (!moveAgentTarget) return
+          await resourceFolders.move(moveAgentTarget.id, folderId)
+          setAgents((current) =>
+            current.map((agent) =>
+              agent.id === moveAgentTarget.id
+                ? { ...agent, folder_id: folderId }
+                : agent
+            )
+          )
+        }}
+      />
 
       {renderTypeChooserDialog()}
       {renderAgentDialog()}

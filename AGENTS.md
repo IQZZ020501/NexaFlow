@@ -340,7 +340,7 @@ broad. Never claim a check passed unless it completed successfully.
   agent_access, workflow_run_coverage, workflow_node_coverage,
   workspace_admin_coverage,
   knowledge_graph, knowledge_graph_edge_coverage, knowledge_domain_coverage,
-  knowledge_api_coverage, agent_services_coverage,
+  knowledge_api_coverage, resource_folders, agent_services_coverage,
   agent_runtime_coverage, infra_unit_coverage). For migration changes,
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on

@@ -85,6 +85,7 @@ def agent_to_response(
         id=agent.id,
         workspace_id=agent.workspace_id,
         name=agent.name,
+        folder_id=agent.folder_id,
         app_type=agent.app_type,
         description=agent.description,
         interaction_config=normalized_interaction_config(agent.interaction_config),

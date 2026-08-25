@@ -79,6 +79,11 @@ class Tool(Base):
     __tablename__ = "tools"
     __table_args__ = (
         ForeignKeyConstraint(
+            ["workspace_id", "folder_id"],
+            ["resource_folders.workspace_id", "resource_folders.id"],
+            name="fk_tools_folder_workspace",
+        ),
+        ForeignKeyConstraint(
             ["workspace_id", "source_id"],
             ["tool_sources.workspace_id", "tool_sources.id"],
             name="fk_tools_source_workspace",
@@ -122,6 +127,7 @@ class Tool(Base):
         ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
     source_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    folder_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
     stable_key: Mapped[str] = mapped_column(String(255), nullable=False)
     function_name: Mapped[str] = mapped_column(String(255), nullable=False)

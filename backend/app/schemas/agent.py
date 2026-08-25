@@ -59,6 +59,7 @@ class AgentResponse(BaseModel):
     id: str
     workspace_id: str
     name: str
+    folder_id: str | None = None
     app_type: AppType
     description: str
     interaction_config: AgentInteractionConfig = Field(

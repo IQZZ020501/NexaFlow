@@ -1,0 +1,1 @@
+"""Workspace resource folder domain."""

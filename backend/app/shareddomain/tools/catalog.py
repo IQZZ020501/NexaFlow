@@ -337,6 +337,7 @@ async def list_tool_catalog(
         db,
         workspace_id,
         actor.id,
+        workspace_role == "admin" or actor.is_global_admin,
         limit,
         offset,
     )

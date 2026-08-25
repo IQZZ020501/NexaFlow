@@ -29,6 +29,11 @@ class KnowledgeBase(Base):
     __table_args__ = (
         UniqueConstraint("workspace_id", "name", name="uq_knowledge_base_workspace_name"),
         UniqueConstraint("workspace_id", "id", name="uq_knowledge_base_workspace_id"),
+        ForeignKeyConstraint(
+            ["workspace_id", "folder_id"],
+            ["resource_folders.workspace_id", "resource_folders.id"],
+            name="fk_knowledge_folder_workspace",
+        ),
         CheckConstraint(
             "status IN ('active', 'archived')",
             name="ck_knowledge_bases_status",
@@ -62,6 +67,7 @@ class KnowledgeBase(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    folder_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     embedding_model_id: Mapped[str | None] = mapped_column(

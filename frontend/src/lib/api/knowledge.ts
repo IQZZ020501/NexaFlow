@@ -9,6 +9,7 @@ export type KnowledgeBase = {
   id: string
   workspace_id: string
   name: string
+  folder_id?: string | null
   description: string
   status: string
   embedding_model_id: string | null

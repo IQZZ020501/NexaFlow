@@ -93,6 +93,8 @@ from app.application.knowledge_graph_build import (
     finalize_abandoned_graph_reservations,
 )
 from app.application.knowledge_graph_maintenance import _revision_source_versions
+from app.application.resource_folders import descendant_folder_ids
+from app.entities.resource_folders import ResourceFolder
 
 
 def expect_http_error(callback, status_code: int) -> None:
@@ -133,6 +135,20 @@ def test_effective_permission_matrix() -> None:
 
 def test_validate_permission_rejects_unknown() -> None:
     expect_http_error(lambda: validate_permission("delete"), 422)
+
+
+def test_resource_folder_descendants_cover_nested_children() -> None:
+    folders = [
+        ResourceFolder(id="parent", parent_id=None),
+        ResourceFolder(id="child", parent_id="parent"),
+        ResourceFolder(id="grandchild", parent_id="child"),
+        ResourceFolder(id="sibling", parent_id=None),
+    ]
+    assert descendant_folder_ids(folders, "parent") == {
+        "parent",
+        "child",
+        "grandchild",
+    }
 
 
 def test_graph_schema_rejects_unknown_relation_endpoint() -> None:

@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     knowledge_retrieval,
     mcp_servers,
     models,
+    resource_folders,
     teams,
     tool_sources,
     tools,
@@ -41,6 +42,7 @@ api_router.include_router(knowledge_graph.router)
 api_router.include_router(knowledge_lifecycle.router)
 api_router.include_router(knowledge_retrieval.router)
 api_router.include_router(models.router)
+api_router.include_router(resource_folders.router)
 api_router.include_router(mcp_servers.router)
 api_router.include_router(tool_sources.router)
 api_router.include_router(tools.router)

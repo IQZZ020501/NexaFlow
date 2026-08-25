@@ -16,6 +16,7 @@ import {
   DatabaseIcon,
   DownloadIcon,
   FileTextIcon,
+  FolderInputIcon,
   FlaskConicalIcon,
   LoaderCircleIcon,
   MoreHorizontalIcon,
@@ -115,6 +116,10 @@ import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dial
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
 import { KnowledgeGraph } from "@/components/knowledge/knowledge-graph"
+import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
+import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
+import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
+import { useResourceFolders } from "@/components/resource-folders/use-resource-folders"
 import {
   getDocumentFileIcon,
   getDocumentFileIconColor,
@@ -414,6 +419,7 @@ function KnowledgeBasePageContent({
   const activeKnowledgeBaseId = params.id ?? null
   const Icon = DatabaseIcon
   const { language, t } = useLanguage()
+  const resourceFolders = useResourceFolders("knowledge")
   const [confirmAction, confirmDialog] = useConfirmDialog()
   const locale = languageLocales[language]
   const [knowledgeBases, setKnowledgeBases] = React.useState<
@@ -496,6 +502,8 @@ function KnowledgeBasePageContent({
   )
   const [isSaving, setIsSaving] = React.useState(false)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
+  const [moveKnowledgeBaseTarget, setMoveKnowledgeBaseTarget] =
+    React.useState<KnowledgeBaseListItem | null>(null)
   const selectAllDocumentsRef = React.useRef<HTMLInputElement>(null)
   const selectAllKnowledgeTasksRef = React.useRef<HTMLInputElement>(null)
 
@@ -515,16 +523,20 @@ function KnowledgeBasePageContent({
   const filteredKnowledgeBases = React.useMemo(() => {
     const search = knowledgeSearch.trim().toLowerCase()
 
+    const inFolder = knowledgeBases.filter(
+      (knowledgeBase) =>
+        (knowledgeBase.folder_id ?? null) === resourceFolders.selectedFolderId
+    )
     if (!search) {
-      return knowledgeBases
+      return inFolder
     }
 
-    return knowledgeBases.filter((knowledgeBase) =>
+    return inFolder.filter((knowledgeBase) =>
       [knowledgeBase.name, knowledgeBase.description].some((value) =>
         value.toLowerCase().includes(search)
       )
     )
-  }, [knowledgeBases, knowledgeSearch])
+  }, [knowledgeBases, knowledgeSearch, resourceFolders.selectedFolderId])
   const filteredDocuments = React.useMemo(() => {
     const search = documentSearch.trim().toLowerCase()
     const matched = search
@@ -2775,7 +2787,29 @@ function KnowledgeBasePageContent({
           </div>
         </div>
       ) : (
-        <>
+        <ResourceFolderLayout
+          sidebar={
+            <ResourceFolderTree
+              folders={resourceFolders.folders}
+              selectedFolderId={resourceFolders.selectedFolderId}
+              canManage={workspaceRole === "admin"}
+              isLoading={resourceFolders.isLoading}
+              onSelect={resourceFolders.setSelectedFolderId}
+              onCreate={resourceFolders.create}
+              onRename={resourceFolders.rename}
+              onDelete={resourceFolders.remove}
+              onFolderDeleted={(folderId, parentId) =>
+                setKnowledgeBases((current) =>
+                  current.map((knowledgeBase) =>
+                    knowledgeBase.folder_id === folderId
+                      ? { ...knowledgeBase, folder_id: parentId }
+                      : knowledgeBase
+                  )
+                )
+              }
+            />
+          }
+        >
           <div className="rounded-lg border bg-background p-3 shadow-sm">
             <div className="relative min-w-0 sm:w-[320px]">
               <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -2902,6 +2936,15 @@ function KnowledgeBasePageContent({
                           canManagePermissions(knowledgeBase) ? (
                             <CardMoreMenu label={t("更多")}>
                               {knowledgeBase.permission === "edit" ? (
+                                <>
+                                  <DropdownMenuItem
+                                    onSelect={() =>
+                                      setMoveKnowledgeBaseTarget(knowledgeBase)
+                                    }
+                                  >
+                                    <FolderInputIcon />
+                                    {t("移动到文件夹")}
+                                  </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onSelect={() =>
                                     void handleToggleStatus(knowledgeBase)
@@ -2918,6 +2961,7 @@ function KnowledgeBasePageContent({
                                       : "恢复知识库"
                                   )}
                                 </DropdownMenuItem>
+                                </>
                               ) : null}
                               {knowledgeBase.permission === "edit" &&
                               canManagePermissions(knowledgeBase) ? (
@@ -2989,8 +3033,26 @@ function KnowledgeBasePageContent({
               </Button>
             </div>
           )}
-        </>
+        </ResourceFolderLayout>
       )}
+
+      <ResourceFolderPickerDialog
+        open={moveKnowledgeBaseTarget !== null}
+        folders={resourceFolders.folders}
+        currentFolderId={moveKnowledgeBaseTarget?.folder_id ?? null}
+        onOpenChange={(open) => !open && setMoveKnowledgeBaseTarget(null)}
+        onMove={async (folderId) => {
+          if (!moveKnowledgeBaseTarget) return
+          await resourceFolders.move(moveKnowledgeBaseTarget.id, folderId)
+          setKnowledgeBases((current) =>
+            current.map((knowledgeBase) =>
+              knowledgeBase.id === moveKnowledgeBaseTarget.id
+                ? { ...knowledgeBase, folder_id: folderId }
+                : knowledgeBase
+            )
+          )
+        }}
+      />
 
       <KnowledgeBaseDialogs
         form={form}

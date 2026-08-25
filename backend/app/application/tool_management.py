@@ -513,6 +513,7 @@ def _summary_response(item: ToolCatalogItem) -> ToolSummaryResponse:
     return ToolSummaryResponse(
         id=item.tool.id,
         workspace_id=item.tool.workspace_id,
+        folder_id=item.tool.folder_id,
         kind=item.tool.kind,
         function_name=item.tool.function_name,
         display_name=definition.display_name if definition else item.tool.function_name,
