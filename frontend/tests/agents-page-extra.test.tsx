@@ -440,6 +440,12 @@ function baseRoutes(
       exact: true,
       respond: () => jsonResponse(tools),
     },
+    {
+      method: "GET",
+      pathname: `/api/v1/workspaces/${WS}/resource-folders`,
+      exact: true,
+      respond: () => jsonResponse([]),
+    },
   ]
 }
 
