@@ -718,7 +718,9 @@ def assert_graph_error_branches() -> None:
             for event in tool_events
         )
         failed = next(
-            event for event in tool_events if event["call_id"] == "call-missing"
+            event
+            for event in tool_events
+            if event["call_id"] == "call-missing" and event["status"] == "failed"
         )
         assert failed["summary"] == "Unknown tool rejected."
 
@@ -1078,6 +1080,19 @@ def assert_live_stream_degradation() -> None:
                                     "1700000000000-3",
                                     {"payload": json.dumps({"type": "process"})},
                                 ),
+                                (
+                                    "1700000000000-4",
+                                    {
+                                        "payload": json.dumps(
+                                            {
+                                                "type": "tool_input_delta",
+                                                "call_id": "call-1",
+                                                "field": "query",
+                                                "delta": "release",
+                                            }
+                                        )
+                                    },
+                                ),
                             ],
                         )
                     ]
@@ -1088,7 +1103,18 @@ def assert_live_stream_degradation() -> None:
             live_stream_module._redis_client = lambda _settings: PayloadRedis()
             reader = live_stream_module.AgentLiveStreamReader(settings, "run-live-6")
             entries = await reader.read(None, 100)
-            assert entries == [("1700000000000-2", {"type": "answer_delta", "delta": "ok"})]
+            assert entries == [
+                ("1700000000000-2", {"type": "answer_delta", "delta": "ok"}),
+                (
+                    "1700000000000-4",
+                    {
+                        "type": "tool_input_delta",
+                        "call_id": "call-1",
+                        "field": "query",
+                        "delta": "release",
+                    },
+                ),
+            ]
             await reader.close()
         finally:
             live_stream_module._redis_client = original

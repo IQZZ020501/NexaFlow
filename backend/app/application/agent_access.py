@@ -266,11 +266,13 @@ def external_progress_events(
                 )
             elif summary in {
                 "agent.analyzing",
+                "agent.preparing_tool_call",
                 "agent.reviewing_tool_results",
                 "agent.tools_selected",
             }:
                 stage = {
                     "agent.analyzing": "analyzing",
+                    "agent.preparing_tool_call": "running",
                     "agent.reviewing_tool_results": "reviewing",
                     "agent.tools_selected": "completed",
                 }[summary]
@@ -350,7 +352,11 @@ def external_progress_events(
                 id=_external_progress_id(event, "tool"),
                 type=progress_type,
                 status=event_status,
-                stage=event_status,
+                stage=(
+                    "preparing"
+                    if summary == "agent.preparing_tool_call"
+                    else event_status
+                ),
                 turn=turn,
                 count=count,
                 tool_name=str(event.get("tool_name") or ""),
@@ -408,6 +414,7 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
 async def sanitize_external_agent_stream(
     events: AsyncIterator[dict[str, Any]],
 ) -> AsyncIterator[dict[str, Any]]:
+    streamed_tool_inputs: dict[str, dict[str, str]] = {}
     async for event in events:
         event_type = event.get("type")
         if event_type == "answer_delta":
@@ -426,6 +433,42 @@ async def sanitize_external_agent_stream(
                 "type": "reasoning_delta",
                 "turn": max(0, int(event.get("turn") or 0)),
                 "delta": str(event.get("delta") or ""),
+            }
+            _copy_external_stream_metadata(event, sanitized)
+            yield sanitized
+        elif event_type == "tool_input_delta":
+            progress_id = _external_progress_id(
+                {
+                    "type": "tool",
+                    "turn": event.get("turn"),
+                    "call_id": event.get("call_id"),
+                },
+                "tool",
+            )
+            field = str(event.get("field") or "")[:200]
+            if not field:
+                continue
+            inputs = streamed_tool_inputs.setdefault(progress_id, {})
+            previous = inputs.get(field, "")
+            raw_delta = str(event.get("delta") or "")
+            candidate = raw_delta if event.get("replace") else previous + raw_delta
+            other_chars = sum(
+                len(value) for key, value in inputs.items() if key != field
+            )
+            allowed = max(0, TOOL_INPUT_LIMITS.max_total_chars - other_chars)
+            limited = candidate[:allowed]
+            inputs[field] = limited
+            replace = not limited.startswith(previous)
+            delta = limited if replace else limited[len(previous) :]
+            sanitized = {
+                "type": "tool_input_delta",
+                "id": progress_id,
+                "turn": max(0, int(event.get("turn") or 0)),
+                "tool_name": str(event.get("tool_name") or "")[:200],
+                "field": field,
+                "delta": delta,
+                "replace": replace,
+                "input_truncated": len(candidate) > len(limited),
             }
             _copy_external_stream_metadata(event, sanitized)
             yield sanitized

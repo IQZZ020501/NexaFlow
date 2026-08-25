@@ -24,6 +24,37 @@ PDF_OCR_LANGUAGE = "chi_sim+eng"
 MARKITDOWN = MarkItDown(enable_plugins=False)
 SPLIT_SEPARATORS = frozenset({"\n\n", "\n", "。", "."})
 IMAGE_DOCUMENT_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+PLAIN_TEXT_DOCUMENT_EXTENSIONS = frozenset(
+    {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cs",
+        ".css",
+        ".go",
+        ".h",
+        ".hpp",
+        ".java",
+        ".js",
+        ".jsx",
+        ".kt",
+        ".kts",
+        ".php",
+        ".properties",
+        ".py",
+        ".rb",
+        ".rs",
+        ".sh",
+        ".sql",
+        ".swift",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".vue",
+        ".yaml",
+        ".yml",
+    }
+)
 SUPPORTED_DOCUMENT_EXTENSIONS = frozenset(
     {
         ".docx",
@@ -42,6 +73,7 @@ SUPPORTED_DOCUMENT_EXTENSIONS = frozenset(
         ".epub",
         ".zip",
         *IMAGE_DOCUMENT_EXTENSIONS,
+        *PLAIN_TEXT_DOCUMENT_EXTENSIONS,
     }
 )
 MARKDOWN_HEADING_PATTERN = re.compile(
@@ -282,7 +314,9 @@ def extract_document(
     validate_archive(path)
     assets: list[DocumentAssetDraft] = []
     try:
-        if extension == ".docx":
+        if extension in PLAIN_TEXT_DOCUMENT_EXTENSIONS:
+            extracted_text = path.read_text(encoding="utf-8-sig")
+        elif extension == ".docx":
             def convert_image(image):
                 asset_id = new_id()
                 asset_index = len(assets)

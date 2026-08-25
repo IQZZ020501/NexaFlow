@@ -125,19 +125,20 @@ Correctness, safety, evidence, and validation take priority over speed.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
   intent is persisted in `workflow_upload_storage_cleanups` and recovered by
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
-- Agent-generated DOCX and static HTML artifacts are stored in PostgreSQL for at
-  most 24 hours and downloaded through scoped signed bearer URLs. HTML downloads
-  use a restrictive CSP and must remain script-free and self-contained.
+- Agent-generated files use safe filenames with arbitrary common extensions,
+  are capped at 5 MiB, stored in PostgreSQL for at most 24 hours, and downloaded
+  through scoped signed bearer URLs. Every response is an attachment with
+  `nosniff`; HTML additionally receives a restrictive CSP.
 - Identity email uses the global administrator SMTP settings and trusted site
   URL. Invitation, welcome, and password-change messages are persisted as
   encrypted `email_deliveries` and recovered by Celery Beat; password-reset
   links store only a token hash and expire after 30 minutes.
 - Knowledge parsing uses MarkItDown for DOCX, PPTX, XLSX, and XLS; PDF Markdown
   conversion uses PyMuPDF4LLM/PyMuPDF with native text first and page-level OCR
-  fallback. The upload UI and parser accept DOCX, PDF, Markdown, text, PPTX,
-  XLSX, XLS, HTML, CSV, JSON, XML, IPYNB, EPUB, ZIP, PNG, JPG, JPEG, and WEBP.
-  The unified application image must include Tesseract Chinese/English data for
-  OCR fallback.
+  fallback. The upload UI and parser accept DOCX, PDF, Markdown, text, common
+  UTF-8 source/configuration files, PPTX, XLSX, XLS, HTML, CSV, JSON, XML, IPYNB,
+  EPUB, ZIP, PNG, JPG, JPEG, and WEBP. The unified application image must include
+  Tesseract Chinese/English data for OCR fallback.
 - QA-table import is opt-in (`import_mode=qa`) and uses read-only openpyxl for
   XLSX plus the Python CSV module for UTF-8 CSV. It requires question/answer
   headers, ignores document segmentation settings, and indexes question plus
@@ -163,10 +164,12 @@ Correctness, safety, evidence, and validation take priority over speed.
   state. Dialogs and responsive panels remain component states unless they are
   intentionally promoted to pages.
 - `sandbox/` is an independent Python execution service for Workflow code nodes
-  and Agent-generated DOCX/static HTML artifacts. It accepts bounded JSON-line
-  requests over a private Unix socket and runs each program with CPU, memory,
-  process, file, wall-clock, input, and output limits. Keep it independent from
-  `backend/app/`; only the Worker supervisor may start or reach its socket.
+  and Agent-generated downloadable files. It accepts bounded JSON-line requests
+  over a private Unix socket and runs each program with CPU, memory, process,
+  file, wall-clock, input, and output limits. Its Artifact runtime includes
+  python-docx, PyMuPDF, openpyxl, python-pptx, Pillow, and the standard library.
+  Keep it independent from `backend/app/`; only the Worker supervisor may start
+  or reach its socket.
 - `docs/` stores project planning and product/engineering documentation.
 - `deploy/` holds the Docker Compose topology, the unified application
   Dockerfile shared by API/worker/frontend containers, the custom PostgreSQL

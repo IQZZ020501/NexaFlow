@@ -11,11 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-if command -v coverage >/dev/null 2>&1; then
-  COV="coverage"
-else
-  COV="$(cd ../backend && uv run which coverage)"
-fi
+COV="$(uv run --project . which coverage)"
 export SANDBOX_COVERAGE_BIN="$COV"
 export PYTHONPATH="$(cd .. && pwd)"
 

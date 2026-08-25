@@ -21,7 +21,23 @@ from app.ports.tool_runtime import (
     ToolInvocationContext,
     ToolRuntimeResult,
 )
+from app.shareddomain.artifacts.services import artifact_format_from_filename
 from app.shareddomain.tools.services import mcp_server_connection
+
+
+DIRECT_ARTIFACT_CONTENT_FORMATS = frozenset(
+    "file txt md markdown html htm css csv tsv json jsonl xml yaml yml toml "
+    "ini cfg conf env py pyi ipynb java js jsx mjs cjs ts tsx c h cc cpp "
+    "cxx hpp go rs rb php swift kt kts scala sh bash zsh fish ps1 sql "
+    "graphql gql vue svelte dart lua r cs fs fsx vb gradle properties svg "
+    "tex rtf log po pot".split()
+)
+
+
+def _is_direct_artifact_content(artifact_format: str, code: str) -> bool:
+    return artifact_format in DIRECT_ARTIFACT_CONTENT_FORMATS and not (
+        "output_path" in code or "NEXAFLOW_OUTPUT_PATH" in code
+    )
 
 
 class BuiltinToolAdapter:
@@ -49,18 +65,36 @@ class BuiltinToolAdapter:
             )
         if builtin == "python_artifact":
             try:
-                artifact = await execute_artifact_code(
-                    self.settings,
-                    arguments["code"],
-                    arguments["format"],
-                    arguments["filename"],
-                    arguments.get("skills", []),
-                )
+                filename = arguments["filename"]
+                artifact_format = artifact_format_from_filename(filename)
+                supplied_format = arguments.get("format")
+                if supplied_format is not None and supplied_format != artifact_format:
+                    raise ValueError("Artifact format does not match its filename.")
+                code = arguments["code"]
+                if not isinstance(code, str):
+                    raise TypeError
+                if _is_direct_artifact_content(artifact_format, code):
+                    artifact_content = code.encode("utf-8")
+                    artifact_stdout = (
+                        f"characters={len(code)}\nbytes={len(artifact_content)}"
+                    )
+                    artifact_exit_code = 0
+                else:
+                    artifact = await execute_artifact_code(
+                        self.settings,
+                        code,
+                        artifact_format,
+                        filename,
+                        [],
+                    )
+                    artifact_content = artifact.content
+                    artifact_stdout = artifact.stdout
+                    artifact_exit_code = artifact.exit_code
             except WorkflowSandboxBusyError as exc:
                 raise ToolAdapterBusy("Python sandbox is busy.") from exc
             except WorkflowSandboxError as exc:
                 return _failure("python_artifact_failed", str(exc)[:1000])
-            except (KeyError, TypeError):
+            except (KeyError, TypeError, ValueError):
                 return _failure(
                     "python_artifact_failed",
                     "Artifact Tool parameters are invalid.",
@@ -73,9 +107,9 @@ class BuiltinToolAdapter:
                         workspace_id=context.workspace_id,
                         run_id=context.run_id,
                         idempotency_key=context.idempotency_key,
-                        artifact_format=artifact.format,
-                        filename=artifact.filename,
-                        content=artifact.content,
+                        artifact_format=artifact_format,
+                        filename=filename,
+                        content=artifact_content,
                     )
                     await db.commit()
             except ValueError as exc:
@@ -89,14 +123,15 @@ class BuiltinToolAdapter:
                     "download_url": link.download_url,
                     "expires_at": link.expires_at.isoformat(),
                     "size_bytes": link.size_bytes,
+                    "stdout": artifact_stdout.strip()[:2000],
                 },
                 summary="Artifact created.",
                 error_code=None,
                 error_message=None,
                 outcome="confirmed",
                 usage={
-                    "exit_code": artifact.exit_code,
-                    "size_bytes": artifact.size_bytes,
+                    "exit_code": artifact_exit_code,
+                    "size_bytes": link.size_bytes,
                 },
             )
         if builtin != "inline_python" or context.origin != "workflow":

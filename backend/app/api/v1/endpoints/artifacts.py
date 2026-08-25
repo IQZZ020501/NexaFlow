@@ -27,16 +27,15 @@ async def download_generated_artifact(
     headers = {
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
+        "Content-Disposition": (
+            "attachment; filename*=UTF-8''" + quote(artifact.filename, safe="")
+        ),
     }
     if artifact.format == "html":
         headers["Content-Security-Policy"] = (
             "sandbox; default-src 'none'; style-src 'unsafe-inline'; "
             "img-src data:; font-src data:; base-uri 'none'; "
             "form-action 'none'; frame-ancestors 'none'"
-        )
-    else:
-        headers["Content-Disposition"] = (
-            "attachment; filename*=UTF-8''" + quote(artifact.filename, safe="")
         )
     return Response(
         content=artifact.content,

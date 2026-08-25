@@ -233,11 +233,103 @@ export function mergeAgentRunStreamEvent(
       if (eventIndex === -1) {
         return { ...run, events: [...run.events, streamEvent.event] }
       }
+      const currentEvent = run.events[eventIndex]
+      const nextEvent =
+        currentEvent?.summary === "agent.preparing_tool_call" &&
+        streamEvent.event.type === "tool"
+          ? {
+              ...streamEvent.event,
+              input: Object.fromEntries(
+                [
+                  ...new Set([
+                    ...Object.keys(currentEvent.input),
+                    ...Object.keys(streamEvent.event.input),
+                  ]),
+                ].map((field) => {
+                  const currentValue = currentEvent.input[field]
+                  const nextValue = streamEvent.event.input[field]
+                  return [
+                    field,
+                    typeof currentValue === "string" &&
+                    typeof nextValue === "string" &&
+                    currentValue.length > nextValue.length &&
+                    currentValue.startsWith(nextValue)
+                      ? currentValue
+                      : nextValue ?? currentValue,
+                  ]
+                })
+              ),
+            }
+          : streamEvent.event
       return {
         ...run,
         events: run.events.map((event, index) =>
-          index === eventIndex ? streamEvent.event : event
+          index === eventIndex ? nextEvent : event
         ),
+      }
+    })
+  }
+  if (streamEvent.type === "tool_input_delta") {
+    return runs.map((run) => {
+      if (run.id !== runId) return run
+      const sameStream =
+        !streamEvent.stream_epoch ||
+        streamEvent.stream_epoch === run.live_stream_epoch
+      if (
+        sameStream &&
+        streamEvent.live_sequence &&
+        run.live_stream_cursor &&
+        compareLiveStreamIds(
+          streamEvent.live_sequence,
+          run.live_stream_cursor
+        ) <= 0
+      ) {
+        return run
+      }
+      let found = false
+      const events = run.events.map((event) => {
+        if (event.call_id !== streamEvent.call_id) return event
+        found = true
+        const input = sameStream ? event.input : {}
+        const current =
+          typeof input[streamEvent.field] === "string"
+            ? String(input[streamEvent.field])
+            : ""
+        return {
+          ...event,
+          tool_name: streamEvent.tool_name || event.tool_name,
+          tool_label: streamEvent.tool_name || event.tool_label,
+          input: {
+            ...input,
+            [streamEvent.field]: streamEvent.replace
+              ? streamEvent.delta
+              : current + streamEvent.delta,
+          },
+        }
+      })
+      if (!found) {
+        events.push({
+          type: "tool",
+          turn: streamEvent.turn,
+          tool_name: streamEvent.tool_name,
+          status: "running",
+          summary: "agent.preparing_tool_call",
+          call_id: streamEvent.call_id,
+          tool_label: streamEvent.tool_name,
+          tool_kind: "unknown",
+          server_name: "",
+          input: { [streamEvent.field]: streamEvent.delta },
+          output: null,
+          duration_ms: 0,
+        })
+      }
+      return {
+        ...run,
+        events,
+        live_stream_epoch:
+          streamEvent.stream_epoch ?? run.live_stream_epoch,
+        live_stream_cursor:
+          streamEvent.live_sequence ?? run.live_stream_cursor,
       }
     })
   }

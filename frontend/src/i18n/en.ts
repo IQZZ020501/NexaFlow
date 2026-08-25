@@ -486,6 +486,9 @@ export const en = {
   "在工作流沙箱中运行 Python 代码。":
     "Run Python code in the Workflow sandbox.",
   "返回当前 UTC 时间。": "Return the current UTC time.",
+  创建文件: "Create file",
+  "在隔离沙箱中生成或重写任意常见文件，并提供可下载链接。":
+    "Generate or rewrite common files of any type in the isolated sandbox and provide a download link.",
   可用: "Available",
   不可用: "Unavailable",
   没有使用权限: "No use permission",
@@ -926,6 +929,7 @@ export const en = {
   暂时无法完成依据核验:
     "Answer evidence verification is temporarily unavailable",
   正在整理工具结果: "Reviewing tool results",
+  正在准备工具调用: "Preparing the tool call",
   已完成分析: "Analysis complete",
   "正在调用 {name}": "Calling {name}",
   正在生成回答: "Generating the answer",

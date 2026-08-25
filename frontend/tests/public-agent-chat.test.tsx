@@ -191,6 +191,15 @@ const FULL_PROGRESS: ExternalAgentProgressEvent[] = [
     count: null,
     hits: [],
   },
+  {
+    id: "preparing-1",
+    type: "analysis",
+    status: "running",
+    stage: "running",
+    turn: 4,
+    count: null,
+    hits: [],
+  },
   knowledgeEvent("k1", "running"),
   knowledgeEvent("k2", "succeeded", {
     count: 2,
@@ -1046,6 +1055,22 @@ describe("public-agent-chat helpers", () => {
       })
     ).toBe("web_search")
     expect(
+      publicToolName(
+        {
+          id: "t3",
+          type: "tool",
+          status: "succeeded",
+          stage: "succeeded",
+          turn: 1,
+          count: null,
+          tool_label: "Create document or page",
+          tool_name: "create_artifact",
+          hits: [],
+        },
+        t
+      )
+    ).toBe("创建文件")
+    expect(
       hasPublicToolDetails({
         id: "k1",
         type: "knowledge",
@@ -1403,6 +1428,47 @@ describe("PublicAgentChat", () => {
     expect(replaced).toEqual([])
   })
 
+  test("renders generated artifacts as filename download links", async () => {
+    const downloadUrl = "/api/v1/artifacts/signed-token"
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL("https://nexaflow.example/chat/agent-1")
+    fetchHandler = agentFetchHandler({
+      conversations: { items: [conversation("conv-1", "生成制度文件")] },
+      history: {
+        items: [
+          run({
+            result: `📄 下载地址：\`${downloadUrl}\``,
+            progress: [
+              toolEvent("artifact-1", "succeeded", {
+                tool_name: "create_artifact",
+                output: {
+                  filename: "公司内部管理制度汇编.docx",
+                  download_url: downloadUrl,
+                },
+              }),
+            ],
+          }),
+        ],
+        total: 1,
+        offset: 0,
+        limit: 200,
+      },
+    })
+
+    renderPage(<PublicAgentChat agentId="agent-1" />)
+
+    const link = await screen.findByRole("link", {
+      name: "公司内部管理制度汇编.docx",
+    })
+    expect(link.getAttribute("href")).toBe(downloadUrl)
+    expect(link.className).toContain("text-sky-600")
+    expect(link.hasAttribute("download")).toBe(true)
+    expect(link.getAttribute("target")).toBeNull()
+    expect(screen.queryByText(downloadUrl)).toBeNull()
+  })
+
   test("renders history runs, selects conversations, and starts fresh", async () => {
     const testWindow = window as typeof window & {
       happyDOM: { setURL: (url: string) => void }
@@ -1601,6 +1667,7 @@ describe("PublicAgentChat", () => {
     expect(screen.getByText("正在分析问题")).toBeTruthy()
     expect(screen.getByText("正在整理工具结果")).toBeTruthy()
     expect(screen.getByText("已完成分析")).toBeTruthy()
+    expect(screen.getByText("正在准备工具调用")).toBeTruthy()
     expect(screen.getByText("正在调用 知识库检索")).toBeTruthy()
     expect(screen.getByText("已检索 2 个知识片段")).toBeTruthy()
     expect(screen.getByText("已检索 0 个知识片段")).toBeTruthy()

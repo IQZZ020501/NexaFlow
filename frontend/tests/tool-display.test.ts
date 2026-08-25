@@ -1,14 +1,17 @@
 /* @jsxImportSource react */
 import { describe, expect, test } from "bun:test"
 
-import type { TFunction } from "../src/i18n"
+import { translate, type Language, type TFunction } from "../src/i18n"
 import {
   toolDisplayDescription,
   toolDisplayName,
   toolSourceDisplayName,
+  withArtifactDownloadLinks,
 } from "../src/lib/tool-display"
 
 const t = ((key: string) => key) as TFunction
+const translated = (language: Language) =>
+  ((key, values) => translate(language, key, values)) as TFunction
 
 describe("tool display helpers", () => {
   test("localizes built-in tool display names", () => {
@@ -32,6 +35,16 @@ describe("tool display helpers", () => {
         t
       )
     ).toBe("当前时间")
+    expect(
+      toolDisplayName(
+        {
+          function_name: "create_artifact",
+          display_name: "Create document or page",
+          description: "Creates a file",
+        },
+        t
+      )
+    ).toBe("创建文件")
   })
 
   test("falls back to the configured display name for custom tools", () => {
@@ -68,6 +81,36 @@ describe("tool display helpers", () => {
         t
       )
     ).toBe("返回当前 UTC 时间。")
+    expect(
+      toolDisplayDescription(
+        {
+          function_name: "create_artifact",
+          display_name: "Create document or page",
+          description: "Creates a file",
+        },
+        t
+      )
+    ).toBe(
+      "在隔离沙箱中生成或重写任意常见文件，并提供可下载链接。"
+    )
+  })
+
+  test("translates the artifact tool in all supported languages", () => {
+    const tool = {
+      function_name: "create_artifact",
+      display_name: "Create document or page",
+      description: "Creates a file",
+    }
+
+    expect(toolDisplayName(tool, translated("zh-Hans"))).toBe("创建文件")
+    expect(toolDisplayName(tool, translated("zh-Hant"))).toBe("建立檔案")
+    expect(toolDisplayName(tool, translated("en"))).toBe("Create file")
+    expect(toolDisplayDescription(tool, translated("zh-Hant"))).toBe(
+      "在隔離沙箱中產生或重寫任意常見檔案，並提供可下載連結。"
+    )
+    expect(toolDisplayDescription(tool, translated("en"))).toBe(
+      "Generate or rewrite common files of any type in the isolated sandbox and provide a download link."
+    )
   })
 
   test("falls back to the configured description for custom tools", () => {
@@ -93,5 +136,47 @@ describe("tool display helpers", () => {
     expect(
       toolSourceDisplayName({ kind: "mcp", name: "Search MCP" }, t)
     ).toBe("Search MCP")
+  })
+
+  test("normalizes absolute artifact URLs and keeps the latest file version", () => {
+    const oldUrl = "/api/v1/artifacts/old-token"
+    const latestUrl = "/api/v1/artifacts/latest-token"
+    const value = withArtifactDownloadLinks(
+      `下载：https://chat.kimi.com${latestUrl}`,
+      [
+        {
+          tool_name: "create_artifact",
+          status: "succeeded",
+          output: { filename: "论文.docx", download_url: oldUrl },
+        },
+        {
+          tool_name: "create_artifact",
+          status: "succeeded",
+          output: { filename: "论文.docx", download_url: latestUrl },
+        },
+      ]
+    )
+
+    expect(value).toBe(`下载：[论文.docx](${latestUrl})`)
+    expect(value).not.toContain("chat.kimi.com")
+    expect(value).not.toContain(oldUrl)
+  })
+
+  test("replaces a copied artifact token with the verified filename link", () => {
+    const validUrl = "/api/v1/artifacts/valid-token"
+    const copiedUrl = "/api/v1/artifacts/copied-token"
+    const value = withArtifactDownloadLinks(
+      `下载链接：[${copiedUrl}](${copiedUrl})`,
+      [
+        {
+          tool_name: "create_artifact",
+          status: "succeeded",
+          output: { filename: "verify_stream.py", download_url: validUrl },
+        },
+      ]
+    )
+
+    expect(value).toBe(`下载链接：[verify_stream.py](${validUrl})`)
+    expect(value).not.toContain(copiedUrl)
   })
 })

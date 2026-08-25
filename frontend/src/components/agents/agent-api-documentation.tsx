@@ -171,6 +171,7 @@ Authorization: Bearer <API_KEY>
 Accept: application/x-ndjson
 
 {"type":"progress","event":{"id":"opaque-id","type":"knowledge","status":"succeeded","stage":"succeeded","turn":1,"count":3,"hits":[{"knowledge_base":"string","document":"string","content":"string"}]}}
+{"type":"tool_input_delta","id":"opaque-tool-id","turn":1,"tool_name":"string","field":"query","delta":"string","replace":false}
 {"type":"answer_delta","delta":"string"}
 {"type":"answer_reset"}
 {"type":"complete","run":${runResponse.replaceAll("\n", "")}}`,

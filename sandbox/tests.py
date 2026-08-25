@@ -107,11 +107,21 @@ def check_run_code_validation() -> None:
             lambda: execute_request(
                 {
                     "code": "pass",
-                    "artifact": {"format": "pdf", "filename": "x.pdf"},
+                    "artifact": {"format": "../zip", "filename": "x.zip"},
                 }
             ),
             ValueError,
             "artifact.format",
+        ),
+        (
+            lambda: execute_request(
+                {
+                    "code": "pass",
+                    "artifact": {"format": "py", "filename": "x.java"},
+                }
+            ),
+            ValueError,
+            "artifact.filename",
         ),
         (
             lambda: execute_request({"code": "pass", "skills": ["../documents"]}),
@@ -170,19 +180,85 @@ def check_artifact_outputs_and_skills() -> None:
         b"</html>"
     )
 
-    docx = execute_request(
-        {
-            "code": (
-                "import os, zipfile\n"
-                "with zipfile.ZipFile(os.environ['NEXAFLOW_OUTPUT_PATH'], 'w') as archive:\n"
-                "    archive.writestr('[Content_Types].xml', '<Types/>')\n"
-                "    archive.writestr('word/document.xml', '<document/>')\n"
-            ),
-            "artifact": {"format": "docx", "filename": "report.docx"},
-        }
-    )
-    assert docx["ok"] is True, docx
-    assert docx["artifact"]["filename"] == "report.docx"
+    for artifact_format, filename, code in [
+        (
+            "docx",
+            "report.docx",
+            "import os\n"
+            "from docx import Document\n"
+            "output_path = os.environ['NEXAFLOW_OUTPUT_PATH']\n"
+            "document = Document()\n"
+            "document.add_paragraph('ready')\n"
+            "document.save(output_path)\n",
+        ),
+        (
+            "xlsx",
+            "report.xlsx",
+            "import os\n"
+            "from openpyxl import Workbook\n"
+            "output_path = os.environ['NEXAFLOW_OUTPUT_PATH']\n"
+            "workbook = Workbook()\n"
+            "workbook.active['A1'] = 'ready'\n"
+            "workbook.save(output_path)\n",
+        ),
+        (
+            "pptx",
+            "slides.pptx",
+            "import os\n"
+            "from pptx import Presentation\n"
+            "output_path = os.environ['NEXAFLOW_OUTPUT_PATH']\n"
+            "presentation = Presentation()\n"
+            "presentation.slides.add_slide(presentation.slide_layouts[6])\n"
+            "presentation.save(output_path)\n",
+        ),
+        (
+            "pdf",
+            "report.pdf",
+            "import os, pymupdf\n"
+            "output_path = os.environ['NEXAFLOW_OUTPUT_PATH']\n"
+            "document = pymupdf.open()\n"
+            "page = document.new_page()\n"
+            "page.insert_text((72, 72), 'ready')\n"
+            "document.save(output_path)\n",
+        ),
+        (
+            "py",
+            "hello.py",
+            "import os\n"
+            "open(os.environ['NEXAFLOW_OUTPUT_PATH'], 'w', encoding='utf-8').write("
+            "\"print('hello')\\n\")\n",
+        ),
+        (
+            "java",
+            "Hello.java",
+            "import os\n"
+            "open(os.environ['NEXAFLOW_OUTPUT_PATH'], 'w', encoding='utf-8').write("
+            "'class Hello {}\\n')\n",
+        ),
+        (
+            "zip",
+            "bundle.zip",
+            "import os, zipfile\n"
+            "output_path = os.environ['NEXAFLOW_OUTPUT_PATH']\n"
+            "with zipfile.ZipFile(output_path, 'w') as archive:\n"
+            "    archive.writestr('hello.txt', 'ready')\n",
+        ),
+        (
+            "file",
+            "README",
+            "import os\n"
+            "open(os.environ['NEXAFLOW_OUTPUT_PATH'], 'w', encoding='utf-8').write('ready')\n",
+        ),
+    ]:
+        result = execute_request(
+            {
+                "code": code,
+                "artifact": {"format": artifact_format, "filename": filename},
+            }
+        )
+        assert result["ok"] is True, result
+        assert result["artifact"]["format"] == artifact_format
+        assert result["artifact"]["filename"] == filename
 
     with tempfile.TemporaryDirectory() as directory:
         skill = Path(directory) / "documents"
@@ -239,27 +315,6 @@ def check_artifact_error_paths() -> None:
             "html",
             "empty.html",
             "artifact_empty",
-        ),
-        (
-            "import os\nopen(os.environ['NEXAFLOW_OUTPUT_PATH'], 'wb').write(b'\\xff')",
-            "html",
-            "invalid.html",
-            "artifact_invalid",
-        ),
-        (
-            "import os\n"
-            "open(os.environ['NEXAFLOW_OUTPUT_PATH'], 'wb').write(b'not-a-zip')",
-            "docx",
-            "invalid.docx",
-            "artifact_invalid",
-        ),
-        (
-            "import os, zipfile\n"
-            "with zipfile.ZipFile(os.environ['NEXAFLOW_OUTPUT_PATH'], 'w') as archive:\n"
-            "    archive.writestr('other.xml', '<x/>')\n",
-            "docx",
-            "incomplete.docx",
-            "artifact_invalid",
         ),
     ]:
         result = execute_request(
