@@ -785,6 +785,7 @@ describe("AgentDetailWorkspace preview", () => {
       reasoning.compareDocumentPosition(preparing) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+    fireEvent.click(preparing.closest("button")!)
     expect(
       screen.getByText(
         (_, element) =>

@@ -203,7 +203,7 @@ function ToolEventDetails({
   t: TFunction
 }) {
   const isPreparing = event.summary === "agent.preparing_tool_call"
-  const [isOpen, setIsOpen] = React.useState(isPreparing)
+  const [isOpen, setIsOpen] = React.useState(false)
   const toolName =
     event.tool_kind === "knowledge"
       ? t("知识库检索")

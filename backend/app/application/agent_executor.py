@@ -353,7 +353,11 @@ class DurableToolLedger:
                         tool_name=call["name"],
                         tool_kind=metadata["kind"],
                         server_name=metadata["server_name"],
-                        arguments=safe_event_value(arguments),
+                        arguments=safe_event_value(
+                            arguments,
+                            max_string_chars=None,
+                            max_list_items=None,
+                        ),
                         arguments_hash=arguments_hash,
                         definition_hash=metadata.get("definition_hash", ""),
                         policy_mode=policy_mode,

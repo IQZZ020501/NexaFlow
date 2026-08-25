@@ -227,7 +227,6 @@ const FULL_PROGRESS: ExternalAgentProgressEvent[] = [
     server_name: "Tavily",
     input: { query: "NexaFlow" },
     output: { results: ["r1"] },
-    input_truncated: true,
   }),
   toolEvent("f1", "failed", {
     tool_name: "db_query",
@@ -1658,7 +1657,7 @@ describe("PublicAgentChat", () => {
               { type: "progress", sequence: 2, event: knowledgeEvent("k2", "succeeded", { count: 2, hits: [{ knowledge_base: "kb-1", document: "doc-1", content: "片段内容" }] }) },
               { type: "progress", sequence: 3, event: knowledgeEvent("k3", "succeeded", { count: 0 }) },
               { type: "progress", sequence: 4, event: toolEvent("t1", "running", { tool_name: "search", tool_label: "Search", tool_kind: "mcp", server_name: "Tavily", input: { q: "x" } }) },
-              { type: "progress", sequence: 5, event: toolEvent("t2", "succeeded", { tool_name: "web_search", tool_label: "Web search", tool_kind: "mcp", server_name: "Tavily", input: { query: "NexaFlow" }, output: { results: ["r1"] }, input_truncated: true }) },
+              { type: "progress", sequence: 5, event: toolEvent("t2", "succeeded", { tool_name: "web_search", tool_label: "Web search", tool_kind: "mcp", server_name: "Tavily", input: { query: "NexaFlow" }, output: { results: ["r1"] } }) },
               { type: "progress", sequence: 6, event: toolEvent("f1", "failed", { tool_name: "db_query", tool_label: "DB Query" }) },
               { type: "progress", sequence: 7, event: toolEvent("g1", "succeeded") },
               { type: "progress", sequence: 8, event: { id: "a1", type: "answer", status: "running", stage: "analyzing", turn: 1, count: null, hits: [] } },
@@ -1727,7 +1726,7 @@ describe("PublicAgentChat", () => {
     // Expand the succeeded tool row to reveal input and output.
     fireEvent.click(screen.getByRole("button", { name: /Web search/ }))
     expect(screen.getByText("调用输入")).toBeTruthy()
-    expect(screen.getByText(/内容过长已截断/)).toBeTruthy()
+    expect(screen.queryByText(/内容过长已截断/)).toBeNull()
     expect(screen.getByText(/query/)).toBeTruthy()
     expect(screen.getByText(/r1/)).toBeTruthy()
 

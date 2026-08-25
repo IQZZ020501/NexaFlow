@@ -5699,7 +5699,10 @@ def test_external_progress_events_bound_tool_inputs_and_pass_output() -> None:
         ],
         "succeeded",
     )
-    assert progress[0].input_truncated is True
+    assert progress[0].input_truncated is False
+    assert progress[0].input == {
+        "query": "x" * (TOOL_INPUT_LIMITS.max_string + 50)
+    }
     assert progress[0].output == huge_output
 
 

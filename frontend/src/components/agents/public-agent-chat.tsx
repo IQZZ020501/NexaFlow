@@ -180,7 +180,7 @@ function PublicToolEventRow({
 }) {
   const { t } = useLanguage()
   const isPreparing = event.stage === "preparing"
-  const [isOpen, setIsOpen] = React.useState(isPreparing)
+  const [isOpen, setIsOpen] = React.useState(false)
   const canExpand = hasPublicToolDetails(event)
 
   const leading = (
