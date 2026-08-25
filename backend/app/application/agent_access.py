@@ -70,6 +70,7 @@ from app.shareddomain.agents.services import (
 )
 from app.shareddomain.agents.models import agent_run_display_status
 from app.shareddomain.audit.services import record_audit_log
+from app.shareddomain.agents.runtime.callbacks import safe_event_value
 
 ExternalAccessSource = Literal["public", "api"]
 
@@ -132,7 +133,7 @@ class ToolPayloadLimits:
     max_serialized: int
 
 
-# 调用参数通常很小：收紧限制防止异常参数撑爆公开流。
+# 调用输入由运行时保留完整内容；敏感字段仍在事件生成时脱敏。
 # 调用结果（output）完整透传，不做截断。
 TOOL_INPUT_LIMITS = ToolPayloadLimits(
     max_string=500,
@@ -343,9 +344,10 @@ def external_progress_events(
                             content=str(raw_hit.get("content") or ""),
                         )
                     )
-        bounded_input, input_truncated = _bounded_tool_payload(
-            raw_input if isinstance(raw_input, dict) else {},
-            TOOL_INPUT_LIMITS,
+        bounded_input = (
+            safe_event_value(raw_input, max_string_chars=None, max_list_items=None)
+            if isinstance(raw_input, dict)
+            else {}
         )
         upsert(
             ExternalAgentProgressEventResponse(
@@ -365,7 +367,7 @@ def external_progress_events(
                 server_name=str(event.get("server_name") or ""),
                 input=bounded_input,
                 output=None if progress_type == "knowledge" else event.get("output"),
-                input_truncated=input_truncated,
+                input_truncated=False,
                 hits=hits,
             )
         )
@@ -445,21 +447,24 @@ async def sanitize_external_agent_stream(
                 },
                 "tool",
             )
-            field = str(event.get("field") or "")[:200]
+            field = str(event.get("field") or "")
             if not field:
                 continue
             inputs = streamed_tool_inputs.setdefault(progress_id, {})
             previous = inputs.get(field, "")
             raw_delta = str(event.get("delta") or "")
             candidate = raw_delta if event.get("replace") else previous + raw_delta
-            other_chars = sum(
-                len(value) for key, value in inputs.items() if key != field
+            safe_candidate = safe_event_value(
+                {field: candidate}, max_string_chars=None, max_list_items=None
+            )[field]
+            candidate = (
+                safe_candidate
+                if isinstance(safe_candidate, str)
+                else str(safe_candidate)
             )
-            allowed = max(0, TOOL_INPUT_LIMITS.max_total_chars - other_chars)
-            limited = candidate[:allowed]
-            inputs[field] = limited
-            replace = not limited.startswith(previous)
-            delta = limited if replace else limited[len(previous) :]
+            inputs[field] = candidate
+            replace = not candidate.startswith(previous)
+            delta = candidate if replace else candidate[len(previous) :]
             sanitized = {
                 "type": "tool_input_delta",
                 "id": progress_id,
@@ -468,7 +473,7 @@ async def sanitize_external_agent_stream(
                 "field": field,
                 "delta": delta,
                 "replace": replace,
-                "input_truncated": len(candidate) > len(limited),
+                "input_truncated": False,
             }
             _copy_external_stream_metadata(event, sanitized)
             yield sanitized

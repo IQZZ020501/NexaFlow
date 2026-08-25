@@ -21,30 +21,43 @@ def safe_event_value(
     value: Any,
     field_name: str = "",
     *,
-    max_string_chars: int = MAX_EVENT_STRING_CHARS,
+    max_string_chars: int | None = MAX_EVENT_STRING_CHARS,
+    max_list_items: int | None = MAX_EVENT_LIST_ITEMS,
 ) -> Any:
     normalized_field = field_name.lower()
     if any(part in normalized_field for part in SENSITIVE_FIELD_PARTS):
         return "[REDACTED]"
     if isinstance(value, str):
-        return value[:max_string_chars]
+        return value if max_string_chars is None else value[:max_string_chars]
     if isinstance(value, list):
+        items = value if max_list_items is None else value[:max_list_items]
         return [
-            safe_event_value(item, max_string_chars=max_string_chars)
-            for item in value[:MAX_EVENT_LIST_ITEMS]
+            safe_event_value(
+                item,
+                max_string_chars=max_string_chars,
+                max_list_items=max_list_items,
+            )
+            for item in items
         ]
     if isinstance(value, dict):
+        items = (
+            value.items()
+            if max_list_items is None
+            else list(value.items())[:max_list_items]
+        )
         return {
             str(key): safe_event_value(
                 item,
                 str(key),
                 max_string_chars=max_string_chars,
+                max_list_items=max_list_items,
             )
-            for key, item in list(value.items())[:MAX_EVENT_LIST_ITEMS]
+            for key, item in items
         }
     if value is None or isinstance(value, (bool, int, float)):
         return value
-    return str(value)[:MAX_EVENT_STRING_CHARS]
+    text = str(value)
+    return text if max_string_chars is None else text[:max_string_chars]
 
 
 class AgentEventBus:
@@ -170,6 +183,10 @@ class NexaFlowCallback:
             "tool_label": metadata["display_name"],
             "tool_kind": metadata["kind"],
             "server_name": metadata["server_name"],
-            "input": safe_event_value(input_value),
+            "input": safe_event_value(
+                input_value,
+                max_string_chars=None,
+                max_list_items=None,
+            ),
             "output": None if result is None else safe_event_value(result.output),
         }

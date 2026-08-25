@@ -37,7 +37,6 @@ from app.shareddomain.agents.runtime.usage import merge_usage, usage_from_messag
 MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12
 MAX_REASONING_CHARS = 6000
-MAX_TOOL_INPUT_PREVIEW_CHARS = 32000
 MODEL_RESPONSE_TIMEOUT_SECONDS = 60
 TOOL_RESPONSE_TIMEOUT_SECONDS = 30
 
@@ -83,25 +82,18 @@ def partial_tool_input_preview(arguments: str) -> dict[str, str]:
         return {}
     if not isinstance(parsed, dict):
         return {}
-    safe_value = safe_event_value(
-        parsed,
-        max_string_chars=MAX_TOOL_INPUT_PREVIEW_CHARS,
-    )
+    safe_value = safe_event_value(parsed, max_string_chars=None, max_list_items=None)
     if not isinstance(safe_value, dict):
         return {}
-    remaining = MAX_TOOL_INPUT_PREVIEW_CHARS
     preview: dict[str, str] = {}
     for raw_field, value in safe_value.items():
-        if remaining <= 0:
-            break
         field = str(raw_field)
         text = (
             value
             if isinstance(value, str)
             else json.dumps(value, ensure_ascii=False, indent=2, default=str)
         )
-        preview[field] = text[:remaining]
-        remaining -= len(preview[field])
+        preview[field] = text
     return preview
 
 
