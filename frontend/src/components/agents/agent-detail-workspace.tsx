@@ -208,8 +208,8 @@ function ToolEventDetails({
     event.tool_kind === "knowledge"
       ? t("知识库检索")
       : processToolName(event, t)
-  const label = isPreparing ? t("正在准备工具调用") : toolName
-  const detail = isPreparing ? toolName : processSummary(event, run, t)
+  const label = toolName
+  const detail = isPreparing ? null : processSummary(event, run, t)
 
   return (
     <div className="overflow-hidden rounded-lg border bg-background/70">

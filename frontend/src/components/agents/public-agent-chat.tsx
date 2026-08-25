@@ -378,13 +378,10 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
 
   function title(event: ExternalAgentProgressEvent) {
     if (event.type === "knowledge") return t("知识库检索")
-    if (event.type === "tool")
-      return event.stage === "preparing"
-        ? t("正在准备工具调用")
-        : publicToolName(event, t) || t("工具")
+    if (event.type === "tool") return publicToolName(event, t) || t("工具")
     if (event.type === "answer")
       return t(event.status === "succeeded" ? "回答已生成" : "正在生成回答")
-    if (event.stage === "running") return t("正在准备工具调用")
+    if (event.stage === "running") return t("正在分析问题")
     if (event.stage === "reviewing") return t("正在整理工具结果")
     if (event.stage === "completed") return t("已完成分析")
     return t("正在分析问题")
@@ -392,8 +389,7 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
 
   function detail(event: ExternalAgentProgressEvent) {
     if (event.type === "analysis" || event.type === "answer") return null
-    if (event.stage === "preparing")
-      return publicToolName(event, t) || t("工具")
+    if (event.stage === "preparing") return null
     if (event.status === "running") {
       return t("正在调用 {name}", { name: title(event) })
     }
