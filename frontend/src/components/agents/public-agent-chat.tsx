@@ -870,7 +870,6 @@ export function PublicAgentChat({
   const initialConversationIdRef = React.useRef(initialConversationId)
   const tRef = React.useRef(t)
   const tokenRef = React.useRef(token)
-  const initializedAgentIdRef = React.useRef<string | null>(null)
 
   const loadRunToolCalls = React.useCallback(
     async (runId: string, controller?: AbortController) => {
@@ -916,8 +915,6 @@ export function PublicAgentChat({
     if (!isSessionRestored) return
     const currentToken = tokenRef.current
     if (!currentToken) return
-    if (initializedAgentIdRef.current === agentId) return
-    initializedAgentIdRef.current = agentId
     let current = true
     ;(async () => {
       try {
@@ -1325,8 +1322,8 @@ export function PublicAgentChat({
   }
 
   return (
-    <main className="grid h-svh min-h-0 bg-muted/20 md:grid-cols-[280px_minmax(0,1fr)]">
-      <aside className="hidden min-h-0 border-r md:block">
+    <main className="grid h-svh min-h-0 bg-muted/20 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
+      <aside className="hidden min-h-0 border-r lg:block">
         <ConversationHistory {...historyProps} />
       </aside>
 
@@ -1336,7 +1333,7 @@ export function PublicAgentChat({
             type="button"
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="lg:hidden"
             aria-label={t("打开历史记录")}
             title={t("打开历史记录")}
             onClick={() => setIsHistoryOpen(true)}
@@ -1365,7 +1362,7 @@ export function PublicAgentChat({
         </header>
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 py-8 sm:px-8">
+          <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-4 py-8 sm:px-8 2xl:max-w-6xl">
             {isRunsLoading ? (
               <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
                 <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
@@ -1476,13 +1473,13 @@ export function PublicAgentChat({
           {sendError ? (
             <p
               role="alert"
-              className="mx-auto mb-2 max-w-3xl text-xs text-destructive"
+              className="mx-auto mb-2 max-w-5xl text-xs text-destructive 2xl:max-w-6xl"
             >
               {sendError}
             </p>
           ) : null}
           <form
-            className="relative mx-auto max-w-3xl rounded-xl border bg-background p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring/40"
+            className="relative mx-auto max-w-5xl rounded-xl border bg-background p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring/40 2xl:max-w-6xl"
             onSubmit={handleAsk}
           >
             <input
@@ -1567,7 +1564,7 @@ export function PublicAgentChat({
       </section>
 
       <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-        <DialogContent side="right" className="p-0 md:hidden">
+        <DialogContent side="right" className="p-0 lg:hidden">
           <DialogHeader className="sr-only">
             <DialogTitle>{t("历史记录")}</DialogTitle>
             <DialogDescription>{t("选择或新建对话")}</DialogDescription>

@@ -23,7 +23,7 @@ with RAG, LLM-powered agents, and MCP tool integration — with a trilingual UI
 
 - **Backend**: FastAPI (Python ≥3.11), SQLAlchemy async, PostgreSQL, Celery +
   Redis, Qdrant
-- **Frontend**: Next.js 15 (App Router), React 19, TypeScript, Bun,
+- **Frontend**: Next.js 16 (App Router), React 19, TypeScript, Bun,
   shadcn/ui, Tailwind CSS
 - **Deploy**: Docker Compose, Nginx
 

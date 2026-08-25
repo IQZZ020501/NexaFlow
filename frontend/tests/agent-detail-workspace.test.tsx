@@ -1002,6 +1002,12 @@ describe("AgentOverviewPanel", () => {
       configurable: true,
     })
     renderPage(<Harness />)
+    const overview = screen.getByText("公开访问与 API").closest("section")
+    expect(overview?.className).toContain("max-w-[1600px]")
+    const accessGrid = screen
+      .getByText("公开访问链接")
+      .closest("div.min-w-0")?.parentElement
+    expect(accessGrid?.className).toContain("xl:grid")
     expect(screen.getByText(/\/chat\/agent-1/)).toBeTruthy()
     expect(screen.getByText("未发布")).toBeTruthy()
     expect(screen.getByText("发布后此链接才可访问。")).toBeTruthy()

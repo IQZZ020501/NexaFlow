@@ -409,7 +409,7 @@ export function AgentOverviewPanel({
 
   return (
     <div className="space-y-5 p-4 sm:p-6">
-      <section className="mx-auto w-full max-w-6xl rounded-xl border bg-background p-5 shadow-xs">
+      <section className="mx-auto w-full max-w-[1600px] rounded-xl border bg-background p-5 shadow-xs">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -427,7 +427,7 @@ export function AgentOverviewPanel({
           </Badge>
         </div>
 
-        <div className="mt-5 divide-y overflow-hidden rounded-lg border lg:grid lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+        <div className="mt-5 divide-y overflow-hidden rounded-lg border xl:grid xl:grid-cols-2 xl:divide-x xl:divide-y-0">
           <div className="min-w-0 p-4 sm:p-5">
             <div className="flex items-center gap-2 text-sm font-medium">
               <ExternalLinkIcon className="size-4 text-primary" />
