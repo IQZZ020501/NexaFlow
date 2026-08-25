@@ -52,6 +52,7 @@ export type McpSourceCreatePayload =
 export type ToolSummary = {
   id: string
   workspace_id: string
+  folder_id?: string | null
   kind: ToolKind
   function_name: string
   display_name: string

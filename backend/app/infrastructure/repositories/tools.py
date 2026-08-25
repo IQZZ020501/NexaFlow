@@ -271,6 +271,7 @@ async def list_tool_catalog_rows(
     db: AsyncSession,
     workspace_id: str,
     actor_id: str,
+    include_all: bool = False,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[ToolCatalogRow]:
@@ -311,13 +312,18 @@ async def list_tool_catalog_rows(
         .where(
             ToolOrm.workspace_id == workspace_id,
             ToolOrm.status != "archived",
+        )
+    )
+    if not include_all:
+        statement = statement.where(
             or_(
                 ToolOrm.kind == "builtin",
                 ToolOrm.created_by_user_id == actor_id,
                 grant.id.is_not(None),
-            ),
+            )
         )
-        .order_by(ToolOrm.created_at.desc(), ToolOrm.id.desc())
+    statement = (
+        statement.order_by(ToolOrm.created_at.desc(), ToolOrm.id.desc())
         .limit(limit)
         .offset(offset)
     )

@@ -42,6 +42,15 @@ export function formatDateTime(value: string, locale: string) {
   }).format(new Date(value))
 }
 
+export function formatUserIdentity(
+  name: string | null | undefined,
+  username: string | null | undefined,
+  fallback: string
+) {
+  if (name && username && name !== username) return `${name} · ${username}`
+  return name || username || fallback
+}
+
 type DefaultNamedScope = {
   name: string
   is_default: boolean

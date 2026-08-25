@@ -343,6 +343,7 @@ class Tool:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""
     source_id: str = ""
+    folder_id: str | None = None
     kind: str = "builtin"
     stable_key: str = ""
     function_name: str = ""

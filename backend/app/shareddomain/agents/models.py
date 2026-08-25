@@ -136,6 +136,11 @@ def queued_agent_run_status(generation: str) -> str:
 class Agent(Base):
     __tablename__ = "agents"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "folder_id"],
+            ["resource_folders.workspace_id", "resource_folders.id"],
+            name="fk_agents_folder_workspace",
+        ),
         UniqueConstraint("workspace_id", "name", name="uq_agents_workspace_name"),
         UniqueConstraint("workspace_id", "id", name="uq_agents_workspace_id"),
         CheckConstraint(
@@ -162,6 +167,7 @@ class Agent(Base):
         ForeignKey("workspaces.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    folder_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     app_type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="agent", server_default="agent"
     )

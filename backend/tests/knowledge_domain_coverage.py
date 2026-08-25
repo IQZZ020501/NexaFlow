@@ -4195,7 +4195,9 @@ async def run_direct_shareddomain_tests(
             limit=10,
             offset=0,
         )
-        assert any(item.id == direct_kb.id for item in listed)
+        listed_direct = next(item for item in listed if item.id == direct_kb.id)
+        assert listed_direct.created_by_name == alice.name
+        assert listed_direct.created_by_username == alice.username
 
         # ---- kb.get_knowledge_base 404 ----
         try:

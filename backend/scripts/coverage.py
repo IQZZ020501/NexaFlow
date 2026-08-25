@@ -19,6 +19,7 @@ SUITES = (
     "workspaces",
     "teams",
     "knowledge",
+    "resource_folders",
     "knowledge_graph",
     "knowledge_graph_edge_coverage",
     "llm",

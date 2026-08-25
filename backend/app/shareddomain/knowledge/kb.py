@@ -11,6 +11,7 @@ from app.entities.user import User
 from app.infrastructure.config import Settings
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
 from app.infrastructure.repositories import resource_permission as permission_repository
+from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.validation import normalize_name
 from app.ports import model_registry as model_repository
 from app.ports.llm import (
@@ -51,6 +52,7 @@ def knowledge_base_to_response(
         id=knowledge_base.id,
         workspace_id=knowledge_base.workspace_id,
         name=knowledge_base.name,
+        folder_id=knowledge_base.folder_id,
         description=knowledge_base.description,
         status=knowledge_base.status,
         embedding_model_id=knowledge_base.embedding_model_id,
@@ -148,8 +150,21 @@ async def list_knowledge_bases(
         limit,
         offset,
     )
+    creators = {
+        user.id: user
+        for user in await user_repository.list_users_by_ids(
+            db,
+            list(
+                dict.fromkeys(
+                    knowledge_base.created_by_user_id
+                    for knowledge_base, _, _, _ in rows
+                )
+            ),
+        )
+    }
     responses: list[KnowledgeBaseListItemResponse] = []
     for knowledge_base, grant, document_count, char_count in rows:
+        creator = creators.get(knowledge_base.created_by_user_id)
         permission = effective_permission(
             knowledge_base,
             actor,
@@ -162,6 +177,8 @@ async def list_knowledge_bases(
                     knowledge_base,
                     permission,
                 ).model_dump(),
+                created_by_name=creator.name if creator else None,
+                created_by_username=creator.username if creator else None,
                 document_count=document_count,
                 char_count=char_count,
             )

@@ -6,6 +6,7 @@ import {
   BracesIcon,
   Code2Icon,
   EyeIcon,
+  FolderInputIcon,
   LoaderCircleIcon,
   NetworkIcon,
   PlusIcon,
@@ -22,6 +23,10 @@ import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
 import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
 import { ToolPermissionsDialog } from "@/components/tools/tool-permissions-dialog"
+import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
+import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
+import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
+import { useResourceFolders } from "@/components/resource-folders/use-resource-folders"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
@@ -151,6 +156,7 @@ function transportLabel(transport: ToolSourceDetail["transport"]) {
 export function ToolsPage() {
   const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
+  const resourceFolders = useResourceFolders("tool")
   const [confirmAction, confirmDialog] = useConfirmDialog()
   const [tools, setTools] = React.useState<ToolSummary[]>([])
   const [sources, setSources] = React.useState<ToolSourceDetail[]>([])
@@ -164,6 +170,8 @@ export function ToolsPage() {
   }>({ open: false, tool: null })
   const [mcpDialogOpen, setMcpDialogOpen] = React.useState(false)
   const [permissionTool, setPermissionTool] =
+    React.useState<ToolSummary | null>(null)
+  const [moveToolTarget, setMoveToolTarget] =
     React.useState<ToolSummary | null>(null)
   const [detailTarget, setDetailTarget] = React.useState<ToolSummary | null>(
     null
@@ -229,10 +237,11 @@ export function ToolsPage() {
   const query = search.trim().toLowerCase()
   const filteredTools = tools.filter(
     (tool) =>
-      !query ||
+      (tool.folder_id ?? null) === resourceFolders.selectedFolderId &&
+      (!query ||
       `${displayToolName(tool)} ${displayToolDescription(tool)} ${displaySourceName(tool)} ${tool.function_name}`
         .toLowerCase()
-        .includes(query)
+        .includes(query))
   )
   const filteredSources = sources.filter(
     (source) =>
@@ -625,6 +634,29 @@ export function ToolsPage() {
         </section>
       ) : null}
 
+      <ResourceFolderLayout
+        sidebar={
+          <ResourceFolderTree
+            folders={resourceFolders.folders}
+            selectedFolderId={resourceFolders.selectedFolderId}
+            canManage={membershipRole === "admin"}
+            isLoading={resourceFolders.isLoading}
+            onSelect={resourceFolders.setSelectedFolderId}
+            onCreate={resourceFolders.create}
+            onRename={resourceFolders.rename}
+            onDelete={resourceFolders.remove}
+            onFolderDeleted={(folderId, parentId) =>
+              setTools((current) =>
+                current.map((tool) =>
+                  tool.folder_id === folderId
+                    ? { ...tool, folder_id: parentId }
+                    : tool
+                )
+              )
+            }
+          />
+        }
+      >
       {isLoading ? (
         <div className="flex min-h-72 items-center justify-center gap-2 rounded-xl border text-sm text-muted-foreground">
           <LoaderCircleIcon className="size-4 animate-spin" />
@@ -734,8 +766,14 @@ export function ToolsPage() {
                                 label={t("管理工具 {name}", {
                                   name: displayToolName(tool),
                                 })}
-                              >
-                                {tool.kind === "python" ? (
+                                >
+                                  <DropdownMenuItem
+                                    onSelect={() => setMoveToolTarget(tool)}
+                                  >
+                                    <FolderInputIcon />
+                                    {t("移动到文件夹")}
+                                  </DropdownMenuItem>
+                                  {tool.kind === "python" ? (
                                   <DropdownMenuItem
                                     onSelect={() =>
                                       setPythonDialog({ open: true, tool })
@@ -891,8 +929,27 @@ export function ToolsPage() {
               </section>
             ) : null
           )}
-        </div>
-      )}
+          </div>
+        )}
+      </ResourceFolderLayout>
+
+      <ResourceFolderPickerDialog
+        open={moveToolTarget !== null}
+        folders={resourceFolders.folders}
+        currentFolderId={moveToolTarget?.folder_id ?? null}
+        onOpenChange={(open) => !open && setMoveToolTarget(null)}
+        onMove={async (folderId) => {
+          if (!moveToolTarget) return
+          await resourceFolders.move(moveToolTarget.id, folderId)
+          setTools((current) =>
+            current.map((tool) =>
+              tool.id === moveToolTarget.id
+                ? { ...tool, folder_id: folderId }
+                : tool
+            )
+          )
+        }}
+      />
 
       <PythonToolDialog
         open={pythonDialog.open}

@@ -10,6 +10,7 @@ class Agent:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""
     name: str = ""
+    folder_id: str | None = None
     app_type: str = "agent"
     description: str = ""
     interaction_config: dict[str, Any] = field(default_factory=dict)

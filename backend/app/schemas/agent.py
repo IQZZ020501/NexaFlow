@@ -59,6 +59,7 @@ class AgentResponse(BaseModel):
     id: str
     workspace_id: str
     name: str
+    folder_id: str | None = None
     app_type: AppType
     description: str
     interaction_config: AgentInteractionConfig = Field(
@@ -77,6 +78,8 @@ class AgentResponse(BaseModel):
     published_by_user_id: str | None
     published_at: datetime | None
     created_by_user_id: str
+    created_by_name: str | None = None
+    created_by_username: str | None = None
     can_edit: bool
     created_at: datetime
     updated_at: datetime

@@ -186,6 +186,8 @@ export function makeAgent(overrides: Partial<Agent> = {}): Agent {
     published_by_user_id: null,
     published_at: null,
     created_by_user_id: "u-1",
+    created_by_name: "NexaFlow Admin",
+    created_by_username: "admin",
     can_edit: true,
     created_at: "2026-08-03T00:00:00Z",
     updated_at: "2026-08-03T00:00:00Z",
@@ -406,6 +408,12 @@ function fetchRouter(
         : u.pathname === c.pathname || u.pathname.startsWith(`${c.pathname}/`)
       if (matches) return c.respond(init, u.pathname, u.searchParams)
     }
+    if (
+      method === "GET" &&
+      u.pathname === `/api/v1/workspaces/${WS}/resource-folders`
+    ) {
+      return jsonResponse([])
+    }
     if (fallback) return fallback(url, init)
     throw new Error(`Unhandled ${method} ${u.pathname}`)
   }
@@ -560,7 +568,11 @@ describe("AgentsPage list view", () => {
   test("renders agent and workflow cards with badges and counts", async () => {
     routes = baseRoutes([
       makeAgent(),
-      makeWorkflow(),
+      makeWorkflow({
+        created_by_user_id: "u-other",
+        created_by_name: "Fuhua",
+        created_by_username: "Yang",
+      }),
       makeWorkflow({ id: "agent-3", name: "Nightly Report", published: false }),
     ])
     renderPage(<AgentsPage />)
@@ -576,11 +588,15 @@ describe("AgentsPage list view", () => {
     expect(within(agentCard).getByText("Agent")).toBeTruthy()
     expect(within(agentCard).getByText("已启用")).toBeTruthy()
     expect(within(agentCard).getByText("DeepSeek Chat")).toBeTruthy()
+    expect(within(agentCard).getByText("创建者：我")).toBeTruthy()
     expect(within(agentCard).getAllByText("1").length).toBe(2)
     expect(within(agentCard).getByText("工具")).toBeTruthy()
 
     const workflowCard = cardOf("Weekly Digest")
     expect(within(workflowCard).getByText("工作流")).toBeTruthy()
+    expect(
+      within(workflowCard).getByText("创建者：Fuhua · Yang")
+    ).toBeTruthy()
     expect(within(workflowCard).getAllByText("0").length).toBe(2)
 
     expect(screen.getByText("已加载全部")).toBeTruthy()

@@ -58,6 +58,7 @@ class KnowledgeBase:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""
     name: str = ""
+    folder_id: str | None = None
     description: str = ""
     status: str = "active"
     embedding_model_id: str | None = None
