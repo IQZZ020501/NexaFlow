@@ -77,6 +77,8 @@ class AgentResponse(BaseModel):
     published_by_user_id: str | None
     published_at: datetime | None
     created_by_user_id: str
+    created_by_name: str | None = None
+    created_by_username: str | None = None
     can_edit: bool
     created_at: datetime
     updated_at: datetime

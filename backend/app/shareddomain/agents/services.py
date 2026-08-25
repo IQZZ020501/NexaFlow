@@ -12,6 +12,7 @@ from app.entities.user import User
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import tools as tools_repository
+from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.validation import normalize_name
 from app.schemas.agent import (
@@ -78,6 +79,7 @@ def agent_to_response(
     workspace_role: str | None,
     *,
     has_unpublished_changes: bool,
+    creator: User | None = None,
 ) -> AgentResponse:
     return AgentResponse(
         id=agent.id,
@@ -99,6 +101,8 @@ def agent_to_response(
         published_by_user_id=agent.published_by_user_id,
         published_at=agent.published_at,
         created_by_user_id=agent.created_by_user_id,
+        created_by_name=creator.name if creator else None,
+        created_by_username=creator.username if creator else None,
         can_edit=can_edit_agent(agent, actor, workspace_role),
         created_at=agent.created_at,
         updated_at=agent.updated_at,
@@ -410,6 +414,13 @@ async def list_agents(
         workspace_id,
         application_ids,
     )
+    creators = {
+        user.id: user
+        for user in await user_repository.list_users_by_ids(
+            db,
+            list(dict.fromkeys(agent.created_by_user_id for agent in agents)),
+        )
+    }
     responses: list[AgentResponse] = []
     for agent in agents:
         knowledge_bases = await accessible_agent_knowledge_bases(
@@ -427,6 +438,7 @@ async def list_agents(
                 legacy_mcp_bindings[agent.id],
                 actor,
                 workspace_role,
+                creator=creators.get(agent.created_by_user_id),
                 has_unpublished_changes=_agent_has_unpublished_changes(
                     agent,
                     bindings[agent.id],

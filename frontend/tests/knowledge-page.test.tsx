@@ -164,6 +164,8 @@ function makeKnowledgeBase(overrides: Record<string, unknown> = {}) {
     embedding_model_id: "model-emb",
     reranker_model_id: null,
     created_by_user_id: "u-admin",
+    created_by_name: "NexaFlow Admin",
+    created_by_username: "admin",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-02T00:00:00Z",
     permission: "edit",
@@ -312,6 +314,7 @@ describe("KnowledgeBasePage list view", () => {
       expect(screen.getByText("KB Alpha")).toBeTruthy()
     })
     expect(screen.getByText("Alpha docs")).toBeTruthy()
+    expect(screen.getByText("创建者：我")).toBeTruthy()
     expect(screen.getByText("已启用")).toBeTruthy() // StatusBadge
     expect(screen.getByText("可编辑")).toBeTruthy() // PermissionBadge
     expect(screen.getByText("文档数")).toBeTruthy()
@@ -353,6 +356,9 @@ describe("KnowledgeBasePage list view", () => {
             id: "kb-2",
             name: "HR Handbook",
             description: "People policy",
+            created_by_user_id: "u-other",
+            created_by_name: "Fuhua",
+            created_by_username: "Yang",
           }),
         ])
       }
@@ -366,6 +372,7 @@ describe("KnowledgeBasePage list view", () => {
     const search = screen.getByPlaceholderText("搜索知识库...")
     fireEvent.change(search, { target: { value: "HR" } })
     expect(screen.getByText("HR Handbook")).toBeTruthy()
+    expect(screen.getByText("创建者：Fuhua · Yang")).toBeTruthy()
     expect(screen.queryByText("KB Alpha")).toBeNull()
 
     fireEvent.change(search, { target: { value: "zzz" } })

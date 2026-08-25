@@ -370,7 +370,9 @@ async def exercise_services_http_paths(
         listed = await agent_services.list_agents(
             db, workspace_id, actor, "admin", limit=10, offset=0
         )
-        assert any(item.id == created.id for item in listed)
+        listed_created = next(item for item in listed if item.id == created.id)
+        assert listed_created.created_by_name
+        assert listed_created.created_by_username
         response = await agent_services.get_agent_response(
             db, created_agent, actor, "admin"
         )

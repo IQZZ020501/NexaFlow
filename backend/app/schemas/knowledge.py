@@ -26,6 +26,8 @@ class KnowledgeBaseResponse(BaseModel):
 
 
 class KnowledgeBaseListItemResponse(KnowledgeBaseResponse):
+    created_by_name: str | None = None
+    created_by_username: str | None = None
     document_count: int
     char_count: int
 

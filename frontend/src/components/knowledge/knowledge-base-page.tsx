@@ -97,7 +97,12 @@ import { listWorkspaceMembers } from "@/lib/api/system"
 import type { WorkspaceMember } from "@/lib/api/system"
 import { languageLocales, type TFunction, type TranslationKey } from "@/i18n"
 import { cn } from "@/lib/utils"
-import { formatDateTime, getMembershipRole, modelLabel } from "@/lib/display"
+import {
+  formatDateTime,
+  formatUserIdentity,
+  getMembershipRole,
+  modelLabel,
+} from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import {
   knowledgeUploadPath,
@@ -2831,6 +2836,19 @@ function KnowledgeBasePageContent({
                                     knowledgeBase.updated_at,
                                     locale
                                   )}
+                              </p>
+                              <p className="mt-1 truncate text-xs text-muted-foreground">
+                                {t("创建者：{creator}", {
+                                  creator:
+                                    knowledgeBase.created_by_user_id ===
+                                    me.user.id
+                                      ? t("我")
+                                      : formatUserIdentity(
+                                          knowledgeBase.created_by_name,
+                                          knowledgeBase.created_by_username,
+                                          knowledgeBase.created_by_user_id
+                                        ),
+                                })}
                               </p>
                             </div>
                           </div>

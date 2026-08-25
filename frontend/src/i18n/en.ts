@@ -92,6 +92,8 @@ export const en = {
   "工作空间 ID": "Workspace ID",
   账号: "Account",
   姓名: "Name",
+  我: "Me",
+  "创建者：{creator}": "Created by: {creator}",
   全局管理员: "Global admin",
   工作空间管理员: "Workspace admin",
   团队管理员: "Team admin",

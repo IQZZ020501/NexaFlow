@@ -38,6 +38,8 @@ export type Agent = {
   published_at: string | null
   current_published_version_id?: string | null
   created_by_user_id: string
+  created_by_name?: string | null
+  created_by_username?: string | null
   can_edit: boolean
   created_at: string
   updated_at: string

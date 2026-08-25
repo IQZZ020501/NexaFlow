@@ -21,6 +21,8 @@ export type KnowledgeBase = {
 
 /** List-item variant: the list API always reports capacity stats. */
 export type KnowledgeBaseListItem = KnowledgeBase & {
+  created_by_name?: string | null
+  created_by_username?: string | null
   document_count: number
   char_count: number
 }

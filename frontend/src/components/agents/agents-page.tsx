@@ -83,7 +83,7 @@ import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/api/system"
 import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { getErrorMessage } from "@/lib/errors"
 import { latestRunVersions } from "@/lib/run-versions"
-import { getMembershipRole } from "@/lib/display"
+import { formatUserIdentity, getMembershipRole } from "@/lib/display"
 import { appViewPath, type AgentDetailView } from "@/lib/agent-views"
 import {
   defaultInteractionConfig,
@@ -1949,6 +1949,18 @@ export function AgentsPage({
                         </div>
                         <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-muted-foreground">
                           {modelLine(agent.model_id)}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          {t("创建者：{creator}", {
+                            creator:
+                              agent.created_by_user_id === me.user.id
+                                ? t("我")
+                                : formatUserIdentity(
+                                    agent.created_by_name,
+                                    agent.created_by_username,
+                                    agent.created_by_user_id
+                                  ),
+                          })}
                         </p>
                       </div>
                     </div>
