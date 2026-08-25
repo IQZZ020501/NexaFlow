@@ -188,5 +188,9 @@ class NexaFlowCallback:
                 max_string_chars=None,
                 max_list_items=None,
             ),
-            "output": None if result is None else safe_event_value(result.output),
+            "output": (
+                None
+                if result is None
+                else safe_event_value(result.content if result.is_error else result.output)
+            ),
         }

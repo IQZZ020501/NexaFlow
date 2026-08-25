@@ -397,7 +397,11 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
     if (event.status === "running") {
       return t("正在调用 {name}", { name: title(event) })
     }
-    if (event.status === "failed") return t("调用失败")
+    if (event.status === "failed") {
+      return typeof event.output === "string" && event.output
+        ? event.output
+        : t("调用失败")
+    }
     if (event.type === "knowledge" && event.count !== null) {
       return t("已检索 {value} 个知识片段", { value: event.count })
     }

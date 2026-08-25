@@ -597,7 +597,7 @@ def build_python_artifact_tool(
         "properties": {
             "code": {
                 "type": "string",
-                "maxLength": 32768,
+                "maxLength": 262144,
                 "description": (
                     "Exact UTF-8 file contents for plain-text/source files, or Python "
                     "generator code that writes rich/binary output to output_path."

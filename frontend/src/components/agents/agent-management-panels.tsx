@@ -62,6 +62,7 @@ import {
 import { copyText } from "@/lib/clipboard"
 import { formatDateTime } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
+import { withArtifactDownloadLinksInContent } from "@/lib/tool-display"
 import type { TFunction } from "@/i18n"
 
 type PanelProps = {
@@ -901,7 +902,9 @@ export function AgentLogsPanel({
                 <div className="mt-1 rounded-lg border bg-muted/20 p-3">
                   {selectedLog.result ? (
                     <MarkdownContent
-                      content={selectedLog.result}
+                      content={withArtifactDownloadLinksInContent(
+                        selectedLog.result
+                      )}
                       className="break-words [overflow-wrap:anywhere]"
                     />
                   ) : (
