@@ -7,6 +7,7 @@ import {
   toolDisplayName,
   toolSourceDisplayName,
   withArtifactDownloadLinks,
+  withArtifactDownloadLinksInContent,
 } from "../src/lib/tool-display"
 
 const t = ((key: string) => key) as TFunction
@@ -178,5 +179,39 @@ describe("tool display helpers", () => {
 
     expect(value).toBe(`下载链接：[verify_stream.py](${validUrl})`)
     expect(value).not.toContain(copiedUrl)
+  })
+
+  test("normalizes raw artifact URLs in log content", () => {
+    const url = "/api/v1/artifacts/production-token"
+    const value = withArtifactDownloadLinksInContent(
+      `文件名：校外培训行政处罚相关条例汇编.docx\n下载链接：${url}`
+    )
+
+    expect(value).toContain(`[校外培训行政处罚相关条例汇编.docx](${url})`)
+    expect(value).not.toContain(`下载链接：${url}`)
+  })
+
+  test("normalizes links split by whitespace and ignores unmentioned artifacts", () => {
+    const url = "/api/v1/artifacts/document-token"
+    const tempUrl = "/api/v1/artifacts/test-token"
+    const value = withArtifactDownloadLinks(
+      `文件名：规章制度（通用模板）.docx\n下载：[规章制度（通用模板）.docx]\n(${url})`,
+      [
+        {
+          tool_name: "create_artifact",
+          status: "succeeded",
+          output: { filename: "规章制度（通用模板）.docx", download_url: url },
+        },
+        {
+          tool_name: "create_artifact",
+          status: "succeeded",
+          output: { filename: "test_docx.py", download_url: tempUrl },
+        },
+      ]
+    )
+
+    expect(value).toContain(`[规章制度（通用模板）.docx](${url})`)
+    expect(value).not.toContain(tempUrl)
+    expect(value).not.toContain("test_docx.py")
   })
 })

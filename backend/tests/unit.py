@@ -2924,6 +2924,13 @@ def test_python_tool_code_is_limited_to_eight_kibibytes() -> None:
         raise AssertionError("Oversized Python Tool code was accepted.")
 
 
+def test_artifact_tool_accepts_sandbox_sized_generator_code() -> None:
+    from app.shareddomain.tools.catalog import build_python_artifact_tool
+
+    _tool, version, _policy = build_python_artifact_tool("workspace-1")
+    assert version.input_schema["properties"]["code"]["maxLength"] == 262144
+
+
 def test_validate_agent_permission_only_accepts_view() -> None:
     validate_agent_permission("view")
     expect_http_error(lambda: validate_agent_permission("edit"), 422)
@@ -6824,6 +6831,7 @@ def main() -> None:
     test_python_tool_schema_rejects_defs_depth_bypass()
     test_python_tool_schema_rejects_legacy_definitions_property_bypass()
     test_python_tool_code_is_limited_to_eight_kibibytes()
+    test_artifact_tool_accepts_sandbox_sized_generator_code()
     test_knowledge_writes_recheck_locked_owner()
     test_clean_upload_filename_sanitizes_path_and_classification()
     test_parse_task_options_validates_boundaries()

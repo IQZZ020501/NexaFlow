@@ -10,7 +10,8 @@ from jsonschema import Draft202012Validator
 from app.entities.tools import Tool, ToolPolicy, ToolSnapshot, ToolSource, ToolVersion
 
 
-MAX_TOOL_INPUT_BYTES = 64 * 1024
+# Leave room for the JSON envelope around the sandbox's 256 KiB code limit.
+MAX_TOOL_INPUT_BYTES = 512 * 1024
 MAX_TOOL_RESULT_BYTES = 32 * 1024
 TOOL_APPROVAL_AUTO = "auto"
 TOOL_APPROVAL_DISABLED = "disabled"

@@ -541,6 +541,27 @@ def assert_callback_safety() -> None:
     assert isinstance(rendered["key"], str)
     assert len(rendered["key"]) <= 2000
 
+    from app.shareddomain.agents.runtime.callbacks import NexaFlowCallback
+
+    event = NexaFlowCallback(None).tool_event(
+        turn=1,
+        tool_name="create_artifact",
+        call_id="call-1",
+        metadata={
+            "display_name": "Create file",
+            "kind": "builtin",
+            "server_name": "",
+        },
+        input_value={"filename": "x.docx"},
+        result=AgentToolResult(
+            content="artifact_missing",
+            summary="Artifact generation failed.",
+            output=None,
+            is_error=True,
+        ),
+    )
+    assert event["output"] == "artifact_missing"
+
 
 async def checkpoint_state(**overrides: Any) -> dict[str, Any]:
     state = {
