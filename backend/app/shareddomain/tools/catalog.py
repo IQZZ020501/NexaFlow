@@ -578,41 +578,46 @@ def build_python_artifact_tool(
     source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
     tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:python_artifact")
     description = (
-        "Create a DOCX or self-contained static HTML file by running Python in "
-        "the isolated sandbox. Write the final file to the global output_path. "
-        "python-docx is available for DOCX files. HTML must use inline CSS and "
-        "must not use JavaScript or external resources. Requested administrator "
-        "Skills are readable below the global skills_dir. Include the returned "
-        "download_url verbatim in the final answer."
+        "Create or rewrite a downloadable file of any common type. Choose the exact "
+        "filename; its extension determines the file type, and extensionless names "
+        "are supported. For plain-text and source-code files, put the exact final "
+        "file contents in code; they are saved without being executed. For rich or "
+        "binary formats, put Python generator code in code and write the final file "
+        "to the global output_path in the isolated sandbox. python-docx, PyMuPDF, "
+        "openpyxl, python-pptx, Pillow, and the Python standard library are "
+        "available. User "
+        "attachment text is already included in the conversation and can be used "
+        "to produce an edited copy. Enforce requested measurable constraints in "
+        "the code before saving, and print concise validation results to stdout. "
+        "The returned metadata includes stdout. Include the returned download_url "
+        "verbatim in the final answer."
     )
     input_schema = {
         "type": "object",
         "properties": {
-            "code": {"type": "string", "maxLength": 32768},
-            "format": {
+            "code": {
                 "type": "string",
-                "enum": ["docx", "html"],
-                "maxLength": 10,
+                "maxLength": 32768,
+                "description": (
+                    "Exact UTF-8 file contents for plain-text/source files, or Python "
+                    "generator code that writes rich/binary output to output_path."
+                ),
             },
             "filename": {"type": "string", "maxLength": 120},
-            "skills": {
-                "type": "array",
-                "items": {"type": "string", "maxLength": 64},
-                "maxItems": 8,
-            },
         },
-        "required": ["code", "format", "filename"],
+        "required": ["code", "filename"],
         "additionalProperties": False,
     }
     output_schema = {
         "type": "object",
         "properties": {
             "artifact_id": {"type": "string", "maxLength": 36},
-            "format": {"type": "string", "maxLength": 10},
+            "format": {"type": "string", "maxLength": 32},
             "filename": {"type": "string", "maxLength": 120},
             "download_url": {"type": "string", "maxLength": 4096},
             "expires_at": {"type": "string", "maxLength": 64},
             "size_bytes": {"type": "integer"},
+            "stdout": {"type": "string", "maxLength": 2000},
         },
         "required": [
             "artifact_id",
@@ -621,6 +626,7 @@ def build_python_artifact_tool(
             "download_url",
             "expires_at",
             "size_bytes",
+            "stdout",
         ],
         "additionalProperties": False,
     }
@@ -654,7 +660,7 @@ def build_python_artifact_tool(
             workspace_id=workspace_id,
             tool_id=tool_id,
             revision=1,
-            display_name="Create document or page",
+            display_name="Create downloadable file",
             description=description,
             input_schema=input_schema,
             output_schema=output_schema,

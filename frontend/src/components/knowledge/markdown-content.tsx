@@ -131,15 +131,20 @@ const markdownComponents: Components = {
     )
   },
   a(props) {
-    const { className, ...restProps } = omitMarkdownNode(props)
+    const { className, href, ...restProps } = omitMarkdownNode(props)
+    const isArtifact = href?.startsWith("/api/v1/artifacts/") ?? false
     return (
       <a
         className={cn(
-          "font-medium text-primary underline-offset-4 hover:underline",
+          isArtifact
+            ? "font-medium text-sky-600 underline decoration-sky-600/40 underline-offset-4 hover:text-sky-700 dark:text-sky-400 dark:decoration-sky-400/50 dark:hover:text-sky-300"
+            : "font-medium text-primary underline-offset-4 hover:underline",
           className
         )}
-        target="_blank"
-        rel="noreferrer"
+        href={href}
+        download={isArtifact ? "" : undefined}
+        target={isArtifact ? undefined : "_blank"}
+        rel={isArtifact ? undefined : "noreferrer"}
         {...restProps}
       />
     )

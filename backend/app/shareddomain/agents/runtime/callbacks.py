@@ -17,17 +17,29 @@ SENSITIVE_FIELD_PARTS = (
 AgentEventHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
-def safe_event_value(value: Any, field_name: str = "") -> Any:
+def safe_event_value(
+    value: Any,
+    field_name: str = "",
+    *,
+    max_string_chars: int = MAX_EVENT_STRING_CHARS,
+) -> Any:
     normalized_field = field_name.lower()
     if any(part in normalized_field for part in SENSITIVE_FIELD_PARTS):
         return "[REDACTED]"
     if isinstance(value, str):
-        return value[:MAX_EVENT_STRING_CHARS]
+        return value[:max_string_chars]
     if isinstance(value, list):
-        return [safe_event_value(item) for item in value[:MAX_EVENT_LIST_ITEMS]]
+        return [
+            safe_event_value(item, max_string_chars=max_string_chars)
+            for item in value[:MAX_EVENT_LIST_ITEMS]
+        ]
     if isinstance(value, dict):
         return {
-            str(key): safe_event_value(item, str(key))
+            str(key): safe_event_value(
+                item,
+                str(key),
+                max_string_chars=max_string_chars,
+            )
             for key, item in list(value.items())[:MAX_EVENT_LIST_ITEMS]
         }
     if value is None or isinstance(value, (bool, int, float)):
@@ -70,6 +82,28 @@ class NexaFlowCallback:
             {"type": "reasoning_delta", "turn": turn, "delta": delta}
         )
 
+    async def tool_input_delta(
+        self,
+        *,
+        turn: int,
+        call_id: str,
+        tool_name: str,
+        field: str,
+        delta: str,
+        replace: bool,
+    ) -> None:
+        await self._event_bus.publish(
+            {
+                "type": "tool_input_delta",
+                "turn": turn,
+                "call_id": call_id,
+                "tool_name": tool_name,
+                "field": field,
+                "delta": delta,
+                "replace": replace,
+            }
+        )
+
     def thought(self, turn: int) -> dict[str, Any]:
         return {
             "type": "thought",
@@ -86,6 +120,28 @@ class NexaFlowCallback:
             "input": {},
             "output": None,
             "reasoning": "",
+        }
+
+    def preparing_tool_event(
+        self,
+        *,
+        turn: int,
+        tool_name: str,
+        call_id: str,
+    ) -> dict[str, Any]:
+        return {
+            "type": "tool",
+            "turn": turn,
+            "tool_name": tool_name,
+            "status": "running",
+            "summary": "agent.preparing_tool_call",
+            "call_id": call_id,
+            "tool_label": tool_name,
+            "tool_kind": "unknown",
+            "server_name": "",
+            "input": {},
+            "output": None,
+            "duration_ms": 0,
         }
 
     def tool_event(

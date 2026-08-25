@@ -13,8 +13,12 @@ const FILE_UPLOAD_TYPES: Record<AppType, readonly FileUploadType[]> = {
 
 const FILE_UPLOAD_EXTENSIONS: Partial<Record<FileUploadType, readonly string[]>> = {
   document: [
-    ".csv", ".docx", ".epub", ".html", ".ipynb", ".json", ".md", ".pdf",
-    ".pptx", ".txt", ".xls", ".xlsx", ".xml", ".zip",
+    ".c", ".cc", ".cpp", ".cs", ".css", ".csv", ".docx", ".epub",
+    ".go", ".h", ".hpp", ".html", ".ipynb", ".java", ".js", ".json",
+    ".jsx", ".kt", ".kts", ".md", ".pdf", ".php", ".pptx",
+    ".properties", ".py", ".rb", ".rs", ".sh", ".sql", ".swift",
+    ".toml", ".ts", ".tsx", ".txt", ".vue", ".xls", ".xlsx", ".xml",
+    ".yaml", ".yml", ".zip",
   ],
   image: [".jpeg", ".jpg", ".png", ".webp"],
 }

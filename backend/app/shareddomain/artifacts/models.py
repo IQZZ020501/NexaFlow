@@ -24,7 +24,7 @@ class GeneratedArtifact(Base):
             name="uq_generated_artifacts_idempotency",
         ),
         CheckConstraint(
-            "format IN ('docx', 'html')",
+            "length(format) BETWEEN 1 AND 32",
             name="ck_generated_artifacts_format",
         ),
         CheckConstraint(
@@ -41,7 +41,7 @@ class GeneratedArtifact(Base):
     )
     run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
-    format: Mapped[str] = mapped_column(String(10), nullable=False)
+    format: Mapped[str] = mapped_column(String(32), nullable=False)
     filename: Mapped[str] = mapped_column(String(120), nullable=False)
     media_type: Mapped[str] = mapped_column(String(120), nullable=False)
     # ponytail: bounded 5 MiB/24h DB blobs; move to ObjectStorage when volume warrants it.

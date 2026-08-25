@@ -28,6 +28,7 @@ import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { Button } from "@/components/ui/button"
 import { AgentAttachmentList } from "@/components/agents/agent-attachment-list"
+import { ToolInputPreview } from "@/components/agents/tool-input-preview"
 import {
   Dialog,
   DialogContent,
@@ -63,6 +64,10 @@ import {
   AGENT_FILE_UPLOAD_SETTING,
   acceptedUploadExtensions,
 } from "@/lib/interaction-config"
+import {
+  builtinToolDisplayName,
+  withArtifactDownloadLinks,
+} from "@/lib/tool-display"
 
 type PublicAgentChatProps = {
   agentId: string
@@ -135,8 +140,14 @@ function ReasoningBlock({ reasoning }: { reasoning: string }) {
   )
 }
 
-export function publicToolName(event: ExternalAgentProgressEvent) {
-  return event.tool_label || event.tool_name || ""
+export function publicToolName(
+  event: ExternalAgentProgressEvent,
+  t?: TFunction
+) {
+  const fallback = event.tool_label || event.tool_name || ""
+  return t
+    ? builtinToolDisplayName(event.tool_name || "", t) ?? fallback
+    : fallback
 }
 
 export function hasPublicToolDetails(event: ExternalAgentProgressEvent) {
@@ -168,7 +179,8 @@ function PublicToolEventRow({
   statusIcon: React.ReactNode
 }) {
   const { t } = useLanguage()
-  const [isOpen, setIsOpen] = React.useState(false)
+  const isPreparing = event.stage === "preparing"
+  const [isOpen, setIsOpen] = React.useState(isPreparing)
   const canExpand = hasPublicToolDetails(event)
 
   const leading = (
@@ -226,9 +238,10 @@ function PublicToolEventRow({
                   <span className="ml-1">({t("内容过长已截断")})</span>
                 ) : null}
               </p>
-              <pre className="max-h-44 overflow-auto rounded-md bg-background p-3 font-mono leading-5 break-words whitespace-pre-wrap">
-                {JSON.stringify(event.input, null, 2)}
-              </pre>
+              <ToolInputPreview
+                input={event.input ?? {}}
+                streaming={isPreparing}
+              />
             </div>
           ) : null}
           {event.type === "knowledge" ? (
@@ -365,9 +378,13 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
 
   function title(event: ExternalAgentProgressEvent) {
     if (event.type === "knowledge") return t("知识库检索")
-    if (event.type === "tool") return publicToolName(event) || t("工具")
+    if (event.type === "tool")
+      return event.stage === "preparing"
+        ? t("正在准备工具调用")
+        : publicToolName(event, t) || t("工具")
     if (event.type === "answer")
       return t(event.status === "succeeded" ? "回答已生成" : "正在生成回答")
+    if (event.stage === "running") return t("正在准备工具调用")
     if (event.stage === "reviewing") return t("正在整理工具结果")
     if (event.stage === "completed") return t("已完成分析")
     return t("正在分析问题")
@@ -375,6 +392,8 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
 
   function detail(event: ExternalAgentProgressEvent) {
     if (event.type === "analysis" || event.type === "answer") return null
+    if (event.stage === "preparing")
+      return publicToolName(event, t) || t("工具")
     if (event.status === "running") {
       return t("正在调用 {name}", { name: title(event) })
     }
@@ -481,7 +500,37 @@ export function mergePublicRunEvent(
       )
       const progress = [...run.progress]
       if (index === -1) progress.push(event.event)
-      else progress[index] = event.event
+      else {
+        const current = progress[index]
+        progress[index] =
+          current?.stage === "preparing" && event.event.type === "tool"
+            ? {
+                ...event.event,
+                input: Object.fromEntries(
+                  [
+                    ...new Set([
+                      ...Object.keys(current.input ?? {}),
+                      ...Object.keys(event.event.input ?? {}),
+                    ]),
+                  ].map((field) => {
+                    const currentValue = current.input?.[field]
+                    const nextValue = event.event.input?.[field]
+                    return [
+                      field,
+                      typeof currentValue === "string" &&
+                      typeof nextValue === "string" &&
+                      currentValue.length > nextValue.length &&
+                      currentValue.startsWith(nextValue)
+                        ? currentValue
+                        : nextValue ?? currentValue,
+                    ]
+                  })
+                ),
+                input_truncated:
+                  current.input_truncated || event.event.input_truncated,
+              }
+            : event.event
+      }
       if (event.event.type === "answer" && event.event.reasoning) {
         const analysisIndex = progress.findIndex(
           (item) => item.type === "analysis" && item.turn === event.event.turn
@@ -494,6 +543,67 @@ export function mergePublicRunEvent(
         }
       }
       return { ...run, progress }
+    })
+  }
+  if (event.type === "tool_input_delta") {
+    return runs.map((run) => {
+      if (run.id !== runId) return run
+      const sameStream =
+        !event.stream_epoch || event.stream_epoch === run.live_stream_epoch
+      if (
+        sameStream &&
+        event.live_sequence &&
+        run.live_stream_cursor &&
+        compareLiveStreamIds(event.live_sequence, run.live_stream_cursor) <= 0
+      ) {
+        return run
+      }
+      const progress = [...run.progress]
+      const index = progress.findIndex((item) => item.id === event.id)
+      if (index === -1) {
+        progress.push({
+          id: event.id,
+          type: "tool",
+          status: "running",
+          stage: "preparing",
+          turn: event.turn,
+          count: null,
+          tool_name: event.tool_name,
+          tool_label: event.tool_name,
+          tool_kind: "unknown",
+          server_name: "",
+          input: { [event.field]: event.delta },
+          output: null,
+          input_truncated: event.input_truncated,
+          hits: [],
+        })
+      } else {
+        const current = progress[index]
+        const input = sameStream ? current.input ?? {} : {}
+        const currentValue =
+          typeof input[event.field] === "string"
+            ? String(input[event.field])
+            : ""
+        progress[index] = {
+          ...current,
+          tool_name: event.tool_name || current.tool_name,
+          tool_label: event.tool_name || current.tool_label,
+          input: {
+            ...input,
+            [event.field]: event.replace
+              ? event.delta
+              : currentValue + event.delta,
+          },
+          input_truncated:
+            current.input_truncated || event.input_truncated,
+        }
+      }
+      return {
+        ...run,
+        progress,
+        live_stream_epoch: event.stream_epoch ?? run.live_stream_epoch,
+        live_stream_cursor: event.live_sequence ?? run.live_stream_cursor,
+      }
     })
   }
   if (event.type === "answer_delta") {
@@ -1317,7 +1427,10 @@ export function PublicAgentChat({
                             ))}
                           {run.result ? (
                             <MarkdownContent
-                              content={run.result}
+                              content={withArtifactDownloadLinks(
+                                run.result,
+                                run.progress
+                              )}
                               className="text-sm leading-6"
                             />
                           ) : run.status === "failed" ? (

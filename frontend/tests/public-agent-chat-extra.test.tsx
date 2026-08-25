@@ -393,6 +393,68 @@ describe("public chat pure helpers", () => {
     ).toBe("")
   })
 
+  test("mergePublicRunEvent streams a preparing tool input after analysis", () => {
+    const base = run({
+      status: "running",
+      result: "",
+      progress: [
+        {
+          id: "analysis-1",
+          type: "analysis",
+          status: "succeeded",
+          stage: "completed",
+          turn: 1,
+          count: null,
+          reasoning: "Done thinking",
+          hits: [],
+        },
+      ],
+    })
+    const first = mergePublicRunEvent(
+      [base],
+      "run-1",
+      {
+        type: "tool_input_delta",
+        id: "tool-1",
+        live_sequence: "1000-1",
+        stream_epoch: "worker-1",
+        turn: 1,
+        tool_name: "web_search",
+        field: "query",
+        delta: "release ",
+        replace: false,
+      },
+      "pending-1"
+    )
+    expect(first[0].progress).toHaveLength(2)
+    expect(first[0].progress[1]).toMatchObject({
+      id: "tool-1",
+      type: "tool",
+      stage: "preparing",
+      input: { query: "release " },
+    })
+
+    const second = mergePublicRunEvent(
+      first,
+      "run-1",
+      {
+        type: "tool_input_delta",
+        id: "tool-1",
+        live_sequence: "1000-2",
+        stream_epoch: "worker-1",
+        turn: 1,
+        tool_name: "web_search",
+        field: "query",
+        delta: "notes",
+        replace: false,
+        input_truncated: true,
+      },
+      "pending-1"
+    )
+    expect(second[0].progress[1].input).toEqual({ query: "release notes" })
+    expect(second[0].progress[1].input_truncated).toBe(true)
+  })
+
   test("mergePublicRunEvent answers reset on a new stream epoch", () => {
     const base = run({
       status: "running",

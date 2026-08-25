@@ -20,7 +20,11 @@ from app.infrastructure.object_storage import (
 from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
-from app.ports.parsing import KnowledgePipelineError, build_document_parser
+from app.ports.parsing import (
+    KnowledgePipelineError,
+    PLAIN_TEXT_DOCUMENT_EXTENSIONS,
+    build_document_parser,
+)
 from app.schemas.agent import AgentInteractionConfig, AgentUploadResponse
 from app.schemas.workflow import WorkflowUploadResponse
 from app.shareddomain.agents.permissions import require_agent_view
@@ -39,6 +43,7 @@ UPLOAD_EXTENSIONS = {
     "document": {
         ".csv", ".docx", ".epub", ".html", ".ipynb", ".json", ".md",
         ".pdf", ".pptx", ".txt", ".xls", ".xlsx", ".xml", ".zip",
+        *PLAIN_TEXT_DOCUMENT_EXTENSIONS,
     },
     "image": {".jpeg", ".jpg", ".png", ".webp"},
     "audio": {".m4a", ".mp3", ".ogg", ".wav", ".webm"},

@@ -515,9 +515,11 @@ class StreamingProvider(SequenceProvider):
         self,
         completions: list[ModelCompletion],
         reasoning: list[list[str]],
+        tool_argument_chunk_size: int | None = None,
     ) -> None:
         super().__init__(completions)
         self.reasoning = reasoning
+        self.tool_argument_chunk_size = tool_argument_chunk_size
 
     async def astream(self, messages: list[BaseMessage]):
         completion = self.next_completion(messages)
@@ -527,17 +529,30 @@ class StreamingProvider(SequenceProvider):
                 additional_kwargs={"reasoning_content": delta},
             )
         for index, call in enumerate(completion.tool_calls):
-            yield AIMessageChunk(
-                content="",
-                tool_call_chunks=[
-                    tool_call_chunk(
-                        name=call.name,
-                        args=call.arguments,
-                        id=call.id,
-                        index=index,
+            chunks = (
+                [call.arguments]
+                if self.tool_argument_chunk_size is None
+                else [
+                    call.arguments[offset : offset + self.tool_argument_chunk_size]
+                    for offset in range(
+                        0,
+                        len(call.arguments),
+                        self.tool_argument_chunk_size,
                     )
-                ],
+                ]
             )
+            for chunk_index, arguments in enumerate(chunks):
+                yield AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        tool_call_chunk(
+                            name=call.name if chunk_index == 0 else None,
+                            args=arguments,
+                            id=call.id if chunk_index == 0 else None,
+                            index=index,
+                        )
+                    ],
+                )
         if completion.content:
             yield AIMessageChunk(content=completion.content)
         yield AIMessageChunk(
@@ -1532,9 +1547,10 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
     assert [event["type"] for event in emitted] == [
         "process",
         "process",
+        "process",
+        "process",
         "answer_delta",
         "answer_reset",
-        "process",
         "process",
         "process",
         "process",
@@ -1544,17 +1560,86 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
         "answer_delta",
     ]
     assert emitted[0]["event"]["type"] == "thought"
-    assert emitted[2]["delta"] == "I will search again. "
-    assert emitted[3] == {"type": "answer_reset"}
-    assert emitted[5]["event"]["type"] == "tool"
-    assert emitted[8] == {
+    assert emitted[1]["event"]["summary"] == "agent.tools_selected"
+    assert emitted[2]["event"]["summary"] == "agent.preparing_tool_call"
+    assert emitted[2]["event"]["type"] == "tool"
+    assert emitted[2]["event"]["status"] == "running"
+    assert emitted[4]["delta"] == "I will search again. "
+    assert emitted[5] == {"type": "answer_reset"}
+    assert emitted[7]["event"]["type"] == "tool"
+    assert emitted[9] == {
         "type": "reasoning_delta",
         "turn": 2,
         "delta": "Inspect ",
     }
-    assert len(emitted[9]["delta"]) == MAX_REASONING_CHARS - len("Inspect ")
-    assert len(emitted[10]["event"]["reasoning"]) == MAX_REASONING_CHARS
+    assert len(emitted[10]["delta"]) == MAX_REASONING_CHARS - len("Inspect ")
+    assert len(emitted[11]["event"]["reasoning"]) == MAX_REASONING_CHARS
     assert emitted[-1]["delta"] == "Streamed answer."
+
+
+async def assert_tool_input_stream_follows_completed_reasoning() -> None:
+    emitted: list[dict] = []
+
+    async def emit(event: dict) -> None:
+        emitted.append(event)
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        return AgentToolResult(content="ok", summary="Tool completed.")
+
+    arguments = json.dumps(
+        {"query": "release notes", "api_token": "secret-value"}
+    )
+    provider = StreamingProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-stream", "test_tool", arguments),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ],
+        [["Reasoning result."], []],
+        tool_argument_chunk_size=5,
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [
+            create_agent_tool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"type": "object"},
+                execute=execute,
+            )
+        ],
+        on_event=emit,
+    )
+    assert result.content == "Done."
+    process_events = [event["event"] for event in emitted if event["type"] == "process"]
+    completed_index = next(
+        index
+        for index, event in enumerate(process_events)
+        if event["type"] == "thought" and event["summary"] == "agent.tools_selected"
+    )
+    preparing_index = next(
+        index
+        for index, event in enumerate(process_events)
+        if event["type"] == "tool"
+        and event["summary"] == "agent.preparing_tool_call"
+    )
+    assert completed_index < preparing_index
+    assert process_events[completed_index]["reasoning"] == "Reasoning result."
+
+    streamed: dict[str, str] = {}
+    for event in emitted:
+        if event["type"] != "tool_input_delta":
+            continue
+        previous = streamed.get(event["field"], "")
+        streamed[event["field"]] = (
+            event["delta"] if event["replace"] else previous + event["delta"]
+        )
+    assert streamed == {"query": "release notes", "api_token": "[REDACTED]"}
+    assert "secret-value" not in repr(emitted)
 
 
 async def assert_streaming_tool_preamble_is_reset_on_failure() -> None:
@@ -2802,7 +2887,10 @@ def assert_external_agent_access() -> None:
                 f"{public_base}/uploads",
                 headers=auth_headers(admin_token),
                 files=[
-                    ("files", ("context.txt", b"release attachment", "text/plain")),
+                    (
+                        "files",
+                        ("context.py", b"print('release attachment')", "text/x-python"),
+                    ),
                     *[
                         ("files", (f"extra-{index}.txt", b"text", "text/plain"))
                         for index in range(8)
@@ -3439,6 +3527,7 @@ def main() -> None:
     assert_tool_routing_context_is_explicit()
     asyncio.run(assert_mcp_discovery_rejects_untrusted_metadata())
     asyncio.run(assert_streaming_run_emits_process_and_answer())
+    asyncio.run(assert_tool_input_stream_follows_completed_reasoning())
     asyncio.run(assert_streaming_tool_preamble_is_reset_on_failure())
     asyncio.run(assert_parallel_policy_is_enforced())
     asyncio.run(assert_runtime_budgets_are_enforced())

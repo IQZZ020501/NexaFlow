@@ -3384,11 +3384,36 @@ def test_supported_document_formats_are_accepted() -> None:
     from app.capabilities.embedding import pipeline
 
     expected_extensions = {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cs",
+        ".css",
         ".docx",
+        ".go",
+        ".h",
+        ".hpp",
+        ".java",
+        ".js",
+        ".jsx",
+        ".kt",
+        ".kts",
         ".md",
         ".markdown",
         ".pdf",
+        ".php",
+        ".properties",
+        ".py",
+        ".rb",
+        ".rs",
+        ".sh",
+        ".sql",
+        ".swift",
+        ".toml",
+        ".ts",
+        ".tsx",
         ".txt",
+        ".vue",
         ".pptx",
         ".xlsx",
         ".xls",
@@ -3403,6 +3428,8 @@ def test_supported_document_formats_are_accepted() -> None:
         ".jpg",
         ".jpeg",
         ".webp",
+        ".yaml",
+        ".yml",
     }
     assert expected_extensions == pipeline.SUPPORTED_DOCUMENT_EXTENSIONS
 
@@ -3417,6 +3444,7 @@ def test_supported_document_formats_are_accepted() -> None:
             ".jpg",
             ".jpeg",
             ".webp",
+            *pipeline.PLAIN_TEXT_DOCUMENT_EXTENSIONS,
         }:
             path = Path(directory) / f"document{extension}"
             path.write_bytes(b"content")
@@ -3427,6 +3455,17 @@ def test_supported_document_formats_are_accepted() -> None:
                     path,
                 )
             assert text == "converted"
+            assert assets == []
+
+        for extension in pipeline.PLAIN_TEXT_DOCUMENT_EXTENSIONS:
+            path = Path(directory) / f"source{extension}"
+            path.write_text("print('source')", encoding="utf-8")
+            text, assets = pipeline.extract_document(
+                path.name,
+                "application/octet-stream",
+                path,
+            )
+            assert text == "print('source')"
             assert assets == []
 
 
@@ -5430,6 +5469,17 @@ def test_external_stream_epoch_is_stable_and_sanitized() -> None:
             "stream_epoch": raw_epoch,
         }
         yield {
+            "type": "tool_input_delta",
+            "turn": 1,
+            "call_id": "internal-call-1",
+            "tool_name": "mcp_internal_search",
+            "field": "query",
+            "delta": "release notes",
+            "replace": False,
+            "live_sequence": "1-1",
+            "stream_epoch": raw_epoch,
+        }
+        yield {
             "type": "process",
             "event": {
                 "type": "thought",
@@ -5466,13 +5516,21 @@ def test_external_stream_epoch_is_stable_and_sanitized() -> None:
     assert raw_epoch not in repr(events)
     assert epochs[0] != raw_epoch
     assert "internal-call-1" not in repr(events)
-    assert "mcp_internal_search" not in repr(events)
     reasoning_deltas = [event for event in events if event["type"] == "reasoning_delta"]
     assert len(reasoning_deltas) == 1
     assert {
         key: reasoning_deltas[0][key]
         for key in ("type", "turn", "delta")
     } == {"type": "reasoning_delta", "turn": 1, "delta": "Let me think"}
+    tool_input_deltas = [
+        event for event in events if event["type"] == "tool_input_delta"
+    ]
+    assert len(tool_input_deltas) == 1
+    assert tool_input_deltas[0]["field"] == "query"
+    assert tool_input_deltas[0]["delta"] == "release notes"
+    assert tool_input_deltas[0]["replace"] is False
+    assert tool_input_deltas[0]["tool_name"] == "mcp_internal_search"
+    assert len(tool_input_deltas[0]["id"]) == 16
     progress_events = [event for event in events if event["type"] == "progress"]
     assert len(progress_events) == 1
     assert progress_events[0]["event"] == {

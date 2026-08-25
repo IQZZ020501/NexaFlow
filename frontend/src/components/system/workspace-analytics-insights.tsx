@@ -282,11 +282,11 @@ function DonutChart({
             </PieChart>
           </ResponsiveContainer>
         ) : null}
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+        <div className="pointer-events-none absolute inset-0 grid place-items-center">
           <strong className="text-xl font-semibold leading-none tabular-nums">
             {centerValue}
           </strong>
-          <span className="mt-1 flex h-6 max-w-20 items-start text-center text-[10px] leading-3 text-muted-foreground">
+          <span className="absolute left-1/2 top-1/2 mt-3 flex h-6 w-20 -translate-x-1/2 items-start justify-center text-center text-[10px] leading-3 text-muted-foreground">
             {centerLabel}
           </span>
         </div>

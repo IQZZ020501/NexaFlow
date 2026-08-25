@@ -24,7 +24,10 @@ import {
   unrenderedAgentToolCalls,
 } from "../src/components/agents/agent-detail-workspace"
 import type { Agent, AgentRun, AgentToolCall } from "../src/lib/api/agents"
-import { normalizeInteractionConfigForAppType } from "../src/lib/interaction-config"
+import {
+  acceptedUploadExtensions,
+  normalizeInteractionConfigForAppType,
+} from "../src/lib/interaction-config"
 
 const agentsPageSource = readFileSync(
   join(import.meta.dir, "../src/components/agents/agents-page.tsx"),
@@ -168,6 +171,12 @@ const form: AgentFormState = {
 }
 
 describe("Agent form state", () => {
+  test("accepts common source files as Agent attachments", () => {
+    const accepted = acceptedUploadExtensions(["document"])
+    expect(accepted).toContain(".py")
+    expect(accepted).toContain(".java")
+  })
+
   test("shows selected attachment names in the composer", () => {
     const markup = renderToStaticMarkup(
       createElement(AgentAttachmentList, {

@@ -197,6 +197,18 @@ export type AgentRunStreamEvent =
       stream_epoch?: string
     }
   | {
+      type: "tool_input_delta"
+      sequence?: number
+      live_sequence?: string
+      stream_epoch?: string
+      turn: number
+      call_id: string
+      tool_name: string
+      field: string
+      delta: string
+      replace: boolean
+    }
+  | {
       type: "approval_required"
       sequence: number
       call_id: string

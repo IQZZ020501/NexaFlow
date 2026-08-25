@@ -12,7 +12,9 @@ from app.infrastructure.logger import get_logger
 
 logger = get_logger("agent_live_stream")
 
-LIVE_EVENT_TYPES = frozenset({"answer_delta", "answer_reset", "reasoning_delta"})
+LIVE_EVENT_TYPES = frozenset(
+    {"answer_delta", "answer_reset", "reasoning_delta", "tool_input_delta"}
+)
 LIVE_STREAM_MAXLEN = 4096
 LIVE_STREAM_TTL_SECONDS = 900
 LIVE_STREAM_READ_COUNT = 128

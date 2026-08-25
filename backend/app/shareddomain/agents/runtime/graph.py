@@ -15,6 +15,7 @@ from langchain_core.messages import (
     message_chunk_to_message,
 )
 from langchain_core.tools import StructuredTool
+from langchain_core.utils.json import parse_partial_json
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
@@ -23,7 +24,7 @@ from app.ports.llm import (
     ModelProviderError,
     ModelToolCall,
 )
-from app.shareddomain.agents.runtime.callbacks import NexaFlowCallback
+from app.shareddomain.agents.runtime.callbacks import NexaFlowCallback, safe_event_value
 from app.shareddomain.agents.runtime.state import AgentState, PendingToolCall
 from app.shareddomain.agents.runtime.tools import (
     AgentExecutionPaused,
@@ -36,6 +37,7 @@ from app.shareddomain.agents.runtime.usage import merge_usage, usage_from_messag
 MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12
 MAX_REASONING_CHARS = 6000
+MAX_TOOL_INPUT_PREVIEW_CHARS = 32000
 MODEL_RESPONSE_TIMEOUT_SECONDS = 60
 TOOL_RESPONSE_TIMEOUT_SECONDS = 30
 
@@ -72,6 +74,35 @@ class PreparedToolCall:
     arguments: dict[str, Any] | None
     blocked_result: AgentToolResult | None
     parallel_safe: bool
+
+
+def partial_tool_input_preview(arguments: str) -> dict[str, str]:
+    try:
+        parsed = parse_partial_json(arguments)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    safe_value = safe_event_value(
+        parsed,
+        max_string_chars=MAX_TOOL_INPUT_PREVIEW_CHARS,
+    )
+    if not isinstance(safe_value, dict):
+        return {}
+    remaining = MAX_TOOL_INPUT_PREVIEW_CHARS
+    preview: dict[str, str] = {}
+    for raw_field, value in safe_value.items():
+        if remaining <= 0:
+            break
+        field = str(raw_field)
+        text = (
+            value
+            if isinstance(value, str)
+            else json.dumps(value, ensure_ascii=False, indent=2, default=str)
+        )
+        preview[field] = text[:remaining]
+        remaining -= len(preview[field])
+    return preview
 
 
 def model_completion(message: AIMessage) -> ModelCompletion:
@@ -131,6 +162,8 @@ async def agent_node(
     thought = callback.thought(turn)
     await callback.process(thought)
     answer_started = False
+    tool_call_started = False
+    streamed_tool_calls: dict[int, dict[str, Any]] = {}
     reasoning = ""
 
     async def emit_reasoning_delta(delta: str) -> None:
@@ -185,6 +218,63 @@ async def agent_node(
                             "Agent model returned an invalid stream message."
                         )
                     await emit_reasoning_delta(reasoning_content(chunk))
+                    if chunk.tool_call_chunks:
+                        if not tool_call_started:
+                            tool_call_started = True
+                            await callback.process(
+                                completed_thought("agent.tools_selected")
+                            )
+                        for tool_chunk in chunk.tool_call_chunks:
+                            raw_index = tool_chunk.get("index")
+                            index = raw_index if isinstance(raw_index, int) else 0
+                            streamed = streamed_tool_calls.setdefault(
+                                index,
+                                {
+                                    "id": "",
+                                    "name": "",
+                                    "arguments": "",
+                                    "preview": {},
+                                    "announced": False,
+                                },
+                            )
+                            for key in ("id", "name", "args"):
+                                fragment = tool_chunk.get(key)
+                                if not isinstance(fragment, str) or not fragment:
+                                    continue
+                                target = "arguments" if key == "args" else key
+                                streamed[target] += fragment
+                            call_id = str(streamed["id"])
+                            tool_name = str(streamed["name"])
+                            if not call_id or not tool_name:
+                                continue
+                            if not streamed["announced"]:
+                                streamed["announced"] = True
+                                await callback.process(
+                                    callback.preparing_tool_event(
+                                        turn=turn,
+                                        tool_name=tool_name,
+                                        call_id=call_id,
+                                    )
+                                )
+                            preview = partial_tool_input_preview(
+                                str(streamed["arguments"])
+                            )
+                            previous = streamed["preview"]
+                            for field, value in preview.items():
+                                prior = str(previous.get(field, ""))
+                                if value == prior:
+                                    continue
+                                replace = bool(prior) and not value.startswith(prior)
+                                delta = value if replace else value[len(prior) :]
+                                await callback.tool_input_delta(
+                                    turn=turn,
+                                    call_id=call_id,
+                                    tool_name=tool_name,
+                                    field=field,
+                                    delta=delta,
+                                    replace=replace,
+                                )
+                            streamed["preview"] = preview
                     if chunk.text and not runtime.context.defer_answer:
                         await emit_answer_delta(chunk.text)
                     aggregate = chunk if aggregate is None else aggregate + chunk
@@ -221,7 +311,8 @@ async def agent_node(
             raise AgentRunnerError("Agent model returned invalid tool call identifiers.")
         if not allow_tools:
             raise AgentRunnerError("Agent turn limit reached.")
-        await callback.process(completed_thought("agent.tools_selected"))
+        if not tool_call_started:
+            await callback.process(completed_thought("agent.tools_selected"))
         return {
             "messages": messages,
             "turn": turn,

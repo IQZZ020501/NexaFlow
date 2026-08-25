@@ -16,7 +16,7 @@
 - `backend/app/infrastructure/secrets.py` — Fernet 对称加解密工具与密钥尾号提示 `secret_hint`
 - `backend/app/infrastructure/model_utils.py` — 通用工具：UUID 主键 `new_id` 与 UTC 时间 `utc_now`
 - `backend/app/infrastructure/mcp_stdio.py` — stdio 配置序列化、输入边界校验及可执行文件/工作目录运行时校验
-- `backend/app/infrastructure/code_sandbox.py` — 通过 Worker 私有 Unix socket 调用 Python sandbox，支持有界 JSON 结果与 DOCX/HTML Artifact；API 进程不执行用户代码
+- `backend/app/infrastructure/code_sandbox.py` — 通过 Worker 私有 Unix socket 调用 Python sandbox，支持有界 JSON 结果与通用可下载 Artifact；API 进程不执行用户代码
 - `backend/app/infrastructure/validation.py` — 输入规范化：email/username/name 校验与 trim
 - `backend/app/infrastructure/system_log.py` — SystemLog ORM 模型与 `record_system_log` 系统日志落库
 - `backend/app/infrastructure/celery.py` — Celery 应用工厂（broker、序列化、ack 策略）与任务失败全局错误钩子
@@ -86,6 +86,7 @@
   - `202608170003_workflow_agent_children.py` — Workflow Agent 节点的 root/parent/depth lineage 与等待子 Run 状态
   - `202608240001_agent_run_four_table_storage.py` — 拆分 Run 身份、可变状态、不可变快照和事件，并把旧 Agent 工具调用合并到 ToolInvocation
   - `202608240002_generated_artifacts.py` — Agent 生成 Artifact 表、索引与既有工作空间内置 `python_artifact` Tool 回填
+  - `202608250001_generic_generated_files.py` — 将 Artifact 扩展为安全文件名驱动的通用文件，并迁移现有 Tool 版本、策略与 Agent/Workflow 草稿绑定
 
 ## 仓库与 backend 配置
 

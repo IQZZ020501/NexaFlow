@@ -114,7 +114,7 @@ function SourceCodeBlock({ code, language }: MarkdownCodeBlockProps) {
   const [highlighted, setHighlighted] =
     React.useState<HighlightedCode | null>(null)
   const highlightedHtml =
-    highlighted?.code === code && highlighted.language === language
+    code.length <= MAX_RICH_CODE_CHARS && highlighted?.language === language
       ? highlighted.html
       : null
 
@@ -207,8 +207,7 @@ function MermaidCodeBlock({ code }: MarkdownCodeBlockProps) {
     () => false,
   )
   const [rendered, setRendered] = React.useState<MermaidRender | null>(null)
-  const currentRender =
-    rendered?.code === code && rendered.isDark === isDark ? rendered : null
+  const currentRender = rendered?.isDark === isDark ? rendered : null
 
   React.useEffect(() => {
     if (code.length > MAX_RICH_CODE_CHARS) return
