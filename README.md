@@ -6,7 +6,7 @@
   <p>
     <a href="https://github.com/IQZZ020501/NexaFlow/actions/workflows/ci.yml"><img src="https://github.com/IQZZ020501/NexaFlow/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
     <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB" alt="Python 3.11+" />
-    <img src="https://img.shields.io/badge/Next.js-16-000000" alt="Next.js 15" />
+    <img src="https://img.shields.io/badge/Next.js-16-000000" alt="Next.js 16" />
     <a href="https://coderabbit.ai"><img src="https://img.shields.io/coderabbit/prs/github/IQZZ020501/NexaFlow?utm_source=oss&amp;utm_medium=github&amp;utm_campaign=IQZZ020501%2FNexaFlow&amp;labelColor=171717&amp;color=FF570A&amp;link=https%3A%2F%2Fcoderabbit.ai&amp;label=CodeRabbit+Reviews" alt="CodeRabbit Pull Request Reviews" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue" alt="GPLv3 license" /></a>
   </p>
@@ -36,7 +36,7 @@ NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队�
 
 ### 应用发布与 API
 
-Agent 和工作流都可以发布为公开访问页面，也可以通过独立 API Key、API 地址和接口文档接入其他系统。
+Agent 和工作流都可以发布为访问页面，登录后的所属工作空间成员可直接使用；也可以通过独立 API Key、API 地址和接口文档接入其他系统。
 
 ![NexaFlow 应用发布与 API 界面](docs/assets/application-publishing.png)
 
@@ -81,7 +81,7 @@ flowchart LR
 
 | 层级 | 技术 |
 | --- | --- |
-| 前端 | Next.js 15、React 19、TypeScript、Bun、shadcn/ui、Tailwind CSS、React Flow |
+| 前端 | Next.js 16、React 19、TypeScript、Bun、shadcn/ui、Tailwind CSS、React Flow |
 | API | Python 3.11+、FastAPI、SQLAlchemy Async、Alembic |
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
 | 工具 | builtin / Python / MCP 统一目录、不可变版本、授权、策略、绑定与 ToolInvocation |

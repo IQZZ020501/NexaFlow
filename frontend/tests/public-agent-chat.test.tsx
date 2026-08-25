@@ -8,6 +8,7 @@ import {
 } from "bun:test"
 import {
   cleanup,
+  configure,
   fireEvent,
   screen,
   waitFor,
@@ -1422,10 +1423,33 @@ describe("PublicAgentChat", () => {
     expect(screen.getByRole("heading", { name: "公开助手" })).toBeTruthy()
     expect(screen.getAllByText("这是一个公开助手。").length).toBeGreaterThan(0)
     expect(screen.getByText("暂无历史记录")).toBeTruthy()
+    const composer = screen.getByLabelText("请输入问题").closest("form")
+    expect(composer?.className).toContain("max-w-5xl")
+    expect(composer?.className).toContain("2xl:max-w-6xl")
+    expect(composer?.closest("main")?.className).toContain(
+      "lg:grid-cols-[240px_minmax(0,1fr)]"
+    )
+    expect(screen.getByLabelText("打开历史记录").className).toContain(
+      "lg:hidden"
+    )
     expect(
       (screen.getByLabelText("发送问题") as HTMLButtonElement).disabled
     ).toBe(true)
     expect(replaced).toEqual([])
+  })
+
+  test("initializes under React Strict Mode", async () => {
+    configure({ reactStrictMode: true })
+    fetchHandler = agentFetchHandler({ conversations: { items: [] } })
+
+    try {
+      renderPage(<PublicAgentChat agentId="agent-1" />)
+
+      expect(await screen.findByText("开始新对话")).toBeTruthy()
+      expect(Boolean(screen.queryByText("正在加载"))).toBe(false)
+    } finally {
+      configure({ reactStrictMode: false })
+    }
   })
 
   test("renders generated artifacts as filename download links", async () => {
