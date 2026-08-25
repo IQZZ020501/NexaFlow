@@ -324,7 +324,9 @@ def check_artifact_error_paths() -> None:
             }
         )
         assert result["ok"] is False, result
-        assert result["error"] == expected_error, result
+        assert result["error"] == expected_error or result["error"].startswith(
+            f"{expected_error}:"
+        ), result
 
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)

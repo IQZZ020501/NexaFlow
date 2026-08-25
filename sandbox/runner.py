@@ -206,7 +206,10 @@ def _read_artifact(path: Path, artifact_format: str, filename: str) -> dict[str,
     try:
         metadata = path.lstat()
     except FileNotFoundError as exc:
-        raise ValueError("artifact_missing") from exc
+        raise ValueError(
+            "artifact_missing: write the final file to output_path; "
+            "do not use /tmp or another hard-coded path"
+        ) from exc
     if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
         raise ValueError("artifact_invalid")
     if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
