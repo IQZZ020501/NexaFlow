@@ -780,7 +780,7 @@ describe("AgentDetailWorkspace preview", () => {
     renderPage(<Harness activeView="settings" runs={[run]} />)
     expect(screen.getAllByText("已完成分析")).toHaveLength(2)
     const reasoning = screen.getByText("Tool reasoning result")
-    const preparing = screen.getByText("正在准备工具调用")
+    const preparing = screen.getAllByText("search")[0]!
     expect(
       reasoning.compareDocumentPosition(preparing) &
         Node.DOCUMENT_POSITION_FOLLOWING
