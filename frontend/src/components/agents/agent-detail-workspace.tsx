@@ -55,6 +55,10 @@ import {
   AGENT_FILE_UPLOAD_SETTING,
   acceptedUploadExtensions,
 } from "@/lib/interaction-config"
+import {
+  builtinToolDisplayName,
+  withArtifactDownloadLinks,
+} from "@/lib/tool-display"
 
 import { AgentConfigFields } from "./agent-config-fields"
 import { AgentAttachmentList } from "./agent-attachment-list"
@@ -65,6 +69,7 @@ import {
   AgentOverviewPanel,
 } from "./agent-management-panels"
 import type { AgentFormState } from "./agents-page"
+import { ToolInputPreview } from "./tool-input-preview"
 
 type AgentDetailWorkspaceProps = {
   agent: Agent
@@ -151,6 +156,8 @@ function processSummary(
   if (event.summary === "agent.analyzing") return t("正在分析问题")
   if (event.summary === "agent.reviewing_tool_results")
     return t("正在整理工具结果")
+  if (event.summary === "agent.preparing_tool_call")
+    return t("正在准备工具调用")
   if (event.summary === "agent.tools_selected") return t("已完成分析")
   if (event.summary === "agent.grounding_check") return t("正在核验回答依据")
   if (event.summary === "agent.grounding_verified") return t("已完成依据核验")
@@ -161,7 +168,7 @@ function processSummary(
   if (event.summary === "agent.grounding_unavailable")
     return t("暂时无法完成依据核验")
   if (event.summary === "agent.tool_running")
-    return t("正在调用 {name}", { name: event.tool_name })
+    return t("正在调用 {name}", { name: processToolName(event, t) })
   if (event.summary === "agent.answer_ready")
     return t(run.status === "running" ? "正在生成回答" : "回答已生成")
   if (event.summary.startsWith("agent.knowledge_chunks_returned:")) {
@@ -179,6 +186,13 @@ function processSummary(
   return event.summary
 }
 
+function processToolName(event: AgentRun["events"][number], t: TFunction) {
+  return (
+    builtinToolDisplayName(event.tool_name, t) ??
+    (event.tool_label || event.tool_name)
+  )
+}
+
 function ToolEventDetails({
   event,
   run,
@@ -188,11 +202,14 @@ function ToolEventDetails({
   run: AgentRun
   t: TFunction
 }) {
-  const [isOpen, setIsOpen] = React.useState(false)
-  const label =
+  const isPreparing = event.summary === "agent.preparing_tool_call"
+  const [isOpen, setIsOpen] = React.useState(isPreparing)
+  const toolName =
     event.tool_kind === "knowledge"
       ? t("知识库检索")
-      : event.tool_label || event.tool_name
+      : processToolName(event, t)
+  const label = isPreparing ? t("正在准备工具调用") : toolName
+  const detail = isPreparing ? toolName : processSummary(event, run, t)
 
   return (
     <div className="overflow-hidden rounded-lg border bg-background/70">
@@ -219,7 +236,7 @@ function ToolEventDetails({
             ) : null}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
-            {processSummary(event, run, t)}
+            {detail}
           </span>
         </span>
         {event.status === "running" ? (
@@ -235,14 +252,14 @@ function ToolEventDetails({
       </button>
       {isOpen ? (
         <div className="grid gap-3 border-t bg-muted/20 p-3 text-xs">
-          <div>
-            <p className="mb-1 font-medium text-muted-foreground">
-              {t("调用输入")}
-            </p>
-            <pre className="max-h-44 overflow-auto rounded-md bg-background p-3 font-mono leading-5 break-words whitespace-pre-wrap">
-              {JSON.stringify(event.input, null, 2)}
-            </pre>
-          </div>
+          {Object.keys(event.input).length > 0 ? (
+            <div>
+              <p className="mb-1 font-medium text-muted-foreground">
+                {t("调用输入")}
+              </p>
+              <ToolInputPreview input={event.input} streaming={isPreparing} />
+            </div>
+          ) : null}
           {event.output !== null && event.output !== undefined ? (
             <div>
               <p className="mb-1 font-medium text-muted-foreground">
@@ -507,11 +524,23 @@ function RunExchange({
   t: TFunction
 }) {
   const timeline = processTimeline(run)
-  const inlineToolCalls = unrenderedAgentToolCalls(timeline, toolCalls)
-  const hasProcess = timeline.length > 0 || inlineToolCalls.length > 0
+  const approvalCallIds = new Set(
+    toolCalls
+      .filter((call) => ["awaiting_approval", "uncertain"].includes(call.status))
+      .map((call) => call.call_id)
+  )
+  const visibleTimeline = timeline.filter(
+    ({ event }) =>
+      !(
+        event.summary === "agent.preparing_tool_call" &&
+        approvalCallIds.has(event.call_id)
+      )
+  )
+  const inlineToolCalls = unrenderedAgentToolCalls(visibleTimeline, toolCalls)
+  const hasProcess = visibleTimeline.length > 0 || inlineToolCalls.length > 0
   const hasActiveToolCall =
     inlineToolCalls.length > 0 ||
-    timeline.some(
+    visibleTimeline.some(
       ({ event }) => event.type === "tool" && event.status === "running"
     )
   const [isProcessOpen, setIsProcessOpen] = React.useState(true)
@@ -520,7 +549,7 @@ function RunExchange({
     hasActiveToolCall,
     isProcessOpen
   )
-  const answer = run.result
+  const answer = withArtifactDownloadLinks(run.result, run.events)
   return (
     <article className="flex flex-col gap-5">
       <div className="ml-auto flex max-w-[88%] flex-col items-end gap-1">
@@ -547,7 +576,7 @@ function RunExchange({
                   <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
                 </summary>
                 <div className="mt-2 space-y-2 border-l pl-4">
-                  {timeline.map(({ event }, index) =>
+                  {visibleTimeline.map(({ event }, index) =>
                     event.type === "tool" ? (
                       <ToolEventDetails
                         key={`${event.call_id || `${event.turn}-${event.tool_name}`}-${index}`}

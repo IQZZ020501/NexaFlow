@@ -577,6 +577,43 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.getByText("summary")).toBeTruthy()
   })
 
+  test("renders generated artifacts as filename download links", () => {
+    const downloadUrl = "/api/v1/artifacts/signed-token"
+    const run = makeRun({
+      result: `📄 下载地址：\`${downloadUrl}\``,
+      events: [
+        {
+          type: "tool",
+          turn: 1,
+          tool_name: "create_artifact",
+          status: "succeeded",
+          summary: "Artifact created.",
+          call_id: "artifact-call",
+          tool_label: "Create document or page",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: {
+            filename: "公司内部管理制度汇编.docx",
+            download_url: downloadUrl,
+          },
+          duration_ms: 10,
+        },
+      ],
+    })
+
+    renderPage(<Harness activeView="settings" runs={[run]} />)
+
+    const link = screen.getByRole("link", {
+      name: "公司内部管理制度汇编.docx",
+    })
+    expect(link.getAttribute("href")).toBe(downloadUrl)
+    expect(link.className).toContain("text-sky-600")
+    expect(link.hasAttribute("download")).toBe(true)
+    expect(link.getAttribute("target")).toBeNull()
+    expect(screen.queryByText(downloadUrl)).toBeNull()
+  })
+
   test("preserves and wraps multiline user messages", () => {
     const goal = [
       "scc .",
@@ -696,6 +733,35 @@ describe("AgentDetailWorkspace preview", () => {
           reasoning: "Reasoning line",
         },
         {
+          type: "thought",
+          turn: 3,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.tools_selected",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "Tool reasoning result",
+        },
+        {
+          type: "tool",
+          turn: 3,
+          tool_name: "search",
+          status: "running",
+          summary: "agent.preparing_tool_call",
+          call_id: "call-3",
+          tool_label: "search",
+          tool_kind: "unknown",
+          server_name: "",
+          input: { query: "latest releases" },
+          output: null,
+          duration_ms: 0,
+        },
+        {
           type: "tool",
           turn: 1,
           tool_name: "search",
@@ -712,14 +778,30 @@ describe("AgentDetailWorkspace preview", () => {
       ],
     })
     renderPage(<Harness activeView="settings" runs={[run]} />)
-    expect(screen.getByText("已完成分析")).toBeTruthy()
+    expect(screen.getAllByText("已完成分析")).toHaveLength(2)
+    const reasoning = screen.getByText("Tool reasoning result")
+    const preparing = screen.getByText("正在准备工具调用")
+    expect(
+      reasoning.compareDocumentPosition(preparing) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "PRE" &&
+          element.textContent === "query:\nlatest releases"
+      )
+    ).toBeTruthy()
     expect(screen.getByText("Reasoning line")).toBeTruthy()
-    expect(screen.getByText("search")).toBeTruthy()
+    const searchLabels = screen.getAllByText("search")
+    expect(searchLabels).toHaveLength(2)
 
-    fireEvent.click(screen.getByText("search").closest("button")!)
-    expect(screen.getByText("调用输入")).toBeTruthy()
-    expect(screen.getByText(/query/)).toBeTruthy()
-    expect(screen.getByText("调用结果")).toBeTruthy()
+    const completedToolButton = searchLabels[1]!.closest("button")!
+    const completedToolCard = completedToolButton.parentElement!
+    fireEvent.click(completedToolButton)
+    expect(within(completedToolCard).getByText("调用输入")).toBeTruthy()
+    expect(within(completedToolCard).getByText(/query/)).toBeTruthy()
+    expect(within(completedToolCard).getByText("调用结果")).toBeTruthy()
   })
 
   test("renders knowledge hits inside tool details", () => {

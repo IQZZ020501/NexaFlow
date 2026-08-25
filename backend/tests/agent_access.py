@@ -285,13 +285,31 @@ def assert_external_progress_events() -> None:
             "summary": "agent.analyzing",
             "reasoning": "analyzing",
         },
+        {
+            "type": "thought",
+            "status": "running",
+            "turn": 4,
+            "summary": "agent.preparing_tool_call",
+            "reasoning": "ready",
+        },
+        {
+            "type": "tool",
+            "status": "running",
+            "turn": 5,
+            "summary": "agent.preparing_tool_call",
+            "tool_kind": "unknown",
+            "tool_name": "web_search",
+            "tool_label": "Web search",
+            "input": {"query": "release"},
+            "call_id": "call-preparing",
+        },
         # 280: non-thought, non-tool event skipped.
-        {"type": "message", "status": "succeeded", "turn": 4, "summary": "hello"},
+        {"type": "message", "status": "succeeded", "turn": 5, "summary": "hello"},
         # 288-295 + 296-310: knowledge tool with count and hits.
         {
             "type": "tool",
             "status": "succeeded",
-            "turn": 5,
+            "turn": 6,
             "summary": "agent.knowledge_chunks_returned:3",
             "tool_kind": "knowledge",
             "tool_name": "search_knowledge",
@@ -320,7 +338,7 @@ def assert_external_progress_events() -> None:
         {
             "type": "tool",
             "status": "running",
-            "turn": 6,
+            "turn": 7,
             "summary": "agent.knowledge_chunks_returned:abc",
             "tool_kind": "knowledge",
             "input": {},
@@ -330,7 +348,7 @@ def assert_external_progress_events() -> None:
         {
             "type": "tool",
             "status": "succeeded",
-            "turn": 7,
+            "turn": 8,
             "summary": "done",
             "tool_kind": "custom",
             "tool_name": "custom_tool",
@@ -339,7 +357,7 @@ def assert_external_progress_events() -> None:
         },
     ]
     progress = external_progress_events(events, "succeeded")
-    assert len(progress) == 5, [item.type for item in progress]
+    assert len(progress) == 7, [item.type for item in progress]
 
     answer = next(item for item in progress if item.type == "answer")
     assert answer.status == "succeeded"
@@ -350,6 +368,15 @@ def assert_external_progress_events() -> None:
     analysis = next(item for item in progress if item.type == "analysis")
     assert analysis.stage == "analyzing"
     assert analysis.status == "running"
+
+    preparing = next(item for item in progress if item.stage == "running")
+    assert preparing.type == "analysis"
+    assert preparing.reasoning == "ready"
+
+    tool_preparing = next(item for item in progress if item.stage == "preparing")
+    assert tool_preparing.type == "tool"
+    assert tool_preparing.tool_name == "web_search"
+    assert tool_preparing.input == {"query": "release"}
 
     knowledge = next(item for item in progress if item.type == "knowledge")
     assert knowledge.count == 3
@@ -368,10 +395,10 @@ def assert_external_progress_events() -> None:
     ):
         assert marker not in serialized_knowledge
 
-    bad_count = next(item for item in progress if item.turn == 6)
+    bad_count = next(item for item in progress if item.turn == 7)
     assert bad_count.count is None
 
-    custom = next(item for item in progress if item.turn == 7)
+    custom = next(item for item in progress if item.turn == 8)
     assert custom.tool_kind == "unknown"
 
     # 227-228: upsert replaces the previous event with the same id.

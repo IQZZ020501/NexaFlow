@@ -234,6 +234,40 @@ def load_network_policy_migration():
     return module
 
 
+def load_generic_artifact_migration():
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202608250001_generic_generated_files.py"
+    )
+    spec = spec_from_file_location("generic_generated_files", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_generic_artifact_migration_matches_catalog() -> None:
+    from app.shareddomain.tools.catalog import build_python_artifact_tool
+
+    migration = load_generic_artifact_migration()
+    _tool, version, _policy = build_python_artifact_tool("workspace-1")
+    (
+        display_name,
+        description,
+        input_schema,
+        output_schema,
+        execution_spec,
+        definition_hash,
+    ) = migration._definition(generic=True)
+    assert migration.down_revision == "202608240002"
+    assert display_name == version.display_name
+    assert description == version.description
+    assert input_schema == version.input_schema
+    assert output_schema == version.output_schema
+    assert execution_spec == version.execution_spec
+    assert definition_hash == version.definition_hash
+
+
 def test_agent_publication_migration_supports_sqlite_foreign_keys() -> None:
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
@@ -1042,9 +1076,15 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         )
         assert artifact_version is not None
         assert artifact_version.execution_spec == {"builtin": "python_artifact"}
-        assert set(artifact_version.input_schema["properties"]["format"]["enum"]) == {
-            "docx",
-            "html",
+        assert set(artifact_version.input_schema["required"]) == {
+            "code",
+            "filename",
+        }
+        assert "format" not in artifact_version.input_schema["properties"]
+        assert "skills" not in artifact_version.input_schema["properties"]
+        assert artifact_version.output_schema["properties"]["stdout"] == {
+            "type": "string",
+            "maxLength": 2000,
         }
 
 
@@ -1089,7 +1129,77 @@ def test_generated_artifact_link_serves_static_html() -> None:
         assert response.headers["content-type"].startswith("text/html")
         assert "sandbox" in response.headers["content-security-policy"]
         assert "default-src 'none'" in response.headers["content-security-policy"]
+        assert "page.html" in response.headers["content-disposition"]
         assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_generated_artifact_downloads_common_formats() -> None:
+    from app.application.artifacts import create_generated_artifact
+    from app.infrastructure.session import get_session_factory
+    from app.shareddomain.artifacts.services import artifact_format_from_filename
+
+    formats = [
+        ("pdf", "report.pdf", b"%PDF-1.4\n%%EOF\n", "application/pdf"),
+        (
+            "xlsx",
+            "report.xlsx",
+            b"workbook",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        (
+            "pptx",
+            "slides.pptx",
+            b"slides",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+        ("py", "hello.py", b"print('hello')\n", "text/x-python"),
+        ("java", "Hello.java", b"class Hello {}\n", "text/x-java-source"),
+        ("zip", "bundle.zip", b"archive", "application/zip"),
+        ("file", "README", b"ready", "application/octet-stream"),
+    ]
+
+    assert artifact_format_from_filename("hello.py") == "py"
+    assert artifact_format_from_filename("README") == "file"
+    for filename in ("../hello.py", "hello.不安全", "bad\nname.py"):
+        try:
+            artifact_format_from_filename(filename)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"Unsafe artifact filename accepted: {filename}")
+
+    with test_client() as client:
+        _admin_token, workspace_id = activate_admin(client)
+
+        async def create():
+            async with get_session_factory()() as db:
+                links = []
+                for artifact_format, filename, content, _media_type in formats:
+                    links.append(
+                        await create_generated_artifact(
+                            db,
+                            test_settings(),
+                            workspace_id=workspace_id,
+                            run_id="run-common-formats",
+                            idempotency_key=f"artifact-{artifact_format}",
+                            artifact_format=artifact_format,
+                            filename=filename,
+                            content=content,
+                        )
+                    )
+                await db.commit()
+                return links
+
+        links = asyncio.run(create())
+        for link, (_artifact_format, filename, content, media_type) in zip(
+            links, formats, strict=True
+        ):
+            response = client.get(link.download_url)
+            assert response.status_code == 200, response.text
+            assert response.content == content
+            assert response.headers["content-type"].startswith(media_type)
+            assert filename in response.headers["content-disposition"]
+            assert response.headers["x-content-type-options"] == "nosniff"
 
 
 def test_private_catalog_filters_before_pagination_for_every_role() -> None:
@@ -4547,7 +4657,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
                 filename="page.html",
                 size_bytes=len(artifact_content),
                 sha256="ignored-by-adapter",
-                stdout="",
+                stdout="characters=8000\n",
                 stderr="",
                 exit_code=0,
             )
@@ -4557,7 +4667,6 @@ async def assert_tool_adapters(workspace_id: str) -> None:
             artifact_snapshot,
             {
                 "code": "open(output_path, 'w').write('ready')",
-                "format": "html",
                 "filename": "page.html",
                 "skills": ["documents"],
             },
@@ -4566,15 +4675,33 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.ok is True
     assert result.data["filename"] == "page.html"
     assert result.data["download_url"].startswith("/api/v1/artifacts/")
+    assert result.data["stdout"] == "characters=8000"
     assert result.usage == {"exit_code": 0, "size_bytes": len(artifact_content)}
     assert artifact_sandbox.await_count == 1
+    assert artifact_sandbox.await_args.args[2:4] == ("html", "page.html")
+    assert artifact_sandbox.await_args.args[4] == []
+    direct_content = "print('hello')\n"
+    with patch(
+        "app.application.tool_adapters.execute_artifact_code",
+        new=AsyncMock(),
+    ) as artifact_sandbox:
+        direct_result = await builtin.invoke(
+            artifact_snapshot,
+            {"code": direct_content, "filename": "demo.py"},
+            dataclasses.replace(context, idempotency_key="adapter-direct"),
+        )
+    assert direct_result.ok is True
+    assert direct_result.data["filename"] == "demo.py"
+    assert direct_result.data["size_bytes"] == len(direct_content.encode("utf-8"))
+    assert direct_result.data["stdout"].startswith("characters=15\nbytes=15")
+    assert artifact_sandbox.await_count == 0
     with patch(
         "app.application.tool_adapters.execute_artifact_code",
         new=AsyncMock(side_effect=WorkflowSandboxError("NameError: missing value")),
     ):
         result = await builtin.invoke(
             artifact_snapshot,
-            {"code": "missing", "format": "html", "filename": "page.html"},
+            {"code": "missing", "format": "pdf", "filename": "report.pdf"},
             dataclasses.replace(context, idempotency_key="adapter-failed"),
         )
     assert result.ok is False
@@ -5336,6 +5463,7 @@ def test_tool_tasks_are_registered() -> None:
 
 def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
+    test_generic_artifact_migration_matches_catalog()
     test_agent_publication_migration_supports_sqlite_foreign_keys()
     test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()
     test_legacy_disabled_tools_remain_disabled_after_backfill()
@@ -5356,6 +5484,7 @@ def main() -> None:
     test_mcp_resolution_rejects_missing_authorization_context()
     test_workspace_creation_initializes_system_catalog()
     test_generated_artifact_link_serves_static_html()
+    test_generated_artifact_downloads_common_formats()
     test_python_tool_http_lifecycle_and_private_grants()
     test_canonical_mcp_policy_allows_owner_read_only_attestation()
     test_tool_tasks_never_execute_inline_and_recover_queued_tests()

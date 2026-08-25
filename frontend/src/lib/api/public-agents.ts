@@ -39,7 +39,13 @@ export type ExternalAgentProgressEvent = {
   type: "analysis" | "knowledge" | "tool" | "answer"
   status: "running" | "succeeded" | "failed"
   stage:
-    "analyzing" | "reviewing" | "completed" | "running" | "succeeded" | "failed"
+    | "analyzing"
+    | "reviewing"
+    | "completed"
+    | "preparing"
+    | "running"
+    | "succeeded"
+    | "failed"
   turn: number
   count: number | null
   reasoning?: string
@@ -89,6 +95,16 @@ export type PublicAgentRunStreamEvent =
       type: "reasoning_delta"
       turn: number
       delta: string
+    })
+  | (PublicAgentStreamCursor & {
+      type: "tool_input_delta"
+      id: string
+      turn: number
+      tool_name: string
+      field: string
+      delta: string
+      replace: boolean
+      input_truncated?: boolean
     })
   | (PublicAgentStreamCursor & {
       type: "progress"

@@ -19,7 +19,6 @@ import sys
 import tempfile
 import time
 from typing import Any
-import zipfile
 
 RUNNER_UID = int(os.environ.get("SANDBOX_RUNNER_UID", "65532"))
 RUNNER_GID = int(os.environ.get("SANDBOX_RUNNER_GID", "65532"))
@@ -30,6 +29,7 @@ MAX_SKILLS = 8
 MAX_SKILL_FILES = 128
 MAX_SKILL_BYTES = 2 * 1024 * 1024
 SKILL_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
+ARTIFACT_FORMAT = re.compile(r"[a-z0-9][a-z0-9+_-]{0,31}\Z")
 PR_SET_CHILD_SUBREAPER = 36
 
 
@@ -104,15 +104,30 @@ def _artifact_spec(raw: Any) -> tuple[str, str] | None:
         raise ValueError("artifact must contain format and filename")
     artifact_format = raw.get("format")
     filename = raw.get("filename")
-    if artifact_format not in {"docx", "html"}:
-        raise ValueError("artifact.format must be docx or html")
+    if not isinstance(artifact_format, str) or not ARTIFACT_FORMAT.fullmatch(
+        artifact_format
+    ):
+        raise ValueError("artifact.format is invalid")
     if (
         not isinstance(filename, str)
         or not filename
+        or filename != filename.strip()
         or len(filename) > 120
         or Path(filename).name != filename
+        or "/" in filename
+        or "\\" in filename
         or "\x00" in filename
-        or not filename.lower().endswith(f".{artifact_format}")
+        or any(
+            ord(character) < 32 or ord(character) == 127
+            for character in filename
+        )
+    ):
+        raise ValueError("artifact.filename is invalid")
+    suffix = Path(filename).suffix.removeprefix(".").lower()
+    expected_format = suffix or "file"
+    if (
+        not ARTIFACT_FORMAT.fullmatch(expected_format)
+        or artifact_format != expected_format
     ):
         raise ValueError("artifact.filename is invalid")
     return artifact_format, filename
@@ -202,19 +217,6 @@ def _read_artifact(path: Path, artifact_format: str, filename: str) -> dict[str,
     if metadata.st_size > MAX_ARTIFACT_BYTES:
         raise ValueError("artifact_too_large")
     content = path.read_bytes()
-    if artifact_format == "html":
-        try:
-            content.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError("artifact_invalid") from exc
-    else:
-        try:
-            with zipfile.ZipFile(path) as archive:
-                names = set(archive.namelist())
-        except (OSError, zipfile.BadZipFile) as exc:
-            raise ValueError("artifact_invalid") from exc
-        if not {"[Content_Types].xml", "word/document.xml"}.issubset(names):
-            raise ValueError("artifact_invalid")
     return {
         "format": artifact_format,
         "filename": filename,

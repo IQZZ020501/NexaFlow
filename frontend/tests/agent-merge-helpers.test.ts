@@ -308,6 +308,74 @@ describe("mergeAgentRunStreamEvent", () => {
     expect(untouched).toEqual([base])
   })
 
+  test("streams tool input into a separate step after completed reasoning", () => {
+    const run = makeRun({
+      status: "running",
+      result: "",
+      events: [
+        thoughtEvent({
+          status: "succeeded",
+          summary: "agent.tools_selected",
+          reasoning: "Reasoning result",
+        }),
+      ],
+    })
+    const first = mergeAgentRunStreamEvent([run], "run-1", {
+      type: "tool_input_delta",
+      live_sequence: "1000-1",
+      stream_epoch: "worker-1",
+      turn: 1,
+      call_id: "call-1",
+      tool_name: "search",
+      field: "query",
+      delta: "release ",
+      replace: false,
+    })
+    expect(first[0].events).toHaveLength(2)
+    expect(first[0].events[0].reasoning).toBe("Reasoning result")
+    expect(first[0].events[1]).toMatchObject({
+      type: "tool",
+      summary: "agent.preparing_tool_call",
+      call_id: "call-1",
+      input: { query: "release " },
+    })
+
+    const second = mergeAgentRunStreamEvent(first, "run-1", {
+      type: "tool_input_delta",
+      live_sequence: "1000-2",
+      stream_epoch: "worker-1",
+      turn: 1,
+      call_id: "call-1",
+      tool_name: "search",
+      field: "query",
+      delta: "notes",
+      replace: false,
+    })
+    expect(second[0].events[1].input).toEqual({ query: "release notes" })
+
+    const durablePreparation = mergeAgentRunStreamEvent(second, "run-1", {
+      type: "process",
+      sequence: 2,
+      event: {
+        type: "tool",
+        turn: 1,
+        tool_name: "search",
+        status: "running",
+        summary: "agent.preparing_tool_call",
+        call_id: "call-1",
+        tool_label: "search",
+        tool_kind: "unknown",
+        server_name: "",
+        input: {},
+        output: null,
+        duration_ms: 0,
+      },
+    })
+    expect(durablePreparation[0].events[1].input).toEqual({
+      query: "release notes",
+    })
+  })
+
   test("reasoning deltas append, skip stale cursors, and update live fields", () => {
     const run = makeRun({
       status: "running",

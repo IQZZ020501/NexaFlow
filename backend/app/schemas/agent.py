@@ -305,6 +305,7 @@ class ExternalAgentProgressEventResponse(BaseModel):
         "analyzing",
         "reviewing",
         "completed",
+        "preparing",
         "running",
         "succeeded",
         "failed",
