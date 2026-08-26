@@ -21,6 +21,7 @@ from app.infrastructure.base import Base
 from app.domain.user import RefreshSession, User  # noqa: F401
 from app.domain.workspace_governance import WorkspaceGovernance  # noqa: F401
 from app.domain.workspace_invitation import WorkspaceInvitation  # noqa: F401
+from app.shareddomain.resource_folders.models import ResourceFolder  # noqa: F401
 from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeAsset,
     KnowledgeAttachment,
@@ -47,7 +48,6 @@ from app.shareddomain.knowledge_graph.models import (  # noqa: F401
     KnowledgeGraphRevisionChange,
     KnowledgeGraphSchema,
 )
-from app.shareddomain.resource_folders.models import ResourceFolder  # noqa: F401
 from app.shareddomain.tools.models import (  # noqa: F401
     ApplicationToolBinding,
     McpServer,
