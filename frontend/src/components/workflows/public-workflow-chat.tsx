@@ -5,19 +5,30 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDotDashedIcon,
+  DownloadIcon,
+  EllipsisIcon,
   HistoryIcon,
   LoaderCircleIcon,
   MenuIcon,
   MessageSquarePlusIcon,
   PaperclipIcon,
   PlayIcon,
+  SearchIcon,
   WorkflowIcon,
 } from "lucide-react"
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { RunActionBar } from "@/components/app/run-action-bar"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Dialog,
   DialogContent,
@@ -31,7 +42,9 @@ import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import {
   createPublicWorkflowRun,
+  deletePublicWorkflowConversation,
   initializePublicWorkflow,
+  listPublicWorkflowConversations,
   listPublicWorkflowRuns,
   observePublicWorkflowRun,
   regeneratePublicWorkflowRun,
@@ -46,6 +59,10 @@ import {
 import { compareLiveStreamIds } from "@/lib/api/agents"
 import { speakBrowserText, workflowSpeechText } from "@/lib/browser-tts"
 import { getErrorMessage } from "@/lib/errors"
+import {
+  downloadConversationMarkdown,
+  type ConversationExportMessage,
+} from "@/lib/conversation-export"
 import { latestRunVersions } from "@/lib/run-versions"
 import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import { workflowErrorMessage, workflowNodeLabel } from "@/lib/workflows/graph"
@@ -123,14 +140,32 @@ function ConversationHistory({
   conversationId,
   onNew,
   onSelect,
+  onDelete,
+  deletingConversationId,
+  onExport,
+  exportingConversationId,
 }: {
   profile: PublicWorkflowProfile
   conversations: PublicWorkflowConversation[]
   conversationId: string | null
   onNew: () => void
   onSelect: (conversationId: string) => void
+  onDelete: (conversationId: string) => void
+  deletingConversationId: string | null
+  onExport: (conversationId: string) => void
+  exportingConversationId: string | null
 }) {
   const { t } = useLanguage()
+  const [query, setQuery] = React.useState("")
+  const filteredConversations = React.useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase()
+    if (!normalized) return conversations
+    return conversations.filter((conversation) =>
+      conversationLabel(conversation.inputs, "")
+        .toLocaleLowerCase()
+        .includes(normalized)
+    )
+  }, [conversations, query])
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex min-h-16 items-center gap-3 border-b px-4">
@@ -155,27 +190,93 @@ function ConversationHistory({
           <HistoryIcon className="size-3.5" />
           {t("历史记录")}
         </p>
-        {conversations.map((item) => (
-          <button
+        <div className="relative mb-2">
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            className="h-8 w-full rounded-md border bg-background pr-2 pl-8 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("搜索历史记录")}
+            aria-label={t("搜索历史记录")}
+          />
+        </div>
+        {filteredConversations.map((item) => (
+          <div
             key={item.conversation_id}
-            type="button"
-            className={`w-full rounded-md px-3 py-2 text-left hover:bg-muted ${conversationId === item.conversation_id ? "bg-muted" : ""}`}
-            aria-current={
-              conversationId === item.conversation_id ? "page" : undefined
-            }
-            onClick={() => onSelect(item.conversation_id)}
+            className={`group flex items-center gap-1 rounded-md px-2 py-1 hover:bg-muted ${conversationId === item.conversation_id ? "bg-muted" : ""}`}
           >
-            <span className="block truncate text-sm font-medium">
-              {conversationLabel(item.inputs, t("工作流运行"))}
-            </span>
-            <span className="mt-1 block truncate text-xs text-muted-foreground">
-              {t("运行 {count} 次", { count: item.run_count })}
-            </span>
-          </button>
+            <button
+              type="button"
+              className="min-w-0 flex-1 rounded-md px-1 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-current={
+                conversationId === item.conversation_id ? "page" : undefined
+              }
+              onClick={() => onSelect(item.conversation_id)}
+            >
+              <span className="block truncate text-sm font-medium">
+                {conversationLabel(item.inputs, t("工作流运行"))}
+              </span>
+              <span className="mt-1 block truncate text-xs text-muted-foreground">
+                {t("运行 {count} 次", { count: item.run_count })}
+              </span>
+            </button>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="size-5 rounded-md p-0 text-muted-foreground"
+                  aria-label={t("更多")}
+                  title={t("更多")}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {deletingConversationId === item.conversation_id ||
+                  exportingConversationId === item.conversation_id ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : (
+                    <EllipsisIcon />
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="bottom"
+                align="center"
+                sideOffset={4}
+                className="w-36 min-w-0 rounded-md p-1"
+              >
+                <DropdownMenuItem
+                  className="h-8 px-2 py-1 text-xs [&_svg]:size-3.5"
+                  disabled={Boolean(
+                    deletingConversationId || exportingConversationId
+                  )}
+                  onSelect={() => onExport(item.conversation_id)}
+                >
+                  <DownloadIcon />
+                  {t("导出对话")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="h-8 px-2 py-1 text-xs"
+                  variant="destructive"
+                  disabled={Boolean(
+                    deletingConversationId || exportingConversationId
+                  )}
+                  onSelect={() => onDelete(item.conversation_id)}
+                >
+                  {t("删除对话")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         ))}
         {!conversations.length ? (
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">
             {t("暂无历史记录")}
+          </p>
+        ) : !filteredConversations.length ? (
+          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+            {t("暂无匹配的历史记录")}
           </p>
         ) : null}
       </div>
@@ -197,6 +298,7 @@ export function PublicWorkflowChat({
   initialConversationId?: string | null
 }) {
   const { language, t } = useLanguage()
+  const [confirm, confirmDialog] = useConfirmDialog()
   const { token, isSessionRestored } = useSession()
   const [profile, setProfile] = React.useState<PublicWorkflowProfile | null>(
     null
@@ -223,6 +325,12 @@ export function PublicWorkflowChat({
     string | null
   >(null)
   const [historyOpen, setHistoryOpen] = React.useState(false)
+  const [deletingConversationId, setDeletingConversationId] = React.useState<
+    string | null
+  >(null)
+  const [exportingConversationId, setExportingConversationId] = React.useState<
+    string | null
+  >(null)
   const [error, setError] = React.useState<string | null>(null)
   const streamRef = React.useRef<AbortController | null>(null)
   const conversationScrollRef = React.useRef<HTMLDivElement>(null)
@@ -285,6 +393,83 @@ export function PublicWorkflowChat({
         ? `/chat/${workflowId}?conversation_id=${encodeURIComponent(nextId)}`
         : `/chat/${workflowId}`
     )
+  }
+
+  async function handleDeleteConversation(nextId: string) {
+    if (!token || deletingConversationId) return
+    const confirmed = await confirm({
+      title: t("删除对话"),
+      description: t("删除对话说明"),
+      confirmLabel: t("删除"),
+      destructive: true,
+    })
+    if (!confirmed) return
+    setDeletingConversationId(nextId)
+    setError(null)
+    try {
+      await deletePublicWorkflowConversation(workflowId, nextId, token)
+      const refreshed = await listPublicWorkflowConversations(workflowId, token)
+      setConversations(refreshed.items)
+      if (conversationId === nextId) {
+        selectConversation(refreshed.items[0]?.conversation_id ?? null)
+      }
+    } catch (reason) {
+      setError(getErrorMessage(reason, t))
+    } finally {
+      setDeletingConversationId(null)
+    }
+  }
+
+  async function handleExportConversation(nextId: string) {
+    if (!token || exportingConversationId || deletingConversationId) return
+    setExportingConversationId(nextId)
+    setError(null)
+    try {
+      const pageSize = 200
+      const exportedRuns: ExternalWorkflowRun[] = []
+      for (let offset = 0; ; offset += pageSize) {
+        const response = await listPublicWorkflowRuns(
+          workflowId,
+          nextId,
+          token,
+          {
+            limit: pageSize,
+            offset,
+          }
+        )
+        exportedRuns.push(...response.items)
+        if (
+          exportedRuns.length >= response.total ||
+          response.items.length < pageSize
+        ) {
+          break
+        }
+      }
+      const conversation = conversations.find(
+        (item) => item.conversation_id === nextId
+      )
+      const messages: ConversationExportMessage[] = latestRunVersions(
+        exportedRuns
+      ).map((run) => ({
+        question:
+          typeof run.inputs.question === "string"
+            ? run.inputs.question
+            : t("工作流运行"),
+        answer: workflowSpeechText(run.outputs),
+        error: run.error,
+        createdAt: run.created_at,
+      }))
+      downloadConversationMarkdown(
+        conversation
+          ? conversationLabel(conversation.inputs, profile?.name ?? "")
+          : profile?.name || t("对话记录"),
+        messages
+      )
+    } catch (reason) {
+      setError(getErrorMessage(reason, t))
+    } finally {
+      setExportingConversationId(null)
+    }
   }
 
   async function handleRun(event: React.FormEvent<HTMLFormElement>) {
@@ -522,6 +707,10 @@ export function PublicWorkflowChat({
       conversationId={conversationId}
       onNew={() => selectConversation(null)}
       onSelect={selectConversation}
+      onDelete={handleDeleteConversation}
+      deletingConversationId={deletingConversationId}
+      onExport={handleExportConversation}
+      exportingConversationId={exportingConversationId}
     />
   )
 
@@ -779,6 +968,7 @@ export function PublicWorkflowChat({
           {history}
         </DialogContent>
       </Dialog>
+      {confirmDialog}
     </main>
   )
 }

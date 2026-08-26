@@ -25,6 +25,16 @@ const nextConfig: NextConfig = {
       { source: "/health", destination: `${BACKEND_ORIGIN}/health` },
     ]
   },
+  async headers() {
+    return [
+      {
+        // HTML and RSC payloads reference build-specific chunks. Do not let a
+        // deployment leave an old shell in a shared cache.
+        source: "/((?!_next/static/|_next/image/).*)",
+        headers: [{ key: "Cache-Control", value: "no-store" }],
+      },
+    ]
+  },
 }
 
 export default nextConfig

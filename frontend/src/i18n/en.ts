@@ -1127,6 +1127,13 @@ export const en = {
     "Create, rotate, or revoke credentials used for API access.",
   匿名用户: "Anonymous user",
   历史记录: "History",
+  搜索历史记录: "Search history",
+  暂无匹配的历史记录: "No matching history",
+  删除对话: "Delete conversation",
+  删除对话说明:
+    "This removes all runs in the conversation and cannot be undone.",
+  导出对话: "Export conversation",
+  对话记录: "Conversation record",
   "回答失败，请稍后重试。": "The answer failed. Please try again later.",
   "复制 API Key": "Copy API key",
   复制链接: "Copy link",

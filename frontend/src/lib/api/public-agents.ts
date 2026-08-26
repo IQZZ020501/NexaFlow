@@ -165,6 +165,18 @@ export function listPublicAgentConversations(agentId: string, token: string) {
   )
 }
 
+/** Deletes one public Agent conversation and all of its runs. */
+export function deletePublicAgentConversation(
+  agentId: string,
+  conversationId: string,
+  token: string
+) {
+  return request<void>(
+    publicAgentPath(agentId, `/conversations/${conversationId}`),
+    { method: "DELETE", token }
+  )
+}
+
 /**
  * Loads a public agent's profile and conversations.
  *

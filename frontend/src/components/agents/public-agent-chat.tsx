@@ -12,6 +12,8 @@ import {
   CircleXIcon,
   CopyIcon,
   DatabaseIcon,
+  DownloadIcon,
+  EllipsisIcon,
   HistoryIcon,
   LoaderCircleIcon,
   MenuIcon,
@@ -20,13 +22,22 @@ import {
   SendIcon,
   ShieldAlertIcon,
   SquareIcon,
+  SearchIcon,
   UserIcon,
   WrenchIcon,
 } from "lucide-react"
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { RunActionBar } from "@/components/app/run-action-bar"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { AgentAttachmentList } from "@/components/agents/agent-attachment-list"
 import { ToolInputPreview } from "@/components/agents/tool-input-preview"
 import {
@@ -43,6 +54,7 @@ import { compareLiveStreamIds } from "@/lib/api/agents"
 import type { AgentToolCall } from "@/lib/api/agents"
 import {
   initializePublicAgent,
+  deletePublicAgentConversation,
   listPublicAgentConversations,
   listPublicAgentRuns,
   listPublicAgentRunToolCalls,
@@ -59,6 +71,10 @@ import {
   type PublicAgentRunStreamEvent,
 } from "@/lib/api/public-agents"
 import { getErrorMessage } from "@/lib/errors"
+import {
+  downloadConversationMarkdown,
+  type ConversationExportMessage,
+} from "@/lib/conversation-export"
 import { latestRunVersions } from "@/lib/run-versions"
 import {
   AGENT_FILE_UPLOAD_SETTING,
@@ -146,7 +162,7 @@ export function publicToolName(
 ) {
   const fallback = event.tool_label || event.tool_name || ""
   return t
-    ? builtinToolDisplayName(event.tool_name || "", t) ?? fallback
+    ? (builtinToolDisplayName(event.tool_name || "", t) ?? fallback)
     : fallback
 }
 
@@ -523,7 +539,7 @@ export function mergePublicRunEvent(
                       currentValue.length > nextValue.length &&
                       currentValue.startsWith(nextValue)
                         ? currentValue
-                        : nextValue ?? currentValue,
+                        : (nextValue ?? currentValue),
                     ]
                   })
                 ),
@@ -580,7 +596,7 @@ export function mergePublicRunEvent(
         })
       } else {
         const current = progress[index]
-        const input = sameStream ? current.input ?? {} : {}
+        const input = sameStream ? (current.input ?? {}) : {}
         const currentValue =
           typeof input[event.field] === "string"
             ? String(input[event.field])
@@ -595,8 +611,7 @@ export function mergePublicRunEvent(
               ? event.delta
               : currentValue + event.delta,
           },
-          input_truncated:
-            current.input_truncated || event.input_truncated,
+          input_truncated: current.input_truncated || event.input_truncated,
         }
       }
       return {
@@ -752,14 +767,32 @@ function ConversationHistory({
   activeConversationId,
   onNew,
   onSelect,
+  onDelete,
+  deletingConversationId,
+  onExport,
+  exportingConversationId,
 }: {
   profile: PublicAgentProfile | null
   conversations: PublicAgentConversation[]
   activeConversationId: string | null
   onNew: () => void
   onSelect: (conversationId: string) => void
+  onDelete: (conversationId: string) => void
+  deletingConversationId: string | null
+  onExport: (conversationId: string) => void
+  exportingConversationId: string | null
 }) {
   const { t } = useLanguage()
+  const [query, setQuery] = React.useState("")
+  const filteredConversations = React.useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase()
+    if (!normalized) return conversations
+    return conversations.filter((conversation) =>
+      `${conversation.question} ${conversation.result}`
+        .toLocaleLowerCase()
+        .includes(normalized)
+    )
+  }, [conversations, query])
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex min-h-16 items-center gap-3 border-b px-4">
@@ -784,37 +817,105 @@ function ConversationHistory({
       <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">
         <div className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground">
           <HistoryIcon className="size-3.5" />
-          {t("历史记录")}
+          <span className="flex-1">{t("历史记录")}</span>
+        </div>
+        <div className="relative mb-2">
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            className="h-8 w-full rounded-md border bg-background pr-2 pl-8 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("搜索历史记录")}
+            aria-label={t("搜索历史记录")}
+          />
         </div>
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
           {conversations.length === 0 ? (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground">
               {t("暂无历史记录")}
             </p>
+          ) : filteredConversations.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              {t("暂无匹配的历史记录")}
+            </p>
           ) : (
-            conversations.map((conversation) => (
-              <button
+            filteredConversations.map((conversation) => (
+              <div
                 key={conversation.conversation_id}
-                type="button"
-                className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${
+                className={`group flex items-center gap-1 rounded-lg px-2 py-1 transition-colors hover:bg-muted ${
                   activeConversationId === conversation.conversation_id
                     ? "bg-muted"
                     : ""
                 }`}
-                aria-current={
-                  activeConversationId === conversation.conversation_id
-                    ? "page"
-                    : undefined
-                }
-                onClick={() => onSelect(conversation.conversation_id)}
               >
-                <span className="block truncate text-sm font-medium">
-                  {conversation.question || t("新对话")}
-                </span>
-                <span className="mt-1 block truncate text-xs text-muted-foreground">
-                  {conversation.result || t("等待回答")}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 rounded-md px-1 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-current={
+                    activeConversationId === conversation.conversation_id
+                      ? "page"
+                      : undefined
+                  }
+                  onClick={() => onSelect(conversation.conversation_id)}
+                >
+                  <span className="block truncate text-sm font-medium">
+                    {conversation.question || t("新对话")}
+                  </span>
+                  <span className="mt-1 block truncate text-xs text-muted-foreground">
+                    {conversation.result || t("等待回答")}
+                  </span>
+                </button>
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="size-5 rounded-md p-0 text-muted-foreground"
+                      aria-label={t("更多")}
+                      title={t("更多")}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {deletingConversationId ===
+                        conversation.conversation_id ||
+                      exportingConversationId ===
+                        conversation.conversation_id ? (
+                        <LoaderCircleIcon className="animate-spin" />
+                      ) : (
+                        <EllipsisIcon />
+                      )}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    side="bottom"
+                    align="center"
+                    sideOffset={4}
+                    className="w-36 min-w-0 rounded-md p-1"
+                  >
+                    <DropdownMenuItem
+                      className="h-8 px-2 py-1 text-xs [&_svg]:size-3.5"
+                      disabled={Boolean(
+                        deletingConversationId || exportingConversationId
+                      )}
+                      onSelect={() => onExport(conversation.conversation_id)}
+                    >
+                      <DownloadIcon />
+                      {t("导出对话")}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="h-8 px-2 py-1 text-xs"
+                      variant="destructive"
+                      disabled={Boolean(
+                        deletingConversationId || exportingConversationId
+                      )}
+                      onSelect={() => onDelete(conversation.conversation_id)}
+                    >
+                      {t("删除对话")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             ))
           )}
         </div>
@@ -835,6 +936,7 @@ export function PublicAgentChat({
 }: PublicAgentChatProps) {
   const router = useRouter()
   const { t } = useLanguage()
+  const [confirm, confirmDialog] = useConfirmDialog()
   const { token, isSessionRestored } = useSession()
   const [profile, setProfile] = React.useState<PublicAgentProfile | null>(null)
   const [conversations, setConversations] = React.useState<
@@ -858,6 +960,12 @@ export function PublicAgentChat({
   const [fatalError, setFatalError] = React.useState<string | null>(null)
   const [sendError, setSendError] = React.useState<string | null>(null)
   const [isHistoryOpen, setIsHistoryOpen] = React.useState(false)
+  const [deletingConversationId, setDeletingConversationId] = React.useState<
+    string | null
+  >(null)
+  const [exportingConversationId, setExportingConversationId] = React.useState<
+    string | null
+  >(null)
   const [toolCallsByRun, setToolCallsByRun] = React.useState<
     Record<string, AgentToolCall[]>
   >({})
@@ -1018,6 +1126,79 @@ export function PublicAgentChat({
     setIsRunsLoading(false)
     setIsHistoryOpen(false)
     window.history.replaceState(null, "", `/chat/${agentId}`)
+  }
+
+  async function handleDeleteConversation(conversationId: string) {
+    if (!token || deletingConversationId) return
+    const confirmed = await confirm({
+      title: t("删除对话"),
+      description: t("删除对话说明"),
+      confirmLabel: t("删除"),
+      destructive: true,
+    })
+    if (!confirmed) return
+    setDeletingConversationId(conversationId)
+    setSendError(null)
+    try {
+      await deletePublicAgentConversation(agentId, conversationId, token)
+      const nextConversations = await refreshConversations()
+      if (activeConversationId === conversationId) {
+        const nextId = nextConversations[0]?.conversation_id ?? null
+        if (nextId) selectConversation(nextId)
+        else startNewConversation()
+      }
+    } catch (error) {
+      setSendError(getErrorMessage(error, t))
+    } finally {
+      setDeletingConversationId(null)
+    }
+  }
+
+  async function handleExportConversation(conversationId: string) {
+    if (!token || exportingConversationId || deletingConversationId) return
+    setExportingConversationId(conversationId)
+    setSendError(null)
+    try {
+      const pageSize = 200
+      const exportedRuns: ExternalAgentRun[] = []
+      for (let offset = 0; ; offset += pageSize) {
+        const response = await listPublicAgentRuns(
+          agentId,
+          conversationId,
+          token,
+          {
+            limit: pageSize,
+            offset,
+          }
+        )
+        exportedRuns.push(...response.items)
+        if (
+          exportedRuns.length >= response.total ||
+          response.items.length < pageSize
+        ) {
+          break
+        }
+      }
+      const conversation = conversations.find(
+        (item) => item.conversation_id === conversationId
+      )
+      const messages: ConversationExportMessage[] = latestRunVersions(
+        exportedRuns
+      ).map((run) => ({
+        question: run.question,
+        answer: run.result,
+        error: run.error,
+        createdAt: run.created_at,
+      }))
+      downloadConversationMarkdown(
+        conversation?.question || profile?.name || t("对话记录"),
+        messages
+      )
+    } catch (error) {
+      setSendError(getErrorMessage(error, t))
+    } finally {
+      setExportingConversationId(null)
+    }
   }
 
   async function handleToolCallDecision(
@@ -1320,6 +1501,10 @@ export function PublicAgentChat({
     activeConversationId,
     onNew: startNewConversation,
     onSelect: selectConversation,
+    onDelete: handleDeleteConversation,
+    deletingConversationId,
+    onExport: handleExportConversation,
+    exportingConversationId,
   }
 
   return (
@@ -1573,6 +1758,7 @@ export function PublicAgentChat({
           <ConversationHistory {...historyProps} />
         </DialogContent>
       </Dialog>
+      {confirmDialog}
     </main>
   )
 }

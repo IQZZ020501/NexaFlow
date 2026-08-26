@@ -106,12 +106,32 @@ export async function initializePublicWorkflow(
 ) {
   const [profile, conversations] = await Promise.all([
     getPublicWorkflowProfile(workflowId, token),
-    request<{ items: PublicWorkflowConversation[] }>(
-      path(workflowId, "/conversations"),
-      { token }
-    ),
+    listPublicWorkflowConversations(workflowId, token),
   ])
   return { profile, conversations }
+}
+
+/** Lists the conversations available for a public workflow. */
+export function listPublicWorkflowConversations(
+  workflowId: string,
+  token: string
+) {
+  return request<{ items: PublicWorkflowConversation[] }>(
+    path(workflowId, "/conversations"),
+    { token }
+  )
+}
+
+/** Deletes one public workflow conversation and all of its runs. */
+export function deletePublicWorkflowConversation(
+  workflowId: string,
+  conversationId: string,
+  token: string
+) {
+  return request<void>(path(workflowId, `/conversations/${conversationId}`), {
+    method: "DELETE",
+    token,
+  })
 }
 
 /**
@@ -125,11 +145,19 @@ export async function initializePublicWorkflow(
 export function listPublicWorkflowRuns(
   workflowId: string,
   conversationId: string,
-  token: string
+  token: string,
+  options: { limit?: number; offset?: number } = {}
 ) {
-  const params = new URLSearchParams(listQuery({ limit: 200 }).slice(1))
+  const params = new URLSearchParams(
+    listQuery({ limit: options.limit ?? 200, offset: options.offset }).slice(1)
+  )
   params.set("conversation_id", conversationId)
-  return request<{ items: ExternalWorkflowRun[] }>(
+  return request<{
+    items: ExternalWorkflowRun[]
+    total: number
+    offset: number
+    limit: number
+  }>(
     path(workflowId, `/runs?${params.toString()}`),
     { token }
   )

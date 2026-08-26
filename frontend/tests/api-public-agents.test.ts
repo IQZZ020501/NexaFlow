@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { ApiError } from "@/lib/api-client"
 import {
   createPublicAgentRun,
+  deletePublicAgentConversation,
   getPublicAgentProfile,
   getPublicAgentRun,
   initializePublicAgent,
@@ -17,11 +18,7 @@ import {
   streamPublicAgentRun,
   uploadPublicAgentFiles,
 } from "@/lib/api/public-agents"
-import {
-  jsonResponse,
-  resetFetch,
-  withFetch,
-} from "./helpers/dom"
+import { jsonResponse, resetFetch, withFetch } from "./helpers/dom"
 
 const originalSetTimeout = globalThis.setTimeout
 
@@ -74,7 +71,9 @@ const interactionConfig = {
   prologue: "",
   tts_type: "NONE" as const,
   file_upload: false,
-  file_upload_setting: { file_upload_type: ["document"] as Array<"document" | "image" | "audio"> },
+  file_upload_setting: {
+    file_upload_type: ["document"] as Array<"document" | "image" | "audio">,
+  },
   user_input_title: "输入",
 }
 
@@ -100,6 +99,26 @@ const conversations = {
 }
 
 describe("public agent API", () => {
+  test("deletes a public agent conversation", async () => {
+    const requests = capture()
+
+    await deletePublicAgentConversation("agent-1", "conv-1", "token-1")
+
+    expect(
+      requests.map(({ url, method, authorization }) => [
+        method,
+        url,
+        authorization,
+      ])
+    ).toEqual([
+      [
+        "DELETE",
+        "/api/v1/public/agents/agent-1/conversations/conv-1",
+        "Bearer token-1",
+      ],
+    ])
+  })
+
   test("loads public agent profiles and conversations", async () => {
     const urls: string[] = []
     withFetch((url) => {
@@ -107,9 +126,9 @@ describe("public agent API", () => {
       return jsonResponse(url.endsWith("/profile") ? profile : conversations)
     })
 
-    await expect(
-      getPublicAgentProfile("agent-1", "token-1")
-    ).resolves.toEqual(profile)
+    await expect(getPublicAgentProfile("agent-1", "token-1")).resolves.toEqual(
+      profile
+    )
     await expect(
       listPublicAgentConversations("agent-1", "token-1")
     ).resolves.toEqual(conversations)
@@ -181,11 +200,7 @@ describe("public agent API", () => {
     })
 
     const files = [new File(["data"], "doc.pdf", { type: "application/pdf" })]
-    const uploaded = await uploadPublicAgentFiles(
-      "agent-1",
-      "token-1",
-      files
-    )
+    const uploaded = await uploadPublicAgentFiles("agent-1", "token-1", files)
 
     expect(requests[0]?.url).toBe("/api/v1/public/agents/agent-1/uploads")
     expect(requests[0]?.body).toBeInstanceOf(FormData)
@@ -230,8 +245,14 @@ describe("public agent API", () => {
       ["POST", "/api/v1/public/agents/agent-1/runs/run-1/feedback"],
       ["POST", "/api/v1/public/agents/agent-1/runs/run-1/feedback"],
       ["GET", "/api/v1/public/agents/agent-1/runs/run-1/tool-calls"],
-      ["POST", "/api/v1/public/agents/agent-1/runs/run-1/tool-calls/call-1/approve"],
-      ["POST", "/api/v1/public/agents/agent-1/runs/run-1/tool-calls/call-1/reject"],
+      [
+        "POST",
+        "/api/v1/public/agents/agent-1/runs/run-1/tool-calls/call-1/approve",
+      ],
+      [
+        "POST",
+        "/api/v1/public/agents/agent-1/runs/run-1/tool-calls/call-1/reject",
+      ],
     ])
     expect(requests[2]?.body).toEqual({ value: "positive" })
     expect(requests[3]?.body).toEqual({ value: null })
@@ -257,11 +278,8 @@ describe("public agent API", () => {
     })
 
     const eventTypes: string[] = []
-    await observePublicAgentRun(
-      "agent-1",
-      "token-1",
-      "run-1",
-      (event) => eventTypes.push(event.type)
+    await observePublicAgentRun("agent-1", "token-1", "run-1", (event) =>
+      eventTypes.push(event.type)
     )
 
     expect(eventTypes).toEqual(["answer_delta", "complete"])
@@ -301,32 +319,23 @@ describe("public agent API", () => {
 
     const succeededUrls = install("succeeded")
     const succeededEvents: string[] = []
-    await streamPublicAgentRun(
-      "agent-1",
-      "token-1",
-      "q",
-      (event) => succeededEvents.push(event.type)
+    await streamPublicAgentRun("agent-1", "token-1", "q", (event) =>
+      succeededEvents.push(event.type)
     )
     expect(succeededEvents).toEqual(["run", "complete"])
     expect(succeededUrls).toHaveLength(1)
 
     const failedEvents: string[] = []
     install("failed")
-    await streamPublicAgentRun(
-      "agent-1",
-      "token-1",
-      "q",
-      (event) => failedEvents.push(event.type)
+    await streamPublicAgentRun("agent-1", "token-1", "q", (event) =>
+      failedEvents.push(event.type)
     )
     expect(failedEvents).toEqual(["run", "error"])
 
     const cancelledEvents: string[] = []
     install("cancelled")
-    await streamPublicAgentRun(
-      "agent-1",
-      "token-1",
-      "q",
-      (event) => cancelledEvents.push(event.type)
+    await streamPublicAgentRun("agent-1", "token-1", "q", (event) =>
+      cancelledEvents.push(event.type)
     )
     expect(cancelledEvents).toEqual(["run", "error"])
 
@@ -334,11 +343,8 @@ describe("public agent API", () => {
     const queuedUrls = install("queued", [
       { type: "complete", sequence: 1, run: {} },
     ])
-    await streamPublicAgentRun(
-      "agent-1",
-      "token-1",
-      "q",
-      (event) => queuedEvents.push(event.type)
+    await streamPublicAgentRun("agent-1", "token-1", "q", (event) =>
+      queuedEvents.push(event.type)
     )
     expect(queuedEvents).toEqual(["run", "complete"])
     expect(queuedUrls).toHaveLength(2)
