@@ -15,6 +15,8 @@ from app.infrastructure.logger import get_logger, log_event
 
 logger = get_logger(__name__)
 
+QDRANT_UPLOAD_BATCH_SIZE = 64
+
 
 @dataclass(frozen=True)
 class VectorChunk:
@@ -240,7 +242,7 @@ def upsert_vectors(
     _ensure_collection(client, collection_name, len(vectors[0]))
     started = time.monotonic()
     try:
-        client.upsert(
+        client.upload_points(
             collection_name,
             points=[
                 models.PointStruct(
@@ -262,6 +264,7 @@ def upsert_vectors(
                 )
                 for chunk, vector in zip(chunks, vectors, strict=True)
             ],
+            batch_size=QDRANT_UPLOAD_BATCH_SIZE,
             wait=True,
         )
     except Exception as exc:
@@ -367,7 +370,7 @@ def upsert_graph_profile_vectors(
     client = _client(settings)
     collection_name = graph_profile_collection_name(knowledge_base_id)
     _ensure_collection(client, collection_name, len(vectors[0]))
-    client.upsert(
+    client.upload_points(
         collection_name,
         points=[
             models.PointStruct(
@@ -382,6 +385,7 @@ def upsert_graph_profile_vectors(
             )
             for item, vector in zip(profiles, vectors, strict=True)
         ],
+        batch_size=QDRANT_UPLOAD_BATCH_SIZE,
         wait=True,
     )
 
