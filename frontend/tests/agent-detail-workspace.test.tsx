@@ -607,7 +607,7 @@ describe("AgentDetailWorkspace preview", () => {
     const link = screen.getByRole("link", {
       name: "公司内部管理制度汇编.docx",
     })
-    expect(link.getAttribute("href")).toBe("/api/v1/artifacts/download")
+    expect(link.getAttribute("href")).toBe(downloadUrl)
     expect(link.className).toContain("text-sky-600")
     expect(link.hasAttribute("download")).toBe(true)
     expect(link.getAttribute("target")).toBeNull()

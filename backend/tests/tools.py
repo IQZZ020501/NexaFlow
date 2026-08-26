@@ -246,6 +246,30 @@ def load_artifact_runtime_contract_migration():
     return module
 
 
+def load_artifact_identity_migration():
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202608250005_generic_artifact_identity.py"
+    )
+    spec = spec_from_file_location("generic_artifact_identity", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_artifact_renderer_migration():
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202608250006_artifact_docx_renderer.py"
+    )
+    spec = spec_from_file_location("artifact_docx_renderer", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_generic_artifact_migration_matches_catalog() -> None:
     from app.shareddomain.tools.catalog import build_artifact_tool
 
@@ -268,6 +292,83 @@ def test_generic_artifact_migration_matches_catalog() -> None:
     assert definition_hash == version.definition_hash
     assert "import pymupdf" in version.description
     assert "never reportlab" in version.description
+
+
+def test_artifact_contract_downgrade_rejects_durable_references() -> None:
+    from sqlalchemy import create_engine
+
+    migrations = (
+        load_artifact_identity_migration(),
+        load_artifact_renderer_migration(),
+        load_artifact_runtime_contract_migration(),
+    )
+    for migration in migrations:
+        engine = create_engine("sqlite://")
+        metadata = sa.MetaData()
+        publications = sa.Table(
+            "agent_publication_versions",
+            metadata,
+            sa.Column("id", sa.String, primary_key=True),
+            sa.Column("resource_snapshot", sa.JSON, nullable=False),
+        )
+        invocations = sa.Table(
+            "tool_invocations",
+            metadata,
+            sa.Column("id", sa.String, primary_key=True),
+            sa.Column("tool_id", sa.String, nullable=True),
+            sa.Column("tool_version_id", sa.String, nullable=True),
+            sa.Column("policy_snapshot", sa.JSON, nullable=False),
+        )
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            migration._assert_downgrade_safe(
+                connection,
+                "artifact-tool",
+                "artifact-version",
+            )
+            connection.execute(
+                publications.insert().values(
+                    id="publication-1",
+                    resource_snapshot={
+                        "tools": [
+                            {
+                                "tool_id": "artifact-tool",
+                                "version_id": "artifact-version",
+                            }
+                        ]
+                    },
+                )
+            )
+            try:
+                migration._assert_downgrade_safe(
+                    connection,
+                    "artifact-tool",
+                    "artifact-version",
+                )
+            except RuntimeError as exc:
+                assert "durable execution state" in str(exc)
+            else:
+                raise AssertionError("Unsafe Artifact Tool downgrade was accepted.")
+
+            connection.execute(publications.delete())
+            connection.execute(
+                invocations.insert().values(
+                    id="invocation-1",
+                    tool_id="artifact-tool",
+                    tool_version_id="artifact-version",
+                    policy_snapshot={},
+                )
+            )
+            try:
+                migration._assert_downgrade_safe(
+                    connection,
+                    "artifact-tool",
+                    "artifact-version",
+                )
+            except RuntimeError as exc:
+                assert "durable execution state" in str(exc)
+            else:
+                raise AssertionError("Artifact Tool ledger downgrade was accepted.")
 
 
 def test_artifact_generator_preflight_is_actionable() -> None:
@@ -5595,6 +5696,7 @@ def test_tool_tasks_are_registered() -> None:
 def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
     test_generic_artifact_migration_matches_catalog()
+    test_artifact_contract_downgrade_rejects_durable_references()
     test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()
     test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()

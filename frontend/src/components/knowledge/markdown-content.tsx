@@ -154,7 +154,7 @@ function ArtifactDownloadLink({
         isDownloading && "cursor-wait opacity-70",
         className
       )}
-      href="/api/v1/artifacts/download"
+      href={href}
       download=""
       aria-busy={isDownloading}
       title={failed ? t("请求失败") : t("下载原文")}

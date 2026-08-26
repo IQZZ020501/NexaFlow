@@ -21,6 +21,62 @@ def _stable_catalog_id(key: str) -> str:
     return str(uuid5(_CATALOG_ID_NAMESPACE, key))
 
 
+def _contains_tool_version(value: object, tool_id: str, version_id: str) -> bool:
+    if isinstance(value, dict):
+        if value.get("tool_id") == tool_id and (
+            value.get("version_id") == version_id
+            or value.get("tool_version_id") == version_id
+        ):
+            return True
+        return any(
+            _contains_tool_version(item, tool_id, version_id)
+            for item in value.values()
+        )
+    if isinstance(value, list):
+        return any(_contains_tool_version(item, tool_id, version_id) for item in value)
+    return False
+
+
+def _assert_downgrade_safe(
+    bind: sa.Connection,
+    tool_id: str,
+    version_id: str,
+) -> None:
+    inspector = sa.inspect(bind)
+    if inspector.has_table("tool_invocations"):
+        invocations = sa.Table("tool_invocations", sa.MetaData(), autoload_with=bind)
+        if bind.scalar(
+            sa.select(sa.literal(True))
+            .where(
+                invocations.c.tool_id == tool_id,
+                invocations.c.tool_version_id == version_id,
+            )
+            .limit(1)
+        ):
+            raise RuntimeError(
+                "Cannot downgrade while the current Artifact Tool contract is "
+                "referenced by durable execution state."
+            )
+    for table_name, column_name in (
+        ("agent_publication_versions", "resource_snapshot"),
+        ("agent_run_snapshots", "tool_snapshots"),
+        ("workflow_versions", "resource_snapshot"),
+        ("workflow_run_details", "resource_snapshot"),
+        ("tool_invocations", "policy_snapshot"),
+    ):
+        if not inspector.has_table(table_name):
+            continue
+        table = sa.Table(table_name, sa.MetaData(), autoload_with=bind)
+        if any(
+            _contains_tool_version(value, tool_id, version_id)
+            for value in bind.execute(sa.select(table.c[column_name])).scalars()
+        ):
+            raise RuntimeError(
+                "Cannot downgrade while the current Artifact Tool contract is "
+                "referenced by durable execution state."
+            )
+
+
 def _definition() -> tuple[str, dict, dict, dict, str]:
     description = (
         "Create or rewrite a downloadable file of any common type. Choose the exact "
@@ -134,12 +190,14 @@ def _switch(*, downgrade: bool = False) -> None:
     description, input_schema, output_schema, execution_spec, digest = _definition()
     timestamp = datetime.now(UTC)
     rows = bind.execute(
-        sa.select(tools.c.id, tools.c.workspace_id).where(
+        sa.select(tools.c.id, tools.c.workspace_id, tools.c.current_version_id).where(
             tools.c.stable_key == "artifact", tools.c.kind == "builtin"
         )
     ).all()
-    for tool_id, workspace_id in rows:
+    for tool_id, workspace_id, current_version_id in rows:
         if downgrade:
+            if current_version_id is not None:
+                _assert_downgrade_safe(bind, tool_id, current_version_id)
             previous = bind.execute(
                 sa.select(versions.c.id, versions.c.definition_hash)
                 .where(

@@ -550,7 +550,9 @@ describe("MarkdownContent", () => {
       )
 
       const link = screen.getByRole("link", { name: "制度文件.docx" })
-      expect(link.getAttribute("href")).toBe("/api/v1/artifacts/download")
+      expect(link.getAttribute("href")).toBe(
+        "/api/v1/artifacts/eyJold-token"
+      )
       fireEvent.click(link)
       await waitFor(() => expect(calls).toHaveLength(1))
       expect(calls[0]).toEqual({

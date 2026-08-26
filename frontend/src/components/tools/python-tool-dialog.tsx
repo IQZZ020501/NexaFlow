@@ -290,8 +290,11 @@ function updateFlatSchema(
   const required = new Set(
     Array.isArray(parsed.required) ? parsed.required.map(String) : []
   )
+  if (nextName !== fieldName && required.delete(fieldName)) {
+    required.add(nextName)
+  }
   if (update.required === true) required.add(nextName)
-  if (update.required === false) required.delete(fieldName)
+  if (update.required === false) required.delete(nextName)
   parsed.required = [...required].filter((name) => name in nextProperties)
   return JSON.stringify(parsed, null, 2)
 }

@@ -2056,7 +2056,7 @@ def test_code_sandbox_execute() -> None:
     assert isinstance(oversized, code_sandbox.WorkflowSandboxError)
 
     # unavailable: OSError from connect
-    async def run_unavailable() -> code_sandbox.WorkflowSandboxBusyError:
+    async def run_unavailable() -> code_sandbox.WorkflowSandboxError:
         with patch("asyncio.open_unix_connection", new=AsyncMock(side_effect=OSError("refused"))):
             try:
                 await code_sandbox.execute_workflow_code(
@@ -2064,19 +2064,19 @@ def test_code_sandbox_execute() -> None:
                     "result = 1",
                     {},
                 )
-            except code_sandbox.WorkflowSandboxBusyError as exc:
+            except code_sandbox.WorkflowSandboxError as exc:
                 return exc
-            raise AssertionError("expected WorkflowSandboxBusyError")
+            raise AssertionError("expected WorkflowSandboxError")
 
     unavailable = run(run_unavailable())
-    assert isinstance(unavailable, code_sandbox.WorkflowSandboxBusyError)
-    assert "temporarily unavailable" in str(unavailable)
+    assert type(unavailable) is code_sandbox.WorkflowSandboxError
+    assert "unavailable" in str(unavailable)
 
     # unavailable: readline raising
     reader_error = _sandbox_expect_error(
         lambda: _run_sandbox(_FakeSandboxReader(b"", error=TimeoutError("slow")))
     )
-    assert isinstance(reader_error, code_sandbox.WorkflowSandboxBusyError)
+    assert type(reader_error) is code_sandbox.WorkflowSandboxError
 
 
 def test_code_sandbox_artifact_execute() -> None:

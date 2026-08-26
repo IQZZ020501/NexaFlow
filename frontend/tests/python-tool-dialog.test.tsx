@@ -480,6 +480,9 @@ describe("PythonToolDialog", () => {
     expect(screen.getByText("在工作流中")).toBeTruthy()
     expect(screen.getByText("代码约定")).toBeTruthy()
 
+    fireEvent.change(screen.getByLabelText("参数名称 1"), {
+      target: { value: "source_text" },
+    })
     const addButtons = screen.getAllByRole("button", { name: "添加参数" })
     fireEvent.click(addButtons[0]!)
     fireEvent.change(screen.getByLabelText("参数名称 2"), {
@@ -506,11 +509,15 @@ describe("PythonToolDialog", () => {
         .input_schema
     ).toMatchObject({
       properties: {
+        source_text: {
+          type: "string",
+        },
         summary: {
           type: "string",
           description: "要生成摘要的文本",
         },
       },
+      required: ["source_text"],
     })
   })
 
