@@ -381,6 +381,7 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
     if (event.type === "tool") return publicToolName(event, t) || t("工具")
     if (event.type === "answer")
       return t(event.status === "succeeded" ? "回答已生成" : "正在生成回答")
+    if (event.stage === "preparing") return t("正在准备工具调用")
     if (event.stage === "running") return t("正在分析问题")
     if (event.stage === "reviewing") return t("正在整理工具结果")
     if (event.stage === "completed") return t("已完成分析")

@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm"
 import { MarkdownCodeBlock } from "@/components/knowledge/markdown-code-block"
 import { cn } from "@/lib/utils"
 import { useLanguage } from "@/contexts/language-provider"
+import { requestBlob } from "@/lib/api-client"
 
 type MarkdownContentProps = {
   content: string
@@ -96,6 +97,74 @@ function MarkdownPre(
   return <MarkdownCodeBlock code={code} language={language} />
 }
 
+function markdownText(children: React.ReactNode) {
+  return React.Children.toArray(children)
+    .filter((child): child is string | number =>
+      typeof child === "string" || typeof child === "number"
+    )
+    .join("")
+    .trim()
+}
+
+function ArtifactDownloadLink({
+  href,
+  children,
+  className,
+}: {
+  href: string
+  children?: React.ReactNode
+  className?: string
+}) {
+  const { t } = useLanguage()
+  const [isDownloading, setIsDownloading] = React.useState(false)
+  const [failed, setFailed] = React.useState(false)
+  const filename = markdownText(children) || "download"
+  const token = href.slice("/api/v1/artifacts/".length)
+
+  async function handleDownload(event: React.MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault()
+    if (isDownloading) return
+    setIsDownloading(true)
+    setFailed(false)
+    try {
+      const blob = await requestBlob("/api/v1/artifacts/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      })
+      const objectUrl = URL.createObjectURL(blob)
+      const anchor = document.createElement("a")
+      anchor.href = objectUrl
+      anchor.download = filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(objectUrl)
+    } catch {
+      setFailed(true)
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
+  return (
+    <a
+      className={cn(
+        "font-medium text-sky-600 underline decoration-sky-600/40 underline-offset-4 hover:text-sky-700 dark:text-sky-400 dark:decoration-sky-400/50 dark:hover:text-sky-300",
+        isDownloading && "cursor-wait opacity-70",
+        className
+      )}
+      href={href}
+      download=""
+      aria-busy={isDownloading}
+      title={failed ? t("请求失败") : t("下载原文")}
+      onClick={(event) => void handleDownload(event)}
+    >
+      {children}
+    </a>
+  )
+}
+
 const markdownComponents: Components = {
   h1(props) {
     const { className, ...restProps } = omitMarkdownNode(props)
@@ -133,6 +202,13 @@ const markdownComponents: Components = {
   a(props) {
     const { className, href, ...restProps } = omitMarkdownNode(props)
     const isArtifact = href?.startsWith("/api/v1/artifacts/") ?? false
+    if (isArtifact && href) {
+      return (
+        <ArtifactDownloadLink href={href} className={className}>
+          {restProps.children}
+        </ArtifactDownloadLink>
+      )
+    }
     return (
       <a
         className={cn(

@@ -273,7 +273,7 @@ def external_progress_events(
             }:
                 stage = {
                     "agent.analyzing": "analyzing",
-                    "agent.preparing_tool_call": "running",
+                    "agent.preparing_tool_call": "preparing",
                     "agent.reviewing_tool_results": "reviewing",
                     "agent.tools_selected": "completed",
                 }[summary]

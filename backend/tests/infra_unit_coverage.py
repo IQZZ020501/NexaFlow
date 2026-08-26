@@ -2069,13 +2069,14 @@ def test_code_sandbox_execute() -> None:
             raise AssertionError("expected WorkflowSandboxError")
 
     unavailable = run(run_unavailable())
+    assert type(unavailable) is code_sandbox.WorkflowSandboxError
     assert "unavailable" in str(unavailable)
 
     # unavailable: readline raising
     reader_error = _sandbox_expect_error(
         lambda: _run_sandbox(_FakeSandboxReader(b"", error=TimeoutError("slow")))
     )
-    assert isinstance(reader_error, code_sandbox.WorkflowSandboxError)
+    assert type(reader_error) is code_sandbox.WorkflowSandboxError
 
 
 def test_code_sandbox_artifact_execute() -> None:

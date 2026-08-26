@@ -159,7 +159,9 @@ export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
   }
   if (tool.function_name === "current_time") return t("返回当前 UTC 时间。")
   if (tool.function_name === "create_artifact") {
-    return t("在隔离沙箱中生成或重写任意常见文件，并提供可下载链接。")
+    return t(
+      "根据文件名和内容创建可下载文件；文本文件直接保存，复杂格式由平台生成。"
+    )
   }
   return tool.description
 }

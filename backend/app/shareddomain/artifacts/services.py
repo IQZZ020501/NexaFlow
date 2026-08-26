@@ -1,6 +1,8 @@
 import mimetypes
 import re
+from io import BytesIO
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 
 MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
@@ -18,6 +20,11 @@ ARTIFACT_MEDIA_TYPES = {
     "py": "text/x-python; charset=utf-8",
     "java": "text/x-java-source; charset=utf-8",
     "zip": "application/zip",
+}
+RICH_ARTIFACT_MEMBERS = {
+    "docx": frozenset({"[Content_Types].xml", "word/document.xml"}),
+    "xlsx": frozenset({"[Content_Types].xml", "xl/workbook.xml"}),
+    "pptx": frozenset({"[Content_Types].xml", "ppt/presentation.xml"}),
 }
 
 
@@ -52,6 +59,25 @@ def validate_generated_artifact(
         raise ValueError("Artifact format does not match its filename.")
     if not isinstance(content, bytes) or not 0 < len(content) <= MAX_ARTIFACT_BYTES:
         raise ValueError("Artifact content must be between 1 byte and 5 MiB.")
+    required_members = RICH_ARTIFACT_MEMBERS.get(artifact_format)
+    if required_members is not None:
+        try:
+            with ZipFile(BytesIO(content)) as archive:
+                if not required_members.issubset(archive.namelist()):
+                    raise ValueError(
+                        f"Generated {artifact_format.upper()} is missing "
+                        "its document structure."
+                    )
+                if archive.testzip() is not None:
+                    raise ValueError(
+                        f"Generated {artifact_format.upper()} is corrupt."
+                    )
+        except BadZipFile as exc:
+            raise ValueError(
+                f"Generated {artifact_format.upper()} is not a valid Office document."
+            ) from exc
+    elif artifact_format == "pdf" and not content.startswith(b"%PDF-"):
+        raise ValueError("Generated PDF is not a valid PDF file.")
     return (
         ARTIFACT_MEDIA_TYPES.get(artifact_format)
         or mimetypes.guess_type(filename, strict=False)[0]

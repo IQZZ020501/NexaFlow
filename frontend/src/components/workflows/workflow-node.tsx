@@ -569,6 +569,7 @@ function JsonEditor({
   readOnly,
   onChange,
   t,
+  accessory,
 }: {
   id: string
   label: string
@@ -576,13 +577,17 @@ function JsonEditor({
   readOnly: boolean
   onChange: (value: unknown) => void
   t: TFunction
+  accessory?: React.ReactNode
 }) {
   const [text, setText] = React.useState(() => JSON.stringify(value, null, 2))
   const [invalid, setInvalid] = React.useState(false)
 
   return (
-    <label className="grid min-w-0 gap-1.5 text-xs font-medium" htmlFor={id}>
-      {label}
+    <div className="grid min-w-0 gap-1.5 text-xs font-medium">
+      <div className="flex items-center justify-between gap-2">
+        <label htmlFor={id}>{label}</label>
+        {accessory}
+      </div>
       <textarea
         id={id}
         className="min-h-28 resize-y rounded-md border bg-background p-2 font-mono text-xs leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring aria-invalid:border-destructive"
@@ -606,7 +611,7 @@ function JsonEditor({
           {t("JSON 格式无效")}
         </span>
       ) : null}
-    </label>
+    </div>
   )
 }
 
@@ -1476,6 +1481,7 @@ function ConditionEditor({
  */
 function ToolArgumentsFields({
   nodeId,
+  node,
   tool,
   value,
   readOnly,
@@ -1483,6 +1489,7 @@ function ToolArgumentsFields({
   t,
 }: {
   nodeId: string
+  node: WorkflowNodeData
   tool?: ToolDetail
   value: Record<string, unknown>
   readOnly: boolean
@@ -1550,6 +1557,22 @@ function ToolArgumentsFields({
               label={`${title}${required.has(name) ? " *" : ""}`}
               value={name in value ? value[name] : defaultValue}
               readOnly={readOnly}
+              accessory={
+                <VariablePicker
+                  nodeId={nodeId}
+                  node={node}
+                  t={t}
+                  label={
+                    typeof value[name] === "string" && value[name]
+                      ? value[name]
+                      : t("插入变量")
+                  }
+                  disabled={readOnly}
+                  onInsert={(reference) =>
+                    onChange({ ...value, [name]: reference })
+                  }
+                />
+              }
               onChange={(nextValue) =>
                 onChange({ ...value, [name]: nextValue })
               }
@@ -1570,6 +1593,22 @@ function ToolArgumentsFields({
           label={name}
           value={extraValue}
           readOnly={readOnly}
+          accessory={
+            <VariablePicker
+              nodeId={nodeId}
+              node={node}
+              t={t}
+              label={
+                typeof extraValue === "string" && extraValue
+                  ? extraValue
+                  : t("插入变量")
+              }
+              disabled={readOnly}
+              onInsert={(reference) =>
+                onChange({ ...value, [name]: reference })
+              }
+            />
+          }
           onChange={(nextValue) => onChange({ ...value, [name]: nextValue })}
           t={t}
         />
@@ -3128,6 +3167,7 @@ function NodeConfigFields({
           <ToolArgumentsFields
             key={`${directToolReference?.tool_id ?? "tool"}:${directToolReference?.version_id ?? "version"}`}
             nodeId={nodeId}
+            node={node}
             tool={directToolWithMatchingSchema}
             value={directToolArguments}
             readOnly={readOnly}

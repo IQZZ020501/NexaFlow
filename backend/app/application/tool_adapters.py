@@ -1,6 +1,8 @@
 """Provider adapters behind the unified Tool runtime contract."""
 
+import ast
 import json
+import re
 from typing import Any
 
 from app.application.artifacts import create_generated_artifact
@@ -40,6 +42,85 @@ def _is_direct_artifact_content(artifact_format: str, code: str) -> bool:
     )
 
 
+def _redirect_legacy_artifact_path(code: str, filename: str) -> str:
+    """Repair the legacy model pattern that saves the requested file under /tmp."""
+
+    escaped_filename = re.escape(filename)
+    return re.sub(
+        rf"(['\"])/tmp/[^'\"\n]*{escaped_filename}\1",
+        "output_path",
+        code,
+    )
+
+
+_UNAVAILABLE_ARTIFACT_IMPORTS = {
+    "reportlab": (
+        "PDF generation uses PyMuPDF in this runtime: import pymupdf. "
+        "reportlab is not installed."
+    ),
+    "fpdf": (
+        "PDF generation uses PyMuPDF in this runtime: import pymupdf. "
+        "fpdf is not installed."
+    ),
+    "weasyprint": (
+        "PDF generation uses PyMuPDF in this runtime: import pymupdf. "
+        "weasyprint is not installed."
+    ),
+}
+
+
+def _artifact_code_preflight(code: str, artifact_format: str) -> str | None:
+    try:
+        tree = ast.parse(code, filename="<artifact-tool>")
+    except SyntaxError as exc:
+        location = f"line {exc.lineno}" if exc.lineno else "the submitted code"
+        return f"Artifact generator has a syntax error at {location}: {exc.msg}."
+
+    imported_modules: set[str] = set()
+    imported_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imported_modules.add(alias.name.split(".", 1)[0])
+                imported_names.add(alias.asname or alias.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module.split(".", 1)[0])
+            imported_names.update(alias.asname or alias.name for alias in node.names)
+
+    for module, message in _UNAVAILABLE_ARTIFACT_IMPORTS.items():
+        if module in imported_modules:
+            return (
+                f"{message} Do not repeat the same generator code; replace that "
+                "import and retry."
+            )
+
+    if artifact_format == "pdf":
+        references_fitz = any(
+            isinstance(node, ast.Name) and node.id == "fitz"
+            for node in ast.walk(tree)
+        )
+        if references_fitz and "fitz" not in imported_names:
+            return (
+                "PDF generator references 'fitz' without importing it. Add "
+                "'import pymupdf as fitz' at the top, then retry once; do not "
+                "repeat the same code."
+            )
+    return None
+
+
+def _artifact_error_message(error: Exception) -> str:
+    message = str(error).strip()
+    for line in reversed(message.splitlines()):
+        candidate = line.strip()
+        if re.match(
+            r"(?:ModuleNotFoundError|ImportError|NameError|SyntaxError|"
+            r"PermissionError|RuntimeError|ValueError|TypeError):",
+            candidate,
+        ):
+            return candidate[:1000]
+    return message[:1000]
+
+
 class BuiltinToolAdapter:
     kind = "builtin"
 
@@ -63,26 +144,48 @@ class BuiltinToolAdapter:
                 outcome="confirmed",
                 usage={},
             )
-        if builtin == "python_artifact":
+        if builtin in {"artifact", "python_artifact"}:
+            failure_code = (
+                "artifact_failed"
+                if builtin == "artifact"
+                else "python_artifact_failed"
+            )
             try:
                 filename = arguments["filename"]
                 artifact_format = artifact_format_from_filename(filename)
                 supplied_format = arguments.get("format")
                 if supplied_format is not None and supplied_format != artifact_format:
                     raise ValueError("Artifact format does not match its filename.")
-                code = arguments["code"]
-                if not isinstance(code, str):
+                content = arguments.get("content", arguments.get("code"))
+                if not isinstance(content, str):
                     raise TypeError
-                if _is_direct_artifact_content(artifact_format, code):
-                    artifact_content = code.encode("utf-8")
+                content_mode = arguments.get("content_mode")
+                if content_mode is not None and content_mode not in {"text", "python"}:
+                    raise ValueError("Artifact content_mode must be text or python.")
+                direct_content = (
+                    artifact_format in DIRECT_ARTIFACT_CONTENT_FORMATS
+                    if content_mode == "text"
+                    else content_mode != "python"
+                    and _is_direct_artifact_content(artifact_format, content)
+                )
+                if content_mode == "text" and not direct_content:
+                    raise ValueError(
+                        "Rich and binary files require content_mode=python."
+                    )
+                if direct_content:
+                    artifact_content = content.encode("utf-8")
                     artifact_stdout = (
-                        f"characters={len(code)}\nbytes={len(artifact_content)}"
+                        f"characters={len(content)}\nbytes={len(artifact_content)}"
                     )
                     artifact_exit_code = 0
                 else:
+                    generator = _redirect_legacy_artifact_path(content, filename)
+                    preflight_error = _artifact_code_preflight(generator, artifact_format)
+                    if preflight_error is not None:
+                        return _failure("artifact_code_invalid", preflight_error)
                     artifact = await execute_artifact_code(
                         self.settings,
-                        code,
+                        generator,
                         artifact_format,
                         filename,
                         [],
@@ -91,14 +194,16 @@ class BuiltinToolAdapter:
                     artifact_stdout = artifact.stdout
                     artifact_exit_code = artifact.exit_code
             except WorkflowSandboxBusyError as exc:
-                raise ToolAdapterBusy("Python sandbox is busy.") from exc
+                raise ToolAdapterBusy("File runtime is busy.") from exc
             except WorkflowSandboxError as exc:
-                return _failure("python_artifact_failed", str(exc)[:1000])
-            except (KeyError, TypeError, ValueError):
+                return _failure(failure_code, _artifact_error_message(exc))
+            except (KeyError, TypeError):
                 return _failure(
-                    "python_artifact_failed",
+                    failure_code,
                     "Artifact Tool parameters are invalid.",
                 )
+            except ValueError as exc:
+                return _failure(failure_code, str(exc)[:1000])
             try:
                 async with get_session_factory()() as db:
                     link = await create_generated_artifact(
@@ -113,19 +218,31 @@ class BuiltinToolAdapter:
                     )
                     await db.commit()
             except ValueError as exc:
-                return _failure("python_artifact_failed", str(exc)[:1000])
+                return _failure(failure_code, str(exc)[:1000])
+            artifact_data = {
+                "artifact_id": link.artifact_id,
+                "format": link.format,
+                "filename": link.filename,
+                "download_url": link.download_url,
+                "expires_at": link.expires_at.isoformat(),
+                "size_bytes": link.size_bytes,
+            }
+            result_data = {
+                **artifact_data,
+                "stdout": artifact_stdout.strip()[:2000],
+            }
+            output_properties = (
+                snapshot.output_schema.get("properties", {})
+                if isinstance(snapshot.output_schema, dict)
+                else {}
+            )
+            if isinstance(output_properties, dict) and "artifacts" in output_properties:
+                artifact_data["mime_type"] = link.media_type
+                result_data["artifacts"] = [artifact_data]
             return ToolRuntimeResult(
                 ok=True,
-                data={
-                    "artifact_id": link.artifact_id,
-                    "format": link.format,
-                    "filename": link.filename,
-                    "download_url": link.download_url,
-                    "expires_at": link.expires_at.isoformat(),
-                    "size_bytes": link.size_bytes,
-                    "stdout": artifact_stdout.strip()[:2000],
-                },
-                summary="Artifact created.",
+                data=result_data,
+                summary="File created.",
                 error_code=None,
                 error_message=None,
                 outcome="confirmed",

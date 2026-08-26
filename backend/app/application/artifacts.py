@@ -23,6 +23,7 @@ class GeneratedArtifactLink:
     artifact_id: str
     format: str
     filename: str
+    media_type: str
     download_url: str
     expires_at: datetime
     size_bytes: int
@@ -37,6 +38,7 @@ def _artifact_link(
         artifact_id=artifact.id,
         format=artifact.format,
         filename=artifact.filename,
+        media_type=artifact.media_type,
         download_url=f"/api/v1/artifacts/{token}",
         expires_at=artifact.expires_at,
         size_bytes=artifact.size_bytes,

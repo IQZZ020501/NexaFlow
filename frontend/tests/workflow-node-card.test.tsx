@@ -6,7 +6,13 @@
  * read-only, runtime status) behave as users see them.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { ReactFlowProvider } from "@xyflow/react"
 import type { ReactElement } from "react"
 
@@ -217,10 +223,7 @@ function nodeData(
 
 function renderNode(
   data: WorkflowNodeData,
-  {
-    id = "node-1",
-    selected = false,
-  }: { id?: string; selected?: boolean } = {}
+  { id = "node-1", selected = false }: { id?: string; selected?: boolean } = {}
 ) {
   const ui = (
     <ReactFlowProvider>
@@ -282,9 +285,7 @@ describe("WorkflowNodeCard", () => {
   })
 
   test("collapses and re-expands the configuration", () => {
-    renderNode(
-      nodeData("llm", { config: { prompt: "Summarize this" } })
-    )
+    renderNode(nodeData("llm", { config: { prompt: "Summarize this" } }))
     expect(screen.getByRole("button", { name: "收起节点" })).toBeTruthy()
     expect(screen.getByLabelText("提示词")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "收起节点" }))
@@ -322,13 +323,9 @@ describe("WorkflowNodeCard", () => {
     const trigger = screen.getByTitle("更多")
     fireEvent.pointerDown(trigger)
     fireEvent.click(trigger)
-    expect(
-      await screen.findByRole("menuitem", { name: /重命名/ })
-    ).toBeTruthy()
+    expect(await screen.findByRole("menuitem", { name: /重命名/ })).toBeTruthy()
     fireEvent.click(screen.getByRole("menuitem", { name: /重命名/ }))
-    await waitFor(() =>
-      expect(screen.queryAllByRole("menuitem")).toEqual([])
-    )
+    await waitFor(() => expect(screen.queryAllByRole("menuitem")).toEqual([]))
   })
 
   test("read-only nodes hide the more menu", () => {
@@ -384,9 +381,9 @@ describe("WorkflowNodeCard", () => {
         },
       })
     )
-    expect(
-      (screen.getByLabelText("显示名称") as HTMLInputElement).value
-    ).toBe("姓名")
+    expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe(
+      "姓名"
+    )
   })
 
   test("tool node shows its pinned binding name", () => {
@@ -422,9 +419,7 @@ describe("WorkflowNodeCard", () => {
     )
     expect(screen.getByText("工具已不可用或授权已撤销")).toBeTruthy()
     expect(screen.getByText("可从节点菜单移除该工具")).toBeTruthy()
-    expect(
-      screen.queryByRole("button", { name: "升级到当前版本" })
-    ).toBeNull()
+    expect(screen.queryByRole("button", { name: "升级到当前版本" })).toBeNull()
 
     unmount()
     renderNode(
@@ -442,9 +437,7 @@ describe("WorkflowNodeCard", () => {
         },
       })
     )
-    fireEvent.click(
-      screen.getByRole("button", { name: "升级到当前版本" })
-    )
+    fireEvent.click(screen.getByRole("button", { name: "升级到当前版本" }))
     expect(updates.at(-1)?.config.tool).toEqual({
       tool_id: "tool-1",
       version_id: "version-2",
@@ -513,9 +506,7 @@ describe("WorkflowNodeCard", () => {
     )
     fireEvent.pointerDown(screen.getByRole("button", { name: "自定义" }))
     fireEvent.click(screen.getByRole("button", { name: "自定义" }))
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: /引用变量/ })
-    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: /引用变量/ }))
     expect(updates.at(-1)?.config.reply_type).toBe("referencing")
   })
 
@@ -599,9 +590,7 @@ describe("WorkflowNodeCard", () => {
     ]
     for (const [status, label] of cases) {
       cleanup()
-      renderNode(
-        nodeData("llm", { runtimeStatus: status })
-      )
+      renderNode(nodeData("llm", { runtimeStatus: status }))
       expect(screen.getByText(label)).toBeTruthy()
     }
   })
@@ -776,9 +765,7 @@ describe("WorkflowNodeCard", () => {
   })
 
   test("LLM node with MCP enabled but no servers shows empty state", () => {
-    renderNode(
-      nodeData("llm", { config: { prompt: "x", mcp_enable: true } })
-    )
+    renderNode(nodeData("llm", { config: { prompt: "x", mcp_enable: true } }))
     expect(screen.getByText("暂无可用 MCP 工具")).toBeTruthy()
   })
 
@@ -807,7 +794,9 @@ describe("WorkflowNodeCard", () => {
     expect(screen.getByText("ELSE")).toBeTruthy()
     expect(screen.getByText("分支 · 2")).toBeTruthy()
     // Change the field reference via the variable picker.
-    fireEvent.pointerDown(screen.getByRole("button", { name: "start · question" }))
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "start · question" })
+    )
     fireEvent.click(screen.getByRole("button", { name: "start · question" }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "当前时间" }))
     expect(ruleList(branchList(updates.at(-1))[0])[0].field).toEqual([
@@ -980,13 +969,9 @@ describe("WorkflowNodeCard", () => {
   })
 
   test("knowledge node without bases shows the empty state", () => {
-    renderNode(
-      nodeData("knowledge", { config: { search_mode: "embedding" } })
-    )
+    renderNode(nodeData("knowledge", { config: { search_mode: "embedding" } }))
     expect(screen.getByText("暂无可用知识库")).toBeTruthy()
-    expect(
-      screen.getByRole("button", { name: "选择知识库" })
-    ).toBeTruthy()
+    expect(screen.getByRole("button", { name: "选择知识库" })).toBeTruthy()
   })
 
   test("reranker node selects model and manages references", async () => {
@@ -1004,9 +989,7 @@ describe("WorkflowNodeCard", () => {
     // Reranker model select (the wrapping label names the trigger 重排模型).
     fireEvent.pointerDown(screen.getByRole("button", { name: "重排模型" }))
     fireEvent.click(screen.getByRole("button", { name: "重排模型" }))
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "BGE Rerank" })
-    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: "BGE Rerank" }))
     expect(updates.at(-1)?.config.reranker_model_id).toBe("r-1")
     // Question reference picker.
     fireEvent.pointerDown(screen.getByRole("button", { name: "选择引用变量" }))
@@ -1036,10 +1019,9 @@ describe("WorkflowNodeCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除" }))
     expect(updates.at(-1)?.config.reranker_reference_list).toEqual([])
     // Top-n and max chars steppers.
-    fireEvent.change(
-      screen.getByRole("spinbutton", { name: "引用分段数" }),
-      { target: { value: "5" } }
-    )
+    fireEvent.change(screen.getByRole("spinbutton", { name: "引用分段数" }), {
+      target: { value: "5" },
+    })
     expect(updates.at(-1)?.config.reranker_setting).toMatchObject({ top_n: 5 })
     fireEvent.click(screen.getAllByRole("button", { name: "增加数值" })[2])
     expect(updates.at(-1)?.config.reranker_setting).toMatchObject({
@@ -1053,11 +1035,7 @@ describe("WorkflowNodeCard", () => {
       nodeData("classifier", {
         onUpdate: (data) => updates.push(data),
         config: {
-          classes: [
-            { handle: "tech" },
-            { handle: "sales" },
-            { handle: 42 },
-          ],
+          classes: [{ handle: "tech" }, { handle: "sales" }, { handle: 42 }],
           default_handle: "default",
           input: "q",
           model_id: "model-1",
@@ -1079,7 +1057,9 @@ describe("WorkflowNodeCard", () => {
     expect(updates.at(-1)?.config.model_id).toBeNull()
     // Classes JSON editor.
     const classesEditor = screen.getByLabelText("分类出口")
-    fireEvent.change(classesEditor, { target: { value: '[{"handle": "tech"}]' } })
+    fireEvent.change(classesEditor, {
+      target: { value: '[{"handle": "tech"}]' },
+    })
     expect(updates.at(-1)?.config.classes).toEqual([{ handle: "tech" }])
     // Invalid JSON shows the error without updating.
     fireEvent.change(classesEditor, { target: { value: "{oops" } })
@@ -1111,9 +1091,7 @@ describe("WorkflowNodeCard", () => {
         config: {},
       })
     )
-    expect(
-      screen.getAllByText("选择只读 MCP 工具").length
-    ).toBeGreaterThan(0)
+    expect(screen.getAllByText("选择只读 MCP 工具").length).toBeGreaterThan(0)
     fireEvent.pointerDown(
       screen.getByRole("button", { name: "选择只读 MCP 工具" })
     )
@@ -1170,6 +1148,40 @@ describe("WorkflowNodeCard", () => {
       target: { value: "456" },
     })
     expect(updates.at(-1)?.config.arguments).toMatchObject({ extra_key: 456 })
+  })
+
+  test("tool node maps an upstream variable into a schema argument", async () => {
+    const updates: WorkflowNodeData[] = []
+    const weatherTool = {
+      ...tool("tool-1", "Weather"),
+      version_id: "version-1",
+      input_schema: {
+        type: "object",
+        properties: {
+          city: { type: "string", title: "城市" },
+        },
+        required: ["city"],
+      },
+    } as ToolDetail
+    renderNode(
+      nodeData("tool", {
+        onUpdate: (data) => updates.push(data),
+        nodes: [graphNode("start", "start", "开始")],
+        edges: [{ source: "start", target: "node-1" }] as WorkflowEdge[],
+        tools: [weatherTool],
+        config: {
+          tool: { tool_id: "tool-1", version_id: "version-1" },
+          arguments: { city: "SF" },
+        },
+      })
+    )
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "SF" }))
+    fireEvent.click(screen.getByRole("button", { name: "SF" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "用户问题" }))
+    expect(updates.at(-1)?.config.arguments).toMatchObject({
+      city: "{{start.question}}",
+    })
   })
 
   test("tool node without schema uses the JSON arguments editor", () => {
@@ -1247,9 +1259,7 @@ describe("WorkflowNodeCard", () => {
     fireEvent.click(
       screen.getByRole("menuitem", { name: "检索结果的分段列表" })
     )
-    expect(updates.at(-1)?.config.template).toContain(
-      "{{kb-1.paragraph_list}}"
-    )
+    expect(updates.at(-1)?.config.template).toContain("{{kb-1.paragraph_list}}")
   })
 
   test("variable node edits its JSON value", () => {
@@ -1296,9 +1306,7 @@ describe("WorkflowNodeCard", () => {
         config: { reply_type: "referencing", is_result: true },
       })
     )
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "选择引用变量" })
-    )
+    fireEvent.pointerDown(screen.getByRole("button", { name: "选择引用变量" }))
     fireEvent.click(screen.getByRole("button", { name: "选择引用变量" }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "用户问题" }))
     expect(updates.at(-1)?.config.fields).toEqual([
@@ -1355,9 +1363,7 @@ describe("WorkflowNodeCard", () => {
     // Type dropdown.
     fireEvent.pointerDown(screen.getByRole("button", { name: "下拉选择" }))
     fireEvent.click(screen.getByRole("button", { name: "下拉选择" }))
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "多行文本" })
-    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: "多行文本" }))
     expect(fieldList(updates.at(-1))[0].type).toBe("textarea")
     // Required, default value, and preset toggles (one per field row).
     fireEvent.click(screen.getAllByRole("checkbox", { name: "必填" })[0])
@@ -1450,9 +1456,7 @@ describe("WorkflowNodeCard", () => {
     })
     renderNode(nodeData("start", {}))
     fireEvent.click(screen.getAllByRole("button", { name: "复制变量" })[0])
-    await waitFor(() =>
-      expect(notifyCalls).toEqual([["success", "已复制"]])
-    )
+    await waitFor(() => expect(notifyCalls).toEqual([["success", "已复制"]]))
     expect(written[0]).toBe("{{global.time}}")
     Object.defineProperty(navigator, "clipboard", {
       value: originalClipboard,
@@ -1479,9 +1483,7 @@ describe("WorkflowNodeCard", () => {
     })
     renderNode(nodeData("template", { config: { template: "x" } }))
     fireEvent.click(screen.getByRole("button", { name: "复制变量" }))
-    await waitFor(() =>
-      expect(notifyCalls).toEqual([["error", "复制失败"]])
-    )
+    await waitFor(() => expect(notifyCalls).toEqual([["error", "复制失败"]]))
     Object.defineProperty(navigator, "clipboard", {
       value: originalClipboard,
       configurable: true,

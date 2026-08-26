@@ -527,6 +527,46 @@ describe("MarkdownContent", () => {
     expect(screen.getByText("const x = 1")).toBeTruthy()
   })
 
+  test("downloads artifact links through the safe POST endpoint", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = []
+    const originalClick = HTMLAnchorElement.prototype.click
+    const clicked: HTMLAnchorElement[] = []
+    HTMLAnchorElement.prototype.click = function () {
+      clicked.push(this)
+    }
+    try {
+      stubFetch((url, init) => {
+        calls.push({
+          url,
+          method: init?.method ?? "GET",
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        })
+        return new Response(new Blob(["content"]), { status: 200 })
+      })
+      renderPage(
+        <MarkdownContent
+          content="[制度文件.docx](/api/v1/artifacts/eyJold-token)"
+        />
+      )
+
+      const link = screen.getByRole("link", { name: "制度文件.docx" })
+      expect(link.getAttribute("href")).toBe(
+        "/api/v1/artifacts/eyJold-token"
+      )
+      fireEvent.click(link)
+      await waitFor(() => expect(calls).toHaveLength(1))
+      expect(calls[0]).toEqual({
+        url: "/api/v1/artifacts/download",
+        method: "POST",
+        body: { token: "eyJold-token" },
+      })
+      expect(clicked).toHaveLength(1)
+      expect(clicked[0]?.download).toBe("制度文件.docx")
+    } finally {
+      HTMLAnchorElement.prototype.click = originalClick
+    }
+  })
+
   test("renders GFM tables", () => {
     renderPage(
       <MarkdownContent

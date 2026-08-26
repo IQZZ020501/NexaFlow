@@ -214,7 +214,12 @@ async def agent_node(
                         if not tool_call_started:
                             tool_call_started = True
                             await callback.process(
-                                completed_thought("agent.tools_selected")
+                                {
+                                    **thought,
+                                    "status": "running",
+                                    "summary": "agent.preparing_tool_call",
+                                    "reasoning": reasoning,
+                                }
                             )
                         for tool_chunk in chunk.tool_call_chunks:
                             raw_index = tool_chunk.get("index")
@@ -303,8 +308,7 @@ async def agent_node(
             raise AgentRunnerError("Agent model returned invalid tool call identifiers.")
         if not allow_tools:
             raise AgentRunnerError("Agent turn limit reached.")
-        if not tool_call_started:
-            await callback.process(completed_thought("agent.tools_selected"))
+        await callback.process(completed_thought("agent.tools_selected"))
         return {
             "messages": messages,
             "turn": turn,

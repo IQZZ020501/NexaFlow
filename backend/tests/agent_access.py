@@ -369,11 +369,19 @@ def assert_external_progress_events() -> None:
     assert analysis.stage == "analyzing"
     assert analysis.status == "running"
 
-    preparing = next(item for item in progress if item.stage == "running")
+    preparing = next(
+        item
+        for item in progress
+        if item.type == "analysis" and item.stage == "preparing"
+    )
     assert preparing.type == "analysis"
     assert preparing.reasoning == "ready"
 
-    tool_preparing = next(item for item in progress if item.stage == "preparing")
+    tool_preparing = next(
+        item
+        for item in progress
+        if item.type == "tool" and item.stage == "preparing"
+    )
     assert tool_preparing.type == "tool"
     assert tool_preparing.tool_name == "web_search"
     assert tool_preparing.input == {"query": "release"}
