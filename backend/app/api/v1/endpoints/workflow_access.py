@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ from app.application.workflows import (
     get_workflow_api_documentation,
     list_external_workflow_runs,
     list_public_workflow_conversations,
+    delete_public_workflow_conversation,
     regenerate_external_workflow_run,
     set_external_workflow_run_feedback,
     stream_external_workflow_run,
@@ -91,6 +92,22 @@ async def public_workflow_conversations(
 ) -> PublicWorkflowConversationListResponse:
     await get_workspace_published_workflow_context(db, workflow_id, user)
     return await list_public_workflow_conversations(db, workflow_id, user.id)
+
+
+@public_router.delete(
+    "/conversations/{conversation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_public_workflow_conversation_endpoint(
+    workflow_id: str,
+    conversation_id: Annotated[str, Path(min_length=1, max_length=36)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> None:
+    await get_workspace_published_workflow_context(db, workflow_id, user)
+    await delete_public_workflow_conversation(
+        db, workflow_id, user.id, conversation_id
+    )
 
 
 @public_router.post(

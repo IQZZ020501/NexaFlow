@@ -475,6 +475,26 @@ async def list_public_workflow_conversations(
     return PublicWorkflowConversationListResponse(items=items)
 
 
+async def delete_public_workflow_conversation(
+    db: AsyncSession,
+    workflow_id: str,
+    consumer_id: str,
+    conversation_id: str,
+) -> None:
+    await get_published_workflow_context(db, workflow_id)
+    deleted, active = await agent_repository.delete_consumer_conversation(
+        db, workflow_id, "public", consumer_id, conversation_id
+    )
+    if active:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Cannot delete a conversation while it is running.",
+        )
+    if not deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found.")
+    await db.commit()
+
+
 async def stream_external_workflow_run(
     run_id: str,
     settings: Settings,

@@ -4,9 +4,11 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { ApiError } from "@/lib/api-client"
 import {
   createPublicWorkflowRun,
+  deletePublicWorkflowConversation,
   getPublicWorkflowProfile,
   getWorkflowApiDocumentation,
   initializePublicWorkflow,
+  listPublicWorkflowConversations,
   listPublicWorkflowRuns,
   observePublicWorkflowRun,
   regeneratePublicWorkflowRun,
@@ -14,11 +16,7 @@ import {
   submitPublicWorkflowForm,
   uploadPublicWorkflowFiles,
 } from "@/lib/api/public-workflows"
-import {
-  jsonResponse,
-  resetFetch,
-  withFetch,
-} from "./helpers/dom"
+import { jsonResponse, resetFetch, withFetch } from "./helpers/dom"
 
 const originalSetTimeout = globalThis.setTimeout
 
@@ -71,7 +69,9 @@ const interactionConfig = {
   prologue: "",
   tts_type: "NONE" as const,
   file_upload: false,
-  file_upload_setting: { file_upload_type: ["document"] as Array<"document" | "image" | "audio"> },
+  file_upload_setting: {
+    file_upload_type: ["document"] as Array<"document" | "image" | "audio">,
+  },
   user_input_title: "输入",
 }
 
@@ -97,6 +97,18 @@ const conversations = {
 }
 
 describe("public workflow API", () => {
+  test("lists and deletes a public workflow conversation", async () => {
+    const requests = capture()
+
+    await listPublicWorkflowConversations("wf-1", "token-1")
+    await deletePublicWorkflowConversation("wf-1", "conv-1", "token-1")
+
+    expect(requests.map(({ url, method }) => [method, url])).toEqual([
+      ["GET", "/api/v1/public/workflows/wf-1/conversations"],
+      ["DELETE", "/api/v1/public/workflows/wf-1/conversations/conv-1"],
+    ])
+  })
+
   test("loads public workflow profiles and conversations", async () => {
     const urls: string[] = []
     withFetch((url) => {
@@ -104,9 +116,9 @@ describe("public workflow API", () => {
       return jsonResponse(url.endsWith("/profile") ? profile : conversations)
     })
 
-    await expect(
-      getPublicWorkflowProfile("wf-1", "token-1")
-    ).resolves.toEqual(profile)
+    await expect(getPublicWorkflowProfile("wf-1", "token-1")).resolves.toEqual(
+      profile
+    )
     const initialized = await initializePublicWorkflow("wf-1", "token-1")
 
     expect(urls).toEqual([
@@ -121,25 +133,29 @@ describe("public workflow API", () => {
     const requests = capture()
 
     await listPublicWorkflowRuns("wf-1", "conv-1", "token-1")
+    await listPublicWorkflowRuns("wf-1", "conv-1", "token-1", {
+      limit: 20,
+      offset: 5,
+    })
     await createPublicWorkflowRun("wf-1", "token-1", "hello")
-    await createPublicWorkflowRun(
-      "wf-1",
-      "token-1",
-      "continue",
-      "conv-1",
-      ["file-1"]
-    )
+    await createPublicWorkflowRun("wf-1", "token-1", "continue", "conv-1", [
+      "file-1",
+    ])
 
     expect(requests.map(({ url, method }) => [method, url])).toEqual([
       [
         "GET",
         "/api/v1/public/workflows/wf-1/runs?limit=200&conversation_id=conv-1",
       ],
+      [
+        "GET",
+        "/api/v1/public/workflows/wf-1/runs?limit=20&offset=5&conversation_id=conv-1",
+      ],
       ["POST", "/api/v1/public/workflows/wf-1/runs"],
       ["POST", "/api/v1/public/workflows/wf-1/runs"],
     ])
-    expect(requests[1]?.body).toEqual({ question: "hello" })
-    expect(requests[2]?.body).toEqual({
+    expect(requests[2]?.body).toEqual({ question: "hello" })
+    expect(requests[3]?.body).toEqual({
       question: "continue",
       file_ids: ["file-1"],
       conversation_id: "conv-1",
@@ -149,18 +165,12 @@ describe("public workflow API", () => {
   test("uploads, submits forms, regenerates, and rates public workflow runs", async () => {
     const requests = capture()
 
-    await uploadPublicWorkflowFiles(
-      "wf-1",
-      "token-1",
-      [new File(["data"], "doc.pdf", { type: "application/pdf" })]
-    )
-    await submitPublicWorkflowForm(
-      "wf-1",
-      "token-1",
-      "run-1",
-      "node-1",
-      { name: "Ada" }
-    )
+    await uploadPublicWorkflowFiles("wf-1", "token-1", [
+      new File(["data"], "doc.pdf", { type: "application/pdf" }),
+    ])
+    await submitPublicWorkflowForm("wf-1", "token-1", "run-1", "node-1", {
+      name: "Ada",
+    })
     await regeneratePublicWorkflowRun("wf-1", "token-1", "run-1")
     await setPublicWorkflowRunFeedback("wf-1", "token-1", "run-1", "positive")
     await setPublicWorkflowRunFeedback("wf-1", "token-1", "run-1", null)
@@ -205,11 +215,8 @@ describe("public workflow API", () => {
     })
 
     const eventTypes: string[] = []
-    await observePublicWorkflowRun(
-      "wf-1",
-      "token-1",
-      "run-1",
-      (event) => eventTypes.push(event.type)
+    await observePublicWorkflowRun("wf-1", "token-1", "run-1", (event) =>
+      eventTypes.push(event.type)
     )
 
     expect(eventTypes).toEqual(["answer_delta", "complete"])

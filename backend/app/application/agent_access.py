@@ -1157,6 +1157,26 @@ async def list_public_agent_conversations(
     )
 
 
+async def delete_public_agent_conversation(
+    db: AsyncSession,
+    agent_id: str,
+    consumer_id: str,
+    conversation_id: str,
+) -> None:
+    await get_published_agent_context(db, agent_id)
+    deleted, active = await agent_repository.delete_consumer_conversation(
+        db, agent_id, "public", consumer_id, conversation_id
+    )
+    if active:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Cannot delete a conversation while it is running.",
+        )
+    if not deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found.")
+    await db.commit()
+
+
 async def stream_external_agent_run(
     db: AsyncSession,
     context: PublishedAgentContext,

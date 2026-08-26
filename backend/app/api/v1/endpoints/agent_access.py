@@ -8,6 +8,7 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Path,
     UploadFile,
     status,
 )
@@ -26,6 +27,7 @@ from app.application.agents import (
     list_external_agent_runs,
     list_external_agent_run_tool_calls,
     list_public_agent_conversations,
+    delete_public_agent_conversation,
     regenerate_external_agent_run,
     resolve_external_agent_tool_approval,
     set_external_agent_run_feedback,
@@ -88,6 +90,20 @@ async def public_agent_conversations(
 ) -> PublicAgentConversationListResponse:
     await get_workspace_published_agent_context(db, agent_id, user)
     return await list_public_agent_conversations(db, agent_id, user.id)
+
+
+@public_router.delete(
+    "/conversations/{conversation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_public_agent_conversation_endpoint(
+    agent_id: str,
+    conversation_id: Annotated[str, Path(min_length=1, max_length=36)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> None:
+    await get_workspace_published_agent_context(db, agent_id, user)
+    await delete_public_agent_conversation(db, agent_id, user.id, conversation_id)
 
 
 @public_router.post(

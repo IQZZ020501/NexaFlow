@@ -881,6 +881,39 @@ async def list_consumer_conversations(
     return list(result.all())
 
 
+async def delete_consumer_conversation(
+    db: AsyncSession,
+    agent_id: str,
+    access_source: str,
+    consumer_id: str,
+    conversation_id: str,
+) -> tuple[bool, bool]:
+    """Delete one consumer conversation and its persisted run graph.
+
+    Returns ``(deleted, active)``. Active runs are left intact so a worker
+    cannot continue writing into a conversation while it is being removed.
+    """
+    scope = (
+        AgentRun.agent_id == agent_id,
+        AgentRun.access_source == access_source,
+        AgentRun.consumer_id == consumer_id,
+        AgentRun.conversation_id == conversation_id,
+    )
+    exists = await db.scalar(select(AgentRun.id).where(*scope).limit(1))
+    if exists is None:
+        return False, False
+    active = await db.scalar(
+        select(AgentRun.id)
+        .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
+        .where(*scope, AgentRunState.status.in_(AGENT_RUN_ACTIVE_STATUSES))
+        .limit(1)
+    )
+    if active is not None:
+        return False, True
+    result = await db.execute(delete(AgentRun).where(*scope))
+    return bool(result.rowcount), False
+
+
 async def latest_agent_conversation_id(
     db: AsyncSession,
     agent_id: str,
