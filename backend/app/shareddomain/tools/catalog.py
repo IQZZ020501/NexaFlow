@@ -570,7 +570,7 @@ def build_inline_python_tool(
     )
 
 
-def build_python_artifact_tool(
+def build_artifact_tool(
     workspace_id: str,
     created_at: datetime | None = None,
 ) -> tuple[Tool, ToolVersion, ToolPolicy]:
@@ -581,31 +581,45 @@ def build_python_artifact_tool(
         "Create or rewrite a downloadable file of any common type. Choose the exact "
         "filename; its extension determines the file type, and extensionless names "
         "are supported. For plain-text and source-code files, put the exact final "
-        "file contents in code; they are saved without being executed. For rich or "
-        "binary formats, put Python generator code in code and write the final file "
-        "to the global output_path in the isolated sandbox. python-docx, PyMuPDF, "
-        "openpyxl, python-pptx, Pillow, and the Python standard library are "
-        "available. User "
+        "file contents in content; they are saved without being executed. For DOCX, "
+        "PDF, XLSX, PPTX, images, and other rich or binary formats, put a Python "
+        "generator program in content and write the final file only to the provided "
+        "global output_path; never use /tmp, the current directory, or a hard-coded "
+        "path. Use only these installed libraries and import names: DOCX uses "
+        "python-docx (`from docx import Document`); PDF uses PyMuPDF "
+        "(`import pymupdf`, never reportlab); XLSX uses openpyxl; PPTX uses "
+        "python-pptx (`from pptx import Presentation`); images use Pillow "
+        "(`from PIL import Image`). Do not probe the environment, install packages, "
+        "or create diagnostic files. The Python standard library is also available. User "
         "attachment text is already included in the conversation and can be used "
         "to produce an edited copy. Enforce requested measurable constraints in "
-        "the code before saving, and print concise validation results to stdout. "
+        "the generator before saving, and print concise validation results to stdout. "
         "The returned metadata includes stdout. Include the returned download_url "
         "verbatim in the final answer."
     )
     input_schema = {
         "type": "object",
         "properties": {
-            "code": {
+            "content": {
                 "type": "string",
                 "maxLength": 262144,
                 "description": (
-                    "Exact UTF-8 file contents for plain-text/source files, or Python "
-                    "generator code that writes rich/binary output to output_path."
+                    "Exact UTF-8 contents for plain-text/source files, or Python "
+                    "generator code for rich/binary output that writes to output_path. "
+                    "For PDF import pymupdf; reportlab is unavailable."
+                ),
+            },
+            "content_mode": {
+                "type": "string",
+                "enum": ["text", "python"],
+                "description": (
+                    "Use text for final plain-text contents or python for generator "
+                    "code. Omit only when the filename makes the mode unambiguous."
                 ),
             },
             "filename": {"type": "string", "maxLength": 120},
         },
-        "required": ["code", "filename"],
+        "required": ["content", "filename"],
         "additionalProperties": False,
     }
     output_schema = {
@@ -618,6 +632,31 @@ def build_python_artifact_tool(
             "expires_at": {"type": "string", "maxLength": 64},
             "size_bytes": {"type": "integer"},
             "stdout": {"type": "string", "maxLength": 2000},
+            "artifacts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "artifact_id": {"type": "string", "maxLength": 36},
+                        "format": {"type": "string", "maxLength": 32},
+                        "filename": {"type": "string", "maxLength": 120},
+                        "mime_type": {"type": "string", "maxLength": 120},
+                        "download_url": {"type": "string", "maxLength": 4096},
+                        "expires_at": {"type": "string", "maxLength": 64},
+                        "size_bytes": {"type": "integer"},
+                    },
+                    "required": [
+                        "artifact_id",
+                        "format",
+                        "filename",
+                        "mime_type",
+                        "download_url",
+                        "expires_at",
+                        "size_bytes",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
         },
         "required": [
             "artifact_id",
@@ -627,10 +666,11 @@ def build_python_artifact_tool(
             "expires_at",
             "size_bytes",
             "stdout",
+            "artifacts",
         ],
         "additionalProperties": False,
     }
-    execution_spec = {"builtin": "python_artifact"}
+    execution_spec = {"builtin": "artifact"}
     definition_hash = canonical_definition_hash(
         {
             "name": "create_artifact",
@@ -647,7 +687,9 @@ def build_python_artifact_tool(
             workspace_id=workspace_id,
             source_id=source_id,
             kind="builtin",
-            stable_key="python_artifact",
+            # Keep the deterministic ID path for existing ToolRefs; the public
+            # identity is now the generic built-in artifact capability.
+            stable_key="artifact",
             function_name="create_artifact",
             current_version_id=version_id,
             status="active",
@@ -719,7 +761,7 @@ async def ensure_workspace_system_catalog(
 
     await ensure_tool(catalog.tool, catalog.version, catalog.policy)
     await ensure_tool(*build_inline_python_tool(workspace_id))
-    await ensure_tool(*build_python_artifact_tool(workspace_id))
+    await ensure_tool(*build_artifact_tool(workspace_id))
 
 
 async def _tombstone_mcp_sources(

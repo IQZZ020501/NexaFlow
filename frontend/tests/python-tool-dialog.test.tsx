@@ -354,13 +354,15 @@ describe("PythonToolDialog", () => {
     fireEvent.change(screen.getByLabelText("工具描述"), {
       target: { value: "Does things" },
     })
-    fireEvent.change(screen.getByLabelText("输入 Schema"), {
+    fireEvent.click(screen.getAllByRole("button", { name: "高级 Schema" })[0]!)
+    fireEvent.change(screen.getByLabelText("输入参数"), {
       target: {
         value:
           '{\n  "type": "object",\n  "properties": { "x": { "type": "string" } }\n}',
       },
     })
-    fireEvent.change(screen.getByLabelText("输出 Schema"), {
+    fireEvent.click(screen.getAllByRole("button", { name: "高级 Schema" })[1]!)
+    fireEvent.change(screen.getByLabelText("输出结果"), {
       target: { value: '{\n  "type": "object"\n}' },
     })
     fireEvent.change(screen.getByLabelText("Python 代码"), {
@@ -415,7 +417,8 @@ describe("PythonToolDialog", () => {
     )
 
     await screen.findByDisplayValue("Formatter")
-    const inputSchema = screen.getByLabelText("输入 Schema")
+    fireEvent.click(screen.getAllByRole("button", { name: "高级 Schema" })[0]!)
+    const inputSchema = screen.getByLabelText("输入参数")
     const saveButton = screen.getByRole("button", {
       name: "保存草稿",
     }) as HTMLButtonElement
@@ -435,20 +438,88 @@ describe("PythonToolDialog", () => {
       target: { value: "not-json" },
     })
     fireEvent.click(screen.getByRole("button", { name: "运行测试" }))
-    await waitFor(() =>
-      expect(messages).toContain("测试参数必须是 JSON 对象")
-    )
+    await waitFor(() => expect(messages).toContain("测试参数必须是 JSON 对象"))
     expect(
       requests.some(
-        (request) =>
-          request.method === "POST" && request.url.endsWith("/tests")
+        (request) => request.method === "POST" && request.url.endsWith("/tests")
       )
     ).toBe(false)
   })
 
+  test("explains Agent and Workflow usage and edits simple parameters", async () => {
+    const requests: Array<{ method: string; url: string; body?: unknown }> = []
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      const url = String(input)
+      requests.push({
+        method: init?.method ?? "GET",
+        url,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      })
+      if (init?.method === "PUT") return jsonResponse(detail.draft)
+      return jsonResponse(detail)
+    }) as typeof fetch
+
+    renderPage(
+      <PythonToolDialog
+        open
+        onOpenChange={() => undefined}
+        token="token"
+        workspaceId="ws-1"
+        tool={summary}
+        onChanged={() => undefined}
+        onArchived={() => undefined}
+        onMessage={() => undefined}
+      />
+    )
+
+    await screen.findByText("这个工具怎么被调用")
+    expect(screen.getByText("在 Agent 中")).toBeTruthy()
+    expect(screen.getByText("在工作流中")).toBeTruthy()
+    expect(screen.getByText("代码约定")).toBeTruthy()
+
+    const addButtons = screen.getAllByRole("button", { name: "添加参数" })
+    fireEvent.click(addButtons[0]!)
+    fireEvent.change(screen.getByLabelText("参数名称 2"), {
+      target: { value: "summary" },
+    })
+    fireEvent.change(screen.getByLabelText("参数说明 2"), {
+      target: { value: "要生成摘要的文本" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }))
+
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "PUT" && request.url.endsWith("/draft")
+        )
+      ).toBe(true)
+    )
+    const saveRequest = requests.find(
+      (request) => request.method === "PUT" && request.url.endsWith("/draft")
+    )
+    expect(
+      (saveRequest?.body as { input_schema: Record<string, unknown> })
+        .input_schema
+    ).toMatchObject({
+      properties: {
+        summary: {
+          type: "string",
+          description: "要生成摘要的文本",
+        },
+      },
+    })
+  })
+
   test("labels an archived tool with its status", async () => {
     globalThis.fetch = (async () =>
-      jsonResponse({ ...detail, status: "archived" })) as unknown as typeof fetch
+      jsonResponse({
+        ...detail,
+        status: "archived",
+      })) as unknown as typeof fetch
 
     renderPage(
       <PythonToolDialog
@@ -607,25 +678,20 @@ describe("PythonToolDialog", () => {
       expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull()
     )
     expect(archivedIds).toEqual([])
-    expect(
-      requests.some((request) => request.method === "DELETE")
-    ).toBe(false)
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false)
 
     fireEvent.click(screen.getByRole("button", { name: "归档" }))
     const confirmDialog = await screen.findByRole("dialog", {
       name: "确认操作",
     })
-    fireEvent.click(
-      within(confirmDialog).getByRole("button", { name: "归档" })
-    )
+    fireEvent.click(within(confirmDialog).getByRole("button", { name: "归档" }))
     await waitFor(() => expect(messages).toContain("工具已归档"))
     expect(archivedIds).toEqual(["tool-1"])
     expect(openChanges).toContain(false)
     expect(
       requests.some(
         (request) =>
-          request.method === "DELETE" &&
-          request.url.endsWith("/tools/tool-1")
+          request.method === "DELETE" && request.url.endsWith("/tools/tool-1")
       )
     ).toBe(true)
   })
@@ -699,9 +765,7 @@ describe("PythonToolDialog", () => {
 
     await screen.findByDisplayValue("Formatter")
     fireEvent.click(screen.getByRole("button", { name: "发布" }))
-    await waitFor(() =>
-      expect(messages).toContain("资源不存在或无权访问")
-    )
+    await waitFor(() => expect(messages).toContain("资源不存在或无权访问"))
   })
 
   test("reports a failed test run", async () => {
@@ -817,7 +881,10 @@ describe("PythonToolDialog", () => {
 
   test("shows the raw status for an unknown tool status", async () => {
     globalThis.fetch = (async () =>
-      jsonResponse({ ...detail, status: "provisioning" })) as unknown as typeof fetch
+      jsonResponse({
+        ...detail,
+        status: "provisioning",
+      })) as unknown as typeof fetch
 
     renderPage(
       <PythonToolDialog

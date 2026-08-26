@@ -98,8 +98,12 @@ async def _exchange(
             exchange(),
             timeout=settings.workflow_sandbox_timeout_seconds + 1,
         )
-    except (OSError, TimeoutError, ValueError) as exc:
-        raise WorkflowSandboxError("Code sandbox is unavailable.") from exc
+    except (OSError, TimeoutError) as exc:
+        raise WorkflowSandboxBusyError(
+            "Code sandbox is temporarily unavailable."
+        ) from exc
+    except ValueError as exc:
+        raise WorkflowSandboxError("Code sandbox returned invalid JSON.") from exc
 
 
 def _execution_fields(response: dict[str, Any]) -> tuple[str, str, int]:

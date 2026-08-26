@@ -9,16 +9,16 @@ from app.api.deps import get_settings
 from app.application.artifacts import get_generated_artifact
 from app.infrastructure.config import Settings
 from app.infrastructure.session import get_db
+from app.schemas.artifact import ArtifactDownloadRequest
 
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
 
-@router.get("/{token}", response_class=Response)
-async def download_generated_artifact(
+async def _download_response(
     token: str,
-    settings: Annotated[Settings, Depends(get_settings)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Settings,
+    db: AsyncSession,
 ) -> Response:
     artifact = await get_generated_artifact(db, settings, token)
     if artifact is None:
@@ -42,3 +42,21 @@ async def download_generated_artifact(
         media_type=artifact.media_type,
         headers=headers,
     )
+
+
+@router.post("/download", response_class=Response)
+async def download_generated_artifact_by_body(
+    payload: ArtifactDownloadRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    return await _download_response(payload.token, settings, db)
+
+
+@router.get("/{token}", response_class=Response)
+async def download_generated_artifact(
+    token: str,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    return await _download_response(token, settings, db)

@@ -141,8 +141,9 @@ def _sandbox_self_check(socket_path: Path, *, hard_isolation: bool) -> bool:
         )
     request = {
         "code": (
-            "import os, socket\n"
+            "import os, socket, pymupdf\n"
             f"{isolation_checks}"
+            "pymupdf.open().close()\n"
             "from docx import Document\n"
             "document = Document()\n"
             "document.add_paragraph('NexaFlow sandbox ready')\n"

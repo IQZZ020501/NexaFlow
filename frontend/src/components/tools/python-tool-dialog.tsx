@@ -3,13 +3,19 @@
 import * as React from "react"
 import {
   ArchiveIcon,
+  BotIcon,
+  BracesIcon,
   CircleCheckIcon,
   Code2Icon,
+  ChevronDownIcon,
   LoaderCircleIcon,
+  PlusIcon,
   PlayIcon,
   PowerIcon,
   RefreshCwIcon,
   SendIcon,
+  Trash2Icon,
+  WorkflowIcon,
 } from "lucide-react"
 
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
@@ -24,11 +30,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
+import { IconButton } from "@/components/ui/icon-button"
 import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/contexts/language-provider"
 import {
@@ -138,6 +151,359 @@ function payloadFromForm(form: PythonForm): PythonToolPayload | null {
     output_schema: outputSchema,
     code,
   }
+}
+
+type SimpleSchemaType =
+  "string" | "number" | "integer" | "boolean" | "object" | "array" | "custom"
+
+type SchemaField = {
+  name: string
+  type: SimpleSchemaType
+  description: string
+  required: boolean
+}
+
+const SIMPLE_SCHEMA_TYPES: SimpleSchemaType[] = [
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "object",
+  "array",
+]
+
+function schemaTypeLabel(
+  type: SimpleSchemaType,
+  t: ReturnType<typeof useLanguage>["t"]
+) {
+  if (type === "string") return t("文本")
+  if (type === "number") return t("数字")
+  if (type === "integer") return t("整数")
+  if (type === "boolean") return t("布尔值")
+  if (type === "object") return t("JSON 对象")
+  if (type === "array") return t("数组")
+  return t("自定义")
+}
+
+function schemaType(value: unknown): SimpleSchemaType {
+  return typeof value === "string" &&
+    SIMPLE_SCHEMA_TYPES.includes(value as SimpleSchemaType)
+    ? (value as SimpleSchemaType)
+    : "custom"
+}
+
+function parseFlatSchema(value: string) {
+  const parsed = parseObject(value)
+  if (!parsed || parsed.type !== "object") return null
+  const properties = parsed.properties
+  if (
+    properties !== undefined &&
+    (!properties || typeof properties !== "object" || Array.isArray(properties))
+  ) {
+    return null
+  }
+  const required = new Set(
+    Array.isArray(parsed.required) ? parsed.required.map(String) : []
+  )
+  const fields = Object.entries(
+    (properties as Record<string, unknown> | undefined) ?? {}
+  ).map(([name, value]) => {
+    const property =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {}
+    return {
+      name,
+      type: schemaType(property.type),
+      description:
+        typeof property.description === "string" ? property.description : "",
+      required: required.has(name),
+    } satisfies SchemaField
+  })
+  return { parsed, fields }
+}
+
+function simplePropertySchema(
+  type: SimpleSchemaType,
+  description: string
+): Record<string, unknown> {
+  const property: Record<string, unknown> = {
+    type: type === "custom" ? "string" : type,
+  }
+  if (property.type === "string") property.maxLength = 4096
+  if (property.type === "array") {
+    property.maxItems = 100
+    property.items = { type: "string", maxLength: 4096 }
+  }
+  if (property.type === "object") {
+    property.properties = {}
+    property.additionalProperties = false
+  }
+  if (description.trim()) property.description = description.trim()
+  return property
+}
+
+function updateFlatSchema(
+  value: string,
+  fieldName: string,
+  update: Partial<SchemaField>
+) {
+  const parsed = parseObject(value)
+  if (!parsed || parsed.type !== "object") return value
+  const properties = parsed.properties
+  if (
+    !properties ||
+    typeof properties !== "object" ||
+    Array.isArray(properties)
+  ) {
+    return value
+  }
+  const propertyMap = properties as Record<string, unknown>
+  const current = propertyMap[fieldName]
+  if (!current || typeof current !== "object" || Array.isArray(current)) {
+    return value
+  }
+  const currentProperty = current as Record<string, unknown>
+  const nextName = update.name?.trim() || fieldName
+  const nextProperty = { ...currentProperty }
+  if (update.type && update.type !== schemaType(currentProperty.type)) {
+    Object.assign(
+      nextProperty,
+      simplePropertySchema(
+        update.type,
+        update.description ??
+          (typeof currentProperty.description === "string"
+            ? currentProperty.description
+            : "")
+      )
+    )
+  } else if (update.description !== undefined) {
+    if (update.description.trim())
+      nextProperty.description = update.description.trim()
+    else delete nextProperty.description
+  }
+  const nextProperties = { ...propertyMap }
+  if (nextName !== fieldName && nextName in nextProperties) return value
+  if (nextName !== fieldName) delete nextProperties[fieldName]
+  nextProperties[nextName] = nextProperty
+  parsed.properties = nextProperties
+  const required = new Set(
+    Array.isArray(parsed.required) ? parsed.required.map(String) : []
+  )
+  if (update.required === true) required.add(nextName)
+  if (update.required === false) required.delete(fieldName)
+  parsed.required = [...required].filter((name) => name in nextProperties)
+  return JSON.stringify(parsed, null, 2)
+}
+
+function addFlatSchemaField(value: string) {
+  const parsed = parseObject(value)
+  if (!parsed || parsed.type !== "object") return value
+  const properties =
+    parsed.properties &&
+    typeof parsed.properties === "object" &&
+    !Array.isArray(parsed.properties)
+      ? { ...(parsed.properties as Record<string, unknown>) }
+      : {}
+  let name = "input"
+  let suffix = 2
+  while (name in properties) name = `input_${suffix++}`
+  properties[name] = simplePropertySchema("string", "")
+  parsed.properties = properties
+  parsed.additionalProperties = false
+  return JSON.stringify(parsed, null, 2)
+}
+
+function removeFlatSchemaField(value: string, fieldName: string) {
+  const parsed = parseObject(value)
+  if (!parsed || parsed.type !== "object") return value
+  const properties = parsed.properties
+  if (
+    !properties ||
+    typeof properties !== "object" ||
+    Array.isArray(properties)
+  ) {
+    return value
+  }
+  const nextProperties = { ...(properties as Record<string, unknown>) }
+  delete nextProperties[fieldName]
+  parsed.properties = nextProperties
+  parsed.required = Array.isArray(parsed.required)
+    ? parsed.required.filter((name) => name !== fieldName)
+    : []
+  return JSON.stringify(parsed, null, 2)
+}
+
+function SchemaFieldsEditor({
+  label,
+  value,
+  disabled,
+  onChange,
+  t,
+}: {
+  label: string
+  value: string
+  disabled: boolean
+  onChange: (value: string) => void
+  t: ReturnType<typeof useLanguage>["t"]
+}) {
+  const [advanced, setAdvanced] = React.useState(false)
+  const parsed = parseFlatSchema(value)
+
+  return (
+    <div className="rounded-xl border bg-muted/15 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">{label}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {label === t("输入参数")
+              ? t(
+                  "Agent 会根据这些参数生成调用；工作流可以把上游结果连接到这里。"
+                )
+              : t("Python 代码通过 result 返回这些结果给 Agent 或工作流。")}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          onClick={() => setAdvanced((current) => !current)}
+        >
+          <BracesIcon />
+          {t("高级 Schema")}
+          <ChevronDownIcon
+            className={
+              advanced
+                ? "rotate-180 transition-transform"
+                : "transition-transform"
+            }
+          />
+        </Button>
+      </div>
+
+      {advanced ? (
+        <textarea
+          aria-label={label}
+          className={`${TEXTAREA_CLASS} mt-4 min-h-48 font-mono text-xs`}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+          spellCheck={false}
+        />
+      ) : parsed ? (
+        <div className="mt-4 space-y-2">
+          {parsed.fields.length ? (
+            parsed.fields.map((field, index) => (
+              <div
+                key={`${field.name}-${index}`}
+                className="grid gap-2 rounded-lg border bg-background p-3 md:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1.4fr)_auto] md:items-center"
+              >
+                <Input
+                  aria-label={`${t("参数名称")} ${index + 1}`}
+                  value={field.name}
+                  onChange={(event) =>
+                    onChange(
+                      updateFlatSchema(value, field.name, {
+                        name: event.target.value,
+                      })
+                    )
+                  }
+                  disabled={disabled}
+                  placeholder={t("参数名称")}
+                />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="justify-between"
+                      disabled={disabled}
+                      aria-label={`${t("参数类型")} ${index + 1}`}
+                    >
+                      {schemaTypeLabel(field.type, t)}
+                      <ChevronDownIcon />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {SIMPLE_SCHEMA_TYPES.map((type) => (
+                      <DropdownMenuItem
+                        key={type}
+                        onSelect={() =>
+                          onChange(
+                            updateFlatSchema(value, field.name, { type })
+                          )
+                        }
+                      >
+                        {schemaTypeLabel(type, t)}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Input
+                  aria-label={`${t("参数说明")} ${index + 1}`}
+                  value={field.description}
+                  onChange={(event) =>
+                    onChange(
+                      updateFlatSchema(value, field.name, {
+                        description: event.target.value,
+                      })
+                    )
+                  }
+                  disabled={disabled}
+                  placeholder={t("告诉 Agent 这个参数是什么")}
+                />
+                <div className="flex items-center justify-between gap-2 md:justify-end">
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={field.required}
+                      onChange={(event) =>
+                        onChange(
+                          updateFlatSchema(value, field.name, {
+                            required: event.target.checked,
+                          })
+                        )
+                      }
+                      disabled={disabled}
+                    />
+                    {t("必填")}
+                  </label>
+                  <IconButton
+                    label={t("删除参数")}
+                    disabled={disabled}
+                    onClick={() =>
+                      onChange(removeFlatSchemaField(value, field.name))
+                    }
+                  >
+                    <Trash2Icon />
+                  </IconButton>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+              {t("还没有参数；添加一个参数后，Agent 和工作流就知道要传什么。")}
+            </div>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={disabled}
+            onClick={() => onChange(addFlatSchemaField(value))}
+          >
+            <PlusIcon />
+            {t("添加参数")}
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
+          {t("当前 Schema 不是简单参数表，请打开高级 Schema 编辑。")}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const TERMINAL_INVOCATION_STATUSES = new Set<ToolInvocation["status"]>([
@@ -513,6 +879,33 @@ export function PythonToolDialog({
                 </div>
               ) : null}
 
+              <div className="rounded-xl border border-sky-200/70 bg-sky-50/60 p-4 dark:border-sky-900/60 dark:bg-sky-950/20">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Code2Icon className="size-4 text-sky-700 dark:text-sky-300" />
+                  {t("这个工具怎么被调用")}
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-lg border border-sky-200/70 bg-background/80 p-3 dark:border-sky-900/60">
+                    <div className="flex items-center gap-2 text-xs font-medium">
+                      <BotIcon className="size-4 text-sky-700 dark:text-sky-300" />
+                      {t("在 Agent 中")}
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {t("Agent 会根据工具描述和输入参数自动生成调用。")}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-sky-200/70 bg-background/80 p-3 dark:border-sky-900/60">
+                    <div className="flex items-center gap-2 text-xs font-medium">
+                      <WorkflowIcon className="size-4 text-sky-700 dark:text-sky-300" />
+                      {t("在工作流中")}
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {t("把上游节点的输出连接到下面的输入参数。")}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <FieldGroup>
                 <Field>
                   <FieldLabel htmlFor="python-tool-name">
@@ -550,44 +943,24 @@ export function PythonToolDialog({
                     rows={3}
                   />
                 </Field>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="python-tool-input-schema">
-                      {t("输入 Schema")}
-                    </FieldLabel>
-                    <textarea
-                      id="python-tool-input-schema"
-                      className={`${TEXTAREA_CLASS} min-h-48 font-mono text-xs`}
-                      value={form.inputSchema}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          inputSchema: event.target.value,
-                        }))
-                      }
-                      disabled={!canManage || isBusy}
-                      spellCheck={false}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="python-tool-output-schema">
-                      {t("输出 Schema")}
-                    </FieldLabel>
-                    <textarea
-                      id="python-tool-output-schema"
-                      className={`${TEXTAREA_CLASS} min-h-48 font-mono text-xs`}
-                      value={form.outputSchema}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          outputSchema: event.target.value,
-                        }))
-                      }
-                      disabled={!canManage || isBusy}
-                      spellCheck={false}
-                    />
-                  </Field>
-                </div>
+                <SchemaFieldsEditor
+                  label={t("输入参数")}
+                  value={form.inputSchema}
+                  disabled={!canManage || isBusy}
+                  onChange={(inputSchema) =>
+                    setForm((current) => ({ ...current, inputSchema }))
+                  }
+                  t={t}
+                />
+                <SchemaFieldsEditor
+                  label={t("输出结果")}
+                  value={form.outputSchema}
+                  disabled={!canManage || isBusy}
+                  onChange={(outputSchema) =>
+                    setForm((current) => ({ ...current, outputSchema }))
+                  }
+                  t={t}
+                />
                 {canManage ? (
                   <Field>
                     <FieldLabel htmlFor="python-tool-code">
@@ -612,6 +985,15 @@ export function PythonToolDialog({
                         "从 inputs 读取参数，并将 JSON 结果赋给 result 变量。"
                       )}
                     </FieldDescription>
+                    <div className="rounded-lg border bg-muted/25 p-3 text-xs">
+                      <div className="flex items-center gap-2 font-medium">
+                        <BracesIcon className="size-4 text-muted-foreground" />
+                        {t("代码约定")}
+                      </div>
+                      <pre className="mt-2 overflow-x-auto text-[11px] leading-5 whitespace-pre-wrap text-muted-foreground">
+                        {t("Python 代码示例")}
+                      </pre>
+                    </div>
                   </Field>
                 ) : null}
               </FieldGroup>

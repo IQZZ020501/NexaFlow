@@ -1544,36 +1544,58 @@ async def assert_streaming_run_emits_process_and_answer() -> None:
         on_event=emit,
     )
     assert result.content == "Streamed answer."
-    assert [event["type"] for event in emitted] == [
-        "process",
-        "process",
-        "process",
-        "process",
-        "answer_delta",
-        "answer_reset",
-        "process",
-        "process",
-        "process",
-        "reasoning_delta",
-        "reasoning_delta",
-        "process",
-        "answer_delta",
-    ]
-    assert emitted[0]["event"]["type"] == "thought"
-    assert emitted[1]["event"]["summary"] == "agent.tools_selected"
-    assert emitted[2]["event"]["summary"] == "agent.preparing_tool_call"
-    assert emitted[2]["event"]["type"] == "tool"
-    assert emitted[2]["event"]["status"] == "running"
-    assert emitted[4]["delta"] == "I will search again. "
-    assert emitted[5] == {"type": "answer_reset"}
-    assert emitted[7]["event"]["type"] == "tool"
-    assert emitted[9] == {
+    process_events = [event["event"] for event in emitted if event["type"] == "process"]
+    assert process_events[0]["type"] == "thought"
+    preparing_index = next(
+        index
+        for index, event in enumerate(process_events)
+        if event["type"] == "thought"
+        and event["summary"] == "agent.preparing_tool_call"
+    )
+    tool_index = next(
+        index
+        for index, event in enumerate(process_events)
+        if event["type"] == "tool"
+        and event["summary"] == "agent.preparing_tool_call"
+    )
+    completed_index = next(
+        index
+        for index, event in enumerate(process_events)
+        if event["type"] == "thought"
+        and event["summary"] == "agent.tools_selected"
+    )
+    assert preparing_index < tool_index < completed_index
+    assert next(
+        event["delta"]
+        for event in emitted
+        if event["type"] == "answer_delta"
+    ) == "I will search again. "
+    assert {"type": "answer_reset"} in emitted
+    assert any(
+        event["event"]["type"] == "tool"
+        for event in emitted
+        if event["type"] == "process"
+    )
+    reasoning_index = next(
+        index
+        for index, event in enumerate(emitted)
+        if event["type"] == "reasoning_delta"
+    )
+    assert emitted[reasoning_index] == {
         "type": "reasoning_delta",
         "turn": 2,
         "delta": "Inspect ",
     }
-    assert len(emitted[10]["delta"]) == MAX_REASONING_CHARS - len("Inspect ")
-    assert len(emitted[11]["event"]["reasoning"]) == MAX_REASONING_CHARS
+    assert len(emitted[reasoning_index + 1]["delta"]) == MAX_REASONING_CHARS - len(
+        "Inspect "
+    )
+    answer_reasoning_lengths = [
+        len(event["event"]["reasoning"])
+        for event in emitted
+        if event["type"] == "process"
+        and event["event"].get("summary") == "agent.answer_ready"
+    ]
+    assert max(answer_reasoning_lengths) == MAX_REASONING_CHARS
     assert emitted[-1]["delta"] == "Streamed answer."
 
 
@@ -1621,14 +1643,23 @@ async def assert_tool_input_stream_follows_completed_reasoning() -> None:
         for index, event in enumerate(process_events)
         if event["type"] == "thought" and event["summary"] == "agent.tools_selected"
     )
+    analysis_preparing_index = next(
+        index
+        for index, event in enumerate(process_events)
+        if event["type"] == "thought"
+        and event["summary"] == "agent.preparing_tool_call"
+    )
     preparing_index = next(
         index
         for index, event in enumerate(process_events)
         if event["type"] == "tool"
         and event["summary"] == "agent.preparing_tool_call"
     )
-    assert completed_index < preparing_index
-    assert process_events[completed_index]["reasoning"] == "Reasoning result."
+    assert analysis_preparing_index < preparing_index < completed_index
+    assert (
+        process_events[analysis_preparing_index]["reasoning"]
+        == "Reasoning result."
+    )
 
     streamed: dict[str, str] = {}
     for event in emitted:

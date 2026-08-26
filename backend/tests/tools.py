@@ -234,12 +234,12 @@ def load_network_policy_migration():
     return module
 
 
-def load_generic_artifact_migration():
+def load_artifact_runtime_contract_migration():
     path = (
         Path(__file__).parents[1]
-        / "alembic/versions/202608250001_generic_generated_files.py"
+        / "alembic/versions/202608250007_artifact_runtime_contract.py"
     )
-    spec = spec_from_file_location("generic_generated_files", path)
+    spec = spec_from_file_location("artifact_runtime_contract", path)
     assert spec is not None and spec.loader is not None
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -247,25 +247,42 @@ def load_generic_artifact_migration():
 
 
 def test_generic_artifact_migration_matches_catalog() -> None:
-    from app.shareddomain.tools.catalog import build_python_artifact_tool
+    from app.shareddomain.tools.catalog import build_artifact_tool
 
-    migration = load_generic_artifact_migration()
-    _tool, version, _policy = build_python_artifact_tool("workspace-1")
-    (
-        display_name,
-        description,
-        input_schema,
-        output_schema,
-        execution_spec,
-        definition_hash,
-    ) = migration._definition(generic=True)
-    assert migration.down_revision == "202608240002"
-    assert display_name == version.display_name
+    _tool, version, _policy = build_artifact_tool("workspace-1")
+    assert version.display_name == "Create downloadable file"
+
+    migration = load_artifact_runtime_contract_migration()
+    description, input_schema, output_schema, execution_spec, definition_hash = (
+        migration._definition(
+            version.input_schema,
+            version.output_schema,
+            version.execution_spec,
+        )
+    )
+    assert migration.down_revision == "202608250006"
     assert description == version.description
     assert input_schema == version.input_schema
     assert output_schema == version.output_schema
     assert execution_spec == version.execution_spec
     assert definition_hash == version.definition_hash
+    assert "import pymupdf" in version.description
+    assert "never reportlab" in version.description
+
+
+def test_artifact_generator_preflight_is_actionable() -> None:
+    from app.application.tool_adapters import _artifact_code_preflight
+
+    reportlab = _artifact_code_preflight("import reportlab", "pdf")
+    assert reportlab is not None
+    assert "reportlab is not installed" in reportlab
+    assert "import pymupdf" in reportlab
+
+    missing_fitz = _artifact_code_preflight("page = fitz.open()\n", "pdf")
+    assert missing_fitz is not None
+    assert "import pymupdf as fitz" in missing_fitz
+
+    assert _artifact_code_preflight("import pymupdf\n", "pdf") is None
 
 
 def test_agent_publication_migration_supports_sqlite_foreign_keys() -> None:
@@ -1049,7 +1066,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert {tool.stable_key for tool in tools} == {
             "current_time",
             "inline_python",
-            "python_artifact",
+            "artifact",
         }
         tool = next(tool for tool in tools if tool.stable_key == "current_time")
         assert tool.stable_key == "current_time"
@@ -1067,7 +1084,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert policy.effect == "pure"
 
         artifact_tool = next(
-            item for item in tools if item.stable_key == "python_artifact"
+            item for item in tools if item.stable_key == "artifact"
         )
         artifact_version = await repository.get_tool_version(
             db,
@@ -1075,11 +1092,12 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             artifact_tool.current_version_id or "",
         )
         assert artifact_version is not None
-        assert artifact_version.execution_spec == {"builtin": "python_artifact"}
+        assert artifact_version.execution_spec == {"builtin": "artifact"}
         assert set(artifact_version.input_schema["required"]) == {
-            "code",
+            "content",
             "filename",
         }
+        assert "code" not in artifact_version.input_schema["properties"]
         assert "format" not in artifact_version.input_schema["properties"]
         assert "skills" not in artifact_version.input_schema["properties"]
         assert artifact_version.output_schema["properties"]["stdout"] == {
@@ -1131,25 +1149,61 @@ def test_generated_artifact_link_serves_static_html() -> None:
         assert "default-src 'none'" in response.headers["content-security-policy"]
         assert "page.html" in response.headers["content-disposition"]
         assert response.headers["x-content-type-options"] == "nosniff"
+        token = first.download_url.rsplit("/", 1)[-1]
+        body_response = client.post(
+            "/api/v1/artifacts/download",
+            json={"token": token},
+        )
+        assert body_response.status_code == 200, body_response.text
+        assert body_response.content == response.content
+
+def test_generated_artifact_rejects_source_as_docx() -> None:
+    from app.shareddomain.artifacts.services import validate_generated_artifact
+
+    try:
+        validate_generated_artifact(
+            "docx",
+            "report.docx",
+            b"# -*- coding: utf-8 -*-\nfrom docx import Document\n",
+        )
+    except ValueError as exc:
+        assert "valid Office document" in str(exc)
+    else:
+        raise AssertionError("Python source was accepted as a DOCX artifact")
 
 
 def test_generated_artifact_downloads_common_formats() -> None:
+    from io import BytesIO
+    from zipfile import ZIP_DEFLATED, ZipFile
+
     from app.application.artifacts import create_generated_artifact
     from app.infrastructure.session import get_session_factory
     from app.shareddomain.artifacts.services import artifact_format_from_filename
+
+    def office_bytes(root: str) -> bytes:
+        buffer = BytesIO()
+        with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+            archive.writestr("[Content_Types].xml", "<Types/>")
+            member = (
+                f"{root}/workbook.xml"
+                if root == "xl"
+                else f"{root}/presentation.xml"
+            )
+            archive.writestr(member, "<document/>")
+        return buffer.getvalue()
 
     formats = [
         ("pdf", "report.pdf", b"%PDF-1.4\n%%EOF\n", "application/pdf"),
         (
             "xlsx",
             "report.xlsx",
-            b"workbook",
+            office_bytes("xl"),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         ),
         (
             "pptx",
             "slides.pptx",
-            b"slides",
+            office_bytes("ppt"),
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         ),
         ("py", "hello.py", b"print('hello')\n", "text/x-python"),
@@ -2489,6 +2543,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
         ToolRuntimeResult,
     )
     from app.shareddomain.tools.runtime import build_tool_snapshot
+    from app.application.tool_runtime import validate_tool_output
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
@@ -4548,7 +4603,9 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     import dataclasses
     import json
     from datetime import timedelta
+    from io import BytesIO
     from unittest.mock import AsyncMock, patch
+    from zipfile import ZIP_DEFLATED, ZipFile
 
     from app.application.tool_adapters import (
         BuiltinToolAdapter,
@@ -4563,12 +4620,14 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         WorkflowSandboxError,
         WorkflowSandboxResult,
     )
+    from app.application.tool_runtime import validate_tool_output
     from app.infrastructure.config import Settings
     from app.infrastructure.model_utils import utc_now
     from app.infrastructure.repositories import tools as tool_repository
     from app.infrastructure.repositories import user as user_repository
     from app.ports.mcp import McpClientError
     from app.ports.tool_runtime import ToolAdapterBusy, ToolInvocationContext
+    from app.shareddomain.tools.catalog import build_artifact_tool
     from app.shareddomain.tools.runtime import build_tool_snapshot
 
     settings = Settings.from_env(require_bootstrap=False)
@@ -4645,7 +4704,8 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert "iso8601" in result.data
     artifact_snapshot = dataclasses.replace(
         snapshot,
-        execution_spec={"builtin": "python_artifact"},
+        execution_spec={"builtin": "artifact"},
+        output_schema=build_artifact_tool(workspace_id)[1].output_schema,
     )
     artifact_content = b"<html><body>ready</body></html>"
     with patch(
@@ -4666,7 +4726,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         result = await builtin.invoke(
             artifact_snapshot,
             {
-                "code": "open(output_path, 'w').write('ready')",
+                "content": "open(output_path, 'w').write('ready')",
                 "filename": "page.html",
                 "skills": ["documents"],
             },
@@ -4680,33 +4740,104 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert artifact_sandbox.await_count == 1
     assert artifact_sandbox.await_args.args[2:4] == ("html", "page.html")
     assert artifact_sandbox.await_args.args[4] == []
-    direct_content = "print('hello')\n"
+    from app.application.tool_adapters import _redirect_legacy_artifact_path
+
+    legacy_code = 'document.save("/tmp/report.docx")'
+    assert _redirect_legacy_artifact_path(legacy_code, "report.docx") == (
+        'document.save(output_path)'
+    )
+    docx_bytes = BytesIO()
+    with ZipFile(docx_bytes, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", "<document/>")
+    with patch(
+        "app.application.tool_adapters.execute_artifact_code",
+        new=AsyncMock(
+            return_value=ArtifactSandboxResult(
+                content=docx_bytes.getvalue(),
+                format="docx",
+                filename="report.docx",
+                size_bytes=len(docx_bytes.getvalue()),
+                sha256="ignored-by-adapter",
+                stdout="generator=python",
+                stderr="",
+                exit_code=0,
+            )
+        ),
+    ) as docx_sandbox:
+        rendered = await builtin.invoke(
+            artifact_snapshot,
+            {"content": 'document.save("/tmp/report.docx")', "filename": "report.docx"},
+            dataclasses.replace(context, idempotency_key="adapter-docx"),
+        )
+    assert rendered.ok is True
+    assert rendered.data["artifacts"][0]["mime_type"].startswith(
+        "application/vnd.openxmlformats"
+    )
+    assert "mime_type" not in rendered.data
+    validate_tool_output(artifact_snapshot, rendered.data)
+    assert docx_sandbox.await_count == 1
+    assert docx_sandbox.await_args.args[1] == "document.save(output_path)"
+    direct_content = "output_path = 'literal text'\n"
     with patch(
         "app.application.tool_adapters.execute_artifact_code",
         new=AsyncMock(),
     ) as artifact_sandbox:
         direct_result = await builtin.invoke(
             artifact_snapshot,
-            {"code": direct_content, "filename": "demo.py"},
+            {
+                "content": direct_content,
+                "content_mode": "text",
+                "filename": "demo.py",
+            },
             dataclasses.replace(context, idempotency_key="adapter-direct"),
         )
     assert direct_result.ok is True
     assert direct_result.data["filename"] == "demo.py"
     assert direct_result.data["size_bytes"] == len(direct_content.encode("utf-8"))
-    assert direct_result.data["stdout"].startswith("characters=15\nbytes=15")
+    assert direct_result.data["stdout"].startswith("characters=")
     assert artifact_sandbox.await_count == 0
+    legacy_output_schema = json.loads(json.dumps(artifact_snapshot.output_schema))
+    legacy_output_schema["properties"].pop("artifacts")
+    legacy_output_schema["required"].remove("artifacts")
+    legacy_snapshot = dataclasses.replace(
+        artifact_snapshot,
+        output_schema=legacy_output_schema,
+    )
+    legacy_result = await builtin.invoke(
+        legacy_snapshot,
+        {
+            "content": "legacy",
+            "content_mode": "text",
+            "filename": "legacy.txt",
+        },
+        dataclasses.replace(context, idempotency_key="adapter-legacy-output"),
+    )
+    assert legacy_result.ok is True
+    assert "artifacts" not in legacy_result.data
+    assert "mime_type" not in legacy_result.data
+    validate_tool_output(legacy_snapshot, legacy_result.data)
     with patch(
         "app.application.tool_adapters.execute_artifact_code",
         new=AsyncMock(side_effect=WorkflowSandboxError("NameError: missing value")),
     ):
         result = await builtin.invoke(
             artifact_snapshot,
-            {"code": "missing", "format": "pdf", "filename": "report.pdf"},
+            {"content": "missing", "format": "pdf", "filename": "report.pdf"},
             dataclasses.replace(context, idempotency_key="adapter-failed"),
         )
     assert result.ok is False
-    assert result.error_code == "python_artifact_failed"
+    assert result.error_code == "artifact_failed"
     assert "NameError" in result.error_message
+    legacy_result = await builtin.invoke(
+        dataclasses.replace(
+            artifact_snapshot,
+            execution_spec={"builtin": "python_artifact"},
+        ),
+        {"code": "legacy", "filename": "legacy.txt"},
+        dataclasses.replace(context, idempotency_key="adapter-legacy"),
+    )
+    assert legacy_result.ok is True
     # Unsupported builtin (tool_adapters.py:47-48).
     result = await builtin.invoke(
         dataclasses.replace(snapshot, execution_spec={"builtin": "other"}),
@@ -5464,6 +5595,7 @@ def test_tool_tasks_are_registered() -> None:
 def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
     test_generic_artifact_migration_matches_catalog()
+    test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()
     test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()
     test_legacy_disabled_tools_remain_disabled_after_backfill()
@@ -5484,6 +5616,7 @@ def main() -> None:
     test_mcp_resolution_rejects_missing_authorization_context()
     test_workspace_creation_initializes_system_catalog()
     test_generated_artifact_link_serves_static_html()
+    test_generated_artifact_rejects_source_as_docx()
     test_generated_artifact_downloads_common_formats()
     test_python_tool_http_lifecycle_and_private_grants()
     test_canonical_mcp_policy_allows_owner_read_only_attestation()

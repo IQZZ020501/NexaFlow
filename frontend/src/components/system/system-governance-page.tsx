@@ -17,6 +17,7 @@ import {
   RefreshCwIcon,
   ShieldCheckIcon,
   Trash2Icon,
+  UserCogIcon,
   UserPlusIcon,
   UsersIcon,
   XCircleIcon,
@@ -85,13 +86,19 @@ const navItems: Array<{
 }> = [
   { href: "/system/workspaces", label: "工作空间", icon: Building2Icon },
   { href: "/system/teams", label: "团队", icon: UsersIcon },
-  { href: "/system/users", label: "用户管理", icon: KeyRoundIcon },
+  { href: "/system/users", label: "用户管理", icon: UserCogIcon },
   { href: "/system/audit", label: "审计日志", icon: HistoryIcon },
   { href: "/system/operations", label: "系统运行", icon: ActivityIcon },
   { href: "/system/email", label: "SMTP 邮件", icon: MailIcon },
   { href: "/system/governance", label: "工作空间治理", icon: ShieldCheckIcon },
   { href: "/system/security", label: "会话安全", icon: KeyRoundIcon },
 ]
+const secondaryNavHrefs = new Set([
+  "/system/operations",
+  "/system/email",
+  "/system/governance",
+  "/system/security",
+])
 
 /**
  * Renders the system governance section authorized for the current user.
@@ -132,7 +139,7 @@ export function SystemGovernancePage({ section }: Props) {
   if (!session.me || !session.token || !canAccess) return null
 
   return (
-    <div className="grid min-w-0 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+    <div className="grid min-w-0 gap-4 lg:h-[calc(100svh-9.25rem)] lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)]">
       <SystemGovernanceNav section={section} me={session.me} />
       <main className="min-w-0">
         {section === "operations" ? <OperationsPanel /> : null}
@@ -174,26 +181,36 @@ function SystemGovernanceNav({
   })
   const activeHref = `/system/${section}`
   return (
-    <aside className="min-w-0 lg:sticky lg:top-20 lg:self-start">
+    <aside className="min-w-0 lg:sticky lg:top-20 lg:h-full lg:self-start">
       <nav
         aria-label={t("系统管理")}
-        className="flex gap-1 overflow-x-auto rounded-lg border bg-background p-1 shadow-sm lg:flex-col lg:overflow-visible"
+        className="flex gap-1 overflow-x-auto rounded-lg border bg-background p-1 shadow-sm lg:h-full lg:flex-col lg:overflow-visible"
       >
-        {visible.map((item) => {
+        {visible.map((item, index) => {
           const Icon = item.icon
           const active = item.href === activeHref
+          const isSecondary = secondaryNavHrefs.has(item.href)
+          const previousItem = visible[index - 1]
+          const startsSecondary =
+            isSecondary &&
+            previousItem &&
+            !secondaryNavHrefs.has(previousItem.href)
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex min-w-32 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0",
-                active && "bg-foreground text-background hover:bg-foreground hover:text-background"
-              )}
-            >
-              <Icon className="size-4 shrink-0" />
-              <span>{t(item.label)}</span>
-            </Link>
+            <React.Fragment key={item.href}>
+              {startsSecondary ? <div className="my-1 border-t" /> : null}
+              <Link
+                href={item.href}
+                className={cn(
+                  "flex min-w-32 items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0",
+                  active && "bg-foreground text-background hover:bg-foreground hover:text-background"
+                )}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <Icon className="size-4 shrink-0" />
+                  <span>{t(item.label)}</span>
+                </span>
+              </Link>
+            </React.Fragment>
           )
         })}
       </nav>
