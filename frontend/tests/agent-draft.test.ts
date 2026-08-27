@@ -489,4 +489,38 @@ describe("Agent preview state", () => {
     expect(merged.status).toBe("queued")
     expect(merged.events).toEqual([toolEvent])
   })
+
+  test("terminal error events end the loading state even with a running snapshot", () => {
+    const running = {
+      id: "run-1",
+      status: "running",
+      events: [],
+      result: "",
+    } as unknown as AgentRun
+    const merged = mergeAgentRunStreamEvent([running], "run-1", {
+      type: "error",
+      sequence: 3,
+      run: {
+        ...running,
+        last_error: "Agent executor lost its lease; the run was interrupted.",
+      },
+    })[0]
+    expect(merged.status).toBe("failed")
+    expect(merged.last_error).toContain("lost its lease")
+  })
+
+  test("terminal complete events mark the run succeeded", () => {
+    const running = {
+      id: "run-1",
+      status: "running",
+      events: [],
+      result: "",
+    } as unknown as AgentRun
+    const merged = mergeAgentRunStreamEvent([running], "run-1", {
+      type: "complete",
+      sequence: 3,
+      run: running,
+    })[0]
+    expect(merged.status).toBe("succeeded")
+  })
 })
