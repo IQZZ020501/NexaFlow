@@ -53,6 +53,7 @@ import type { TFunction } from "@/i18n"
 import { compareLiveStreamIds } from "@/lib/api/agents"
 import type { AgentToolCall } from "@/lib/api/agents"
 import {
+  cancelPublicAgentRun,
   initializePublicAgent,
   deletePublicAgentConversation,
   listPublicAgentConversations,
@@ -496,7 +497,7 @@ export function mergePublicRunEvent(
   placeholderId: string
 ) {
   if (event.type === "run") {
-    return runs.map((run) =>
+    const next = runs.map((run) =>
       run.id === placeholderId || run.id === event.run.id
         ? {
             ...event.run,
@@ -508,6 +509,9 @@ export function mergePublicRunEvent(
           }
         : run
     )
+    return next.some((run) => run.id === event.run.id)
+      ? next
+      : [event.run, ...runs]
   }
   if (event.type === "progress") {
     return runs.map((run) => {
@@ -728,10 +732,20 @@ export function mergePublicRunEvent(
       run.id === runId ? { ...run, status: "awaiting_approval" } : run
     )
   }
+  const target = runs.find(
+    (run) => run.id === event.run.id || run.id === placeholderId
+  )
+  if (!target) return runId === event.run.id ? [event.run, ...runs] : runs
   return runs.map((run) =>
-    run.id === event.run.id
+    run.id === event.run.id || run.id === placeholderId
       ? {
           ...event.run,
+          result:
+            event.run.status === "cancelled"
+              ? ""
+              : event.run.result || run.result,
+          progress:
+            event.run.progress.length > 0 ? event.run.progress : run.progress,
           live_stream_epoch: event.stream_epoch ?? run.live_stream_epoch,
           live_stream_cursor: event.live_sequence ?? run.live_stream_cursor,
         }
@@ -974,6 +988,9 @@ export function PublicAgentChat({
   )
   const [sessionReady, setSessionReady] = React.useState(false)
   const streamControllerRef = React.useRef<AbortController | null>(null)
+  const activeRunIdRef = React.useRef<string | null>(null)
+  const activePlaceholderIdRef = React.useRef<string | null>(null)
+  const cancelRequestedRef = React.useRef(false)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const initialConversationIdRef = React.useRef(initialConversationId)
@@ -1071,7 +1088,20 @@ export function PublicAgentChat({
       .then((response) => {
         if (current) {
           const visibleRuns = latestRunVersions(response.items)
-          setRuns(visibleRuns)
+          setRuns((currentRuns) => {
+            const preservedRuns = currentRuns.filter(
+              (run) =>
+                run.conversation_id === activeConversationId &&
+                (run.status === "cancelled" ||
+                  run.id === activeRunIdRef.current ||
+                  run.id === activePlaceholderIdRef.current)
+            )
+            const merged = new Map(
+              visibleRuns.map((run) => [run.id, run] as const)
+            )
+            preservedRuns.forEach((run) => merged.set(run.id, run))
+            return latestRunVersions([...merged.values()])
+          })
           for (const run of visibleRuns) {
             if (run.status === "awaiting_approval") {
               void loadRunToolCalls(run.id)
@@ -1101,6 +1131,9 @@ export function PublicAgentChat({
       return
     }
     cancelPublicAgentStream(streamControllerRef)
+    activeRunIdRef.current = null
+    activePlaceholderIdRef.current = null
+    cancelRequestedRef.current = false
     setIsSending(false)
     setSendError(null)
     setIsRunsLoading(true)
@@ -1115,6 +1148,9 @@ export function PublicAgentChat({
 
   function startNewConversation() {
     cancelPublicAgentStream(streamControllerRef)
+    activeRunIdRef.current = null
+    activePlaceholderIdRef.current = null
+    cancelRequestedRef.current = false
     setActiveConversationId(null)
     setRuns([])
     setToolCallsByRun({})
@@ -1379,6 +1415,50 @@ export function PublicAgentChat({
     }
   }
 
+  async function cancelActiveRun(
+    runId: string,
+    placeholderId: string | null,
+    controller: AbortController | null
+  ) {
+    const ownsRun = () =>
+      activeRunIdRef.current === runId &&
+      activePlaceholderIdRef.current === placeholderId
+    if (streamControllerRef.current === controller) {
+      cancelPublicAgentStream(streamControllerRef)
+    }
+    if (!token) {
+      if (ownsRun()) {
+        activeRunIdRef.current = null
+        activePlaceholderIdRef.current = null
+        cancelRequestedRef.current = false
+        setIsSending(false)
+      }
+      return
+    }
+    try {
+      const cancelled = await cancelPublicAgentRun(agentId, token, runId)
+      if (ownsRun()) {
+        setRuns((current) =>
+          mergePublicRunEvent(
+            current,
+            cancelled.id,
+            { type: "error", run: cancelled },
+            placeholderId ?? cancelled.id
+          )
+        )
+      }
+    } catch (error) {
+      if (ownsRun()) setSendError(getErrorMessage(error, t))
+    } finally {
+      if (ownsRun()) {
+        activeRunIdRef.current = null
+        activePlaceholderIdRef.current = null
+        cancelRequestedRef.current = false
+        setIsSending(false)
+      }
+    }
+  }
+
   async function handleAsk(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const nextQuestion = question.trim()
@@ -1390,6 +1470,9 @@ export function PublicAgentChat({
     const controller = new AbortController()
     streamControllerRef.current = controller
     const placeholderId = `pending-${Date.now()}`
+    activeRunIdRef.current = null
+    activePlaceholderIdRef.current = placeholderId
+    cancelRequestedRef.current = false
     const placeholder: ExternalAgentRun = {
       id: placeholderId,
       conversation_id: activeConversationId ?? "",
@@ -1417,12 +1500,21 @@ export function PublicAgentChat({
           if (streamControllerRef.current !== controller) return
           if (streamEvent.type === "run") {
             liveRunId = streamEvent.run.id
+            activeRunIdRef.current = streamEvent.run.id
             if (!activeConversationId) {
               setActiveConversationId(streamEvent.run.conversation_id)
               window.history.replaceState(
                 null,
                 "",
                 `/chat/${agentId}?conversation_id=${encodeURIComponent(streamEvent.run.conversation_id)}`
+              )
+            }
+            if (cancelRequestedRef.current) {
+              cancelRequestedRef.current = false
+              void cancelActiveRun(
+                streamEvent.run.id,
+                placeholderId,
+                controller
               )
             }
           }
@@ -1457,14 +1549,21 @@ export function PublicAgentChat({
     } finally {
       if (streamControllerRef.current === controller) {
         streamControllerRef.current = null
+        activeRunIdRef.current = null
+        activePlaceholderIdRef.current = null
+        cancelRequestedRef.current = false
         setIsSending(false)
       }
     }
   }
 
   function handleCancelAsk() {
-    cancelPublicAgentStream(streamControllerRef)
-    setIsSending(false)
+    const controller = streamControllerRef.current
+    const runId = activeRunIdRef.current
+    cancelRequestedRef.current = true
+    if (!runId) return
+    cancelRequestedRef.current = false
+    void cancelActiveRun(runId, activePlaceholderIdRef.current, controller)
   }
 
   if (isInitializing) {

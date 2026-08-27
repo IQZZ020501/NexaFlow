@@ -283,6 +283,18 @@ export function getPublicAgentRun(
   })
 }
 
+/** Cancels a running public agent run. */
+export function cancelPublicAgentRun(
+  agentId: string,
+  token: string,
+  runId: string
+) {
+  return request<ExternalAgentRun>(
+    publicAgentPath(agentId, `/runs/${runId}/cancel`),
+    { method: "POST", keepalive: true, token }
+  )
+}
+
 /**
  * Regenerates a public agent run.
  *

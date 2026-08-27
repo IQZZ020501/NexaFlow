@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.agent_runs import (
+    cancel_run_tree,
     enqueue_prepared_agent_run,
     list_canonical_agent_run_tool_calls,
     prepare_agent_run,
@@ -958,6 +959,31 @@ async def get_external_agent_run(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent run not found.")
     return run
+
+
+async def cancel_external_agent_run(
+    db: AsyncSession,
+    agent_id: str,
+    run_id: str,
+    access_source: ExternalAccessSource,
+    consumer_id: str,
+) -> ExternalAgentRunResponse:
+    """Cancel an externally accessible public run owned by the consumer."""
+    if access_source != "public":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent run not found.")
+    run = await get_external_agent_run(
+        db,
+        agent_id,
+        run_id,
+        access_source,
+        consumer_id,
+    )
+    if not await cancel_run_tree(db, run.id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Agent run is already finished.")
+    await db.commit()
+    current = await agent_repository.get_agent_run_by_id(db, run.id)
+    assert current is not None
+    return external_run_to_response(current)
 
 
 async def regenerate_external_agent_run(

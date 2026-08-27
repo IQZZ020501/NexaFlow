@@ -367,6 +367,7 @@ type AgentFetchRoutes = {
   createRun?: (
     body: Record<string, unknown>
   ) => Response | Promise<Response>
+  cancelRun?: () => Response | Promise<Response>
   streamResponses?: Array<() => Response | Promise<Response>>
   toolCalls?: () => Response | Promise<Response>
   resolveRun?: () => Response | Promise<Response>
@@ -389,6 +390,9 @@ function agentFetchHandler(
     }
     if (url.includes("/uploads")) {
       return jsonResponse(routes.uploads ?? [])
+    }
+    if (url.endsWith("/cancel")) {
+      return routes.cancelRun ? routes.cancelRun() : jsonResponse({})
     }
     if (url.includes("/stream")) {
       const responses = routes.streamResponses ?? []
@@ -1882,26 +1886,105 @@ describe("PublicAgentChat", () => {
   })
 
   test("cancels a running generation", async () => {
-    fetchHandler = agentFetchHandler({
-      conversations: { items: [] },
-      createRun: () => jsonResponse(run({ status: "running", result: "" }), 201),
-      streamResponses: [() => new Promise<Response>(() => {})],
-    })
+    const requests: string[] = []
+    fetchHandler = agentFetchHandler(
+      {
+        conversations: { items: [] },
+        createRun: () =>
+          jsonResponse(
+            run({ id: "run-1", status: "running", result: "" }),
+            201
+          ),
+        cancelRun: () =>
+          jsonResponse(
+            run({
+              id: "run-1",
+              status: "cancelled",
+              result: "",
+              error: "Agent run was cancelled.",
+            })
+          ),
+        streamResponses: [() => new Promise<Response>(() => {})],
+      },
+      requests
+    )
 
     renderPage(<PublicAgentChat agentId="agent-1" />)
     await screen.findByText("开始新对话")
-
     sendMessage("慢慢来")
-
     expect(await screen.findByLabelText("停止生成")).toBeTruthy()
     fireEvent.click(screen.getByLabelText("停止生成"))
 
     await waitFor(() =>
       expect(screen.getByLabelText("发送问题")).toBeTruthy()
     )
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) => request.includes("POST") && request.endsWith("/cancel")
+        )
+      ).toBe(true)
+    )
+    await waitFor(() =>
+      expect(screen.getByText("运行已取消")).toBeTruthy()
+    )
     expect(
       (screen.getByLabelText("请输入问题") as HTMLTextAreaElement).disabled
     ).toBe(false)
+  })
+
+  test("cancels a run when the server response arrives after stop", async () => {
+    const requests: string[] = []
+    let resolveCreate!: (response: Response) => void
+    const createResponse = new Promise<Response>((resolve) => {
+      resolveCreate = resolve
+    })
+    fetchHandler = agentFetchHandler(
+      {
+        conversations: { items: [] },
+        createRun: () => createResponse,
+        cancelRun: () =>
+          jsonResponse(
+            run({
+              id: "run-late",
+              status: "cancelled",
+              result: "",
+              error: "Agent run was cancelled.",
+            })
+          ),
+        streamResponses: [() => new Response(null, { status: 200 })],
+      },
+      requests
+    )
+
+    renderPage(<PublicAgentChat agentId="agent-1" />)
+    await screen.findByText("开始新对话")
+    sendMessage("先停一下")
+    await screen.findByLabelText("停止生成")
+    fireEvent.click(screen.getByLabelText("停止生成"))
+
+    expect(
+      requests.some(
+        (request) => request.includes("POST") && request.endsWith("/cancel")
+      )
+    ).toBe(false)
+    resolveCreate(
+      jsonResponse(
+        run({ id: "run-late", status: "running", result: "" }),
+        201
+      )
+    )
+
+    await waitFor(() =>
+      expect(
+        requests.some(
+          (request) => request.includes("POST") && request.endsWith("/cancel")
+        )
+      ).toBe(true)
+    )
+    await waitFor(() =>
+      expect(screen.getByText("运行已取消")).toBeTruthy()
+    )
   })
 
   test("approves a tool call and resumes observing the run", async () => {
