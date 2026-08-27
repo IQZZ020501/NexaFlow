@@ -30,6 +30,7 @@ from app.application.agent_tools import (
 )
 from app.application.agent_access import (
     authenticate_agent_api_credential,
+    cancel_external_agent_run,
     create_agent_api_credential,
     create_external_agent_run,
     external_run_to_response,
@@ -81,6 +82,7 @@ __all__ = [
     "KnowledgeSearchInput",
     "accessible_agent_knowledge_bases",
     "authenticate_agent_api_credential",
+    "cancel_external_agent_run",
     "build_knowledge_search_tool",
     "build_mcp_agent_tool",
     "can_edit_agent",

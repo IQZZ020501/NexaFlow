@@ -1375,6 +1375,24 @@ async def assert_direct_endpoint_calls(
         assert any(b'"type": "run"' in chunk for chunk in chunks)
         assert any(b'"type": "complete"' in chunk for chunk in chunks)
 
+        # 267: cancel a queued public run.
+        cancel_run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Direct endpoint cancel",
+            user,
+            "admin",
+            access_source="public",
+            consumer_id=user.id,
+        )
+        await db.commit()
+        cancelled = await endpoints_module.cancel_public_agent_run(
+            agent_id, cancel_run.id, db, user
+        )
+        assert cancelled.id == cancel_run.id
+        assert cancelled.status == "cancelled"
+
         # 230: approve tool call.
         approve_run, _ = await agent_runs.prepare_agent_run(
             db,

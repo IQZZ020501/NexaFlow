@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_settings, require_password_changed
 from app.application.agents import (
     authenticate_agent_api_credential,
+    cancel_external_agent_run,
     create_external_agent_run,
     external_run_to_response,
     get_external_agent_run,
@@ -260,6 +261,26 @@ async def set_public_agent_run_feedback(
         "public",
         user.id,
         payload.value,
+    )
+
+
+@public_router.post(
+    "/runs/{run_id}/cancel",
+    response_model=ExternalAgentRunResponse,
+)
+async def cancel_public_agent_run(
+    agent_id: str,
+    run_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> ExternalAgentRunResponse:
+    await get_workspace_published_agent_context(db, agent_id, user)
+    return await cancel_external_agent_run(
+        db,
+        agent_id,
+        run_id,
+        "public",
+        user.id,
     )
 
 
