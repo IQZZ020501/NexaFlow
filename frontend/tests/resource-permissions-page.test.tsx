@@ -37,6 +37,55 @@ afterEach(() => {
   resetFetch()
 })
 
+test("keeps the workspace card aligned with the resource card", async () => {
+  session.selectedWorkspaceId = "ws-1"
+  const member = { user: session.me.user, role: "admin" }
+
+  withFetch((url) => {
+    const parsed = new URL(url, "http://localhost")
+    if (parsed.pathname === "/api/v1/workspaces/ws-1/knowledge-bases") {
+      return jsonResponse([])
+    }
+    if (parsed.pathname.endsWith("/members")) return jsonResponse([member])
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  renderPage(<ResourcePermissionsPage type="knowledge" />)
+
+  const card = (await screen.findByText("工作空间")).closest(
+    '[data-slot="card"]'
+  )
+  expect(card?.className).toContain("lg:top-0")
+  expect(card?.className).not.toContain("lg:top-20")
+})
+
+test("keeps the permission cards mounted while data loads", async () => {
+  session.selectedWorkspaceId = "ws-1"
+  let resolveResources: ((response: Response) => void) | null = null
+
+  withFetch((url) => {
+    const parsed = new URL(url, "http://localhost")
+    if (parsed.pathname === "/api/v1/workspaces/ws-1/knowledge-bases") {
+      return new Promise<Response>((resolve) => {
+        resolveResources = resolve
+      })
+    }
+    if (parsed.pathname.endsWith("/members")) return jsonResponse([])
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  renderPage(<ResourcePermissionsPage type="knowledge" />)
+
+  expect(screen.getByText("工作空间")).toBeTruthy()
+  expect(screen.getByText("知识库")).toBeTruthy()
+  expect(screen.getAllByText("正在加载").length).toBe(2)
+
+  await act(async () => {
+    resolveResources?.(jsonResponse([]))
+  })
+  expect(await screen.findByText("暂无数据")).toBeTruthy()
+})
+
 test("resource permissions ignore a stale workspace resource response", async () => {
   let resolveOldKnowledge: ((response: Response) => void) | null = null
   const permissionRequests: string[] = []

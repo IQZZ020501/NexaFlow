@@ -4,7 +4,9 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import {
   BookOpenIcon,
+  BoxesIcon,
   CheckIcon,
+  ChevronDownIcon,
   LoaderCircleIcon,
   SparklesIcon,
   UserRoundIcon,
@@ -71,6 +73,60 @@ const PAGE_CONFIG = {
   knowledge: { label: "知识库", icon: BookOpenIcon, color: "text-blue-600" },
   tools: { label: "工具", icon: WrenchIcon, color: "text-emerald-600" },
 } as const
+
+const RESOURCE_PERMISSION_TYPES: ResourcePermissionPageType[] = [
+  "apps",
+  "knowledge",
+  "tools",
+]
+
+export function ResourcePermissionNavGroup({
+  activeType,
+  onSelect,
+}: {
+  activeType?: ResourcePermissionPageType
+  onSelect: (type: ResourcePermissionPageType) => void
+}) {
+  const { t } = useLanguage()
+
+  return (
+    <details className="group" open={Boolean(activeType)}>
+      <summary
+        className={cn(
+          "flex min-w-32 cursor-pointer list-none items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0 [&::-webkit-details-marker]:hidden",
+          activeType &&
+            "bg-foreground text-background hover:bg-foreground hover:text-background"
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <BoxesIcon className="size-4 shrink-0" />
+          <span>{t("资源授权")}</span>
+        </span>
+        <ChevronDownIcon className="size-4 shrink-0 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="mt-1 space-y-0.5 border-l pl-3 lg:ml-3">
+        {RESOURCE_PERMISSION_TYPES.map((type) => {
+          const config = PAGE_CONFIG[type]
+          const Icon = config.icon
+          return (
+            <button
+              key={type}
+              type="button"
+              onClick={() => onSelect(type)}
+              className={cn(
+                "flex w-full items-center justify-start gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                activeType === type && "bg-primary/10 text-primary"
+              )}
+            >
+              <Icon className="size-4 shrink-0" />
+              <span>{t(config.label)}</span>
+            </button>
+          )
+        })}
+      </div>
+    </details>
+  )
+}
 
 function rowsForApps(items: Agent[]): ResourceRow[] {
   return items.map((item) => ({
@@ -430,12 +486,7 @@ export function ResourcePermissionsPage({
 
   return (
     <div className="w-full min-w-0">
-      {isLoading ? (
-        <div className="flex min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
-          <LoaderCircleIcon className="size-4 animate-spin" />
-          {t("正在加载")}
-        </div>
-      ) : error ? (
+      {error ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-destructive">
             {error}
@@ -444,7 +495,7 @@ export function ResourcePermissionsPage({
       ) : (
         <div className="grid gap-4 lg:grid-cols-[250px_minmax(0,1fr)]">
           <aside className="min-w-0">
-            <Card className="gap-4 py-5 lg:sticky lg:top-20">
+            <Card className="gap-4 py-5 lg:sticky lg:top-0">
               <CardHeader className="gap-1 px-5">
                 <CardTitle className="flex items-center gap-2">
                   <UserRoundIcon className="size-4" />
@@ -473,7 +524,12 @@ export function ResourcePermissionsPage({
                     placeholder={t("搜索成员")}
                   />
                   <div className="mt-2 max-h-[calc(100svh-26rem)] space-y-1 overflow-y-auto">
-                    {filteredMembers.length ? (
+                    {isLoading ? (
+                      <div className="flex min-h-12 items-center justify-center gap-2 text-sm text-muted-foreground">
+                        <LoaderCircleIcon className="size-4 animate-spin" />
+                        {t("正在加载")}
+                      </div>
+                    ) : filteredMembers.length ? (
                       filteredMembers.map((member) => (
                         <button
                           key={member.user.id}
@@ -524,7 +580,7 @@ export function ResourcePermissionsPage({
                 <span>{t("名称")}</span>
                 <span>{t("权限")}</span>
               </div>
-              {isPermissionsLoading ? (
+              {isLoading || isPermissionsLoading ? (
                 <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
                   <LoaderCircleIcon className="size-4 animate-spin" />
                   {t("正在加载")}

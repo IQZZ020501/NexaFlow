@@ -21,11 +21,15 @@ import {
 } from "./helpers/dom"
 
 const notifications: Array<[string, string]> = []
+const pushes: string[] = []
 const session = makeSession({
   notify: (kind: string, message: string) => notifications.push([kind, message]),
 })
 mockUseSession(session)
-mockNextNavigation({ pathname: "/system/operations" })
+mockNextNavigation({
+  pathname: "/system/operations",
+  push: (href: string) => pushes.push(href),
+})
 mockNextLink()
 
 const originalSetInterval = window.setInterval
@@ -58,6 +62,7 @@ function healthCard(label: string) {
 
 beforeEach(() => {
   notifications.length = 0
+  pushes.length = 0
   intervalHandler = null
   intervalDelay = 0
   window.setInterval = ((handler: TimerHandler, delay?: number) => {
@@ -101,6 +106,10 @@ describe("system health", () => {
     expect(healthCard("Redis").getByText("检查超时")).toBeTruthy()
     expect(screen.getByText(/最后检查：/)).toBeTruthy()
     expect(screen.getByText(/每 30 秒自动刷新/)).toBeTruthy()
+    expect(screen.getByText("资源授权")).toBeTruthy()
+    fireEvent.click(screen.getByText("资源授权"))
+    fireEvent.click(screen.getByRole("button", { name: "工具" }))
+    expect(pushes).toContain("/system/permissions?type=tools")
     expect(intervalDelay).toBe(30_000)
 
     await act(async () => {

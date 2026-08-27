@@ -77,6 +77,7 @@ import {
   SystemPagination,
   type SystemPageSize,
 } from "@/components/system/pagination-footer"
+import { ResourcePermissionNavGroup } from "@/components/system/resource-permissions-page"
 
 export type SystemGovernanceSection = "operations" | "governance" | "security" | "email"
 
@@ -170,6 +171,7 @@ function SystemGovernanceNav({
   me: NonNullable<ReturnType<typeof useSession>["me"]>
 }) {
   const { t } = useLanguage()
+  const router = useRouter()
   const canManageUsers = Boolean(
     me.user.is_global_admin || me.memberships.some((membership) => membership.role === "admin")
   )
@@ -202,7 +204,18 @@ function SystemGovernanceNav({
             !secondaryNavHrefs.has(previousItem.href)
           return (
             <React.Fragment key={item.href}>
-              {startsSecondary ? <div className="my-1 border-t" /> : null}
+              {startsSecondary ? (
+                <>
+                  <div className="my-1 border-t" />
+                  {canManageWorkspace ? (
+                    <ResourcePermissionNavGroup
+                      onSelect={(type) =>
+                        router.push(`/system/permissions?type=${type}`)
+                      }
+                    />
+                  ) : null}
+                </>
+              ) : null}
               <Link
                 href={item.href}
                 className={cn(
