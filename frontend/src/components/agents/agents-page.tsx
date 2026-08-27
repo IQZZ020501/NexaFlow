@@ -458,6 +458,23 @@ export function mergeAgentRunStreamEvent(
         : run
     )
   }
+  if (streamEvent.type === "complete") {
+    // Terminal events end the loading state even when the embedded run
+    // snapshot is not yet terminal (e.g. an interrupted run the backend
+    // reports as failed while its durable row still says running).
+    return runs.map((run) =>
+      run.id === streamEvent.run.id
+        ? { ...streamEvent.run, status: "succeeded" as const }
+        : run
+    )
+  }
+  if (streamEvent.type === "error") {
+    return runs.map((run) =>
+      run.id === streamEvent.run.id
+        ? { ...streamEvent.run, status: "failed" as const }
+        : run
+    )
+  }
   return runs.map((run) =>
     run.id === streamEvent.run.id ? streamEvent.run : run
   )

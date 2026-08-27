@@ -5982,6 +5982,56 @@ async def assert_tool_service_paths(
 # ---------------------------------------------------------------------------
 
 
+async def assert_orphaned_stream_ends_with_error(
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    """A run whose executor lease expired must end the stream with an error."""
+    from sqlalchemy import update
+
+    from app.shareddomain.agents.models import AgentRunState
+
+    actor = await get_admin_actor()
+    settings = test_settings()
+    async with get_session_factory()() as db:
+        run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "orphan stream goal",
+            actor,
+            "admin",
+        )
+        run_id = run.id
+        await db.execute(
+            update(AgentRunState)
+            .where(AgentRunState.run_id == run_id)
+            .values(
+                status="running_v2",
+                worker_task_id="orphan-task",
+                lease_expires_at=utc_now() - timedelta(minutes=5),
+            )
+        )
+        await db.commit()
+    async with get_session_factory()() as db:
+        current = await agent_repository.get_agent_run_by_id(db, run_id)
+        assert current is not None
+        events: list[dict[str, Any]] = []
+        async for event in agent_runs.stream_agent_run(
+            db,
+            current,
+            object(),
+            actor,
+            "admin",
+            settings,
+        ):
+            events.append(event)
+    assert [event["type"] for event in events] == ["run", "error"], events
+    error_event = events[-1]
+    assert error_event["run"]["status"] == "failed"
+    assert "lost its lease" in error_event["run"]["last_error"]
+
+
 def main() -> None:
     assert_usage_normalization()
     assert_agent_tool_construction()
@@ -6031,6 +6081,12 @@ def main() -> None:
             )
             asyncio.run(
                 assert_stream_paths(workspace_id, resources["agent_id"])
+            )
+            asyncio.run(
+                assert_orphaned_stream_ends_with_error(
+                    workspace_id,
+                    resources["agent_id"],
+                )
             )
             asyncio.run(
                 assert_create_agent_run_paths(

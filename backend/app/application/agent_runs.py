@@ -1201,6 +1201,46 @@ async def stream_agent_run(
                     )
                 if current is None:
                     return
+                lease_expires = current.lease_expires_at
+                if (
+                    current.status not in terminal_statuses
+                    and lease_expires is not None
+                ):
+                    now = utc_now()
+                    if lease_expires.tzinfo is None:
+                        now = now.replace(tzinfo=None)
+                    if lease_expires <= now:
+                        # The executor holding this run has lost its lease
+                        # (crashed or hung) and nothing has marked the run
+                        # terminal. Drain any live events still buffered so a
+                        # merely lagging heartbeat does not false-positive;
+                        # otherwise end the stream with an explicit error
+                        # instead of long-polling forever.
+                        live_events = await reader.read(live_cursor, 1)
+                        if live_events:
+                            for live_sequence, event in live_events:
+                                live_cursor = live_sequence
+                                if event.get("type") in LIVE_EVENT_TYPES:
+                                    yield {
+                                        **event,
+                                        "live_sequence": live_cursor,
+                                    }
+                        else:
+                            failed = run_to_response(
+                                current,
+                                trace_id=current.trace_id,
+                            ).model_dump(mode="json")
+                            failed["status"] = "failed"
+                            failed["last_error"] = (
+                                "Agent executor lost its lease; "
+                                "the run was interrupted."
+                            )
+                            yield {
+                                "type": "error",
+                                "sequence": cursor,
+                                "run": failed,
+                            }
+                            return
                 next_database_poll = loop.time() + settings.agent_event_poll_seconds
                 for row in rows:
                     assert row.id is not None
