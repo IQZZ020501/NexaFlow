@@ -229,7 +229,7 @@ describe("workspace governance settings", () => {
       "失败运行（24小时）",
       "失败任务（24小时）",
     ]) {
-      expect(screen.getByText(label)).toBeTruthy()
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0)
     }
     // "成员" also appears as the selected invite role; "团队" is a nav link.
     expect(screen.getAllByText("成员").length).toBeGreaterThan(0)

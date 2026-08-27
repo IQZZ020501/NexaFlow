@@ -5,7 +5,7 @@ import {
   UserCogIcon,
   UsersIcon,
 } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
@@ -220,6 +220,7 @@ function SystemPageContent({
   onNotify: (kind: AppNotification["kind"], message: string) => void
 }) {
   const { language, t } = useLanguage()
+  const searchParams = useSearchParams()
   const [confirmAction, confirmDialog] = useConfirmDialog()
   const locale = languageLocales[language]
   const [workspaceForm, setWorkspaceForm] = React.useState<WorkspaceForm>({
@@ -247,8 +248,15 @@ function SystemPageContent({
     isGlobalAdmin: false,
   })
   const [users, setUsers] = React.useState<User[]>([])
-  const [resourcePermissionType, setResourcePermissionType] =
+  const [selectedResourcePermissionType, setSelectedResourcePermissionType] =
     React.useState<ResourcePermissionPageType>("apps")
+  const requestedResourcePermissionType = searchParams.get("type")
+  const resourcePermissionType =
+    requestedResourcePermissionType === "apps" ||
+    requestedResourcePermissionType === "knowledge" ||
+    requestedResourcePermissionType === "tools"
+      ? requestedResourcePermissionType
+      : selectedResourcePermissionType
   const [workspaceMembers, setWorkspaceMembers] = React.useState<
     WorkspaceMember[]
   >([])
@@ -1320,7 +1328,7 @@ function SystemPageContent({
       systemTabs={systemTabs}
       onSystemTabChange={onSystemTabChange}
       resourcePermissionType={resourcePermissionType}
-      onResourcePermissionTypeChange={setResourcePermissionType}
+      onResourcePermissionTypeChange={setSelectedResourcePermissionType}
       me={me}
       workspaces={workspaces}
       selectedWorkspaceId={selectedWorkspaceId}
