@@ -1104,6 +1104,7 @@ def main() -> None:
         )
         assert workspace_audit.status_code == 200, workspace_audit.text
         workspace_audit_logs = workspace_audit.json()
+        assert int(workspace_audit.headers["x-total-count"]) == len(workspace_audit_logs)
         assert workspace_audit_logs
         assert all(
             item["workspace_id"] == research_workspace_id

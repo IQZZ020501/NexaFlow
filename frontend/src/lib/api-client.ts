@@ -130,6 +130,26 @@ export async function request<T>(path: string, options: RequestOptions = {}) {
   return (text ? JSON.parse(text) : null) as T
 }
 
+export async function requestPage<T>(path: string, options: RequestOptions = {}) {
+  const response = await fetch(apiUrl(path), {
+    ...options,
+    credentials: options.credentials ?? "include",
+    headers: options.token
+      ? new Headers({ ...Object.fromEntries(new Headers(options.headers)), Authorization: `Bearer ${options.token}` })
+      : options.headers,
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    let payload: unknown = text
+    try { payload = text ? JSON.parse(text) : null } catch { /* plain text */ }
+    throw new ApiError(response.status, errorMessage(payload, response.statusText))
+  }
+  return {
+    items: await response.json() as T[],
+    total: Number(response.headers.get("X-Total-Count") ?? 0),
+  }
+}
+
 
 /**
  * Requests a resource and provides its successful response as a blob.

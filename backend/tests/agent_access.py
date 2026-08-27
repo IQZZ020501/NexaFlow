@@ -62,6 +62,8 @@ from app.shareddomain.agents.models import (
     Agent as AgentOrm,
     AgentApiCredential as AgentApiCredentialOrm,
     AgentRun as AgentRunOrm,
+    AgentRunSnapshot,
+    AgentRunState,
 )
 
 MEMBER_PASSWORD = "AgentMember@12345."
@@ -1132,10 +1134,14 @@ async def assert_direct_access_units(
             approve_run.configuration_source = "legacy"
             approve_run.agent_publication_version_id = None
             await db.execute(
-                update(AgentRunOrm)
-                .where(AgentRunOrm.id == approve_run.id)
+                update(AgentRunState)
+                .where(AgentRunState.run_id == approve_run.id)
+                .values(status="awaiting_approval_v2")
+            )
+            await db.execute(
+                update(AgentRunSnapshot)
+                .where(AgentRunSnapshot.run_id == approve_run.id)
                 .values(
-                    status="awaiting_approval",
                     configuration_source="legacy",
                     agent_publication_version_id=None,
                 )
@@ -1175,10 +1181,14 @@ async def assert_direct_access_units(
             reject_run.configuration_source = "legacy"
             reject_run.agent_publication_version_id = None
             await db.execute(
-                update(AgentRunOrm)
-                .where(AgentRunOrm.id == reject_run.id)
+                update(AgentRunState)
+                .where(AgentRunState.run_id == reject_run.id)
+                .values(status="awaiting_approval_v2")
+            )
+            await db.execute(
+                update(AgentRunSnapshot)
+                .where(AgentRunSnapshot.run_id == reject_run.id)
                 .values(
-                    status="awaiting_approval",
                     configuration_source="legacy",
                     agent_publication_version_id=None,
                 )
@@ -1379,10 +1389,14 @@ async def assert_direct_endpoint_calls(
         approve_run.configuration_source = "legacy"
         approve_run.agent_publication_version_id = None
         await db.execute(
-            update(AgentRunOrm)
-            .where(AgentRunOrm.id == approve_run.id)
+            update(AgentRunState)
+            .where(AgentRunState.run_id == approve_run.id)
+            .values(status="awaiting_approval_v2")
+        )
+        await db.execute(
+            update(AgentRunSnapshot)
+            .where(AgentRunSnapshot.run_id == approve_run.id)
             .values(
-                status="awaiting_approval",
                 configuration_source="legacy",
                 agent_publication_version_id=None,
             )
@@ -1422,10 +1436,14 @@ async def assert_direct_endpoint_calls(
         reject_run.configuration_source = "legacy"
         reject_run.agent_publication_version_id = None
         await db.execute(
-            update(AgentRunOrm)
-            .where(AgentRunOrm.id == reject_run.id)
+            update(AgentRunState)
+            .where(AgentRunState.run_id == reject_run.id)
+            .values(status="awaiting_approval_v2")
+        )
+        await db.execute(
+            update(AgentRunSnapshot)
+            .where(AgentRunSnapshot.run_id == reject_run.id)
             .values(
-                status="awaiting_approval",
                 configuration_source="legacy",
                 agent_publication_version_id=None,
             )
@@ -1478,16 +1496,26 @@ async def assert_direct_endpoint_calls(
 
 async def seed_approval(workspace_id: str, run_id: str, call_id: str) -> None:
     from app.entities.agents import AgentToolCall
-    from app.shareddomain.agents.models import AgentRun as AgentRunOrm
+    from app.shareddomain.agents.models import (
+        AgentRunSnapshot,
+        AgentRunState,
+    )
 
     async with get_session_factory()() as db:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
         assert run is not None
+        # Run status lives in the split state row, and the approval gate
+        # reads the run's configuration source from its snapshot; mark the
+        # run legacy so the interactive approval path stays available.
         await db.execute(
-            update(AgentRunOrm)
-            .where(AgentRunOrm.id == run_id)
+            update(AgentRunState)
+            .where(AgentRunState.run_id == run_id)
+            .values(status="awaiting_approval_v2")
+        )
+        await db.execute(
+            update(AgentRunSnapshot)
+            .where(AgentRunSnapshot.run_id == run_id)
             .values(
-                status="awaiting_approval",
                 configuration_source="legacy",
                 agent_publication_version_id=None,
             )
@@ -1521,7 +1549,10 @@ async def seed_runs_for_logs_and_monitoring(
         workspace_id (str): Workspace containing the runs.
         agent_id (str): Agent associated with the runs.
     """
-    from app.shareddomain.agents.models import AgentRun as AgentRunOrm
+    from app.shareddomain.agents.models import (
+        AgentRun as AgentRunOrm,
+        AgentRunState,
+    )
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
@@ -1536,25 +1567,31 @@ async def seed_runs_for_logs_and_monitoring(
             db, workspace_id, agent_id, "Old console run", actor, "admin"
         )
         await db.execute(
-            update(AgentRunOrm)
-            .where(AgentRunOrm.id == succeeded.id)
+            update(AgentRunState)
+            .where(AgentRunState.run_id == succeeded.id)
             .values(
                 status="succeeded",
                 result="Monitor answer",
                 model_usage={"total_tokens": 120},
+            )
+        )
+        await db.execute(
+            update(AgentRunOrm)
+            .where(AgentRunOrm.id == succeeded.id)
+            .values(
                 feedback="positive",
                 feedback_updated_at=utc_now(),
             )
         )
         await db.execute(
-            update(AgentRunOrm)
-            .where(AgentRunOrm.id == failed.id)
+            update(AgentRunState)
+            .where(AgentRunState.run_id == failed.id)
             .values(status="failed", model_usage={"total_tokens": 7})
         )
         await db.execute(
             update(AgentRunOrm)
             .where(AgentRunOrm.id == old.id)
-            .values(status="succeeded", created_at=utc_now() - timedelta(days=100))
+            .values(created_at=utc_now() - timedelta(days=100))
         )
         await db.commit()
 

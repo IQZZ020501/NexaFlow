@@ -20,8 +20,10 @@ import {
   deleteTeam,
   deleteUser,
   deleteWorkspace,
-  listAuditLogs,
-  listWorkspaceAuditLogs,
+  listAllAuditLogs,
+  listAllWorkspaceAuditLogs,
+  listAuditLogsPage,
+  listWorkspaceAuditLogsPage,
   listTeamMembers,
   listWorkspaceMembers,
   listTeams,
@@ -69,8 +71,15 @@ import {
   canManageTeamMembers,
   getUserRoleKey,
 } from "@/components/system/system-utils"
+import type { ResourcePermissionPageType } from "@/components/system/resource-permissions-page"
+import type { SystemPageSize } from "@/components/system/pagination-footer"
 
-export type SystemTab = "workspaces" | "teams" | "users" | "audit"
+export type SystemTab =
+  | "workspaces"
+  | "teams"
+  | "users"
+  | "audit"
+  | "permissions"
 
 /**
  * Renders the system administration interface for the active tab when the current user has access.
@@ -118,7 +127,10 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
         !canAccessUsers) ||
       (currentTab === "audit" &&
         !session.me?.user.is_global_admin &&
-        getMembershipRole(session.me, session.selectedWorkspaceId) !== "admin")
+        getMembershipRole(session.me, session.selectedWorkspaceId) !== "admin") ||
+      (currentTab === "permissions" &&
+        !session.isSessionLoading &&
+        !canAccessUsers)
     ) {
       router.replace("/system/teams")
     }
@@ -235,6 +247,8 @@ function SystemPageContent({
     isGlobalAdmin: false,
   })
   const [users, setUsers] = React.useState<User[]>([])
+  const [resourcePermissionType, setResourcePermissionType] =
+    React.useState<ResourcePermissionPageType>("apps")
   const [workspaceMembers, setWorkspaceMembers] = React.useState<
     WorkspaceMember[]
   >([])
@@ -251,7 +265,9 @@ function SystemPageContent({
   const [debouncedAuditSearch, setDebouncedAuditSearch] = React.useState("")
   const [auditAction, setAuditAction] = React.useState("")
   const [auditOffset, setAuditOffset] = React.useState(0)
+  const [auditPageSize, setAuditPageSize] = React.useState<SystemPageSize>(20)
   const [auditHasMore, setAuditHasMore] = React.useState(false)
+  const [auditTotal, setAuditTotal] = React.useState(0)
   const [userForm, setUserForm] = React.useState<UserForm | null>(null)
   const [userPasswordForm, setUserPasswordForm] =
     React.useState<UserPasswordForm | null>(null)
@@ -444,26 +460,27 @@ function SystemPageContent({
     [reportError, token]
   )
 
-  const loadAuditLogs = React.useCallback(async (offset: number) => {
+  const loadAuditLogs = React.useCallback(async (offset: number, requestedPageSize = auditPageSize) => {
     const requestId = auditRequestId.current + 1
     auditRequestId.current = requestId
     setIsAuditLoading(true)
 
     try {
       const filters: AuditFilters = {
-        limit: 100,
+        limit: requestedPageSize,
         offset,
         search: debouncedAuditSearch || undefined,
         action: auditAction || undefined,
       }
-      const nextLogs = me.user.is_global_admin
-        ? await listAuditLogs(token, filters)
+      const page = me.user.is_global_admin
+        ? await listAuditLogsPage(token, filters)
         : selectedWorkspaceId
-          ? await listWorkspaceAuditLogs(token, selectedWorkspaceId, filters)
-          : []
+          ? await listWorkspaceAuditLogsPage(token, selectedWorkspaceId, filters)
+          : { items: [], total: 0 }
       if (requestId !== auditRequestId.current) return
-      setAuditLogs((current) => (offset ? [...current, ...nextLogs] : nextLogs))
-      setAuditHasMore(nextLogs.length === 100)
+      setAuditLogs(page.items)
+      setAuditTotal(page.total)
+      setAuditHasMore(offset + page.items.length < page.total)
     } catch (error) {
       if (requestId !== auditRequestId.current) return
       setAuditLogs([])
@@ -473,7 +490,7 @@ function SystemPageContent({
         setIsAuditLoading(false)
       }
     }
-  }, [auditAction, debouncedAuditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
+  }, [auditAction, auditPageSize, debouncedAuditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
 
   const loadUserCreateTeams = React.useCallback(
     async (workspaceId: string) => {
@@ -1302,6 +1319,8 @@ function SystemPageContent({
       activeSystemTab={activeTab}
       systemTabs={systemTabs}
       onSystemTabChange={onSystemTabChange}
+      resourcePermissionType={resourcePermissionType}
+      onResourcePermissionTypeChange={setResourcePermissionType}
       me={me}
       workspaces={workspaces}
       selectedWorkspaceId={selectedWorkspaceId}
@@ -1359,12 +1378,33 @@ function SystemPageContent({
         setAuditOffset(0)
         void loadAuditLogs(0)
       }}
-      onLoadMore={() => {
-        const nextOffset = auditOffset + 100
+      hasMore={auditHasMore}
+      total={auditTotal}
+      page={Math.floor(auditOffset / auditPageSize) + 1}
+      pageSize={auditPageSize}
+      onPageChange={(page) => {
+        const nextOffset = (page - 1) * auditPageSize
         setAuditOffset(nextOffset)
         void loadAuditLogs(nextOffset)
       }}
-      hasMore={auditHasMore}
+      onPageSizeChange={(pageSize) => {
+        setAuditPageSize(pageSize)
+        setAuditOffset(0)
+        void loadAuditLogs(0, pageSize)
+      }}
+      loadAll={() =>
+        me.user.is_global_admin
+          ? listAllAuditLogs(token, {
+              search: debouncedAuditSearch || undefined,
+              action: auditAction || undefined,
+            })
+          : selectedWorkspaceId
+            ? listAllWorkspaceAuditLogs(token, selectedWorkspaceId, {
+                search: debouncedAuditSearch || undefined,
+                action: auditAction || undefined,
+              })
+            : Promise.resolve([])
+      }
       workspaceScope={me.user.is_global_admin ? null : selectedWorkspace?.name ?? null}
       workspaceEditForm={workspaceEditForm}
       setWorkspaceEditForm={setWorkspaceEditForm}

@@ -1202,27 +1202,42 @@ describe("SystemShell audit loading", () => {
       const offset = parsed.searchParams.get("offset") ?? "0"
       requests.push(`${parsed.pathname}?offset=${offset}`)
       if (parsed.pathname.endsWith("/ws-2/audit-logs")) {
-        return jsonResponse([
-          { ...auditLog, id: "ws-2-page-1", resource_name: "Workspace two page one" },
-        ])
+        return new Response(
+          JSON.stringify([
+            { ...auditLog, id: "ws-2-page-1", resource_name: "Workspace two page one" },
+          ]),
+          {
+            headers: { "Content-Type": "application/json", "X-Total-Count": "1" },
+          }
+        )
       }
-      if (offset === "100") {
-        return jsonResponse([
-          { ...auditLog, id: "ws-1-page-2", resource_name: "Workspace one page two" },
-        ])
+      if (offset === "20") {
+        return new Response(
+          JSON.stringify([
+            { ...auditLog, id: "ws-1-page-2", resource_name: "Workspace one page two" },
+          ]),
+          {
+            headers: { "Content-Type": "application/json", "X-Total-Count": "21" },
+          }
+        )
       }
-      return jsonResponse(
-        Array.from({ length: 100 }, (_, index) => ({
-          ...auditLog,
-          id: `ws-1-page-1-${index}`,
-          resource_name: `Workspace one page one ${index}`,
-        }))
+      return new Response(
+        JSON.stringify(
+          Array.from({ length: 20 }, (_, index) => ({
+            ...auditLog,
+            id: `ws-1-page-1-${index}`,
+            resource_name: `Workspace one page one ${index}`,
+          }))
+        ),
+        {
+          headers: { "Content-Type": "application/json", "X-Total-Count": "21" },
+        }
       )
     }
 
     const view = renderPage(<SystemShell activeTab="audit" />)
     await screen.findByText("Workspace one page one 0")
-    fireEvent.click(screen.getByRole("button", { name: "加载更多" }))
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }))
     await screen.findByText("Workspace one page two")
 
     fireEvent.click(screen.getByRole("button", { name: "刷新" }))
@@ -1231,7 +1246,7 @@ describe("SystemShell audit loading", () => {
       requests.filter((request) => request === "/api/v1/workspaces/ws-1/audit-logs?offset=0")
     ).toHaveLength(2)
 
-    fireEvent.click(screen.getByRole("button", { name: "加载更多" }))
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }))
     await screen.findByText("Workspace one page two")
     sessionState.selectedWorkspaceId = "ws-2"
     view.rerender(

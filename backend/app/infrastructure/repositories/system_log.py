@@ -1,11 +1,48 @@
 from datetime import datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.system_log import SystemLog as SystemLogEntity
 from app.infrastructure.repositories.mapping import to_entity
 from app.infrastructure.system_log import SystemLog
+
+
+
+def _system_log_filter_clauses(
+    *,
+    level: str | None = None,
+    event: str | None = None,
+    status_code: int | None = None,
+    user_id: str | None = None,
+    search: str | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+) -> list:
+    clauses = []
+    if level:
+        clauses.append(SystemLog.level == level)
+    if event:
+        clauses.append(SystemLog.event == event)
+    if status_code is not None:
+        clauses.append(SystemLog.status_code == status_code)
+    if user_id:
+        clauses.append(SystemLog.user_id == user_id)
+    if search:
+        pattern = f"%{search}%"
+        clauses.append(
+            or_(
+                SystemLog.event.ilike(pattern),
+                SystemLog.message.ilike(pattern),
+                SystemLog.path.ilike(pattern),
+                SystemLog.username.ilike(pattern),
+            )
+        )
+    if from_date:
+        clauses.append(SystemLog.created_at >= from_date)
+    if to_date:
+        clauses.append(SystemLog.created_at < to_date)
+    return clauses
 
 
 async def list_system_logs(
@@ -38,29 +75,18 @@ async def list_system_logs(
     Returns:
         list[SystemLogEntity]: Matching logs ordered from newest to oldest.
     """
-    statement = select(SystemLog)
-    if level:
-        statement = statement.where(SystemLog.level == level)
-    if event:
-        statement = statement.where(SystemLog.event == event)
-    if status_code is not None:
-        statement = statement.where(SystemLog.status_code == status_code)
-    if user_id:
-        statement = statement.where(SystemLog.user_id == user_id)
-    if search:
-        pattern = f"%{search}%"
-        statement = statement.where(
-            or_(
-                SystemLog.event.ilike(pattern),
-                SystemLog.message.ilike(pattern),
-                SystemLog.path.ilike(pattern),
-                SystemLog.username.ilike(pattern),
-            )
+    statement = select(SystemLog).where(
+        *_system_log_filter_clauses(
+            level=level,
+            event=event,
+            status_code=status_code,
+            user_id=user_id,
+            search=search,
+            from_date=from_date,
+            to_date=to_date,
         )
-    if from_date:
-        statement = statement.where(SystemLog.created_at >= from_date)
-    if to_date:
-        statement = statement.where(SystemLog.created_at < to_date)
+    )
+
     result = await db.scalars(
         statement
         .order_by(SystemLog.created_at.desc(), SystemLog.id.desc())
@@ -68,3 +94,28 @@ async def list_system_logs(
         .offset(offset)
     )
     return [to_entity(SystemLogEntity, row) for row in result.all()]
+
+
+async def count_system_logs(
+    db: AsyncSession,
+    *,
+    level: str | None = None,
+    event: str | None = None,
+    status_code: int | None = None,
+    user_id: str | None = None,
+    search: str | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+) -> int:
+    statement = select(func.count()).select_from(SystemLog).where(
+        *_system_log_filter_clauses(
+            level=level,
+            event=event,
+            status_code=status_code,
+            user_id=user_id,
+            search=search,
+            from_date=from_date,
+            to_date=to_date,
+        )
+    )
+    return int(await db.scalar(statement) or 0)

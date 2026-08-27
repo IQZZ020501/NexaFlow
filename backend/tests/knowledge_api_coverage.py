@@ -1354,6 +1354,9 @@ def test_vector_store_edge_paths() -> None:
             def upsert(self, *_args, **_kwargs) -> None:
                 raise RuntimeError("upsert boom")
 
+            def upload_points(self, *_args, **_kwargs) -> None:
+                raise RuntimeError("upsert boom")
+
         class ValidEmbeddings:
             def embed_documents(self, texts: list[str]) -> list[list[float]]:
                 return [[0.5, 0.5]] * len(texts)

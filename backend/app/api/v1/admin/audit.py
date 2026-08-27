@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.audit import list_audit_logs
+from app.application.audit import count_audit_logs, list_audit_logs
 from app.schemas.audit import AuditLogResponse
 from app.infrastructure.session import get_db
 from app.api.deps import require_global_admin
@@ -17,6 +17,7 @@ router = APIRouter(prefix="/audit-logs", tags=["audit-logs"])
 async def list_logs(
     _: Annotated[User, Depends(require_global_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     workspace_id: Annotated[str | None, Query(max_length=36)] = None,
@@ -46,6 +47,8 @@ async def list_logs(
     Returns:
         list[AuditLogResponse]: The matching audit log records.
     """
+    filters = dict(workspace_id=workspace_id, actor=actor, action=action, resource_type=resource_type, resource_id=resource_id, search=search, from_date=from_date, to_date=to_date)
+    response.headers["X-Total-Count"] = str(await count_audit_logs(db, **filters))
     return await list_audit_logs(
         db,
         limit,

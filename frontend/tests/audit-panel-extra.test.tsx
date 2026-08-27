@@ -176,27 +176,26 @@ describe("AuditPanel", () => {
     expect(refreshes).toBe(1)
   })
 
-  test("shows and triggers load more only when more logs exist", () => {
-    let loaded = 0
+  test("shows pagination and reports page-size changes", async () => {
+    let selectedSize = 0
     renderPage(
       <AuditPanel
         auditLogs={[auditLog()]}
         hasMore
-        onLoadMore={() => {
-          loaded += 1
+        total={61}
+        onPageSizeChange={(value) => {
+          selectedSize = value
         }}
         {...panelProps}
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "加载更多" }))
-    expect(loaded).toBe(1)
-  })
-
-  test("hides load more when no further logs exist", () => {
-    renderPage(<AuditPanel auditLogs={[auditLog()]} {...panelProps} />)
-
-    expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull()
+    expect(screen.getByRole("button", { name: "下一页" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "1" }).getAttribute("aria-current")).toBe("page")
+    expect(screen.getByRole("button", { name: "2" })).toBeTruthy()
+    fireEvent.pointerDown(screen.getByRole("button", { name: "每页 20 条" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "每页 50 条" }))
+    expect(selectedSize).toBe(50)
   })
 
   test("exports audit logs as a CSV file", async () => {
@@ -243,7 +242,7 @@ describe("AuditPanel", () => {
   test("uses no-op defaults for optional handlers", async () => {
     renderPage(<AuditPanel auditLogs={[auditLog()]} {...panelProps} />)
 
-    // Default setAuditSearch, setAuditAction, onRefresh, onLoadMore, and
+    // Default setAuditSearch, setAuditAction, onRefresh, and
     // hasMore must not throw when exercised.
     fireEvent.change(screen.getByRole("textbox", { name: "搜索审计" }), {
       target: { value: "x" },
@@ -254,4 +253,36 @@ describe("AuditPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "刷新" }))
     fireEvent.click(screen.getByRole("button", { name: "导出" }))
   })
+})
+
+test("exports every log returned by loadAll instead of only the current page", async () => {
+  const createObjectURL = spyOn(URL, "createObjectURL").mockImplementation(
+    (blob: Blob) => {
+      capturedBlob = blob
+      return "blob:nexaflow-test"
+    }
+  )
+  const click = spyOn(HTMLAnchorElement.prototype, "click")
+
+  renderPage(
+    <AuditPanel
+      auditLogs={[auditLog()]}
+      loadAll={async () => [
+        auditLog(),
+        auditLog({ id: "audit-all-2", actor_username: "alice" }),
+      ]}
+      {...panelProps}
+    />
+  )
+
+  fireEvent.click(screen.getByRole("button", { name: "导出" }))
+
+  await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1))
+  const csv = await capturedBlob!.text()
+  // Header plus both loadAll rows (not the single page row).
+  expect(csv.split("\n")).toHaveLength(3)
+  expect(csv).toContain('"alice"')
+  expect(click).toHaveBeenCalledTimes(1)
+  createObjectURL.mockRestore()
+  click.mockRestore()
 })

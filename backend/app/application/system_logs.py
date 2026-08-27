@@ -129,3 +129,7 @@ async def list_system_logs(
         to_date=to_date,
     )
     return [_to_response(log, include_stack) for log in logs]
+
+
+async def count_system_logs(db: AsyncSession, **filters: Any) -> int:
+    return await system_log_repository.count_system_logs(db, **filters)

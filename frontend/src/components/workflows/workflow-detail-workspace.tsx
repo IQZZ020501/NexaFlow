@@ -17,7 +17,6 @@ import {
   ScrollTextIcon,
   SendIcon,
   SettingsIcon,
-  ShieldCheckIcon,
   MoreHorizontalIcon,
   Trash2Icon,
   UploadIcon,
@@ -131,7 +130,6 @@ type WorkflowDetailWorkspaceProps = {
   standalone?: boolean
   onBack: () => void
   onDelete: () => void
-  onManagePermissions: () => void
   onSaveApp: (event?: React.FormEvent<HTMLFormElement>) => void
   onViewChange: (view: AgentDetailView) => void
   notify: (kind: "success" | "error", message: string) => void
@@ -187,7 +185,6 @@ function JsonBlock({ value }: { value: unknown }) {
  * @param standalone - Whether to render without the surrounding workspace navigation
  * @param onBack - Handles navigation away from the workspace
  * @param onDelete - Handles workflow deletion
- * @param onManagePermissions - Opens workflow permission management
  * @param onSaveApp - Saves the application configuration
  * @param onViewChange - Changes the active workspace view
  * @param notify - Reports operation results to the user
@@ -215,7 +212,6 @@ export function WorkflowDetailWorkspace({
   standalone,
   onBack,
   onDelete,
-  onManagePermissions,
   onSaveApp,
   onViewChange,
   notify,
@@ -982,10 +978,6 @@ export function WorkflowDetailWorkspace({
               align="start"
               className="min-w-40"
             >
-              <DropdownMenuItem onSelect={onManagePermissions}>
-                <ShieldCheckIcon />
-                {t("资源授权")}
-              </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onSelect={onDelete}>
                 <Trash2Icon />
                 {t("删除工作流")}

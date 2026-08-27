@@ -1,6 +1,16 @@
 import * as React from "react"
 import Link from "next/link"
-import { ActivityIcon, KeyRoundIcon, MailIcon, ShieldCheckIcon } from "lucide-react"
+import {
+  ActivityIcon,
+  BookOpenIcon,
+  ChevronDownIcon,
+  KeyRoundIcon,
+  MailIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
+  BoxesIcon,
+  WrenchIcon,
+} from "lucide-react"
 import { useLanguage } from "@/contexts/language-provider"
 import type {
   AuditLog,
@@ -30,6 +40,10 @@ import { GlobalUsersPanel } from "@/components/system/panels/global-users-panel"
 import { TeamsPanel } from "@/components/system/panels/teams-panel"
 import { WorkspacesPanel } from "@/components/system/panels/workspaces-panel"
 import { WorkspaceUsersPanel } from "@/components/system/panels/workspace-users-panel"
+import {
+  ResourcePermissionsPage,
+  type ResourcePermissionPageType,
+} from "@/components/system/resource-permissions-page"
 import type {
   ScopeEditForm,
   TeamForm,
@@ -51,6 +65,10 @@ type SystemPageViewProps = {
   activeSystemTab: SystemTab
   systemTabs: SystemTabItem[]
   onSystemTabChange: (tab: SystemTab) => void
+  resourcePermissionType: ResourcePermissionPageType
+  onResourcePermissionTypeChange: (
+    type: ResourcePermissionPageType
+  ) => void
   me: MeResponse
   workspaces: Workspace[]
   selectedWorkspaceId: string | null
@@ -99,9 +117,15 @@ type SystemPageViewProps = {
   auditAction?: string
   setAuditAction?: (value: string) => void
   onRefresh?: () => void
-  onLoadMore?: () => void
   hasMore?: boolean
+  total?: number
+  page?: number
+  pageSize?: import("@/components/system/pagination-footer").SystemPageSize
+  onPageChange?: (page: number) => void
+  onPageSizeChange?: (pageSize: import("@/components/system/pagination-footer").SystemPageSize) => void
   workspaceScope?: string | null
+  /** Loads every matching audit log for the CSV export. */
+  loadAll?: () => Promise<AuditLog[]>
   workspaceEditForm: ScopeEditForm | null
   setWorkspaceEditForm: React.Dispatch<
     React.SetStateAction<ScopeEditForm | null>
@@ -165,6 +189,8 @@ export function SystemPageView({
   activeSystemTab,
   systemTabs,
   onSystemTabChange,
+  resourcePermissionType,
+  onResourcePermissionTypeChange,
   me,
   workspaces,
   selectedWorkspaceId,
@@ -213,9 +239,14 @@ export function SystemPageView({
   auditAction = "",
   setAuditAction = () => undefined,
   onRefresh = () => undefined,
-  onLoadMore = () => undefined,
   hasMore = false,
+  total,
+  page = 1,
+  pageSize = 20,
+  onPageChange = () => undefined,
+  onPageSizeChange = () => undefined,
   workspaceScope = null,
+  loadAll,
   workspaceEditForm,
   setWorkspaceEditForm,
   isSavingWorkspace,
@@ -300,6 +331,73 @@ export function SystemPageView({
             )
           })}
           <div className="my-1 border-t" />
+          {canManageSelectedWorkspace(me, selectedWorkspaceId) ? (
+            <details className="group" open={activeSystemTab === "permissions"}>
+              <summary
+                className={cn(
+                  "flex min-w-32 cursor-pointer list-none items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0 [&::-webkit-details-marker]:hidden",
+                  activeSystemTab === "permissions" &&
+                    "bg-foreground text-background hover:bg-foreground hover:text-background"
+                )}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <BoxesIcon className="size-4 shrink-0" />
+                  <span>{t("资源授权")}</span>
+                </span>
+                <ChevronDownIcon className="size-4 shrink-0 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="mt-1 space-y-0.5 border-l pl-3 lg:ml-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onResourcePermissionTypeChange("apps")
+                    onSystemTabChange("permissions")
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-start gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    activeSystemTab === "permissions" &&
+                      resourcePermissionType === "apps" &&
+                      "bg-primary/10 text-primary"
+                  )}
+                >
+                  <SparklesIcon className="size-4 shrink-0" />
+                  <span>{t("应用")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onResourcePermissionTypeChange("knowledge")
+                    onSystemTabChange("permissions")
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-start gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    activeSystemTab === "permissions" &&
+                      resourcePermissionType === "knowledge" &&
+                      "bg-primary/10 text-primary"
+                  )}
+                >
+                  <BookOpenIcon className="size-4 shrink-0" />
+                  <span>{t("知识库")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onResourcePermissionTypeChange("tools")
+                    onSystemTabChange("permissions")
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-start gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                    activeSystemTab === "permissions" &&
+                      resourcePermissionType === "tools" &&
+                      "bg-primary/10 text-primary"
+                  )}
+                >
+                  <WrenchIcon className="size-4 shrink-0" />
+                  <span>{t("工具")}</span>
+                </button>
+              </div>
+            </details>
+          ) : null}
           {me.user.is_global_admin ? (
             <Link
               href="/system/operations"
@@ -338,6 +436,10 @@ export function SystemPageView({
       </aside>
 
       <div className="min-w-0 lg:h-full lg:min-h-0 lg:overflow-hidden">
+        {activeSystemTab === "permissions" ? (
+          <ResourcePermissionsPage type={resourcePermissionType} />
+        ) : null}
+
         {activeSystemTab === "workspaces" ? (
           <WorkspacesPanel
             me={me}
@@ -421,9 +523,14 @@ export function SystemPageView({
             auditAction={auditAction}
             setAuditAction={setAuditAction}
             onRefresh={onRefresh}
-            onLoadMore={onLoadMore}
             hasMore={hasMore}
+            total={total}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
             workspaceScope={workspaceScope}
+            loadAll={loadAll}
           />
         ) : null}
       </div>
@@ -514,5 +621,18 @@ function canManageAnyWorkspace(me: MeResponse, workspaceId: string | null) {
           membership.workspace_id === workspaceId && membership.role === "admin"
       ) ||
       me.memberships.some((membership) => membership.role === "admin")
+  )
+}
+
+function canManageSelectedWorkspace(
+  me: MeResponse,
+  workspaceId: string | null
+) {
+  return Boolean(
+    me.user.is_global_admin ||
+      me.memberships.some(
+        (membership) =>
+          membership.workspace_id === workspaceId && membership.role === "admin"
+      )
   )
 }

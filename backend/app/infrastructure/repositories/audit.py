@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.audit import AuditLog as AuditLogEntity
@@ -24,6 +24,52 @@ def add(db: AsyncSession, entity: AuditLogEntity) -> None:
             details=entity.details,
         )
     )
+
+
+
+def _audit_filter_clauses(
+    *,
+    workspace_id: str | None = None,
+    actor: str | None = None,
+    action: str | None = None,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    search: str | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+) -> list:
+    clauses = []
+    if workspace_id:
+        clauses.append(AuditLog.workspace_id == workspace_id)
+    if actor:
+        clauses.append(
+            or_(
+                AuditLog.actor_user_id == actor,
+                AuditLog.actor_username.ilike(f"%{actor}%"),
+                AuditLog.actor_name.ilike(f"%{actor}%"),
+            )
+        )
+    if action:
+        clauses.append(AuditLog.action == action)
+    if resource_type:
+        clauses.append(AuditLog.resource_type == resource_type)
+    if resource_id:
+        clauses.append(AuditLog.resource_id == resource_id)
+    if search:
+        pattern = f"%{search}%"
+        clauses.append(
+            or_(
+                AuditLog.action.ilike(pattern),
+                AuditLog.resource_name.ilike(pattern),
+                AuditLog.resource_type.ilike(pattern),
+                AuditLog.actor_username.ilike(pattern),
+            )
+        )
+    if from_date:
+        clauses.append(AuditLog.created_at >= from_date)
+    if to_date:
+        clauses.append(AuditLog.created_at < to_date)
+    return clauses
 
 
 async def list_audit_logs(
@@ -58,36 +104,19 @@ async def list_audit_logs(
     Returns:
         list[AuditLogEntity]: Matching audit logs ordered from newest to oldest.
     """
-    statement = select(AuditLog)
-    if workspace_id:
-        statement = statement.where(AuditLog.workspace_id == workspace_id)
-    if actor:
-        statement = statement.where(
-            or_(
-                AuditLog.actor_user_id == actor,
-                AuditLog.actor_username.ilike(f"%{actor}%"),
-                AuditLog.actor_name.ilike(f"%{actor}%"),
-            )
+    statement = select(AuditLog).where(
+        *_audit_filter_clauses(
+            workspace_id=workspace_id,
+            actor=actor,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            search=search,
+            from_date=from_date,
+            to_date=to_date,
         )
-    if action:
-        statement = statement.where(AuditLog.action == action)
-    if resource_type:
-        statement = statement.where(AuditLog.resource_type == resource_type)
-    if resource_id:
-        statement = statement.where(AuditLog.resource_id == resource_id)
-    if search:
-        statement = statement.where(
-            or_(
-                AuditLog.action.ilike(f"%{search}%"),
-                AuditLog.resource_name.ilike(f"%{search}%"),
-                AuditLog.resource_type.ilike(f"%{search}%"),
-                AuditLog.actor_username.ilike(f"%{search}%"),
-            )
-        )
-    if from_date:
-        statement = statement.where(AuditLog.created_at >= from_date)
-    if to_date:
-        statement = statement.where(AuditLog.created_at < to_date)
+    )
+
     result = await db.scalars(
         statement
         .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
@@ -95,6 +124,33 @@ async def list_audit_logs(
         .offset(offset)
     )
     return [to_entity(AuditLogEntity, row) for row in result.all()]
+
+
+async def count_audit_logs(
+    db: AsyncSession,
+    *,
+    workspace_id: str | None = None,
+    actor: str | None = None,
+    action: str | None = None,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    search: str | None = None,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+) -> int:
+    statement = select(func.count()).select_from(AuditLog).where(
+        *_audit_filter_clauses(
+            workspace_id=workspace_id,
+            actor=actor,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            search=search,
+            from_date=from_date,
+            to_date=to_date,
+        )
+    )
+    return int(await db.scalar(statement) or 0)
 
 
 async def list_workspace_audit_logs(

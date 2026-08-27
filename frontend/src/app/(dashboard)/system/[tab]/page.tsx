@@ -4,7 +4,13 @@ import { redirect, useParams } from "next/navigation"
 
 import { SystemShell } from "@/components/system/system-shell"
 
-const SYSTEM_TABS = ["workspaces", "teams", "users", "audit"] as const
+const SYSTEM_TABS = [
+  "workspaces",
+  "teams",
+  "users",
+  "audit",
+  "permissions",
+] as const
 
 export type SystemTab = (typeof SYSTEM_TABS)[number]
 

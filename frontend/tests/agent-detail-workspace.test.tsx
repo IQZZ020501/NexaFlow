@@ -306,7 +306,6 @@ type HarnessProps = {
   onViewChange?: (view: string) => void
   onBack?: () => void
   onDelete?: () => void
-  onManagePermissions?: () => void
   onSave?: (event: unknown) => void
   onPublish?: () => void
   onAsk?: (event: unknown) => void
@@ -337,7 +336,6 @@ function Harness(props: HarnessProps = {}) {
   const callbacks = {
     onBack: props.onBack ?? (() => undefined),
     onDelete: props.onDelete ?? (() => undefined),
-    onManagePermissions: props.onManagePermissions ?? (() => undefined),
     onSave: props.onSave ?? (() => undefined),
     onPublish: props.onPublish ?? (() => undefined),
     onViewChange: props.onViewChange ?? (() => undefined),
@@ -378,7 +376,6 @@ function Harness(props: HarnessProps = {}) {
       canManagePublishing={props.canManagePublishing ?? true}
       onBack={callbacks.onBack}
       onDelete={callbacks.onDelete}
-      onManagePermissions={callbacks.onManagePermissions}
       onSave={callbacks.onSave as never}
       onPublish={callbacks.onPublish}
       onViewChange={callbacks.onViewChange as never}
@@ -494,14 +491,10 @@ describe("AgentDetailWorkspace header and navigation", () => {
     expect(screen.getAllByLabelText("设置").length).toBeGreaterThanOrEqual(2)
   })
 
-  test("more menu opens permissions and delete", () => {
-    let permissionsCalls = 0
+  test("more menu only exposes delete", () => {
     let deleteCalls = 0
     renderPage(
       <Harness
-        onManagePermissions={() => {
-          permissionsCalls += 1
-        }}
         onDelete={() => {
           deleteCalls += 1
         }}
@@ -509,10 +502,7 @@ describe("AgentDetailWorkspace header and navigation", () => {
     )
     fireEvent.pointerDown(screen.getByLabelText("设置"))
     fireEvent.click(screen.getByLabelText("设置"))
-    fireEvent.click(screen.getByRole("menuitem", { name: /资源授权/ }))
-    expect(permissionsCalls).toBe(1)
-    fireEvent.pointerDown(screen.getByLabelText("设置"))
-    fireEvent.click(screen.getByLabelText("设置"))
+    expect(screen.queryByRole("menuitem", { name: /资源授权/ })).toBeNull()
     fireEvent.click(screen.getByRole("menuitem", { name: /删除 Agent/ }))
     expect(deleteCalls).toBe(1)
   })
