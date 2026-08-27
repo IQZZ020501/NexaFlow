@@ -50,6 +50,7 @@ EXPECTED_COLUMNS = {
         "id",
         "workspace_id",
         "source_id",
+        "folder_id",
         "kind",
         "stable_key",
         "function_name",
@@ -541,6 +542,8 @@ def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
         "workspace-1", timestamp
     )
     tool_row["current_version_id"] = version_row["id"]
+    # The resource-folder column was added after the seed migration; seeded rows are unassigned.
+    tool_row["folder_id"] = None
     assert source_rows == [asdict(source) for source in catalog.sources]
     assert tool_row == asdict(catalog.tool)
     assert version_row == asdict(catalog.version)
@@ -1488,8 +1491,10 @@ def test_private_catalog_filters_before_pagination_for_every_role() -> None:
                 assert owner_tool.id in owner_ids
                 assert owner_tool.id in grantee_ids
                 assert owner_tool.id not in stranger_page
-                assert owner_tool.id not in workspace_admin_ids
-                assert owner_tool.id not in global_admin_ids
+                # Workspace and global admins see every catalog row (admin
+                # management surfaces), matching get_tool_catalog_detail below.
+                assert owner_tool.id in workspace_admin_ids
+                assert owner_tool.id in global_admin_ids
                 assert workspace_admin_tool.id in workspace_admin_ids
                 for ids in (
                     owner_ids,

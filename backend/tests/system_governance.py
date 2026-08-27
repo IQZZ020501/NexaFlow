@@ -352,7 +352,46 @@ def main() -> None:
             headers=admin_headers,
         )
         assert system_logs.status_code == 200, system_logs.text
+        assert int(system_logs.headers["x-total-count"]) >= 1
         assert system_logs.json()[0]["message"] == "Login failed."
+
+        admin_me = client.get("/api/v1/auth/me", headers=admin_headers)
+        assert admin_me.status_code == 200, admin_me.text
+        admin_user_id = admin_me.json()["user"]["id"]
+
+        # Every audit filter participates in both the list and the total.
+        filtered_audit = client.get(
+            "/api/v1/admin/audit-logs"
+            "?actor=admin&action=workspace.create&resource_type=workspace"
+            f"&resource_id={workspace_id}&search=create"
+            "&from_date=2026-01-01T00:00:00Z&to_date=2030-01-01T00:00:00Z",
+            headers=admin_headers,
+        )
+        assert filtered_audit.status_code == 200, filtered_audit.text
+        assert int(filtered_audit.headers["x-total-count"]) == len(
+            filtered_audit.json()
+        )
+        assert filtered_audit.json()
+        assert all(
+            item["resource_type"] == "workspace" for item in filtered_audit.json()
+        )
+
+        for query, check in (
+            ("?level=warning", lambda item: item["level"] == "warning"),
+            ("?status_code=401", lambda item: item["status_code"] == 401),
+            (
+                f"?user_id={admin_user_id}",
+                lambda item: item["user_id"] == admin_user_id,
+            ),
+            ("?search=Login", lambda item: "Login" in (item["message"] or "")),
+        ):
+            filtered_logs = client.get(
+                "/api/v1/admin/system-logs" + query,
+                headers=admin_headers,
+            )
+            assert filtered_logs.status_code == 200, filtered_logs.text
+            assert filtered_logs.json()
+            assert all(check(item) for item in filtered_logs.json())
 
         invitation = client.post(
             f"/api/v1/workspaces/{workspace_id}/invitations",
@@ -486,6 +525,33 @@ def main() -> None:
             ).status_code
             == 403
         )
+
+        # ---- admin-managed user sessions and deletion ----
+        managed_me = client.get("/api/v1/auth/me", headers=workspace_admin_headers)
+        assert managed_me.status_code == 200, managed_me.text
+        managed_user_id = managed_me.json()["user"]["id"]
+        managed_sessions = client.get(
+            f"/api/v1/admin/users/{managed_user_id}/sessions",
+            headers=admin_headers,
+        )
+        assert managed_sessions.status_code == 200, managed_sessions.text
+        managed_session_ids = [item["id"] for item in managed_sessions.json()]
+        assert managed_session_ids
+        revoked_one = client.delete(
+            f"/api/v1/admin/users/{managed_user_id}/sessions/{managed_session_ids[0]}",
+            headers=admin_headers,
+        )
+        assert revoked_one.status_code == 204, revoked_one.text
+        revoked_all = client.delete(
+            f"/api/v1/admin/users/{managed_user_id}/sessions",
+            headers=admin_headers,
+        )
+        assert revoked_all.status_code == 204, revoked_all.text
+        deleted_user = client.delete(
+            f"/api/v1/admin/users/{managed_user_id}",
+            headers=admin_headers,
+        )
+        assert deleted_user.status_code == 204, deleted_user.text
 
 
 if __name__ == "__main__":
