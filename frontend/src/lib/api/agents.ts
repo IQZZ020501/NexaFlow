@@ -696,6 +696,18 @@ export async function observeAgentRun(
   )
 }
 
+export async function cancelAgentRun(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  runId: string
+) {
+  return request<AgentRun>(
+    agentsPath(workspaceId, `/${agentId}/runs/${runId}/cancel`),
+    { method: "POST", token }
+  )
+}
+
 export async function streamAgentRun(
   token: string,
   workspaceId: string,
