@@ -420,6 +420,7 @@ export function SmtpSettingsPage() {
                     </FieldLabel>
                     <FilterDropdown
                       id="smtp-security"
+                      className="h-9 rounded-lg border-input bg-transparent px-3"
                       value={form.security}
                       onChange={(value) =>
                         updateForm("security", value as SmtpSecurity)

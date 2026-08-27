@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.audit import list_workspace_audit_logs
+from app.application.audit import count_audit_logs, list_workspace_audit_logs
 from app.application.analytics import get_workspace_analytics
 from app.application.governance import (
     get_workspace_governance,
@@ -358,6 +358,7 @@ async def delete_member(
 async def list_workspace_logs(
     context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
     db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     actor: Annotated[str | None, Query(max_length=120)] = None,
@@ -383,6 +384,8 @@ async def list_workspace_logs(
     Returns:
         list[AuditLogResponse]: The matching workspace audit log records.
     """
+    filters = dict(workspace_id=context.workspace.id, actor=actor, action=action, resource_type=resource_type, resource_id=resource_id, search=search, from_date=from_date, to_date=to_date)
+    response.headers["X-Total-Count"] = str(await count_audit_logs(db, **filters))
     return await list_workspace_audit_logs(
         db,
         context.workspace.id,

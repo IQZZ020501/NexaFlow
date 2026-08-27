@@ -1,4 +1,4 @@
-import { request } from "@/lib/api-client"
+import { request, requestPage } from "@/lib/api-client"
 import type {
   User,
   UserPasswordResetResponse,
@@ -718,6 +718,38 @@ export function listAuditLogs(token: string, filters: AuditFilters = {}) {
   })
 }
 
+export function listAuditLogsPage(token: string, filters: AuditFilters = {}) {
+  return requestPage<AuditLog>(`/api/v1/admin/audit-logs${filtersQuery(filters)}`, { token })
+}
+
+/**
+ * Retrieves every audit log matching the supplied filters by paging through
+ * the admin audit log endpoint until the reported total is reached.
+ *
+ * @param token - The session access token
+ * @param filters - The audit filters applied to every page
+ * @returns All matching audit logs across pages
+ */
+export async function listAllAuditLogs(
+  token: string,
+  filters: AuditFilters = {}
+) {
+  const items: AuditLog[] = []
+  let offset = 0
+  while (true) {
+    const page = await listAuditLogsPage(token, {
+      ...filters,
+      limit: 200,
+      offset,
+    })
+    items.push(...page.items)
+    if (!page.items.length || offset + page.items.length >= page.total) {
+      return items
+    }
+    offset += page.items.length
+  }
+}
+
 /**
  * Retrieves audit logs for a workspace, optionally filtered by audit criteria.
  *
@@ -736,6 +768,40 @@ export function listWorkspaceAuditLogs(
   )
 }
 
+export function listWorkspaceAuditLogsPage(token: string, workspaceId: string, filters: AuditFilters = {}) {
+  return requestPage<AuditLog>(`/api/v1/workspaces/${workspaceId}/audit-logs${filtersQuery(filters)}`, { token })
+}
+
+/**
+ * Retrieves every audit log for a workspace by paging through the workspace
+ * audit log endpoint until the reported total is reached.
+ *
+ * @param token - The session access token
+ * @param workspaceId - The workspace whose audit logs are exported
+ * @param filters - The audit filters applied to every page
+ * @returns All matching audit logs across pages
+ */
+export async function listAllWorkspaceAuditLogs(
+  token: string,
+  workspaceId: string,
+  filters: AuditFilters = {}
+) {
+  const items: AuditLog[] = []
+  let offset = 0
+  while (true) {
+    const page = await listWorkspaceAuditLogsPage(
+      token,
+      workspaceId,
+      { ...filters, limit: 200, offset }
+    )
+    items.push(...page.items)
+    if (!page.items.length || offset + page.items.length >= page.total) {
+      return items
+    }
+    offset += page.items.length
+  }
+}
+
 /**
  * Retrieves system logs matching the supplied filters.
  *
@@ -752,6 +818,44 @@ export function listSystemLogs(token: string, filters: AuditFilters & {
   return request<SystemLog[]>(`/api/v1/admin/system-logs${filtersQuery(filters)}`, {
     token,
   })
+}
+
+export function listSystemLogsPage(token: string, filters: AuditFilters & {
+  level?: string
+  event?: string
+  status_code?: number
+  user_id?: string
+  include_stack?: boolean
+} = {}) {
+  return requestPage<SystemLog>(`/api/v1/admin/system-logs${filtersQuery(filters)}`, { token })
+}
+
+/**
+ * Retrieves every system log matching the supplied filters by paging through
+ * the system log endpoint until the reported total is reached.
+ *
+ * @param token - The session access token
+ * @param filters - The log filters applied to every page
+ * @returns All matching system logs across pages
+ */
+export async function listAllSystemLogs(
+  token: string,
+  filters: Parameters<typeof listSystemLogsPage>[1] = {}
+) {
+  const items: SystemLog[] = []
+  let offset = 0
+  while (true) {
+    const page = await listSystemLogsPage(token, {
+      ...filters,
+      limit: 200,
+      offset,
+    })
+    items.push(...page.items)
+    if (!page.items.length || offset + page.items.length >= page.total) {
+      return items
+    }
+    offset += page.items.length
+  }
 }
 
 /**

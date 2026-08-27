@@ -143,3 +143,7 @@ async def list_workspace_audit_logs(
         to_date=to_date,
     )
     return [audit_log_to_response(item) for item in logs]
+
+
+async def count_audit_logs(db: AsyncSession, **filters: Any) -> int:
+    return await audit_repository.count_audit_logs(db, **filters)

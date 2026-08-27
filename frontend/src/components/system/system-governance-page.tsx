@@ -33,8 +33,9 @@ import {
   getAdminHealth,
   getWorkspaceGovernance,
   getWorkspaceInventory,
+  listAllSystemLogs,
   listSessions,
-  listSystemLogs,
+  listSystemLogsPage,
   listUserSessions,
   listUsers,
   listWorkspaceInvitations,
@@ -72,6 +73,10 @@ import {
   systemLogLevelLabel,
 } from "@/lib/constants"
 import { SmtpSettingsPage } from "@/components/system/smtp-settings-page"
+import {
+  SystemPagination,
+  type SystemPageSize,
+} from "@/components/system/pagination-footer"
 
 export type SystemGovernanceSection = "operations" | "governance" | "security" | "email"
 
@@ -276,9 +281,13 @@ function OperationsPanel() {
   const [level, setLevel] = React.useState("")
   const [event, setEvent] = React.useState("")
   const [search, setSearch] = React.useState("")
+  const [logsOffset, setLogsOffset] = React.useState(0)
+  const [logsPageSize, setLogsPageSize] = React.useState<SystemPageSize>(20)
+  const [logsHasMore, setLogsHasMore] = React.useState(false)
+  const [logsTotal, setLogsTotal] = React.useState(0)
   const [loading, setLoading] = React.useState(true)
   const healthRequestRef = React.useRef(0)
-
+  const logsRequestRef = React.useRef(0)
   const loadHealth = React.useCallback(async (reportFailure: boolean) => {
     if (!session.token) return
     const requestId = ++healthRequestRef.current
@@ -292,21 +301,29 @@ function OperationsPanel() {
     }
   }, [reportError, session.token])
 
-  const loadLogs = React.useCallback(async () => {
-    if (!session.token) return
-    try {
-      setLogs(
-        await listSystemLogs(session.token, {
-          limit: 100,
+  const loadLogs = React.useCallback(
+    async (offset = logsOffset, pageSize = logsPageSize) => {
+      if (!session.token) return
+      const requestId = ++logsRequestRef.current
+      try {
+        const page = await listSystemLogsPage(session.token, {
+          limit: pageSize,
+          offset,
           level: level || undefined,
           event: event || undefined,
           search: search || undefined,
         })
-      )
-    } catch (error) {
-      reportError(error)
-    }
-  }, [event, level, reportError, search, session.token])
+        if (requestId !== logsRequestRef.current) return
+        setLogs(page.items)
+        setLogsTotal(page.total)
+        setLogsHasMore(offset + page.items.length < page.total)
+      } catch (error) {
+        if (requestId !== logsRequestRef.current) return
+        reportError(error)
+      }
+    },
+    [event, level, logsOffset, logsPageSize, reportError, search, session.token]
+  )
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -323,6 +340,11 @@ function OperationsPanel() {
   }, [load])
 
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLogsOffset(0)
+  }, [event, level, search])
+
+  React.useEffect(() => {
     const timer = window.setInterval(() => {
       void loadHealth(false)
     }, 30_000)
@@ -332,9 +354,15 @@ function OperationsPanel() {
     }
   }, [loadHealth])
 
-  function exportLogs() {
+  async function exportLogs() {
+    if (!session.token) return
+    const allLogs = await listAllSystemLogs(session.token, {
+      level: level || undefined,
+      event: event || undefined,
+      search: search || undefined,
+    })
     const header = [t("时间"), t("级别"), t("事件"), t("消息"), t("状态")]
-    const rows = logs.map((log) => [
+    const rows = allLogs.map((log) => [
       formatDateTime(log.created_at, languageLocales[language]),
       systemLogLevelLabel(log.level, t),
       systemLogEventLabel(log.event, t),
@@ -444,7 +472,7 @@ function OperationsPanel() {
                 })),
               ]}
             />
-            <Button variant="outline" size="sm" onClick={exportLogs}><FileTextIcon className="size-4" />{t("导出")}</Button>
+            <Button variant="outline" size="sm" onClick={() => void exportLogs()}><FileTextIcon className="size-4" />{t("导出")}</Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -454,6 +482,23 @@ function OperationsPanel() {
               {logs.map((log) => <div key={log.id} className="grid grid-cols-[170px_90px_220px_minmax(0,1fr)_80px] items-center gap-x-6 border-b px-3 py-3 last:border-b-0"><span className="text-muted-foreground">{formatDateTime(log.created_at, languageLocales[language])}</span><span><Badge variant={log.level === "error" || log.level === "critical" ? "destructive" : "outline"}>{systemLogLevelLabel(log.level, t)}</Badge></span><span className="truncate" title={systemLogEventLabel(log.event, t)}>{systemLogEventLabel(log.event, t)}</span><span className="min-w-0 truncate text-muted-foreground" title={log.message || systemLogEventLabel(log.event, t)}>{log.message || systemLogEventLabel(log.event, t)}</span><span>{log.status_code ?? "—"}</span></div>)}
             </div></div>
           ) : <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{t("暂无运行日志")}</div>}
+          <SystemPagination
+            page={Math.floor(logsOffset / logsPageSize) + 1}
+            pageSize={logsPageSize}
+            itemCount={logs.length}
+            total={logsTotal}
+            hasNext={logsHasMore}
+            onPageChange={(page) => {
+              const nextOffset = (page - 1) * logsPageSize
+              setLogsOffset(nextOffset)
+              void loadLogs(nextOffset)
+            }}
+            onPageSizeChange={(pageSize) => {
+              setLogsPageSize(pageSize)
+              setLogsOffset(0)
+              void loadLogs(0, pageSize)
+            }}
+          />
         </CardContent>
       </Card>
     </div>
@@ -693,15 +738,19 @@ function SecurityPanel() {
   const [sessions, setSessions] = React.useState<RefreshSession[]>([])
   const [users, setUsers] = React.useState<User[]>([])
   const [targetUserId, setTargetUserId] = React.useState(session.me?.user.id ?? "")
+  const [page, setPage] = React.useState(1)
+  const [pageSize, setPageSize] = React.useState<SystemPageSize>(20)
   const [loading, setLoading] = React.useState(true)
   const isGlobal = Boolean(session.me?.user.is_global_admin)
   const currentUserId = session.me?.user.id ?? ""
   const dateLocale = language === "en" ? "en-US" : language === "zh-Hant" ? "zh-TW" : "zh-CN"
+  const visibleSessions = sessions.slice((page - 1) * pageSize, page * pageSize)
 
   const load = React.useCallback(async () => {
     if (!session.token) return
     setLoading(true)
     try {
+      setPage(1)
       if (isGlobal) {
         const [nextUsers, nextSessions] = await Promise.all([listUsers(session.token), listUserSessions(session.token, targetUserId || currentUserId)])
         setUsers(nextUsers); setSessions(nextSessions)
@@ -734,7 +783,7 @@ function SecurityPanel() {
     try { if (isGlobal && targetUserId !== session.me?.user.id) await revokeAllUserSessions(session.token, targetUserId); else await revokeOtherSessions(session.token); await load(); session.notify("success", t("其他会话已撤销")) } catch (error) { reportError(error) }
   }
 
-  return <><Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><KeyRoundIcon className="size-4" />{t("会话安全")}</CardTitle><CardDescription>{t("查看登录设备并及时撤销异常会话")}</CardDescription></div><div className="flex flex-wrap gap-2">{isGlobal ? <FilterDropdown className="h-9 w-56" value={targetUserId} onChange={setTargetUserId} ariaLabel={t("选择用户")} options={users.map((user) => ({ value: user.id, label: `${user.name} (${user.username})` }))} /> : null}<Button variant="outline" size="sm" onClick={() => void revokeAll()} disabled={loading}><XCircleIcon className="size-4" />{t("撤销其他会话")}</Button><Button variant="outline" size="icon" onClick={() => void load()} disabled={loading} aria-label={t("刷新")}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent>{loading ? <LoaderCircleIcon className="mx-auto my-10 animate-spin" /> : sessions.length ? <div className="grid gap-2">{sessions.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"><div className="flex min-w-0 items-center gap-3"><div className="flex size-9 items-center justify-center rounded-full bg-muted"><KeyRoundIcon className="size-4" /></div><div className="min-w-0"><div className="truncate text-sm font-medium" title={item.user_agent || item.ip_address || t("未知设备")}>{item.user_agent || item.ip_address || t("未知设备")}</div><div className="text-xs text-muted-foreground">{item.user_agent ? item.ip_address || "—" : "—"} · {t("最近使用")} {formatDateTime(item.last_used_at, dateLocale)}</div></div></div><div className="flex items-center gap-2">{item.is_current ? <Badge><CheckCircle2Icon className="mr-1 size-3" />{t("当前会话")}</Badge> : null}<Button variant="destructive" size="sm" onClick={() => void revoke(item)}>{t("撤销")}</Button></div></div>)}</div> : <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{t("暂无会话")}</div>}</CardContent></Card>{confirmDialog}</>
+  return <><Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><KeyRoundIcon className="size-4" />{t("会话安全")}</CardTitle><CardDescription>{t("查看登录设备并及时撤销异常会话")}</CardDescription></div><div className="flex flex-wrap gap-2">{isGlobal ? <FilterDropdown className="h-9 w-56" value={targetUserId} onChange={setTargetUserId} ariaLabel={t("选择用户")} options={users.map((user) => ({ value: user.id, label: `${user.name} (${user.username})` }))} /> : null}<Button variant="outline" size="sm" onClick={() => void revokeAll()} disabled={loading}><XCircleIcon className="size-4" />{t("撤销其他会话")}</Button><Button variant="outline" size="icon" onClick={() => void load()} disabled={loading} aria-label={t("刷新")}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent>{loading ? <LoaderCircleIcon className="mx-auto my-10 animate-spin" /> : sessions.length ? <div className="grid gap-2">{visibleSessions.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"><div className="flex min-w-0 items-center gap-3"><div className="flex size-9 items-center justify-center rounded-full bg-muted"><KeyRoundIcon className="size-4" /></div><div className="min-w-0"><div className="truncate text-sm font-medium" title={item.user_agent || item.ip_address || t("未知设备")}>{item.user_agent || item.ip_address || t("未知设备")}</div><div className="text-xs text-muted-foreground">{item.user_agent ? item.ip_address || "—" : "—"} · {t("最近使用")} {formatDateTime(item.last_used_at, dateLocale)}</div></div></div><div className="flex items-center gap-2">{item.is_current ? <Badge><CheckCircle2Icon className="mr-1 size-3" />{t("当前会话")}</Badge> : null}<Button variant="destructive" size="sm" onClick={() => void revoke(item)}>{t("撤销")}</Button></div></div>)}</div> : <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{t("暂无会话")}</div>}<SystemPagination page={page} pageSize={pageSize} itemCount={visibleSessions.length} total={sessions.length} hasNext={page * pageSize < sessions.length} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1) }} /></CardContent></Card>{confirmDialog}</>
 }
 
 /**

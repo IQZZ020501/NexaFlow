@@ -15,6 +15,10 @@ import { formatAuditDetails } from "@/components/system/system-utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
+import {
+  SystemPagination,
+  type SystemPageSize,
+} from "@/components/system/pagination-footer"
 
 type AuditPanelProps = {
   auditLogs: AuditLog[]
@@ -25,9 +29,15 @@ type AuditPanelProps = {
   auditAction?: string
   setAuditAction?: (value: string) => void
   onRefresh?: () => void
-  onLoadMore?: () => void
   hasMore?: boolean
+  total?: number
+  page?: number
+  pageSize?: SystemPageSize
+  onPageChange?: (page: number) => void
+  onPageSizeChange?: (pageSize: SystemPageSize) => void
   workspaceScope?: string | null
+  /** Loads every matching audit log for the CSV export; falls back to the current page when omitted. */
+  loadAll?: () => Promise<AuditLog[]>
 }
 
 /**
@@ -45,16 +55,22 @@ export function AuditPanel({
   auditAction = "",
   setAuditAction = () => undefined,
   onRefresh = () => undefined,
-  onLoadMore = () => undefined,
   hasMore = false,
+  total,
+  page = 1,
+  pageSize = 20,
+  onPageChange = () => undefined,
+  onPageSizeChange = () => undefined,
   workspaceScope = null,
+  loadAll,
 }: AuditPanelProps) {
   const { t } = useLanguage()
 
-  function exportLogs() {
+  async function exportLogs() {
+    const allLogs = loadAll ? await loadAll() : auditLogs
     const rows = [
       [t("时间"), t("操作者"), t("动作"), t("对象"), t("详情")],
-      ...auditLogs.map((log) => [
+      ...allLogs.map((log) => [
         formatDateTime(log.created_at, locale),
         log.actor_username,
         auditActionLabel(log.action, t),
@@ -115,7 +131,7 @@ export function AuditPanel({
             <Button variant="outline" size="icon" onClick={onRefresh} disabled={isAuditLoading} aria-label={t("刷新")}>
               <RefreshCwIcon className={cn("size-4", isAuditLoading && "animate-spin")} />
             </Button>
-            <Button variant="outline" size="sm" onClick={exportLogs} disabled={!auditLogs.length}>
+            <Button variant="outline" size="sm" onClick={() => void exportLogs()} disabled={!auditLogs.length}>
               <DownloadIcon className="size-4" />{t("导出")}
             </Button>
           </div>
@@ -188,13 +204,15 @@ export function AuditPanel({
               </p>
             </div>
           )}
-          {hasMore ? (
-            <div className="flex justify-center pt-3">
-              <Button variant="outline" size="sm" onClick={onLoadMore} disabled={isAuditLoading}>
-                {t("加载更多")}
-              </Button>
-            </div>
-          ) : null}
+          <SystemPagination
+            page={page}
+            pageSize={pageSize}
+            itemCount={auditLogs.length}
+            total={total}
+            hasNext={hasMore}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+          />
         </CardContent>
       </Card>
     </div>

@@ -114,7 +114,7 @@ export function TopBar() {
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex max-w-[32vw] min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground sm:max-w-52"
+                className="flex min-h-9 max-w-[32vw] min-w-0 items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground sm:max-w-52"
                 title={currentWorkspaceName}
                 aria-label={t("切换工作空间，当前为 {workspace}", {
                   workspace: currentWorkspaceName,

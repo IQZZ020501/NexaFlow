@@ -1869,9 +1869,6 @@ export function AgentsPage({
                 : router.push("/app/apps")
             }
             onDelete={() => setDeleteAgentTarget(selectedAgent)}
-            onManagePermissions={() =>
-              void handleOpenAgentPermissions(selectedAgent)
-            }
             onSaveApp={handleSaveAgent}
             onViewChange={handleViewChange}
             notify={notify}
@@ -1899,9 +1896,6 @@ export function AgentsPage({
             isRunsLoading={isRunsLoading}
             onBack={() => void handleBackFromAgent()}
             onDelete={() => setDeleteAgentTarget(selectedAgent)}
-            onManagePermissions={() =>
-              void handleOpenAgentPermissions(selectedAgent)
-            }
             onSave={handleSaveAgent}
             onPublish={() => void handlePublishAgent()}
             isPublishing={isPublishing}
