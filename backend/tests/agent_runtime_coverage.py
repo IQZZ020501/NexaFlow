@@ -5982,6 +5982,69 @@ async def assert_tool_service_paths(
 # ---------------------------------------------------------------------------
 
 
+async def assert_cancel_stops_claimed_run(
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    """Cancelling a claimed run marks it terminal and ends its stream."""
+    from sqlalchemy import update
+
+    from app.shareddomain.agents.models import AgentRunState
+
+    actor = await get_admin_actor()
+    settings = test_settings()
+    async with get_session_factory()() as db:
+        run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "cancel claimed goal",
+            actor,
+            "admin",
+        )
+        run_id = run.id
+        await db.execute(
+            update(AgentRunState)
+            .where(AgentRunState.run_id == run_id)
+            .values(
+                status="running_v2",
+                worker_task_id="cancel-worker",
+                lease_expires_at=utc_now() + timedelta(minutes=5),
+                attempts=1,
+                max_attempts=3,
+            )
+        )
+        await db.commit()
+    async with get_session_factory()() as db:
+        cancelled = await agent_runs.cancel_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            run_id,
+            actor,
+            "admin",
+        )
+        assert cancelled.status == "cancelled"
+    async with get_session_factory()() as db:
+        state = await agent_repository.get_agent_run_by_id(db, run_id)
+        assert state is not None
+        assert state.status == "cancelled"
+        assert state.worker_task_id is None
+        assert state.lease_expires_at is None
+        events: list[dict[str, Any]] = []
+        async for event in agent_runs.stream_agent_run(
+            db,
+            state,
+            object(),
+            actor,
+            "admin",
+            settings,
+        ):
+            events.append(event)
+    assert [event["type"] for event in events] == ["run", "error"], events
+    assert events[-1]["run"]["status"] == "cancelled"
+
+
 async def assert_orphaned_stream_ends_with_error(
     workspace_id: str,
     agent_id: str,
@@ -6084,6 +6147,12 @@ def main() -> None:
             )
             asyncio.run(
                 assert_orphaned_stream_ends_with_error(
+                    workspace_id,
+                    resources["agent_id"],
+                )
+            )
+            asyncio.run(
+                assert_cancel_stops_claimed_run(
                     workspace_id,
                     resources["agent_id"],
                 )

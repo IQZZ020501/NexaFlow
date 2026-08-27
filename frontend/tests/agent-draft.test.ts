@@ -523,4 +523,21 @@ describe("Agent preview state", () => {
     })[0]
     expect(merged.status).toBe("succeeded")
   })
+
+  test("error events keep an already cancelled snapshot", () => {
+    const cancelled = {
+      id: "run-1",
+      status: "cancelled",
+      events: [],
+      result: "",
+      last_error: "Cancelled by user.",
+    } as unknown as AgentRun
+    const merged = mergeAgentRunStreamEvent([cancelled], "run-1", {
+      type: "error",
+      sequence: 3,
+      run: cancelled,
+    })[0]
+    expect(merged.status).toBe("cancelled")
+    expect(merged.last_error).toBe("Cancelled by user.")
+  })
 })

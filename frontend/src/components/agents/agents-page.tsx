@@ -49,6 +49,7 @@ import {
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import {
+  cancelAgentRun,
   compareLiveStreamIds,
   createAgent,
   deleteAgent,
@@ -471,7 +472,14 @@ export function mergeAgentRunStreamEvent(
   if (streamEvent.type === "error") {
     return runs.map((run) =>
       run.id === streamEvent.run.id
-        ? { ...streamEvent.run, status: "failed" as const }
+        ? {
+            ...streamEvent.run,
+            status:
+              streamEvent.run.status === "cancelled" ||
+              streamEvent.run.status === "failed"
+                ? streamEvent.run.status
+                : ("failed" as const),
+          }
         : run
     )
   }
@@ -550,6 +558,7 @@ export function AgentsPage({
   )
   const [askAbortController, setAskAbortController] =
     React.useState<AbortController | null>(null)
+  const liveRunIdRef = React.useRef<string | null>(null)
   const [form, setForm] = React.useState<AgentFormState>(EMPTY_FORM)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)
@@ -1555,6 +1564,7 @@ export function AgentsPage({
           }
           if (streamEvent.type === "run") {
             liveRunId = streamEvent.run.id
+            liveRunIdRef.current = streamEvent.run.id
             setPendingQuestion(null)
           }
           const eventRunId =
@@ -1571,7 +1581,10 @@ export function AgentsPage({
               placeholderRun.id
             )
           }
-          if (streamEvent.type === "error") {
+          if (
+            streamEvent.type === "error" &&
+            streamEvent.run.status !== "cancelled"
+          ) {
             notify("error", t("Agent 回答失败"))
           }
         },
@@ -1608,8 +1621,25 @@ export function AgentsPage({
     }
   }
 
-  function handleCancelAsk() {
-    askAbortController?.abort()
+  async function handleCancelAsk() {
+    const controller = askAbortController
+    const runId = liveRunIdRef.current
+    controller?.abort()
+    liveRunIdRef.current = null
+    if (!token || !selectedWorkspaceId || !selectedAgent || !runId) {
+      return
+    }
+    try {
+      const cancelled = await cancelAgentRun(
+        token,
+        selectedWorkspaceId,
+        selectedAgent.id,
+        runId
+      )
+      setRuns((current) => mergeAgentRunSnapshot(current, cancelled))
+    } catch {
+      // The stream abort already stopped the UI; cancellation is best-effort.
+    }
   }
 
   async function handleRegenerateRun(runId: string) {
