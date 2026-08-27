@@ -18,6 +18,9 @@ import {
   getSmtpSettings,
   getWorkspaceGovernance,
   getWorkspaceInventory,
+  listAllAuditLogs,
+  listAllSystemLogs,
+  listAllWorkspaceAuditLogs,
   listAllWorkspaceMembers,
   listAuditLogs,
   listSessions,
@@ -672,5 +675,71 @@ describe("error handling", () => {
       expect((error as ApiError).status).toBe(502)
       expect((error as ApiError).message).toBe("upstream unavailable")
     }
+  })
+})
+
+describe("listAll audit and system log helpers", () => {
+  test("pages through the admin audit endpoint until the total is reached", async () => {
+    const offsets: string[] = []
+    install((url) => {
+      const offset = new URL(url, "http://localhost").searchParams.get("offset") ?? "0"
+      offsets.push(offset)
+      const items =
+        offset === "0" || offset === "200"
+          ? Array.from({ length: 200 }, (_, index) => ({
+              id: `audit-${offset}-${index}`,
+            }))
+          : [{ id: "audit-400" }]
+      return Response.json(items, {
+        headers: { "X-Total-Count": "401" },
+      })
+    })
+
+    const logs = await listAllAuditLogs(TOKEN, { action: "user.update" })
+    expect(logs).toHaveLength(401)
+    expect(offsets).toEqual(["0", "200", "400"])
+    expect(calls[0].url).toContain("action=user.update")
+  })
+
+  test("workspace variant pages until the total is reached", async () => {
+    const offsets: string[] = []
+    install((url) => {
+      const offset = new URL(url, "http://localhost").searchParams.get("offset") ?? "0"
+      offsets.push(offset)
+      return Response.json([{ id: "ws-audit-1" }], {
+        headers: { "X-Total-Count": "1" },
+      })
+    })
+
+    const logs = await listAllWorkspaceAuditLogs(TOKEN, "ws-1", {
+      search: "create",
+    })
+    expect(logs).toHaveLength(1)
+    expect(offsets).toEqual(["0"])
+    expect(calls[0].url).toContain("/workspaces/ws-1/audit-logs")
+  })
+
+  test("falls back to a single page when the total header is missing", async () => {
+    let requests = 0
+    install(() => {
+      requests += 1
+      return jsonResponse([{ id: "audit-1" }, { id: "audit-2" }])
+    })
+
+    const logs = await listAllAuditLogs(TOKEN)
+    expect(logs).toHaveLength(2)
+    expect(requests).toBe(1)
+  })
+
+  test("stops early on an empty page", async () => {
+    let requests = 0
+    install(() => {
+      requests += 1
+      return Response.json([], { headers: { "X-Total-Count": "10" } })
+    })
+
+    const logs = await listAllSystemLogs(TOKEN, { level: "warning" })
+    expect(logs).toHaveLength(0)
+    expect(requests).toBe(1)
   })
 })

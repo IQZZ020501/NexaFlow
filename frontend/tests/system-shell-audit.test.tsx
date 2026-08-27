@@ -255,7 +255,7 @@ describe("audit tab", () => {
     expect(notifications).toEqual([])
   })
 
-  test("refreshes and loads more pages of audit logs", async () => {
+  test("refreshes and paginates audit logs", async () => {
     const requests: string[] = []
     handler = routeHandler([
       {
@@ -264,29 +264,28 @@ describe("audit tab", () => {
           requests.push(url)
           const parsed = new URL(url, "http://localhost")
           const offset = parsed.searchParams.get("offset") ?? "0"
-          if (offset === "100") {
-            return jsonResponse([
+          if (offset === "20") {
+            return new Response(JSON.stringify([
               { ...auditLog, id: "a-page-2", resource_name: "Page Two" },
-            ])
+            ]), { headers: { "Content-Type": "application/json", "X-Total-Count": "21" } })
           }
-          return jsonResponse(
-            Array.from({ length: 100 }, (_, index) => ({
+          return new Response(JSON.stringify(
+            Array.from({ length: 20 }, (_, index) => ({
               ...auditLog,
               id: `a-page-1-${index}`,
               resource_name: `Page One ${index}`,
             }))
-          )
+          ), { headers: { "Content-Type": "application/json", "X-Total-Count": "21" } })
         },
       },
     ])
     renderPage(<SystemShell activeTab="audit" />)
     expect(await screen.findByText("Page One 0")).toBeTruthy()
 
-    // Load more appends the next page and hides the button once exhausted.
-    fireEvent.click(screen.getByRole("button", { name: "加载更多" }))
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }))
     expect(await screen.findByText("Page Two")).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull()
-    expect(requests.some((request) => request.includes("offset=100"))).toBe(true)
+    expect(screen.queryByText("Page One 0")).toBeNull()
+    expect(requests.some((request) => request.includes("offset=20"))).toBe(true)
 
     // Refresh resets to the first page.
     fireEvent.click(screen.getByRole("button", { name: "刷新" }))
@@ -295,7 +294,7 @@ describe("audit tab", () => {
     expect(
       requests.filter(
         (request) =>
-          request.includes("offset=0") && !request.includes("offset=100")
+          request.includes("offset=0") && !request.includes("offset=20")
       ).length
     ).toBeGreaterThanOrEqual(2)
   })

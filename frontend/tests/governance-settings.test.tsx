@@ -653,7 +653,7 @@ describe("system operation logs", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: "导出" }))
-    expect(exported).toBe(1)
+    await waitFor(() => expect(exported).toBe(1))
   })
 
   test("reports an error when operation logs cannot be loaded", async () => {

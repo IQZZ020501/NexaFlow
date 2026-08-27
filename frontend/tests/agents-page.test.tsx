@@ -324,14 +324,13 @@ mockNextImage()
 
 // The workflow detail workspace is loaded via next/dynamic and would pull in
 // the heavy canvas runtime; stub it so the workflow branch of AgentsPage is
-// still exercised (save/delete/permissions/back handlers included).
+// still exercised (save/delete/back handlers included).
 mock.module("@/components/workflows/workflow-detail-workspace", () => ({
   WorkflowDetailWorkspace: (props: {
     agent: { id: string; name: string }
     form: AgentFormState
     setForm: (form: AgentFormState) => void
     onDelete: () => void
-    onManagePermissions: () => void
     onSaveApp: (event: unknown) => void
     onViewChange: (view: string) => void
     onBack: () => void
@@ -354,9 +353,6 @@ mock.module("@/components/workflows/workflow-detail-workspace", () => ({
       ) : null}
       <button type="button" onClick={() => props.onDelete()}>
         stub-delete
-      </button>
-      <button type="button" onClick={() => props.onManagePermissions()}>
-        stub-perms
       </button>
       <button
         type="button"
@@ -1612,30 +1608,6 @@ describe("AgentsPage detail view", () => {
     expect(deleteCount).toBe(1)
   })
 
-  test("opens permissions from the workflow workspace", async () => {
-    const workflow = makeWorkflow()
-    routes = [
-      ...baseRoutes([workflow]),
-      {
-        method: "GET",
-        pathname: `/api/v1/workspaces/${WS}/members`,
-        exact: false,
-        respond: () => jsonResponse([]),
-      },
-      {
-        method: "GET",
-        pathname: `/api/v1/workspaces/${WS}/agents/agent-2/permissions`,
-        exact: true,
-        respond: () => jsonResponse([]),
-      },
-    ]
-    navState.params.id = "agent-2"
-    renderPage(<AgentsPage />)
-    await expectWorkflowStub()
-    fireEvent.click(screen.getByText("stub-perms").closest("button")!)
-    await waitFor(() => expect(screen.getByText("资源授权")).toBeTruthy())
-  })
-
   test("redirects workflow settings views to the canvas when not in canvas mode", async () => {
     const workflow = makeWorkflow()
     routes = baseRoutes([workflow])
@@ -1760,34 +1732,6 @@ describe("AgentsPage detail view", () => {
       expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull()
     )
     expect(navState.pushCalls).not.toContain("/app/apps")
-  })
-
-  test("opens permissions from the detail workspace menu", async () => {
-    const agent = makeAgent()
-    routes = [
-      ...baseRoutes([agent]),
-      {
-        method: "GET",
-        pathname: `/api/v1/workspaces/${WS}/members`,
-        exact: false,
-        respond: () => jsonResponse([]),
-      },
-      {
-        method: "GET",
-        pathname: `/api/v1/workspaces/${WS}/agents/agent-1/permissions`,
-        exact: true,
-        respond: () => jsonResponse([]),
-      },
-    ]
-    navState.params.id = "agent-1"
-    renderPage(<AgentsPage />)
-    await waitFor(() =>
-      expect(screen.getByText("Research Assistant")).toBeTruthy()
-    )
-    fireEvent.pointerDown(screen.getByLabelText("设置"))
-    fireEvent.click(screen.getByLabelText("设置"))
-    fireEvent.click(await screen.findByRole("menuitem", { name: /资源授权/ }))
-    await waitFor(() => expect(screen.getByText("选择用户")).toBeTruthy())
   })
 
   test("backs to the workflow overview in canvas mode", async () => {
