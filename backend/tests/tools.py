@@ -977,7 +977,7 @@ def test_entities_and_orm_columns_match_exactly() -> None:
 
 
 def test_orm_enforces_tenant_scoped_relations_and_legal_states() -> None:
-    from app.domain.resource_permission import ResourcePermission
+    from app.shareddomain.platform.models import ResourcePermission
     from app.shareddomain.tools.models import (
         ApplicationToolBinding,
         Tool,

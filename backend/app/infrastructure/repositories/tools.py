@@ -6,9 +6,9 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.resource_permission import ResourcePermission as ResourcePermissionOrm
-from app.domain.user import User as UserOrm
-from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipOrm
+from app.shareddomain.platform.models import ResourcePermission as ResourcePermissionOrm
+from app.shareddomain.platform.models import User as UserOrm
+from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.resource_permission import ResourcePermission
 from app.entities.tools import (
     ApplicationToolBinding,

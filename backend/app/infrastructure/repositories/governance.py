@@ -4,9 +4,9 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities.llm.models import RegisteredModel
-from app.domain.team import Team as TeamOrm
-from app.domain.user import User as UserOrm
-from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipOrm
+from app.shareddomain.platform.models import Team as TeamOrm
+from app.shareddomain.platform.models import User as UserOrm
+from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.infrastructure.system_log import SystemLog
 from app.shareddomain.agents.models import (
     AGENT_RUN_ACTIVE_STATUSES,

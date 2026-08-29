@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.entities.user import User
 from app.entities.workspace import WorkspaceMembership
 from app.entities.workspace_invitation import WorkspaceInvitation
-from app.domain.workspace_invitation import WorkspaceInvitation as WorkspaceInvitationOrm  # noqa: F401
+from app.shareddomain.platform.models import WorkspaceInvitation as WorkspaceInvitationOrm  # noqa: F401
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.infrastructure.repositories import workspace_invitation as invitation_repository

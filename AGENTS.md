@@ -24,7 +24,7 @@ Correctness, safety, evidence, and validation take priority over speed.
   (`api/` HTTP, `application/` use cases, `capabilities/` model/rag/embedding
   capabilities, `infrastructure/` config, DB session, data access, storage)
   cross-cut module-owned business domains under `shareddomain/` and shared
-  domain entities under `domain/` (User, Workspace, Team, permissions).
+  domain entities under `shareddomain/platform/` (User, Workspace, Team, permissions).
   Schemas stay in `app/schemas/` and Celery task entry points in
   `app/tasks/`. New features: add a self-contained module directory under
   `app/shareddomain/<feature>/` (entities + services), expose use cases
@@ -32,10 +32,10 @@ Correctness, safety, evidence, and validation take priority over speed.
 - Layer boundaries are enforced by convention (dependency direction is one-way):
   `api/` routers and dependencies import ONLY `application/` (plus `schemas/`
   and `api/deps.py`); `application/` may import `shareddomain/`,
-  `capabilities/`, `infrastructure/`, `schemas/`, `domain/`; `shareddomain/`
-  may import `capabilities/`, `infrastructure/`, `schemas/`, `domain/` but
+  `capabilities/`, `infrastructure/`, `schemas/`, `shareddomain/platform/`; `shareddomain/`
+  may import `capabilities/`, `infrastructure/`, `schemas/`, `shareddomain/platform/` but
   NEVER `application/`; `capabilities/` may import `infrastructure/` and its
-  own modules only — NEVER `shareddomain/`, `schemas/`, `domain/`, or
+  own modules only — NEVER `shareddomain/`, `schemas/`, or
   `application/`. Business rules and status constants live in
   `shareddomain/` (repositories import them from the domain models), and
   infrastructure is consumed through interfaces where swap-out matters
@@ -49,14 +49,15 @@ Correctness, safety, evidence, and validation take priority over speed.
   normalization). Swapping an implementation (e.g. Qdrant → Milvus) touches
   only the capability module and its port factory.
 - Data isolation: pure domain entities live in `app/entities/` (dataclasses
-  mirroring the database columns); `app/domain/` and
+  mirroring the database columns); `app/shareddomain/platform/` and other
   `app/shareddomain/*/models.py` hold the SQLAlchemy database models.
   Repositories (`app/infrastructure/repositories/`) map ORM ↔ entities via
   `mapping.py` helpers and own all `db.add/delete/refresh/flush`; business
   code (`shareddomain/`, `application/`) imports entities only, never ORM
   models, and coordinates transactions via the `db` unit-of-work
   (`db.commit()`/`db.rollback()`). New models: add the entity to
-  `app/entities/`, keep the ORM class in its current models module, and
+  `app/entities/`, keep the ORM class in its current models module
+  (`app/shareddomain/platform/` for cross-domain shared entities), and
   expose create/save/refresh/delete wrappers on the repository.
 - Agent Run persistence separates identity/caller/lineage in `agent_runs`,
   mutable lease/checkpoint/result data in `agent_run_states`, immutable

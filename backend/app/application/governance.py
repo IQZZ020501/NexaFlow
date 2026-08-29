@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.entities.user import User
 from app.entities.workspace import Workspace
 from app.entities.workspace_governance import WorkspaceGovernance
-from app.domain.workspace_governance import WorkspaceGovernance as WorkspaceGovernanceOrm  # noqa: F401
+from app.shareddomain.platform.models import WorkspaceGovernance as WorkspaceGovernanceOrm  # noqa: F401
 from app.infrastructure.config import Settings
 from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories import governance as governance_repository

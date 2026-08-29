@@ -21,7 +21,7 @@ from app.application.smtp import (
     _validate_entity,
     build_smtp_transport_config,
 )
-from app.domain.smtp_settings import SmtpSettings as SmtpSettingsOrm
+from app.shareddomain.platform.models import SmtpSettings as SmtpSettingsOrm
 from app.entities.smtp_settings import SmtpSettings
 from app.infrastructure.secrets import decrypt_secret
 from app.infrastructure.session import get_session_factory

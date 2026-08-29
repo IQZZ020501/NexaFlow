@@ -129,11 +129,11 @@ from app.capabilities.llm.runtime import (
     openai_compatible_base,
     test_model_connection,
 )
-from app.domain.resource_permission import ResourcePermission as ResourcePermissionOrm
-from app.domain.team import Team as TeamOrm
-from app.domain.user import User as UserOrm
-from app.domain.workspace import Workspace as WorkspaceOrm
-from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipOrm
+from app.shareddomain.platform.models import ResourcePermission as ResourcePermissionOrm
+from app.shareddomain.platform.models import Team as TeamOrm
+from app.shareddomain.platform.models import User as UserOrm
+from app.shareddomain.platform.models import Workspace as WorkspaceOrm
+from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.infrastructure.security import (
     create_access_token,
     create_refresh_token,

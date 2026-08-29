@@ -3,10 +3,10 @@ from datetime import datetime
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.team import Team as TeamOrm
-from app.domain.team import TeamMembership as TeamMembershipOrm
-from app.domain.user import User as UserOrm
-from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipOrm
+from app.shareddomain.platform.models import Team as TeamOrm
+from app.shareddomain.platform.models import TeamMembership as TeamMembershipOrm
+from app.shareddomain.platform.models import User as UserOrm
+from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.analytics import (
     WorkspaceAnalyticsCounts,
     WorkspaceAnalyticsGraphBuild,

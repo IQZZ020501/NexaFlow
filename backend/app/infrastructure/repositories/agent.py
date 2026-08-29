@@ -8,7 +8,7 @@ from sqlalchemy import and_, case, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.domain.resource_permission import ResourcePermission as ResourcePermissionORM
+from app.shareddomain.platform.models import ResourcePermission as ResourcePermissionORM
 from app.entities.agents import Agent as AgentEntity
 from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
 from app.entities.agents import (
