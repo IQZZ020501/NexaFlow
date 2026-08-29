@@ -18,6 +18,7 @@ import time
 
 SANDBOX_NETWORK_NONE = "none"
 SANDBOX_NETWORK_PUBLIC = "public"
+SANDBOX_SOCKET_GID = 65532
 
 
 def _sandbox_network() -> str:
@@ -106,13 +107,19 @@ def _sandbox_runtime() -> tuple[Path, Path]:
     return sandbox_root, sandbox_python
 
 
-def _skills_directory() -> Path | None:
+def _skills_directory(sandbox_root: Path | None = None) -> Path | None:
     configured = os.environ.get("SANDBOX_SKILLS_DIR", "").strip()
-    if not configured:
+    path = (
+        Path(configured)
+        if configured
+        else (sandbox_root / "sandbox" / "skills" if sandbox_root else None)
+    )
+    if path is None:
         return None
-    path = Path(configured)
     if not path.is_absolute() or path.is_symlink() or not path.is_dir():
-        raise RuntimeError("SANDBOX_SKILLS_DIR must be an absolute real directory.")
+        if configured:
+            raise RuntimeError("SANDBOX_SKILLS_DIR must be an absolute real directory.")
+        return None
     return path.resolve()
 
 
@@ -130,6 +137,8 @@ def _open_egress_listener(path: Path) -> socket.socket:
     try:
         listener.bind(str(path))
         listener.listen(16)
+        if os.geteuid() == 0:  # pragma: no cover - production Linux only
+            os.chown(path, 0, SANDBOX_SOCKET_GID)
         path.chmod(0o660)
         return listener
     except BaseException:
@@ -327,7 +336,7 @@ def main() -> int:
 
     try:
         sandbox_root, sandbox_python = _sandbox_runtime()
-        skills_dir = _skills_directory()
+        skills_dir = _skills_directory(sandbox_root)
         network_mode = _sandbox_network()
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)

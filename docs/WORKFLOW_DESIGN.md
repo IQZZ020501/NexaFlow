@@ -215,7 +215,7 @@ Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全�
 - 整个进程组在超时或输出超限时强制终止；请求只能降低、不能提高硬限制；
 - 沙箱不可用、超时、超限、无 `result`、结果不是 JSON 时节点失败并中止工作流。
 
-基础沙箱不提供包安装、跨运行文件或解释器状态持久化。启用 `SANDBOX_NETWORK=public` 时，代码只能通过 Worker 代理访问公网 HTTP/HTTPS（80/443），代理拒绝内网、回环、链路本地和 metadata 地址；`SANDBOX_NETWORK=none` 保持完全无网络。Skill 的依赖安装仍需单独定义每次运行的缓存、版本和资源策略。
+基础沙箱不提供跨运行文件或解释器状态持久化。启用 `SANDBOX_NETWORK=public` 时，代码只能通过 Worker 代理访问公网 HTTP/HTTPS（80/443），代理拒绝内网、回环、链路本地和 metadata 地址；`SANDBOX_NETWORK=none` 保持完全无网络。Skill 可携带受限的 `requirements.txt`，依赖仅在当前运行的临时目录中通过 Worker 公网代理安装。固定文件 Skill 在 `SKILL.md` 中声明只读入口脚本和产物格式，调用方仅传 Markdown 或结构化数据，不能提交替代入口的 Python 代码。
 
 ## 8. API
 

@@ -124,6 +124,7 @@ export function ToolPicker({
       tool.status === "active" &&
       tool.availability === "available" &&
       tool.function_name !== "inline_python" &&
+      tool.function_name !== "create_artifact" &&
       (!query ||
         `${toolDisplayName(tool, t)} ${toolDisplayDescription(tool, t)} ${toolSourceDisplayName(tool.source, t)}`
           .toLowerCase()

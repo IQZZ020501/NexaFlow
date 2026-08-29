@@ -2113,6 +2113,40 @@ def test_code_sandbox_artifact_execute() -> None:
     assert result.content == content
     assert result.filename == "page.html"
 
+    skill_content = b"docx-content"
+    skill_writer = _FakeSandboxWriter()
+    skill_response = _sandbox_response(
+        artifact={
+            "format": "docx",
+            "filename": "report.docx",
+            "size_bytes": len(skill_content),
+            "sha256": hashlib.sha256(skill_content).hexdigest(),
+            "content_base64": base64.b64encode(skill_content).decode(),
+        }
+    )
+
+    async def execute_skill():
+        with patch(
+            "asyncio.open_unix_connection",
+            new=AsyncMock(
+                return_value=(_FakeSandboxReader(skill_response), skill_writer)
+            ),
+        ):
+            return await code_sandbox.execute_skill_artifact(
+                replace(settings(), workflow_sandbox_timeout_seconds=5),
+                "documents",
+                {"content": "# Report"},
+                "docx",
+                "report.docx",
+            )
+
+    skill_result = run(execute_skill())
+    skill_request = json.loads(skill_writer.data)
+    assert skill_request["skill"] == "documents"
+    assert json.loads(skill_request["stdin"]) == {"content": "# Report"}
+    assert "code" not in skill_request and "skills" not in skill_request
+    assert skill_result.content == skill_content
+
 
 def test_worker_supervisor_sandbox_commands() -> None:
     script = Path(__file__).resolve().parents[1] / "scripts" / "worker.py"

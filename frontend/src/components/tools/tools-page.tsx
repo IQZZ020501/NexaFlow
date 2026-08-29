@@ -18,6 +18,7 @@ import {
   Trash2Icon,
   WrenchIcon,
 } from "lucide-react"
+import Link from "next/link"
 
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
@@ -522,9 +523,11 @@ export function ToolsPage() {
               {t("MCP Server")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem disabled>
-              <SparklesIcon />
-              {t("Skill（后续开放）")}
+            <DropdownMenuItem asChild>
+              <Link href="/app/tools/skills">
+                <SparklesIcon />
+                {t("Skills")}
+              </Link>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

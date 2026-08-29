@@ -32,6 +32,116 @@ from app.shareddomain.tools.permissions import (
 CATALOG_ID_NAMESPACE = UUID("2df58f89-2f5c-4e2b-9545-d50fb806a6db")
 
 
+BUILTIN_SKILL_DEFINITIONS = (
+    (
+        "documents",
+        "documents_skill",
+        "Documents Skill",
+        "Create a DOCX file from Markdown content using the Documents Skill renderer.",
+    ),
+    (
+        "pdf",
+        "pdf_skill",
+        "PDF Skill",
+        "Create a paginated PDF from Markdown content using the PDF Skill renderer.",
+    ),
+    (
+        "spreadsheets",
+        "spreadsheets_skill",
+        "Spreadsheets Skill",
+        "Create a formatted XLSX workbook from structured sheet data using the Spreadsheets Skill renderer.",
+    ),
+)
+
+INTERNAL_BUILTIN_FUNCTION_NAMES = (
+    "create_artifact",
+    "inline_python",
+)
+
+
+def _skill_input_schema(skill_name: str) -> dict[str, Any]:
+    filename_patterns = {
+        "documents": r"^[^/\\]+\.[dD][oO][cC][xX]$",
+        "pdf": r"^[^/\\]+\.[pP][dD][fF]$",
+        "spreadsheets": r"^[^/\\]+\.[xX][lL][sS][xX]$",
+    }
+    properties: dict[str, Any] = {
+        "filename": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": filename_patterns[skill_name],
+        }
+    }
+    required = ["filename"]
+    if skill_name in {"documents", "pdf"}:
+        properties["content"] = {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200_000,
+            "description": (
+                "Final document content in a concise Markdown subset: headings, "
+                "paragraphs, bullet or numbered lists, and pipe tables."
+            ),
+        }
+        required.append("content")
+    else:
+        properties["workbook"] = {
+            "type": "object",
+            "properties": {
+                "sheets": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 31,
+                            },
+                            "rows": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 2_000,
+                                "items": {
+                                    "type": "array",
+                                    "maxItems": 64,
+                                    "items": {
+                                        "type": [
+                                            "string",
+                                            "number",
+                                            "integer",
+                                            "boolean",
+                                            "null",
+                                        ]
+                                    },
+                                },
+                            },
+                            "freeze_panes": {
+                                "type": "string",
+                                "maxLength": 10,
+                            },
+                            "auto_filter": {"type": "boolean"},
+                        },
+                        "required": ["name", "rows"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["sheets"],
+            "additionalProperties": False,
+        }
+        required.append("workbook")
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
 def stable_catalog_id(key: str) -> str:
     return str(uuid5(CATALOG_ID_NAMESPACE, key))
 
@@ -340,6 +450,7 @@ async def list_tool_catalog(
         workspace_role == "admin" or actor.is_global_admin,
         limit,
         offset,
+        excluded_builtin_function_names=INTERNAL_BUILTIN_FUNCTION_NAMES,
     )
     items: list[ToolCatalogItem] = []
     for tool, source, version, draft, grant in rows:
@@ -500,6 +611,19 @@ def build_inline_python_tool(
         "properties": {
             "code": {"type": "string", "maxLength": 8192},
             "inputs": {"type": "object"},
+            "skills": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                },
+                "maxItems": 8,
+                "uniqueItems": True,
+                "description": (
+                    "Optional managed Skills to stage for this run. Each Skill "
+                    "must be installed by the Worker."
+                ),
+            },
         },
         "required": ["code", "inputs"],
         "additionalProperties": False,
@@ -518,7 +642,11 @@ def build_inline_python_tool(
     definition_hash = canonical_definition_hash(
         {
             "name": "inline_python",
-            "description": "Run inline Python in the Workflow sandbox.",
+            "description": (
+                "Run inline Python in the Workflow sandbox. Optional managed "
+                "Skills are staged read-only and may install their requirements "
+                "through the Worker public egress proxy."
+            ),
             "input_schema": input_schema,
             "output_schema": output_schema,
             "execution_spec": execution_spec,
@@ -545,7 +673,11 @@ def build_inline_python_tool(
             tool_id=tool_id,
             revision=1,
             display_name="Python code",
-            description="Run inline Python in the Workflow sandbox.",
+            description=(
+                "Run inline Python in the Workflow sandbox. Optional managed "
+                "Skills are staged read-only and may install their requirements "
+                "through the Worker public egress proxy."
+            ),
             input_schema=input_schema,
             output_schema=output_schema,
             execution_spec=execution_spec,
@@ -585,12 +717,16 @@ def build_artifact_tool(
         "PDF, XLSX, PPTX, images, and other rich or binary formats, put a Python "
         "generator program in content and write the final file only to the provided "
         "global output_path; never use /tmp, the current directory, or a hard-coded "
-        "path. Use only these installed libraries and import names: DOCX uses "
+        "path. Use these installed libraries and import names: DOCX uses "
         "python-docx (`from docx import Document`); PDF uses PyMuPDF "
-        "(`import pymupdf`, never reportlab); XLSX uses openpyxl; PPTX uses "
+        "(`import pymupdf`); XLSX uses openpyxl; PPTX uses "
         "python-pptx (`from pptx import Presentation`); images use Pillow "
-        "(`from PIL import Image`). Do not probe the environment, install packages, "
-        "or create diagnostic files. The Python standard library is also available. User "
+        "(`from PIL import Image`). Managed Skills may be selected with `skills`: "
+        "built-in bundles are `documents`, `pdf`, and `spreadsheets`; their files "
+        "are staged read-only below `NEXAFLOW_SKILLS_DIR`, and an optional "
+        "`requirements.txt` is installed into `NEXAFLOW_PACKAGES_DIR` through the "
+        "Worker public HTTP(S) proxy. Do not install packages yourself, use package "
+        "URLs, or create diagnostic files. The Python standard library is also available. User "
         "attachment text is already included in the conversation and can be used "
         "to produce an edited copy. Enforce requested measurable constraints in "
         "the generator before saving, and print concise validation results to stdout. "
@@ -606,7 +742,8 @@ def build_artifact_tool(
                 "description": (
                     "Exact UTF-8 contents for plain-text/source files, or Python "
                     "generator code for rich/binary output that writes to output_path. "
-                    "For PDF import pymupdf; reportlab is unavailable."
+                    "For PDF import pymupdf, or select the `pdf` Skill for its "
+                    "additional PDF packages."
                 ),
             },
             "content_mode": {
@@ -618,6 +755,19 @@ def build_artifact_tool(
                 ),
             },
             "filename": {"type": "string", "maxLength": 120},
+            "skills": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                },
+                "maxItems": 8,
+                "uniqueItems": True,
+                "description": (
+                    "Optional managed Skills to stage for the Python generator. "
+                    "Built-ins: documents, pdf, spreadsheets."
+                ),
+            },
         },
         "required": ["content", "filename"],
         "additionalProperties": False,
@@ -728,6 +878,58 @@ def build_artifact_tool(
     )
 
 
+def build_skill_artifact_tool(
+    workspace_id: str,
+    skill_name: str,
+    created_at: datetime | None = None,
+) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    definition = next(
+        (
+            item
+            for item in BUILTIN_SKILL_DEFINITIONS
+            if item[0] == skill_name
+        ),
+        None,
+    )
+    if definition is None:
+        raise ValueError(f"Unknown built-in Skill: {skill_name}")
+
+    _, function_name, display_name, description = definition
+    tool, version, policy = build_artifact_tool(workspace_id, created_at)
+    tool_id = stable_catalog_id(
+        f"tool:{workspace_id}:builtin:skill:{skill_name}"
+    )
+    input_schema = _skill_input_schema(skill_name)
+    execution_spec = {"builtin": "skill", "skill": skill_name}
+    definition_hash = canonical_definition_hash(
+        {
+            "name": function_name,
+            "description": description,
+            "input_schema": input_schema,
+            "output_schema": version.output_schema,
+            "execution_spec": execution_spec,
+        }
+    )
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+
+    tool.id = tool_id
+    tool.stable_key = f"skill_{skill_name}"
+    tool.function_name = function_name
+    tool.current_version_id = version_id
+    version.id = version_id
+    version.tool_id = tool_id
+    version.display_name = display_name
+    version.description = description
+    version.input_schema = input_schema
+    version.execution_spec = execution_spec
+    version.definition_hash = definition_hash
+    policy.id = stable_catalog_id(f"policy:{tool_id}")
+    policy.tool_id = tool_id
+    policy.tool_version_id = version_id
+    policy.definition_hash = definition_hash
+    return tool, version, policy
+
+
 async def ensure_workspace_system_catalog(
     db: AsyncSession,
     workspace_id: str,
@@ -761,7 +963,8 @@ async def ensure_workspace_system_catalog(
 
     await ensure_tool(catalog.tool, catalog.version, catalog.policy)
     await ensure_tool(*build_inline_python_tool(workspace_id))
-    await ensure_tool(*build_artifact_tool(workspace_id))
+    for skill_name, *_ in BUILTIN_SKILL_DEFINITIONS:
+        await ensure_tool(*build_skill_artifact_tool(workspace_id, skill_name))
 
 
 async def _tombstone_mcp_sources(

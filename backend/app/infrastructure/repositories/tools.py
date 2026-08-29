@@ -274,6 +274,7 @@ async def list_tool_catalog_rows(
     include_all: bool = False,
     limit: int | None = None,
     offset: int = 0,
+    excluded_builtin_function_names: tuple[str, ...] = (),
 ) -> list[ToolCatalogRow]:
     grant = ResourcePermissionOrm
     statement = (
@@ -320,6 +321,13 @@ async def list_tool_catalog_rows(
                 ToolOrm.kind == "builtin",
                 ToolOrm.created_by_user_id == actor_id,
                 grant.id.is_not(None),
+            )
+        )
+    if excluded_builtin_function_names:
+        statement = statement.where(
+            or_(
+                ToolOrm.kind != "builtin",
+                ToolOrm.function_name.not_in(excluded_builtin_function_names),
             )
         )
     statement = (

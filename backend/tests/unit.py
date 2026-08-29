@@ -2480,10 +2480,13 @@ def test_workflow_tool_migration_matches_runtime_catalog() -> None:
     assert source["name"] == "Built-in"
     assert migrated_tool["id"] == tool.id
     assert migrated_tool["function_name"] == tool.function_name
-    assert migrated_version["id"] == version.id
-    assert migrated_version["definition_hash"] == version.definition_hash
+    # The historical migration remains immutable; the Skills contract is
+    # published by the follow-up migration and therefore has a new version.
+    assert migrated_version["id"] != version.id
+    assert migrated_version["definition_hash"] != version.definition_hash
+    assert "skills" in version.input_schema["properties"]
     assert migrated_policy["id"] == policy.id
-    assert migrated_policy["tool_version_id"] == policy.tool_version_id
+    assert migrated_policy["tool_version_id"] != policy.tool_version_id
 
     graph = {
         "nodes": [

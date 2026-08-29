@@ -46,6 +46,16 @@ describe("tool display helpers", () => {
         t
       )
     ).toBe("创建文件")
+    expect(
+      toolDisplayName(
+        {
+          function_name: "documents_skill",
+          display_name: "Documents Skill",
+          description: "Creates DOCX files",
+        },
+        t
+      )
+    ).toBe("文档 Skill")
   })
 
   test("falls back to the configured display name for custom tools", () => {
@@ -94,6 +104,16 @@ describe("tool display helpers", () => {
     ).toBe(
       "根据文件名和内容创建可下载文件；文本文件直接保存，复杂格式由平台生成。"
     )
+    expect(
+      toolDisplayDescription(
+        {
+          function_name: "pdf_skill",
+          display_name: "PDF Skill",
+          description: "Creates PDFs",
+        },
+        t
+      )
+    ).toBe("使用内置 PDF Skill 创建 PDF 文件。")
   })
 
   test("translates the artifact tool in all supported languages", () => {
@@ -161,6 +181,19 @@ describe("tool display helpers", () => {
     expect(value).toBe(`下载：[论文.docx](${latestUrl})`)
     expect(value).not.toContain("chat.kimi.com")
     expect(value).not.toContain(oldUrl)
+  })
+
+  test("links artifacts returned by built-in Skill tools", () => {
+    const url = "/api/v1/artifacts/pdf-token"
+    const value = withArtifactDownloadLinks("文件已生成：report.pdf", [
+      {
+        tool_name: "pdf_skill",
+        status: "succeeded",
+        output: { filename: "report.pdf", download_url: url },
+      },
+    ])
+
+    expect(value).toContain(`[report.pdf](${url})`)
   })
 
   test("replaces a copied artifact token with the verified filename link", () => {

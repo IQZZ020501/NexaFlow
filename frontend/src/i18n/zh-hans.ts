@@ -449,7 +449,38 @@ export const zhHans = {
   还没有工具: "还没有工具",
   "Python 工具": "Python 工具",
   "MCP Server": "MCP Server",
-  "Skill（后续开放）": "Skill（后续开放）",
+  Skills: "Skills",
+  "三个内置 Skills 都有自己的生成脚本，并作为工具出现在工具中心、Agent 选择器和 Workflow 节点库。":
+    "三个内置 Skills 都有自己的生成脚本，并作为工具出现在工具中心、Agent 选择器和 Workflow 节点库。",
+  返回工具: "返回工具",
+  "内置 Skills": "内置 Skills",
+  手动安装: "手动安装",
+  "内置 Skill bundle 随 Worker 提供；自定义 bundle 仍由部署管理员写入 Worker 文件系统。":
+    "内置 Skill bundle 随 Worker 提供；自定义 bundle 仍由部署管理员写入 Worker 文件系统。",
+  "在 Worker 配置的目录下创建 Skill 文件夹。":
+    "在 Worker 配置的目录下创建 Skill 文件夹。",
+  "在 SKILL.md 中声明 entrypoint 和 artifact-format，并提供对应的 Python 入口脚本。":
+    "在 SKILL.md 中声明 entrypoint 和 artifact-format，并提供对应的 Python 入口脚本。",
+  "需要额外 Python 包时再添加 requirements.txt。":
+    "需要额外 Python 包时再添加 requirements.txt。",
+  "重启 Worker，并注册匹配的 Tool 输入契约；仅复制目录不会自动出现在选择器中。":
+    "重启 Worker，并注册匹配的 Tool 输入契约；仅复制目录不会自动出现在选择器中。",
+  运行方式: "运行方式",
+  "绑定到 Agent": "绑定到 Agent",
+  "在 Agent 工具选择器中授权文档、PDF 或表格 Skill；运行时模型会根据用户目标和工具描述自主选择。":
+    "在 Agent 工具选择器中授权文档、PDF 或表格 Skill；运行时模型会根据用户目标和工具描述自主选择。",
+  "Skill 自带执行": "Skill 自带执行",
+  "Agent 只提交 Markdown 或结构化表格数据，Worker 运行 Skill bundle 内声明的入口脚本，不执行调用方提供的 Python。":
+    "Agent 只提交 Markdown 或结构化表格数据，Worker 运行 Skill bundle 内声明的入口脚本，不执行调用方提供的 Python。",
+  平台安全边界: "平台安全边界",
+  "沙箱隔离、资源限额、文件校验、临时存储和下载链接仍由平台统一负责。":
+    "沙箱隔离、资源限额、文件校验、临时存储和下载链接仍由平台统一负责。",
+  "Word 与 Google Docs 文档": "Word 与 Google Docs 文档",
+  "PDF 创建、检查与渲染": "PDF 创建、检查与渲染",
+  "电子表格创建与分析": "电子表格创建与分析",
+  "DOCX · python-docx": "DOCX · python-docx",
+  "PDF · PyMuPDF": "PDF · PyMuPDF",
+  "XLSX · openpyxl": "XLSX · openpyxl",
   我的工具: "我的工具",
   共享给我的: "共享给我的",
   内置工具: "内置工具",
@@ -1193,6 +1224,12 @@ export const zhHans = {
   变量赋值: "变量赋值",
   "MCP 工具节点": "MCP 工具节点",
   "Python 代码": "Python 代码",
+  "文档 Skill": "文档 Skill",
+  "PDF Skill": "PDF Skill",
+  "表格 Skill": "表格 Skill",
+  "使用内置文档 Skill 创建 DOCX 文件。": "使用内置文档 Skill 创建 DOCX 文件。",
+  "使用内置 PDF Skill 创建 PDF 文件。": "使用内置 PDF Skill 创建 PDF 文件。",
+  "使用内置表格 Skill 创建 XLSX 文件。": "使用内置表格 Skill 创建 XLSX 文件。",
   运行成功: "运行成功",
   运行失败: "运行失败",
   "重排内容必须包含非空文本。": "重排内容必须包含非空文本。",

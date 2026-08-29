@@ -19,6 +19,12 @@ type ToolOutputEvent = {
 
 const ARTIFACT_URL_PATTERN =
   /(?:https?:\/\/[^\s<>()\x5B\x5D]+)?\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+/g
+const ARTIFACT_TOOL_FUNCTIONS = new Set([
+  "create_artifact",
+  "documents_skill",
+  "pdf_skill",
+  "spreadsheets_skill",
+])
 
 function artifactLink(filename: string, downloadUrl: string) {
   return `[${filename.replace(/[\x5B\x5D]/g, "\\$&")}](${downloadUrl})`
@@ -64,6 +70,9 @@ export function builtinToolDisplayName(functionName: string, t: TFunction) {
   if (functionName === "inline_python") return t("Python 代码")
   if (functionName === "current_time") return t("当前时间")
   if (functionName === "create_artifact") return t("创建文件")
+  if (functionName === "documents_skill") return t("文档 Skill")
+  if (functionName === "pdf_skill") return t("PDF Skill")
+  if (functionName === "spreadsheets_skill") return t("表格 Skill")
   return null
 }
 
@@ -79,7 +88,7 @@ export function withArtifactDownloadLinks(
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (
-      event.tool_name !== "create_artifact" ||
+      !ARTIFACT_TOOL_FUNCTIONS.has(event.tool_name ?? "") ||
       event.status !== "succeeded" ||
       !event.output ||
       typeof event.output !== "object"
@@ -162,6 +171,15 @@ export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
     return t(
       "根据文件名和内容创建可下载文件；文本文件直接保存，复杂格式由平台生成。"
     )
+  }
+  if (tool.function_name === "documents_skill") {
+    return t("使用内置文档 Skill 创建 DOCX 文件。")
+  }
+  if (tool.function_name === "pdf_skill") {
+    return t("使用内置 PDF Skill 创建 PDF 文件。")
+  }
+  if (tool.function_name === "spreadsheets_skill") {
+    return t("使用内置表格 Skill 创建 XLSX 文件。")
   }
   return tool.description
 }

@@ -123,7 +123,9 @@ describe("ToolsPage", () => {
     fireEvent.click(trigger)
     expect(await screen.findByText("Python 工具")).toBeTruthy()
     expect(screen.getByText("MCP Server")).toBeTruthy()
-    expect(screen.getByText("Skill（后续开放）")).toBeTruthy()
+    expect(screen.getByRole("menuitem", { name: "Skills" }).getAttribute("href")).toBe(
+      "/app/tools/skills"
+    )
   })
 
   test("shows an explicit retry state when the catalog fails", async () => {
@@ -446,15 +448,26 @@ describe("ToolsPage", () => {
       },
       created_by_user_id: null,
     })
+    const skillTool = tool({
+      id: "tool-skill-pdf",
+      kind: "builtin",
+      function_name: "pdf_skill",
+      display_name: "PDF Skill",
+      description: "Create PDF files",
+      source: builtinTool.source,
+      created_by_user_id: null,
+    })
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes("/tools?")) return jsonResponse([builtinTool])
+      if (url.includes("/tools?"))
+        return jsonResponse([builtinTool, skillTool])
       if (url.includes("/tool-sources?")) return jsonResponse([])
       return jsonResponse([])
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
     await screen.findByText("当前时间")
+    expect(screen.getByText("PDF Skill")).toBeTruthy()
     expect(screen.getByText("内置工具")).toBeTruthy()
     const card = screen.getByText("当前时间").closest("article")!
     expect(within(card).getAllByText("内置").length).toBeGreaterThan(0)

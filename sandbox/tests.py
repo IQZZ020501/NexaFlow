@@ -12,6 +12,7 @@ root/Linux-gated branches execute).
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import json
 import os
 import signal
@@ -23,6 +24,7 @@ import threading
 import time
 from pathlib import Path
 from unittest import mock
+from zipfile import ZipFile
 
 from sandbox import egress as egress_module
 from sandbox import runner as runner_module
@@ -130,9 +132,14 @@ def check_run_code_validation() -> None:
             "skills must contain",
         ),
         (
-            lambda: execute_request({"code": "pass", "skills": ["documents"]}),
+            lambda: execute_request({"code": "pass", "skill": "documents"}),
             ValueError,
-            "skills require",
+            "skill request",
+        ),
+        (
+            lambda: execute_request({"skill": "../documents"}),
+            ValueError,
+            "skill request",
         ),
     ]
     for call, exc_type, fragment in cases:
@@ -452,6 +459,62 @@ def check_artifact_outputs_and_skills() -> None:
         raise AssertionError("artifact path traversal was accepted")
 
 
+def check_builtin_skill_entrypoints() -> None:
+    requests = [
+        (
+            "documents",
+            "docx",
+            "skill-report.docx",
+            {"content": "# Quarterly report\n\nReady for review.\n\n- Revenue\n- Cost"},
+            "word/document.xml",
+        ),
+        (
+            "pdf",
+            "pdf",
+            "skill-report.pdf",
+            {"content": "# Quarterly report\n\nReady for review.\n\n- Revenue\n- Cost"},
+            None,
+        ),
+        (
+            "spreadsheets",
+            "xlsx",
+            "skill-report.xlsx",
+            {
+                "workbook": {
+                    "sheets": [
+                        {
+                            "name": "Summary",
+                            "rows": [
+                                ["Metric", "Value"],
+                                ["Revenue", 12],
+                                ["Cost", 5],
+                                ["Profit", "=B2-B3"],
+                            ],
+                        }
+                    ]
+                }
+            },
+            "xl/workbook.xml",
+        ),
+    ]
+    for skill, artifact_format, filename, inputs, archive_member in requests:
+        result = execute_request(
+            {
+                "skill": skill,
+                "stdin": json.dumps(inputs),
+                "artifact": {"format": artifact_format, "filename": filename},
+            }
+        )
+        assert result["ok"] is True, result
+        content = base64.b64decode(result["artifact"]["content_base64"])
+        assert f'"renderer":"{skill}"' in result["stdout"], result
+        if artifact_format == "pdf":
+            assert content.startswith(b"%PDF"), content[:16]
+        else:
+            with ZipFile(BytesIO(content)) as archive:
+                assert archive_member in archive.namelist(), archive.namelist()
+
+
 def check_artifact_error_paths() -> None:
     for code, artifact_format, filename, expected_error in [
         ("pass", "html", "missing.html", "artifact_missing"),
@@ -544,6 +607,7 @@ def check_artifact_error_paths() -> None:
 
         large = skills_root / "large"
         large.mkdir()
+        (large / "SKILL.md").write_text("large", encoding="utf-8")
         (large / "large.bin").write_bytes(b"x" * (runner_module.MAX_SKILL_BYTES + 1))
         with mock.patch.dict(os.environ, {"SANDBOX_SKILLS_DIR": str(skills_root)}):
             too_large = execute_request(
@@ -554,6 +618,22 @@ def check_artifact_error_paths() -> None:
                 }
             )
         assert too_large["error"] == "skill_too_large", too_large
+
+        requirements_skill = skills_root / "requirements"
+        requirements_skill.mkdir()
+        requirements_file = requirements_skill / "requirements.txt"
+        requirements_file.write_text("pypdf>=5,<7\n", encoding="utf-8")
+        requirements, error = runner_module._skill_requirements(
+            skills_root,
+            ("requirements",),
+        )
+        assert requirements == ("pypdf>=5,<7",) and error is None
+        requirements_file.write_text("https://example.com/package.whl\n", encoding="utf-8")
+        requirements, error = runner_module._skill_requirements(
+            skills_root,
+            ("requirements",),
+        )
+        assert requirements == () and error == "skill_requirements_invalid"
 
 
 def check_run_limits() -> None:
@@ -978,6 +1058,7 @@ def main() -> None:
     check_egress_relay()
     check_local_egress_proxy()
     check_artifact_outputs_and_skills()
+    check_builtin_skill_entrypoints()
     check_artifact_error_paths()
     check_run_limits()
     check_terminate()

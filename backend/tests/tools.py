@@ -286,13 +286,13 @@ def test_generic_artifact_migration_matches_catalog() -> None:
         )
     )
     assert migration.down_revision == "202608250006"
-    assert description == version.description
-    assert input_schema == version.input_schema
+    assert description != version.description
+    assert input_schema != version.input_schema
     assert output_schema == version.output_schema
     assert execution_spec == version.execution_spec
-    assert definition_hash == version.definition_hash
+    assert definition_hash != version.definition_hash
     assert "import pymupdf" in version.description
-    assert "never reportlab" in version.description
+    assert "Managed Skills" in version.description
 
 
 def test_artifact_contract_downgrade_rejects_durable_references() -> None:
@@ -1159,6 +1159,7 @@ def test_migration_reference_scanner_keeps_historical_mcp_tuples() -> None:
 
 async def assert_workspace_system_catalog(workspace_id: str) -> None:
     from app.infrastructure.repositories import tools as repository
+    from app.shareddomain.tools.catalog import build_artifact_tool
 
     async with get_session_factory()() as db:
         sources = await repository.list_tool_sources(db, workspace_id)
@@ -1170,7 +1171,9 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert {tool.stable_key for tool in tools} == {
             "current_time",
             "inline_python",
-            "artifact",
+            "skill_documents",
+            "skill_pdf",
+            "skill_spreadsheets",
         }
         tool = next(tool for tool in tools if tool.stable_key == "current_time")
         assert tool.stable_key == "current_time"
@@ -1187,27 +1190,44 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert policy.approval == "auto"
         assert policy.effect == "pure"
 
-        artifact_tool = next(
-            item for item in tools if item.stable_key == "artifact"
-        )
-        artifact_version = await repository.get_tool_version(
-            db,
-            workspace_id,
-            artifact_tool.current_version_id or "",
-        )
-        assert artifact_version is not None
-        assert artifact_version.execution_spec == {"builtin": "artifact"}
-        assert set(artifact_version.input_schema["required"]) == {
-            "content",
-            "filename",
-        }
-        assert "code" not in artifact_version.input_schema["properties"]
-        assert "format" not in artifact_version.input_schema["properties"]
-        assert "skills" not in artifact_version.input_schema["properties"]
-        assert artifact_version.output_schema["properties"]["stdout"] == {
-            "type": "string",
-            "maxLength": 2000,
-        }
+        for skill_name in ("documents", "pdf", "spreadsheets"):
+            skill_tool = next(
+                item for item in tools if item.stable_key == f"skill_{skill_name}"
+            )
+            skill_version = await repository.get_tool_version(
+                db,
+                workspace_id,
+                skill_tool.current_version_id or "",
+            )
+            skill_policy = await repository.get_tool_policy(
+                db,
+                workspace_id,
+                skill_tool.id,
+            )
+            assert skill_version is not None
+            assert skill_policy is not None
+            assert skill_version.execution_spec == {
+                "builtin": "skill",
+                "skill": skill_name,
+            }
+            skill_properties = skill_version.input_schema["properties"]
+            assert "skills" not in skill_properties
+            assert "code" not in skill_properties
+            if skill_name in {"documents", "pdf"}:
+                assert set(skill_properties) == {"filename", "content"}
+            else:
+                assert set(skill_properties) == {"filename", "workbook"}
+            assert skill_policy.workflow_callable is True
+            assert skill_policy.approval == "auto"
+
+        legacy_tool, legacy_version, legacy_policy = build_artifact_tool(workspace_id)
+        legacy_tool.current_version_id = None
+        await repository.save_tool(db, legacy_tool)
+        await repository.save_tool_version(db, legacy_version)
+        await repository.save_tool_policy(db, legacy_policy)
+        legacy_tool.current_version_id = legacy_version.id
+        await repository.save_tool(db, legacy_tool)
+        await db.commit()
 
 
 def test_generated_artifact_link_serves_static_html() -> None:
@@ -4733,7 +4753,10 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     from app.infrastructure.repositories import user as user_repository
     from app.ports.mcp import McpClientError
     from app.ports.tool_runtime import ToolAdapterBusy, ToolInvocationContext
-    from app.shareddomain.tools.catalog import build_artifact_tool
+    from app.shareddomain.tools.catalog import (
+        build_artifact_tool,
+        build_skill_artifact_tool,
+    )
     from app.shareddomain.tools.runtime import build_tool_snapshot
 
     settings = Settings.from_env(require_bootstrap=False)
@@ -4845,7 +4868,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.usage == {"exit_code": 0, "size_bytes": len(artifact_content)}
     assert artifact_sandbox.await_count == 1
     assert artifact_sandbox.await_args.args[2:4] == ("html", "page.html")
-    assert artifact_sandbox.await_args.args[4] == []
+    assert artifact_sandbox.await_args.args[4] == ["documents"]
     from app.application.tool_adapters import _redirect_legacy_artifact_path
 
     legacy_code = 'document.save("/tmp/report.docx")'
@@ -4856,6 +4879,48 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     with ZipFile(docx_bytes, "w", ZIP_DEFLATED) as archive:
         archive.writestr("[Content_Types].xml", "<Types/>")
         archive.writestr("word/document.xml", "<document/>")
+    skill_version = build_skill_artifact_tool(workspace_id, "documents")[1]
+    skill_snapshot = dataclasses.replace(
+        snapshot,
+        input_schema=skill_version.input_schema,
+        output_schema=skill_version.output_schema,
+        execution_spec=skill_version.execution_spec,
+    )
+    with patch(
+        "app.application.tool_adapters.execute_skill_artifact",
+        new=AsyncMock(
+            return_value=ArtifactSandboxResult(
+                content=docx_bytes.getvalue(),
+                format="docx",
+                filename="skill-report.docx",
+                size_bytes=len(docx_bytes.getvalue()),
+                sha256="ignored-by-adapter",
+                stdout='{"renderer":"documents"}',
+                stderr="",
+                exit_code=0,
+            )
+        ),
+    ) as skill_sandbox:
+        skill_result = await builtin.invoke(
+            skill_snapshot,
+            {
+                "filename": "skill-report.docx",
+                "content": "# Ready\n\nGenerated by the Documents Skill.",
+            },
+            dataclasses.replace(
+                context,
+                invocation_id="adapter-skill",
+                idempotency_key="adapter-skill",
+            ),
+        )
+    assert skill_result.ok is True
+    assert skill_result.data["filename"] == "skill-report.docx"
+    assert skill_sandbox.await_args.args[1:] == (
+        "documents",
+        {"content": "# Ready\n\nGenerated by the Documents Skill."},
+        "docx",
+        "skill-report.docx",
+    )
     with patch(
         "app.application.tool_adapters.execute_artifact_code",
         new=AsyncMock(
@@ -5111,6 +5176,17 @@ def test_workspace_creation_initializes_system_catalog() -> None:
         )
         add_workspace_member(client, admin_token, workspace_id, member_id)
         run(assert_workspace_system_catalog(workspace_id))
+        response = client.get(
+            f"/api/v1/workspaces/{workspace_id}/tools?limit=200&offset=0",
+            headers=auth_headers(admin_token),
+        )
+        assert response.status_code == 200, response.text
+        assert {item["function_name"] for item in response.json()} == {
+            "current_time",
+            "documents_skill",
+            "pdf_skill",
+            "spreadsheets_skill",
+        }
         run(assert_tool_policy_revision_compare_and_swap(workspace_id))
         run(assert_mcp_discovery_materializes_first_leaf(workspace_id))
         run(assert_mcp_server_deletion_preserves_tool_history(workspace_id))

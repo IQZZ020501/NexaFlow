@@ -13,6 +13,7 @@ RESULT_MARKER = "__NEXAFLOW_RESULT__="
 MAX_RESPONSE_BYTES = 128 * 1024
 MAX_ARTIFACT_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
+SKILL_REQUEST_TIMEOUT_SECONDS = 30
 
 
 class WorkflowSandboxError(RuntimeError):
@@ -48,6 +49,10 @@ def _program(user_code: str) -> str:
     marker = json.dumps(RESULT_MARKER)
     return (
         "import json, sys\n"
+        "import os\n"
+        "packages_dir = os.environ.get('NEXAFLOW_PACKAGES_DIR', '')\n"
+        "if packages_dir:\n"
+        "    sys.path.insert(0, packages_dir)\n"
         "inputs = json.loads(sys.stdin.read())\n"
         f"exec(compile({encoded}, '<workflow-code-node>', 'exec'), globals())\n"
         "if 'result' not in globals():\n"
@@ -60,9 +65,12 @@ def _program(user_code: str) -> str:
 def _artifact_program(user_code: str) -> str:
     encoded = json.dumps(user_code, ensure_ascii=False)
     return (
-        "import os\n"
+        "import os, sys\n"
         "output_path = os.environ['NEXAFLOW_OUTPUT_PATH']\n"
-        "skills_dir = os.environ['NEXAFLOW_SKILLS_DIR']\n"
+        "skills_dir = os.environ.get('NEXAFLOW_SKILLS_DIR', '')\n"
+        "packages_dir = os.environ.get('NEXAFLOW_PACKAGES_DIR', '')\n"
+        "if packages_dir:\n"
+        "    sys.path.insert(0, packages_dir)\n"
         f"exec(compile({encoded}, '<artifact-tool>', 'exec'), globals())\n"
     )
 
@@ -71,6 +79,7 @@ async def _exchange(
     settings: Settings,
     request: dict[str, Any],
     max_response_bytes: int,
+    timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
     async def exchange() -> dict[str, Any]:
         reader, writer = await asyncio.open_unix_connection(
@@ -96,7 +105,11 @@ async def _exchange(
     try:
         return await asyncio.wait_for(
             exchange(),
-            timeout=settings.workflow_sandbox_timeout_seconds + 1,
+            timeout=(
+                timeout_seconds
+                if timeout_seconds is not None
+                else settings.workflow_sandbox_timeout_seconds + 1
+            ),
         )
     except (OSError, TimeoutError) as exc:
         raise WorkflowSandboxError("Code sandbox is unavailable.") from exc
@@ -121,14 +134,22 @@ async def execute_workflow_code(
     settings: Settings,
     code: str,
     inputs: dict[str, Any],
+    skills: list[str] | None = None,
 ) -> WorkflowSandboxResult:
     request = {
         "code": _program(code),
         "stdin": json.dumps(inputs, ensure_ascii=False, separators=(",", ":")),
         "limits": {"timeout_ms": round(settings.workflow_sandbox_timeout_seconds * 1000)},
     }
+    if skills is not None:
+        request["skills"] = skills
 
-    response = await _exchange(settings, request, MAX_RESPONSE_BYTES)
+    response = await _exchange(
+        settings,
+        request,
+        MAX_RESPONSE_BYTES,
+        SKILL_REQUEST_TIMEOUT_SECONDS if skills else None,
+    )
     stdout, stderr, exit_code = _execution_fields(response)
     marker_index = stdout.rfind(RESULT_MARKER)
     if marker_index < 0:
@@ -168,7 +189,40 @@ async def execute_artifact_code(
             },
         },
         MAX_ARTIFACT_RESPONSE_BYTES,
+        SKILL_REQUEST_TIMEOUT_SECONDS if skills else None,
     )
+    return _artifact_result(response, artifact_format, filename)
+
+
+async def execute_skill_artifact(
+    settings: Settings,
+    skill: str,
+    inputs: dict[str, Any],
+    artifact_format: str,
+    filename: str,
+) -> ArtifactSandboxResult:
+    response = await _exchange(
+        settings,
+        {
+            "skill": skill,
+            "stdin": json.dumps(inputs, ensure_ascii=False, separators=(",", ":")),
+            "artifact": {"format": artifact_format, "filename": filename},
+            "limits": {
+                "timeout_ms": round(settings.workflow_sandbox_timeout_seconds * 1000),
+                "max_file_bytes": MAX_ARTIFACT_BYTES,
+            },
+        },
+        MAX_ARTIFACT_RESPONSE_BYTES,
+        SKILL_REQUEST_TIMEOUT_SECONDS,
+    )
+    return _artifact_result(response, artifact_format, filename)
+
+
+def _artifact_result(
+    response: dict[str, Any],
+    artifact_format: str,
+    filename: str,
+) -> ArtifactSandboxResult:
     stdout, stderr, exit_code = _execution_fields(response)
     artifact = response.get("artifact")
     if not isinstance(artifact, dict):

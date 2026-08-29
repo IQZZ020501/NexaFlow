@@ -112,6 +112,7 @@ export function WorkflowNodePalette({
     (tool) =>
       tool.can_view &&
       tool.function_name !== "inline_python" &&
+      tool.function_name !== "create_artifact" &&
       (!query ||
         `${toolDisplayName(tool, t)} ${toolDisplayDescription(tool, t)} ${toolSourceDisplayName(tool.source, t)}`
           .toLowerCase()
