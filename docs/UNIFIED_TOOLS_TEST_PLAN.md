@@ -34,7 +34,7 @@ git log --oneline --decorate -20
 `docs/local/`；不要把带运行环境、账号、资源 ID 或临时数据的验收材料提交到仓库。
 计划中的 `NOT RUN` 是报告模板初始值，不表示当前产品状态。
 
-本期明确非目标不是缺陷：Skill 仅保留禁用标签；不支持 Agent -> Agent、Agent -> Workflow、Workflow -> Workflow；Python Tool 不开放网络、secret、pip 或持久文件；Workflow 不支持 `each_call` 人工审批。
+本期明确非目标不是缺陷：Skill 仅保留禁用标签；不支持 Agent -> Agent、Agent -> Workflow、Workflow -> Workflow；Python Tool 仍不开放 secret、pip 或持久文件。沙箱底层现在支持可选的 Worker 代理公网出站，但在 Python Tool/Skill 契约落地前不对产品入口开放。
 
 ## 1. 测试目标
 
@@ -67,7 +67,7 @@ git log --oneline --decorate -20
 
 - Skill 的创建和执行；只验证“Skill 暂未开放”的入口状态。
 - Agent -> Agent、Agent -> Workflow、Workflow -> Workflow 递归调用。
-- Python Tool 的网络、secret、pip、持久文件或自定义依赖。
+- Skill 的创建和执行，以及 Python Tool 的 pip、持久文件或自定义依赖；Python Tool 的公网出站入口也暂不开放。
 - Workflow 内的 `each_call` 人工审批；本版应展示但禁止选择，并说明原因。
 - 真实生产 MCP、真实第三方写操作和生产数据。
 
@@ -84,7 +84,7 @@ git log --oneline --decorate -20
 
 - 测试连接到非明确命名的临时数据库。
 - 测试 MCP 指向真实外部写系统。
-- sandbox 获得网络、宿主文件或未授权环境变量。
+- sandbox 获得未授权网络（直连或代理访问内网）、宿主文件或未授权环境变量。
 - 同一幂等键产生两次外部写。
 - 发现跨 workspace 数据可见或可执行。
 
@@ -208,7 +208,7 @@ git log --oneline --decorate -20
 | PY-005 | P1 | 合法代码读取 `inputs` 并赋值 object `result` | 异步测试成功，data 匹配 output schema |
 | PY-006 | P1 | arguments 不匹配动态 input schema | 创建测试请求返回 422，不产生 500 |
 | PY-007 | P1 | 未赋值 result、result 非 JSON、primitive、schema 不匹配 | invocation failed，错误码稳定，不发布错误结果 |
-| PY-008 | P0 | 代码尝试 network、socket、env secret、workspace file、fork/exec | sandbox 阻断；宿主无副作用 |
+| PY-008 | P0 | 代码尝试直连 network、访问 socket、env secret、workspace file、fork/exec | 直连网络/敏感资源被阻断；宿主无副作用；若底层启用公网模式，仅代理 HTTP(S) 出站 |
 | PY-009 | P1 | 无限循环、内存、进程、文件、stdout/stderr、输出超限 | 在各自限额内终止；日志截断；模型和下游不接收 stdout/stderr |
 | PY-010 | P1 | sandbox busy | 有界退避后执行或明确失败；不忙等、不无限重试 |
 | PY-011 | P1 | 发布 draft 为 v1 | 创建不可变 ToolVersion，current pointer 指向 v1，默认 pure/auto |
@@ -347,7 +347,7 @@ git log --oneline --decorate -20
 | SEC-004 | P0 | public/API 尝试审批写 Tool | canonical 路径不可进入公开审批接口 |
 | SEC-005 | P0 | MCP DNS rebinding、redirect 到私网、IPv4/IPv6 loopback | 每次连接/redirect 均执行网络策略，普通成员入口拒绝 |
 | SEC-006 | P0 | MCP 响应中的 prompt injection | 作为不可信 Tool data，不改变系统策略或泄露上下文 |
-| SEC-007 | P0 | Python import socket/subprocess/ctypes、读取 `/proc`/env | sandbox 与解释器限制阻断 |
+| SEC-007 | P0 | Python import socket/subprocess/ctypes、读取 `/proc`/env，或绕过代理直连网络 | sandbox 与解释器限制阻断；允许的公网模式只可经 Worker HTTP(S) 代理 |
 | SEC-008 | P0 | API 进程访问 sandbox socket | socket 只存在于 Worker 进程树；API 无路径可达 |
 | SEC-009 | P1 | secret/token 出现在 validation、trace、audit、SSE、前端错误 | 全部脱敏 |
 | SEC-010 | P0 | 参数原型污染键、超深 JSON、NaN/Infinity、非字符串 key | schema/JSON 边界拒绝 |

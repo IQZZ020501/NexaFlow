@@ -105,9 +105,15 @@ def main() -> None:
     )
     parser = argparse.ArgumentParser()
     parser.add_argument("--socket", default="/run/sandbox/sandbox.sock")
+    parser.add_argument("--egress-socket")
     args = parser.parse_args()
     if os.name != "posix":
         raise SystemExit("the sandbox requires a POSIX host")
+    if args.egress_socket is not None:
+        egress_socket = Path(args.egress_socket)
+        if not egress_socket.is_absolute():
+            raise SystemExit("the sandbox egress socket must be absolute")
+        os.environ["SANDBOX_EGRESS_SOCKET"] = str(egress_socket)
     server = SandboxServer(args.socket)
 
     def stop(_signum: int, _frame: Any) -> None:

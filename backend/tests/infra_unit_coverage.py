@@ -2150,6 +2150,37 @@ def test_worker_supervisor_sandbox_commands() -> None:
     assert "--skills-dir" in hard
     assert hard[-2:] == ["--socket", str(socket_path)]
 
+    egress = module.build_sandbox_command(
+        sandbox_python=Path(sys.executable),
+        sandbox_root=sandbox_root,
+        socket_path=socket_path,
+        hard_isolation=True,
+        skills_dir=None,
+        egress_socket=socket_path.with_name("egress.sock"),
+    )
+    assert egress[-2:] == ["--egress-socket", str(socket_path.with_name("egress.sock"))]
+    with patch.dict(os.environ, {}, clear=True):
+        assert module._sandbox_network() == "none"
+    with patch.dict(os.environ, {"SANDBOX_NETWORK": "public"}):
+        assert module._sandbox_network() == "public"
+    with patch.dict(os.environ, {"SANDBOX_NETWORK": "invalid"}):
+        try:
+            module._sandbox_network()
+        except RuntimeError as exc:
+            assert "SANDBOX_NETWORK" in str(exc)
+        else:
+            raise AssertionError("invalid sandbox network mode was accepted")
+    with TemporaryDirectory() as directory:
+        protected = Path(directory) / "egress.sock"
+        protected.write_text("keep")
+        try:
+            module._open_egress_listener(protected)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("non-socket egress path was accepted")
+        assert protected.read_text() == "keep"
+
 
 class _BrokenSandboxWriter:
     def write(self, data):

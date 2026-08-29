@@ -19,6 +19,9 @@ import sys
 import tempfile
 import time
 from typing import Any
+from urllib.parse import urlsplit
+
+from .egress import LocalEgressProxy
 
 RUNNER_UID = int(os.environ.get("SANDBOX_RUNNER_UID", "65532"))
 RUNNER_GID = int(os.environ.get("SANDBOX_RUNNER_GID", "65532"))
@@ -229,7 +232,9 @@ def _read_artifact(path: Path, artifact_format: str, filename: str) -> dict[str,
     }
 
 
-def _sandboxed_child_command(command: list[str], workdir: Path) -> list[str]:
+def _sandboxed_child_command(
+    command: list[str], workdir: Path, network_proxy: str | None = None
+) -> list[str]:
     if sys.platform != "darwin":
         return command
     sandbox_exec = shutil.which("sandbox-exec")
@@ -271,6 +276,13 @@ def _sandboxed_child_command(command: list[str], workdir: Path) -> list[str]:
         ),
         *(f"(allow file-read* (subpath {quoted(path)}))" for path in readable),
     ]
+    if network_proxy is not None:
+        parsed_proxy = urlsplit(network_proxy)
+        if parsed_proxy.hostname != "127.0.0.1" or parsed_proxy.port is None:
+            raise ValueError("sandbox network proxy must use loopback")
+        profile.append(
+            f'(allow network-outbound (remote ip "localhost:{parsed_proxy.port}"))'
+        )
     return [sandbox_exec, "-p", "\n".join(profile), *command]
 
 
@@ -475,50 +487,62 @@ def run_code(
                     "NEXAFLOW_SKILLS_DIR": str(skills_path),
                 }
             )
-        child_path = Path(__file__).with_name("child.py")
-        identity: dict[str, Any] = {}
-        if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
-            identity = {
-                "user": RUNNER_UID,
-                "group": RUNNER_GID,
-                "extra_groups": [],
-                "umask": 0o077,
-            }
-        with stdin_path.open("rb") as input_stream:
-            command = _sandboxed_child_command(
-                [
-                    sys.executable,
-                    "-I",
-                    "-B",
-                    "-S",
-                    str(child_path),
-                    json.dumps(asdict(limits), separators=(",", ":")),
-                    str(code_path),
-                ],
-                workdir,
-            )
-            process = subprocess.Popen(
-                command,
-                cwd=workdir,
-                env=environment,
-                stdin=input_stream,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                close_fds=True,
-                start_new_session=True,
-                **identity,
-            )
-            try:
-                stdout, stderr, error = _collect_output(
-                    process,
-                    limits.max_output_bytes,
-                    time.monotonic() + limits.timeout_ms / 1000,
+        egress_socket = os.environ.get("SANDBOX_EGRESS_SOCKET", "").strip()
+        egress_proxy: LocalEgressProxy | None = None
+        proxy_url: str | None = None
+        try:
+            if egress_socket:
+                egress_proxy = LocalEgressProxy(egress_socket)
+                proxy_url = egress_proxy.start()
+                environment.update(egress_proxy.environment())
+            child_path = Path(__file__).with_name("child.py")
+            identity: dict[str, Any] = {}
+            if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
+                identity = {
+                    "user": RUNNER_UID,
+                    "group": RUNNER_GID,
+                    "extra_groups": [],
+                    "umask": 0o077,
+                }
+            with stdin_path.open("rb") as input_stream:
+                command = _sandboxed_child_command(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-B",
+                        "-S",
+                        str(child_path),
+                        json.dumps(asdict(limits), separators=(",", ":")),
+                        str(code_path),
+                    ],
+                    workdir,
+                    proxy_url,
                 )
-                if error is None:
-                    process.wait()
-            finally:
-                _terminate(process)
-                _terminate_linux_descendants()
+                process = subprocess.Popen(
+                    command,
+                    cwd=workdir,
+                    env=environment,
+                    stdin=input_stream,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    close_fds=True,
+                    start_new_session=True,
+                    **identity,
+                )
+                try:
+                    stdout, stderr, error = _collect_output(
+                        process,
+                        limits.max_output_bytes,
+                        time.monotonic() + limits.timeout_ms / 1000,
+                    )
+                    if error is None:
+                        process.wait()
+                finally:
+                    _terminate(process)
+                    _terminate_linux_descendants()
+        finally:
+            if egress_proxy is not None:
+                egress_proxy.close()
 
         artifact_payload = None
         if error is None and process.returncode == 0 and artifact is not None:

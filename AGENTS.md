@@ -168,6 +168,8 @@ Correctness, safety, evidence, and validation take priority over speed.
   over a private Unix socket and runs each program with CPU, memory, process,
   file, wall-clock, input, and output limits. Its Artifact runtime includes
   python-docx, PyMuPDF, openpyxl, python-pptx, Pillow, and the standard library.
+  Optional `SANDBOX_NETWORK=public` uses a Worker-owned HTTP(S) egress proxy;
+  direct sockets and private/loopback/metadata destinations remain blocked.
   Keep it independent from `backend/app/`; only the Worker supervisor may start
   or reach its socket.
 - `docs/` stores project planning and product/engineering documentation.
@@ -175,7 +177,8 @@ Correctness, safety, evidence, and validation take priority over speed.
   Dockerfile shared by API/worker/frontend containers, the custom PostgreSQL
   Dockerfile, and Nginx examples. The production Worker supervises the sandbox
   source inside its own container and creates a private network/mount/PID/IPC/UTS
-  namespace plus chroot before starting Celery. Its outer Docker AppArmor
+  namespace plus chroot before starting Celery. `NET_ADMIN` is used only to
+  bring up namespace-local loopback for the egress relay, then dropped. Its outer Docker AppArmor
   profile is unconfined so those mount operations are permitted; default seccomp
   and `no-new-privileges` remain enabled. There is no sandbox service or socket
   volume. `scripts/setup-hooks.sh` enables the repository Git hooks.
@@ -351,8 +354,8 @@ broad. Never claim a check passed unless it completed successfully.
 - `deploy/` changes: render the base, development, and pull-only server Compose
   configurations, verify the unique image list, build the affected image, and
   run the `sandbox-runtime` target's direct container checks plus embedded-Worker
-  hard-isolation self-check when the unified application image or sandbox wiring
-  changes.
+  hard-isolation self-check (including the public egress mode when enabled) when
+  the unified application image or sandbox wiring changes.
 - Coverage gates (do not claim a percentage unless measured):
   - Backend: `make coverage` / `backend/scripts/coverage.sh` — both use the
     cross-platform `backend/scripts/coverage.py` runner to execute all suites

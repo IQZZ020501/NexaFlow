@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from unittest import mock
 
+from sandbox import egress as egress_module
 from sandbox import runner as runner_module
 from sandbox import server as server_module
 from sandbox.healthcheck import (
@@ -160,6 +161,150 @@ def check_run_code_validation() -> None:
                 assert "sandbox-exec" in str(exc)
             else:
                 raise AssertionError("missing macOS sandbox-exec was accepted")
+        with mock.patch.object(runner_module.sys, "platform", "darwin"), mock.patch.object(
+            runner_module.shutil, "which", return_value="/usr/bin/sandbox-exec"
+        ):
+            command_with_proxy = runner_module._sandboxed_child_command(
+                command, workdir, "http://127.0.0.1:4321"
+            )
+            assert "localhost:4321" in command_with_proxy[2]
+
+
+def check_egress_policy() -> None:
+    assert egress_module._is_public_address("1.1.1.1")
+    for address in ("127.0.0.1", "10.0.0.1", "169.254.169.254", "::1"):
+        assert not egress_module._is_public_address(address), address
+    assert egress_module._destination("GET", "http://example.com/a?q=1")[2] == "/a?q=1"
+    assert egress_module._host_port("[2001:db8::1]:443") == ("2001:db8::1", 443)
+    for target in ("http://example.com:22/", "https://example.com/", "not-a-url"):
+        try:
+            egress_module._destination("GET", target)
+        except egress_module.ProxyRequestError:
+            pass
+        else:
+            raise AssertionError(f"disallowed proxy target accepted: {target}")
+
+    public_info = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
+    with mock.patch.object(egress_module.socket, "getaddrinfo", return_value=public_info):
+        assert egress_module._resolve_public("example.test", 80) == ("93.184.216.34",)
+    mixed_info = public_info + [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.10", 80))
+    ]
+    with mock.patch.object(egress_module.socket, "getaddrinfo", return_value=mixed_info):
+        try:
+            egress_module._resolve_public("example.test", 80)
+        except egress_module.ProxyRequestError as exc:
+            assert "not public" in str(exc)
+        else:
+            raise AssertionError("mixed public/private DNS result was accepted")
+
+
+def check_egress_relay() -> None:
+    client, proxy_side = socket.socketpair()
+    upstream_peer, upstream_side = socket.socketpair()
+    original_connect = egress_module._connect
+    egress_module._connect = lambda host, port: upstream_side
+    thread = threading.Thread(
+        target=egress_module._serve_client, args=(proxy_side,), daemon=True
+    )
+    thread.start()
+    try:
+        client.sendall(
+            b"GET http://example.com/ready?x=1 HTTP/1.1\r\n"
+            b"Host: example.com\r\nConnection: close\r\n\r\n"
+        )
+        forwarded = upstream_peer.recv(4096)
+        assert b"GET /ready?x=1 HTTP/1.1" in forwarded, forwarded
+        assert b"Host: example.com\r\n" in forwarded, forwarded
+        upstream_peer.sendall(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+        )
+        response = client.recv(4096)
+        assert b"200 OK" in response and response.endswith(b"ok"), response
+    finally:
+        egress_module._connect = original_connect
+        client.close()
+        upstream_peer.close()
+        upstream_side.close()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+
+
+def check_local_egress_proxy() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "egress.sock"
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(path))
+        listener.listen(1)
+
+        def fake_egress() -> None:
+            client, _ = listener.accept()
+            with client:
+                assert b"GET http://example.com/ready" in client.recv(4096)
+                client.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"
+                    b"Connection: close\r\n\r\nok"
+                )
+
+        thread = threading.Thread(target=fake_egress, daemon=True)
+        thread.start()
+        proxy = egress_module.LocalEgressProxy(path)
+        proxy.start()
+        assert proxy.environment()["HTTP_PROXY"] == proxy.url
+        try:
+            port = int(proxy.url.rsplit(":", 1)[1])
+            with socket.create_connection(("127.0.0.1", port)) as client:
+                client.sendall(
+                    b"GET http://example.com/ready HTTP/1.1\r\n"
+                    b"Host: example.com\r\n\r\n"
+                )
+                response = client.recv(4096)
+            assert response.endswith(b"ok"), response
+        finally:
+            proxy.close()
+            listener.close()
+            thread.join(timeout=2)
+            assert not thread.is_alive()
+
+    client, proxy_side = socket.socketpair()
+    thread = threading.Thread(
+        target=egress_module._serve_client, args=(proxy_side,), daemon=True
+    )
+    thread.start()
+    try:
+        client.sendall(
+            b"GET http://127.0.0.1/metadata HTTP/1.1\r\n"
+            b"Host: 127.0.0.1\r\n\r\n"
+        )
+        response = client.recv(4096)
+        assert response.startswith(b"HTTP/1.1 403 Forbidden"), response
+    finally:
+        client.close()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
+
+    client, proxy_side = socket.socketpair()
+    upstream_peer, upstream_side = socket.socketpair()
+    original_connect = egress_module._connect
+    egress_module._connect = lambda host, port: upstream_side
+    thread = threading.Thread(
+        target=egress_module._serve_client, args=(proxy_side,), daemon=True
+    )
+    thread.start()
+    try:
+        client.sendall(
+            b"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com\r\n\r\n"
+            b"client-hello"
+        )
+        assert client.recv(4096).startswith(b"HTTP/1.1 200 Connection Established")
+        assert upstream_peer.recv(4096) == b"client-hello"
+    finally:
+        egress_module._connect = original_connect
+        client.close()
+        upstream_peer.close()
+        upstream_side.close()
+        thread.join(timeout=2)
+        assert not thread.is_alive()
 
 
 def check_artifact_outputs_and_skills() -> None:
@@ -829,6 +974,9 @@ def check_server_cli_subprocess() -> None:
 def main() -> None:
     check_limits_validation()
     check_run_code_validation()
+    check_egress_policy()
+    check_egress_relay()
+    check_local_egress_proxy()
     check_artifact_outputs_and_skills()
     check_artifact_error_paths()
     check_run_limits()

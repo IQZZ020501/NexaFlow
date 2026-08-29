@@ -9,10 +9,22 @@ from pathlib import Path
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
 import time
+
+
+SANDBOX_NETWORK_NONE = "none"
+SANDBOX_NETWORK_PUBLIC = "public"
+
+
+def _sandbox_network() -> str:
+    value = os.environ.get("SANDBOX_NETWORK", SANDBOX_NETWORK_NONE).strip().lower()
+    if value not in {SANDBOX_NETWORK_NONE, SANDBOX_NETWORK_PUBLIC}:
+        raise RuntimeError("SANDBOX_NETWORK must be either 'none' or 'public'.")
+    return value
 
 
 def build_sandbox_command(
@@ -22,6 +34,7 @@ def build_sandbox_command(
     socket_path: Path,
     hard_isolation: bool,
     skills_dir: Path | None,
+    egress_socket: Path | None = None,
 ) -> list[str]:
     server = [
         str(sandbox_python),
@@ -31,6 +44,8 @@ def build_sandbox_command(
         "--socket",
         str(socket_path),
     ]
+    if egress_socket is not None:
+        server.extend(["--egress-socket", str(egress_socket)])
     if not hard_isolation:
         return server
     command = [
@@ -45,7 +60,10 @@ def build_sandbox_command(
     ]
     if skills_dir is not None:
         command.extend(["--skills-dir", str(skills_dir)])
-    return [*command, "--socket", str(socket_path)]
+    command.extend(["--socket", str(socket_path)])
+    if egress_socket is not None:
+        command.extend(["--egress-socket", str(egress_socket)])
+    return command
 
 
 def _sandbox_runtime() -> tuple[Path, Path]:
@@ -98,6 +116,59 @@ def _skills_directory() -> Path | None:
     return path.resolve()
 
 
+def _open_egress_listener(path: Path) -> socket.socket:
+    if not path.is_absolute():
+        raise RuntimeError("sandbox egress socket must be absolute.")
+    if path.is_symlink():
+        raise RuntimeError(f"refusing to replace symlink: {path}")
+    if path.exists():
+        if not stat.S_ISSOCK(path.stat().st_mode):
+            raise RuntimeError(f"refusing to replace non-socket path: {path}")
+        path.unlink()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        listener.bind(str(path))
+        listener.listen(16)
+        path.chmod(0o660)
+        return listener
+    except BaseException:
+        listener.close()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _start_egress_proxy(
+    listener: socket.socket, sandbox_root: Path, sandbox_python: Path
+) -> subprocess.Popen[bytes]:
+    environment = {
+        "PATH": f"{sandbox_python.parent}:/usr/bin:/bin",
+        "PYTHONUNBUFFERED": "1",
+    }
+    identity: dict[str, object] = {}
+    if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
+        identity = {"user": 65532, "group": 65532, "extra_groups": []}
+    return subprocess.Popen(
+        [
+            str(sandbox_python),
+            "-B",
+            "-m",
+            "sandbox.egress",
+            "--fd",
+            str(listener.fileno()),
+        ],
+        cwd=sandbox_root,
+        env=environment,
+        close_fds=True,
+        pass_fds=(listener.fileno(),),
+        start_new_session=True,
+        **identity,
+    )
+
+
 def _probe(socket_path: Path) -> bool:
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -121,7 +192,9 @@ def _wait_ready(process: subprocess.Popen[bytes], socket_path: Path) -> bool:
     return False
 
 
-def _sandbox_self_check(socket_path: Path, *, hard_isolation: bool) -> bool:
+def _sandbox_self_check(
+    socket_path: Path, *, hard_isolation: bool, network_enabled: bool = False
+) -> bool:
     isolation_checks = ""
     if hard_isolation:
         isolation_checks = (
@@ -138,6 +211,12 @@ def _sandbox_self_check(socket_path: Path, *, hard_isolation: bool) -> bool:
             "    raise AssertionError('sandbox network is reachable')\n"
             "finally:\n"
             "    probe.close()\n"
+        )
+    if network_enabled:
+        isolation_checks += (
+            "assert os.environ.get('HTTP_PROXY', '').startswith('http://127.0.0.1:')\n"
+            "assert os.environ.get('HTTPS_PROXY') == os.environ['HTTP_PROXY']\n"
+            "assert os.environ.get('NO_PROXY') == ''\n"
         )
     request = {
         "code": (
@@ -249,6 +328,7 @@ def main() -> int:
     try:
         sandbox_root, sandbox_python = _sandbox_runtime()
         skills_dir = _skills_directory()
+        network_mode = _sandbox_network()
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -274,9 +354,27 @@ def main() -> int:
         return 2
 
     sandbox: subprocess.Popen[bytes] | None = None
+    egress_proxy: subprocess.Popen[bytes] | None = None
+    egress_listener: socket.socket | None = None
+    egress_socket: Path | None = None
+    egress_socket_owned = False
     worker: subprocess.Popen[bytes] | None = None
     hard_isolation = sys.platform == "linux" and os.geteuid() == 0
     try:
+        if network_mode == SANDBOX_NETWORK_PUBLIC:
+            egress_socket = socket_path.with_name("egress.sock")
+            if egress_socket == socket_path:
+                raise RuntimeError("sandbox egress socket collides with sandbox socket")
+            egress_listener = _open_egress_listener(egress_socket)
+            egress_socket_owned = True
+            try:
+                egress_proxy = _start_egress_proxy(
+                    egress_listener, sandbox_root, sandbox_python
+                )
+            finally:
+                egress_listener.close()
+                egress_listener = None
+
         sandbox_environment = {
             "PATH": f"{sandbox_python.parent}:/usr/bin:/bin",
             "PYTHONUNBUFFERED": "1",
@@ -292,6 +390,7 @@ def main() -> int:
                     socket_path=socket_path,
                     hard_isolation=use_hard_isolation,
                     skills_dir=skills_dir,
+                    egress_socket=egress_socket,
                 ),
                 cwd=sandbox_root,
                 env=sandbox_environment,
@@ -314,6 +413,7 @@ def main() -> int:
             if not _sandbox_self_check(
                 socket_path,
                 hard_isolation=(hard_isolation or sys.platform == "darwin"),
+                network_enabled=egress_socket is not None,
             ):
                 print("Embedded sandbox self-check failed.", file=sys.stderr)
                 return 4
@@ -339,18 +439,32 @@ def main() -> int:
         while True:
             worker_status = worker.poll()
             sandbox_status = sandbox.poll()
+            egress_status = egress_proxy.poll() if egress_proxy is not None else None
             if worker_status is not None:
                 return worker_status
             if sandbox_status is not None:
                 _stop(worker)
                 print("Embedded sandbox exited while Worker was running.", file=sys.stderr)
                 return sandbox_status or 1
+            if egress_status is not None:
+                _stop(worker)
+                _stop(sandbox)
+                print("Sandbox egress proxy exited while Worker was running.", file=sys.stderr)
+                return egress_status or 1
             time.sleep(0.2)
     except KeyboardInterrupt:
         return 130
     finally:
         _stop(worker)
         _stop(sandbox)
+        _stop(egress_proxy)
+        if egress_listener is not None:
+            egress_listener.close()
+        if egress_socket is not None and egress_socket_owned:
+            try:
+                egress_socket.unlink()
+            except FileNotFoundError:
+                pass
         if temporary_socket_dir is not None:
             shutil.rmtree(temporary_socket_dir, ignore_errors=True)
 

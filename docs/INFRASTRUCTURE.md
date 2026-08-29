@@ -90,12 +90,13 @@
 
 ## 仓库与 backend 配置
 
-- `.env.example` — 唯一环境变量模板：PostgreSQL 组件、环境/日志/JWT/模型密钥/知识存储/Qdrant/Redis/MCP/CORS/Agent 外部请求限流与引导管理员；宿主机与 Compose 共用根 `.env`
+- `.env.example` — 唯一环境变量模板：PostgreSQL 组件、环境/日志/JWT/模型密钥/知识存储/Qdrant/Redis/MCP/CORS/Agent 外部请求限流、沙箱网络模式与引导管理员；宿主机与 Compose 共用根 `.env`
 - `backend/pyproject.toml` — 项目元数据与依赖声明（FastAPI/Celery/LangChain/LangGraph/MCP/Qdrant/Alembic 等）
 - `backend/README.md` — 后台 worker 运行说明（Celery 命令与共享 `KNOWLEDGE_STORAGE_DIR`/`QDRANT_URL` 要求）
-- `backend/Makefile` — 开发入口；`make dev` 启动基础设施/迁移/API，`make worker` 从源码启动 Celery 与受监管 Sandbox Broker
+- `backend/Makefile` — 开发入口；`make dev` 启动基础设施/迁移/API，`make worker` 默认以 `SANDBOX_NETWORK=public` 启动 Celery 与受监管 Sandbox Broker（可传 `SANDBOX_NETWORK=none`）
 - `backend/scripts/dev.py` — `make dev` 的跨平台 Uvicorn 编排
-- `backend/scripts/worker.py` — Worker/Sandbox 进程监管、平台隔离选择、启动探针与 capability 收敛
+- `backend/scripts/worker.py` — Worker/Sandbox 进程监管、平台隔离选择、受控公网 egress 代理、启动探针与 capability 收敛
+- `sandbox/egress.py` — Worker 侧 Unix→HTTP(S) 公网代理与沙箱内 loopback relay；拒绝非全局公网地址
 - `backend/scripts/coverage.py` — `make coverage` 的跨平台并行套件、隔离存储与覆盖率合并
 - `backend/scripts/coverage.sh` — POSIX 环境兼容入口，转发到 Python coverage runner
 - `backend/uv.lock` — uv 依赖锁文件

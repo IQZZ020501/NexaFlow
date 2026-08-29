@@ -29,9 +29,10 @@
 ## 关键约定
 
 - 仓库根 `.env` 是宿主机后端与 Compose 的唯一配置源；Compose 命令显式传 `--env-file .env`，并通过 `NEXAFLOW_APP_IMAGE` / `NEXAFLOW_POSTGRES_IMAGE` 选择本地或镜像仓库标签。
-- API、Worker 与 Frontend 共享同一应用镜像并保持三个独立容器；Sandbox 不是 Compose 服务。Worker 必须保留 namespace/chroot 所需 capability，关闭会拦截 mount 的 Docker 默认 AppArmor profile，保留 `no-new-privileges` 和默认 seccomp，并在启动 Celery 前丢弃 capability。
+- API、Worker 与 Frontend 共享同一应用镜像并保持三个独立容器；Sandbox 不是 Compose 服务。Worker 必须保留 namespace/chroot 与临时 loopback 所需 capability，关闭会拦截 mount 的 Docker 默认 AppArmor profile，保留 `no-new-privileges` 和默认 seccomp，并在启动 Celery 前丢弃 capability。`SANDBOX_NETWORK=public` 只开启经 Worker Unix→HTTP(S) 代理的公网出站；设为 `none` 可关闭。
 - API 与 Worker 必须共享 `KNOWLEDGE_STORAGE_DIR` 并连接同一个 `QDRANT_URL`，否则 worker 会漏读上传文件或写入不同向量库。
 - API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL/Redis；该组合 Worker 只运行一个实例，由 Beat 重新派发 queued/租约过期的 Knowledge Task 与 Agent Run。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
+- 根 `.env` 中 `SANDBOX_NETWORK=public`（模板默认值）启用沙箱公网 HTTP(S) 出站；修改后需重启 Worker。设置为 `none` 可回到完全无网络模式。
 - `AGENT_EXECUTOR_HEARTBEAT_SECONDS` 必须小于 `AGENT_EXECUTOR_LEASE_SECONDS` 的一半。部署更新应先执行 Alembic，再滚动更新 API/Worker；回滚则先回滚进程，再降级 migration。
 - 公开链接与 Agent API 的 Run 提交通过同一 Redis 做双桶限流；Redis 不可用时这些成本型入口返回 503，避免恢复后集中执行未受限请求。
 - FastAPI `/docs` 和 `/openapi.json` 保留完整接口文档；Agent 概览中的专属文档页单独使用 Agent API Key 解锁，不替代或裁剪全局 Swagger。
