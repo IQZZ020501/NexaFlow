@@ -11,6 +11,7 @@ The built-in bundles below are NexaFlow-authored renderers:
 
 - `documents` — Word and Google Docs-targeted DOCX workflows
 - `pdf` — PDF creation, inspection, and rendering workflows
+- `pptx` — new PowerPoint decks with templates, brand themes, icons, and tables
 - `spreadsheets` — spreadsheet creation and analysis guidance
 
 They are intentionally small and project-specific; they are not copies of an

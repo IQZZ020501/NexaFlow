@@ -24,12 +24,12 @@ import {
   SquareIcon,
   SearchIcon,
   UserIcon,
-  WrenchIcon,
 } from "lucide-react"
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
+import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -39,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AgentAttachmentList } from "@/components/agents/agent-attachment-list"
+import { MessageTimestamp } from "@/components/agents/message-timestamp"
 import { ToolInputPreview } from "@/components/agents/tool-input-preview"
 import {
   Dialog,
@@ -206,7 +207,10 @@ function PublicToolEventRow({
         {event.type === "knowledge" ? (
           <DatabaseIcon className="size-3.5" />
         ) : (
-          <WrenchIcon className="size-3.5" />
+          <BuiltinToolIcon
+            functionName={event.tool_name}
+            className="size-3.5"
+          />
         )}
       </span>
       <span className="min-w-0 flex-1">
@@ -392,8 +396,16 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
         : [event]
     )
   }, [run.progress])
+  const runCancelled = run.status === "cancelled"
+
+  function effectiveStatus(event: ExternalAgentProgressEvent) {
+    if (event.status !== "running" || !runCancelled) return event.status
+    return "failed"
+  }
 
   function title(event: ExternalAgentProgressEvent) {
+    if (runCancelled && event.status !== "succeeded")
+      return t("已停止")
     if (event.type === "knowledge") return t("知识库检索")
     if (event.type === "tool") return publicToolName(event, t) || t("工具")
     if (event.type === "answer")
@@ -406,12 +418,14 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
   }
 
   function detail(event: ExternalAgentProgressEvent) {
+    const status = effectiveStatus(event)
+    if (event.status === "running" && status !== "running") return null
     if (event.type === "analysis" || event.type === "answer") return null
     if (event.stage === "preparing") return null
-    if (event.status === "running") {
+    if (status === "running") {
       return t("正在调用 {name}", { name: title(event) })
     }
-    if (event.status === "failed") {
+    if (status === "failed") {
       return typeof event.output === "string" && event.output
         ? event.output
         : t("调用失败")
@@ -423,14 +437,17 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
   }
 
   function statusIcon(event: ExternalAgentProgressEvent) {
-    if (event.status === "running") {
+    const status = effectiveStatus(event)
+    if (status === "running") {
       return <LoaderCircleIcon className="size-4 animate-spin text-sky-600" />
     }
-    if (event.status === "failed") {
+    if (status === "failed") {
       return <CircleXIcon className="size-4 text-destructive" />
     }
     return <CircleCheckIcon className="size-4 text-emerald-600" />
   }
+
+  if (timeline.length === 0 && runCancelled) return null
 
   return (
     <details
@@ -1667,88 +1684,104 @@ export function PublicAgentChat({
               </div>
             ) : (
               <div className="space-y-8">
-                {visibleRuns.map((run) => (
-                  <article key={run.id} className="space-y-4">
-                    <div className="flex items-start gap-2">
-                      <div className="ml-auto flex max-w-[85%] flex-col items-end gap-1">
-                        <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
-                          {run.question}
+                {visibleRuns.map((run) => {
+                  const answerStartedAt = run.progress.findLast(
+                    (event) => event.type === "answer"
+                  )?.created_at
+                  return (
+                    <article key={run.id} className="space-y-4">
+                      <div className="flex items-start gap-2">
+                        <div className="ml-auto flex max-w-[85%] flex-col items-end gap-1">
+                          <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
+                            {run.question}
+                          </div>
+                          <div className="flex items-start gap-1">
+                            <MessageTimestamp value={run.created_at} />
+                            <CopyMessageButton value={run.question} />
+                          </div>
                         </div>
-                        <CopyMessageButton value={run.question} />
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
+                          <UserIcon className="size-3.5" />
+                        </span>
                       </div>
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
-                        <UserIcon className="size-3.5" />
-                      </span>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
-                        <BotIcon className="size-4" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
-                          <PublicExecutionProcess run={run} />
-                          {toolCallsByRun[run.id]
-                            ?.filter(
-                              (call) => call.status === "awaiting_approval"
-                            )
-                            .map((call) => (
-                              <PublicToolApproval
-                                key={call.call_id}
-                                runId={run.id}
-                                call={call}
-                                resolvingCallId={resolvingCallId}
-                                onDecision={(callId, decision) =>
-                                  handleToolCallDecision(
-                                    run.id,
-                                    callId,
-                                    decision
-                                  )
-                                }
-                                t={t}
+                      <div className="flex items-start gap-3">
+                        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
+                          <BotIcon className="size-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
+                            <PublicExecutionProcess run={run} />
+                            {toolCallsByRun[run.id]
+                              ?.filter(
+                                (call) => call.status === "awaiting_approval"
+                              )
+                              .map((call) => (
+                                <PublicToolApproval
+                                  key={call.call_id}
+                                  runId={run.id}
+                                  call={call}
+                                  resolvingCallId={resolvingCallId}
+                                  onDecision={(callId, decision) =>
+                                    handleToolCallDecision(
+                                      run.id,
+                                      callId,
+                                      decision
+                                    )
+                                  }
+                                  t={t}
+                                />
+                              ))}
+                            {run.result ? (
+                              <MarkdownContent
+                                content={withArtifactDownloadLinks(
+                                  run.result,
+                                  run.progress
+                                )}
+                                className="text-sm leading-6"
                               />
-                            ))}
-                          {run.result ? (
-                            <MarkdownContent
-                              content={withArtifactDownloadLinks(
-                                run.result,
-                                run.progress
-                              )}
-                              className="text-sm leading-6"
-                            />
-                          ) : run.status === "failed" ? (
-                            <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                              {run.error || t("回答失败，请稍后重试。")}
-                            </p>
-                          ) : run.status === "cancelled" ? (
-                            <p className="text-sm text-muted-foreground">
-                              {t("运行已取消")}
-                            </p>
+                            ) : run.status === "failed" ? (
+                              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                                {run.error || t("回答失败，请稍后重试。")}
+                              </p>
+                            ) : run.status === "cancelled" ? (
+                              <p className="text-sm text-muted-foreground">
+                                {t("运行已取消")}
+                              </p>
+                            ) : null}
+                          </div>
+                          {answerStartedAt ||
+                          (run.status === "succeeded" && run.result) ? (
+                            <div className="flex items-start justify-between gap-2">
+                              <MessageTimestamp value={answerStartedAt} />
+                              {run.status === "succeeded" && run.result ? (
+                                <RunActionBar
+                                  result={run.result}
+                                  feedback={run.feedback}
+                                  regenerateDisabled={
+                                    isSending ||
+                                    isRunsLoading ||
+                                    Boolean(regeneratingRunId)
+                                  }
+                                  regenerating={regeneratingRunId === run.id}
+                                  feedbackPending={
+                                    feedbackPendingRunId === run.id
+                                  }
+                                  onRegenerate={() =>
+                                    void handleRegenerateRun(run.id)
+                                  }
+                                  onFeedback={(value) =>
+                                    void handleRunFeedback(run.id, value)
+                                  }
+                                  t={t}
+                                />
+                              ) : null}
+                            </div>
                           ) : null}
                         </div>
-                        {run.status === "succeeded" && run.result ? (
-                          <RunActionBar
-                            result={run.result}
-                            feedback={run.feedback}
-                            regenerateDisabled={
-                              isSending ||
-                              isRunsLoading ||
-                              Boolean(regeneratingRunId)
-                            }
-                            regenerating={regeneratingRunId === run.id}
-                            feedbackPending={feedbackPendingRunId === run.id}
-                            onRegenerate={() =>
-                              void handleRegenerateRun(run.id)
-                            }
-                            onFeedback={(value) =>
-                              void handleRunFeedback(run.id, value)
-                            }
-                            t={t}
-                          />
-                        ) : null}
                       </div>
-                    </div>
-                  </article>
-                ))}
+                    </article>
+                  )
+                })}
               </div>
             )}
           </div>

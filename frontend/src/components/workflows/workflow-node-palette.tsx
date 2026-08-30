@@ -11,6 +11,7 @@ import { Popover as PopoverPrimitive, Tabs as TabsPrimitive } from "radix-ui"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Input } from "@/components/ui/input"
 import type { TFunction, TranslationKey } from "@/i18n"
 import type { Agent } from "@/lib/api/agents"
@@ -329,7 +330,6 @@ export function WorkflowNodePalette({
                     </button>
                   ) : null}
                   {visibleTools.map((tool) => {
-                    const Icon = NODE_ICONS.tool
                     const disabledReason = workflowToolDisabledReason(tool)
                     return (
                       <button
@@ -351,7 +351,10 @@ export function WorkflowNodePalette({
                         }}
                       >
                         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-                          <Icon className="size-4" />
+                          <BuiltinToolIcon
+                            functionName={tool.function_name}
+                            className="size-4"
+                          />
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">

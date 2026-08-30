@@ -14,9 +14,11 @@ logger = get_logger("celery")
 def worker_pool_for_platform(platform: str) -> str:
     # billiard's prefork pool requires os.fork() and inherited pipe handles.
     # Windows only has spawn, so prefork workers die with an invalid-handle
-    # error in the pool workloop; macOS avoids unsafe HTTPS work after a
-    # multithreaded fork. Both platforms run the solo pool.
-    return "solo" if platform in ("darwin", "win32") else "prefork"
+    # error in the pool workloop. macOS uses threads so HTTPS clients are not
+    # inherited across a fork, while independent runs still overlap.
+    if platform == "darwin":
+        return "threads"
+    return "solo" if platform == "win32" else "prefork"
 
 
 @task_failure.connect

@@ -6374,9 +6374,37 @@ def test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch() -> 
 def test_celery_worker_pool_is_fork_safe_without_prefork() -> None:
     from app.infrastructure.celery import worker_pool_for_platform
 
-    assert worker_pool_for_platform("darwin") == "solo"
+    assert worker_pool_for_platform("darwin") == "threads"
     assert worker_pool_for_platform("win32") == "solo"
     assert worker_pool_for_platform("linux") == "prefork"
+
+
+def test_celery_nonfork_pool_runs_tasks_concurrently() -> None:
+    import threading
+
+    from celery.concurrency import get_implementation
+
+    from app.infrastructure.celery import worker_pool_for_platform
+
+    pool = get_implementation(worker_pool_for_platform("darwin"))(limit=2)
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release = threading.Event()
+
+    def block(name: str) -> None:
+        (first_started if name == "first" else second_started).set()
+        if name == "first":
+            release.wait(2)
+
+    pool.start()
+    try:
+        pool.apply_async(block, args=("first",), callback=lambda _: None)
+        assert first_started.wait(2)
+        pool.apply_async(block, args=("second",), callback=lambda _: None)
+        assert second_started.wait(2)
+    finally:
+        release.set()
+        pool.stop()
 
 
 def test_worker_database_rejects_in_memory_sqlite() -> None:
@@ -6892,6 +6920,7 @@ def main() -> None:
     test_mcp_server_to_response()
     test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch()
     test_celery_worker_pool_is_fork_safe_without_prefork()
+    test_celery_nonfork_pool_runs_tasks_concurrently()
     test_worker_database_rejects_in_memory_sqlite()
     test_windows_event_loop_policy_is_selector_based()
     test_agent_live_stream_round_trip()

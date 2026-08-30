@@ -1388,12 +1388,29 @@ async def exercise_repository_runs(
 
         # events
         event = await agent_repository.append_agent_run_event(
-            db, workspace_id, r3.id, {"type": "process", "message": "hi"}
+            db,
+            workspace_id,
+            r3.id,
+            {
+                "type": "process",
+                "event": {
+                    "type": "thought",
+                    "status": "succeeded",
+                    "turn": 1,
+                    "tool_name": "",
+                    "summary": "agent.answer_ready",
+                },
+            },
         )
         assert event.id is not None
+        answer_started_at = event.event["event"]["created_at"]
+        assert answer_started_at == event.created_at.isoformat()
         await db.commit()
         events = await agent_repository.list_agent_run_events(db, r3.id)
         assert len(events) == 1
+        projected = await agent_repository.get_agent_run_by_id(db, r3.id)
+        assert projected is not None
+        assert projected.events[0]["created_at"] == answer_started_at
         after = await agent_repository.list_agent_run_events(
             db, r3.id, after=events[0].id
         )

@@ -1173,6 +1173,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             "inline_python",
             "skill_documents",
             "skill_pdf",
+            "skill_pptx",
             "skill_spreadsheets",
         }
         tool = next(tool for tool in tools if tool.stable_key == "current_time")
@@ -1190,7 +1191,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert policy.approval == "auto"
         assert policy.effect == "pure"
 
-        for skill_name in ("documents", "pdf", "spreadsheets"):
+        for skill_name in ("documents", "pdf", "pptx", "spreadsheets"):
             skill_tool = next(
                 item for item in tools if item.stable_key == f"skill_{skill_name}"
             )
@@ -1215,8 +1216,24 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             assert "code" not in skill_properties
             if skill_name in {"documents", "pdf"}:
                 assert set(skill_properties) == {"filename", "content"}
-            else:
+            elif skill_name == "spreadsheets":
                 assert set(skill_properties) == {"filename", "workbook"}
+            else:
+                assert set(skill_properties) == {"filename", "presentation"}
+                presentation_schema = skill_properties["presentation"]
+                assert presentation_schema["properties"]["template"]["enum"] == [
+                    "minimal",
+                    "editorial",
+                    "bold",
+                ]
+                slide_schema = presentation_schema["properties"]["slides"]["items"]
+                assert slide_schema["properties"]["layout"]["enum"] == [
+                    "section",
+                    "bullets",
+                    "two_column",
+                    "icons",
+                    "table",
+                ]
             assert skill_policy.workflow_callable is True
             assert skill_policy.approval == "auto"
 
@@ -5159,6 +5176,108 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.ok is False
     assert result.error_code == "mcp_request_failed"
     assert result.outcome == "uncertain"
+    # Artifact format does not match filename (tool_adapters.py:176-181).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": "x", "format": "pdf", "filename": "report.docx"},
+        dataclasses.replace(context, idempotency_key="adapter-format"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    assert "does not match" in result.error_message
+    # Artifact non-string content (tool_adapters.py:182-184, 244-248).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": 42, "filename": "notes.txt"},
+        dataclasses.replace(context, idempotency_key="adapter-content-type"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    # Artifact invalid content mode (tool_adapters.py:185-192).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": "x", "content_mode": "binary", "filename": "notes.txt"},
+        dataclasses.replace(context, idempotency_key="adapter-mode"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    # Artifact text mode on a rich format (tool_adapters.py:193-202).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": "plain", "content_mode": "text", "filename": "report.pdf"},
+        dataclasses.replace(context, idempotency_key="adapter-rich-text"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    # Artifact invalid skills (tool_adapters.py:203-215).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {
+            "content": "x",
+            "content_mode": "text",
+            "filename": "notes.txt",
+            "skills": ["documents", "documents"],
+        },
+        dataclasses.replace(context, idempotency_key="adapter-skills"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    # Artifact generator rejected by preflight (tool_adapters.py:222-229).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": "def broken(:", "filename": "report.pdf"},
+        dataclasses.replace(context, idempotency_key="adapter-preflight"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_code_invalid"
+    assert "syntax error" in result.error_message
+    # Artifact sandbox busy (tool_adapters.py:240-241).
+    with patch(
+        "app.application.tool_adapters.execute_artifact_code",
+        new=AsyncMock(side_effect=WorkflowSandboxBusyError("busy")),
+    ):
+        try:
+            await builtin.invoke(
+                artifact_snapshot,
+                {"content": "x", "filename": "report.docx"},
+                dataclasses.replace(context, idempotency_key="adapter-busy"),
+            )
+        except ToolAdapterBusy:
+            pass
+        else:
+            raise AssertionError("A busy artifact sandbox must raise ToolAdapterBusy.")
+    # Artifact missing parameters (tool_adapters.py:244-248).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {},
+        dataclasses.replace(context, idempotency_key="adapter-missing"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    assert "parameters are invalid" in result.error_message
+    # Artifact storage rejection (tool_adapters.py:264-265).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": "x", "content_mode": "text", "filename": "notes.txt"},
+        dataclasses.replace(context, idempotency_key=""),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    # Skill adapter invalid configuration (tool_adapters.py:157-160).
+    broken_skill_snapshot = dataclasses.replace(
+        snapshot,
+        input_schema=skill_version.input_schema,
+        output_schema=skill_version.output_schema,
+        execution_spec={"builtin": "skill"},
+    )
+    result = await builtin.invoke(
+        broken_skill_snapshot,
+        {"filename": "skill-report.docx", "content": "# x"},
+        dataclasses.replace(context, idempotency_key="adapter-bad-skill"),
+    )
+    assert result.ok is False
+    assert result.error_code == "skill_failed"
+    assert "configuration is invalid" in result.error_message
 
 
 def test_workspace_creation_initializes_system_catalog() -> None:
@@ -5185,6 +5304,7 @@ def test_workspace_creation_initializes_system_catalog() -> None:
             "current_time",
             "documents_skill",
             "pdf_skill",
+            "pptx_skill",
             "spreadsheets_skill",
         }
         run(assert_tool_policy_revision_compare_and_swap(workspace_id))

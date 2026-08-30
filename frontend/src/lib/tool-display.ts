@@ -23,6 +23,7 @@ const ARTIFACT_TOOL_FUNCTIONS = new Set([
   "create_artifact",
   "documents_skill",
   "pdf_skill",
+  "pptx_skill",
   "spreadsheets_skill",
 ])
 
@@ -70,9 +71,10 @@ export function builtinToolDisplayName(functionName: string, t: TFunction) {
   if (functionName === "inline_python") return t("Python 代码")
   if (functionName === "current_time") return t("当前时间")
   if (functionName === "create_artifact") return t("创建文件")
-  if (functionName === "documents_skill") return t("文档 Skill")
-  if (functionName === "pdf_skill") return t("PDF Skill")
-  if (functionName === "spreadsheets_skill") return t("表格 Skill")
+  if (functionName === "documents_skill") return t("DOCX")
+  if (functionName === "pdf_skill") return t("PDF")
+  if (functionName === "pptx_skill") return t("PPTX")
+  if (functionName === "spreadsheets_skill") return t("Excel")
   return null
 }
 
@@ -173,13 +175,16 @@ export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
     )
   }
   if (tool.function_name === "documents_skill") {
-    return t("使用内置文档 Skill 创建 DOCX 文件。")
+    return t("创建 DOCX 文件。")
   }
   if (tool.function_name === "pdf_skill") {
-    return t("使用内置 PDF Skill 创建 PDF 文件。")
+    return t("创建 PDF 文件。")
+  }
+  if (tool.function_name === "pptx_skill") {
+    return t("创建 PPTX 演示文稿。")
   }
   if (tool.function_name === "spreadsheets_skill") {
-    return t("使用内置表格 Skill 创建 XLSX 文件。")
+    return t("创建 Excel 工作簿。")
   }
   return tool.description
 }

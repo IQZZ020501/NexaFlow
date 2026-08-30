@@ -21,6 +21,7 @@ import {
 import Link from "next/link"
 
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
+import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
 import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
 import { ToolPermissionsDialog } from "@/components/tools/tool-permissions-dialog"
@@ -75,6 +76,12 @@ import {
 } from "@/lib/tool-display"
 
 type ToolGroup = "mine" | "shared" | "builtin"
+
+const catalogTabs = [
+  { kind: "builtin", label: "Skills" },
+  { kind: "mcp", label: "MCP" },
+  { kind: "python", label: "Python" },
+] as const satisfies ReadonlyArray<{ kind: ToolKind; label: string }>
 
 /**
  * Categorizes a tool based on its type and creator.
@@ -154,11 +161,14 @@ function transportLabel(transport: ToolSourceDetail["transport"]) {
  *
  * @returns The workspace tools management interface.
  */
-export function ToolsPage() {
+export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   const { t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
   const resourceFolders = useResourceFolders("tool")
   const [confirmAction, confirmDialog] = useConfirmDialog()
+  const [activeKind, setActiveKind] = React.useState<ToolKind>(
+    initialKind ?? "builtin"
+  )
   const [tools, setTools] = React.useState<ToolSummary[]>([])
   const [sources, setSources] = React.useState<ToolSourceDetail[]>([])
   const [search, setSearch] = React.useState("")
@@ -235,8 +245,12 @@ export function ToolsPage() {
   const displaySourceName = (tool: ToolSummary) =>
     toolSourceDisplayName(tool.source, t)
 
+  const catalogTools = initialKind
+    ? tools.filter((tool) => tool.kind === activeKind)
+    : tools
+  const catalogSources = initialKind && activeKind !== "mcp" ? [] : sources
   const query = search.trim().toLowerCase()
-  const filteredTools = tools.filter(
+  const filteredTools = catalogTools.filter(
     (tool) =>
       (tool.folder_id ?? null) === resourceFolders.selectedFolderId &&
       (!query ||
@@ -244,7 +258,7 @@ export function ToolsPage() {
         .toLowerCase()
         .includes(query))
   )
-  const filteredSources = sources.filter(
+  const filteredSources = catalogSources.filter(
     (source) =>
       !query ||
       `${source.name} ${source.url ?? ""} ${source.stdio_command ?? ""} ${source.transport ?? ""}`
@@ -533,7 +547,10 @@ export function ToolsPage() {
         </DropdownMenu>
       </div>
 
-      <div className="rounded-lg border bg-background p-3 shadow-sm">
+      <div
+        role="search"
+        className="flex flex-col gap-3 rounded-lg border bg-background p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+      >
         <div className="relative min-w-0 sm:w-[320px]">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -544,6 +561,33 @@ export function ToolsPage() {
             className="pl-9"
           />
         </div>
+        {initialKind ? (
+          <div
+            role="group"
+            aria-label={t("工具")}
+            className="grid w-fit shrink-0 grid-cols-3 self-end rounded-md bg-muted p-0.5 sm:self-auto"
+          >
+            {catalogTabs.map((tab) => {
+              const isActive = activeKind === tab.kind
+
+              return (
+                <button
+                  key={tab.kind}
+                  type="button"
+                  aria-pressed={isActive}
+                  className={`h-8 min-w-16 rounded-sm px-2.5 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    isActive
+                      ? "bg-background text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setActiveKind(tab.kind)}
+                >
+                  {t(tab.label)}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
       </div>
 
       {!isLoading && !error && filteredSources.length ? (
@@ -674,7 +718,7 @@ export function ToolsPage() {
             {t("重试")}
           </Button>
         </div>
-      ) : tools.length === 0 && sources.length === 0 ? (
+      ) : catalogTools.length === 0 && catalogSources.length === 0 ? (
         <div className="flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
           <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
             <WrenchIcon className="size-5" />
@@ -735,7 +779,11 @@ export function ToolsPage() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex min-w-0 gap-3">
                             <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
-                              <Icon className="size-5" />
+                              <BuiltinToolIcon
+                                functionName={tool.function_name}
+                                fallback={Icon}
+                                className="size-5"
+                              />
                             </span>
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-2">

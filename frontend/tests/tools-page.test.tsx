@@ -115,6 +115,65 @@ beforeEach(() => {
   }) as typeof fetch
 })
 describe("ToolsPage", () => {
+  test("filters the current catalog with Skills, MCP, and Python tabs", async () => {
+    const builtinTool = tool({
+      id: "tool-skill",
+      kind: "builtin",
+      function_name: "pdf_skill",
+      display_name: "PDF Skill",
+      source: {
+        id: "source-builtin",
+        name: "Builtin",
+        kind: "builtin",
+        transport: null,
+      },
+      created_by_user_id: null,
+    })
+    const remoteTool = tool({
+      id: "tool-mcp",
+      kind: "mcp",
+      function_name: "remote_lookup",
+      display_name: "Remote lookup",
+      source: {
+        id: "source-mcp",
+        name: "Remote tools",
+        kind: "mcp",
+        transport: "streamable_http",
+      },
+    })
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/tool-sources?"))
+        return jsonResponse([source({ tool_count: 1 })])
+      if (url.includes("/tools?"))
+        return jsonResponse([builtinTool, remoteTool, tool()])
+      return jsonResponse([])
+    }) as typeof fetch
+
+    renderPage(<ToolsPage initialKind="builtin" />)
+    await screen.findByText("PDF")
+    const searchToolbar = screen.getByRole("search")
+    expect(within(searchToolbar).getByRole("searchbox")).toBeTruthy()
+    expect(
+      within(searchToolbar).getByRole("button", { name: "Skills" })
+    ).toBeTruthy()
+    expect(screen.queryByText("Remote lookup")).toBeNull()
+    expect(screen.queryByText("Owned formatter")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "MCP" }))
+    await screen.findByText("Remote lookup")
+    expect(screen.getAllByText("Remote tools").length).toBeGreaterThan(0)
+    expect(screen.queryByText("PDF")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Python" }))
+    await screen.findByText("Owned formatter")
+    expect(screen.queryByText("Remote lookup")).toBeNull()
+    expect(screen.queryByText("Remote tools")).toBeNull()
+    expect(
+      screen.getByRole("button", { name: "Python" }).getAttribute("aria-pressed")
+    ).toBe("true")
+  })
+
   test("renders the unified empty state and member-safe add menu", async () => {
     renderPage(<ToolsPage />)
     await screen.findByText("还没有工具")
@@ -467,7 +526,7 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findByText("当前时间")
-    expect(screen.getByText("PDF Skill")).toBeTruthy()
+    expect(screen.getByText("PDF")).toBeTruthy()
     expect(screen.getByText("内置工具")).toBeTruthy()
     const card = screen.getByText("当前时间").closest("article")!
     expect(within(card).getAllByText("内置").length).toBeGreaterThan(0)

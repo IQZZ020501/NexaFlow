@@ -244,9 +244,27 @@ def downgrade() -> None:
 
 
 def _skill_definitions():
-    from app.shareddomain.tools.catalog import BUILTIN_SKILL_DEFINITIONS
-
-    return BUILTIN_SKILL_DEFINITIONS
+    # Keep this historical migration stable; later built-ins use their own revisions.
+    return (
+        (
+            "documents",
+            "documents_skill",
+            "Documents Skill",
+            "Create a DOCX file from Markdown content using the Documents Skill renderer.",
+        ),
+        (
+            "pdf",
+            "pdf_skill",
+            "PDF Skill",
+            "Create a paginated PDF from Markdown content using the PDF Skill renderer.",
+        ),
+        (
+            "spreadsheets",
+            "spreadsheets_skill",
+            "Spreadsheets Skill",
+            "Create a formatted XLSX workbook from structured sheet data using the Spreadsheets Skill renderer.",
+        ),
+    )
 
 
 def _skill_keys() -> tuple[str, ...]:

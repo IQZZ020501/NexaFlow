@@ -55,7 +55,37 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("文档 Skill")
+    ).toBe("DOCX")
+    expect(
+      toolDisplayName(
+        {
+          function_name: "pptx_skill",
+          display_name: "PPTX Skill",
+          description: "Creates PPTX decks",
+        },
+        t
+      )
+    ).toBe("PPTX")
+    expect(
+      toolDisplayName(
+        {
+          function_name: "pdf_skill",
+          display_name: "PDF Skill",
+          description: "Creates PDFs",
+        },
+        t
+      )
+    ).toBe("PDF")
+    expect(
+      toolDisplayName(
+        {
+          function_name: "spreadsheets_skill",
+          display_name: "Spreadsheets Skill",
+          description: "Creates workbooks",
+        },
+        t
+      )
+    ).toBe("Excel")
   })
 
   test("falls back to the configured display name for custom tools", () => {
@@ -113,7 +143,17 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("使用内置 PDF Skill 创建 PDF 文件。")
+    ).toBe("创建 PDF 文件。")
+    expect(
+      toolDisplayDescription(
+        {
+          function_name: "pptx_skill",
+          display_name: "PPTX Skill",
+          description: "Creates PPTX decks",
+        },
+        t
+      )
+    ).toBe("创建 PPTX 演示文稿。")
   })
 
   test("translates the artifact tool in all supported languages", () => {
@@ -184,16 +224,16 @@ describe("tool display helpers", () => {
   })
 
   test("links artifacts returned by built-in Skill tools", () => {
-    const url = "/api/v1/artifacts/pdf-token"
-    const value = withArtifactDownloadLinks("文件已生成：report.pdf", [
+    const url = "/api/v1/artifacts/pptx-token"
+    const value = withArtifactDownloadLinks("文件已生成：review.pptx", [
       {
-        tool_name: "pdf_skill",
+        tool_name: "pptx_skill",
         status: "succeeded",
-        output: { filename: "report.pdf", download_url: url },
+        output: { filename: "review.pptx", download_url: url },
       },
     ])
 
-    expect(value).toContain(`[report.pdf](${url})`)
+    expect(value).toContain(`[review.pptx](${url})`)
   })
 
   test("replaces a copied artifact token with the verified filename link", () => {

@@ -18,6 +18,7 @@ from app.entities.agents import AgentRun as AgentRunEntity
 from app.entities.agents import AgentRunEvent as AgentRunEventEntity
 from app.entities.agents import AgentToolCall as AgentToolCallEntity
 from app.entities.tools import ToolInvocation as ToolInvocationEntity
+from app.infrastructure.model_utils import utc_now
 from app.infrastructure.repositories.mapping import (
     refresh_entity,
     save,
@@ -200,6 +201,23 @@ def _project_process_events(stored_events: list[dict[str, Any]]) -> list[dict[st
     return [event for event in projected if event.get("status") != "running"]
 
 
+def _with_answer_ready_timestamp(
+    event: dict[str, Any], created_at: datetime
+) -> dict[str, Any]:
+    process_event = event.get("event")
+    if (
+        event.get("type") != "process"
+        or not isinstance(process_event, dict)
+        or process_event.get("summary") != "agent.answer_ready"
+        or process_event.get("created_at")
+    ):
+        return event
+    return {
+        **event,
+        "event": {**process_event, "created_at": created_at.isoformat()},
+    }
+
+
 async def _run_event_projections(
     db: AsyncSession,
     run_ids: list[str],
@@ -207,13 +225,15 @@ async def _run_event_projections(
     if not run_ids:
         return {}
     rows = await db.execute(
-        select(AgentRunEvent.run_id, AgentRunEvent.event)
+        select(AgentRunEvent.run_id, AgentRunEvent.event, AgentRunEvent.created_at)
         .where(AgentRunEvent.run_id.in_(run_ids))
         .order_by(AgentRunEvent.id)
     )
     stored: dict[str, list[dict[str, Any]]] = {run_id: [] for run_id in run_ids}
-    for run_id, event in rows.all():
-        stored.setdefault(run_id, []).append(event)
+    for run_id, event, created_at in rows.all():
+        stored.setdefault(run_id, []).append(
+            _with_answer_ready_timestamp(event, created_at)
+        )
     return {
         run_id: _project_process_events(events)
         for run_id, events in stored.items()
@@ -1796,7 +1816,13 @@ async def append_agent_run_event(
     run_id: str,
     event: dict,
 ) -> AgentRunEventEntity:
-    row = AgentRunEvent(workspace_id=workspace_id, run_id=run_id, event=event)
+    created_at = utc_now()
+    row = AgentRunEvent(
+        workspace_id=workspace_id,
+        run_id=run_id,
+        event=_with_answer_ready_timestamp(event, created_at),
+        created_at=created_at,
+    )
     db.add(row)
     await db.flush()
     return to_entity(AgentRunEventEntity, row)
@@ -1837,7 +1863,16 @@ async def list_agent_run_events(
         .order_by(AgentRunEvent.id)
         .limit(limit)
     )
-    return [to_entity(AgentRunEventEntity, row) for row in rows.all()]
+    return [
+        AgentRunEventEntity(
+            id=row.id,
+            workspace_id=row.workspace_id,
+            run_id=row.run_id,
+            event=_with_answer_ready_timestamp(row.event, row.created_at),
+            created_at=row.created_at,
+        )
+        for row in rows.all()
+    ]
 
 
 def _internal_tool_metadata(invocation: ToolInvocation) -> dict[str, Any]:

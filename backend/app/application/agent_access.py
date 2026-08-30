@@ -246,16 +246,20 @@ def external_progress_events(
         if status_value not in {"running", "succeeded", "failed"}:
             continue
         event_status: Literal["running", "succeeded", "failed"] = status_value
+        if run_status == "cancelled" and event_status == "running":
+            event_status = "failed"
         turn = max(0, int(event.get("turn") or 0))
         summary = str(event.get("summary") or "")
 
         if event_type == "thought":
             if summary == "agent.answer_ready":
                 answer_status: Literal["running", "succeeded", "failed"] = (
-                    "succeeded" if run_status == "succeeded" else "running"
+                    "succeeded"
+                    if run_status == "succeeded"
+                    else "failed"
+                    if run_status in {"failed", "cancelled"}
+                    else "running"
                 )
-                if run_status == "failed":
-                    answer_status = "failed"
                 upsert(
                     ExternalAgentProgressEventResponse(
                         id=_external_progress_id(event, "answer"),
@@ -264,6 +268,7 @@ def external_progress_events(
                         stage=answer_status,
                         turn=turn,
                         reasoning=str(event.get("reasoning") or ""),
+                        created_at=event.get("created_at"),
                     )
                 )
             elif summary in {

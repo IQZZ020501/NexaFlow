@@ -197,6 +197,9 @@ class AgentRunEventResponse(BaseModel):
     output: Any = None
     duration_ms: int = 0
     reasoning: str = ""
+    created_at: datetime | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class AgentRunResponse(BaseModel):
@@ -324,6 +327,9 @@ class ExternalAgentProgressEventResponse(BaseModel):
     output: Any = None
     input_truncated: bool = False
     hits: list[ExternalAgentKnowledgeHitResponse] = Field(default_factory=list)
+    created_at: datetime | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class ExternalAgentRunResponse(BaseModel):

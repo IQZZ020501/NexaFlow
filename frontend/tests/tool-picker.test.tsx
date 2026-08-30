@@ -146,9 +146,9 @@ describe("ToolPicker", () => {
       ])
     const changes: ToolRef[][] = []
     renderPage(picker([], (value) => changes.push(value)))
-    await screen.findByText("PDF Skill")
+    await screen.findByText("PDF")
     fireEvent.click(
-      screen.getByRole("checkbox", { name: "PDF Skill" })
+      screen.getByRole("checkbox", { name: "PDF" })
     )
     expect(changes.at(-1)).toEqual([
       { tool_id: "skill-pdf", version_id: "skill-pdf-v1" },

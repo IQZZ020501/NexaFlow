@@ -46,6 +46,21 @@ BUILTIN_SKILL_DEFINITIONS = (
         "Create a paginated PDF from Markdown content using the PDF Skill renderer.",
     ),
     (
+        "pptx",
+        "pptx_skill",
+        "PPTX Skill",
+        (
+            "Create a new 16:9 PPTX from audience-facing structured slides. "
+            "Plan around the audience and purpose, give each slide one takeaway, "
+            "keep the cover minimal, keep copy concise, vary the supported layouts, "
+            "and put external sources in speaker notes. Keep titles and body text "
+            "at readable sizes; the renderer rejects overlong slide titles. It "
+            "supports built-in templates, "
+            "brand colors, native icons, and tables; it does not edit existing "
+            "decks or fetch external media."
+        ),
+    ),
+    (
         "spreadsheets",
         "spreadsheets_skill",
         "Spreadsheets Skill",
@@ -59,10 +74,243 @@ INTERNAL_BUILTIN_FUNCTION_NAMES = (
 )
 
 
+def _pptx_input_schema() -> dict[str, Any]:
+    bullet_list = {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 6,
+        "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+        },
+        "description": "Short audience-facing support points for one slide claim.",
+    }
+    column = {
+        "type": "object",
+        "properties": {
+            "heading": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+            },
+            "bullets": {
+                **bullet_list,
+                "maxItems": 5,
+            },
+        },
+        "required": ["heading", "bullets"],
+        "additionalProperties": False,
+    }
+    icon_item = {
+        "type": "object",
+        "properties": {
+            "icon": {
+                "type": "string",
+                "enum": [
+                    "bolt",
+                    "cloud",
+                    "cycle",
+                    "direction",
+                    "focus",
+                    "gear",
+                    "growth",
+                    "heart",
+                    "star",
+                    "sun",
+                ],
+                "description": "Built-in native PowerPoint icon.",
+            },
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48,
+            },
+            "body": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 180,
+            },
+        },
+        "required": ["icon", "title", "body"],
+        "additionalProperties": False,
+    }
+    table = {
+        "type": "object",
+        "properties": {
+            "headers": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 5,
+                "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60,
+                },
+            },
+            "rows": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 7,
+                "items": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 5,
+                    "items": {
+                        "type": [
+                            "string",
+                            "number",
+                            "integer",
+                            "boolean",
+                            "null",
+                        ]
+                    },
+                },
+            },
+        },
+        "required": ["headers", "rows"],
+        "additionalProperties": False,
+        "description": "A compact native table; every row must match the headers.",
+    }
+    slide = {
+        "type": "object",
+        "properties": {
+            "layout": {
+                "type": "string",
+                "enum": [
+                    "section",
+                    "bullets",
+                    "two_column",
+                    "icons",
+                    "table",
+                ],
+                "description": (
+                    "Use section for transitions, bullets for one claim with "
+                    "supporting points, two_column for a direct comparison, icons "
+                    "for 2-4 parallel concepts, and table for compact structured data."
+                ),
+            },
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48,
+                "description": (
+                    "One-line takeaway title written for the intended audience, "
+                    "not a topic label or planning note; keep it to roughly 30 "
+                    "display-width units so it stays on one line."
+                ),
+            },
+            "subtitle": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "description": "Optional section-slide context; omit for other layouts.",
+            },
+            "bullets": bullet_list,
+            "left": column,
+            "right": column,
+            "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": icon_item,
+            },
+            "table": table,
+            "notes": {
+                "type": "string",
+                "maxLength": 4_000,
+                "description": (
+                    "Speaker notes. Put externally sourced claims under a "
+                    "[Sources] block with traceable references."
+                ),
+            },
+        },
+        "required": ["layout", "title"],
+        "additionalProperties": False,
+        "description": (
+            "Provide only the content field used by the selected layout: subtitle, "
+            "bullets, left/right, items, or table."
+        ),
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "description": "Minimal cover title for the intended audience.",
+            },
+            "subtitle": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+            },
+            "template": {
+                "type": "string",
+                "enum": ["minimal", "editorial", "bold"],
+                "description": "Built-in composition template; defaults to minimal.",
+            },
+            "brand": {
+                "type": "object",
+                "properties": {
+                    "primary_color": {
+                        "type": "string",
+                        "pattern": r"^#[0-9A-Fa-f]{6}$",
+                    },
+                    "background_color": {
+                        "type": "string",
+                        "pattern": r"^#[0-9A-Fa-f]{6}$",
+                    },
+                    "text_color": {
+                        "type": "string",
+                        "pattern": r"^#[0-9A-Fa-f]{6}$",
+                    },
+                    "font_family": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "description": "Referenced PowerPoint font; it is not embedded.",
+                    },
+                },
+                "required": [
+                    "primary_color",
+                    "background_color",
+                    "text_color",
+                    "font_family",
+                ],
+                "additionalProperties": False,
+                "description": (
+                    "Optional brand override. Text/background must meet readable "
+                    "contrast and primary/background must remain visually distinct."
+                ),
+            },
+            "footer": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+            },
+            "slides": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 30,
+                "items": slide,
+                "description": (
+                    "Narrative-ordered content slides. Each slide should advance one "
+                    "claim; vary adjacent layouts when the content supports it."
+                ),
+            },
+        },
+        "required": ["title", "slides"],
+        "additionalProperties": False,
+    }
+
+
 def _skill_input_schema(skill_name: str) -> dict[str, Any]:
     filename_patterns = {
         "documents": r"^[^/\\]+\.[dD][oO][cC][xX]$",
         "pdf": r"^[^/\\]+\.[pP][dD][fF]$",
+        "pptx": r"^[^/\\]+\.[pP][pP][tT][xX]$",
         "spreadsheets": r"^[^/\\]+\.[xX][lL][sS][xX]$",
     }
     properties: dict[str, Any] = {
@@ -85,7 +333,7 @@ def _skill_input_schema(skill_name: str) -> dict[str, Any]:
             ),
         }
         required.append("content")
-    else:
+    elif skill_name == "spreadsheets":
         properties["workbook"] = {
             "type": "object",
             "properties": {
@@ -134,6 +382,11 @@ def _skill_input_schema(skill_name: str) -> dict[str, Any]:
             "additionalProperties": False,
         }
         required.append("workbook")
+    elif skill_name == "pptx":
+        properties["presentation"] = _pptx_input_schema()
+        required.append("presentation")
+    else:
+        raise ValueError(f"Unknown built-in Skill: {skill_name}")
     return {
         "type": "object",
         "properties": properties,
@@ -722,7 +975,7 @@ def build_artifact_tool(
         "(`import pymupdf`); XLSX uses openpyxl; PPTX uses "
         "python-pptx (`from pptx import Presentation`); images use Pillow "
         "(`from PIL import Image`). Managed Skills may be selected with `skills`: "
-        "built-in bundles are `documents`, `pdf`, and `spreadsheets`; their files "
+        "built-in bundles are `documents`, `pdf`, `pptx`, and `spreadsheets`; their files "
         "are staged read-only below `NEXAFLOW_SKILLS_DIR`, and an optional "
         "`requirements.txt` is installed into `NEXAFLOW_PACKAGES_DIR` through the "
         "Worker public HTTP(S) proxy. Do not install packages yourself, use package "
@@ -765,7 +1018,7 @@ def build_artifact_tool(
                 "uniqueItems": True,
                 "description": (
                     "Optional managed Skills to stage for the Python generator. "
-                    "Built-ins: documents, pdf, spreadsheets."
+                    "Built-ins: documents, pdf, pptx, spreadsheets."
                 ),
             },
         },

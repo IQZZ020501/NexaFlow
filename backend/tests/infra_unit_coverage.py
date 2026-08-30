@@ -2146,6 +2146,86 @@ def test_code_sandbox_artifact_execute() -> None:
     assert json.loads(skill_request["stdin"]) == {"content": "# Report"}
     assert "code" not in skill_request and "skills" not in skill_request
     assert skill_result.content == skill_content
+    # Invalid JSON response (code_sandbox.py:117).
+    bad_json = _sandbox_expect_error(
+        lambda: _run_sandbox(_FakeSandboxReader(b"not-json"))
+    )
+    assert isinstance(bad_json, code_sandbox.WorkflowSandboxError)
+    # Skills are forwarded on workflow code requests (code_sandbox.py:145).
+    skills_writer = _FakeSandboxWriter()
+    skills_response = _sandbox_response(
+        stdout=f"{code_sandbox.RESULT_MARKER}{json.dumps({'result': None})}"
+    )
+
+    async def execute_with_skills():
+        with patch(
+            "asyncio.open_unix_connection",
+            new=AsyncMock(
+                return_value=(_FakeSandboxReader(skills_response), skills_writer)
+            ),
+        ):
+            return await code_sandbox.execute_workflow_code(
+                replace(settings(), workflow_sandbox_timeout_seconds=5),
+                "result = None",
+                {},
+                ["documents"],
+            )
+
+    run(execute_with_skills())
+    assert json.loads(skills_writer.data)["skills"] == ["documents"]
+
+    async def run_artifact(reader, artifact_format="html", filename="page.html"):
+        with patch(
+            "asyncio.open_unix_connection",
+            new=AsyncMock(return_value=(reader, _FakeSandboxWriter())),
+        ):
+            return await code_sandbox.execute_artifact_code(
+                replace(settings(), workflow_sandbox_timeout_seconds=5),
+                "open(output_path, 'w').write('ready')",
+                artifact_format,
+                filename,
+                [],
+            )
+
+    # Artifact response without an artifact payload (code_sandbox.py:229).
+    missing = _sandbox_expect_error(
+        lambda: run_artifact(_FakeSandboxReader(_sandbox_response()))
+    )
+    assert isinstance(missing, code_sandbox.WorkflowSandboxError)
+    # Artifact response with corrupt base64 (code_sandbox.py:232-233).
+    corrupt = _sandbox_expect_error(
+        lambda: run_artifact(
+            _FakeSandboxReader(
+                _sandbox_response(
+                    artifact={
+                        "format": "html",
+                        "filename": "page.html",
+                        "size_bytes": 1,
+                        "sha256": "x",
+                        "content_base64": "!!!not-base64!!!",
+                    }
+                )
+            )
+        )
+    )
+    assert isinstance(corrupt, code_sandbox.WorkflowSandboxError)
+    # Artifact response with a tampered digest (code_sandbox.py:246).
+    tampered = _sandbox_expect_error(
+        lambda: run_artifact(
+            _FakeSandboxReader(
+                _sandbox_response(
+                    artifact={
+                        "format": "html",
+                        "filename": "page.html",
+                        "size_bytes": len(content),
+                        "sha256": "0" * 64,
+                        "content_base64": base64.b64encode(content).decode(),
+                    }
+                )
+            )
+        )
+    )
+    assert isinstance(tampered, code_sandbox.WorkflowSandboxError)
 
 
 def test_worker_supervisor_sandbox_commands() -> None:
@@ -2683,7 +2763,7 @@ def test_validation_normalizers() -> None:
 
 
 def test_celery() -> None:
-    assert celery_mod.worker_pool_for_platform("darwin") == "solo"
+    assert celery_mod.worker_pool_for_platform("darwin") == "threads"
     assert celery_mod.worker_pool_for_platform("win32") == "solo"
     assert celery_mod.worker_pool_for_platform("linux") == "prefork"
 
@@ -2700,7 +2780,7 @@ def test_celery() -> None:
 
     app = celery_mod.create_celery_app()
     assert app.conf.broker_url == settings().celery_broker_url
-    assert app.conf.worker_pool in {"solo", "prefork"}
+    assert app.conf.worker_pool in {"solo", "threads", "prefork"}
     beat = app.conf.beat_schedule
     assert beat == {
         "recover-frequent-maintenance": {
@@ -2752,6 +2832,9 @@ def test_maintenance_recovery_sweeps() -> None:
 
 
 def test_configure_task_worker() -> None:
+    import threading
+    import time
+
     import app.tasks as tasks_module
 
     original_pid = tasks_module._configured_process_id
@@ -2760,6 +2843,7 @@ def test_configure_task_worker() -> None:
 
     def fake_configure_database(settings, *, worker_process=False):
         calls.append((settings, worker_process))
+        time.sleep(0.05)
 
     tasks_module.configure_database = fake_configure_database
     try:
@@ -2771,6 +2855,22 @@ def test_configure_task_worker() -> None:
 
         tasks_module.configure_task_worker(settings())
         assert len(calls) == 1  # idempotent within the process
+
+        calls.clear()
+        tasks_module._configured_process_id = None
+        start = threading.Barrier(3)
+
+        def configure() -> None:
+            start.wait()
+            tasks_module.configure_task_worker(settings())
+
+        threads = [threading.Thread(target=configure) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        start.wait()
+        for thread in threads:
+            thread.join(timeout=1)
+        assert len(calls) == 1
     finally:
         tasks_module._configured_process_id = original_pid
         tasks_module.configure_database = original_configure

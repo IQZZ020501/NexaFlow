@@ -10,8 +10,8 @@ and optional `references/`, `assets/`, and `requirements.txt` files.
 
 ## Built-in Skills
 
-The repository ships three NexaFlow-authored bundles at
-`sandbox/skills/documents`, `sandbox/skills/pdf`, and
+The repository ships four NexaFlow-authored bundles at
+`sandbox/skills/documents`, `sandbox/skills/pdf`, `sandbox/skills/pptx`, and
 `sandbox/skills/spreadsheets`. They are small project-specific guides and are
 available to the Worker without a separate download. Each bundle owns its
 renderer under `scripts/render.py` and is registered as a fixed Skill Tool, so
@@ -19,6 +19,9 @@ it appears in the Tools page, Agent Tool picker, and Workflow node palette.
 
 - `documents_skill` accepts a DOCX filename and Markdown content.
 - `pdf_skill` accepts a PDF filename and Markdown content.
+- `pptx_skill` accepts a PPTX filename and structured slides. It creates a new
+  16:9 deck with built-in templates, optional brand colors, native icons,
+  tables, and speaker notes.
 - `spreadsheets_skill` accepts an XLSX filename and structured sheets/rows.
 
 The Agent never supplies Python source to these Tools.

@@ -567,6 +567,39 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.getByText("summary")).toBeTruthy()
   })
 
+  test("shows the submit and first-token timestamps below the messages", () => {
+    const run = makeRun({
+      created_at: "2026-08-04T00:00:00Z",
+      events: [
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.answer_ready",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          created_at: "2026-08-04T00:00:01Z",
+        },
+      ],
+    })
+    const { container } = renderPage(
+      <Harness activeView="settings" runs={[run]} />
+    )
+    const timestamps = container.querySelectorAll("time")
+
+    expect(timestamps).toHaveLength(2)
+    expect(timestamps[0]?.getAttribute("datetime")).toBe(run.created_at)
+    expect(timestamps[1]?.getAttribute("datetime")).toBe(
+      "2026-08-04T00:00:01Z"
+    )
+  })
+
   test("renders generated artifacts as filename download links", () => {
     const downloadUrl = "/api/v1/artifacts/signed-token"
     const run = makeRun({
@@ -664,17 +697,53 @@ describe("AgentDetailWorkspace preview", () => {
   })
 
   test("renders queued and cancelled runs", () => {
-    renderPage(
+    const { container } = renderPage(
       <Harness
         activeView="settings"
         runs={[
           makeRun({ id: "run-q", status: "queued", result: "" }),
-          makeRun({ id: "run-c", status: "cancelled", result: "" }),
+          makeRun({
+            id: "run-c",
+            status: "cancelled",
+            result: "",
+            events: [
+              {
+                type: "thought",
+                turn: 1,
+                tool_name: "",
+                status: "running",
+                summary: "agent.analyzing",
+                call_id: "",
+                tool_label: "",
+                tool_kind: "unknown",
+                server_name: "",
+                input: {},
+                output: null,
+                duration_ms: 0,
+              },
+              {
+                type: "thought",
+                turn: 1,
+                tool_name: "",
+                status: "failed",
+                summary: "agent.answer_ready",
+                call_id: "",
+                tool_label: "",
+                tool_kind: "unknown",
+                server_name: "",
+                input: {},
+                output: null,
+                duration_ms: 0,
+              },
+            ],
+          }),
         ]}
       />
     )
     expect(screen.getByText("等待执行")).toBeTruthy()
-    expect(screen.getByText("运行已取消")).toBeTruthy()
+    expect(screen.getAllByText("运行已取消").length).toBeGreaterThan(0)
+    expect(container.querySelectorAll(".animate-spin")).toHaveLength(0)
+    expect(screen.queryByText("正在生成回答")).toBeNull()
   })
 
   test("renders the answering indicator for a running run", () => {

@@ -36,6 +36,7 @@ import {
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { RunActionBar } from "@/components/app/run-action-bar"
+import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -61,6 +62,7 @@ import {
 
 import { AgentConfigFields } from "./agent-config-fields"
 import { AgentAttachmentList } from "./agent-attachment-list"
+import { MessageTimestamp } from "./message-timestamp"
 import {
   AgentConversationUsersPanel,
   AgentLogsPanel,
@@ -151,6 +153,8 @@ function processSummary(
   run: AgentRun,
   t: TFunction
 ) {
+  if (run.status === "cancelled" && event.status !== "succeeded")
+    return t("已停止")
   if (event.summary === "agent.analyzing") return t("正在分析问题")
   if (event.summary === "agent.reviewing_tool_results")
     return t("正在整理工具结果")
@@ -184,6 +188,15 @@ function processSummary(
   return event.summary
 }
 
+function effectiveProcessStatus(
+  eventStatus: AgentRun["events"][number]["status"],
+  runStatus: AgentRun["status"]
+) {
+  if (eventStatus !== "running") return eventStatus
+  if (runStatus === "cancelled") return "failed"
+  return "running"
+}
+
 function processToolName(event: AgentRun["events"][number], t: TFunction) {
   return (
     builtinToolDisplayName(event.tool_name, t) ??
@@ -208,6 +221,7 @@ function ToolEventDetails({
       : processToolName(event, t)
   const label = toolName
   const detail = isPreparing ? null : processSummary(event, run, t)
+  const status = effectiveProcessStatus(event.status, run.status)
 
   return (
     <div className="overflow-hidden rounded-lg border bg-background/70">
@@ -221,7 +235,10 @@ function ToolEventDetails({
           {event.tool_kind === "knowledge" ? (
             <DatabaseIcon className="size-3.5" />
           ) : (
-            <WrenchIcon className="size-3.5" />
+            <BuiltinToolIcon
+              functionName={event.tool_name}
+              className="size-3.5"
+            />
           )}
         </span>
         <span className="min-w-0 flex-1">
@@ -237,9 +254,9 @@ function ToolEventDetails({
             {detail}
           </span>
         </span>
-        {event.status === "running" ? (
+        {status === "running" ? (
           <LoaderCircleIcon className="size-3.5 animate-spin text-sky-600" />
-        ) : event.status === "succeeded" ? (
+        ) : status === "succeeded" ? (
           <CircleCheckIcon className="size-3.5 text-emerald-600" />
         ) : (
           <CircleXIcon className="size-3.5 text-destructive" />
@@ -534,13 +551,17 @@ function RunExchange({
         approvalCallIds.has(event.call_id)
       )
   )
-  const inlineToolCalls = unrenderedAgentToolCalls(visibleTimeline, toolCalls)
+  const runCancelled = run.status === "cancelled"
+  const inlineToolCalls = runCancelled
+    ? []
+    : unrenderedAgentToolCalls(visibleTimeline, toolCalls)
   const hasProcess = visibleTimeline.length > 0 || inlineToolCalls.length > 0
   const hasActiveToolCall =
-    inlineToolCalls.length > 0 ||
-    visibleTimeline.some(
-      ({ event }) => event.type === "tool" && event.status === "running"
-    )
+    !runCancelled &&
+    (inlineToolCalls.length > 0 ||
+      visibleTimeline.some(
+        ({ event }) => event.type === "tool" && event.status === "running"
+      ))
   const [isProcessOpen, setIsProcessOpen] = React.useState(true)
   const collapsedProcessStatus = collapsedProcessStatusKey(
     run.status,
@@ -548,13 +569,19 @@ function RunExchange({
     isProcessOpen
   )
   const answer = withArtifactDownloadLinks(run.result, run.events)
+  const answerStartedAt = run.events.findLast(
+    (event) => event.summary === "agent.answer_ready"
+  )?.created_at
   return (
     <article className="flex flex-col gap-5">
       <div className="ml-auto flex max-w-[88%] flex-col items-end gap-1">
         <div className="rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-background shadow-sm">
           {run.goal}
         </div>
-        <CopyMessageButton value={run.goal} t={t} />
+        <div className="flex items-start gap-1">
+          <MessageTimestamp value={run.created_at} />
+          <CopyMessageButton value={run.goal} t={t} />
+        </div>
       </div>
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
@@ -588,9 +615,13 @@ function RunExchange({
                         className="relative px-1 text-xs leading-5 text-muted-foreground"
                       >
                         <div className="flex items-start gap-2">
-                          {event.status === "running" ? (
+                          {effectiveProcessStatus(event.status, run.status) ===
+                          "running" ? (
                             <LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
-                          ) : event.status === "succeeded" ? (
+                          ) : effectiveProcessStatus(
+                              event.status,
+                              run.status
+                            ) === "succeeded" ? (
                             <CircleCheckIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
                           ) : (
                             <CircleXIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
@@ -654,17 +685,22 @@ function RunExchange({
               </div>
             )}
           </div>
-          {run.status === "succeeded" && answer ? (
-            <RunActionBar
-              result={answer}
-              feedback={run.feedback}
-              regenerateDisabled={regenerateDisabled}
-              regenerating={regeneratingRunId === run.id}
-              feedbackPending={feedbackPendingRunId === run.id}
-              onRegenerate={() => onRegenerateRun?.(run.id)}
-              onFeedback={(value) => onRunFeedback?.(run.id, value)}
-              t={t}
-            />
+          {answerStartedAt || (run.status === "succeeded" && answer) ? (
+            <div className="flex items-start justify-between gap-2">
+              <MessageTimestamp value={answerStartedAt} />
+              {run.status === "succeeded" && answer ? (
+                <RunActionBar
+                  result={answer}
+                  feedback={run.feedback}
+                  regenerateDisabled={regenerateDisabled}
+                  regenerating={regeneratingRunId === run.id}
+                  feedbackPending={feedbackPendingRunId === run.id}
+                  onRegenerate={() => onRegenerateRun?.(run.id)}
+                  onFeedback={(value) => onRunFeedback?.(run.id, value)}
+                  t={t}
+                />
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>

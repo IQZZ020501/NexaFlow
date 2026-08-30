@@ -581,6 +581,45 @@ describe("public chat pure helpers", () => {
 })
 
 /* ------------------------------------------------------------------ */
+/* UI: timestamps                                                      */
+/* ------------------------------------------------------------------ */
+
+describe("PublicAgentChat timestamps", () => {
+  test("shows the submit and first-token timestamps below the messages", async () => {
+    const historyRun = run({
+      created_at: "2026-08-10T00:00:00Z",
+      progress: [
+        {
+          id: "answer-1",
+          type: "answer",
+          status: "succeeded",
+          stage: "succeeded",
+          turn: 1,
+          count: null,
+          hits: [],
+          created_at: "2026-08-10T00:00:01Z",
+        },
+      ],
+    })
+    fetchHandler = agentFetchHandler({
+      conversations: { items: [conversation("conv-1", "第一个会话")] },
+      history: { items: [historyRun] },
+    })
+
+    renderPage(<PublicAgentChat agentId="agent-1" />)
+    await screen.findByText("回答内容")
+    const article = articleOf("回答内容")
+    const timestamps = article.querySelectorAll("time")
+
+    expect(timestamps).toHaveLength(2)
+    expect(timestamps[0]?.getAttribute("datetime")).toBe(historyRun.created_at)
+    expect(timestamps[1]?.getAttribute("datetime")).toBe(
+      "2026-08-10T00:00:01Z"
+    )
+  })
+})
+
+/* ------------------------------------------------------------------ */
 /* UI: regenerate                                                      */
 /* ------------------------------------------------------------------ */
 

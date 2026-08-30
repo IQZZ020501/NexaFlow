@@ -171,10 +171,11 @@ Correctness, safety, evidence, and validation take priority over speed.
   python-docx, PyMuPDF, openpyxl, python-pptx, Pillow, and the standard library.
   Optional `SANDBOX_NETWORK=public` uses a Worker-owned HTTP(S) egress proxy;
   direct sockets and private/loopback/metadata destinations remain blocked.
-  NexaFlow-authored `documents`, `pdf`, and `spreadsheets` Skills live under
-  `sandbox/skills`; each declares a read-only renderer entrypoint and artifact
-  format in `SKILL.md` and is registered as a fixed selectable built-in Tool.
-  Fixed Skill Tools accept content/data rather than caller-supplied Python.
+  NexaFlow-authored `documents`, `pdf`, `pptx`, and `spreadsheets` Skills live
+  under `sandbox/skills`; each declares a read-only renderer entrypoint and
+  artifact format in `SKILL.md` and is registered as a fixed selectable
+  built-in Tool. Fixed Skill Tools accept content/data rather than
+  caller-supplied Python.
   Selected `requirements.txt` files install into a temporary per-run directory
   through that proxy.
   Keep it independent from `backend/app/`; only the Worker supervisor may start
