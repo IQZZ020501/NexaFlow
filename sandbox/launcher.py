@@ -5,10 +5,13 @@ from __future__ import annotations
 import argparse
 import ctypes
 import ctypes.util
+import fcntl
 import os
 from pathlib import Path
 import shutil
 import signal
+import socket
+import struct
 import sys
 
 
@@ -29,6 +32,9 @@ MNT_DETACH = 2
 PR_SET_PDEATHSIG = 1
 PR_CAPBSET_DROP = 24
 PR_SET_NO_NEW_PRIVS = 38
+SIOCGIFFLAGS = 0x8913
+SIOCSIFFLAGS = 0x8914
+IFF_UP = 0x1
 BROKER_CAPABILITIES = {0, 5, 6, 7}  # CHOWN, KILL, SETGID, SETUID
 
 libc = ctypes.CDLL(None, use_errno=True)
@@ -136,6 +142,26 @@ def _limit_broker_capabilities(libcap: ctypes.CDLL) -> None:
         _raise_errno("set sandbox no-new-privileges")
 
 
+def _bring_loopback_up() -> None:
+    """Enable only the namespace-local loopback used by the egress relay."""
+    if sys.platform != "linux":  # pragma: no cover - Linux-only launcher
+        return
+    request = struct.pack("16sH22s", b"lo", 0, b"")
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as control:
+        try:
+            response = fcntl.ioctl(control.fileno(), SIOCGIFFLAGS, request)
+            flags = struct.unpack("16sH22s", response)[1]
+            if flags & IFF_UP:
+                return
+            fcntl.ioctl(
+                control.fileno(),
+                SIOCSIFFLAGS,
+                struct.pack("16sH22s", b"lo", flags | IFF_UP, b""),
+            )
+        except OSError as exc:  # pragma: no cover - Linux capability failure
+            raise RuntimeError(f"failed to enable sandbox loopback: {exc}") from exc
+
+
 def _prepare_root(
     root: Path,
     sandbox_root: Path,
@@ -152,6 +178,9 @@ def _prepare_root(
         Path("/etc/ld.so.cache"),
         Path("/etc/passwd"),
         Path("/etc/group"),
+        Path("/etc/ssl"),
+        Path("/etc/fonts"),
+        Path("/var/cache/fontconfig"),
     ):
         if source.exists():
             _bind(root, source, read_only=True)
@@ -196,6 +225,7 @@ def _child(
     sandbox_root: Path,
     sandbox_python: Path,
     socket_path: Path,
+    egress_socket: Path | None,
     skills_dir: Path | None,
     libcap: ctypes.CDLL,
 ) -> None:
@@ -204,6 +234,8 @@ def _child(
         _raise_errno("set sandbox parent-death signal")
     if os.getppid() != parent_pid:
         raise RuntimeError("Sandbox launcher parent exited.")
+    if egress_socket is not None:
+        _bring_loopback_up()
     inside_socket = _prepare_root(
         root,
         sandbox_root,
@@ -222,16 +254,23 @@ def _child(
     }
     if skills_dir is not None:
         environment["SANDBOX_SKILLS_DIR"] = "/opt/nexaflow-skills"
+    inside_egress_socket = None
+    if egress_socket is not None:
+        inside_egress_socket = f"/run/sandbox/{egress_socket.name}"
+        environment["SANDBOX_EGRESS_SOCKET"] = inside_egress_socket
+    command = [
+        str(sandbox_python),
+        "-B",
+        "-m",
+        "sandbox.server",
+        "--socket",
+        inside_socket,
+    ]
+    if inside_egress_socket is not None:
+        command.extend(["--egress-socket", inside_egress_socket])
     os.execve(
         sandbox_python,
-        [
-            str(sandbox_python),
-            "-B",
-            "-m",
-            "sandbox.server",
-            "--socket",
-            inside_socket,
-        ],
+        command,
         environment,
     )
 
@@ -242,14 +281,27 @@ def main() -> int:
     parser.add_argument("--sandbox-python", required=True, type=Path)
     parser.add_argument("--skills-dir", type=Path)
     parser.add_argument("--socket", required=True, type=Path)
+    parser.add_argument("--egress-socket", type=Path)
     args = parser.parse_args()
     if sys.platform != "linux" or os.geteuid() != 0:
         parser.error("the hard sandbox launcher requires Linux root startup")
-    for path in (args.sandbox_root, args.sandbox_python, args.socket.parent):
+    for path in (
+        args.sandbox_root,
+        args.sandbox_python,
+        args.socket.parent,
+        args.egress_socket,
+    ):
+        if path is None:
+            continue
         if not path.is_absolute():
             parser.error("sandbox paths must be absolute")
     if args.skills_dir is not None and not args.skills_dir.is_absolute():
         parser.error("skills path must be absolute")
+    if args.egress_socket is not None:
+        if args.egress_socket.parent != args.socket.parent:
+            parser.error("egress socket must share the sandbox socket directory")
+        if args.egress_socket.name == args.socket.name:
+            parser.error("egress socket must differ from the sandbox socket")
 
     libcap = _libcap()
     root = Path("/run") / f"nexaflow-sandbox-root-{os.getpid()}"
@@ -267,6 +319,7 @@ def main() -> int:
                 args.sandbox_root,
                 args.sandbox_python,
                 args.socket,
+                args.egress_socket,
                 args.skills_dir,
                 libcap,
             )

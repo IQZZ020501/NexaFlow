@@ -38,6 +38,7 @@ from app.shareddomain.tools.runtime import (
     TOOL_SAFE_EXTERNAL_EFFECTS,
     TOOL_UNCERTAIN_EFFECTS,
     tool_arguments_hash,
+    normalize_tool_arguments,
     tool_snapshot_from_payload,
     tool_snapshot_payload,
     validate_tool_arguments,
@@ -60,6 +61,11 @@ async def queue_tool_invocation(
     context: ToolInvocationContext,
 ) -> ToolInvocation:
     _validate_context(context)
+    arguments = normalize_tool_arguments(
+        snapshot.function_name,
+        snapshot.input_schema,
+        arguments,
+    )
     validate_tool_arguments(snapshot, arguments)
     arguments_hash = tool_arguments_hash(arguments)
     payload = {

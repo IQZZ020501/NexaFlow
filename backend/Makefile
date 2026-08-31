@@ -2,6 +2,7 @@
 
 HOST ?= 127.0.0.1
 PORT ?= 8000
+SANDBOX_NETWORK ?= public
 COMPOSE ?= docker compose --env-file ../.env -f ../deploy/docker-compose.yml -f ../deploy/docker-compose.dev.yml
 
 dev:
@@ -14,7 +15,7 @@ migrate:
 
 worker:
 	uv sync --project ../sandbox --no-install-project --frozen
-	uv run python scripts/worker.py
+	SANDBOX_NETWORK=$(SANDBOX_NETWORK) uv run python scripts/worker.py
 
 coverage:
 	uv run python scripts/coverage.py

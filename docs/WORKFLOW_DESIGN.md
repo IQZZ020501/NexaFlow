@@ -8,7 +8,7 @@
 - 草稿调试、节点状态回显、运行与节点审计；
 - 不可变发布版本、版本列表、恢复为新草稿、指定版本运行；
 - “基础节点 / 工具 / Agent”三页签节点库：基础节点包含 Start、End、LLM、Reply、Classifier、Knowledge、Reranker、Form、Document Extract、Condition、Variable；工具页提供固定版本 Tool 与 Inline Python；Agent 页提供固定发布版本 Agent；
-- Code 节点的独立、无网络、受资源限制的 Python 生产沙箱；
+- Code 节点的独立、受资源限制的 Python 生产沙箱；公网出站仅经 Worker 代理，默认阻断直连；
 - Celery 持久执行、租约接管、deadline、步数与模型 token 预算、NDJSON 事件重放。
 
 Form 已使用 durable `awaiting_input` checkpoint 暂停/恢复，Agent 节点已使用 durable child Run；通用 HITL、循环、迭代、子工作流、HTTP 请求和失败分支仍属于后续批次。节点失败默认立即中止整个运行；不提供隐式重试、兜底值或部分成功。
@@ -215,7 +215,7 @@ Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全�
 - 整个进程组在超时或输出超限时强制终止；请求只能降低、不能提高硬限制；
 - 沙箱不可用、超时、超限、无 `result`、结果不是 JSON 时节点失败并中止工作流。
 
-基础沙箱不提供包安装、网络、跨运行文件或解释器状态持久化。需要数据科学依赖或多租户高并发时，应采用每次运行独立容器/微虚机池，而不是放宽当前同容器边界。
+基础沙箱不提供跨运行文件或解释器状态持久化。启用 `SANDBOX_NETWORK=public` 时，代码只能通过 Worker 代理访问公网 HTTP/HTTPS（80/443），代理拒绝内网、回环、链路本地和 metadata 地址；`SANDBOX_NETWORK=none` 保持完全无网络。Skill 可携带受限的 `requirements.txt`，依赖仅在当前运行的临时目录中通过 Worker 公网代理安装。固定文件 Skill 在 `SKILL.md` 中声明只读入口脚本和产物格式，调用方仅传 Markdown 或结构化数据，不能提交替代入口的 Python 代码。
 
 ## 8. API
 
@@ -291,7 +291,7 @@ Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_r
 
 | 阶段 | 目标 | 验收标准 | 主要风险 | 回滚方式 |
 | --- | --- | --- | --- | --- |
-| 0 基础隔离 | 类型不可变、运行分派、Code 沙箱、部署依赖 | Agent 路由拒绝 workflow；沙箱无网络且资源自检通过；Beat 有 DB | 旧 worker 误接 workflow；沙箱权限不足 | 停止创建/运行 workflow；保留类型保护；停用代码执行 Tool |
+| 0 基础隔离 | 类型不可变、运行分派、Code 沙箱、部署依赖 | Agent 路由拒绝 workflow；沙箱资源自检通过，公网模式仅代理出站且拒绝内网；Beat 有 DB | 旧 worker 误接 workflow；沙箱权限不足 | 停止创建/运行 workflow；保留类型保护；停用代码执行 Tool |
 | 1 引擎与存储 | 图校验、三态调度、审计、租约/checkpoint | 引擎分支/汇聚/预算测试；迁移 fresh upgrade/downgrade/upgrade；API 运行落库 | checkpoint 重放、并行写顺序、历史图漂移 | 新表为加法迁移；无生产 workflow 数据时可 downgrade；已有数据时保留表和类型保护 |
 | 2 画布与发布 | 三页签节点库、草稿调试、状态回显、版本发布/恢复 | 三语 typecheck/test/build；Tool/Agent 固定版本快照与新草稿隔离；真实 API 冒烟 | React Flow 状态序列化、多人保存冲突 | 下线 workflow UI；API 与表保留只读，避免历史运行不可查 |
 | 3 高级能力 | HITL、Loop/Iteration、失败分支/兜底、子流 | 暂停跨进程恢复；迭代帧审计；恢复 CAS；独立限额与测试 | 状态空间和副作用重放显著增加 | 每项用独立 schema/feature gate 发布，不改变第一批 DAG 语义 |
@@ -301,7 +301,7 @@ Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_r
 ## 11. 安全与运维注意事项
 
 - 内嵌 Beat 的 worker 与 API 必须使用同一 PostgreSQL/Redis 配置；Compose 必须显式传入相同数据库组件并覆盖容器内主机名；
-- Sandbox socket 只存在于 Worker 进程树；沙箱 namespace/chroot 不得映射应用源码、业务数据卷或 Compose 网络；
+- Sandbox socket 只存在于 Worker 进程树；沙箱 namespace/chroot 不得映射应用源码或业务数据卷。公网模式只映射同目录的 egress Unix socket，不能把 Compose 网络直接交给沙箱；
 - MCP 管理员仍具备项目既有的 worker 进程级 stdio 执行权限；Workflow 只接受当前可用、允许调用且不需要逐次审批的固定 ToolSnapshot；
 - Redis 负责队列，不作为审计真源；运行、checkpoint、事件和节点记录均以 PostgreSQL 为准；
 - 事件协议是 `application/x-ndjson`，不是 SSE。客户端用 `after` 游标重放，不依赖进程内内存；

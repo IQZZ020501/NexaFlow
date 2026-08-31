@@ -49,9 +49,9 @@ When `DATABASE_URL` is empty, the backend safely constructs it from the shared
 uv run celery -A app.infrastructure.celery:celery_app worker --beat --loglevel=INFO
 ```
 
-The app selects Celery's `solo` pool on macOS (unsafe HTTPS work after process
-forks) and Windows (the `prefork` pool needs `os.fork()`, which Windows lacks);
-Linux workers keep the production `prefork` pool.
+The app selects Celery's `threads` pool on macOS so Agent runs can overlap
+without prefork inheriting live HTTPS clients. Windows keeps the `solo` pool
+because `prefork` needs `os.fork()`; Linux workers use production `prefork`.
 
 On Windows the API and worker also install the `WindowsSelectorEventLoopPolicy`
 so psycopg async connections work (Windows defaults to the Proactor loop,

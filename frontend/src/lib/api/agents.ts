@@ -99,6 +99,7 @@ export type AgentRunEvent = {
   output: unknown
   duration_ms: number
   reasoning?: string
+  created_at?: string | null
 }
 
 export type AgentRunStatus =

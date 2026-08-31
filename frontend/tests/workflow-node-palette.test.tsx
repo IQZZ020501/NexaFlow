@@ -126,6 +126,69 @@ describe("WorkflowNodePalette", () => {
     })
   })
 
+  test("offers a built-in Skill as a selectable Workflow tool", () => {
+    const added: Array<{ type: string; config?: Record<string, unknown> }> = []
+    const skillTool = {
+      ...tool,
+      id: "skill-documents",
+      function_name: "documents_skill",
+      display_name: "Documents Skill",
+      input_schema: {
+        type: "object",
+        properties: {
+          content: { type: "string" },
+          filename: { type: "string" },
+        },
+      },
+    }
+    renderPage(
+      <WorkflowNodePalette
+        tools={[skillTool]}
+        agents={[]}
+        graph={{ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }}
+        onAdd={(type, _title, config) => added.push({ type, config })}
+        t={(key, values) => translate("zh-Hans", key, values)}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "添加节点" }))
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "工具" }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(screen.getByRole("button", { name: "DOCX" }))
+    expect(added.at(-1)).toEqual({
+      type: "tool",
+      config: {
+        tool: { tool_id: "skill-documents", version_id: "version-1" },
+        arguments: {},
+      },
+    })
+  })
+
+  test("does not offer the legacy artifact runtime as a Workflow tool", () => {
+    renderPage(
+      <WorkflowNodePalette
+        tools={[
+          {
+            ...tool,
+            function_name: "create_artifact",
+            display_name: "Create downloadable file",
+          },
+        ]}
+        agents={[]}
+        graph={{ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }}
+        onAdd={() => undefined}
+        t={(key, values) => translate("zh-Hans", key, values)}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "添加节点" }))
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "工具" }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    expect(screen.queryByRole("button", { name: "创建文件" })).toBeNull()
+  })
+
   test("keeps visible tools disabled with localized reasons and filters Agents", () => {
     const added: string[] = []
     renderPage(

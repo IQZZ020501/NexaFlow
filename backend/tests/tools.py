@@ -286,13 +286,13 @@ def test_generic_artifact_migration_matches_catalog() -> None:
         )
     )
     assert migration.down_revision == "202608250006"
-    assert description == version.description
-    assert input_schema == version.input_schema
+    assert description != version.description
+    assert input_schema != version.input_schema
     assert output_schema == version.output_schema
     assert execution_spec == version.execution_spec
-    assert definition_hash == version.definition_hash
+    assert definition_hash != version.definition_hash
     assert "import pymupdf" in version.description
-    assert "never reportlab" in version.description
+    assert "Managed Skills" in version.description
 
 
 def test_artifact_contract_downgrade_rejects_durable_references() -> None:
@@ -370,6 +370,311 @@ def test_artifact_contract_downgrade_rejects_durable_references() -> None:
                 assert "durable execution state" in str(exc)
             else:
                 raise AssertionError("Artifact Tool ledger downgrade was accepted.")
+
+
+def load_pptx_schema_migration():
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202608300003_builtin_pptx_skill_schema.py"
+    )
+    spec = spec_from_file_location("pptx_skill_schema", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine
+
+    from app.shareddomain.tools.catalog import build_skill_artifact_tool
+
+    migration = load_pptx_schema_migration()
+    assert migration.down_revision == "202608300002"
+
+    workspace_id = "workspace-migration"
+    desired_tool, desired_version, _desired_policy = build_skill_artifact_tool(
+        workspace_id, "pptx"
+    )
+    stale_schema = {
+        "type": "object",
+        "properties": {
+            "slides": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "layout": {
+                            "type": "string",
+                            "enum": [
+                                "section",
+                                "bullets",
+                                "two_column",
+                                "icons",
+                                "table",
+                            ],
+                        }
+                    },
+                },
+            }
+        },
+    }
+
+    engine = create_engine("sqlite://")
+    metadata = sa.MetaData()
+    tables: dict[str, sa.Table] = {}
+    for name, columns in (
+        (
+            "tool_sources",
+            (
+                ("id", sa.String, True),
+                ("workspace_id", sa.String, False),
+                ("kind", sa.String, False),
+            ),
+        ),
+        (
+            "tools",
+            (
+                ("id", sa.String, True),
+                ("workspace_id", sa.String, False),
+                ("source_id", sa.String, False),
+                ("folder_id", sa.String, False),
+                ("kind", sa.String, False),
+                ("stable_key", sa.String, False),
+                ("function_name", sa.String, False),
+                ("current_version_id", sa.String, False),
+                ("status", sa.String, False),
+                ("availability", sa.String, False),
+                ("created_by_user_id", sa.String, False),
+                ("created_at", sa.DateTime, False),
+                ("updated_at", sa.DateTime, False),
+            ),
+        ),
+        (
+            "tool_versions",
+            (
+                ("id", sa.String, True),
+                ("workspace_id", sa.String, False),
+                ("tool_id", sa.String, False),
+                ("revision", sa.Integer, False),
+                ("display_name", sa.String, False),
+                ("description", sa.Text, False),
+                ("input_schema", sa.JSON, False),
+                ("output_schema", sa.JSON, False),
+                ("execution_spec", sa.JSON, False),
+                ("definition_hash", sa.String, False),
+                ("created_by_user_id", sa.String, False),
+                ("created_at", sa.DateTime, False),
+            ),
+        ),
+        (
+            "tool_policies",
+            (
+                ("id", sa.String, True),
+                ("workspace_id", sa.String, False),
+                ("tool_id", sa.String, False),
+                ("tool_version_id", sa.String, False),
+                ("definition_hash", sa.String, False),
+                ("revision", sa.Integer, False),
+                ("approval", sa.String, False),
+                ("effect", sa.String, False),
+                ("allowed_access_sources", sa.JSON, False),
+                ("workflow_callable", sa.Boolean, False),
+                ("parallel_safe", sa.Boolean, False),
+                ("reviewed_by_user_id", sa.String, False),
+                ("reviewed_at", sa.DateTime, False),
+                ("created_at", sa.DateTime, False),
+                ("updated_at", sa.DateTime, False),
+            ),
+        ),
+    ):
+        constraints: list[sa.UniqueConstraint] = []
+        if name == "tool_versions":
+            # Mirror the production model so a duplicate (tool_id, revision)
+            # or (tool_id, definition_hash) insert fails like it does in
+            # PostgreSQL.
+            constraints = [
+                sa.UniqueConstraint("tool_id", "revision"),
+                sa.UniqueConstraint("tool_id", "definition_hash"),
+            ]
+        tables[name] = sa.Table(
+            name,
+            metadata,
+            *[
+                sa.Column(column, column_type, primary_key=primary)
+                for column, column_type, primary in columns
+            ],
+            *constraints,
+        )
+    metadata.create_all(engine)
+
+    timestamp = datetime.now(UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            tables["tool_sources"].insert().values(
+                id="source-builtin",
+                workspace_id=workspace_id,
+                kind="builtin",
+            )
+        )
+        connection.execute(
+            tables["tools"].insert().values(
+                id=desired_tool.id,
+                workspace_id=workspace_id,
+                source_id="source-builtin",
+                folder_id=None,
+                kind="builtin",
+                stable_key="skill_pptx",
+                function_name="pptx_skill",
+                current_version_id="stale-version-id",
+                status="active",
+                availability="available",
+                created_by_user_id=None,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
+        connection.execute(
+            tables["tool_versions"].insert().values(
+                id="stale-version-id",
+                workspace_id=workspace_id,
+                tool_id=desired_tool.id,
+                revision=1,
+                display_name="PPTX Skill",
+                description="legacy",
+                input_schema=stale_schema,
+                output_schema=None,
+                execution_spec={"builtin": "skill", "skill": "pptx"},
+                definition_hash="a" * 64,
+                created_by_user_id=None,
+                created_at=timestamp,
+            )
+        )
+        connection.execute(
+            tables["tool_policies"].insert().values(
+                id="stale-policy-id",
+                workspace_id=workspace_id,
+                tool_id=desired_tool.id,
+                tool_version_id="stale-version-id",
+                definition_hash="a" * 64,
+                revision=1,
+                approval="auto",
+                effect="pure",
+                allowed_access_sources=[],
+                workflow_callable=True,
+                parallel_safe=True,
+                reviewed_by_user_id=None,
+                reviewed_at=None,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
+
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+
+        current_version_id = connection.execute(
+            sa.select(tables["tools"].c.current_version_id).where(
+                tables["tools"].c.id == desired_tool.id
+            )
+        ).scalar_one()
+        assert current_version_id == desired_version.id
+        refreshed_schema = connection.execute(
+            sa.select(tables["tool_versions"].c.input_schema).where(
+                tables["tool_versions"].c.id == desired_version.id
+            )
+        ).scalar_one()
+        slide_layout = (
+            refreshed_schema["properties"]["presentation"]["properties"]["slides"]
+            ["items"]["properties"]["layout"]
+        )
+        presentation_properties = refreshed_schema["properties"]["presentation"][
+            "properties"
+        ]
+        assert "theme" in presentation_properties
+        assert "style" in presentation_properties["slides"]["items"]["properties"]
+        assert set(slide_layout["enum"]) == {
+            "section",
+            "bullets",
+            "two_column",
+            "icons",
+            "table",
+            "hero",
+            "stats",
+            "steps",
+            "quote",
+        }
+        policy_row = connection.execute(
+            sa.select(
+                tables["tool_policies"].c.tool_version_id,
+                tables["tool_policies"].c.definition_hash,
+            ).where(tables["tool_policies"].c.id == "stale-policy-id")
+        ).one()
+        assert policy_row.tool_version_id == desired_version.id
+        assert policy_row.definition_hash == desired_version.definition_hash
+        stale_rows = (
+            connection.execute(
+                sa.select(tables["tool_versions"].c.id).where(
+                    tables["tool_versions"].c.id == "stale-version-id"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert stale_rows == ["stale-version-id"]
+        stale_revision = connection.execute(
+            sa.select(tables["tool_versions"].c.revision).where(
+                tables["tool_versions"].c.id == "stale-version-id"
+            )
+        ).scalar_one()
+        assert stale_revision == 1
+        refreshed_revision = connection.execute(
+            sa.select(tables["tool_versions"].c.revision).where(
+                tables["tool_versions"].c.id == desired_version.id
+            )
+        ).scalar_one()
+        assert refreshed_revision == 2
+
+        migration.upgrade()
+        unchanged = connection.execute(
+            sa.select(tables["tools"].c.current_version_id).where(
+                tables["tools"].c.id == desired_tool.id
+            )
+        ).scalar_one()
+        assert unchanged == desired_version.id
+
+        migration.downgrade()
+        after_downgrade = connection.execute(
+            sa.select(tables["tools"].c.current_version_id).where(
+                tables["tools"].c.id == desired_tool.id
+            )
+        ).scalar_one()
+        assert after_downgrade == desired_version.id
+
+
+def test_pptx_argument_normalization_keeps_model_theme() -> None:
+    from app.shareddomain.tools.catalog import build_skill_artifact_tool
+    from app.shareddomain.tools.runtime import normalize_tool_arguments
+
+    _tool, version, _policy = build_skill_artifact_tool("workspace", "pptx")
+    normalized = normalize_tool_arguments(
+        "pptx_skill",
+        version.input_schema,
+        {
+            "filename": "themed.pptx",
+            "title": "Themed deck",
+            "theme": {
+                "background_color": "#07111F",
+                "text_color": "#F8FAFC",
+                "accent_color": "#F59E0B",
+            },
+            "slides": [{"layout": "hero", "title": "One idea"}],
+        },
+    )
+    assert normalized["presentation"]["theme"]["accent_color"] == "#F59E0B"
+    assert "theme" not in normalized
 
 
 def test_artifact_generator_preflight_is_actionable() -> None:
@@ -977,7 +1282,7 @@ def test_entities_and_orm_columns_match_exactly() -> None:
 
 
 def test_orm_enforces_tenant_scoped_relations_and_legal_states() -> None:
-    from app.domain.resource_permission import ResourcePermission
+    from app.shareddomain.platform.models import ResourcePermission
     from app.shareddomain.tools.models import (
         ApplicationToolBinding,
         Tool,
@@ -1159,6 +1464,7 @@ def test_migration_reference_scanner_keeps_historical_mcp_tuples() -> None:
 
 async def assert_workspace_system_catalog(workspace_id: str) -> None:
     from app.infrastructure.repositories import tools as repository
+    from app.shareddomain.tools.catalog import build_artifact_tool
 
     async with get_session_factory()() as db:
         sources = await repository.list_tool_sources(db, workspace_id)
@@ -1170,7 +1476,10 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert {tool.stable_key for tool in tools} == {
             "current_time",
             "inline_python",
-            "artifact",
+            "skill_documents",
+            "skill_pdf",
+            "skill_pptx",
+            "skill_spreadsheets",
         }
         tool = next(tool for tool in tools if tool.stable_key == "current_time")
         assert tool.stable_key == "current_time"
@@ -1187,27 +1496,82 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert policy.approval == "auto"
         assert policy.effect == "pure"
 
-        artifact_tool = next(
-            item for item in tools if item.stable_key == "artifact"
-        )
-        artifact_version = await repository.get_tool_version(
-            db,
-            workspace_id,
-            artifact_tool.current_version_id or "",
-        )
-        assert artifact_version is not None
-        assert artifact_version.execution_spec == {"builtin": "artifact"}
-        assert set(artifact_version.input_schema["required"]) == {
-            "content",
-            "filename",
-        }
-        assert "code" not in artifact_version.input_schema["properties"]
-        assert "format" not in artifact_version.input_schema["properties"]
-        assert "skills" not in artifact_version.input_schema["properties"]
-        assert artifact_version.output_schema["properties"]["stdout"] == {
-            "type": "string",
-            "maxLength": 2000,
-        }
+        for skill_name in ("documents", "pdf", "pptx", "spreadsheets"):
+            skill_tool = next(
+                item for item in tools if item.stable_key == f"skill_{skill_name}"
+            )
+            skill_version = await repository.get_tool_version(
+                db,
+                workspace_id,
+                skill_tool.current_version_id or "",
+            )
+            skill_policy = await repository.get_tool_policy(
+                db,
+                workspace_id,
+                skill_tool.id,
+            )
+            assert skill_version is not None
+            assert skill_policy is not None
+            assert skill_version.execution_spec == {
+                "builtin": "skill",
+                "skill": skill_name,
+            }
+            skill_properties = skill_version.input_schema["properties"]
+            assert "skills" not in skill_properties
+            assert "code" not in skill_properties
+            if skill_name in {"documents", "pdf"}:
+                assert set(skill_properties) == {"filename", "content"}
+            elif skill_name == "spreadsheets":
+                assert set(skill_properties) == {"filename", "workbook"}
+            else:
+                assert set(skill_properties) == {"filename", "presentation"}
+                presentation_schema = skill_properties["presentation"]
+                assert presentation_schema["properties"]["template"]["enum"] == [
+                    "minimal",
+                    "editorial",
+                    "bold",
+                ]
+                theme_schema = presentation_schema["properties"]["theme"]
+                assert set(theme_schema["properties"]) == {
+                    "background_color",
+                    "text_color",
+                    "accent_color",
+                    "panel_color",
+                    "muted_text_color",
+                    "rule_color",
+                    "font_family",
+                    "heading_font_family",
+                    "cover_title_size",
+                    "slide_title_size",
+                    "body_size",
+                    "panel_radius",
+                    "cover_accent_width",
+                    "title_alignment",
+                }
+                slide_schema = presentation_schema["properties"]["slides"]["items"]
+                assert "style" in slide_schema["properties"]
+                assert slide_schema["properties"]["layout"]["enum"] == [
+                    "section",
+                    "bullets",
+                    "two_column",
+                    "icons",
+                    "table",
+                    "hero",
+                    "stats",
+                    "steps",
+                    "quote",
+                ]
+            assert skill_policy.workflow_callable is True
+            assert skill_policy.approval == "auto"
+
+        legacy_tool, legacy_version, legacy_policy = build_artifact_tool(workspace_id)
+        legacy_tool.current_version_id = None
+        await repository.save_tool(db, legacy_tool)
+        await repository.save_tool_version(db, legacy_version)
+        await repository.save_tool_policy(db, legacy_policy)
+        legacy_tool.current_version_id = legacy_version.id
+        await repository.save_tool(db, legacy_tool)
+        await db.commit()
 
 
 def test_generated_artifact_link_serves_static_html() -> None:
@@ -4733,7 +5097,10 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     from app.infrastructure.repositories import user as user_repository
     from app.ports.mcp import McpClientError
     from app.ports.tool_runtime import ToolAdapterBusy, ToolInvocationContext
-    from app.shareddomain.tools.catalog import build_artifact_tool
+    from app.shareddomain.tools.catalog import (
+        build_artifact_tool,
+        build_skill_artifact_tool,
+    )
     from app.shareddomain.tools.runtime import build_tool_snapshot
 
     settings = Settings.from_env(require_bootstrap=False)
@@ -4845,7 +5212,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.usage == {"exit_code": 0, "size_bytes": len(artifact_content)}
     assert artifact_sandbox.await_count == 1
     assert artifact_sandbox.await_args.args[2:4] == ("html", "page.html")
-    assert artifact_sandbox.await_args.args[4] == []
+    assert artifact_sandbox.await_args.args[4] == ["documents"]
     from app.application.tool_adapters import _redirect_legacy_artifact_path
 
     legacy_code = 'document.save("/tmp/report.docx")'
@@ -4856,6 +5223,48 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     with ZipFile(docx_bytes, "w", ZIP_DEFLATED) as archive:
         archive.writestr("[Content_Types].xml", "<Types/>")
         archive.writestr("word/document.xml", "<document/>")
+    skill_version = build_skill_artifact_tool(workspace_id, "documents")[1]
+    skill_snapshot = dataclasses.replace(
+        snapshot,
+        input_schema=skill_version.input_schema,
+        output_schema=skill_version.output_schema,
+        execution_spec=skill_version.execution_spec,
+    )
+    with patch(
+        "app.application.tool_adapters.execute_skill_artifact",
+        new=AsyncMock(
+            return_value=ArtifactSandboxResult(
+                content=docx_bytes.getvalue(),
+                format="docx",
+                filename="skill-report.docx",
+                size_bytes=len(docx_bytes.getvalue()),
+                sha256="ignored-by-adapter",
+                stdout='{"renderer":"documents"}',
+                stderr="",
+                exit_code=0,
+            )
+        ),
+    ) as skill_sandbox:
+        skill_result = await builtin.invoke(
+            skill_snapshot,
+            {
+                "filename": "skill-report.docx",
+                "content": "# Ready\n\nGenerated by the Documents Skill.",
+            },
+            dataclasses.replace(
+                context,
+                invocation_id="adapter-skill",
+                idempotency_key="adapter-skill",
+            ),
+        )
+    assert skill_result.ok is True
+    assert skill_result.data["filename"] == "skill-report.docx"
+    assert skill_sandbox.await_args.args[1:] == (
+        "documents",
+        {"content": "# Ready\n\nGenerated by the Documents Skill."},
+        "docx",
+        "skill-report.docx",
+    )
     with patch(
         "app.application.tool_adapters.execute_artifact_code",
         new=AsyncMock(
@@ -5094,6 +5503,108 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.ok is False
     assert result.error_code == "mcp_request_failed"
     assert result.outcome == "uncertain"
+    # Artifact format does not match filename (tool_adapters.py:176-181).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": "x", "format": "pdf", "filename": "report.docx"},
+        dataclasses.replace(context, idempotency_key="adapter-format"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    assert "does not match" in result.error_message
+    # Artifact non-string content (tool_adapters.py:182-184, 244-248).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": 42, "filename": "notes.txt"},
+        dataclasses.replace(context, idempotency_key="adapter-content-type"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    # Artifact invalid content mode (tool_adapters.py:185-192).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": "x", "content_mode": "binary", "filename": "notes.txt"},
+        dataclasses.replace(context, idempotency_key="adapter-mode"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    # Artifact text mode on a rich format (tool_adapters.py:193-202).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": "plain", "content_mode": "text", "filename": "report.pdf"},
+        dataclasses.replace(context, idempotency_key="adapter-rich-text"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    # Artifact invalid skills (tool_adapters.py:203-215).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {
+            "content": "x",
+            "content_mode": "text",
+            "filename": "notes.txt",
+            "skills": ["documents", "documents"],
+        },
+        dataclasses.replace(context, idempotency_key="adapter-skills"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    # Artifact generator rejected by preflight (tool_adapters.py:222-229).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": "def broken(:", "filename": "report.pdf"},
+        dataclasses.replace(context, idempotency_key="adapter-preflight"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_code_invalid"
+    assert "syntax error" in result.error_message
+    # Artifact sandbox busy (tool_adapters.py:240-241).
+    with patch(
+        "app.application.tool_adapters.execute_artifact_code",
+        new=AsyncMock(side_effect=WorkflowSandboxBusyError("busy")),
+    ):
+        try:
+            await builtin.invoke(
+                artifact_snapshot,
+                {"content": "x", "filename": "report.docx"},
+                dataclasses.replace(context, idempotency_key="adapter-busy"),
+            )
+        except ToolAdapterBusy:
+            pass
+        else:
+            raise AssertionError("A busy artifact sandbox must raise ToolAdapterBusy.")
+    # Artifact missing parameters (tool_adapters.py:244-248).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {},
+        dataclasses.replace(context, idempotency_key="adapter-missing"),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    assert "parameters are invalid" in result.error_message
+    # Artifact storage rejection (tool_adapters.py:264-265).
+    result = await builtin.invoke(
+        artifact_snapshot,
+        {"content": "x", "content_mode": "text", "filename": "notes.txt"},
+        dataclasses.replace(context, idempotency_key=""),
+    )
+    assert result.ok is False
+    assert result.error_code == "artifact_failed"
+    # Skill adapter invalid configuration (tool_adapters.py:157-160).
+    broken_skill_snapshot = dataclasses.replace(
+        snapshot,
+        input_schema=skill_version.input_schema,
+        output_schema=skill_version.output_schema,
+        execution_spec={"builtin": "skill"},
+    )
+    result = await builtin.invoke(
+        broken_skill_snapshot,
+        {"filename": "skill-report.docx", "content": "# x"},
+        dataclasses.replace(context, idempotency_key="adapter-bad-skill"),
+    )
+    assert result.ok is False
+    assert result.error_code == "skill_failed"
+    assert "configuration is invalid" in result.error_message
 
 
 def test_workspace_creation_initializes_system_catalog() -> None:
@@ -5111,6 +5622,18 @@ def test_workspace_creation_initializes_system_catalog() -> None:
         )
         add_workspace_member(client, admin_token, workspace_id, member_id)
         run(assert_workspace_system_catalog(workspace_id))
+        response = client.get(
+            f"/api/v1/workspaces/{workspace_id}/tools?limit=200&offset=0",
+            headers=auth_headers(admin_token),
+        )
+        assert response.status_code == 200, response.text
+        assert {item["function_name"] for item in response.json()} == {
+            "current_time",
+            "documents_skill",
+            "pdf_skill",
+            "pptx_skill",
+            "spreadsheets_skill",
+        }
         run(assert_tool_policy_revision_compare_and_swap(workspace_id))
         run(assert_mcp_discovery_materializes_first_leaf(workspace_id))
         run(assert_mcp_server_deletion_preserves_tool_history(workspace_id))
@@ -5702,6 +6225,8 @@ def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
     test_generic_artifact_migration_matches_catalog()
     test_artifact_contract_downgrade_rejects_durable_references()
+    test_pptx_skill_schema_migration_refreshes_stale_versions()
+    test_pptx_argument_normalization_keeps_model_theme()
     test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()
     test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()

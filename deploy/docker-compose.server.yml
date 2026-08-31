@@ -97,6 +97,7 @@ services:
     environment:
       <<: *backend-environment
       AUTOSCALE_KEEPALIVE: "5"
+      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-public}
     volumes:
       - ./data/uploads:/data/knowledge
     cap_drop:
@@ -107,6 +108,7 @@ services:
       - SETGID
       - SETPCAP
       - SETUID
+      - NET_ADMIN
       - SYS_ADMIN
       - SYS_CHROOT
     security_opt:

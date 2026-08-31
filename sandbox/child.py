@@ -30,12 +30,36 @@ def main() -> None:
         "PYTHONHASHSEED": "0",
         "PYTHONNOUSERSITE": "1",
     }
-    for name in ("TMPDIR", "NEXAFLOW_OUTPUT_PATH", "NEXAFLOW_SKILLS_DIR"):
+    for name in (
+        "HOME",
+        "TMPDIR",
+        "NEXAFLOW_OUTPUT_PATH",
+        "NEXAFLOW_SKILL_NAME",
+        "NEXAFLOW_SKILLS_DIR",
+        "NEXAFLOW_PACKAGES_DIR",
+        "NEXAFLOW_ALLOW_SITE_PACKAGES",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ):
         if name in os.environ:
             environment[name] = os.environ[name]
     flags = [sys.executable, "-I", "-B"]
     if os.environ.get("NEXAFLOW_ALLOW_SITE_PACKAGES") != "1":
         flags.append("-S")
+    packages_dir = os.environ.get("NEXAFLOW_PACKAGES_DIR", "")
+    if packages_dir:
+        sys.path.insert(0, packages_dir)
+        sys.argv = [program]
+        import runpy
+
+        runpy.run_path(program, run_name="__main__")
+        return
     os.execve(sys.executable, [*flags, program], environment)
 
 

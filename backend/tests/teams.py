@@ -4,8 +4,8 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.infrastructure.session import get_session_factory
-from app.domain.user import User
-from app.domain.team import TeamMembership
+from app.shareddomain.platform.models import User
+from app.shareddomain.platform.models import TeamMembership
 from tests.support import (
     activate_admin,
     auth_headers,

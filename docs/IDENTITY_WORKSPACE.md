@@ -1,4 +1,4 @@
-# IDENTITY_WORKSPACE 模块（backend/app/domain + shareddomain/{teams,audit,tools} + application/{identity,workspace}）
+# IDENTITY_WORKSPACE 模块（backend/app/shareddomain/platform + shareddomain/{teams,audit,tools} + application/{identity,workspace}）
 
 ## 职责
 
@@ -11,18 +11,15 @@ api/{auth,workspaces,teams,tool_sources,tools,mcp_servers,admin/users,admin/audi
   → application/{identity,workspace}（登录/token/用户与工作区管理）
   → application/tools（Tool 用例编排）
   → shareddomain/{teams,audit,tools}（领域服务）
-  → entities/（纯领域实体）+ domain/shareddomain/*/models.py（ORM）
+  → entities/（纯领域实体）+ shareddomain/platform + shareddomain/*/models.py（ORM）
   → infrastructure/repositories/{user,workspace,team,audit,mcp,tools,resource_permission}
 ```
 
 ## 文件清单
 
-### app/domain/（共享 ORM 实体）
+### app/shareddomain/platform/（共享 ORM 实体）
 
-- `backend/app/domain/user.py` — User 与 RefreshSession 实体（含关系与级联）
-- `backend/app/domain/workspace.py` — Workspace 与 WorkspaceMembership 实体（状态/角色约束）
-- `backend/app/domain/team.py` — Team 与 TeamMembership 实体（复合外键约束）
-- `backend/app/domain/resource_permission.py` — ResourcePermission ORM（知识库、Agent 与 Tool 的资源级授权）
+- `backend/app/shareddomain/platform/models.py` — User、RefreshSession、Workspace、WorkspaceMembership、Team、TeamMembership、ResourcePermission、SmtpSettings、WorkspaceGovernance、WorkspaceInvitation 共享 ORM 实体
 
 ### app/entities/（纯领域实体）
 

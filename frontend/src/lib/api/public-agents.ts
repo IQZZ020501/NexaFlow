@@ -57,6 +57,7 @@ export type ExternalAgentProgressEvent = {
   output?: unknown
   input_truncated?: boolean
   hits: ExternalAgentKnowledgeHit[]
+  created_at?: string | null
 }
 
 export type ExternalAgentRun = {

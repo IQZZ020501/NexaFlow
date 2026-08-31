@@ -1761,7 +1761,9 @@ function NodeConfigFields({
       tool.workflow_callable
   )
   const availableLlmTools = availableWorkflowTools.filter(
-    (tool) => tool.function_name !== "inline_python"
+    (tool) =>
+      tool.function_name !== "inline_python" &&
+      tool.function_name !== "create_artifact"
   )
   const selectedToolRefs = Array.isArray(config.tools)
     ? config.tools.flatMap((item) => {

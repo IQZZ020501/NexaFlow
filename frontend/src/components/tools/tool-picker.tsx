@@ -11,6 +11,7 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import {
   Dialog,
   DialogContent,
@@ -124,6 +125,7 @@ export function ToolPicker({
       tool.status === "active" &&
       tool.availability === "available" &&
       tool.function_name !== "inline_python" &&
+      tool.function_name !== "create_artifact" &&
       (!query ||
         `${toolDisplayName(tool, t)} ${toolDisplayDescription(tool, t)} ${toolSourceDisplayName(tool.source, t)}`
           .toLowerCase()
@@ -252,7 +254,10 @@ export function ToolPicker({
                     className="flex items-center gap-3 rounded-xl border border-dashed bg-muted/20 p-3.5 opacity-80"
                   >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                      <WrenchIcon className="size-4" />
+                      <BuiltinToolIcon
+                        functionName={tool?.function_name}
+                        className="size-4"
+                      />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">
@@ -342,7 +347,10 @@ export function ToolPicker({
                       }}
                     />
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-700 dark:text-sky-400">
-                      <WrenchIcon className="size-4" />
+                      <BuiltinToolIcon
+                        functionName={tool.function_name}
+                        className="size-4"
+                      />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-1.5">

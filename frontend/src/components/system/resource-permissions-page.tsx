@@ -55,6 +55,7 @@ import { displayWorkspaceName, getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { ApiError } from "@/lib/api-client"
 import type { TFunction } from "@/i18n"
+import { toolDisplayDescription, toolDisplayName } from "@/lib/tool-display"
 import { cn } from "@/lib/utils"
 
 export type ResourcePermissionPageType = "apps" | "knowledge" | "tools"
@@ -148,11 +149,11 @@ function rowsForKnowledge(items: KnowledgeBaseListItem[]): ResourceRow[] {
   }))
 }
 
-function rowsForTools(items: ToolSummary[]): ResourceRow[] {
+function rowsForTools(items: ToolSummary[], t: TFunction): ResourceRow[] {
   return items.map((item) => ({
     id: item.id,
-    name: item.display_name,
-    description: item.description,
+    name: toolDisplayName(item, t),
+    description: toolDisplayDescription(item, t),
     status: item.status,
     ownerId: item.created_by_user_id,
   }))
@@ -256,8 +257,8 @@ export function ResourcePermissionsPage({
             ? listKnowledgeBases(session.token, selectedWorkspace.id, {
                 limit: 200,
               }).then(rowsForKnowledge)
-            : listAllTools(session.token, selectedWorkspace.id).then(
-                rowsForTools
+            : listAllTools(session.token, selectedWorkspace.id).then((items) =>
+                rowsForTools(items, t)
               ),
         listAllWorkspaceMembers(session.token, selectedWorkspace.id),
       ])

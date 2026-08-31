@@ -32,6 +32,545 @@ from app.shareddomain.tools.permissions import (
 CATALOG_ID_NAMESPACE = UUID("2df58f89-2f5c-4e2b-9545-d50fb806a6db")
 
 
+BUILTIN_SKILL_DEFINITIONS = (
+    (
+        "documents",
+        "documents_skill",
+        "Documents Skill",
+        "Create a DOCX file from Markdown content using the Documents Skill renderer.",
+    ),
+    (
+        "pdf",
+        "pdf_skill",
+        "PDF Skill",
+        "Create a paginated PDF from Markdown content using the PDF Skill renderer.",
+    ),
+    (
+        "pptx",
+        "pptx_skill",
+        "PPTX Skill",
+        (
+            "Create a new 16:9 PPTX from audience-facing structured slides. "
+            "Plan around the audience and purpose, give each slide one takeaway, "
+            "keep the cover minimal, and for teaching or training decks normally "
+            "use 8-12 content slides that show the problem, worked example, "
+            "reasoning/process, practice, and takeaway instead of copying a lesson "
+            "plan line-by-line. Do not use more than two consecutive bullets slides; "
+            "use steps for procedures and hero/two-column for worked examples. Vary "
+            "the supported layouts across section, bullets, two-column, icons, table, "
+            "hero, stats, steps, and quote, and put external sources in speaker notes. Keep "
+            "central arithmetic expressions in the slide copy so the renderer can "
+            "surface simple multiplication examples in an editable visual region. Keep "
+            "titles and body text at readable sizes; the renderer rejects "
+            "overlong slide titles. Create a coherent visual identity with the "
+            "declarative theme and optional per-slide style fields; built-in "
+            "templates are fallbacks, not the primary design choice. It supports "
+            "native icons, tables, click-triggered entrance animations, and page "
+            "transitions; it does not edit existing decks or fetch external media."
+        ),
+    ),
+    (
+        "spreadsheets",
+        "spreadsheets_skill",
+        "Spreadsheets Skill",
+        "Create a formatted XLSX workbook from structured sheet data using the Spreadsheets Skill renderer.",
+    ),
+)
+
+INTERNAL_BUILTIN_FUNCTION_NAMES = (
+    "create_artifact",
+    "inline_python",
+)
+
+
+def _pptx_input_schema() -> dict[str, Any]:
+    bullet_list = {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 6,
+        "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+        },
+        "description": (
+            "Short audience-facing support points for one slide claim. Use no more "
+            "than 4 concise points; do not use this as a transcript or lesson-plan "
+            "dump. Use steps, hero, or two-column when the content is ordered or "
+            "contains a worked example."
+        ),
+    }
+    column = {
+        "type": "object",
+        "properties": {
+            "heading": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+            },
+            "bullets": {
+                **bullet_list,
+                "maxItems": 5,
+            },
+        },
+        "required": ["heading", "bullets"],
+        "additionalProperties": False,
+    }
+    icon_item = {
+        "type": "object",
+        "properties": {
+            "icon": {
+                "type": "string",
+                "enum": [
+                    "bolt",
+                    "cloud",
+                    "cycle",
+                    "direction",
+                    "focus",
+                    "gear",
+                    "growth",
+                    "heart",
+                    "star",
+                    "sun",
+                ],
+                "description": "Built-in native PowerPoint icon.",
+            },
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48,
+            },
+            "body": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 180,
+            },
+        },
+        "required": ["icon", "title", "body"],
+        "additionalProperties": False,
+    }
+    table = {
+        "type": "object",
+        "properties": {
+            "headers": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 5,
+                "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60,
+                },
+            },
+            "rows": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 7,
+                "items": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 5,
+                    "items": {
+                        "type": [
+                            "string",
+                            "number",
+                            "integer",
+                            "boolean",
+                            "null",
+                        ]
+                    },
+                },
+            },
+        },
+        "required": ["headers", "rows"],
+        "additionalProperties": False,
+        "description": "A compact native table; every row must match the headers.",
+    }
+    stats_item = {
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": ["string", "number", "integer"],
+                "minLength": 1,
+                "maxLength": 24,
+                "description": "Big number or short metric string.",
+            },
+            "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40,
+            },
+        },
+        "required": ["value", "label"],
+        "additionalProperties": False,
+    }
+    steps_item = {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+            },
+            "body": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+            },
+        },
+        "required": ["title", "body"],
+        "additionalProperties": False,
+    }
+    style_colors = {
+        name: {
+            "type": "string",
+            "pattern": r"^#[0-9A-Fa-f]{6}$",
+        }
+        for name in (
+            "background_color",
+            "text_color",
+            "accent_color",
+            "panel_color",
+            "muted_text_color",
+            "rule_color",
+        )
+    }
+    slide_style = {
+        "type": "object",
+        "properties": {
+            **style_colors,
+            "font_family": {"type": "string", "minLength": 1, "maxLength": 64},
+            "heading_font_family": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+            },
+            "title_size": {"type": "number", "minimum": 35, "maximum": 44},
+            "body_size": {"type": "number", "minimum": 16, "maximum": 24},
+            "panel_radius": {"type": "number", "minimum": 0, "maximum": 0.18},
+            "title_alignment": {"type": "string", "enum": ["left", "center"]},
+        },
+        "additionalProperties": False,
+        "description": (
+            "Optional visual variation for this slide. Keep it coherent with the "
+            "presentation theme and use it only when the narrative needs contrast."
+        ),
+    }
+    slide = {
+        "type": "object",
+        "properties": {
+            "layout": {
+                "type": "string",
+                "enum": [
+                    "section",
+                    "bullets",
+                    "two_column",
+                    "icons",
+                    "table",
+                    "hero",
+                    "stats",
+                    "steps",
+                    "quote",
+                ],
+                "description": (
+                    "Use section for transitions, bullets for one claim with "
+                    "supporting points, two_column for a direct comparison, icons "
+                    "for 2-4 parallel concepts, table for compact structured data, "
+                    "hero for a bold full-slide statement, stats for 2-4 key "
+                    "metrics, steps for a 2-5 step process, and quote for a "
+                    "centered quotation. For teaching decks, use hero/two_column "
+                    "for the worked example, steps for the method, and avoid more "
+                    "than two consecutive bullets slides. Vary adjacent layouts."
+                ),
+            },
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 48,
+                "description": (
+                    "One-line takeaway title written for the intended audience, "
+                    "not a topic label or planning note; keep it to roughly 30 "
+                    "display-width units so it stays on one line."
+                ),
+            },
+            "subtitle": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "description": "Optional section or hero slide context; omit for other layouts.",
+            },
+            "bullets": bullet_list,
+            "left": column,
+            "right": column,
+            "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": icon_item,
+            },
+            "table": table,
+            "stats": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": stats_item,
+                "description": "Key metrics for the stats layout.",
+            },
+            "steps": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 5,
+                "items": steps_item,
+                "description": "Ordered process steps for the steps layout.",
+            },
+            "quote": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300,
+                "description": "Quotation text for the quote layout.",
+            },
+            "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "description": "Optional attribution line under a quote.",
+            },
+            "notes": {
+                "type": "string",
+                "maxLength": 4_000,
+                "description": (
+                    "Speaker notes. Put externally sourced claims under a "
+                    "[Sources] block with traceable references."
+                ),
+            },
+            "style": slide_style,
+        },
+        "required": ["layout", "title"],
+        "additionalProperties": False,
+        "description": (
+            "Provide only the content field used by the selected layout: subtitle, "
+            "bullets, left/right, items, table, stats, steps, quote, or source."
+        ),
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "description": "Minimal cover title for the intended audience.",
+            },
+            "subtitle": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+            },
+            "template": {
+                "type": "string",
+                "enum": ["minimal", "editorial", "bold"],
+                "description": (
+                    "Fallback composition preset; defaults to minimal. Prefer theme "
+                    "for a model-created visual identity."
+                ),
+            },
+            "theme": {
+                "type": "object",
+                "properties": {
+                    **style_colors,
+                    "font_family": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                    },
+                    "heading_font_family": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                    },
+                    "cover_title_size": {
+                        "type": "number",
+                        "minimum": 40,
+                        "maximum": 64,
+                    },
+                    "slide_title_size": {
+                        "type": "number",
+                        "minimum": 35,
+                        "maximum": 44,
+                    },
+                    "body_size": {
+                        "type": "number",
+                        "minimum": 16,
+                        "maximum": 24,
+                    },
+                    "panel_radius": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 0.18,
+                    },
+                    "cover_accent_width": {
+                        "type": "number",
+                        "minimum": 0.08,
+                        "maximum": 1.4,
+                    },
+                    "title_alignment": {
+                        "type": "string",
+                        "enum": ["left", "center"],
+                    },
+                },
+                "additionalProperties": False,
+                "description": (
+                    "Primary visual design contract. Create a coherent palette, "
+                    "font pairing, typography scale, panel treatment, and title "
+                    "alignment for the audience and subject. The renderer enforces "
+                    "readable contrast and safe size ranges."
+                ),
+            },
+            "brand": {
+                "type": "object",
+                "properties": {
+                    "primary_color": {
+                        "type": "string",
+                        "pattern": r"^#[0-9A-Fa-f]{6}$",
+                    },
+                    "background_color": {
+                        "type": "string",
+                        "pattern": r"^#[0-9A-Fa-f]{6}$",
+                    },
+                    "text_color": {
+                        "type": "string",
+                        "pattern": r"^#[0-9A-Fa-f]{6}$",
+                    },
+                    "font_family": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "description": "Referenced PowerPoint font; it is not embedded.",
+                    },
+                },
+                "required": [
+                    "primary_color",
+                    "background_color",
+                    "text_color",
+                    "font_family",
+                ],
+                "additionalProperties": False,
+                "description": (
+                    "Compatibility brand override. Prefer theme for new decks. "
+                    "Text/background must meet readable contrast and primary/background "
+                    "must remain visually distinct."
+                ),
+            },
+            "footer": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+            },
+            "slides": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 30,
+                "items": slide,
+                "description": (
+                    "Narrative-ordered content slides. Each slide should advance one "
+                    "claim; vary adjacent layouts when the content supports it."
+                ),
+            },
+        },
+        "required": ["title", "slides"],
+        "additionalProperties": False,
+    }
+
+
+def _skill_input_schema(skill_name: str) -> dict[str, Any]:
+    filename_patterns = {
+        "documents": r"^[^/\\]+\.[dD][oO][cC][xX]$",
+        "pdf": r"^[^/\\]+\.[pP][dD][fF]$",
+        "pptx": r"^[^/\\]+\.[pP][pP][tT][xX]$",
+        "spreadsheets": r"^[^/\\]+\.[xX][lL][sS][xX]$",
+    }
+    properties: dict[str, Any] = {
+        "filename": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "pattern": filename_patterns[skill_name],
+        }
+    }
+    required = ["filename"]
+    if skill_name in {"documents", "pdf"}:
+        properties["content"] = {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200_000,
+            "description": (
+                "Final document content in a concise Markdown subset: headings, "
+                "paragraphs, bullet or numbered lists, and pipe tables."
+            ),
+        }
+        required.append("content")
+    elif skill_name == "spreadsheets":
+        properties["workbook"] = {
+            "type": "object",
+            "properties": {
+                "sheets": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 31,
+                            },
+                            "rows": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 2_000,
+                                "items": {
+                                    "type": "array",
+                                    "maxItems": 64,
+                                    "items": {
+                                        "type": [
+                                            "string",
+                                            "number",
+                                            "integer",
+                                            "boolean",
+                                            "null",
+                                        ]
+                                    },
+                                },
+                            },
+                            "freeze_panes": {
+                                "type": "string",
+                                "maxLength": 10,
+                            },
+                            "auto_filter": {"type": "boolean"},
+                        },
+                        "required": ["name", "rows"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["sheets"],
+            "additionalProperties": False,
+        }
+        required.append("workbook")
+    elif skill_name == "pptx":
+        properties["presentation"] = _pptx_input_schema()
+        required.append("presentation")
+    else:
+        raise ValueError(f"Unknown built-in Skill: {skill_name}")
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
 def stable_catalog_id(key: str) -> str:
     return str(uuid5(CATALOG_ID_NAMESPACE, key))
 
@@ -340,6 +879,7 @@ async def list_tool_catalog(
         workspace_role == "admin" or actor.is_global_admin,
         limit,
         offset,
+        excluded_builtin_function_names=INTERNAL_BUILTIN_FUNCTION_NAMES,
     )
     items: list[ToolCatalogItem] = []
     for tool, source, version, draft, grant in rows:
@@ -500,6 +1040,19 @@ def build_inline_python_tool(
         "properties": {
             "code": {"type": "string", "maxLength": 8192},
             "inputs": {"type": "object"},
+            "skills": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                },
+                "maxItems": 8,
+                "uniqueItems": True,
+                "description": (
+                    "Optional managed Skills to stage for this run. Each Skill "
+                    "must be installed by the Worker."
+                ),
+            },
         },
         "required": ["code", "inputs"],
         "additionalProperties": False,
@@ -518,7 +1071,11 @@ def build_inline_python_tool(
     definition_hash = canonical_definition_hash(
         {
             "name": "inline_python",
-            "description": "Run inline Python in the Workflow sandbox.",
+            "description": (
+                "Run inline Python in the Workflow sandbox. Optional managed "
+                "Skills are staged read-only and may install their requirements "
+                "through the Worker public egress proxy."
+            ),
             "input_schema": input_schema,
             "output_schema": output_schema,
             "execution_spec": execution_spec,
@@ -545,7 +1102,11 @@ def build_inline_python_tool(
             tool_id=tool_id,
             revision=1,
             display_name="Python code",
-            description="Run inline Python in the Workflow sandbox.",
+            description=(
+                "Run inline Python in the Workflow sandbox. Optional managed "
+                "Skills are staged read-only and may install their requirements "
+                "through the Worker public egress proxy."
+            ),
             input_schema=input_schema,
             output_schema=output_schema,
             execution_spec=execution_spec,
@@ -585,12 +1146,16 @@ def build_artifact_tool(
         "PDF, XLSX, PPTX, images, and other rich or binary formats, put a Python "
         "generator program in content and write the final file only to the provided "
         "global output_path; never use /tmp, the current directory, or a hard-coded "
-        "path. Use only these installed libraries and import names: DOCX uses "
+        "path. Use these installed libraries and import names: DOCX uses "
         "python-docx (`from docx import Document`); PDF uses PyMuPDF "
-        "(`import pymupdf`, never reportlab); XLSX uses openpyxl; PPTX uses "
+        "(`import pymupdf`); XLSX uses openpyxl; PPTX uses "
         "python-pptx (`from pptx import Presentation`); images use Pillow "
-        "(`from PIL import Image`). Do not probe the environment, install packages, "
-        "or create diagnostic files. The Python standard library is also available. User "
+        "(`from PIL import Image`). Managed Skills may be selected with `skills`: "
+        "built-in bundles are `documents`, `pdf`, `pptx`, and `spreadsheets`; their files "
+        "are staged read-only below `NEXAFLOW_SKILLS_DIR`, and an optional "
+        "`requirements.txt` is installed into `NEXAFLOW_PACKAGES_DIR` through the "
+        "Worker public HTTP(S) proxy. Do not install packages yourself, use package "
+        "URLs, or create diagnostic files. The Python standard library is also available. User "
         "attachment text is already included in the conversation and can be used "
         "to produce an edited copy. Enforce requested measurable constraints in "
         "the generator before saving, and print concise validation results to stdout. "
@@ -606,7 +1171,8 @@ def build_artifact_tool(
                 "description": (
                     "Exact UTF-8 contents for plain-text/source files, or Python "
                     "generator code for rich/binary output that writes to output_path. "
-                    "For PDF import pymupdf; reportlab is unavailable."
+                    "For PDF import pymupdf, or select the `pdf` Skill for its "
+                    "additional PDF packages."
                 ),
             },
             "content_mode": {
@@ -618,6 +1184,19 @@ def build_artifact_tool(
                 ),
             },
             "filename": {"type": "string", "maxLength": 120},
+            "skills": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                },
+                "maxItems": 8,
+                "uniqueItems": True,
+                "description": (
+                    "Optional managed Skills to stage for the Python generator. "
+                    "Built-ins: documents, pdf, pptx, spreadsheets."
+                ),
+            },
         },
         "required": ["content", "filename"],
         "additionalProperties": False,
@@ -728,6 +1307,58 @@ def build_artifact_tool(
     )
 
 
+def build_skill_artifact_tool(
+    workspace_id: str,
+    skill_name: str,
+    created_at: datetime | None = None,
+) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    definition = next(
+        (
+            item
+            for item in BUILTIN_SKILL_DEFINITIONS
+            if item[0] == skill_name
+        ),
+        None,
+    )
+    if definition is None:
+        raise ValueError(f"Unknown built-in Skill: {skill_name}")
+
+    _, function_name, display_name, description = definition
+    tool, version, policy = build_artifact_tool(workspace_id, created_at)
+    tool_id = stable_catalog_id(
+        f"tool:{workspace_id}:builtin:skill:{skill_name}"
+    )
+    input_schema = _skill_input_schema(skill_name)
+    execution_spec = {"builtin": "skill", "skill": skill_name}
+    definition_hash = canonical_definition_hash(
+        {
+            "name": function_name,
+            "description": description,
+            "input_schema": input_schema,
+            "output_schema": version.output_schema,
+            "execution_spec": execution_spec,
+        }
+    )
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+
+    tool.id = tool_id
+    tool.stable_key = f"skill_{skill_name}"
+    tool.function_name = function_name
+    tool.current_version_id = version_id
+    version.id = version_id
+    version.tool_id = tool_id
+    version.display_name = display_name
+    version.description = description
+    version.input_schema = input_schema
+    version.execution_spec = execution_spec
+    version.definition_hash = definition_hash
+    policy.id = stable_catalog_id(f"policy:{tool_id}")
+    policy.tool_id = tool_id
+    policy.tool_version_id = version_id
+    policy.definition_hash = definition_hash
+    return tool, version, policy
+
+
 async def ensure_workspace_system_catalog(
     db: AsyncSession,
     workspace_id: str,
@@ -761,7 +1392,8 @@ async def ensure_workspace_system_catalog(
 
     await ensure_tool(catalog.tool, catalog.version, catalog.policy)
     await ensure_tool(*build_inline_python_tool(workspace_id))
-    await ensure_tool(*build_artifact_tool(workspace_id))
+    for skill_name, *_ in BUILTIN_SKILL_DEFINITIONS:
+        await ensure_tool(*build_skill_artifact_tool(workspace_id, skill_name))
 
 
 async def _tombstone_mcp_sources(

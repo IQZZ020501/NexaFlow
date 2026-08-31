@@ -34,7 +34,7 @@ from app.infrastructure.repositories.mapping import (
     to_entity,
     to_orm,
 )
-from app.domain.resource_permission import ResourcePermission as ResourcePermissionORM
+from app.shareddomain.platform.models import ResourcePermission as ResourcePermissionORM
 from app.shareddomain.knowledge.models import (
     KnowledgeAsset as KnowledgeAssetORM,
     KnowledgeAttachment as KnowledgeAttachmentORM,

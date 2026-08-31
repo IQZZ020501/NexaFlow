@@ -17,12 +17,25 @@ from typing import Any
 from .runner import encode_response, execute_request
 
 MAX_REQUEST_BYTES = 768 * 1024
-# NOTE: serialize same-UID jobs; move to one sandbox instance per job before
-# increasing throughput so untrusted processes cannot signal sibling jobs.
-MAX_CONCURRENT_RUNS = 1
+# Job concurrency is bounded so untrusted siblings stay apart. Each job runs
+# in its own child with per-job rlimits and temp dirs, but Linux launcher
+# children share the worker-level namespace/chroot, so same-UID siblings can
+# still signal each other; the operator controls SANDBOX_MAX_CONCURRENT_RUNS
+# and accepts that tradeoff when raising it. The hardening path remains one
+# instance per job.
 ACQUIRE_TIMEOUT_SECONDS = 2.0
 SOCKET_GID = 65533
 logger = logging.getLogger(__name__)
+
+
+def _max_concurrent_runs() -> int:
+    """Sandbox job concurrency from SANDBOX_MAX_CONCURRENT_RUNS (no cap)."""
+    raw = os.environ.get("SANDBOX_MAX_CONCURRENT_RUNS", "1")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 1
+    return max(1, value)
 
 
 class SandboxRequestHandler(socketserver.StreamRequestHandler):
@@ -85,7 +98,7 @@ class SandboxServer(socketserver.ThreadingUnixStreamServer):
                 raise RuntimeError(f"refusing to replace non-socket path: {self.socket_path}")
             self.socket_path.unlink()
         super().__init__(str(self.socket_path), SandboxRequestHandler)
-        self.run_slot = threading.BoundedSemaphore(MAX_CONCURRENT_RUNS)
+        self.run_slot = threading.BoundedSemaphore(_max_concurrent_runs())
         if os.geteuid() == 0:  # pragma: no cover - requires root (CI Docker only)
             os.chown(self.socket_path, 0, SOCKET_GID)
         self.socket_path.chmod(0o660)
@@ -105,9 +118,15 @@ def main() -> None:
     )
     parser = argparse.ArgumentParser()
     parser.add_argument("--socket", default="/run/sandbox/sandbox.sock")
+    parser.add_argument("--egress-socket")
     args = parser.parse_args()
     if os.name != "posix":
         raise SystemExit("the sandbox requires a POSIX host")
+    if args.egress_socket is not None:
+        egress_socket = Path(args.egress_socket)
+        if not egress_socket.is_absolute():
+            raise SystemExit("the sandbox egress socket must be absolute")
+        os.environ["SANDBOX_EGRESS_SOCKET"] = str(egress_socket)
     server = SandboxServer(args.socket)
 
     def stop(_signum: int, _frame: Any) -> None:

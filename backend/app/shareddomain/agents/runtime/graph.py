@@ -1,5 +1,8 @@
 import asyncio
+from copy import copy
+import html
 import json
+import re
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
@@ -75,6 +78,198 @@ class PreparedToolCall:
     parallel_safe: bool
 
 
+_DSML_TAG_RE = re.compile(
+    r"<\s*(?P<closing>/?)\s*\|\s*DSML\s*\|\s*"
+    r"(?P<slash>/?)\s*(?P<tag>function_calls|tool_calls|invoke|parameter)\b"
+    r"(?P<attrs>[^>]*)>",
+    re.IGNORECASE,
+)
+# Some Markdown renderers expand the two protocol separators to ``| |``.
+_DSML_PREFIX_RE = re.compile(
+    r"<\s*(?P<closing>/?)\s*\|\s*(?:\|\s*)?DSML\s*\|\s*(?:\|\s*)?",
+    re.IGNORECASE,
+)
+_DSML_ANY_TAG_RE = re.compile(
+    r"<\s*/?\s*\|\s*DSML\s*\|[^>]*>",
+    re.IGNORECASE,
+)
+_DSML_MARKER_RE = re.compile(r"<\s*/?\s*\|\s*DSML\s*\|", re.IGNORECASE)
+_DSML_MARKER_PREFIX = "<|dsml|"
+_DSML_SPACED_MARKER_PREFIX = "<||dsml||"
+
+
+def _canonicalize_dsml(text: str) -> str:
+    return _DSML_PREFIX_RE.sub(
+        lambda match: f"<{match.group('closing')}|DSML|",
+        text,
+    )
+
+
+def _dsml_is_closing(match: re.Match[str]) -> bool:
+    return bool(match.group("closing") or match.group("slash"))
+
+
+def _dsml_attribute(attrs: str, name: str) -> str | None:
+    pattern = rf"\b{re.escape(name)}\s*=\s*"
+    match = re.search(pattern + r'"([^"]*)"', attrs, re.IGNORECASE)
+    if match is None:
+        match = re.search(pattern + r"'([^']*)'", attrs, re.IGNORECASE)
+    if match is None:
+        match = re.search(pattern + r"([^\s>]+)", attrs, re.IGNORECASE)
+    if match is None:
+        return None
+    return html.unescape(match.group(1))
+
+
+def _dsml_matching_tag(
+    matches: list[re.Match[str]],
+    start: int,
+    tag: str,
+) -> re.Match[str] | None:
+    for match in matches[start:]:
+        if match.group("tag").lower() != tag:
+            continue
+        # A few providers use the opening token for both sides of a tag.
+        # The first same-name token is the close in both forms.
+        return match
+    return None
+
+
+def _dsml_parameter_value(raw: str, string_value: str | None) -> Any:
+    value = html.unescape(raw.strip())
+    if string_value and string_value.lower() in {"false", "0", "no"}:
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return value
+    if string_value is None and value[:1] in "[{":
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return value
+
+
+def parse_dsml_tool_calls(text: str) -> tuple[str, tuple[ModelToolCall, ...]]:
+    """Parse legacy text-mode DSML calls without exposing protocol markup."""
+    if not isinstance(text, str):
+        return text, ()
+
+    normalized = _canonicalize_dsml(html.unescape(text))
+    if _DSML_MARKER_RE.search(normalized) is None:
+        return text, ()
+    matches = list(_DSML_TAG_RE.finditer(normalized))
+    calls: list[ModelToolCall] = []
+    spans: list[tuple[int, int]] = []
+    consumed_end = -1
+    for index, invoke in enumerate(matches):
+        if invoke.start() < consumed_end:
+            continue
+        if invoke.group("tag").lower() != "invoke" or _dsml_is_closing(invoke):
+            continue
+        close = _dsml_matching_tag(matches, index + 1, "invoke")
+        body_end = close.start() if close is not None else len(normalized)
+        body = normalized[invoke.end() : body_end]
+        parameter_matches = list(_DSML_TAG_RE.finditer(body))
+        arguments: dict[str, Any] = {}
+        for parameter_index, parameter in enumerate(parameter_matches):
+            if (
+                parameter.group("tag").lower() != "parameter"
+                or _dsml_is_closing(parameter)
+            ):
+                continue
+            parameter_close = _dsml_matching_tag(
+                parameter_matches,
+                parameter_index + 1,
+                "parameter",
+            )
+            value_end = (
+                parameter_close.start()
+                if parameter_close is not None
+                else len(body)
+            )
+            name = _dsml_attribute(parameter.group("attrs"), "name")
+            if name:
+                arguments[name] = _dsml_parameter_value(
+                    body[parameter.end() : value_end],
+                    _dsml_attribute(parameter.group("attrs"), "string"),
+                )
+        name = _dsml_attribute(invoke.group("attrs"), "name")
+        if name:
+            calls.append(
+                ModelToolCall(
+                    id=f"dsml-{len(calls) + 1}",
+                    name=name,
+                    arguments=json.dumps(arguments, ensure_ascii=False),
+                )
+            )
+        block_end = close.end() if close is not None else body_end
+        spans.append((invoke.start(), block_end))
+        consumed_end = block_end
+
+    cleaned_parts: list[str] = []
+    cursor = 0
+    for start, end in spans:
+        cleaned_parts.append(normalized[cursor:start])
+        cursor = end
+    cleaned_parts.append(normalized[cursor:])
+    cleaned = _DSML_ANY_TAG_RE.sub("", "".join(cleaned_parts)).strip()
+    return cleaned, tuple(calls)
+
+
+def clean_model_text(text: str) -> str:
+    return parse_dsml_tool_calls(text)[0]
+
+
+def _partial_dsml_start(text: str) -> int | None:
+    for index in range(max(0, len(text) - 32), len(text)):
+        if text[index] != "<":
+            continue
+        compact = re.sub(r"\s+", "", text[index:]).lower()
+        if compact.startswith("<") and any(
+            prefix.startswith(compact)
+            for prefix in (_DSML_MARKER_PREFIX, _DSML_SPACED_MARKER_PREFIX)
+        ):
+            return index
+    return None
+
+
+class ModelTextStreamFilter:
+    """Hold a possible DSML marker until it is either confirmed or released."""
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._protocol = False
+
+    def push(self, delta: str) -> str:
+        if not isinstance(delta, str) or not delta:
+            return ""
+        if self._protocol:
+            self._buffer += delta
+            return ""
+        combined = _canonicalize_dsml(self._buffer + delta)
+        marker = _DSML_MARKER_RE.search(combined)
+        if marker is not None:
+            self._protocol = True
+            self._buffer = combined[marker.start() :]
+            return combined[: marker.start()]
+        partial = _partial_dsml_start(combined)
+        if partial is None:
+            self._buffer = ""
+            return combined
+        self._buffer = combined[partial:]
+        return combined[:partial]
+
+    def finish(self) -> str:
+        tail = self._buffer
+        self._buffer = ""
+        if not tail:
+            return ""
+        if self._protocol:
+            return clean_model_text(tail)
+        return "" if _partial_dsml_start(tail) is not None else tail
+
+
 def partial_tool_input_preview(arguments: str) -> dict[str, str]:
     try:
         parsed = parse_partial_json(arguments)
@@ -102,7 +297,11 @@ def model_completion(message: AIMessage) -> ModelCompletion:
         ModelToolCall(
             id=tool_call.get("id") or "",
             name=tool_call.get("name") or "",
-            arguments=json.dumps(tool_call.get("args") or {}, ensure_ascii=False),
+            arguments=(
+                tool_call.get("args")
+                if isinstance(tool_call.get("args"), str)
+                else json.dumps(tool_call.get("args") or {}, ensure_ascii=False)
+            ),
         )
         for tool_call in message.tool_calls
     ]
@@ -114,12 +313,97 @@ def model_completion(message: AIMessage) -> ModelCompletion:
         )
         for tool_call in message.invalid_tool_calls
     )
+    content, dsml_calls = parse_dsml_tool_calls(message.text)
+    seen = {
+        (
+            call.name,
+            json.dumps(
+                _json_arguments(call.arguments),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+        )
+        for call in tool_calls
+    }
+    for call in dsml_calls:
+        key = (
+            call.name,
+            json.dumps(
+                _json_arguments(call.arguments),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+        )
+        if key not in seen:
+            tool_calls.append(call)
+            seen.add(key)
     finish_reason = message.response_metadata.get("finish_reason") or "stop"
     return ModelCompletion(
-        content=message.text,
+        content=content,
         tool_calls=tuple(tool_calls),
         finish_reason=str(finish_reason),
     )
+
+
+def _json_arguments(arguments: Any) -> Any:
+    if isinstance(arguments, str):
+        try:
+            return json.loads(arguments)
+        except (json.JSONDecodeError, TypeError):
+            return arguments
+    return arguments
+
+
+def sanitized_model_message(
+    message: AIMessage,
+    completion: ModelCompletion,
+) -> AIMessage:
+    tool_calls: list[dict[str, Any]] = []
+    invalid_tool_calls: list[dict[str, Any]] = []
+    for call in completion.tool_calls:
+        arguments = _json_arguments(call.arguments)
+        if isinstance(arguments, dict):
+            tool_calls.append(
+                {
+                    "name": call.name,
+                    "args": arguments,
+                    "id": call.id,
+                    "type": "tool_call",
+                }
+            )
+        else:
+            invalid_tool_calls.append(
+                {
+                    "name": call.name,
+                    "args": call.arguments,
+                    "id": call.id,
+                    "error": None,
+                    "type": "invalid_tool_call",
+                }
+            )
+    update = {
+        "content": completion.content,
+        "tool_calls": tool_calls,
+        "invalid_tool_calls": invalid_tool_calls,
+    }
+    model_copy = getattr(message, "model_copy", None)
+    if callable(model_copy):
+        return model_copy(update=update)
+    # Workflow tests and lightweight provider adapters may expose only the
+    # provider-neutral message attributes, not Pydantic's model_copy().
+    try:
+        fallback = copy(message)
+        for key, value in update.items():
+            setattr(fallback, key, value)
+        if hasattr(fallback, "text"):
+            fallback.text = completion.content
+        return fallback
+    except (AttributeError, TypeError):
+        return AIMessage(**update)
 
 
 def reasoning_content(message: AIMessageChunk) -> str:
@@ -157,6 +441,7 @@ async def agent_node(
     tool_call_started = False
     streamed_tool_calls: dict[int, dict[str, Any]] = {}
     reasoning = ""
+    text_filter = ModelTextStreamFilter()
 
     async def emit_reasoning_delta(delta: str) -> None:
         nonlocal reasoning
@@ -272,9 +557,14 @@ async def agent_node(
                                     replace=replace,
                                 )
                             streamed["preview"] = preview
-                    if chunk.text and not runtime.context.defer_answer:
-                        await emit_answer_delta(chunk.text)
+                    if chunk.text:
+                        visible_text = text_filter.push(chunk.text)
+                        if visible_text and not runtime.context.defer_answer:
+                            await emit_answer_delta(visible_text)
                     aggregate = chunk if aggregate is None else aggregate + chunk
+                trailing_text = text_filter.finish()
+                if trailing_text and not runtime.context.defer_answer:
+                    await emit_answer_delta(trailing_text)
                 message = message_chunk_to_message(
                     aggregate or AIMessageChunk(content="")
                 )
@@ -287,6 +577,7 @@ async def agent_node(
     if not isinstance(message, AIMessage):
         raise AgentRunnerError("Agent model returned an invalid response message.")
     completion = model_completion(message)
+    message = sanitized_model_message(message, completion)
 
     messages = [*state["messages"], message]
     tool_calls = [pending_tool_call(call) for call in completion.tool_calls]
@@ -335,7 +626,7 @@ async def agent_node(
 
 def invalid_arguments_result() -> AgentToolResult:
     return AgentToolResult(
-        content="Tool parameters are invalid.",
+        content="Tool parameters are invalid JSON; return a JSON object.",
         summary="Invalid tool parameters.",
         is_error=True,
     )

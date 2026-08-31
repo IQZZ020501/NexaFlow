@@ -1902,6 +1902,27 @@ describe("PublicAgentChat", () => {
               status: "cancelled",
               result: "",
               error: "Agent run was cancelled.",
+              progress: [
+                {
+                  id: "analysis-1",
+                  type: "analysis",
+                  status: "running",
+                  stage: "analyzing",
+                  turn: 1,
+                  count: null,
+                  reasoning: "仍在思考",
+                  hits: [],
+                },
+                {
+                  id: "answer-1",
+                  type: "answer",
+                  status: "failed",
+                  stage: "failed",
+                  turn: 1,
+                  count: null,
+                  hits: [],
+                },
+              ],
             })
           ),
         streamResponses: [() => new Promise<Response>(() => {})],
@@ -1909,7 +1930,7 @@ describe("PublicAgentChat", () => {
       requests
     )
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    const { container } = renderPage(<PublicAgentChat agentId="agent-1" />)
     await screen.findByText("开始新对话")
     sendMessage("慢慢来")
     expect(await screen.findByLabelText("停止生成")).toBeTruthy()
@@ -1926,8 +1947,10 @@ describe("PublicAgentChat", () => {
       ).toBe(true)
     )
     await waitFor(() =>
-      expect(screen.getByText("运行已取消")).toBeTruthy()
+      expect(screen.getAllByText("运行已取消").length).toBeGreaterThan(0)
     )
+    expect(container.querySelectorAll(".animate-spin")).toHaveLength(0)
+    expect(screen.queryByText("正在生成回答")).toBeNull()
     expect(
       (screen.getByLabelText("请输入问题") as HTMLTextAreaElement).disabled
     ).toBe(false)

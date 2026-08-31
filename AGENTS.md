@@ -24,7 +24,7 @@ Correctness, safety, evidence, and validation take priority over speed.
   (`api/` HTTP, `application/` use cases, `capabilities/` model/rag/embedding
   capabilities, `infrastructure/` config, DB session, data access, storage)
   cross-cut module-owned business domains under `shareddomain/` and shared
-  domain entities under `domain/` (User, Workspace, Team, permissions).
+  domain entities under `shareddomain/platform/` (User, Workspace, Team, permissions).
   Schemas stay in `app/schemas/` and Celery task entry points in
   `app/tasks/`. New features: add a self-contained module directory under
   `app/shareddomain/<feature>/` (entities + services), expose use cases
@@ -32,10 +32,10 @@ Correctness, safety, evidence, and validation take priority over speed.
 - Layer boundaries are enforced by convention (dependency direction is one-way):
   `api/` routers and dependencies import ONLY `application/` (plus `schemas/`
   and `api/deps.py`); `application/` may import `shareddomain/`,
-  `capabilities/`, `infrastructure/`, `schemas/`, `domain/`; `shareddomain/`
-  may import `capabilities/`, `infrastructure/`, `schemas/`, `domain/` but
+  `capabilities/`, `infrastructure/`, `schemas/`, `shareddomain/platform/`; `shareddomain/`
+  may import `capabilities/`, `infrastructure/`, `schemas/`, `shareddomain/platform/` but
   NEVER `application/`; `capabilities/` may import `infrastructure/` and its
-  own modules only — NEVER `shareddomain/`, `schemas/`, `domain/`, or
+  own modules only — NEVER `shareddomain/`, `schemas/`, or
   `application/`. Business rules and status constants live in
   `shareddomain/` (repositories import them from the domain models), and
   infrastructure is consumed through interfaces where swap-out matters
@@ -49,14 +49,15 @@ Correctness, safety, evidence, and validation take priority over speed.
   normalization). Swapping an implementation (e.g. Qdrant → Milvus) touches
   only the capability module and its port factory.
 - Data isolation: pure domain entities live in `app/entities/` (dataclasses
-  mirroring the database columns); `app/domain/` and
+  mirroring the database columns); `app/shareddomain/platform/` and other
   `app/shareddomain/*/models.py` hold the SQLAlchemy database models.
   Repositories (`app/infrastructure/repositories/`) map ORM ↔ entities via
   `mapping.py` helpers and own all `db.add/delete/refresh/flush`; business
   code (`shareddomain/`, `application/`) imports entities only, never ORM
   models, and coordinates transactions via the `db` unit-of-work
   (`db.commit()`/`db.rollback()`). New models: add the entity to
-  `app/entities/`, keep the ORM class in its current models module, and
+  `app/entities/`, keep the ORM class in its current models module
+  (`app/shareddomain/platform/` for cross-domain shared entities), and
   expose create/save/refresh/delete wrappers on the repository.
 - Agent Run persistence separates identity/caller/lineage in `agent_runs`,
   mutable lease/checkpoint/result data in `agent_run_states`, immutable
@@ -168,6 +169,15 @@ Correctness, safety, evidence, and validation take priority over speed.
   over a private Unix socket and runs each program with CPU, memory, process,
   file, wall-clock, input, and output limits. Its Artifact runtime includes
   python-docx, PyMuPDF, openpyxl, python-pptx, Pillow, and the standard library.
+  Optional `SANDBOX_NETWORK=public` uses a Worker-owned HTTP(S) egress proxy;
+  direct sockets and private/loopback/metadata destinations remain blocked.
+  NexaFlow-authored `documents`, `pdf`, `pptx`, and `spreadsheets` Skills live
+  under `sandbox/skills`; each declares a read-only renderer entrypoint and
+  artifact format in `SKILL.md` and is registered as a fixed selectable
+  built-in Tool. Fixed Skill Tools accept content/data rather than
+  caller-supplied Python.
+  Selected `requirements.txt` files install into a temporary per-run directory
+  through that proxy.
   Keep it independent from `backend/app/`; only the Worker supervisor may start
   or reach its socket.
 - `docs/` stores project planning and product/engineering documentation.
@@ -175,7 +185,8 @@ Correctness, safety, evidence, and validation take priority over speed.
   Dockerfile shared by API/worker/frontend containers, the custom PostgreSQL
   Dockerfile, and Nginx examples. The production Worker supervises the sandbox
   source inside its own container and creates a private network/mount/PID/IPC/UTS
-  namespace plus chroot before starting Celery. Its outer Docker AppArmor
+  namespace plus chroot before starting Celery. `NET_ADMIN` is used only to
+  bring up namespace-local loopback for the egress relay, then dropped. Its outer Docker AppArmor
   profile is unconfined so those mount operations are permitted; default seccomp
   and `no-new-privileges` remain enabled. There is no sandbox service or socket
   volume. `scripts/setup-hooks.sh` enables the repository Git hooks.
@@ -351,8 +362,8 @@ broad. Never claim a check passed unless it completed successfully.
 - `deploy/` changes: render the base, development, and pull-only server Compose
   configurations, verify the unique image list, build the affected image, and
   run the `sandbox-runtime` target's direct container checks plus embedded-Worker
-  hard-isolation self-check when the unified application image or sandbox wiring
-  changes.
+  hard-isolation self-check (including the public egress mode when enabled) when
+  the unified application image or sandbox wiring changes.
 - Coverage gates (do not claim a percentage unless measured):
   - Backend: `make coverage` / `backend/scripts/coverage.sh` — both use the
     cross-platform `backend/scripts/coverage.py` runner to execute all suites

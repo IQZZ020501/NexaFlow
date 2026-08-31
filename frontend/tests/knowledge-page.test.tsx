@@ -1066,7 +1066,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(screen.getByText("guide.md")).toBeTruthy()
     })
     expect(screen.getByText("notes.txt")).toBeTruthy()
-    expect(screen.getByText("已向量化")).toBeTruthy()
+    expect(screen.getAllByText("已向量化").length).toBe(2)
     expect(screen.getByText("解析失败")).toBeTruthy()
     expect(screen.getByText("2.0 KB")).toBeTruthy()
     expect(screen.getByText("parser crashed")).toBeTruthy()
@@ -1076,6 +1076,34 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(screen.getByText("文件名称")).toBeTruthy()
     expect(screen.getByText("文件状态")).toBeTruthy()
     expect(screen.getByText("启用状态")).toBeTruthy()
+  })
+
+  test("summarizes document indexing progress", async () => {
+    renderDetailPage({
+      documents: [
+        makeDocument({ id: "doc-1", status: "indexed" }),
+        makeDocument({ id: "doc-2", status: "indexed" }),
+        makeDocument({ id: "doc-3", status: "indexing" }),
+        makeDocument({ id: "doc-4", status: "parsed" }),
+        makeDocument({ id: "doc-5", status: "parse_failed" }),
+      ],
+    })
+
+    const progress = await screen.findByRole("progressbar", { name: "进度" })
+    expect(progress.getAttribute("aria-valuenow")).toBe("40")
+    expect(screen.getByText("40%")).toBeTruthy()
+    expect(
+      within(screen.getByRole("group", { name: "已向量化" })).getByText("2")
+    ).toBeTruthy()
+    expect(
+      within(screen.getByRole("group", { name: "向量化中" })).getByText("1")
+    ).toBeTruthy()
+    expect(
+      within(screen.getByRole("group", { name: "待向量化" })).getByText("1")
+    ).toBeTruthy()
+    expect(
+      within(screen.getByRole("group", { name: "失败" })).getByText("1")
+    ).toBeTruthy()
   })
 
   test("shows empty state when there are no documents", async () => {

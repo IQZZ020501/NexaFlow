@@ -571,6 +571,29 @@ function KnowledgeBasePageContent({
     selectedDocumentIds.includes(document.id)
   )
   const selectedDocumentCount = selectedDocuments.length
+  const documentIndexSummary = React.useMemo(() => {
+    const summary = { indexed: 0, indexing: 0, pending: 0, failed: 0 }
+
+    for (const document of documents) {
+      if (document.status === "indexed") {
+        summary.indexed += 1
+      } else if (
+        document.status === "index_queued" ||
+        document.status === "indexing"
+      ) {
+        summary.indexing += 1
+      } else if (document.status.endsWith("_failed")) {
+        summary.failed += 1
+      } else {
+        summary.pending += 1
+      }
+    }
+
+    return summary
+  }, [documents])
+  const documentIndexProgress = documents.length
+    ? Math.round((documentIndexSummary.indexed / documents.length) * 100)
+    : 0
   const visibleDocuments = paginateDocuments(
     filteredDocuments,
     documentPage,
@@ -1621,142 +1644,227 @@ function KnowledgeBasePageContent({
 
           <div className="min-w-0 overflow-hidden">
             {activeDetailTab === "documents" ? (
-              <div className="min-w-0">
-                <div className="flex flex-col gap-3 border-b px-4 py-4 lg:px-5 xl:flex-row xl:items-center xl:justify-between">
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      disabled={!canEditDocuments}
-                      onClick={() =>
-                        router.push(
-                          knowledgeUploadPath(selectedKnowledgeBase.id)
-                        )
-                      }
-                    >
-                      <UploadIcon data-icon="inline-start" />
-                      {t("上传文档")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={
-                        !canEditDocuments ||
-                        selectedDocumentCount === 0 ||
-                        isSubmittingDocumentTask
-                      }
-                      onClick={() =>
-                        void handleIndexDocuments(selectedDocuments)
-                      }
-                    >
-                      {isSubmittingDocumentTask ? (
-                        <LoaderCircleIcon
-                          className="animate-spin"
-                          data-icon="inline-start"
-                        />
-                      ) : null}
-                      {t("向量化")}
-                      {selectedDocumentCount
-                        ? `(${selectedDocumentCount})`
-                        : ""}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={!canEditDocuments || isSubmittingDocumentTask}
-                      onClick={() => void handleRebuildIndex()}
-                    >
-                      {isSubmittingDocumentTask ? (
-                        <LoaderCircleIcon
-                          className="animate-spin"
-                          data-icon="inline-start"
-                        />
-                      ) : (
-                        <RotateCcwIcon data-icon="inline-start" />
-                      )}
-                      {t("重建索引")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={
-                        !canEditDocuments ||
-                        selectedDocumentCount === 0 ||
-                        isSubmittingDocumentTask
-                      }
-                      onClick={() => void handleDeleteSelectedDocuments()}
-                    >
-                      <Trash2Icon data-icon="inline-start" />
-                      {t("删除")}
-                      {selectedDocumentCount
-                        ? `(${selectedDocumentCount})`
-                        : ""}
-                    </Button>
-                  </div>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-9 justify-between sm:w-36"
-                        >
-                          <span className="truncate">
-                            {t(
-                              DOCUMENT_SORT_OPTIONS.find(
-                                (option) => option.key === documentSortKey
-                              )?.label ?? "排序"
-                            )}
+              <div className="min-w-0 p-3 sm:p-4 lg:p-5">
+                <section
+                  aria-label={t("进度")}
+                  className="mb-3 rounded-lg border bg-background px-4 py-3"
+                >
+                  <div className="grid gap-4 md:grid-cols-[minmax(220px,1.2fr)_minmax(0,2fr)] md:items-center">
+                    <div>
+                      <div className="flex items-baseline justify-between gap-4">
+                        <p className="text-sm font-medium">
+                          {t("进度")}
+                          <span className="ml-2 font-normal text-muted-foreground tabular-nums">
+                            {documentIndexSummary.indexed} / {documents.length}
                           </span>
-                          {documentSortDirection === "asc" ? (
-                            <ArrowUpIcon className="size-3.5" />
-                          ) : (
-                            <ArrowDownIcon className="size-3.5" />
-                          )}
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="w-40">
-                        {DOCUMENT_SORT_OPTIONS.map((option) => (
-                          <DropdownMenuItem
-                            key={option.key}
-                            className="justify-between"
-                            onSelect={() => cycleDocumentSort(option.key)}
-                          >
-                            {t(option.label)}
-                            {documentSortKey === option.key ? (
-                              documentSortDirection === "asc" ? (
-                                <ArrowUpIcon className="size-3.5 text-primary" />
-                              ) : (
-                                <ArrowDownIcon className="size-3.5 text-primary" />
-                              )
-                            ) : null}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    <div className="relative sm:w-80">
-                      <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        value={documentSearch}
-                        onChange={(event) => {
-                          setDocumentSearch(event.target.value)
-                          setDocumentPage(1)
-                        }}
-                        className="pl-9"
-                        placeholder={t("按名称搜索")}
-                      />
+                        </p>
+                        <span className="text-sm font-semibold text-emerald-700 tabular-nums dark:text-emerald-400">
+                          {documentIndexProgress}%
+                        </span>
+                      </div>
+                      <div
+                        role="progressbar"
+                        aria-label={t("进度")}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={documentIndexProgress}
+                        className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted"
+                      >
+                        <div
+                          className="h-full rounded-full bg-emerald-500 transition-[width]"
+                          style={{ width: `${documentIndexProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4">
+                      {[
+                        {
+                          label: t("已向量化"),
+                          value: documentIndexSummary.indexed,
+                          dotClassName: "bg-emerald-500",
+                        },
+                        {
+                          label: t("向量化中"),
+                          value: documentIndexSummary.indexing,
+                          dotClassName: "bg-sky-500",
+                        },
+                        {
+                          label: t("待向量化"),
+                          value: documentIndexSummary.pending,
+                          dotClassName: "bg-amber-500",
+                        },
+                        {
+                          label: t("失败"),
+                          value: documentIndexSummary.failed,
+                          dotClassName: "bg-destructive",
+                        },
+                      ].map((item) => (
+                        <div
+                          key={item.label}
+                          role="group"
+                          aria-label={item.label}
+                          className="min-w-0 border-l px-3 first:border-l-0 first:pl-0 last:pr-0"
+                        >
+                          <p className="flex items-center gap-1.5 truncate text-[11px] font-medium text-muted-foreground sm:text-xs">
+                            <span
+                              className={cn(
+                                "size-1.5 shrink-0 rounded-full",
+                                item.dotClassName
+                              )}
+                            />
+                            {item.label}
+                          </p>
+                          <p className="mt-1 text-lg font-semibold tracking-tight tabular-nums">
+                            {item.value}
+                          </p>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
+                </section>
+                <div className="overflow-hidden rounded-lg border bg-background">
+                  <div className="flex flex-col gap-3 border-b p-3 sm:p-4 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        className="h-9 shadow-sm"
+                        disabled={!canEditDocuments}
+                        onClick={() =>
+                          router.push(
+                            knowledgeUploadPath(selectedKnowledgeBase.id)
+                          )
+                        }
+                      >
+                        <UploadIcon data-icon="inline-start" />
+                        {t("上传文档")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={selectedDocumentCount ? "secondary" : "outline"}
+                        className="h-9"
+                        disabled={
+                          !canEditDocuments ||
+                          selectedDocumentCount === 0 ||
+                          isSubmittingDocumentTask
+                        }
+                        onClick={() =>
+                          void handleIndexDocuments(selectedDocuments)
+                        }
+                      >
+                        {isSubmittingDocumentTask ? (
+                          <LoaderCircleIcon
+                            className="animate-spin"
+                            data-icon="inline-start"
+                          />
+                        ) : (
+                          <SlidersHorizontalIcon data-icon="inline-start" />
+                        )}
+                        {t("向量化")}
+                        {selectedDocumentCount
+                          ? `(${selectedDocumentCount})`
+                          : ""}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9"
+                        disabled={!canEditDocuments || isSubmittingDocumentTask}
+                        onClick={() => void handleRebuildIndex()}
+                      >
+                        {isSubmittingDocumentTask ? (
+                          <LoaderCircleIcon
+                            className="animate-spin"
+                            data-icon="inline-start"
+                          />
+                        ) : (
+                          <RotateCcwIcon data-icon="inline-start" />
+                        )}
+                        {t("重建索引")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={
+                          selectedDocumentCount ? "destructive" : "outline"
+                        }
+                        className="h-9"
+                        disabled={
+                          !canEditDocuments ||
+                          selectedDocumentCount === 0 ||
+                          isSubmittingDocumentTask
+                        }
+                        onClick={() => void handleDeleteSelectedDocuments()}
+                      >
+                        <Trash2Icon data-icon="inline-start" />
+                        {t("删除")}
+                        {selectedDocumentCount
+                          ? `(${selectedDocumentCount})`
+                          : ""}
+                      </Button>
+                    </div>
+                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_140px] gap-2 sm:flex sm:items-center">
+                      <div className="relative min-w-0 sm:w-72 xl:w-80">
+                        <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={documentSearch}
+                          onChange={(event) => {
+                            setDocumentSearch(event.target.value)
+                            setDocumentPage(1)
+                          }}
+                          className="h-9 rounded-lg bg-muted/25 pl-9"
+                          placeholder={t("按名称搜索")}
+                        />
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 w-full justify-between sm:w-40"
+                          >
+                            <span className="truncate">
+                              {t(
+                                DOCUMENT_SORT_OPTIONS.find(
+                                  (option) => option.key === documentSortKey
+                                )?.label ?? "排序"
+                              )}
+                            </span>
+                            {documentSortDirection === "asc" ? (
+                              <ArrowUpIcon className="size-3.5" />
+                            ) : (
+                              <ArrowDownIcon className="size-3.5" />
+                            )}
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                          {DOCUMENT_SORT_OPTIONS.map((option) => (
+                            <DropdownMenuItem
+                              key={option.key}
+                              className="justify-between"
+                              onSelect={() => cycleDocumentSort(option.key)}
+                            >
+                              {t(option.label)}
+                              {documentSortKey === option.key ? (
+                                documentSortDirection === "asc" ? (
+                                  <ArrowUpIcon className="size-3.5 text-primary" />
+                                ) : (
+                                  <ArrowDownIcon className="size-3.5 text-primary" />
+                                )
+                              ) : null}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
 
-                <div className="px-4 py-4 lg:px-5">
-                  <div className="overflow-x-auto rounded-lg border bg-background">
-                    <div className="min-w-[1270px]">
-                      <div className="grid grid-cols-[44px_240px_120px_100px_90px_110px_170px_170px_220px] items-center border-b px-3 py-4 text-sm font-medium text-muted-foreground">
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[1040px]">
+                      <div className="grid grid-cols-[44px_minmax(280px,1fr)_140px_92px_84px_124px_164px_132px] items-center border-b bg-muted/30 px-3 py-3 text-xs font-medium text-muted-foreground">
                         <label className="flex items-center justify-center">
                           <input
                             ref={selectAllDocumentsRef}
                             type="checkbox"
-                            className="size-4"
+                            className="size-4 accent-primary"
                             aria-label={t("选择所有文档")}
                             checked={isAllFilteredDocumentsSelected}
                             disabled={!filteredDocuments.length}
@@ -1765,11 +1873,26 @@ function KnowledgeBasePageContent({
                             }
                           />
                         </label>
-                        <span>{t("文件名称")}</span>
-                        <span>{t("文件状态")}</span>
                         <button
                           type="button"
-                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          className="flex items-center gap-1 text-left outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => cycleDocumentSort("name")}
+                        >
+                          {t("文件名称")}
+                          {documentSortKey === "name" ? (
+                            documentSortDirection === "asc" ? (
+                              <ArrowUpIcon className="size-3.5" />
+                            ) : (
+                              <ArrowDownIcon className="size-3.5" />
+                            )
+                          ) : (
+                            <ArrowUpDownIcon className="size-3.5" />
+                          )}
+                        </button>
+                        <span className="text-center">{t("文件状态")}</span>
+                        <button
+                          type="button"
+                          className="flex items-center justify-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("size_bytes")}
                         >
                           {t("大小")}
@@ -1785,7 +1908,7 @@ function KnowledgeBasePageContent({
                         </button>
                         <button
                           type="button"
-                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          className="flex items-center justify-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("chunk_count")}
                         >
                           {t("分段")}
@@ -1799,26 +1922,10 @@ function KnowledgeBasePageContent({
                             <ArrowUpDownIcon className="size-3.5" />
                           )}
                         </button>
-                        <span>{t("启用状态")}</span>
+                        <span className="text-center">{t("启用状态")}</span>
                         <button
                           type="button"
-                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => cycleDocumentSort("created_at")}
-                        >
-                          {t("创建时间")}
-                          {documentSortKey === "created_at" ? (
-                            documentSortDirection === "asc" ? (
-                              <ArrowUpIcon className="size-3.5" />
-                            ) : (
-                              <ArrowDownIcon className="size-3.5" />
-                            )
-                          ) : (
-                            <ArrowUpDownIcon className="size-3.5" />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className="flex cursor-pointer items-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                          className="flex items-center justify-center gap-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => cycleDocumentSort("updated_at")}
                         >
                           {t("更新时间")}
@@ -1832,243 +1939,277 @@ function KnowledgeBasePageContent({
                             <ArrowUpDownIcon className="size-3.5" />
                           )}
                         </button>
-                        <span className="sticky right-0 flex h-full items-center border-l bg-background px-4">
-                          {t("操作")}
-                        </span>
+                        <span className="text-center">{t("操作")}</span>
                       </div>
                       {isDocumentLoading ? (
                         <div className="flex min-h-56 items-center justify-center px-3 py-10 text-sm text-muted-foreground">
                           <LoaderCircleIcon className="animate-spin" />
                         </div>
                       ) : visibleDocuments.length ? (
-                        visibleDocuments.map((document) => (
-                          <div
-                            key={document.id}
-                            className="grid min-h-14 grid-cols-[44px_240px_120px_100px_90px_110px_170px_170px_220px] items-center border-b px-3 text-sm last:border-b-0 hover:bg-muted/40"
-                          >
-                            <label className="flex items-center justify-center">
-                              <input
-                                type="checkbox"
-                                className="size-4"
-                                aria-label={t("选择 {value}", {
-                                  value: document.filename,
-                                })}
-                                checked={selectedDocumentIds.includes(
-                                  document.id
-                                )}
-                                onChange={(event) =>
-                                  toggleDocumentSelection(
-                                    document.id,
-                                    event.target.checked
-                                  )
-                                }
-                              />
-                            </label>
-                            <div className="min-w-0 pr-3">
-                              <div className="flex min-w-0 items-center gap-2">
-                                {React.createElement(
-                                  getDocumentFileIcon(document.filename),
-                                  {
-                                    "aria-hidden": true,
-                                    className: cn(
-                                      "size-4 shrink-0 text-base leading-none",
-                                      getDocumentFileIconColor(
-                                        document.filename
-                                      )
-                                    ),
-                                  }
-                                )}
-                                <button
-                                  type="button"
-                                  className="min-w-0 cursor-pointer truncate text-left font-medium outline-none hover:text-primary focus-visible:underline"
-                                  title={document.filename}
-                                  onClick={() =>
-                                    router.push(
-                                      `/app/knowledge/${selectedKnowledgeBaseId}/documents/${document.id}`
+                        visibleDocuments.map((document) => {
+                          const isSelected = selectedDocumentIds.includes(
+                            document.id
+                          )
+
+                          return (
+                            <div
+                              key={document.id}
+                              className={cn(
+                                "grid min-h-[72px] grid-cols-[44px_minmax(280px,1fr)_140px_92px_84px_124px_164px_132px] items-center border-b px-3 text-sm transition-colors last:border-b-0 hover:bg-muted/25",
+                                isSelected && "bg-primary/[0.035]"
+                              )}
+                            >
+                              <label className="flex items-center justify-center">
+                                <input
+                                  type="checkbox"
+                                  className="size-4 accent-primary"
+                                  aria-label={t("选择 {value}", {
+                                    value: document.filename,
+                                  })}
+                                  checked={isSelected}
+                                  onChange={(event) =>
+                                    toggleDocumentSelection(
+                                      document.id,
+                                      event.target.checked
                                     )
                                   }
-                                >
-                                  {document.filename}
-                                </button>
-                              </div>
-                              {document.last_error ? (
-                                <p className="mt-1 truncate text-xs text-destructive">
-                                  {document.last_error}
-                                </p>
-                              ) : null}
-                            </div>
-                            <span className="flex items-center gap-2">
-                              {PROCESSING_DOCUMENT_STATUSES[document.status] ? (
-                                <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-primary" />
-                              ) : (
-                                <span
-                                  className={cn(
-                                    "size-2.5 shrink-0 rounded-full",
-                                    documentStatusDotClassName(document.status)
-                                  )}
                                 />
-                              )}
-                              {documentStatusText(document, knowledgeTasks, t)}
-                            </span>
-                            <span>{formatBytes(document.size_bytes)}</span>
-                            <span>{document.chunk_count}</span>
-                            <span className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={document.is_active}
-                                aria-label={t(
-                                  document.is_active
-                                    ? "停用 {value}"
-                                    : "启用 {value}",
-                                  { value: document.filename }
-                                )}
-                                disabled={
-                                  !canEditDocuments || isSubmittingDocumentTask
-                                }
-                                onClick={() =>
-                                  void handleToggleDocumentActive(document)
-                                }
-                                className={cn(
-                                  "relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
-                                  document.is_active
-                                    ? "bg-primary"
-                                    : "bg-muted-foreground/40"
-                                )}
-                              >
-                                <span
-                                  className={cn(
-                                    "block size-4 rounded-full bg-background shadow-sm transition-transform",
-                                    document.is_active
-                                      ? "translate-x-[18px]"
-                                      : "translate-x-0.5"
+                              </label>
+                              <div className="flex min-w-0 items-center gap-3 pr-4">
+                                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted/70">
+                                  {React.createElement(
+                                    getDocumentFileIcon(document.filename),
+                                    {
+                                      "aria-hidden": true,
+                                      className: cn(
+                                        "size-4 text-base leading-none",
+                                        getDocumentFileIconColor(
+                                          document.filename
+                                        )
+                                      ),
+                                    }
                                   )}
-                                />
-                              </button>
-                              <span>
-                                {t(document.is_active ? "已启用" : "已停用")}
-                              </span>
-                            </span>
-                            <span className="whitespace-nowrap">
-                              {formatDateTime(document.created_at, locale)}
-                            </span>
-                            <span className="whitespace-nowrap">
-                              {formatDateTime(document.updated_at, locale)}
-                            </span>
-                            <span className="sticky right-0 flex h-full items-center gap-2 border-l bg-background px-4">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={
-                                  !canEditDocuments || isSubmittingDocumentTask
-                                }
-                                aria-label={t("重新分段 {value}", {
-                                  value: document.filename,
-                                })}
-                                title={t("重新分段 {value}", {
-                                  value: document.filename,
-                                })}
-                                onClick={() => {
-                                  setChunkSize(SMART_CHUNK_SIZE)
-                                  setChunkOverlap(SMART_CHUNK_OVERLAP)
-                                  setSplitSeparator(SMART_SPLIT_SEPARATOR)
-                                  setCleaningRules(SMART_CLEANING_RULES)
-                                  setSegmentMode("smart")
-                                  setSegmentDialogDocument(document)
-                                }}
-                              >
-                                <RotateCcwIcon />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={
-                                  !canEditDocuments || isSubmittingDocumentTask
-                                }
-                                aria-label={t("向量化 {value}", {
-                                  value: document.filename,
-                                })}
-                                title={t("向量化 {value}", {
-                                  value: document.filename,
-                                })}
-                                onClick={() =>
-                                  void handleIndexDocuments([document])
-                                }
-                              >
-                                <SlidersHorizontalIcon />
-                              </Button>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
+                                </span>
+                                <div className="min-w-0">
+                                  <button
                                     type="button"
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    disabled={
-                                      !canEditDocuments ||
-                                      isSubmittingDocumentTask
-                                    }
-                                    aria-label={t("操作 {value}", {
-                                      value: document.filename,
-                                    })}
-                                    title={t("操作 {value}", {
-                                      value: document.filename,
-                                    })}
-                                  >
-                                    <MoreHorizontalIcon />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent
-                                  side="bottom"
-                                  align="start"
-                                  className="min-w-40"
-                                >
-                                  <DropdownMenuItem
-                                    onSelect={() =>
-                                      void handleDownloadDocument(document)
-                                    }
-                                  >
-                                    <DownloadIcon />
-                                    {t("下载原文")}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    onSelect={() =>
+                                    className="block max-w-full truncate text-left font-medium outline-none hover:text-primary focus-visible:underline"
+                                    title={document.filename}
+                                    onClick={() =>
                                       router.push(
                                         `/app/knowledge/${selectedKnowledgeBaseId}/documents/${document.id}`
                                       )
                                     }
                                   >
-                                    <FileTextIcon />
-                                    {t("预览切片")}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onSelect={() =>
-                                      void handleIndexDocuments([document])
-                                    }
+                                    {document.filename}
+                                  </button>
+                                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                                    {t("创建时间")} · {formatDateTime(document.created_at, locale)}
+                                  </p>
+                                  {document.last_error ? (
+                                    <p className="mt-1 truncate text-xs text-destructive">
+                                      {document.last_error}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <span className="inline-flex w-fit max-w-[132px] items-center gap-1.5 justify-self-center rounded-full border bg-background px-2.5 py-1 text-xs font-medium">
+                                {PROCESSING_DOCUMENT_STATUSES[
+                                  document.status
+                                ] ? (
+                                  <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-primary" />
+                                ) : (
+                                  <span
+                                    className={cn(
+                                      "size-2 shrink-0 rounded-full",
+                                      documentStatusDotClassName(
+                                        document.status
+                                      )
+                                    )}
+                                  />
+                                )}
+                                <span className="truncate">
+                                  {documentStatusText(
+                                    document,
+                                    knowledgeTasks,
+                                    t
+                                  )}
+                                </span>
+                              </span>
+                              <span className="text-center text-muted-foreground">
+                                {formatBytes(document.size_bytes)}
+                              </span>
+                              <span className="inline-flex w-fit min-w-8 items-center justify-center justify-self-center rounded-md bg-muted/60 px-2 py-1 text-xs font-semibold">
+                                {document.chunk_count}
+                              </span>
+                              <span className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={document.is_active}
+                                  aria-label={t(
+                                    document.is_active
+                                      ? "停用 {value}"
+                                      : "启用 {value}",
+                                    { value: document.filename }
+                                  )}
+                                  disabled={
+                                    !canEditDocuments ||
+                                    isSubmittingDocumentTask
+                                  }
+                                  onClick={() =>
+                                    void handleToggleDocumentActive(document)
+                                  }
+                                  className={cn(
+                                    "relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+                                    document.is_active
+                                      ? "bg-primary"
+                                      : "bg-muted-foreground/35"
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      "block size-4 rounded-full bg-background shadow-sm transition-transform",
+                                      document.is_active
+                                        ? "translate-x-[18px]"
+                                        : "translate-x-0.5"
+                                    )}
+                                  />
+                                </button>
+                                <span className="text-xs text-muted-foreground">
+                                  {t(
+                                    document.is_active ? "已启用" : "已停用"
+                                  )}
+                                </span>
+                              </span>
+                              <span className="whitespace-nowrap text-center text-xs text-muted-foreground">
+                                {formatDateTime(document.updated_at, locale)}
+                              </span>
+                              <span className="flex items-center justify-center gap-0.5">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="text-muted-foreground hover:text-foreground"
+                                  disabled={
+                                    !canEditDocuments ||
+                                    isSubmittingDocumentTask
+                                  }
+                                  aria-label={t("重新分段 {value}", {
+                                    value: document.filename,
+                                  })}
+                                  title={t("重新分段 {value}", {
+                                    value: document.filename,
+                                  })}
+                                  onClick={() => {
+                                    setChunkSize(SMART_CHUNK_SIZE)
+                                    setChunkOverlap(SMART_CHUNK_OVERLAP)
+                                    setSplitSeparator(SMART_SPLIT_SEPARATOR)
+                                    setCleaningRules(SMART_CLEANING_RULES)
+                                    setSegmentMode("smart")
+                                    setSegmentDialogDocument(document)
+                                  }}
+                                >
+                                  <RotateCcwIcon />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="text-muted-foreground hover:text-foreground"
+                                  disabled={
+                                    !canEditDocuments ||
+                                    isSubmittingDocumentTask
+                                  }
+                                  aria-label={t("向量化 {value}", {
+                                    value: document.filename,
+                                  })}
+                                  title={t("向量化 {value}", {
+                                    value: document.filename,
+                                  })}
+                                  onClick={() =>
+                                    void handleIndexDocuments([document])
+                                  }
+                                >
+                                  <SlidersHorizontalIcon />
+                                </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon-sm"
+                                      className="text-muted-foreground hover:text-foreground"
+                                      disabled={
+                                        !canEditDocuments ||
+                                        isSubmittingDocumentTask
+                                      }
+                                      aria-label={t("操作 {value}", {
+                                        value: document.filename,
+                                      })}
+                                      title={t("操作 {value}", {
+                                        value: document.filename,
+                                      })}
+                                    >
+                                      <MoreHorizontalIcon />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent
+                                    side="bottom"
+                                    align="end"
+                                    className="min-w-40"
                                   >
-                                    <SlidersHorizontalIcon />
-                                    {t("向量化")}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    variant="destructive"
-                                    onSelect={() =>
-                                      void handleDeleteDocument(document)
-                                    }
-                                  >
-                                    <Trash2Icon />
-                                    {t("删除")}
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </span>
-                          </div>
-                        ))
+                                    <DropdownMenuItem
+                                      onSelect={() =>
+                                        void handleDownloadDocument(document)
+                                      }
+                                    >
+                                      <DownloadIcon />
+                                      {t("下载原文")}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onSelect={() =>
+                                        router.push(
+                                          `/app/knowledge/${selectedKnowledgeBaseId}/documents/${document.id}`
+                                        )
+                                      }
+                                    >
+                                      <FileTextIcon />
+                                      {t("预览切片")}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onSelect={() =>
+                                        void handleIndexDocuments([document])
+                                      }
+                                    >
+                                      <SlidersHorizontalIcon />
+                                      {t("向量化")}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      variant="destructive"
+                                      onSelect={() =>
+                                        void handleDeleteDocument(document)
+                                      }
+                                    >
+                                      <Trash2Icon />
+                                      {t("删除")}
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </span>
+                            </div>
+                          )
+                        })
                       ) : (
-                        <div className="flex min-h-56 items-center justify-center px-3 py-10 text-sm text-muted-foreground">
-                          {t(documents.length ? "没有匹配的文档" : "暂无文档")}
+                        <div className="flex min-h-56 flex-col items-center justify-center gap-2 px-3 py-10 text-sm text-muted-foreground">
+                          <span className="flex size-10 items-center justify-center rounded-lg bg-muted/60">
+                            <FileTextIcon className="size-4" />
+                          </span>
+                          {t(
+                            documents.length ? "没有匹配的文档" : "暂无文档"
+                          )}
                         </div>
                       )}
                     </div>

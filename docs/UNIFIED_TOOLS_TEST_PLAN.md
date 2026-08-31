@@ -34,7 +34,7 @@ git log --oneline --decorate -20
 `docs/local/`；不要把带运行环境、账号、资源 ID 或临时数据的验收材料提交到仓库。
 计划中的 `NOT RUN` 是报告模板初始值，不表示当前产品状态。
 
-本期明确非目标不是缺陷：Skill 仅保留禁用标签；不支持 Agent -> Agent、Agent -> Workflow、Workflow -> Workflow；Python Tool 不开放网络、secret、pip 或持久文件；Workflow 不支持 `each_call` 人工审批。
+本期明确非目标不是缺陷：不支持 Agent -> Agent、Agent -> Workflow、Workflow -> Workflow；Python Tool 不开放 secret 或跨运行持久文件。Skill 通过内置/Worker 管理的 bundle、临时依赖目录和受限公网代理执行。
 
 ## 1. 测试目标
 
@@ -65,9 +65,9 @@ git log --oneline --decorate -20
 
 ### 2.2 本轮非范围
 
-- Skill 的创建和执行；只验证“Skill 暂未开放”的入口状态。
+- Skill 的在线上传、数据库管理和跨 Worker 自动分发；本轮仅支持文件系统安装和运行时选择。
 - Agent -> Agent、Agent -> Workflow、Workflow -> Workflow 递归调用。
-- Python Tool 的网络、secret、pip、持久文件或自定义依赖。
+- Skill 的跨运行持久文件、私有网络、VCS/path 依赖和源代码构建。
 - Workflow 内的 `each_call` 人工审批；本版应展示但禁止选择，并说明原因。
 - 真实生产 MCP、真实第三方写操作和生产数据。
 
@@ -84,7 +84,7 @@ git log --oneline --decorate -20
 
 - 测试连接到非明确命名的临时数据库。
 - 测试 MCP 指向真实外部写系统。
-- sandbox 获得网络、宿主文件或未授权环境变量。
+- sandbox 获得未授权网络（直连或代理访问内网）、宿主文件或未授权环境变量。
 - 同一幂等键产生两次外部写。
 - 发现跨 workspace 数据可见或可执行。
 
@@ -208,7 +208,7 @@ git log --oneline --decorate -20
 | PY-005 | P1 | 合法代码读取 `inputs` 并赋值 object `result` | 异步测试成功，data 匹配 output schema |
 | PY-006 | P1 | arguments 不匹配动态 input schema | 创建测试请求返回 422，不产生 500 |
 | PY-007 | P1 | 未赋值 result、result 非 JSON、primitive、schema 不匹配 | invocation failed，错误码稳定，不发布错误结果 |
-| PY-008 | P0 | 代码尝试 network、socket、env secret、workspace file、fork/exec | sandbox 阻断；宿主无副作用 |
+| PY-008 | P0 | 代码尝试直连 network、访问 socket、env secret、workspace file、fork/exec | 直连网络/敏感资源被阻断；宿主无副作用；若底层启用公网模式，仅代理 HTTP(S) 出站 |
 | PY-009 | P1 | 无限循环、内存、进程、文件、stdout/stderr、输出超限 | 在各自限额内终止；日志截断；模型和下游不接收 stdout/stderr |
 | PY-010 | P1 | sandbox busy | 有界退避后执行或明确失败；不忙等、不无限重试 |
 | PY-011 | P1 | 发布 draft 为 v1 | 创建不可变 ToolVersion，current pointer 指向 v1，默认 pure/auto |
@@ -317,7 +317,7 @@ git log --oneline --decorate -20
 | ID | 级别 | 场景与步骤 | 预期结果 |
 | --- | --- | --- | --- |
 | UI-001 | P1 | `/app/tools` 首屏 | 直接显示统一工具列表，不再是“新建 MCP”单一页面 |
-| UI-002 | P1 | “添加工具”菜单 | Python、MCP 可选；Skill 显示未开放且不可选 |
+| UI-002 | P1 | “添加工具”菜单 | Python、MCP、Skill 可选；Skill 显示内置 bundle、入口脚本、Agent 绑定和平台运行边界 |
 | UI-003 | P1 | 普通成员打开创建菜单 | 可以创建 Python 和公网 MCP；stdio/private 说明需 admin |
 | UI-004 | P1 | loading/error/retry/empty | 页面内状态完整；错误后可重试，不白屏 |
 | UI-005 | P1 | Tool 列表分页超过单页 | 所有页可到达，不只加载前 50/200 项 |
@@ -347,7 +347,7 @@ git log --oneline --decorate -20
 | SEC-004 | P0 | public/API 尝试审批写 Tool | canonical 路径不可进入公开审批接口 |
 | SEC-005 | P0 | MCP DNS rebinding、redirect 到私网、IPv4/IPv6 loopback | 每次连接/redirect 均执行网络策略，普通成员入口拒绝 |
 | SEC-006 | P0 | MCP 响应中的 prompt injection | 作为不可信 Tool data，不改变系统策略或泄露上下文 |
-| SEC-007 | P0 | Python import socket/subprocess/ctypes、读取 `/proc`/env | sandbox 与解释器限制阻断 |
+| SEC-007 | P0 | Python import socket/subprocess/ctypes、读取 `/proc`/env，或绕过代理直连网络 | sandbox 与解释器限制阻断；允许的公网模式只可经 Worker HTTP(S) 代理 |
 | SEC-008 | P0 | API 进程访问 sandbox socket | socket 只存在于 Worker 进程树；API 无路径可达 |
 | SEC-009 | P1 | secret/token 出现在 validation、trace、audit、SSE、前端错误 | 全部脱敏 |
 | SEC-010 | P0 | 参数原型污染键、超深 JSON、NaN/Infinity、非字符串 key | schema/JSON 边界拒绝 |
@@ -494,7 +494,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 | REQ-011 | Celery、Beat、sandbox、Compose 与开发启动方式可运行和恢复 | task 注册、Compose config、重启恢复、隔离检查 | OPS-003～011 | `NOT RUN` |
 | REQ-012 | public/API/nested Agent 不得调用 write、unknown 或待审批 Tool | HTTP、模型前 preflight、provider 未调用证据 | RUN-002～004、AGT-008～013、SEC-004、SEC-014 | `NOT RUN` |
 | REQ-013 | 重复投递、崩溃、超时、取消不会重复外部写；未知结果进入 `uncertain` | 故障注入、provider 计数、ledger 终态 | RUN-006～016、RUN-020、AGT-014～016、WF-014～020 | `NOT RUN` |
-| REQ-014 | Skill 本期只有不可用标签，不存在可点击死链或半成品 API | UI 与路由/API 枚举 | UI-002 | `NOT RUN` |
+| REQ-014 | Skill 入口可查看内置 bundle、固定入口与 Agent 选择边界，不暴露未实现的在线管理 API | UI 与路由/API 枚举 | UI-002 | `NOT RUN` |
 | REQ-015 | Backend 97%+、Frontend 99%+，定向/全量、类型、Lint、构建全部通过 | 原始退出码、lcov/coverage 报告、构建日志 | GATE-001～009 | `NOT RUN` |
 | REQ-016 | 测试产生的数据库、容器、volume、网络、进程、队列和文件全部清理 | 第 11 节前后对比证据 | CLEAN-001～010 | `NOT RUN` |
 
@@ -509,7 +509,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 | PRE-001 | P0 | 分支、HEAD、工作树与基点 | `git branch --show-current`、`git rev-parse HEAD`、`git status --short`、与 `main` 的 commit/diff 摘要 |
 | PRE-002 | P0 | 被测环境不是生产或共享开发数据 | 临时 DB/Redis/Qdrant/fixture 名称与连接目标的脱敏记录 |
 | PRE-003 | P1 | 规划范围与实际变更一致 | REQ-001～016 对应文件、迁移、API、页面和测试的映射 |
-| PRE-004 | P1 | 非目标未被意外实现或暴露 | Skill、递归 Agent、Python 网络/依赖等入口枚举结果 |
+| PRE-004 | P1 | 非目标未被意外实现或暴露 | Skill 在线管理、递归 Agent、未授权 Python 网络/依赖等入口枚举结果 |
 
 ### 13.2 架构与代码边界
 

@@ -46,6 +46,46 @@ describe("tool display helpers", () => {
         t
       )
     ).toBe("创建文件")
+    expect(
+      toolDisplayName(
+        {
+          function_name: "documents_skill",
+          display_name: "Documents Skill",
+          description: "Creates DOCX files",
+        },
+        t
+      )
+    ).toBe("DOCX")
+    expect(
+      toolDisplayName(
+        {
+          function_name: "pptx_skill",
+          display_name: "PPTX Skill",
+          description: "Creates PPTX decks",
+        },
+        t
+      )
+    ).toBe("PPTX")
+    expect(
+      toolDisplayName(
+        {
+          function_name: "pdf_skill",
+          display_name: "PDF Skill",
+          description: "Creates PDFs",
+        },
+        t
+      )
+    ).toBe("PDF")
+    expect(
+      toolDisplayName(
+        {
+          function_name: "spreadsheets_skill",
+          display_name: "Spreadsheets Skill",
+          description: "Creates workbooks",
+        },
+        t
+      )
+    ).toBe("Excel")
   })
 
   test("falls back to the configured display name for custom tools", () => {
@@ -94,6 +134,26 @@ describe("tool display helpers", () => {
     ).toBe(
       "根据文件名和内容创建可下载文件；文本文件直接保存，复杂格式由平台生成。"
     )
+    expect(
+      toolDisplayDescription(
+        {
+          function_name: "pdf_skill",
+          display_name: "PDF Skill",
+          description: "Creates PDFs",
+        },
+        t
+      )
+    ).toBe("创建 PDF 文件。")
+    expect(
+      toolDisplayDescription(
+        {
+          function_name: "pptx_skill",
+          display_name: "PPTX Skill",
+          description: "Creates PPTX decks",
+        },
+        t
+      )
+    ).toBe("创建 PPTX 演示文稿。")
   })
 
   test("translates the artifact tool in all supported languages", () => {
@@ -161,6 +221,19 @@ describe("tool display helpers", () => {
     expect(value).toBe(`下载：[论文.docx](${latestUrl})`)
     expect(value).not.toContain("chat.kimi.com")
     expect(value).not.toContain(oldUrl)
+  })
+
+  test("links artifacts returned by built-in Skill tools", () => {
+    const url = "/api/v1/artifacts/pptx-token"
+    const value = withArtifactDownloadLinks("文件已生成：review.pptx", [
+      {
+        tool_name: "pptx_skill",
+        status: "succeeded",
+        output: { filename: "review.pptx", download_url: url },
+      },
+    ])
+
+    expect(value).toContain(`[review.pptx](${url})`)
   })
 
   test("replaces a copied artifact token with the verified filename link", () => {

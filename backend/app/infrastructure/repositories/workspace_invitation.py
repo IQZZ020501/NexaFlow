@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.workspace_invitation import WorkspaceInvitation as InvitationOrm
+from app.shareddomain.platform.models import WorkspaceInvitation as InvitationOrm
 from app.entities.workspace_invitation import WorkspaceInvitation
 from app.infrastructure.repositories import mapping
 

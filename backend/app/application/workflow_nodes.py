@@ -51,7 +51,11 @@ from app.schemas.workflow import (
     WorkflowAgentNodeConfig,
 )
 from app.shareddomain.agents.models import AGENT_RUN_SUCCEEDED_STATUS
-from app.shareddomain.agents.runtime.graph import model_completion
+from app.shareddomain.agents.runtime.graph import (
+    ModelTextStreamFilter,
+    model_completion,
+    sanitized_model_message,
+)
 from app.shareddomain.agents.runtime.tools import AgentToolResult
 from app.shareddomain.agents.runtime.usage import merge_usage, usage_from_message
 from app.shareddomain.workflows.engine import NodeExecutionContext, NodeResult
@@ -266,12 +270,18 @@ async def _invoke_model(
     if on_delta is None:
         return await chat_model.ainvoke(messages, **call_params)
     aggregate: AIMessageChunk | None = None
+    text_filter = ModelTextStreamFilter()
     async for chunk in chat_model.astream(messages, **call_params):
         if not isinstance(chunk, AIMessageChunk):
             raise ValueError("Workflow model returned an invalid stream message.")
         if chunk.text:
-            await on_delta(chunk.text)
+            visible_text = text_filter.push(chunk.text)
+            if visible_text:
+                await on_delta(visible_text)
         aggregate = chunk if aggregate is None else aggregate + chunk
+    trailing_text = text_filter.finish()
+    if trailing_text:
+        await on_delta(trailing_text)
     return message_chunk_to_message(aggregate or AIMessageChunk(content=""))
 
 
@@ -344,7 +354,7 @@ async def _model_tool_loop(
             raise ValueError("Workflow model token budget exceeded.")
         completion = model_completion(message)
         if completion.tool_calls:
-            messages.append(message)
+            messages.append(sanitized_model_message(message, completion))
             for call in completion.tool_calls:
                 if not call.id or not call.name:
                     raise ValueError("Workflow model returned an invalid tool call.")

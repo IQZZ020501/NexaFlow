@@ -451,7 +451,40 @@ export const zhHant = {
   还没有工具: "還沒有工具",
   "Python 工具": "Python 工具",
   "MCP Server": "MCP Server",
-  "Skill（后续开放）": "Skill（後續開放）",
+  Skills: "Skills",
+  "四个内置 Skills 都有自己的生成脚本，并作为工具出现在工具中心、Agent 选择器和 Workflow 节点库。":
+    "四個內建 Skills 都有自己的產生腳本，並作為工具出現在工具中心、Agent 選擇器和 Workflow 節點庫。",
+  返回工具: "返回工具",
+  "内置 Skills": "內建 Skills",
+  手动安装: "手動安裝",
+  "内置 Skill bundle 随 Worker 提供；自定义 bundle 仍由部署管理员写入 Worker 文件系统。":
+    "內建 Skill bundle 隨 Worker 提供；自訂 bundle 仍由部署管理員寫入 Worker 檔案系統。",
+  "在 Worker 配置的目录下创建 Skill 文件夹。":
+    "在 Worker 設定的目錄下建立 Skill 資料夾。",
+  "在 SKILL.md 中声明 entrypoint 和 artifact-format，并提供对应的 Python 入口脚本。":
+    "在 SKILL.md 中宣告 entrypoint 和 artifact-format，並提供對應的 Python 入口腳本。",
+  "需要额外 Python 包时再添加 requirements.txt。":
+    "需要額外 Python 套件時再加入 requirements.txt。",
+  "重启 Worker，并注册匹配的 Tool 输入契约；仅复制目录不会自动出现在选择器中。":
+    "重新啟動 Worker，並註冊相符的 Tool 輸入契約；只複製目錄不會自動出現在選擇器中。",
+  运行方式: "執行方式",
+  "绑定到 Agent": "綁定到 Agent",
+  "在 Agent 工具选择器中授权 DOCX、PDF、PPTX 或 Excel 工具；运行时模型会根据用户目标和工具描述自主选择。":
+    "在 Agent 工具選擇器中授權 DOCX、PDF、PPTX 或 Excel 工具；執行時模型會依照使用者目標和工具描述自主選擇。",
+  "Skill 自带执行": "Skill 自帶執行",
+  "Agent 只提交 Markdown、结构化演示文稿或表格数据，Worker 运行 Skill bundle 内声明的入口脚本，不执行调用方提供的 Python。":
+    "Agent 只提交 Markdown、結構化簡報或試算表資料，Worker 執行 Skill bundle 內宣告的入口腳本，不執行呼叫方提供的 Python。",
+  平台安全边界: "平台安全邊界",
+  "沙箱隔离、资源限额、文件校验、临时存储和下载链接仍由平台统一负责。":
+    "沙箱隔離、資源限額、檔案校驗、暫存和下載連結仍由平台統一負責。",
+  "Word 与 Google Docs 文档": "Word 與 Google Docs 文件",
+  "PDF 创建、检查与渲染": "PDF 建立、檢查與轉譯",
+  "演示文稿、模板与品牌主题": "簡報、範本與品牌主題",
+  "电子表格创建与分析": "電子試算表建立與分析",
+  "DOCX · python-docx": "DOCX · python-docx",
+  "PDF · PyMuPDF": "PDF · PyMuPDF",
+  "PPTX · python-pptx": "PPTX · python-pptx",
+  "XLSX · openpyxl": "XLSX · openpyxl",
   我的工具: "我的工具",
   共享给我的: "共享給我的",
   内置工具: "內建工具",
@@ -1195,6 +1228,14 @@ export const zhHant = {
   变量赋值: "變數賦值",
   "MCP 工具节点": "MCP 工具節點",
   "Python 代码": "Python 程式碼",
+  DOCX: "DOCX",
+  PDF: "PDF",
+  PPTX: "PPTX",
+  Excel: "Excel",
+  "创建 DOCX 文件。": "建立 DOCX 檔案。",
+  "创建 PDF 文件。": "建立 PDF 檔案。",
+  "创建 PPTX 演示文稿。": "建立 PPTX 簡報。",
+  "创建 Excel 工作簿。": "建立 Excel 活頁簿。",
   运行成功: "執行成功",
   运行失败: "執行失敗",
   "重排内容必须包含非空文本。": "重排內容必須包含非空文字。",

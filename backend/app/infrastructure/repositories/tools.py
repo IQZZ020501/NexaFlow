@@ -6,9 +6,9 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.resource_permission import ResourcePermission as ResourcePermissionOrm
-from app.domain.user import User as UserOrm
-from app.domain.workspace import WorkspaceMembership as WorkspaceMembershipOrm
+from app.shareddomain.platform.models import ResourcePermission as ResourcePermissionOrm
+from app.shareddomain.platform.models import User as UserOrm
+from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.resource_permission import ResourcePermission
 from app.entities.tools import (
     ApplicationToolBinding,
@@ -274,6 +274,7 @@ async def list_tool_catalog_rows(
     include_all: bool = False,
     limit: int | None = None,
     offset: int = 0,
+    excluded_builtin_function_names: tuple[str, ...] = (),
 ) -> list[ToolCatalogRow]:
     grant = ResourcePermissionOrm
     statement = (
@@ -320,6 +321,13 @@ async def list_tool_catalog_rows(
                 ToolOrm.kind == "builtin",
                 ToolOrm.created_by_user_id == actor_id,
                 grant.id.is_not(None),
+            )
+        )
+    if excluded_builtin_function_names:
+        statement = statement.where(
+            or_(
+                ToolOrm.kind != "builtin",
+                ToolOrm.function_name.not_in(excluded_builtin_function_names),
             )
         )
     statement = (

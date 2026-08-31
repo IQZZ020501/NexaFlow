@@ -35,6 +35,7 @@ from app.shareddomain.agents.runtime import (
 )
 from app.shareddomain.agents.services import accessible_agent_knowledge_bases
 from app.shareddomain.agents.models import agent_run_display_status
+from app.shareddomain.agents.runtime.graph import clean_model_text
 from app.shareddomain.tools.catalog import mcp_function_name as catalog_mcp_function_name
 from app.shareddomain.tools.services import (
     ResolvedMcpTool,
@@ -236,7 +237,7 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         status=agent_run_display_status(run.status),
         plan=run.plan,
         events=run.events,
-        result=run.result,
+        result=clean_model_text(str(run.result or "")),
         model_usage=run.model_usage,
         grounding_status=run.grounding_status,
         grounding_meta=run.grounding_meta,

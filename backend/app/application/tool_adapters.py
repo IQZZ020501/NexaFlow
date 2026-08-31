@@ -11,6 +11,7 @@ from app.infrastructure.code_sandbox import (
     WorkflowSandboxBusyError,
     WorkflowSandboxError,
     execute_artifact_code,
+    execute_skill_artifact,
     execute_workflow_code,
 )
 from app.infrastructure.config import Settings
@@ -144,55 +145,98 @@ class BuiltinToolAdapter:
                 outcome="confirmed",
                 usage={},
             )
-        if builtin in {"artifact", "python_artifact"}:
-            failure_code = (
-                "artifact_failed"
-                if builtin == "artifact"
-                else "python_artifact_failed"
-            )
+        if builtin in {"artifact", "python_artifact", "skill"}:
+            failure_code = {
+                "artifact": "artifact_failed",
+                "python_artifact": "python_artifact_failed",
+                "skill": "skill_failed",
+            }[builtin]
             try:
                 filename = arguments["filename"]
                 artifact_format = artifact_format_from_filename(filename)
-                supplied_format = arguments.get("format")
-                if supplied_format is not None and supplied_format != artifact_format:
-                    raise ValueError("Artifact format does not match its filename.")
-                content = arguments.get("content", arguments.get("code"))
-                if not isinstance(content, str):
-                    raise TypeError
-                content_mode = arguments.get("content_mode")
-                if content_mode is not None and content_mode not in {"text", "python"}:
-                    raise ValueError("Artifact content_mode must be text or python.")
-                direct_content = (
-                    artifact_format in DIRECT_ARTIFACT_CONTENT_FORMATS
-                    if content_mode == "text"
-                    else content_mode != "python"
-                    and _is_direct_artifact_content(artifact_format, content)
-                )
-                if content_mode == "text" and not direct_content:
-                    raise ValueError(
-                        "Rich and binary files require content_mode=python."
-                    )
-                if direct_content:
-                    artifact_content = content.encode("utf-8")
-                    artifact_stdout = (
-                        f"characters={len(content)}\nbytes={len(artifact_content)}"
-                    )
-                    artifact_exit_code = 0
-                else:
-                    generator = _redirect_legacy_artifact_path(content, filename)
-                    preflight_error = _artifact_code_preflight(generator, artifact_format)
-                    if preflight_error is not None:
-                        return _failure("artifact_code_invalid", preflight_error)
-                    artifact = await execute_artifact_code(
+                if builtin == "skill":
+                    skill = snapshot.execution_spec.get("skill")
+                    if not isinstance(skill, str):
+                        raise ValueError("Skill Tool configuration is invalid.")
+                    artifact = await execute_skill_artifact(
                         self.settings,
-                        generator,
+                        skill,
+                        {
+                            key: value
+                            for key, value in arguments.items()
+                            if key != "filename"
+                        },
                         artifact_format,
                         filename,
-                        [],
                     )
                     artifact_content = artifact.content
                     artifact_stdout = artifact.stdout
                     artifact_exit_code = artifact.exit_code
+                else:
+                    supplied_format = arguments.get("format")
+                    if (
+                        supplied_format is not None
+                        and supplied_format != artifact_format
+                    ):
+                        raise ValueError("Artifact format does not match its filename.")
+                    content = arguments.get("content", arguments.get("code"))
+                    if not isinstance(content, str):
+                        raise TypeError
+                    content_mode = arguments.get("content_mode")
+                    if content_mode is not None and content_mode not in {
+                        "text",
+                        "python",
+                    }:
+                        raise ValueError(
+                            "Artifact content_mode must be text or python."
+                        )
+                    direct_content = (
+                        artifact_format in DIRECT_ARTIFACT_CONTENT_FORMATS
+                        if content_mode == "text"
+                        else content_mode != "python"
+                        and _is_direct_artifact_content(artifact_format, content)
+                    )
+                    if content_mode == "text" and not direct_content:
+                        raise ValueError(
+                            "Rich and binary files require content_mode=python."
+                        )
+                    skills = arguments.get("skills", [])
+                    if (
+                        not isinstance(skills, list)
+                        or len(skills) > 8
+                        or len(set(skills)) != len(skills)
+                        or any(
+                            not isinstance(skill, str)
+                            or re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", skill)
+                            is None
+                            for skill in skills
+                        )
+                    ):
+                        raise ValueError("Artifact Tool skills are invalid.")
+                    if direct_content:
+                        artifact_content = content.encode("utf-8")
+                        artifact_stdout = (
+                            f"characters={len(content)}\nbytes={len(artifact_content)}"
+                        )
+                        artifact_exit_code = 0
+                    else:
+                        generator = _redirect_legacy_artifact_path(content, filename)
+                        preflight_error = _artifact_code_preflight(
+                            generator,
+                            artifact_format,
+                        )
+                        if preflight_error is not None:
+                            return _failure("artifact_code_invalid", preflight_error)
+                        artifact = await execute_artifact_code(
+                            self.settings,
+                            generator,
+                            artifact_format,
+                            filename,
+                            skills,
+                        )
+                        artifact_content = artifact.content
+                        artifact_stdout = artifact.stdout
+                        artifact_exit_code = artifact.exit_code
             except WorkflowSandboxBusyError as exc:
                 raise ToolAdapterBusy("File runtime is busy.") from exc
             except WorkflowSandboxError as exc:
@@ -258,6 +302,7 @@ class BuiltinToolAdapter:
                 self.settings,
                 arguments["code"],
                 arguments["inputs"],
+                arguments.get("skills"),
             )
         except WorkflowSandboxBusyError as exc:
             raise ToolAdapterBusy("Python sandbox is busy.") from exc
@@ -291,7 +336,13 @@ class PythonToolAdapter:
         if not isinstance(code, str):
             return _failure("invalid_python_tool", "Python Tool code is unavailable.")
         try:
-            result = await execute_workflow_code(self.settings, code, arguments)
+            skills = arguments.get("skills")
+            result = await execute_workflow_code(
+                self.settings,
+                code,
+                arguments,
+                skills if isinstance(skills, list) else None,
+            )
         except WorkflowSandboxBusyError as exc:
             raise ToolAdapterBusy("Python sandbox is busy.") from exc
         except WorkflowSandboxError:

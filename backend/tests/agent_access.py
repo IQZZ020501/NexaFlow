@@ -278,6 +278,7 @@ def assert_external_progress_events() -> None:
             "turn": 2,
             "summary": "agent.answer_ready",
             "reasoning": "done reasoning",
+            "created_at": "2026-08-10T00:00:01Z",
         },
         # 257-276: analysis stage.
         {
@@ -366,6 +367,8 @@ def assert_external_progress_events() -> None:
     assert answer.stage == "succeeded"
     assert answer.turn == 2
     assert answer.reasoning == "done reasoning"
+    assert answer.created_at is not None
+    assert answer.created_at.isoformat() == "2026-08-10T00:00:01+00:00"
 
     analysis = next(item for item in progress if item.type == "analysis")
     assert analysis.stage == "analyzing"
@@ -447,6 +450,33 @@ def assert_external_progress_events() -> None:
         "failed",
     )
     assert failed[0].status == "failed"
+
+    cancelled = external_progress_events(
+        [
+            {
+                "type": "thought",
+                "status": "running",
+                "turn": 10,
+                "summary": "agent.analyzing",
+            },
+            {
+                "type": "thought",
+                "status": "running",
+                "turn": 11,
+                "summary": "agent.answer_ready",
+            },
+            {
+                "type": "tool",
+                "status": "running",
+                "turn": 12,
+                "summary": "agent.tool_running",
+                "tool_name": "search_knowledge",
+                "tool_kind": "knowledge",
+            },
+        ],
+        "cancelled",
+    )
+    assert [item.status for item in cancelled] == ["failed", "failed", "failed"]
 
 
 def assert_external_run_to_response() -> None:

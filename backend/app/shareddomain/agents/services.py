@@ -50,6 +50,7 @@ from app.shareddomain.tools.bindings import (
     resolve_tool_refs_for_actor,
     sync_application_tool_bindings,
 )
+from app.shareddomain.tools.catalog import get_tool_catalog_detail
 from app.shareddomain.tools.services import resolve_mcp_tools
 from app.shareddomain.workflows.defaults import default_workflow_graph
 from app.shareddomain.workflows.engine import graph_hash
@@ -782,6 +783,47 @@ async def update_agent(
         configuration_changed = configuration_changed or {
             (item.tool_id, item.version_id) for item in current_tool_bindings
         } != {(item.tool_id, item.version_id) for item in tool_snapshots}
+    elif current_tool_bindings:
+        # The save did not manage Tools, but a built-in catalog refresh can
+        # move a bound Tool to a new version. Heal drifted pins here so a
+        # re-save or re-publish succeeds instead of failing with
+        # "Tool binding changed" — the save is the sanctioned rebind point.
+        healed_refs: list[ToolRef] = []
+        drifted = False
+        for binding in current_tool_bindings:
+            detail = await get_tool_catalog_detail(
+                db,
+                agent.workspace_id,
+                binding.tool_id,
+                actor,
+                workspace_role,
+            )
+            live = (
+                detail.version.id
+                if detail.version is not None
+                else binding.version_id
+            )
+            drifted = drifted or live != binding.version_id
+            healed_refs.append(
+                ToolRef(tool_id=binding.tool_id, version_id=live)
+            )
+        if drifted:
+            tool_snapshots = await resolve_requested_agent_tools(
+                db,
+                agent.workspace_id,
+                healed_refs,
+                [],
+                actor,
+                workspace_role,
+            )
+            await sync_application_tool_bindings(
+                db,
+                agent.workspace_id,
+                agent.id,
+                tool_snapshots,
+                actor.id,
+            )
+            configuration_changed = True
 
     if configuration_changed and legacy_publication_snapshot is not None:
         agent.published_snapshot = legacy_publication_snapshot

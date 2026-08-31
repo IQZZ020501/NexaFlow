@@ -20,7 +20,7 @@ from tests.support import (
 )
 
 from app.infrastructure.session import get_session_factory
-from app.domain.user import User
+from app.shareddomain.platform.models import User
 from app.shareddomain.knowledge.models import (
     KnowledgeBase,
     KnowledgeDocument,
@@ -73,7 +73,7 @@ from app.schemas.knowledge import (
     KnowledgeRetrievalTraceResponse,
 )
 from tests.llm import ModelTestHandler, model_payload, model_test_server, models_url
-from app.domain.resource_permission import ResourcePermission
+from app.shareddomain.platform.models import ResourcePermission
 
 
 MEMBER_PASSWORD = "Member@12345."

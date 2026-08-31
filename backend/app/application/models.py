@@ -32,7 +32,7 @@ from app.capabilities.llm.runtime import (
     DEFAULT_MODEL_REQUEST_PARAMS,
     MODEL_REQUEST_PARAMS_META_KEY,
 )
-from app.domain.user import User
+from app.shareddomain.platform.models import User
 from app.infrastructure.config import Settings
 from app.infrastructure.validation import normalize_name
 from app.schemas.model import (

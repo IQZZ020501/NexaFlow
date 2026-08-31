@@ -53,6 +53,28 @@ const tools: ToolSummary[] = [
     can_use: false,
     can_manage: false,
   },
+  {
+    id: "internal-artifact",
+    workspace_id: "ws-1",
+    kind: "builtin",
+    function_name: "create_artifact",
+    display_name: "Create downloadable file",
+    description: "Legacy internal artifact runtime",
+    current_version_id: "artifact-version-1",
+    status: "active",
+    availability: "available",
+    source: {
+      id: "source-builtin",
+      name: "Built-in",
+      kind: "builtin",
+      transport: null,
+    },
+    created_by_user_id: null,
+    permission: "use",
+    can_view: true,
+    can_use: true,
+    can_manage: false,
+  },
 ]
 
 let response: () => Promise<Response>
@@ -84,6 +106,7 @@ describe("ToolPicker", () => {
     expect(screen.getByText("正在加载工具")).toBeTruthy()
     await screen.findByText("Lookup account")
     expect(screen.queryByText("Private report")).toBeNull()
+    expect(screen.queryByText("Create downloadable file")).toBeNull()
 
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "finance" },
@@ -93,6 +116,43 @@ describe("ToolPicker", () => {
       target: { value: "missing" },
     })
     expect(screen.getByText("没有匹配的工具")).toBeTruthy()
+  })
+
+  test("shows and selects built-in Skill tools", async () => {
+    response = async () =>
+      jsonResponse([
+        {
+          id: "skill-pdf",
+          workspace_id: "ws-1",
+          kind: "builtin",
+          function_name: "pdf_skill",
+          display_name: "PDF Skill",
+          description: "Create PDF files",
+          current_version_id: "skill-pdf-v1",
+          status: "active",
+          availability: "available",
+          source: {
+            id: "source-builtin",
+            name: "Built-in",
+            kind: "builtin",
+            transport: null,
+          },
+          created_by_user_id: null,
+          permission: "use",
+          can_view: true,
+          can_use: true,
+          can_manage: false,
+        } satisfies ToolSummary,
+      ])
+    const changes: ToolRef[][] = []
+    renderPage(picker([], (value) => changes.push(value)))
+    await screen.findByText("PDF")
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "PDF" })
+    )
+    expect(changes.at(-1)).toEqual([
+      { tool_id: "skill-pdf", version_id: "skill-pdf-v1" },
+    ])
   })
 
   test("retains unavailable bindings, allows removal, and never upgrades implicitly", async () => {

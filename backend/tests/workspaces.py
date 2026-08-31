@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from app.capabilities.llm.models import RegisteredModel
-from app.domain.resource_permission import ResourcePermission
+from app.shareddomain.platform.models import ResourcePermission
 from app.entities.agents import AgentRun
 from app.infrastructure.model_utils import new_id, utc_now
 from app.infrastructure import object_storage as object_storage_module

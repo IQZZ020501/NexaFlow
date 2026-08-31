@@ -84,7 +84,7 @@ async def fail_knowledge_task(task_id: str) -> None:
 
 async def expire_refresh_session(token: str) -> None:
     token_hash = hash_refresh_token(token)
-    from app.domain.user import RefreshSession as RefreshSessionOrm
+    from app.shareddomain.platform.models import RefreshSession as RefreshSessionOrm
 
     async with get_session_factory()() as db:
         await db.execute(

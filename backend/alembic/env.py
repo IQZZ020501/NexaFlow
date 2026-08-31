@@ -18,9 +18,9 @@ from app.shareddomain.agents.models import (  # noqa: F401
 from app.shareddomain.audit.models import AuditLog  # noqa: F401
 from app.shareddomain.artifacts.models import GeneratedArtifact  # noqa: F401
 from app.infrastructure.base import Base
-from app.domain.user import RefreshSession, User  # noqa: F401
-from app.domain.workspace_governance import WorkspaceGovernance  # noqa: F401
-from app.domain.workspace_invitation import WorkspaceInvitation  # noqa: F401
+from app.shareddomain.platform.models import RefreshSession, User  # noqa: F401
+from app.shareddomain.platform.models import WorkspaceGovernance  # noqa: F401
+from app.shareddomain.platform.models import WorkspaceInvitation  # noqa: F401
 from app.shareddomain.resource_folders.models import ResourceFolder  # noqa: F401
 from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeAsset,
@@ -68,12 +68,12 @@ from app.shareddomain.workflows.models import (  # noqa: F401
     WorkflowVersion,
 )
 from app.capabilities.llm.models import RegisteredModel  # noqa: F401
-from app.domain.resource_permission import ResourcePermission  # noqa: F401
-from app.domain.smtp_settings import SmtpSettings  # noqa: F401
+from app.shareddomain.platform.models import ResourcePermission  # noqa: F401
+from app.shareddomain.platform.models import SmtpSettings  # noqa: F401
 from app.shareddomain.email.models import EmailDelivery, PasswordResetToken  # noqa: F401
 from app.infrastructure.system_log import SystemLog  # noqa: F401
-from app.domain.team import Team, TeamMembership  # noqa: F401
-from app.domain.workspace import Workspace, WorkspaceMembership  # noqa: F401
+from app.shareddomain.platform.models import Team, TeamMembership  # noqa: F401
+from app.shareddomain.platform.models import Workspace, WorkspaceMembership  # noqa: F401
 
 config = context.config
 

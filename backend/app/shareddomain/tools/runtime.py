@@ -98,6 +98,86 @@ def tool_arguments_hash(arguments: dict[str, Any]) -> str:
     return hashlib.sha256(_encoded_json(arguments, MAX_TOOL_INPUT_BYTES)).hexdigest()
 
 
+def normalize_tool_arguments(
+    function_name: str,
+    input_schema: dict[str, Any],
+    arguments: Any,
+) -> Any:
+    """Accept the two legacy envelopes still emitted by some chat models."""
+    if not isinstance(arguments, dict):
+        return arguments
+    properties = input_schema.get("properties")
+    has_arguments_field = isinstance(properties, dict) and "arguments" in properties
+    normalized = dict(arguments)
+    if not has_arguments_field and set(normalized) == {"arguments"}:
+        wrapped = normalized["arguments"]
+        if isinstance(wrapped, str):
+            try:
+                wrapped = json.loads(wrapped)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if isinstance(wrapped, dict):
+            normalized = dict(wrapped)
+
+    if function_name != "pptx_skill" or not (
+        isinstance(properties, dict) and "presentation" in properties
+    ):
+        return normalized
+
+    presentation = normalized.get("presentation")
+    if isinstance(presentation, str):
+        try:
+            parsed = json.loads(presentation)
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            presentation = parsed
+    if isinstance(presentation, dict):
+        presentation = dict(presentation)
+    elif "presentation" not in normalized:
+        presentation = {}
+    else:
+        presentation = None
+
+    if "filename" not in normalized and "file_name" in normalized:
+        normalized["filename"] = normalized["file_name"]
+    normalized.pop("file_name", None)
+
+    aliases = {
+        "file_title": "title",
+        "file_subtitle": "subtitle",
+    }
+    if presentation is not None:
+        for source, target in aliases.items():
+            if source in presentation:
+                if target not in presentation:
+                    presentation[target] = presentation[source]
+                presentation.pop(source, None)
+    for source, target in aliases.items():
+        if source in normalized:
+            if presentation is not None and target not in presentation:
+                presentation[target] = normalized[source]
+            normalized.pop(source, None)
+
+    for field in (
+        "title",
+        "subtitle",
+        "slides",
+        "template",
+        "brand",
+        "theme",
+        "footer",
+    ):
+        if field in normalized:
+            if presentation is not None and field not in presentation:
+                presentation[field] = normalized[field]
+            normalized.pop(field, None)
+
+    if presentation is not None:
+        normalized["presentation"] = presentation
+    return normalized
+
+
 def validate_tool_arguments(
     snapshot: ToolSnapshot,
     arguments: dict[str, Any],
@@ -160,7 +240,12 @@ def _validate_schema(schema: dict[str, Any], value: Any, message: str) -> None:
     except Exception as exc:
         raise ValueError("Tool schema could not be resolved.") from exc
     if error is not None:
-        raise ValueError(message)
+        path = ".".join(str(part) for part in error.absolute_path) or "root"
+        detail = f"{message} at {path}: {error.message}."
+        properties = schema.get("properties")
+        if path == "root" and isinstance(properties, dict):
+            detail += f" Expected fields: {', '.join(str(key) for key in properties)}."
+        raise ValueError(detail[:1000])
 
 
 __all__ = [
@@ -182,6 +267,7 @@ __all__ = [
     "TOOL_UNCERTAIN_EFFECTS",
     "build_tool_snapshot",
     "exhausted_tool_invocation_terminal_state",
+    "normalize_tool_arguments",
     "tool_arguments_hash",
     "tool_snapshot_from_payload",
     "tool_snapshot_payload",
