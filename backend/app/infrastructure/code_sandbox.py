@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import json
+import re
 from typing import Any
 
 from app.infrastructure.config import Settings
@@ -42,6 +43,26 @@ class ArtifactSandboxResult:
     stdout: str
     stderr: str
     exit_code: int
+
+_ERROR_LINE_PATTERN = re.compile(
+    r"(?:ModuleNotFoundError|ImportError|NameError|SyntaxError|"
+    r"PermissionError|RuntimeError|ValueError|TypeError):"
+)
+
+
+def _error_line(reason: str) -> str:
+    """Return the final actionable error line from sandbox stderr.
+
+    Tracebacks end with the raised exception's message; slicing the stderr
+    from the start (the previous [:1000]) can cut that line mid-way, which
+    then truncates every downstream error (e.g. "ValueError: step" instead
+    of "ValueError: step 3 title does not fit its text box").
+    """
+    for line in reversed(reason.splitlines()):
+        candidate = line.strip()
+        if _ERROR_LINE_PATTERN.match(candidate):
+            return candidate
+    return reason.strip()
 
 
 def _program(user_code: str) -> str:
@@ -123,7 +144,7 @@ def _execution_fields(response: dict[str, Any]) -> tuple[str, str, int]:
     exit_code = response.get("exit_code")
     if response.get("ok") is not True or not isinstance(exit_code, int):
         error = response.get("error")
-        reason = str(error or stderr or "Code execution failed.")
+        reason = _error_line(str(error or stderr or "Code execution failed."))
         if error == "sandbox_busy":
             raise WorkflowSandboxBusyError(reason)
         raise WorkflowSandboxError(reason[:1000])

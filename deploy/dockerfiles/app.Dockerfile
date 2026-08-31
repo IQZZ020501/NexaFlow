@@ -13,7 +13,12 @@ FROM python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd6
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH=/opt/sandbox/.venv/bin:$PATH
-RUN addgroup --system --gid 65532 sandbox \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        fontconfig \
+        fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/* \
+    && addgroup --system --gid 65532 sandbox \
     && addgroup --system --gid 65533 sandbox-socket \
     && adduser --system --uid 65532 --gid 65532 --no-create-home \
        --shell /usr/sbin/nologin sandbox \

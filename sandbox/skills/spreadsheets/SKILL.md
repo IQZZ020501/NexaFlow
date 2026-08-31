@@ -15,8 +15,11 @@ creation and verification.
 
 - The Agent supplies sheet data, not Python source code.
 - A row value beginning with `=` remains an Excel formula.
-- `scripts/render.py` applies readable headers, filters, panes, and widths.
-- The renderer reopens the XLSX and checks sheet names and representative cells.
+- `scripts/render.py` applies readable headers, filters, panes, capped widths,
+  wrap-aware row heights, semantic alignment, hidden gridlines, and light row
+  banding.
+- The renderer reopens the XLSX and checks every requested cell, sheet names,
+  header alignment, and common formula-error tokens.
 
 ## Workbook flow
 

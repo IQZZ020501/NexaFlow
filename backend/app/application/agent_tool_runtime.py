@@ -117,9 +117,9 @@ class UnifiedAgentToolRuntime:
                 await db.commit()
         except ToolInvocationConflict as exc:
             raise AgentToolUncertain(invocation_id, str(exc)) from exc
-        except ValueError:
+        except ValueError as exc:
             return AgentToolResult(
-                content="Tool parameters are invalid.",
+                content=f"Tool parameters are invalid. {exc}",
                 summary="Invalid tool parameters.",
                 is_error=True,
             )

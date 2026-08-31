@@ -534,6 +534,88 @@ async def exercise_services_http_paths(
         assert published.published is True
         assert published.published_by_user_id == admin_id
         assert published.published_at is not None
+        # stale Tool binding heals on save: a built-in catalog refresh moves
+        # a bound Tool to a new version; re-publishing without Tools in the
+        # payload must rebind instead of failing with "Tool binding changed".
+        from app.infrastructure.repositories import tools as tool_repository
+        from app.schemas.tool import ToolRefSchema
+
+        bound_agent = await agent_services.create_agent(
+            db,
+            workspace_id,
+            AgentCreateRequest(name="Heal Bound", model_id=model_id),
+            actor,
+            "admin",
+        )
+        bound_entity = await agent_repository.get_agent_by_id(
+            db, bound_agent.id
+        )
+        assert bound_entity is not None
+        skill_tool = next(
+            item
+            for item in await tool_repository.list_tools(db, workspace_id)
+            if item.stable_key == "skill_pptx"
+        )
+        bound_version = await tool_repository.get_tool_version(
+            db,
+            workspace_id,
+            skill_tool.current_version_id or "",
+        )
+        assert bound_version is not None
+        await agent_services.update_agent(
+            db,
+            bound_entity,
+            AgentUpdateRequest(
+                tools=[
+                    ToolRefSchema(
+                        tool_id=skill_tool.id,
+                        version_id=bound_version.id,
+                    )
+                ]
+            ),
+            actor,
+            "admin",
+        )
+        drifted_version = dataclasses.replace(
+            bound_version,
+            id=new_id(),
+            revision=bound_version.revision + 1,
+            definition_hash="b" * 64,
+        )
+        await tool_repository.save_tool_version(db, drifted_version)
+        drifted_policy = await tool_repository.get_tool_policy(
+            db,
+            workspace_id,
+            skill_tool.id,
+        )
+        assert drifted_policy is not None
+        drifted_policy.tool_version_id = drifted_version.id
+        drifted_policy.definition_hash = drifted_version.definition_hash
+        await tool_repository.save_tool_policy(db, drifted_policy)
+        skill_tool.current_version_id = drifted_version.id
+        await tool_repository.save_tool(db, skill_tool)
+        await db.commit()
+
+        healed_entity = await agent_repository.get_agent_by_id(
+            db, bound_agent.id
+        )
+        assert healed_entity is not None
+        healed = await agent_services.update_agent(
+            db,
+            healed_entity,
+            AgentUpdateRequest(published=True),
+            actor,
+            "admin",
+        )
+        assert healed.published is True
+        bindings = await tool_repository.list_application_tool_bindings(
+            db,
+            workspace_id,
+            bound_agent.id,
+        )
+        assert [binding.tool_version_id for binding in bindings] == [
+            drifted_version.id
+        ]
 
         # non-admin publish -> 403
         try:

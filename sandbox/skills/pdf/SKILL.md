@@ -15,7 +15,8 @@ Markdown content and the bundled renderer owns pagination and verification.
 - The Agent supplies final content, not Python source code.
 - Use headings, paragraphs, lists, and pipe tables in the Markdown input.
 - `scripts/render.py` writes exactly one PDF to the platform output path.
-- The renderer reopens the PDF and checks its page count and extracted text.
+- The renderer adds page numbers, then reopens the PDF and checks A4 page
+  geometry, page count, and extractable text on every page.
 
 ## Choose a tool
 

@@ -52,12 +52,21 @@ BUILTIN_SKILL_DEFINITIONS = (
         (
             "Create a new 16:9 PPTX from audience-facing structured slides. "
             "Plan around the audience and purpose, give each slide one takeaway, "
-            "keep the cover minimal, keep copy concise, vary the supported layouts, "
-            "and put external sources in speaker notes. Keep titles and body text "
-            "at readable sizes; the renderer rejects overlong slide titles. It "
-            "supports built-in templates, "
-            "brand colors, native icons, and tables; it does not edit existing "
-            "decks or fetch external media."
+            "keep the cover minimal, and for teaching or training decks normally "
+            "use 8-12 content slides that show the problem, worked example, "
+            "reasoning/process, practice, and takeaway instead of copying a lesson "
+            "plan line-by-line. Do not use more than two consecutive bullets slides; "
+            "use steps for procedures and hero/two-column for worked examples. Vary "
+            "the supported layouts across section, bullets, two-column, icons, table, "
+            "hero, stats, steps, and quote, and put external sources in speaker notes. Keep "
+            "central arithmetic expressions in the slide copy so the renderer can "
+            "surface simple multiplication examples in an editable visual region. Keep "
+            "titles and body text at readable sizes; the renderer rejects "
+            "overlong slide titles. Create a coherent visual identity with the "
+            "declarative theme and optional per-slide style fields; built-in "
+            "templates are fallbacks, not the primary design choice. It supports "
+            "native icons, tables, click-triggered entrance animations, and page "
+            "transitions; it does not edit existing decks or fetch external media."
         ),
     ),
     (
@@ -84,7 +93,12 @@ def _pptx_input_schema() -> dict[str, Any]:
             "minLength": 1,
             "maxLength": 240,
         },
-        "description": "Short audience-facing support points for one slide claim.",
+        "description": (
+            "Short audience-facing support points for one slide claim. Use no more "
+            "than 4 concise points; do not use this as a transcript or lesson-plan "
+            "dump. Use steps, hero, or two-column when the content is ordered or "
+            "contains a worked example."
+        ),
     }
     column = {
         "type": "object",
@@ -172,6 +186,76 @@ def _pptx_input_schema() -> dict[str, Any]:
         "additionalProperties": False,
         "description": "A compact native table; every row must match the headers.",
     }
+    stats_item = {
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": ["string", "number", "integer"],
+                "minLength": 1,
+                "maxLength": 24,
+                "description": "Big number or short metric string.",
+            },
+            "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40,
+            },
+        },
+        "required": ["value", "label"],
+        "additionalProperties": False,
+    }
+    steps_item = {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+            },
+            "body": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+            },
+        },
+        "required": ["title", "body"],
+        "additionalProperties": False,
+    }
+    style_colors = {
+        name: {
+            "type": "string",
+            "pattern": r"^#[0-9A-Fa-f]{6}$",
+        }
+        for name in (
+            "background_color",
+            "text_color",
+            "accent_color",
+            "panel_color",
+            "muted_text_color",
+            "rule_color",
+        )
+    }
+    slide_style = {
+        "type": "object",
+        "properties": {
+            **style_colors,
+            "font_family": {"type": "string", "minLength": 1, "maxLength": 64},
+            "heading_font_family": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+            },
+            "title_size": {"type": "number", "minimum": 35, "maximum": 44},
+            "body_size": {"type": "number", "minimum": 16, "maximum": 24},
+            "panel_radius": {"type": "number", "minimum": 0, "maximum": 0.18},
+            "title_alignment": {"type": "string", "enum": ["left", "center"]},
+        },
+        "additionalProperties": False,
+        "description": (
+            "Optional visual variation for this slide. Keep it coherent with the "
+            "presentation theme and use it only when the narrative needs contrast."
+        ),
+    }
     slide = {
         "type": "object",
         "properties": {
@@ -183,11 +267,20 @@ def _pptx_input_schema() -> dict[str, Any]:
                     "two_column",
                     "icons",
                     "table",
+                    "hero",
+                    "stats",
+                    "steps",
+                    "quote",
                 ],
                 "description": (
                     "Use section for transitions, bullets for one claim with "
                     "supporting points, two_column for a direct comparison, icons "
-                    "for 2-4 parallel concepts, and table for compact structured data."
+                    "for 2-4 parallel concepts, table for compact structured data, "
+                    "hero for a bold full-slide statement, stats for 2-4 key "
+                    "metrics, steps for a 2-5 step process, and quote for a "
+                    "centered quotation. For teaching decks, use hero/two_column "
+                    "for the worked example, steps for the method, and avoid more "
+                    "than two consecutive bullets slides. Vary adjacent layouts."
                 ),
             },
             "title": {
@@ -204,7 +297,7 @@ def _pptx_input_schema() -> dict[str, Any]:
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
-                "description": "Optional section-slide context; omit for other layouts.",
+                "description": "Optional section or hero slide context; omit for other layouts.",
             },
             "bullets": bullet_list,
             "left": column,
@@ -216,6 +309,32 @@ def _pptx_input_schema() -> dict[str, Any]:
                 "items": icon_item,
             },
             "table": table,
+            "stats": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": stats_item,
+                "description": "Key metrics for the stats layout.",
+            },
+            "steps": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 5,
+                "items": steps_item,
+                "description": "Ordered process steps for the steps layout.",
+            },
+            "quote": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300,
+                "description": "Quotation text for the quote layout.",
+            },
+            "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120,
+                "description": "Optional attribution line under a quote.",
+            },
             "notes": {
                 "type": "string",
                 "maxLength": 4_000,
@@ -224,12 +343,13 @@ def _pptx_input_schema() -> dict[str, Any]:
                     "[Sources] block with traceable references."
                 ),
             },
+            "style": slide_style,
         },
         "required": ["layout", "title"],
         "additionalProperties": False,
         "description": (
             "Provide only the content field used by the selected layout: subtitle, "
-            "bullets, left/right, items, or table."
+            "bullets, left/right, items, table, stats, steps, quote, or source."
         ),
     }
     return {
@@ -249,7 +369,62 @@ def _pptx_input_schema() -> dict[str, Any]:
             "template": {
                 "type": "string",
                 "enum": ["minimal", "editorial", "bold"],
-                "description": "Built-in composition template; defaults to minimal.",
+                "description": (
+                    "Fallback composition preset; defaults to minimal. Prefer theme "
+                    "for a model-created visual identity."
+                ),
+            },
+            "theme": {
+                "type": "object",
+                "properties": {
+                    **style_colors,
+                    "font_family": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                    },
+                    "heading_font_family": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                    },
+                    "cover_title_size": {
+                        "type": "number",
+                        "minimum": 40,
+                        "maximum": 64,
+                    },
+                    "slide_title_size": {
+                        "type": "number",
+                        "minimum": 35,
+                        "maximum": 44,
+                    },
+                    "body_size": {
+                        "type": "number",
+                        "minimum": 16,
+                        "maximum": 24,
+                    },
+                    "panel_radius": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 0.18,
+                    },
+                    "cover_accent_width": {
+                        "type": "number",
+                        "minimum": 0.08,
+                        "maximum": 1.4,
+                    },
+                    "title_alignment": {
+                        "type": "string",
+                        "enum": ["left", "center"],
+                    },
+                },
+                "additionalProperties": False,
+                "description": (
+                    "Primary visual design contract. Create a coherent palette, "
+                    "font pairing, typography scale, panel treatment, and title "
+                    "alignment for the audience and subject. The renderer enforces "
+                    "readable contrast and safe size ranges."
+                ),
             },
             "brand": {
                 "type": "object",
@@ -281,8 +456,9 @@ def _pptx_input_schema() -> dict[str, Any]:
                 ],
                 "additionalProperties": False,
                 "description": (
-                    "Optional brand override. Text/background must meet readable "
-                    "contrast and primary/background must remain visually distinct."
+                    "Compatibility brand override. Prefer theme for new decks. "
+                    "Text/background must meet readable contrast and primary/background "
+                    "must remain visually distinct."
                 ),
             },
             "footer": {

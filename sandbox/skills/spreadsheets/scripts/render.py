@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
@@ -58,11 +58,60 @@ def _width(value: object) -> int:
     return min(max(wide + 2, 10), 40)
 
 
+def _wrapped_lines(value: object, column_width: float) -> int:
+    text = "" if value is None else str(value)
+    if not text:
+        return 1
+    capacity = max(int(column_width) - 2, 1)
+    return sum(
+        max(
+            1,
+            (
+                sum(2 if ord(char) > 127 else 1 for char in line)
+                + capacity
+                - 1
+            )
+            // capacity,
+        )
+        for line in text.splitlines() or [""]
+    )
+
+
+def _horizontal_alignment(value: object) -> str:
+    if isinstance(value, bool):
+        return "center"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return "right"
+    if isinstance(value, str) and value.startswith("="):
+        return "right"
+    return "left"
+
+
+def _verify_workbook(workbook, sheets: list[dict]) -> None:
+    formula_errors = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A")
+    for sheet_spec in sheets:
+        sheet = workbook[sheet_spec["name"]]
+        rows = sheet_spec["rows"]
+        if sheet.max_row < len(rows):
+            raise ValueError("generated XLSX lost workbook rows")
+        for row_index, row in enumerate(rows, start=1):
+            for column_index, expected in enumerate(row, start=1):
+                actual = sheet.cell(row_index, column_index).value
+                if actual != expected:
+                    raise ValueError("generated XLSX changed a workbook value")
+                if isinstance(actual, str) and any(error in actual for error in formula_errors):
+                    raise ValueError("generated XLSX contains a formula error")
+        if sheet["A1"].alignment.horizontal != "center":
+            raise ValueError("generated XLSX header alignment is not centered")
+
+
 def _render(sheets: list[dict], output_path: Path) -> None:
     workbook = Workbook()
     workbook.remove(workbook.active)
     header_fill = PatternFill("solid", fgColor="1F4E78")
+    alternate_fill = PatternFill("solid", fgColor="F4F7FB")
     header_font = Font(color="FFFFFF", bold=True)
+    row_border = Border(bottom=Side(style="thin", color="D9E2F3"))
     for sheet_spec in sheets:
         sheet = workbook.create_sheet(sheet_spec["name"])
         rows = sheet_spec["rows"]
@@ -72,6 +121,8 @@ def _render(sheets: list[dict], output_path: Path) -> None:
             cell.fill = header_fill
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
+        sheet.row_dimensions[1].height = 24
+        sheet.sheet_view.showGridLines = False
         sheet.freeze_panes = sheet_spec.get("freeze_panes") or (
             "A2" if len(rows) > 1 else None
         )
@@ -83,9 +134,33 @@ def _render(sheets: list[dict], output_path: Path) -> None:
                 for row_index in range(1, sheet.max_row + 1)
             )
             sheet.column_dimensions[get_column_letter(column_index)].width = width
-        for row in sheet.iter_rows():
-            for cell in row:
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
+        column_widths = [
+            sheet.column_dimensions[get_column_letter(index)].width or 10
+            for index in range(1, sheet.max_column + 1)
+        ]
+        for row_index, row in enumerate(sheet.iter_rows(), start=1):
+            row_lines = 1
+            for column_index, cell in enumerate(row):
+                value = cell.value
+                if row_index > 1 and row_index % 2 == 0:
+                    cell.fill = alternate_fill
+                cell.border = row_border
+                cell.alignment = Alignment(
+                    horizontal=(
+                        "center"
+                        if cell.row == 1
+                        else _horizontal_alignment(value)
+                    ),
+                    vertical="center" if cell.row == 1 else "top",
+                    wrap_text=True,
+                )
+                if value is not None:
+                    row_lines = max(
+                        row_lines,
+                        _wrapped_lines(value, column_widths[column_index]),
+                    )
+            if row_index > 1:
+                sheet.row_dimensions[row_index].height = max(20, 16 * row_lines)
     workbook.active = 0
     workbook.save(output_path)
 
@@ -101,6 +176,7 @@ def main() -> None:
         raise ValueError("generated XLSX sheet names do not match the request")
     if any(verified[name].max_row < 1 for name in verified.sheetnames):
         raise ValueError("generated XLSX contains an empty sheet")
+    _verify_workbook(verified, sheets)
     print(
         json.dumps(
             {

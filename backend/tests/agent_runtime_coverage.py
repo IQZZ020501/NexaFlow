@@ -518,6 +518,111 @@ def assert_agent_tool_construction() -> None:
     assert is_parallel_safe(tool) is True
 
 
+def assert_legacy_tool_protocol_compatibility() -> None:
+    pptx_schema = {
+        "type": "object",
+        "properties": {
+            "filename": {"type": "string"},
+            "presentation": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "subtitle": {"type": "string"},
+                    "slides": {"type": "array", "minItems": 1},
+                },
+                "required": ["title", "slides"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["filename", "presentation"],
+        "additionalProperties": False,
+    }
+    captured: list[dict[str, Any]] = []
+
+    async def execute(arguments: str) -> AgentToolResult:
+        captured.append(json.loads(arguments))
+        return AgentToolResult(content="ok", summary="ok")
+
+    tool = create_agent_tool(
+        name="pptx_skill",
+        description="PPTX",
+        parameters=pptx_schema,
+        execute=execute,
+    )
+    result = asyncio.run(
+        tool.ainvoke(
+            {
+                "arguments": {
+                    "filename": "lesson.pptx",
+                    "file_title": "标题",
+                    "file_subtitle": "副标题",
+                    "slides": [{"type": "hero"}],
+                }
+            }
+        )
+    )
+    assert result.is_error is False
+    assert captured[0]["presentation"]["title"] == "标题"
+    assert captured[0]["presentation"]["slides"] == [{"type": "hero"}]
+    nested = asyncio.run(
+        tool.ainvoke(
+            {
+                "arguments": json.dumps(
+                    {
+                        "filename": "lesson.pptx",
+                        "presentation": {
+                            "title": "标题",
+                            "slides": [{"type": "hero"}],
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+            }
+        )
+    )
+    assert nested.is_error is False
+
+    invalid = asyncio.run(
+        tool.ainvoke(
+            {
+                "filename": "lesson.pptx",
+                "presentation": {"title": "标题"},
+            }
+        )
+    )
+    assert invalid.is_error is True
+    assert "slides" in invalid.content
+
+    dsml = (
+        '<|DSML|function_calls><|DSML|invoke name="pptx_skill">'
+        '<|DSML|parameter name="filename" string="true">lesson.pptx'
+        "</|DSML|parameter>"
+        '<|DSML|parameter name="file_title" string="true">标题'
+        "</|DSML|parameter>"
+        "</|DSML|invoke></|DSML|function_calls>"
+    )
+    completion = graph_module.model_completion(AIMessage(content=dsml))
+    assert completion.content == ""
+    assert len(completion.tool_calls) == 1
+    assert completion.tool_calls[0].name == "pptx_skill"
+    assert "<|DSML|" not in completion.content
+
+    spaced_dsml = dsml.replace("<|DSML|", "<| | DSML | |")
+    spaced_completion = graph_module.model_completion(AIMessage(content=spaced_dsml))
+    assert spaced_completion.content == ""
+    assert len(spaced_completion.tool_calls) == 1
+    assert spaced_completion.tool_calls[0].name == "pptx_skill"
+
+    text_filter = graph_module.ModelTextStreamFilter()
+    assert text_filter.push("hello <|D") == "hello "
+    assert text_filter.push("SML|function_calls>") == ""
+    assert text_filter.finish() == ""
+    spaced_filter = graph_module.ModelTextStreamFilter()
+    assert spaced_filter.push("hello <| | D") == "hello "
+    assert spaced_filter.push("SML | | function_calls>") == ""
+    assert spaced_filter.finish() == ""
+
+
 def assert_callback_safety() -> None:
     # redaction of sensitive fields
     assert safe_event_value({"password": "hunter2"}, "password") == "[REDACTED]"
@@ -6098,6 +6203,7 @@ async def assert_orphaned_stream_ends_with_error(
 def main() -> None:
     assert_usage_normalization()
     assert_agent_tool_construction()
+    assert_legacy_tool_protocol_compatibility()
     assert_callback_safety()
     assert_graph_error_branches()
     assert_executor_checkpoint_paths()

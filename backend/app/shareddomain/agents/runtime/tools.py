@@ -7,6 +7,8 @@ from jsonschema import validators
 from jsonschema.exceptions import SchemaError
 from langchain_core.tools import StructuredTool
 
+from app.shareddomain.tools.runtime import normalize_tool_arguments
+
 
 @dataclass(frozen=True)
 class AgentToolResult:
@@ -66,13 +68,25 @@ def create_agent_tool(
     validator = validator_type(parameters)
 
     async def invoke(**arguments: Any) -> AgentToolResult:
-        if next(validator.iter_errors(arguments), None) is not None:
+        normalized = normalize_tool_arguments(name, parameters, arguments)
+        error = next(validator.iter_errors(normalized), None)
+        if error is not None:
+            path = ".".join(str(part) for part in error.absolute_path) or "root"
+            expected = parameters.get("properties")
+            expected_text = (
+                f" Expected fields: {', '.join(str(key) for key in expected)}."
+                if path == "root" and isinstance(expected, dict)
+                else ""
+            )
             return AgentToolResult(
-                content="Tool parameters are invalid.",
+                content=(
+                    f"Tool parameters are invalid at {path}: {error.message}."
+                    f"{expected_text}"[:1000]
+                ),
                 summary="Invalid tool parameters.",
                 is_error=True,
             )
-        return await execute(json.dumps(arguments, ensure_ascii=False))
+        return await execute(json.dumps(normalized, ensure_ascii=False))
 
     return StructuredTool.from_function(
         coroutine=invoke,

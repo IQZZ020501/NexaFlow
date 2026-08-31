@@ -70,6 +70,7 @@ from app.shareddomain.agents.services import (
     require_agent_edit,
 )
 from app.shareddomain.agents.models import agent_run_display_status
+from app.shareddomain.agents.runtime.graph import ModelTextStreamFilter, clean_model_text
 from app.shareddomain.audit.services import record_audit_log
 from app.shareddomain.agents.runtime.callbacks import safe_event_value
 
@@ -407,7 +408,7 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
         ),
         question=str(value.get("goal") or value.get("question") or ""),
         status=run_status,
-        result=str(value.get("result") or ""),
+        result=clean_model_text(str(value.get("result") or "")),
         error=generic_error,
         progress=external_progress_events(value.get("events") or [], run_status),
         created_at=value["created_at"],
@@ -423,16 +424,21 @@ async def sanitize_external_agent_stream(
     events: AsyncIterator[dict[str, Any]],
 ) -> AsyncIterator[dict[str, Any]]:
     streamed_tool_inputs: dict[str, dict[str, str]] = {}
+    text_filter = ModelTextStreamFilter()
     async for event in events:
         event_type = event.get("type")
         if event_type == "answer_delta":
+            delta = text_filter.push(str(event.get("delta") or ""))
+            if not delta:
+                continue
             sanitized = {
                 "type": "answer_delta",
-                "delta": str(event.get("delta") or ""),
+                "delta": delta,
             }
             _copy_external_stream_metadata(event, sanitized)
             yield sanitized
         elif event_type == "answer_reset":
+            text_filter = ModelTextStreamFilter()
             sanitized = {"type": "answer_reset"}
             _copy_external_stream_metadata(event, sanitized)
             yield sanitized
@@ -489,7 +495,9 @@ async def sanitize_external_agent_stream(
             ):
                 sanitized = {
                     "type": "progress",
-                    "event": progress_event.model_dump(mode="json"),
+                    "event": progress_event.model_dump(
+                        mode="json", exclude={"created_at"}
+                    ),
                 }
                 _copy_external_stream_metadata(event, sanitized)
                 yield sanitized
@@ -504,6 +512,12 @@ async def sanitize_external_agent_stream(
         elif event_type in {"run", "complete", "error"} and isinstance(
             event.get("run"), dict
         ):
+            if event_type in {"complete", "error"}:
+                trailing = text_filter.finish()
+                if trailing:
+                    trailing_event = {"type": "answer_delta", "delta": trailing}
+                    _copy_external_stream_metadata(event, trailing_event)
+                    yield trailing_event
             sanitized = {
                 "type": event_type,
                 "run": external_run_to_response(event["run"]).model_dump(mode="json"),
@@ -1178,7 +1192,7 @@ async def list_public_agent_conversations(
                 conversation_id=row.conversation_id,
                 question=row.goal,
                 status=row.status,
-                result=row.result,
+                result=clean_model_text(str(row.result or "")),
                 run_count=row.run_count,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
@@ -1318,7 +1332,7 @@ async def list_agent_logs(
                 execution_user_id=run.execution_user_id,
                 question=run.goal,
                 status=run.status,
-                result=run.result,
+                result=clean_model_text(str(run.result or "")),
                 last_error=run.last_error,
                 model_usage=run.model_usage,
                 feedback=run.feedback,

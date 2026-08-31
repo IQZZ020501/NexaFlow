@@ -15,7 +15,12 @@ verification.
 
 - The Agent supplies final content, not Python source code.
 - Use headings, paragraphs, lists, and pipe tables in the Markdown input.
+- The renderer uses a platform CJK family (`Noto Sans CJK SC` in the Linux
+  image, `PingFang SC` on macOS) with `NEXAFLOW_CJK_FONT` as an override; it
+  does not force the unavailable `Microsoft YaHei` family.
 - `scripts/render.py` writes exactly one DOCX to the platform output path.
+- Pipe tables use fixed page-width geometry and wrap long cell text instead of
+  expanding beyond the document margins.
 - The renderer reopens the DOCX and rejects empty or structurally invalid output.
 
 ## Recommended flow

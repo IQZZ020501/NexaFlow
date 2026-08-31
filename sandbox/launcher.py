@@ -179,6 +179,8 @@ def _prepare_root(
         Path("/etc/passwd"),
         Path("/etc/group"),
         Path("/etc/ssl"),
+        Path("/etc/fonts"),
+        Path("/var/cache/fontconfig"),
     ):
         if source.exists():
             _bind(root, source, read_only=True)

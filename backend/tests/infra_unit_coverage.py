@@ -1990,6 +1990,32 @@ def test_code_sandbox_execute() -> None:
         )
     )
     assert type(stderr_busy) is code_sandbox.WorkflowSandboxError
+    # long traceback: the actionable final error line must survive; the
+    # previous [:1000] head slice cut it mid-line ("ValueError: step").
+    traceback = (
+        "Traceback (most recent call last):\n"
+        + "".join(
+            f'  File "/tmp/nexaflow-sandbox-{i}/skills/pptx/scripts/render.py", '
+            f"line {i}, in _steps_slide\n    _text_box(\n"
+            for i in range(40)
+        )
+        + "ValueError: step 3 title does not fit its text box\n"
+    )
+    long_trace = _sandbox_expect_error(
+        lambda: _run_sandbox(
+            _FakeSandboxReader(
+                _sandbox_response(
+                    ok=False,
+                    exit_code=1,
+                    stderr=traceback,
+                    error=None,
+                )
+            )
+        )
+    )
+    assert (
+        str(long_trace) == "ValueError: step 3 title does not fit its text box"
+    )
 
     # non-int exit code
     invalid_exit = _sandbox_expect_error(

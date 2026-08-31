@@ -372,6 +372,311 @@ def test_artifact_contract_downgrade_rejects_durable_references() -> None:
                 raise AssertionError("Artifact Tool ledger downgrade was accepted.")
 
 
+def load_pptx_schema_migration():
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202608300003_builtin_pptx_skill_schema.py"
+    )
+    spec = spec_from_file_location("pptx_skill_schema", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine
+
+    from app.shareddomain.tools.catalog import build_skill_artifact_tool
+
+    migration = load_pptx_schema_migration()
+    assert migration.down_revision == "202608300002"
+
+    workspace_id = "workspace-migration"
+    desired_tool, desired_version, _desired_policy = build_skill_artifact_tool(
+        workspace_id, "pptx"
+    )
+    stale_schema = {
+        "type": "object",
+        "properties": {
+            "slides": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "layout": {
+                            "type": "string",
+                            "enum": [
+                                "section",
+                                "bullets",
+                                "two_column",
+                                "icons",
+                                "table",
+                            ],
+                        }
+                    },
+                },
+            }
+        },
+    }
+
+    engine = create_engine("sqlite://")
+    metadata = sa.MetaData()
+    tables: dict[str, sa.Table] = {}
+    for name, columns in (
+        (
+            "tool_sources",
+            (
+                ("id", sa.String, True),
+                ("workspace_id", sa.String, False),
+                ("kind", sa.String, False),
+            ),
+        ),
+        (
+            "tools",
+            (
+                ("id", sa.String, True),
+                ("workspace_id", sa.String, False),
+                ("source_id", sa.String, False),
+                ("folder_id", sa.String, False),
+                ("kind", sa.String, False),
+                ("stable_key", sa.String, False),
+                ("function_name", sa.String, False),
+                ("current_version_id", sa.String, False),
+                ("status", sa.String, False),
+                ("availability", sa.String, False),
+                ("created_by_user_id", sa.String, False),
+                ("created_at", sa.DateTime, False),
+                ("updated_at", sa.DateTime, False),
+            ),
+        ),
+        (
+            "tool_versions",
+            (
+                ("id", sa.String, True),
+                ("workspace_id", sa.String, False),
+                ("tool_id", sa.String, False),
+                ("revision", sa.Integer, False),
+                ("display_name", sa.String, False),
+                ("description", sa.Text, False),
+                ("input_schema", sa.JSON, False),
+                ("output_schema", sa.JSON, False),
+                ("execution_spec", sa.JSON, False),
+                ("definition_hash", sa.String, False),
+                ("created_by_user_id", sa.String, False),
+                ("created_at", sa.DateTime, False),
+            ),
+        ),
+        (
+            "tool_policies",
+            (
+                ("id", sa.String, True),
+                ("workspace_id", sa.String, False),
+                ("tool_id", sa.String, False),
+                ("tool_version_id", sa.String, False),
+                ("definition_hash", sa.String, False),
+                ("revision", sa.Integer, False),
+                ("approval", sa.String, False),
+                ("effect", sa.String, False),
+                ("allowed_access_sources", sa.JSON, False),
+                ("workflow_callable", sa.Boolean, False),
+                ("parallel_safe", sa.Boolean, False),
+                ("reviewed_by_user_id", sa.String, False),
+                ("reviewed_at", sa.DateTime, False),
+                ("created_at", sa.DateTime, False),
+                ("updated_at", sa.DateTime, False),
+            ),
+        ),
+    ):
+        constraints: list[sa.UniqueConstraint] = []
+        if name == "tool_versions":
+            # Mirror the production model so a duplicate (tool_id, revision)
+            # or (tool_id, definition_hash) insert fails like it does in
+            # PostgreSQL.
+            constraints = [
+                sa.UniqueConstraint("tool_id", "revision"),
+                sa.UniqueConstraint("tool_id", "definition_hash"),
+            ]
+        tables[name] = sa.Table(
+            name,
+            metadata,
+            *[
+                sa.Column(column, column_type, primary_key=primary)
+                for column, column_type, primary in columns
+            ],
+            *constraints,
+        )
+    metadata.create_all(engine)
+
+    timestamp = datetime.now(UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            tables["tool_sources"].insert().values(
+                id="source-builtin",
+                workspace_id=workspace_id,
+                kind="builtin",
+            )
+        )
+        connection.execute(
+            tables["tools"].insert().values(
+                id=desired_tool.id,
+                workspace_id=workspace_id,
+                source_id="source-builtin",
+                folder_id=None,
+                kind="builtin",
+                stable_key="skill_pptx",
+                function_name="pptx_skill",
+                current_version_id="stale-version-id",
+                status="active",
+                availability="available",
+                created_by_user_id=None,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
+        connection.execute(
+            tables["tool_versions"].insert().values(
+                id="stale-version-id",
+                workspace_id=workspace_id,
+                tool_id=desired_tool.id,
+                revision=1,
+                display_name="PPTX Skill",
+                description="legacy",
+                input_schema=stale_schema,
+                output_schema=None,
+                execution_spec={"builtin": "skill", "skill": "pptx"},
+                definition_hash="a" * 64,
+                created_by_user_id=None,
+                created_at=timestamp,
+            )
+        )
+        connection.execute(
+            tables["tool_policies"].insert().values(
+                id="stale-policy-id",
+                workspace_id=workspace_id,
+                tool_id=desired_tool.id,
+                tool_version_id="stale-version-id",
+                definition_hash="a" * 64,
+                revision=1,
+                approval="auto",
+                effect="pure",
+                allowed_access_sources=[],
+                workflow_callable=True,
+                parallel_safe=True,
+                reviewed_by_user_id=None,
+                reviewed_at=None,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+        )
+
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+
+        current_version_id = connection.execute(
+            sa.select(tables["tools"].c.current_version_id).where(
+                tables["tools"].c.id == desired_tool.id
+            )
+        ).scalar_one()
+        assert current_version_id == desired_version.id
+        refreshed_schema = connection.execute(
+            sa.select(tables["tool_versions"].c.input_schema).where(
+                tables["tool_versions"].c.id == desired_version.id
+            )
+        ).scalar_one()
+        slide_layout = (
+            refreshed_schema["properties"]["presentation"]["properties"]["slides"]
+            ["items"]["properties"]["layout"]
+        )
+        presentation_properties = refreshed_schema["properties"]["presentation"][
+            "properties"
+        ]
+        assert "theme" in presentation_properties
+        assert "style" in presentation_properties["slides"]["items"]["properties"]
+        assert set(slide_layout["enum"]) == {
+            "section",
+            "bullets",
+            "two_column",
+            "icons",
+            "table",
+            "hero",
+            "stats",
+            "steps",
+            "quote",
+        }
+        policy_row = connection.execute(
+            sa.select(
+                tables["tool_policies"].c.tool_version_id,
+                tables["tool_policies"].c.definition_hash,
+            ).where(tables["tool_policies"].c.id == "stale-policy-id")
+        ).one()
+        assert policy_row.tool_version_id == desired_version.id
+        assert policy_row.definition_hash == desired_version.definition_hash
+        stale_rows = (
+            connection.execute(
+                sa.select(tables["tool_versions"].c.id).where(
+                    tables["tool_versions"].c.id == "stale-version-id"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert stale_rows == ["stale-version-id"]
+        stale_revision = connection.execute(
+            sa.select(tables["tool_versions"].c.revision).where(
+                tables["tool_versions"].c.id == "stale-version-id"
+            )
+        ).scalar_one()
+        assert stale_revision == 1
+        refreshed_revision = connection.execute(
+            sa.select(tables["tool_versions"].c.revision).where(
+                tables["tool_versions"].c.id == desired_version.id
+            )
+        ).scalar_one()
+        assert refreshed_revision == 2
+
+        migration.upgrade()
+        unchanged = connection.execute(
+            sa.select(tables["tools"].c.current_version_id).where(
+                tables["tools"].c.id == desired_tool.id
+            )
+        ).scalar_one()
+        assert unchanged == desired_version.id
+
+        migration.downgrade()
+        after_downgrade = connection.execute(
+            sa.select(tables["tools"].c.current_version_id).where(
+                tables["tools"].c.id == desired_tool.id
+            )
+        ).scalar_one()
+        assert after_downgrade == desired_version.id
+
+
+def test_pptx_argument_normalization_keeps_model_theme() -> None:
+    from app.shareddomain.tools.catalog import build_skill_artifact_tool
+    from app.shareddomain.tools.runtime import normalize_tool_arguments
+
+    _tool, version, _policy = build_skill_artifact_tool("workspace", "pptx")
+    normalized = normalize_tool_arguments(
+        "pptx_skill",
+        version.input_schema,
+        {
+            "filename": "themed.pptx",
+            "title": "Themed deck",
+            "theme": {
+                "background_color": "#07111F",
+                "text_color": "#F8FAFC",
+                "accent_color": "#F59E0B",
+            },
+            "slides": [{"layout": "hero", "title": "One idea"}],
+        },
+    )
+    assert normalized["presentation"]["theme"]["accent_color"] == "#F59E0B"
+    assert "theme" not in normalized
+
+
 def test_artifact_generator_preflight_is_actionable() -> None:
     from app.application.tool_adapters import _artifact_code_preflight
 
@@ -1226,13 +1531,35 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
                     "editorial",
                     "bold",
                 ]
+                theme_schema = presentation_schema["properties"]["theme"]
+                assert set(theme_schema["properties"]) == {
+                    "background_color",
+                    "text_color",
+                    "accent_color",
+                    "panel_color",
+                    "muted_text_color",
+                    "rule_color",
+                    "font_family",
+                    "heading_font_family",
+                    "cover_title_size",
+                    "slide_title_size",
+                    "body_size",
+                    "panel_radius",
+                    "cover_accent_width",
+                    "title_alignment",
+                }
                 slide_schema = presentation_schema["properties"]["slides"]["items"]
+                assert "style" in slide_schema["properties"]
                 assert slide_schema["properties"]["layout"]["enum"] == [
                     "section",
                     "bullets",
                     "two_column",
                     "icons",
                     "table",
+                    "hero",
+                    "stats",
+                    "steps",
+                    "quote",
                 ]
             assert skill_policy.workflow_callable is True
             assert skill_policy.approval == "auto"
@@ -5898,6 +6225,8 @@ def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
     test_generic_artifact_migration_matches_catalog()
     test_artifact_contract_downgrade_rejects_durable_references()
+    test_pptx_skill_schema_migration_refreshes_stale_versions()
+    test_pptx_argument_normalization_keeps_model_theme()
     test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()
     test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()

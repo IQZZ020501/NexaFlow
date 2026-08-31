@@ -123,9 +123,9 @@ class WorkflowToolRuntime:
                 await db.commit()
         except ToolInvocationConflict as exc:
             raise RuntimeError(str(exc)) from exc
-        except ValueError:
+        except ValueError as exc:
             return AgentToolResult(
-                content="Tool parameters are invalid.",
+                content=f"Tool parameters are invalid. {exc}",
                 summary="Invalid tool parameters.",
                 is_error=True,
             )
