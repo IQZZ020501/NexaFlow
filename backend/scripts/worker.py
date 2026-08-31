@@ -67,6 +67,30 @@ def build_sandbox_command(
     return command
 
 
+def _sandbox_environment(
+    *,
+    sandbox_python: Path,
+    skills_dir: Path | None,
+    hard_isolation: bool,
+) -> dict[str, str]:
+    environment = {
+        "PATH": f"{sandbox_python.parent}:/usr/bin:/bin",
+        "PYTHONUNBUFFERED": "1",
+    }
+    if skills_dir is not None:
+        environment["SANDBOX_SKILLS_DIR"] = str(skills_dir)
+    concurrency = os.environ.get("SANDBOX_MAX_CONCURRENT_RUNS")
+    if concurrency is None and not hard_isolation:
+        # macOS Seatbelt isolates each child, so many concurrent sandbox jobs
+        # keep separate conversations from serializing on one slot. Linux
+        # launcher children share the worker namespace/chroot, so the
+        # single-slot default stays there unless the operator opts in.
+        concurrency = "50"
+    if concurrency is not None:
+        environment["SANDBOX_MAX_CONCURRENT_RUNS"] = concurrency
+    return environment
+
+
 def _sandbox_runtime() -> tuple[Path, Path]:
     configured = os.environ.get("SANDBOX_ROOT", "").strip()
     candidates = [
@@ -384,12 +408,11 @@ def main() -> int:
                 egress_listener.close()
                 egress_listener = None
 
-        sandbox_environment = {
-            "PATH": f"{sandbox_python.parent}:/usr/bin:/bin",
-            "PYTHONUNBUFFERED": "1",
-        }
-        if skills_dir is not None:
-            sandbox_environment["SANDBOX_SKILLS_DIR"] = str(skills_dir)
+        sandbox_environment = _sandbox_environment(
+            sandbox_python=sandbox_python,
+            skills_dir=skills_dir,
+            hard_isolation=hard_isolation,
+        )
 
         def start(use_hard_isolation: bool) -> subprocess.Popen[bytes]:
             return subprocess.Popen(

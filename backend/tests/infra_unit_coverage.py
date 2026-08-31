@@ -2320,6 +2320,57 @@ def test_worker_supervisor_sandbox_commands() -> None:
         else:
             raise AssertionError("non-socket egress path was accepted")
         assert protected.read_text() == "keep"
+    sandbox_environment = module._sandbox_environment(
+        sandbox_python=Path(sys.executable),
+        skills_dir=Path("/srv/nexaflow-skills"),
+        hard_isolation=False,
+    )
+    assert sandbox_environment["SANDBOX_MAX_CONCURRENT_RUNS"] == "50"
+    assert sandbox_environment["SANDBOX_SKILLS_DIR"] == "/srv/nexaflow-skills"
+    assert sandbox_environment["PATH"].startswith(str(Path(sys.executable).parent))
+    hard_environment = module._sandbox_environment(
+        sandbox_python=Path(sys.executable),
+        skills_dir=None,
+        hard_isolation=True,
+    )
+    assert "SANDBOX_MAX_CONCURRENT_RUNS" not in hard_environment
+    with patch.dict(os.environ, {"SANDBOX_MAX_CONCURRENT_RUNS": "3"}):
+        opted = module._sandbox_environment(
+            sandbox_python=Path(sys.executable),
+            skills_dir=None,
+            hard_isolation=True,
+        )
+        assert opted["SANDBOX_MAX_CONCURRENT_RUNS"] == "3"
+    with patch.dict(os.environ):
+        os.environ.pop("SANDBOX_MAX_CONCURRENT_RUNS", None)
+        relaxed = module._sandbox_environment(
+            sandbox_python=Path(sys.executable),
+            skills_dir=None,
+            hard_isolation=False,
+        )
+        assert relaxed["SANDBOX_MAX_CONCURRENT_RUNS"] == "50"
+    with patch.dict(os.environ, {"SANDBOX_MAX_CONCURRENT_RUNS": "4"}):
+        forced = module._sandbox_environment(
+            sandbox_python=Path(sys.executable),
+            skills_dir=None,
+            hard_isolation=False,
+        )
+        assert forced["SANDBOX_MAX_CONCURRENT_RUNS"] == "4"
+    with patch.dict(os.environ):
+        os.environ.pop("SANDBOX_MAX_CONCURRENT_RUNS", None)
+        default_hard = module._sandbox_environment(
+            sandbox_python=Path(sys.executable),
+            skills_dir=None,
+            hard_isolation=True,
+        )
+        assert "SANDBOX_MAX_CONCURRENT_RUNS" not in default_hard
+    with patch.dict(os.environ, {"SANDBOX_MAX_CONCURRENT_RUNS": "nope"}):
+        invalid = module._sandbox_environment(
+            sandbox_python=Path(sys.executable),
+            skills_dir=None,
+            hard_isolation=False,
+        )
+        assert invalid["SANDBOX_MAX_CONCURRENT_RUNS"] == "nope"
 
 
 class _BrokenSandboxWriter:

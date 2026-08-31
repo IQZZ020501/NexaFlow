@@ -1388,6 +1388,60 @@ def _raw_request(socket_path: Path, payload: bytes, read_response: bool = True) 
         return client.makefile("rb").readline()
 
 
+def check_sandbox_concurrency() -> None:
+    from sandbox.server import _max_concurrent_runs
+
+    with mock.patch.dict(os.environ, {"SANDBOX_MAX_CONCURRENT_RUNS": "2"}):
+        assert _max_concurrent_runs() == 2
+        with tempfile.TemporaryDirectory() as directory:
+            socket_path = Path(directory) / "concurrent.sock"
+            server = SandboxServer(socket_path)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                for _ in range(100):
+                    if socket_path.exists():
+                        break
+                    time.sleep(0.01)
+                assert server.run_slot._value == 2, server.run_slot._value
+                code = b'{"code":"import time; time.sleep(1.0); print(\'done\')"}\n'
+                results: list[bytes] = []
+                failures: list[BaseException] = []
+
+                def request() -> None:
+                    try:
+                        results.append(_raw_request(socket_path, code) or b"{}")
+                    except BaseException as exc:  # pragma: no cover - failure path
+                        failures.append(exc)
+
+                started = time.monotonic()
+                first = threading.Thread(target=request, daemon=True)
+                second = threading.Thread(target=request, daemon=True)
+                first.start()
+                second.start()
+                first.join(timeout=8)
+                second.join(timeout=8)
+                elapsed = time.monotonic() - started
+                assert not failures, failures
+                assert len(results) == 2
+                for response in results:
+                    payload = json.loads(response)
+                    assert payload.get("ok") is True, payload
+                # Serial execution takes about 2x the sleep; concurrent
+                # execution finishes near one sleep plus child startup.
+                assert elapsed < 2.2, elapsed
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+                server.server_close()
+    with mock.patch.dict(os.environ, {"SANDBOX_MAX_CONCURRENT_RUNS": "nope"}):
+        assert _max_concurrent_runs() == 1
+    with mock.patch.dict(os.environ, {"SANDBOX_MAX_CONCURRENT_RUNS": "9"}):
+        assert _max_concurrent_runs() == 9
+    with mock.patch.dict(os.environ, {"SANDBOX_MAX_CONCURRENT_RUNS": "500"}):
+        assert _max_concurrent_runs() == 500
+
+
 def check_server_error_paths() -> None:
     with tempfile.TemporaryDirectory() as directory:
         socket_path = Path(directory) / "errors.sock"
@@ -2333,6 +2387,7 @@ def main() -> None:
     check_blocking_io_retry()
     check_non_posix()
     check_macos_seatbelt()
+    check_sandbox_concurrency()
     check_server_error_paths()
     check_server_lifecycle()
     check_main_cli()
