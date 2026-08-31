@@ -49,6 +49,7 @@ type SessionContextValue = {
   openPasswordDialog: () => void
   closePasswordDialog: () => void
   selectWorkspace: (workspaceId: string) => void
+  switchWorkspace: (workspaceId: string) => void
   clearSelectedWorkspace: () => void
   workspaceCreated: (payload: WorkspaceCreateResponse) => void
   workspaceUpdated: (workspace: Workspace) => void
@@ -193,6 +194,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<
     string | null
   >(null)
+  const [pendingWorkspaceId, setPendingWorkspaceId] = React.useState<
+    string | null
+  >(null)
   const [isSessionLoading, setIsSessionLoading] = React.useState(false)
   const [isSessionRestored, setIsSessionRestored] = React.useState(false)
   const [isTeamsLoading, setIsTeamsLoading] = React.useState(false)
@@ -212,6 +216,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
+  const applyWorkspaceSelection = React.useCallback((workspaceId: string) => {
+    localStorage.setItem(WORKSPACE_KEY, workspaceId)
+    setTeams([])
+    setIsTeamsLoading(true)
+    setSelectedWorkspaceId(workspaceId)
+  }, [])
+
   const clearSession = React.useCallback(() => {
     localStorage.removeItem(LEGACY_TOKEN_KEY)
     localStorage.removeItem(WORKSPACE_KEY)
@@ -223,6 +234,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setWorkspaces([])
     setTeams([])
     setSelectedWorkspaceId(null)
+    setPendingWorkspaceId(null)
     setSessionError(null)
   }, [])
 
@@ -450,6 +462,39 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     notify,
   ])
 
+  React.useEffect(() => {
+    if (!pendingWorkspaceId || pathname !== "/app/apps") {
+      return
+    }
+
+    const nextWorkspace = workspaces.find(
+      (workspace) =>
+        workspace.id === pendingWorkspaceId &&
+        workspace.status === "active" &&
+        hasWorkspaceMembership(me, workspace.id)
+    )
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- complete the switch only after leaving the old resource route
+    setPendingWorkspaceId(null)
+    if (!nextWorkspace) {
+      return
+    }
+
+    applyWorkspaceSelection(nextWorkspace.id)
+    notify(
+      "success",
+      tRef.current("已切换到 {workspace}", {
+        workspace: displayWorkspaceName(nextWorkspace, tRef.current),
+      })
+    )
+  }, [
+    applyWorkspaceSelection,
+    me,
+    notify,
+    pathname,
+    pendingWorkspaceId,
+    workspaces,
+  ])
+
   function handleLogin(
     nextToken: string,
     nextMustChangePassword: boolean,
@@ -474,10 +519,27 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       return
     }
 
+    applyWorkspaceSelection(workspaceId)
+  }
+
+  function handleSwitchWorkspace(workspaceId: string) {
+    if (workspaceId === selectedWorkspaceId) {
+      return
+    }
+
+    const nextWorkspace = workspaces.find(
+      (workspace) => workspace.id === workspaceId
+    )
+    if (
+      !nextWorkspace ||
+      nextWorkspace.status !== "active" ||
+      !hasWorkspaceMembership(me, workspaceId)
+    ) {
+      return
+    }
+
     localStorage.setItem(WORKSPACE_KEY, workspaceId)
-    setTeams([])
-    setIsTeamsLoading(true)
-    setSelectedWorkspaceId(workspaceId)
+    setPendingWorkspaceId(workspaceId)
   }
 
   function clearSelectedWorkspace() {
@@ -600,6 +662,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     openPasswordDialog: () => setIsPasswordDialogOpen(true),
     closePasswordDialog: () => setIsPasswordDialogOpen(false),
     selectWorkspace: handleSelectWorkspace,
+    switchWorkspace: handleSwitchWorkspace,
     clearSelectedWorkspace,
     workspaceCreated: handleWorkspaceCreated,
     workspaceUpdated: handleWorkspaceUpdated,

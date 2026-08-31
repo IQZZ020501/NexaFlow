@@ -81,6 +81,7 @@ let handler: FetchHandler = () => jsonResponse(null, 404)
 beforeEach(() => {
   localStorage.clear()
   document.documentElement.lang = ""
+  navPathname = "/app/dashboard"
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url =
       typeof input === "string"
@@ -285,6 +286,9 @@ function SessionProbe() {
       </button>
       <button type="button" onClick={() => session.selectWorkspace("ws-4")}>
         select-ws4
+      </button>
+      <button type="button" onClick={() => session.switchWorkspace("ws-2")}>
+        switch-ws2
       </button>
       <button type="button" onClick={() => session.clearSelectedWorkspace()}>
         clear-ws
@@ -571,6 +575,36 @@ describe("SessionProvider", () => {
     fireEvent.click(screen.getByText("select-ws2"))
     expect(screen.getByTestId("ws").textContent).toBe("ws-2")
     expect(calls.filter((c) => c === "teams").length).toBe(2)
+  })
+
+  test("switchWorkspace waits for the application home and reports success", async () => {
+    restoreHandler()
+    navPathname = "/app/knowledge/kb-1"
+    const view = renderSession()
+    await waitFor(() =>
+      expect(screen.getByTestId("ws").textContent).toBe("ws-1")
+    )
+
+    fireEvent.click(screen.getByText("switch-ws2"))
+    expect(screen.getByTestId("ws").textContent).toBe("ws-1")
+    expect(screen.getByTestId("notif").textContent).toBe("none")
+    expect(localStorage.getItem(WORKSPACE_KEY)).toBe("ws-2")
+
+    navPathname = "/app/apps"
+    view.rerender(
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <SessionProvider>
+          <SessionProbe />
+        </SessionProvider>
+      </LanguageProvider>
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId("ws").textContent).toBe("ws-2")
+    )
+    expect(screen.getByTestId("notif").textContent).toBe(
+      "success:已切换到 Workspace Two"
+    )
   })
 
   test("clearSelectedWorkspace resets the selection", async () => {

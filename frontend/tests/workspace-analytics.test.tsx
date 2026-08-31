@@ -28,8 +28,12 @@ import {
 
 const replaceCalls: string[] = []
 const selectWorkspaceCalls: string[] = []
+const switchWorkspaceCalls: string[] = []
 const session = makeSession({
-  selectWorkspace: (workspaceId: string) => selectWorkspaceCalls.push(workspaceId),
+  selectWorkspace: (workspaceId: string) =>
+    selectWorkspaceCalls.push(workspaceId),
+  switchWorkspace: (workspaceId: string) =>
+    switchWorkspaceCalls.push(workspaceId),
 })
 const sessionState = session as unknown as {
   me: MeResponse | null
@@ -38,6 +42,7 @@ const sessionState = session as unknown as {
   workspaceOptions: Workspace[]
   selectedWorkspaceId: string | null
   selectWorkspace: (workspaceId: string) => void
+  switchWorkspace: (workspaceId: string) => void
 }
 
 mockUseSession(session)
@@ -207,6 +212,8 @@ function restoreGlobalAdminSession() {
   sessionState.selectedWorkspaceId = "ws-1"
   sessionState.selectWorkspace = (workspaceId) =>
     selectWorkspaceCalls.push(workspaceId)
+  sessionState.switchWorkspace = (workspaceId) =>
+    switchWorkspaceCalls.push(workspaceId)
 }
 
 beforeEach(() => {
@@ -214,6 +221,7 @@ beforeEach(() => {
   requests = []
   replaceCalls.length = 0
   selectWorkspaceCalls.length = 0
+  switchWorkspaceCalls.length = 0
   restoreGlobalAdminSession()
   installFetch()
 })
@@ -361,6 +369,20 @@ describe("workspace analytics", () => {
     const navigation = link.closest("nav")
     expect(navigation?.className).toContain("justify-start")
     expect(navigation?.className).toContain("sm:justify-center")
+  })
+
+  test("returns to the application home after switching workspaces", async () => {
+    renderPage(<TopBar />)
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", {
+        name: "切换工作空间，当前为 Test Workspace",
+      })
+    )
+    fireEvent.click(await screen.findByText("Member Workspace"))
+
+    expect(switchWorkspaceCalls).toEqual(["ws-2"])
+    expect(replaceCalls).toEqual(["/app/apps"])
   })
 
   test("derives key metrics from the correct distributions and handles zero denominators", () => {

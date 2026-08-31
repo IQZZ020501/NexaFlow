@@ -12,7 +12,7 @@ import {
 } from "lucide-react"
 import Image from "next/image"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -53,11 +53,12 @@ export function TopBar() {
   const { language, setLanguage, t } = useLanguage()
   const { theme, setTheme } = useTheme()
   const pathname = usePathname()
+  const router = useRouter()
   const {
     me,
     selectedWorkspaceId,
     workspaceOptions,
-    selectWorkspace,
+    switchWorkspace,
     openPasswordDialog,
     logout,
   } = useSession()
@@ -138,7 +139,10 @@ export function TopBar() {
                   otherWorkspaces.map((workspace) => (
                     <DropdownMenuItem
                       key={workspace.id}
-                      onSelect={() => selectWorkspace(workspace.id)}
+                      onSelect={() => {
+                        switchWorkspace(workspace.id)
+                        router.replace("/app/apps")
+                      }}
                     >
                       <Building2Icon />
                       <span className="truncate">
