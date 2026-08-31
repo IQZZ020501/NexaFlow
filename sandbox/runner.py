@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import ctypes
 import hashlib
@@ -17,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Any
 from urllib.parse import urlsplit
@@ -46,6 +48,8 @@ PACKAGE_REQUIREMENT = re.compile(
 )
 ARTIFACT_FORMAT = re.compile(r"[a-z0-9][a-z0-9+_-]{0,31}\Z")
 PR_SET_CHILD_SUBREAPER = 36
+_LINUX_RUNS_LOCK = threading.Lock()
+_LINUX_ACTIVE_RUNS = 0
 
 
 @dataclass(frozen=True)
@@ -604,6 +608,24 @@ def _terminate_linux_descendants() -> None:  # pragma: no cover
         raise RuntimeError("sandbox descendants survived cleanup")
 
 
+@contextmanager
+def _linux_run_scope():  # pragma: no cover - Linux CI Docker only
+    global _LINUX_ACTIVE_RUNS
+    if sys.platform != "linux":
+        yield
+        return
+
+    with _LINUX_RUNS_LOCK:
+        _LINUX_ACTIVE_RUNS += 1
+    try:
+        yield
+    finally:
+        with _LINUX_RUNS_LOCK:
+            _LINUX_ACTIVE_RUNS -= 1
+            if _LINUX_ACTIVE_RUNS == 0:
+                _terminate_linux_descendants()
+
+
 def _collect_output(
     process: subprocess.Popen[bytes],
     limit: int,
@@ -781,7 +803,7 @@ def run_code(
                     "extra_groups": [],
                     "umask": 0o077,
                 }
-            with stdin_path.open("rb") as input_stream:
+            with stdin_path.open("rb") as input_stream, _linux_run_scope():
                 command = _sandboxed_child_command(
                     [
                         sys.executable,
@@ -816,7 +838,6 @@ def run_code(
                         process.wait()
                 finally:
                     _terminate(process)
-                    _terminate_linux_descendants()
         finally:
             if egress_proxy is not None:
                 egress_proxy.close()
