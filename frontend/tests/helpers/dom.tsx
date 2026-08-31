@@ -67,6 +67,7 @@ export function makeSession(overrides: Record<string, unknown> = {}) {
     openPasswordDialog: () => undefined,
     closePasswordDialog: () => undefined,
     selectWorkspace: () => undefined,
+    switchWorkspace: () => undefined,
     clearSelectedWorkspace: () => undefined,
     workspaceCreated: () => undefined,
     workspaceUpdated: () => undefined,

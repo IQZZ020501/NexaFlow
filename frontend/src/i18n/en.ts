@@ -101,6 +101,7 @@ export const en = {
   管理员: "Admin",
   成员: "Member",
   "切换工作空间，当前为 {workspace}": "Switch workspace, currently {workspace}",
+  "已切换到 {workspace}": "Switched to {workspace}",
   其他工作空间: "Other workspaces",
   暂无其他工作空间: "No other workspaces",
   打开用户菜单: "Open user menu",
