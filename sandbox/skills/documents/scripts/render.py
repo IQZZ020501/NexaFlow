@@ -10,7 +10,7 @@ from pathlib import Path
 from docx import Document
 from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
@@ -20,6 +20,8 @@ HEADING = re.compile(r"^(#{1,3})\s+(.+)$")
 BULLET = re.compile(r"^[-*]\s+(.+)$")
 NUMBERED = re.compile(r"^\d+[.)]\s+(.+)$")
 INLINE = re.compile(r"(\*\*.+?\*\*|`.+?`|\*.+?\*)")
+REPORT_STYLE = "report"
+FORMAL_LEGAL_STYLE = "formal_legal"
 
 PAGE_WIDTH_CM = 21.0
 PAGE_HEIGHT_CM = 29.7
@@ -28,11 +30,16 @@ TABLE_INDENT_DXA = 120
 CELL_MARGIN_DXA = 120
 
 
-def _resolve_cjk_font() -> str | None:
+def _resolve_cjk_font(*, formal: bool = False) -> str | None:
     """Return the platform CJK family without probing from an isolated child."""
     configured = os.environ.get("NEXAFLOW_CJK_FONT", "").strip()
     if configured:
         return configured
+    if formal:
+        return {
+            "linux": "Noto Serif CJK SC",
+            "darwin": "STFangsong",
+        }.get(sys.platform)
     return {
         "linux": "Noto Sans CJK SC",
         "darwin": "PingFang SC",
@@ -40,6 +47,7 @@ def _resolve_cjk_font() -> str | None:
 
 
 CJK_FONT = _resolve_cjk_font()
+FORMAL_CJK_FONT = _resolve_cjk_font(formal=True)
 
 
 def _display_units(value: str) -> int:
@@ -49,54 +57,72 @@ def _display_units(value: str) -> int:
     )
 
 
-def _input() -> str:
+def _input() -> tuple[str, str]:
     value = json.load(sys.stdin)
     if not isinstance(value, dict) or not isinstance(value.get("content"), str):
         raise ValueError("documents content must be a string")
+    style = value.get("style", REPORT_STYLE)
+    if not isinstance(style, str) or style not in {REPORT_STYLE, FORMAL_LEGAL_STYLE}:
+        raise ValueError("documents style must be report or formal_legal")
     content = value["content"].strip()
     if not content:
         raise ValueError("documents content is empty")
-    return content
+    if (
+        style == FORMAL_LEGAL_STYLE
+        and "劳动仲裁不收费" in content
+        and re.search(r"仲裁费用[^\n。；]{0,80}由被申请人承担", content)
+    ):
+        raise ValueError(
+            "formal_legal content contains conflicting arbitration fee statements: "
+            "'仲裁费用…由被申请人承担' and '劳动仲裁不收费'"
+        )
+    return content, style
 
 
-def _set_east_asia_font(target) -> None:
-    if not CJK_FONT:
+def _set_east_asia_font(target, font: str | None = CJK_FONT) -> None:
+    if not font:
         return
     r_pr = target._element.get_or_add_rPr()
     r_fonts = r_pr.find(qn("w:rFonts"))
     if r_fonts is None:
         r_fonts = OxmlElement("w:rFonts")
         r_pr.insert(0, r_fonts)
-    r_fonts.set(qn("w:eastAsia"), CJK_FONT)
+    r_fonts.set(qn("w:eastAsia"), font)
 
 
-def _set_font(run, *, size: float | None = None, bold: bool | None = None) -> None:
-    run.font.name = "Arial"
-    _set_east_asia_font(run)
+def _set_font(
+    run,
+    *,
+    size: float | None = None,
+    bold: bool | None = None,
+    formal: bool = False,
+) -> None:
+    run.font.name = "Times New Roman" if formal else "Arial"
+    _set_east_asia_font(run, FORMAL_CJK_FONT if formal else CJK_FONT)
     if size is not None:
         run.font.size = Pt(size)
     if bold is not None:
         run.bold = bold
 
 
-def _add_inline(paragraph, text: str) -> None:
+def _add_inline(paragraph, text: str, *, formal: bool = False) -> None:
     for part in INLINE.split(text):
         if not part:
             continue
         if part.startswith("**") and part.endswith("**"):
             run = paragraph.add_run(part[2:-2])
-            _set_font(run, bold=True)
+            _set_font(run, bold=True, formal=formal)
         elif part.startswith("`") and part.endswith("`"):
             run = paragraph.add_run(part[1:-1])
             run.font.name = "Courier New"
-            _set_east_asia_font(run)
+            _set_east_asia_font(run, FORMAL_CJK_FONT if formal else CJK_FONT)
         elif part.startswith("*") and part.endswith("*"):
             run = paragraph.add_run(part[1:-1])
-            _set_font(run)
+            _set_font(run, formal=formal)
             run.italic = True
         else:
             run = paragraph.add_run(part)
-            _set_font(run)
+            _set_font(run, formal=formal)
 
 
 def _cells(line: str) -> list[str]:
@@ -194,7 +220,12 @@ def _apply_table_geometry(table, rows: list[list[str]], count: int) -> None:
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
 
-def _add_table(document: Document, rows: list[list[str]]) -> None:
+def _add_table(
+    document: Document,
+    rows: list[list[str]],
+    *,
+    formal: bool = False,
+) -> None:
     width = max(len(row) for row in rows)
     table = document.add_table(rows=len(rows), cols=width)
     table.style = "Table Grid"
@@ -203,9 +234,11 @@ def _add_table(document: Document, rows: list[list[str]]) -> None:
             text = values[column_index] if column_index < len(values) else ""
             cell = table.cell(row_index, column_index)
             cell.text = ""
-            _add_inline(cell.paragraphs[0], text)
+            _add_inline(cell.paragraphs[0], text, formal=formal)
+            if formal:
+                cell.paragraphs[0].paragraph_format.first_line_indent = Pt(0)
             if row_index == 0:
-                _shade(cell, "D9EAF7")
+                _shade(cell, "E7E6E6" if formal else "D9EAF7")
                 for run in cell.paragraphs[0].runs:
                     run.bold = True
     _apply_table_geometry(table, rows, width)
@@ -228,7 +261,7 @@ def _add_page_number_footer(section) -> None:
         run._r.append(element)
 
 
-def _configure(document: Document) -> None:
+def _configure(document: Document, *, formal: bool = False) -> None:
     section = document.sections[0]
     section.start_type = WD_SECTION.NEW_PAGE
     section.page_width = Cm(PAGE_WIDTH_CM)
@@ -237,14 +270,16 @@ def _configure(document: Document) -> None:
     section.bottom_margin = Cm(2.4)
     section.left_margin = Cm(2.5)
     section.right_margin = Cm(2.5)
-    _add_page_number_footer(section)
+    if not formal:
+        _add_page_number_footer(section)
 
     normal = document.styles["Normal"]
-    normal.font.name = "Arial"
-    _set_east_asia_font(normal)
-    normal.font.size = Pt(11)
-    normal.paragraph_format.space_after = Pt(7)
-    normal.paragraph_format.line_spacing = 1.15
+    normal.font.name = "Times New Roman" if formal else "Arial"
+    _set_east_asia_font(normal, FORMAL_CJK_FONT if formal else CJK_FONT)
+    normal.font.size = Pt(12 if formal else 11)
+    normal.paragraph_format.space_after = Pt(0 if formal else 7)
+    normal.paragraph_format.line_spacing = 1.4 if formal else 1.15
+    normal.paragraph_format.first_line_indent = Pt(24) if formal else None
     normal.paragraph_format.widow_control = True
     for level, size in ((1, 18), (2, 15), (3, 13)):
         style = document.styles[f"Heading {level}"]
@@ -256,14 +291,22 @@ def _configure(document: Document) -> None:
         style.paragraph_format.keep_together = True
 
 
-def _render(content: str, output_path: Path) -> None:
+def _render(content: str, output_path: Path, style: str = REPORT_STYLE) -> None:
+    formal = style == FORMAL_LEGAL_STYLE
     document = Document()
-    _configure(document)
+    _configure(document, formal=formal)
     lines = content.splitlines()
     index = 0
+    first_h1 = True
     while index < len(lines):
         line = lines[index].strip()
         if not line:
+            index += 1
+            continue
+        if formal and line == "---":
+            paragraph = document.add_paragraph()
+            paragraph.paragraph_format.first_line_indent = Pt(0)
+            paragraph.add_run().add_break(WD_BREAK.PAGE)
             index += 1
             continue
         if (
@@ -276,27 +319,55 @@ def _render(content: str, output_path: Path) -> None:
             while index < len(lines) and "|" in lines[index] and lines[index].strip():
                 rows.append(_cells(lines[index]))
                 index += 1
-            _add_table(document, rows)
+            _add_table(document, rows, formal=formal)
             continue
         heading = HEADING.match(line)
         if heading:
-            paragraph = document.add_heading(level=len(heading.group(1)))
-            _add_inline(paragraph, heading.group(2))
+            level = len(heading.group(1))
+            paragraph = (
+                document.add_paragraph()
+                if formal
+                else document.add_heading(level=level)
+            )
+            _add_inline(paragraph, heading.group(2), formal=formal)
+            if formal:
+                paragraph.paragraph_format.first_line_indent = Pt(0)
+                paragraph.paragraph_format.keep_with_next = True
+                paragraph.paragraph_format.keep_together = True
+                for run in paragraph.runs:
+                    run.bold = True
+                    run.font.size = Pt({1: 18, 2: 14, 3: 12}[level])
+                    run.font.color.rgb = RGBColor(0, 0, 0)
+                if level == 1 and first_h1:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    first_h1 = False
         elif match := BULLET.match(line):
-            paragraph = document.add_paragraph(style="List Bullet")
-            _add_inline(paragraph, match.group(1))
+            paragraph = document.add_paragraph(
+                style="Normal" if formal else "List Bullet"
+            )
+            _add_inline(paragraph, line if formal else match.group(1), formal=formal)
+            if formal:
+                paragraph.paragraph_format.first_line_indent = Pt(0)
         elif match := NUMBERED.match(line):
-            paragraph = document.add_paragraph(style="List Number")
-            _add_inline(paragraph, match.group(1))
+            paragraph = document.add_paragraph(
+                style="Normal" if formal else "List Number"
+            )
+            _add_inline(paragraph, line if formal else match.group(1), formal=formal)
+            if formal:
+                paragraph.paragraph_format.first_line_indent = Pt(0)
         elif line.startswith("> "):
             paragraph = document.add_paragraph()
-            paragraph.paragraph_format.left_indent = Cm(0.7)
-            _add_inline(paragraph, line[2:])
-            for run in paragraph.runs:
-                run.italic = True
+            paragraph.paragraph_format.first_line_indent = Pt(0)
+            _add_inline(paragraph, line[2:], formal=formal)
+            if formal:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            else:
+                paragraph.paragraph_format.left_indent = Cm(0.7)
+                for run in paragraph.runs:
+                    run.italic = True
         else:
             paragraph = document.add_paragraph()
-            _add_inline(paragraph, line)
+            _add_inline(paragraph, line, formal=formal)
         index += 1
     document.save(output_path)
 
@@ -305,7 +376,8 @@ def main() -> None:
     output_path = Path(os.environ["NEXAFLOW_OUTPUT_PATH"])
     if output_path.suffix.lower() != ".docx":
         raise ValueError("documents Skill requires a .docx filename")
-    _render(_input(), output_path)
+    content, style = _input()
+    _render(content, output_path, style)
     verified = Document(output_path)
     text = "".join(paragraph.text for paragraph in verified.paragraphs).strip()
     table_text = "".join(

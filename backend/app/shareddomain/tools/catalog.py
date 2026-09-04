@@ -37,7 +37,14 @@ BUILTIN_SKILL_DEFINITIONS = (
         "documents",
         "documents_skill",
         "Documents Skill",
-        "Create a DOCX file from Markdown content using the Documents Skill renderer.",
+        (
+            "Create a DOCX file from Markdown content using the Documents Skill "
+            "renderer. Omit style for the existing report layout, or use "
+            "formal_legal for a formal legal-document layout. In formal_legal, "
+            "prefix signature/date lines with `> ` and use `---` on its own line "
+            "for an explicit page break. The renderer creates a new DOCX and does "
+            "not preserve an uploaded Word binary or template."
+        ),
     ),
     (
         "pdf",
@@ -509,6 +516,19 @@ def _skill_input_schema(skill_name: str) -> dict[str, Any]:
             ),
         }
         required.append("content")
+        if skill_name == "documents":
+            properties["style"] = {
+                "type": "string",
+                "enum": ["report", "formal_legal"],
+                "default": "report",
+                "description": (
+                    "Omit for the existing report layout. formal_legal uses the "
+                    "first H1 as a centered title, formal CJK body typography, "
+                    "literal list markers, and no page-number footer. Prefix "
+                    "signature/date lines with `> ` and put `---` on its own line "
+                    "for an explicit page break."
+                ),
+            }
     elif skill_name == "spreadsheets":
         properties["workbook"] = {
             "type": "object",

@@ -2934,6 +2934,24 @@ def test_artifact_tool_accepts_sandbox_sized_content() -> None:
     assert version.input_schema["properties"]["content"]["maxLength"] == 262144
 
 
+def test_documents_skill_formal_legal_contract_is_versioned() -> None:
+    from app.shareddomain.tools.catalog import build_skill_artifact_tool
+
+    tool, version, _policy = build_skill_artifact_tool("workspace-1", "documents")
+    rebuilt = build_skill_artifact_tool("workspace-1", "documents")[1]
+    assert version.input_schema["properties"]["style"] == {
+        "type": "string",
+        "enum": ["report", "formal_legal"],
+        "default": "report",
+        "description": version.input_schema["properties"]["style"]["description"],
+    }
+    assert "formal_legal" in version.description
+    assert "`> `" in version.description
+    assert "`---`" in version.description
+    assert tool.current_version_id == version.id == rebuilt.id
+    assert version.definition_hash == rebuilt.definition_hash
+
+
 def test_validate_agent_permission_only_accepts_view() -> None:
     validate_agent_permission("view")
     expect_http_error(lambda: validate_agent_permission("edit"), 422)
@@ -6863,6 +6881,7 @@ def main() -> None:
     test_python_tool_schema_rejects_legacy_definitions_property_bypass()
     test_python_tool_code_is_limited_to_eight_kibibytes()
     test_artifact_tool_accepts_sandbox_sized_content()
+    test_documents_skill_formal_legal_contract_is_versioned()
     test_knowledge_writes_recheck_locked_owner()
     test_clean_upload_filename_sanitizes_path_and_classification()
     test_parse_task_options_validates_boundaries()
