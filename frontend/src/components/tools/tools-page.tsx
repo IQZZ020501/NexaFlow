@@ -254,7 +254,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     (tool) =>
       (tool.folder_id ?? null) === resourceFolders.selectedFolderId &&
       (!query ||
-      `${displayToolName(tool)} ${displayToolDescription(tool)} ${displaySourceName(tool)} ${tool.function_name}`
+      `${displayToolName(tool)} ${displayToolDescription(tool)} ${displaySourceName(tool)}`
         .toLowerCase()
         .includes(query))
   )
@@ -806,9 +806,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                                   </Badge>
                                 ) : null}
                               </div>
-                              <p className="mt-1 truncate font-mono text-sm text-muted-foreground">
-                                {tool.function_name}
-                              </p>
                             </div>
                           </div>
                           {tool.can_manage ? (
