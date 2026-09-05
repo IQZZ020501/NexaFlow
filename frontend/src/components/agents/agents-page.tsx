@@ -331,11 +331,10 @@ export function mergeAgentRunStreamEvent(
       }
       return {
         ...run,
+        status: run.status === "queued" ? "running" : run.status,
         events,
-        live_stream_epoch:
-          streamEvent.stream_epoch ?? run.live_stream_epoch,
-        live_stream_cursor:
-          streamEvent.live_sequence ?? run.live_stream_cursor,
+        live_stream_epoch: streamEvent.stream_epoch ?? run.live_stream_epoch,
+        live_stream_cursor: streamEvent.live_sequence ?? run.live_stream_cursor,
       }
     })
   }
@@ -359,6 +358,7 @@ export function mergeAgentRunStreamEvent(
             }
             return {
               ...run,
+              status: run.status === "queued" ? "running" : run.status,
               result: sameStream ? run.result : "",
               live_stream_epoch:
                 streamEvent.stream_epoch ?? run.live_stream_epoch,
@@ -399,6 +399,7 @@ export function mergeAgentRunStreamEvent(
             }
             return {
               ...run,
+              status: run.status === "queued" ? "running" : run.status,
               result: sameStream
                 ? run.result + streamEvent.delta
                 : streamEvent.delta,
@@ -431,6 +432,7 @@ export function mergeAgentRunStreamEvent(
             }
             return {
               ...run,
+              status: run.status === "queued" ? "running" : run.status,
               result: "",
               live_stream_epoch:
                 streamEvent.stream_epoch ?? run.live_stream_epoch,
