@@ -5,6 +5,7 @@ import {
   deleteResourceFolder,
   listResourceFolders,
   moveResourceToFolder,
+  moveResourcesToFolder,
   updateResourceFolder,
   type ResourceFolder,
 } from "@/lib/api/resource-folders"
@@ -94,6 +95,19 @@ describe("resource folder API", () => {
     expect(JSON.parse(calls[3].body ?? "null")).toEqual({
       resource_type: "knowledge",
       resource_id: "kb-1",
+      folder_id: "folder-1",
+    })
+
+    await moveResourcesToFolder(TOKEN, WS, {
+      resource_type: "knowledge",
+      resource_ids: ["kb-1", "kb-2"],
+      folder_id: "folder-1",
+    })
+    expect(calls[4].method).toBe("PUT")
+    expect(calls[4].url).toContain("/resource-folders/resources/move-batch")
+    expect(JSON.parse(calls[4].body ?? "null")).toEqual({
+      resource_type: "knowledge",
+      resource_ids: ["kb-1", "kb-2"],
       folder_id: "folder-1",
     })
   })

@@ -87,11 +87,11 @@ async def delete_folder(
     )
 
 
-async def set_resource_folder(
+async def set_resources_folder(
     db: AsyncSession,
     workspace_id: str,
     resource_type: str,
-    resource_id: str,
+    resource_ids: list[str],
     folder_id: str | None,
 ) -> None:
     model = {
@@ -101,6 +101,6 @@ async def set_resource_folder(
     }[resource_type]
     await db.execute(
         update(model)
-        .where(model.workspace_id == workspace_id, model.id == resource_id)
+        .where(model.workspace_id == workspace_id, model.id.in_(resource_ids))
         .values(folder_id=folder_id)
     )

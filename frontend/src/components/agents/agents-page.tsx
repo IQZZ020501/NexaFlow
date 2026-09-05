@@ -26,6 +26,7 @@ import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
+import { ResourceBulkMoveBar } from "@/components/resource-folders/resource-bulk-move-bar"
 import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
 import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
@@ -38,6 +39,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spec } from "@/components/ui/spec"
 import { isEventFromDropdownMenu } from "@/lib/dom"
+import { cn } from "@/lib/utils"
 import {
   Dialog,
   DialogContent,
@@ -571,6 +573,9 @@ export function AgentsPage({
   const [deleteAgentTarget, setDeleteAgentTarget] =
     React.useState<Agent | null>(null)
   const [moveAgentTarget, setMoveAgentTarget] = React.useState<Agent | null>(null)
+  const [selectedAgentIds, setSelectedAgentIds] = React.useState<string[]>([])
+  const [isBatchManaging, setIsBatchManaging] = React.useState(false)
+  const [isBatchMoveOpen, setIsBatchMoveOpen] = React.useState(false)
   const [isDeletingAgent, setIsDeletingAgent] = React.useState(false)
   const [isAsking, setIsAsking] = React.useState(false)
   const [regeneratingRunId, setRegeneratingRunId] = React.useState<
@@ -639,6 +644,9 @@ export function AgentsPage({
       )
     })
   }, [agentSearch, agents, models, resourceFolders.selectedFolderId])
+  const movableAgentIds = filteredAgents
+    .filter((agent) => agent.can_edit)
+    .map((agent) => agent.id)
 
   const reportError = React.useCallback(
     (error: unknown) => notify("error", getErrorMessage(error, t)),
@@ -2040,17 +2048,25 @@ export function AgentsPage({
           />
         }
       >
-        <div className="rounded-lg border bg-background p-3 shadow-sm">
-        <div className="relative min-w-0 sm:w-[320px]">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={agentSearch}
-            onChange={(event) => setAgentSearch(event.target.value)}
-            placeholder={t("搜索{label}...", { label: t("应用") })}
-            className="pl-9"
+        <div className="flex flex-col gap-3 rounded-lg border bg-background p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative min-w-0 sm:w-[320px]">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={agentSearch}
+              onChange={(event) => setAgentSearch(event.target.value)}
+              placeholder={t("搜索{label}...", { label: t("应用") })}
+              className="pl-9"
+            />
+          </div>
+          <ResourceBulkMoveBar
+            resourceIds={movableAgentIds}
+            selectedIds={selectedAgentIds}
+            isManaging={isBatchManaging}
+            onSelectedIdsChange={setSelectedAgentIds}
+            onManagingChange={setIsBatchManaging}
+            onMove={() => setIsBatchMoveOpen(true)}
           />
         </div>
-      </div>
 
       <div aria-busy={isAgentListBusy} className="flex flex-col gap-4">
         {isAgentListBusy && agents.length === 0 ? null : agents.length === 0 ? (
@@ -2085,7 +2101,11 @@ export function AgentsPage({
                   key={agent.id}
                   role="button"
                   tabIndex={0}
-                  className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                  className={cn(
+                    "flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
+                    selectedAgentIds.includes(agent.id) &&
+                      "border-primary/50 bg-primary/[0.035]"
+                  )}
                   onClick={(event) => {
                     if (isEventFromDropdownMenu(event)) return
                     openAgent(agent)
@@ -2145,15 +2165,35 @@ export function AgentsPage({
                       </div>
                     </div>
                     {agent.can_edit ? (
-                      <IconButton
-                        label={t("编辑应用")}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          openAgent(agent)
-                        }}
-                      >
-                        <PencilIcon className="size-4" />
-                      </IconButton>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {isBatchManaging ? (
+                          <input
+                            type="checkbox"
+                            className="size-4 accent-primary"
+                            aria-label={t("选择 {value}", {
+                              value: agent.name,
+                            })}
+                            checked={selectedAgentIds.includes(agent.id)}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) =>
+                              setSelectedAgentIds((current) =>
+                                event.target.checked
+                                  ? [...current, agent.id]
+                                  : current.filter((id) => id !== agent.id)
+                              )
+                            }
+                          />
+                        ) : null}
+                        <IconButton
+                          label={t("编辑应用")}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openAgent(agent)
+                          }}
+                        >
+                          <PencilIcon className="size-4" />
+                        </IconButton>
+                      </div>
                     ) : null}
                   </div>
                   <div className="mt-auto flex items-end justify-between gap-2 pt-4">
@@ -2217,6 +2257,28 @@ export function AgentsPage({
       </ResourceFolderLayout>
 
       <ResourceFolderPickerDialog
+        open={isBatchMoveOpen}
+        folders={resourceFolders.folders}
+        currentFolderId={resourceFolders.selectedFolderId}
+        onOpenChange={setIsBatchMoveOpen}
+        onMove={async (folderId) => {
+          const resourceIds = selectedAgentIds.filter((id) =>
+            movableAgentIds.includes(id)
+          )
+          await resourceFolders.moveMany(resourceIds, folderId)
+          setAgents((current) =>
+            current.map((agent) =>
+              resourceIds.includes(agent.id)
+                ? { ...agent, folder_id: folderId }
+                : agent
+            )
+          )
+          setSelectedAgentIds([])
+          setIsBatchManaging(false)
+        }}
+      />
+
+      <ResourceFolderPickerDialog
         open={moveAgentTarget !== null}
         folders={resourceFolders.folders}
         currentFolderId={moveAgentTarget?.folder_id ?? null}
@@ -2230,6 +2292,9 @@ export function AgentsPage({
                 ? { ...agent, folder_id: folderId }
                 : agent
             )
+          )
+          setSelectedAgentIds((current) =>
+            current.filter((id) => id !== moveAgentTarget.id)
           )
         }}
       />

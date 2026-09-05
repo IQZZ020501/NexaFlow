@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -37,4 +37,15 @@ class ResourceFolderMoveRequest(BaseModel):
 
     resource_type: ResourceFolderType
     resource_id: str = Field(min_length=1, max_length=36)
+    folder_id: str | None = Field(default=None, max_length=36)
+
+
+class ResourceFolderBatchMoveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resource_type: ResourceFolderType
+    resource_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = Field(
+        min_length=1,
+        max_length=200,
+    )
     folder_id: str | None = Field(default=None, max_length=36)

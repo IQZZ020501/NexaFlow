@@ -363,6 +363,9 @@ export const en = {
   重命名文件夹: "Rename folder",
   文件夹名称: "Folder name",
   移动到文件夹: "Move to folder",
+  批量管理: "Bulk manage",
+  全选: "Select all",
+  "已选择 {count} 项": "{count} selected",
   "选择资源要归入的目录。": "Choose the folder for this resource.",
   "文件夹仅用于资源归类，不会改变访问权限。":
     "Folders organize resources without changing access permissions.",

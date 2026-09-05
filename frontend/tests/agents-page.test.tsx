@@ -561,6 +561,66 @@ afterEach(() => {
 })
 
 describe("AgentsPage list view", () => {
+  test("batch moves selected applications into a folder", async () => {
+    const moves: unknown[] = []
+    routes = [
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/resource-folders`,
+        exact: true,
+        respond: () =>
+          jsonResponse([
+            {
+              id: "folder-1",
+              workspace_id: WS,
+              resource_type: "application",
+              parent_id: null,
+              name: "客服应用",
+              created_by_user_id: "u-1",
+              created_at: "2026-09-05T00:00:00Z",
+              updated_at: "2026-09-05T00:00:00Z",
+            },
+          ]),
+      },
+      {
+        method: "PUT",
+        pathname: `/api/v1/workspaces/${WS}/resource-folders/resources/move-batch`,
+        exact: true,
+        respond: (init) => {
+          moves.push(JSON.parse(String(init?.body)))
+          return new Response(null, { status: 204 })
+        },
+      },
+      ...baseRoutes([makeAgent(), makeWorkflow()]),
+    ]
+    renderPage(<AgentsPage />)
+
+    await screen.findByText("Research Assistant")
+    expect(
+      screen.queryByRole("checkbox", { name: "选择 Research Assistant" })
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "选择 Research Assistant" })
+    )
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "选择 Weekly Digest" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "移动到文件夹" }))
+    const dialog = await screen.findByRole("dialog", { name: "移动到文件夹" })
+    fireEvent.click(within(dialog).getByRole("button", { name: "客服应用" }))
+
+    await waitFor(() =>
+      expect(moves).toEqual([
+        {
+          resource_type: "application",
+          resource_ids: ["agent-1", "agent-2"],
+          folder_id: "folder-1",
+        },
+      ])
+    )
+  })
+
   test("renders agent and workflow cards with badges and counts", async () => {
     routes = baseRoutes([
       makeAgent(),

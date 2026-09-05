@@ -25,6 +25,7 @@ import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
 import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
 import { ToolPermissionsDialog } from "@/components/tools/tool-permissions-dialog"
+import { ResourceBulkMoveBar } from "@/components/resource-folders/resource-bulk-move-bar"
 import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
 import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
@@ -69,31 +70,18 @@ import {
 import { getMembershipRole } from "@/lib/display"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import { getErrorMessage } from "@/lib/errors"
+import { cn } from "@/lib/utils"
 import {
   toolDisplayDescription,
   toolDisplayName,
   toolSourceDisplayName,
 } from "@/lib/tool-display"
 
-type ToolGroup = "mine" | "shared" | "builtin"
-
 const catalogTabs = [
   { kind: "builtin", label: "Skills" },
   { kind: "mcp", label: "MCP" },
   { kind: "python", label: "Python" },
 ] as const satisfies ReadonlyArray<{ kind: ToolKind; label: string }>
-
-/**
- * Categorizes a tool based on its type and creator.
- *
- * @param tool - The tool to categorize
- * @param userId - The current user's identifier
- * @returns `builtin` for built-in tools, `mine` for tools created by the user, or `shared` for other tools
- */
-function toolGroup(tool: ToolSummary, userId: string): ToolGroup {
-  if (tool.kind === "builtin") return "builtin"
-  return tool.created_by_user_id === userId ? "mine" : "shared"
-}
 
 /**
  * Selects the icon associated with a tool kind.
@@ -184,6 +172,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     React.useState<ToolSummary | null>(null)
   const [moveToolTarget, setMoveToolTarget] =
     React.useState<ToolSummary | null>(null)
+  const [selectedToolIds, setSelectedToolIds] = React.useState<string[]>([])
+  const [isBatchManaging, setIsBatchManaging] = React.useState(false)
+  const [isBatchMoveOpen, setIsBatchMoveOpen] = React.useState(false)
   const [detailTarget, setDetailTarget] = React.useState<ToolSummary | null>(
     null
   )
@@ -258,6 +249,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         .toLowerCase()
         .includes(query))
   )
+  const movableToolIds = filteredTools
+    .filter((tool) => tool.can_manage)
+    .map((tool) => tool.id)
   const filteredSources = catalogSources.filter(
     (source) =>
       !query ||
@@ -265,31 +259,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         .toLowerCase()
         .includes(query)
   )
-  const groups: Array<{ id: ToolGroup; label: string; tools: ToolSummary[] }> =
-    [
-      {
-        id: "mine",
-        label: t("我的工具"),
-        tools: filteredTools.filter(
-          (tool) => toolGroup(tool, me.user.id) === "mine"
-        ),
-      },
-      {
-        id: "shared",
-        label: t("共享给我的"),
-        tools: filteredTools.filter(
-          (tool) => toolGroup(tool, me.user.id) === "shared"
-        ),
-      },
-      {
-        id: "builtin",
-        label: t("内置工具"),
-        tools: filteredTools.filter(
-          (tool) => toolGroup(tool, me.user.id) === "builtin"
-        ),
-      },
-    ]
-
   function upsertTool(updated: ToolSummary) {
     setTools((current) => {
       const exists = current.some((tool) => tool.id === updated.id)
@@ -561,31 +530,43 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             className="pl-9"
           />
         </div>
-        {initialKind ? (
-          <div
-            role="group"
-            aria-label={t("工具")}
-            className="grid w-fit shrink-0 grid-cols-3 self-end rounded-md bg-muted p-0.5 sm:self-auto"
-          >
-            {catalogTabs.map((tab) => {
-              const isActive = activeKind === tab.kind
+        {movableToolIds.length || initialKind ? (
+          <div className="flex flex-wrap items-center justify-end gap-3 self-end sm:self-auto">
+            <ResourceBulkMoveBar
+              resourceIds={movableToolIds}
+              selectedIds={selectedToolIds}
+              isManaging={isBatchManaging}
+              onSelectedIdsChange={setSelectedToolIds}
+              onManagingChange={setIsBatchManaging}
+              onMove={() => setIsBatchMoveOpen(true)}
+            />
+            {initialKind ? (
+              <div
+                role="group"
+                aria-label={t("工具")}
+                className="grid w-fit shrink-0 grid-cols-3 rounded-md bg-muted p-0.5"
+              >
+                {catalogTabs.map((tab) => {
+                  const isActive = activeKind === tab.kind
 
-              return (
-                <button
-                  key={tab.kind}
-                  type="button"
-                  aria-pressed={isActive}
-                  className={`h-8 min-w-16 rounded-sm px-2.5 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                    isActive
-                      ? "bg-background text-foreground shadow-xs"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                  onClick={() => setActiveKind(tab.kind)}
-                >
-                  {t(tab.label)}
-                </button>
-              )
-            })}
+                  return (
+                    <button
+                      key={tab.kind}
+                      type="button"
+                      aria-pressed={isActive}
+                      className={`h-8 min-w-16 rounded-sm px-2.5 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        isActive
+                          ? "bg-background text-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      onClick={() => setActiveKind(tab.kind)}
+                    >
+                      {t(tab.label)}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -735,24 +716,8 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           {t("没有匹配的工具")}
         </div>
       ) : (
-        <div className="space-y-7">
-          {groups.map((group) =>
-            group.tools.length ? (
-              <section
-                key={group.id}
-                aria-labelledby={`tool-group-${group.id}`}
-              >
-                <div className="mb-3 flex items-center gap-2">
-                  <h2
-                    id={`tool-group-${group.id}`}
-                    className="text-sm font-semibold"
-                  >
-                    {group.label}
-                  </h2>
-                  <Badge variant="secondary">{group.tools.length}</Badge>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                  {group.tools.map((tool) => {
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                  {filteredTools.map((tool) => {
                     const Icon = kindIcon(tool.kind)
                     const available = toolIsAvailable(tool)
                     const source = sources.find(
@@ -763,7 +728,11 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         key={tool.id}
                         role="button"
                         tabIndex={0}
-                        className="relative flex min-h-40 min-w-0 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                        className={cn(
+                          "relative flex min-h-40 min-w-0 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
+                          selectedToolIds.includes(tool.id) &&
+                            "border-primary/50 bg-primary/[0.035]"
+                        )}
                         onClick={(event) => {
                           if (isEventFromDropdownMenu(event)) return
                           void openDetail(tool)
@@ -808,6 +777,24 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                               </div>
                             </div>
                           </div>
+                          {tool.can_manage && isBatchManaging ? (
+                            <input
+                              type="checkbox"
+                              className="size-4 shrink-0 accent-primary"
+                              aria-label={t("选择 {value}", {
+                                value: displayToolName(tool),
+                              })}
+                              checked={selectedToolIds.includes(tool.id)}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) =>
+                                setSelectedToolIds((current) =>
+                                  event.target.checked
+                                    ? [...current, tool.id]
+                                    : current.filter((id) => id !== tool.id)
+                                )
+                              }
+                            />
+                          ) : null}
                           {tool.can_manage ? (
                             <span className="absolute right-3 bottom-3">
                               <CardMoreMenu
@@ -973,13 +960,31 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                       </article>
                     )
                   })}
-                </div>
-              </section>
-            ) : null
-          )}
-          </div>
+        </div>
         )}
       </ResourceFolderLayout>
+
+      <ResourceFolderPickerDialog
+        open={isBatchMoveOpen}
+        folders={resourceFolders.folders}
+        currentFolderId={resourceFolders.selectedFolderId}
+        onOpenChange={setIsBatchMoveOpen}
+        onMove={async (folderId) => {
+          const resourceIds = selectedToolIds.filter((id) =>
+            movableToolIds.includes(id)
+          )
+          await resourceFolders.moveMany(resourceIds, folderId)
+          setTools((current) =>
+            current.map((tool) =>
+              resourceIds.includes(tool.id)
+                ? { ...tool, folder_id: folderId }
+                : tool
+            )
+          )
+          setSelectedToolIds([])
+          setIsBatchManaging(false)
+        }}
+      />
 
       <ResourceFolderPickerDialog
         open={moveToolTarget !== null}
@@ -995,6 +1000,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                 ? { ...tool, folder_id: folderId }
                 : tool
             )
+          )
+          setSelectedToolIds((current) =>
+            current.filter((id) => id !== moveToolTarget.id)
           )
         }}
       />

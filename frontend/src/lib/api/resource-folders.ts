@@ -83,3 +83,19 @@ export function moveResourceToFolder(
     body: JSON.stringify(payload),
   })
 }
+
+export function moveResourcesToFolder(
+  token: string,
+  workspaceId: string,
+  payload: {
+    resource_type: FolderResourceType
+    resource_ids: string[]
+    folder_id: string | null
+  }
+) {
+  return request<void>(foldersPath(workspaceId, "/resources/move-batch"), {
+    method: "PUT",
+    token,
+    body: JSON.stringify(payload),
+  })
+}
