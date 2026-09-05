@@ -1708,7 +1708,7 @@ describe("AgentsPage detail view", () => {
     )
   })
 
-  test("deletes the agent from the detail menu", async () => {
+  test("deletes the agent from the detail action", async () => {
     const agent = makeAgent()
     let deleteCount = 0
     await renderDetail({
@@ -1725,9 +1725,7 @@ describe("AgentsPage detail view", () => {
         },
       ],
     })
-    fireEvent.pointerDown(screen.getByLabelText("设置"))
-    fireEvent.click(screen.getByLabelText("设置"))
-    fireEvent.click(await screen.findByRole("menuitem", { name: /删除 Agent/ }))
+    fireEvent.click(screen.getByLabelText("删除 Agent"))
 
     expect(screen.getByText("删除 Agent")).toBeTruthy()
     fireEvent.click(screen.getByText("删除").closest("button")!)

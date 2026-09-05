@@ -15,7 +15,6 @@ import {
   LoaderCircleIcon,
   MessageSquareIcon,
   MessageSquarePlusIcon,
-  MoreHorizontalIcon,
   PaperclipIcon,
   ChartNoAxesColumnIcon,
   LayoutDashboardIcon,
@@ -39,12 +38,6 @@ import { RunActionBar } from "@/components/app/run-action-bar"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import type { TFunction } from "@/i18n"
 import type { AgentDetailView } from "@/lib/agent-views"
 import type { Agent, AgentRun, AgentToolCall } from "@/lib/api/agents"
@@ -1003,29 +996,17 @@ export function AgentDetailWorkspace({
                 <span className="hidden sm:inline">{t("保存")}</span>
               </Button>
             ) : null}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("设置")}
-                  title={t("设置")}
-                >
-                  <MoreHorizontalIcon />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                side="bottom"
-                align="start"
-                className="min-w-40"
-              >
-                <DropdownMenuItem variant="destructive" onSelect={onDelete}>
-                  <Trash2Icon />
-                  {t("删除 Agent")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              aria-label={t("删除 Agent")}
+              title={t("删除 Agent")}
+              onClick={onDelete}
+            >
+              <Trash2Icon />
+            </Button>
           </>
         ) : null}
       </header>
