@@ -47,6 +47,9 @@ backend/storage/
 *.sln
 *.sw?
 
+# Local agent skills
+/.agents/
+
 # docs
 docs/MVP_TASK_PLAN.md
 docs/local/
