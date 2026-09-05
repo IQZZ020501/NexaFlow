@@ -18,6 +18,10 @@ export type AgentUpload = {
   category: "document" | "image" | "audio"
 }
 
+export type AgentRunAttachment = Omit<AgentUpload, "id" | "category"> & {
+  category: "document" | "image"
+}
+
 export type PublicAgentConversation = {
   conversation_id: string
   question: string
@@ -65,6 +69,7 @@ export type ExternalAgentRun = {
   conversation_id: string
   regenerated_from_run_id?: string | null
   question: string
+  attachments?: AgentRunAttachment[]
   status: string
   result: string
   error: string | null
@@ -307,11 +312,16 @@ export function cancelPublicAgentRun(
 export function regeneratePublicAgentRun(
   agentId: string,
   token: string,
-  runId: string
+  runId: string,
+  goal?: string
 ) {
   return request<ExternalAgentRun>(
     publicAgentPath(agentId, `/runs/${runId}/regenerate`),
-    { method: "POST", token }
+    {
+      method: "POST",
+      token,
+      body: goal === undefined ? undefined : JSON.stringify({ goal }),
+    }
   )
 }
 

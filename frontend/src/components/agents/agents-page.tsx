@@ -25,7 +25,9 @@ import { TopLoadingBar } from "@/components/app/top-progress"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
+import { runAttachmentFromFile } from "@/components/agents/agent-attachment-list"
 import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
+import { ResourceBulkMoveBar } from "@/components/resource-folders/resource-bulk-move-bar"
 import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
 import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
@@ -38,6 +40,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spec } from "@/components/ui/spec"
 import { isEventFromDropdownMenu } from "@/lib/dom"
+import { cn } from "@/lib/utils"
 import {
   Dialog,
   DialogContent,
@@ -189,6 +192,10 @@ export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
   )
   return {
     ...liveRun,
+    attachments:
+      liveRun.attachments?.length
+        ? liveRun.attachments
+        : pendingRun.attachments,
     events: liveRun.events.length > 0 ? liveRun.events : pendingRun.events,
     result:
       keepLiveAnswer && !liveRun.result ? pendingRun.result : liveRun.result,
@@ -331,11 +338,10 @@ export function mergeAgentRunStreamEvent(
       }
       return {
         ...run,
+        status: run.status === "queued" ? "running" : run.status,
         events,
-        live_stream_epoch:
-          streamEvent.stream_epoch ?? run.live_stream_epoch,
-        live_stream_cursor:
-          streamEvent.live_sequence ?? run.live_stream_cursor,
+        live_stream_epoch: streamEvent.stream_epoch ?? run.live_stream_epoch,
+        live_stream_cursor: streamEvent.live_sequence ?? run.live_stream_cursor,
       }
     })
   }
@@ -359,6 +365,7 @@ export function mergeAgentRunStreamEvent(
             }
             return {
               ...run,
+              status: run.status === "queued" ? "running" : run.status,
               result: sameStream ? run.result : "",
               live_stream_epoch:
                 streamEvent.stream_epoch ?? run.live_stream_epoch,
@@ -399,6 +406,7 @@ export function mergeAgentRunStreamEvent(
             }
             return {
               ...run,
+              status: run.status === "queued" ? "running" : run.status,
               result: sameStream
                 ? run.result + streamEvent.delta
                 : streamEvent.delta,
@@ -431,6 +439,7 @@ export function mergeAgentRunStreamEvent(
             }
             return {
               ...run,
+              status: run.status === "queued" ? "running" : run.status,
               result: "",
               live_stream_epoch:
                 streamEvent.stream_epoch ?? run.live_stream_epoch,
@@ -569,6 +578,9 @@ export function AgentsPage({
   const [deleteAgentTarget, setDeleteAgentTarget] =
     React.useState<Agent | null>(null)
   const [moveAgentTarget, setMoveAgentTarget] = React.useState<Agent | null>(null)
+  const [selectedAgentIds, setSelectedAgentIds] = React.useState<string[]>([])
+  const [isBatchManaging, setIsBatchManaging] = React.useState(false)
+  const [isBatchMoveOpen, setIsBatchMoveOpen] = React.useState(false)
   const [isDeletingAgent, setIsDeletingAgent] = React.useState(false)
   const [isAsking, setIsAsking] = React.useState(false)
   const [regeneratingRunId, setRegeneratingRunId] = React.useState<
@@ -637,6 +649,9 @@ export function AgentsPage({
       )
     })
   }, [agentSearch, agents, models, resourceFolders.selectedFolderId])
+  const movableAgentIds = filteredAgents
+    .filter((agent) => agent.can_edit)
+    .map((agent) => agent.id)
 
   const reportError = React.useCallback(
     (error: unknown) => notify("error", getErrorMessage(error, t)),
@@ -1040,6 +1055,18 @@ export function AgentsPage({
     }
     let isCurrent = true
     const requestedConversationId = activeConversationIdRef.current
+    if (!requestedConversationId) {
+      const conversationId = crypto.randomUUID()
+      activeConversationIdRef.current = conversationId
+      setRuns([])
+      setIsRunsLoading(false)
+      window.history.replaceState(
+        null,
+        "",
+        appViewPath(selectedAgentId, "agent", "settings", conversationId)
+      )
+      return
+    }
     let expectedConversationId = requestedConversationId
     const observers: AbortController[] = []
     setIsRunsLoading(true)
@@ -1059,10 +1086,7 @@ export function AgentsPage({
         ) {
           return
         }
-        const resolvedConversationId =
-          requestedConversationId ??
-          nextRuns[0]?.conversation_id ??
-          crypto.randomUUID()
+        const resolvedConversationId = requestedConversationId
         activeConversationIdRef.current = resolvedConversationId
         expectedConversationId = resolvedConversationId
         const visibleRuns = latestRunVersions(
@@ -1071,18 +1095,6 @@ export function AgentsPage({
           )
         )
         setRuns(visibleRuns)
-        if (!requestedConversationId) {
-          window.history.replaceState(
-            null,
-            "",
-            appViewPath(
-              selectedAgentId,
-              "agent",
-              "settings",
-              resolvedConversationId
-            )
-          )
-        }
         for (const run of visibleRuns) {
           if (run.status === "awaiting_approval") {
             void loadRunToolCalls(
@@ -1315,6 +1327,15 @@ export function AgentsPage({
 
   function handleViewChange(view: AgentDetailView) {
     if (!selectedAgentId || !selectedAgent) return
+    if (
+      selectedAgent.app_type === "agent" &&
+      view === "settings" &&
+      activeView !== "settings"
+    ) {
+      setActiveView(view)
+      resetPreviewConversation("replaceState")
+      return
+    }
     const path = appViewPath(
       selectedAgentId,
       selectedAgent.app_type,
@@ -1504,6 +1525,7 @@ export function AgentsPage({
       requested_by_user_id: me?.user.id ?? "",
       conversation_id: conversationId,
       goal: nextQuestion,
+      attachments: agentFiles.map(runAttachmentFromFile),
       model_id: selectedAgent.model_id,
       model_name:
         models.find((m) => m.id === selectedAgent.model_id)?.name ?? "",
@@ -1642,7 +1664,7 @@ export function AgentsPage({
     }
   }
 
-  async function handleRegenerateRun(runId: string) {
+  async function handleRegenerateRun(runId: string, goal?: string) {
     if (
       !token ||
       !selectedWorkspaceId ||
@@ -1660,7 +1682,8 @@ export function AgentsPage({
         token,
         selectedWorkspaceId,
         selectedAgent.id,
-        runId
+        runId,
+        goal
       )
       if (
         !isCurrentAgentConversation(
@@ -1799,7 +1822,9 @@ export function AgentsPage({
     }
   }
 
-  function handleNewConversation() {
+  function resetPreviewConversation(
+    historyMethod: "pushState" | "replaceState"
+  ) {
     if (!selectedAgentId) return
     const conversationId = crypto.randomUUID()
     activeConversationIdRef.current = conversationId
@@ -1815,11 +1840,15 @@ export function AgentsPage({
     setRegeneratingRunId(null)
     setFeedbackPendingRunId(null)
     setResolvingCallId(null)
-    window.history.pushState(
+    window.history[historyMethod](
       null,
       "",
       appViewPath(selectedAgentId, "agent", "settings", conversationId)
     )
+  }
+
+  function handleNewConversation() {
+    resetPreviewConversation("pushState")
   }
 
   async function handleToolCallDecision(
@@ -1954,7 +1983,9 @@ export function AgentsPage({
             notify={notify}
             onAsk={handleAsk}
             onCancelAsk={handleCancelAsk}
-            onRegenerateRun={(runId) => void handleRegenerateRun(runId)}
+            onRegenerateRun={(runId, goal) =>
+              void handleRegenerateRun(runId, goal)
+            }
             onRunFeedback={(runId, value) =>
               void handleRunFeedback(runId, value)
             }
@@ -2026,17 +2057,25 @@ export function AgentsPage({
           />
         }
       >
-        <div className="rounded-lg border bg-background p-3 shadow-sm">
-        <div className="relative min-w-0 sm:w-[320px]">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={agentSearch}
-            onChange={(event) => setAgentSearch(event.target.value)}
-            placeholder={t("搜索{label}...", { label: t("应用") })}
-            className="pl-9"
+        <div className="flex flex-col gap-3 rounded-lg border bg-background p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative min-w-0 sm:w-[320px]">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={agentSearch}
+              onChange={(event) => setAgentSearch(event.target.value)}
+              placeholder={t("搜索{label}...", { label: t("应用") })}
+              className="pl-9"
+            />
+          </div>
+          <ResourceBulkMoveBar
+            resourceIds={movableAgentIds}
+            selectedIds={selectedAgentIds}
+            isManaging={isBatchManaging}
+            onSelectedIdsChange={setSelectedAgentIds}
+            onManagingChange={setIsBatchManaging}
+            onMove={() => setIsBatchMoveOpen(true)}
           />
         </div>
-      </div>
 
       <div aria-busy={isAgentListBusy} className="flex flex-col gap-4">
         {isAgentListBusy && agents.length === 0 ? null : agents.length === 0 ? (
@@ -2071,7 +2110,11 @@ export function AgentsPage({
                   key={agent.id}
                   role="button"
                   tabIndex={0}
-                  className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                  className={cn(
+                    "flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
+                    selectedAgentIds.includes(agent.id) &&
+                      "border-primary/50 bg-primary/[0.035]"
+                  )}
                   onClick={(event) => {
                     if (isEventFromDropdownMenu(event)) return
                     openAgent(agent)
@@ -2131,15 +2174,35 @@ export function AgentsPage({
                       </div>
                     </div>
                     {agent.can_edit ? (
-                      <IconButton
-                        label={t("编辑应用")}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          openAgent(agent)
-                        }}
-                      >
-                        <PencilIcon className="size-4" />
-                      </IconButton>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {isBatchManaging ? (
+                          <input
+                            type="checkbox"
+                            className="size-4 accent-primary"
+                            aria-label={t("选择 {value}", {
+                              value: agent.name,
+                            })}
+                            checked={selectedAgentIds.includes(agent.id)}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) =>
+                              setSelectedAgentIds((current) =>
+                                event.target.checked
+                                  ? [...current, agent.id]
+                                  : current.filter((id) => id !== agent.id)
+                              )
+                            }
+                          />
+                        ) : null}
+                        <IconButton
+                          label={t("编辑应用")}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openAgent(agent)
+                          }}
+                        >
+                          <PencilIcon className="size-4" />
+                        </IconButton>
+                      </div>
                     ) : null}
                   </div>
                   <div className="mt-auto flex items-end justify-between gap-2 pt-4">
@@ -2203,6 +2266,28 @@ export function AgentsPage({
       </ResourceFolderLayout>
 
       <ResourceFolderPickerDialog
+        open={isBatchMoveOpen}
+        folders={resourceFolders.folders}
+        currentFolderId={resourceFolders.selectedFolderId}
+        onOpenChange={setIsBatchMoveOpen}
+        onMove={async (folderId) => {
+          const resourceIds = selectedAgentIds.filter((id) =>
+            movableAgentIds.includes(id)
+          )
+          await resourceFolders.moveMany(resourceIds, folderId)
+          setAgents((current) =>
+            current.map((agent) =>
+              resourceIds.includes(agent.id)
+                ? { ...agent, folder_id: folderId }
+                : agent
+            )
+          )
+          setSelectedAgentIds([])
+          setIsBatchManaging(false)
+        }}
+      />
+
+      <ResourceFolderPickerDialog
         open={moveAgentTarget !== null}
         folders={resourceFolders.folders}
         currentFolderId={moveAgentTarget?.folder_id ?? null}
@@ -2216,6 +2301,9 @@ export function AgentsPage({
                 ? { ...agent, folder_id: folderId }
                 : agent
             )
+          )
+          setSelectedAgentIds((current) =>
+            current.filter((id) => id !== moveAgentTarget.id)
           )
         }}
       />

@@ -29,7 +29,11 @@ import {
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
-import { AgentAttachmentList } from "@/components/agents/agent-attachment-list"
+import {
+  appendAttachmentFiles,
+  AgentAttachmentList,
+  RunAttachmentCards,
+} from "@/components/agents/agent-attachment-list"
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import {
   AgentConversationUsersPanel,
@@ -86,6 +90,7 @@ import {
 } from "@/lib/api/workflows"
 import { workflowSpeechText } from "@/lib/browser-tts"
 import { copyText } from "@/lib/clipboard"
+import { APP_TIME_ZONE } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import {
@@ -1139,6 +1144,10 @@ export function WorkflowDetailWorkspace({
                         <div className="grid gap-4">
                           {currentRunQuestion ? (
                             <div className="ml-auto grid max-w-[85%] justify-items-end gap-1">
+                              <RunAttachmentCards
+                                attachments={currentRun.inputs.files}
+                                t={t}
+                              />
                               <p className="rounded-2xl rounded-tr-md bg-foreground px-3.5 py-2.5 text-sm leading-6 text-background shadow-sm">
                                 {currentRunQuestion}
                               </p>
@@ -1293,7 +1302,12 @@ export function WorkflowDetailWorkspace({
                             )}
                             disabled={runInputDisabled}
                             onChange={(event) => {
-                              setRunFiles(Array.from(event.target.files ?? []))
+                              setRunFiles((current) =>
+                                appendAttachmentFiles(
+                                  current,
+                                  event.target.files ?? []
+                                )
+                              )
                             }}
                           />
                         ) : null}
@@ -1557,7 +1571,9 @@ export function WorkflowDetailWorkspace({
                       })}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {new Date(version.created_at).toLocaleString()} ·{" "}
+                      {new Date(version.created_at).toLocaleString(undefined, {
+                        timeZone: APP_TIME_ZONE,
+                      })} ·{" "}
                       {version.graph_hash.slice(0, 12)}
                     </p>
                   </div>

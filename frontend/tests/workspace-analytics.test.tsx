@@ -177,7 +177,7 @@ const analytics: WorkspaceAnalytics = {
   ],
   metadata: {
     workspace_id: "ws-1",
-    timezone: "UTC",
+    timezone: "Asia/Shanghai",
     from_date: "2026-08-01",
     to_date: "2026-08-08",
     previous_from_date: "2026-07-25",
@@ -237,13 +237,20 @@ describe("workspace analytics", () => {
       .getByText("Token 消耗")
       .closest<HTMLElement>("[data-slot='card']")!
     expect(within(tokenCard).getByText("320")).toBeTruthy()
-    expect(within(tokenCard).getByText("应用运行 280")).toBeTruthy()
-    expect(within(tokenCard).getByText("知识整理 40")).toBeTruthy()
-    expect(within(tokenCard).getByText("1 次运行的用量未完整上报")).toBeTruthy()
-    expect(within(tokenCard).getByText("1 次知识整理使用估算 Token")).toBeTruthy()
+    expect(
+      within(tokenCard).queryByText(
+        /输入|应用运行|知识整理|上期|用量未完整上报/
+      )
+    ).toBeNull()
     expect(screen.getByText("公开/API 调用")).toBeTruthy()
     expect(screen.getByText("How do I deploy?")).toBeTruthy()
     expect(screen.getByText("时段活跃曲线")).toBeTruthy()
+    expect(screen.getByText("按自然日统计顶层运行")).toBeTruthy()
+    expect(screen.queryByText(/统计时区/)).toBeNull()
+    expect(
+      screen.getByText("使用排行").closest<HTMLElement>("[data-slot='card']")
+        ?.parentElement?.className
+    ).toContain("xl:grid-cols-2")
     const statusSection = screen.getByText("运行状态").closest("section")!
     const succeededRow = within(statusSection)
       .getByText("运行成功")
@@ -416,10 +423,10 @@ describe("workspace analytics", () => {
     })
   })
 
-  test("switches ranking views and expands frequent questions without another request", async () => {
+  test("switches ranking views and loads frequent questions ten at a time", async () => {
     const longAnalytics: WorkspaceAnalytics = {
       ...analytics,
-      frequent_questions: Array.from({ length: 7 }, (_, index) => ({
+      frequent_questions: Array.from({ length: 12 }, (_, index) => ({
         question: `Question ${index + 1}`,
         count: index + 3,
         latest_at: `2026-08-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
@@ -429,7 +436,8 @@ describe("workspace analytics", () => {
     renderPage(<WorkspaceAnalyticsPage />)
     await waitFor(() => expect(screen.getByText("Question 1")).toBeTruthy())
     expect(requests).toHaveLength(1)
-    expect(screen.queryByText("Question 6")).toBeNull()
+    expect(screen.getByText("Question 10")).toBeTruthy()
+    expect(screen.queryByText("Question 11")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "用户" }))
     expect(screen.getByText("NexaFlow Admin")).toBeTruthy()
@@ -438,17 +446,30 @@ describe("workspace analytics", () => {
     fireEvent.click(screen.getByRole("button", { name: "应用 / 工作流" }))
     expect(screen.getByText("Support Agent")).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("button", { name: "展开全部" }))
-    expect(screen.getByText("Question 6")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "收起" }))
-    expect(screen.queryByText("Question 6")).toBeNull()
+    const questions = screen.getByRole("region", { name: "高频问题" })
+    Object.defineProperty(questions, "scrollHeight", {
+      configurable: true,
+      value: 1_000,
+    })
+    Object.defineProperty(questions, "clientHeight", {
+      configurable: true,
+      value: 400,
+    })
+    questions.scrollTop = 600
+    fireEvent.scroll(questions)
+    expect(screen.getByText("Question 11")).toBeTruthy()
+    expect(screen.getByText("Question 12")).toBeTruthy()
     expect(requests).toHaveLength(1)
   })
 })
 
-test("builds UTC preset ranges with an exclusive end date", () => {
+test("builds preset ranges from the Shanghai calendar date", () => {
   expect(getPresetAnalyticsRange(7, new Date("2026-08-19T12:00:00Z"))).toEqual({
     from: "2026-08-13",
     to: "2026-08-20",
+  })
+  expect(getPresetAnalyticsRange(7, new Date("2026-08-19T16:30:00Z"))).toEqual({
+    from: "2026-08-14",
+    to: "2026-08-21",
   })
 })

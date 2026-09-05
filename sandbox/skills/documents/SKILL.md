@@ -25,8 +25,8 @@ construction and structural verification.
 - In `formal_legal`, prefix each signature or date line with `> ` to right-align
   it. Put `---` on its own line to start the following instructions or
   attachment section on a new page.
-- The renderer uses `Noto Sans CJK SC` for report documents and `Noto Serif CJK
-  SC` for formal documents in Linux; macOS uses `PingFang SC` and `STFangsong`.
+- The renderer uses `Noto Serif CJK SC` for report and formal documents in
+  Linux; macOS uses `Songti SC` for reports and `STFangsong` for formal documents.
   `NEXAFLOW_CJK_FONT` overrides either choice.
 - `formal_legal` rejects the specific contradictory combination
   “仲裁费用…由被申请人承担” plus “劳动仲裁不收费”. This is a narrow issue guard,

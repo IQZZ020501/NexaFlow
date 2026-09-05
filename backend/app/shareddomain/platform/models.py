@@ -19,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.entities.smtp_settings import SMTP_SETTINGS_ID
 from app.infrastructure.base import Base
-from app.infrastructure.model_utils import new_id, utc_now
+from app.infrastructure.model_utils import APP_TIMEZONE_NAME, new_id, utc_now
 
 
 class User(Base):
@@ -272,7 +272,10 @@ class WorkspaceGovernance(Base):
     )
     retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     timezone: Mapped[str] = mapped_column(
-        String(64), nullable=False, default="UTC", server_default="UTC"
+        String(64),
+        nullable=False,
+        default=APP_TIMEZONE_NAME,
+        server_default=APP_TIMEZONE_NAME,
     )
     updated_by_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True

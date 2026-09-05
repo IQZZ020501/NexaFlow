@@ -43,6 +43,7 @@ from app.infrastructure.session import get_db
 from app.schemas.agent import (
     AgentApiDocumentationResponse,
     AgentUploadResponse,
+    AgentRunRegenerateRequest,
     AgentToolCallResponse,
     ExternalAgentRunCreateRequest,
     ExternalAgentRunListResponse,
@@ -209,6 +210,7 @@ async def regenerate_public_agent_run(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_password_changed)],
+    payload: AgentRunRegenerateRequest | None = None,
 ) -> ExternalAgentRunResponse:
     """
     Regenerate a public agent run.
@@ -228,6 +230,7 @@ async def regenerate_public_agent_run(
         "public",
         user.id,
         settings,
+        payload.goal if payload else None,
     )
 
 

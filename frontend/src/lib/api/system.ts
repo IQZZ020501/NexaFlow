@@ -141,7 +141,7 @@ export type WorkspaceGovernance = {
   monthly_token_limit: number | null
   alert_threshold_percent: number
   retention_days: number | null
-  timezone: string
+  timezone: "Asia/Shanghai"
   updated_at: string
 }
 
@@ -934,7 +934,7 @@ export function updateWorkspaceGovernance(
     monthly_token_limit: number | null
     alert_threshold_percent: number
     retention_days: number | null
-    timezone: string
+    timezone: "Asia/Shanghai"
   }
 ) {
   return request<WorkspaceGovernance>(

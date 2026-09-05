@@ -116,6 +116,7 @@ import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dial
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
 import { KnowledgeGraph } from "@/components/knowledge/knowledge-graph"
+import { ResourceBulkMoveBar } from "@/components/resource-folders/resource-bulk-move-bar"
 import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
 import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
@@ -504,6 +505,10 @@ function KnowledgeBasePageContent({
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
   const [moveKnowledgeBaseTarget, setMoveKnowledgeBaseTarget] =
     React.useState<KnowledgeBaseListItem | null>(null)
+  const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] =
+    React.useState<string[]>([])
+  const [isBatchManaging, setIsBatchManaging] = React.useState(false)
+  const [isBatchMoveOpen, setIsBatchMoveOpen] = React.useState(false)
   const selectAllDocumentsRef = React.useRef<HTMLInputElement>(null)
   const selectAllKnowledgeTasksRef = React.useRef<HTMLInputElement>(null)
 
@@ -537,6 +542,9 @@ function KnowledgeBasePageContent({
       )
     )
   }, [knowledgeBases, knowledgeSearch, resourceFolders.selectedFolderId])
+  const movableKnowledgeBaseIds = filteredKnowledgeBases
+    .filter((knowledgeBase) => knowledgeBase.permission === "edit")
+    .map((knowledgeBase) => knowledgeBase.id)
   const filteredDocuments = React.useMemo(() => {
     const search = documentSearch.trim().toLowerCase()
     const matched = search
@@ -2951,7 +2959,7 @@ function KnowledgeBasePageContent({
             />
           }
         >
-          <div className="rounded-lg border bg-background p-3 shadow-sm">
+          <div className="flex flex-col gap-3 rounded-lg border bg-background p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
             <div className="relative min-w-0 sm:w-[320px]">
               <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -2961,6 +2969,14 @@ function KnowledgeBasePageContent({
                 className="pl-9"
               />
             </div>
+            <ResourceBulkMoveBar
+              resourceIds={movableKnowledgeBaseIds}
+              selectedIds={selectedKnowledgeBaseIds}
+              isManaging={isBatchManaging}
+              onSelectedIdsChange={setSelectedKnowledgeBaseIds}
+              onManagingChange={setIsBatchManaging}
+              onMove={() => setIsBatchMoveOpen(true)}
+            />
           </div>
 
           {isLoading ? (
@@ -2977,7 +2993,11 @@ function KnowledgeBasePageContent({
                         key={knowledgeBase.id}
                         role="button"
                         tabIndex={0}
-                        className="flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                        className={cn(
+                          "flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
+                          selectedKnowledgeBaseIds.includes(knowledgeBase.id) &&
+                            "border-primary/50 bg-primary/[0.035]"
+                        )}
                         onClick={(event) => {
                           if (isEventFromDropdownMenu(event)) return
                           openKnowledgeBase(knowledgeBase)
@@ -3028,23 +3048,47 @@ function KnowledgeBasePageContent({
                             </div>
                           </div>
                           {knowledgeBase.permission === "edit" ? (
-                            <IconButton
-                              label={t("编辑知识库")}
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                setEditForm({
-                                  id: knowledgeBase.id,
-                                  name: knowledgeBase.name,
-                                  description: knowledgeBase.description,
-                                  embedding_model_id:
-                                    knowledgeBase.embedding_model_id,
-                                  reranker_model_id:
-                                    knowledgeBase.reranker_model_id,
-                                })
-                              }}
-                            >
-                              <PencilIcon className="size-4" />
-                            </IconButton>
+                            <div className="flex shrink-0 items-center gap-1">
+                              {isBatchManaging ? (
+                                <input
+                                  type="checkbox"
+                                  className="size-4 accent-primary"
+                                  aria-label={t("选择 {value}", {
+                                    value: knowledgeBase.name,
+                                  })}
+                                  checked={selectedKnowledgeBaseIds.includes(
+                                    knowledgeBase.id
+                                  )}
+                                  onClick={(event) => event.stopPropagation()}
+                                  onChange={(event) =>
+                                    setSelectedKnowledgeBaseIds((current) =>
+                                      event.target.checked
+                                        ? [...current, knowledgeBase.id]
+                                        : current.filter(
+                                            (id) => id !== knowledgeBase.id
+                                          )
+                                    )
+                                  }
+                                />
+                              ) : null}
+                              <IconButton
+                                label={t("编辑知识库")}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setEditForm({
+                                    id: knowledgeBase.id,
+                                    name: knowledgeBase.name,
+                                    description: knowledgeBase.description,
+                                    embedding_model_id:
+                                      knowledgeBase.embedding_model_id,
+                                    reranker_model_id:
+                                      knowledgeBase.reranker_model_id,
+                                  })
+                                }}
+                              >
+                                <PencilIcon className="size-4" />
+                              </IconButton>
+                            </div>
                           ) : null}
                         </div>
                         <div className="mt-auto flex items-end justify-between gap-2 pt-4">
@@ -3178,6 +3222,28 @@ function KnowledgeBasePageContent({
       )}
 
       <ResourceFolderPickerDialog
+        open={isBatchMoveOpen}
+        folders={resourceFolders.folders}
+        currentFolderId={resourceFolders.selectedFolderId}
+        onOpenChange={setIsBatchMoveOpen}
+        onMove={async (folderId) => {
+          const resourceIds = selectedKnowledgeBaseIds.filter((id) =>
+            movableKnowledgeBaseIds.includes(id)
+          )
+          await resourceFolders.moveMany(resourceIds, folderId)
+          setKnowledgeBases((current) =>
+            current.map((knowledgeBase) =>
+              resourceIds.includes(knowledgeBase.id)
+                ? { ...knowledgeBase, folder_id: folderId }
+                : knowledgeBase
+            )
+          )
+          setSelectedKnowledgeBaseIds([])
+          setIsBatchManaging(false)
+        }}
+      />
+
+      <ResourceFolderPickerDialog
         open={moveKnowledgeBaseTarget !== null}
         folders={resourceFolders.folders}
         currentFolderId={moveKnowledgeBaseTarget?.folder_id ?? null}
@@ -3191,6 +3257,9 @@ function KnowledgeBasePageContent({
                 ? { ...knowledgeBase, folder_id: folderId }
                 : knowledgeBase
             )
+          )
+          setSelectedKnowledgeBaseIds((current) =>
+            current.filter((id) => id !== moveKnowledgeBaseTarget.id)
           )
         }}
       />

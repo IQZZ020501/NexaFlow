@@ -10,8 +10,6 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
-  Tooltip,
-  type TooltipContentProps,
 } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -26,6 +24,7 @@ import {
 import { useLanguage } from "@/contexts/language-provider"
 import type { TFunction, TranslationKey } from "@/i18n"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
+import { APP_TIME_ZONE } from "@/lib/display"
 import {
   distributionTotal,
 } from "@/components/system/workspace-analytics-metrics"
@@ -91,7 +90,7 @@ function formatPercent(value: number | null, locale: string) {
 }
 
 /**
- * Formats a date-time value for the specified locale using UTC.
+ * Formats a date-time value for the specified locale.
  *
  * @param value - The date-time value to format
  * @param locale - The locale used for date and time formatting
@@ -101,7 +100,7 @@ function formatDateTime(value: string, locale: string) {
   return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "UTC",
+    timeZone: APP_TIME_ZONE,
   }).format(new Date(value))
 }
 
@@ -162,39 +161,6 @@ function itemColor(kind: DistributionKind, key: string, index: number) {
   if (key === "cancelled") return COLORS.status[2]
   if (key === "succeeded") return COLORS.status[0]
   return COLORS.status[index % COLORS.status.length]
-}
-
-function DistributionTooltip({
-  active,
-  payload,
-  items,
-  kind,
-  locale,
-}: Pick<TooltipContentProps, "active" | "payload"> & {
-  items: DistributionItem[]
-  kind: DistributionKind
-  locale: string
-}) {
-  const { t } = useLanguage()
-  const item = payload[0]?.payload as DistributionItem | undefined
-  if (!active || !item) return null
-  const total = distributionTotal(items)
-  const index = items.findIndex((candidate) => candidate.key === item.key)
-
-  return (
-    <div className="flex items-center gap-2 whitespace-nowrap rounded-md border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg">
-      <span
-        aria-hidden="true"
-        className="size-2 rounded-full"
-        style={{ backgroundColor: itemColor(kind, item.key, index) }}
-      />
-      <span className="font-medium">{distributionLabel(item.key, kind, t)}</span>
-      <span className="tabular-nums">{formatNumber(item.count, locale)}</span>
-      <span className="tabular-nums text-muted-foreground">
-        {formatPercent(total ? item.count / total : null, locale)}
-      </span>
-    </div>
-  )
 }
 
 /**
@@ -259,26 +225,6 @@ function DonutChart({
                   />
                 ))}
               </Pie>
-              <Tooltip
-                allowEscapeViewBox={{ x: false, y: true }}
-                cursor={false}
-                offset={10}
-                reverseDirection={{ x: false, y: false }}
-                wrapperStyle={{
-                  outline: "none",
-                  pointerEvents: "none",
-                  zIndex: 20,
-                }}
-                content={({ active, payload }) => (
-                  <DistributionTooltip
-                    active={active}
-                    payload={payload}
-                    items={items}
-                    kind={kind}
-                    locale={locale}
-                  />
-                )}
-              />
             </PieChart>
           </ResponsiveContainer>
         ) : null}
@@ -519,8 +465,8 @@ export function FrequentQuestionsPanel({
   locale: string
 }) {
   const { t } = useLanguage()
-  const [expanded, setExpanded] = React.useState(false)
-  const visibleItems = expanded ? items.slice(0, 20) : items.slice(0, 5)
+  const [visibleCount, setVisibleCount] = React.useState(10)
+  const visibleItems = items.slice(0, visibleCount)
 
   return (
     <Card className="min-w-0 gap-4 py-5 shadow-none">
@@ -531,13 +477,26 @@ export function FrequentQuestionsPanel({
         </CardTitle>
         <CardDescription>{t("仅展示当前工作空间内出现至少 3 次的问题")}</CardDescription>
       </CardHeader>
-      <CardContent className="min-w-0 px-5">
+      <CardContent
+        role="region"
+        aria-label={t("高频问题")}
+        className="max-h-[37.5rem] min-w-0 overflow-y-auto px-5"
+        onScroll={(event) => {
+          const target = event.currentTarget
+          if (
+            visibleCount < items.length &&
+            target.scrollTop + target.clientHeight >= target.scrollHeight - 24
+          ) {
+            setVisibleCount((count) => Math.min(count + 10, items.length))
+          }
+        }}
+      >
         {visibleItems.length ? (
           <div className="space-y-2">
             {visibleItems.map((item) => (
               <div
                 key={item.question}
-                className="flex min-w-0 flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-start sm:justify-between"
+                className="flex min-h-14 min-w-0 flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-start sm:justify-between"
               >
                 <p className="min-w-0 whitespace-normal break-words">{item.question}</p>
                 <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
@@ -548,16 +507,6 @@ export function FrequentQuestionsPanel({
                 </div>
               </div>
             ))}
-            {items.length > 5 ? (
-              <Button
-                variant="outline"
-                size="sm"
-                aria-expanded={expanded}
-                onClick={() => setExpanded((value) => !value)}
-              >
-                {expanded ? t("收起") : t("展开全部")}
-              </Button>
-            ) : null}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">{t("暂无达到阈值的高频问题")}</p>

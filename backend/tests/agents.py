@@ -2979,11 +2979,17 @@ def assert_external_agent_access() -> None:
                 },
             )
             assert attachment_run.status_code == 201, attachment_run.text
+            assert [item["filename"] for item in attachment_run.json()["attachments"]] == [
+                item["filename"] for item in uploaded.json()
+            ]
             stored_attachment_run = asyncio.run(
                 run_snapshot(attachment_run.json()["id"])
             )
             assert stored_attachment_run is not None
             assert "release attachment" in stored_attachment_run.attachment_context
+            assert stored_attachment_run.application_snapshot["attachments"][0][
+                "filename"
+            ] == "context.py"
             assert stored_attachment_run.goal == "Read the attachment"
             openapi = client.get("/openapi.json")
             assert openapi.status_code == 200, openapi.text
@@ -3079,6 +3085,7 @@ def assert_external_agent_access() -> None:
                 "conversation_id",
                 "regenerated_from_run_id",
                 "question",
+                "attachments",
                 "status",
                 "result",
                 "error",
@@ -4052,11 +4059,12 @@ def main() -> None:
                     f"/{agent_id}/runs/{executed['id']}/regenerate",
                 ),
                 headers=auth_headers(member_token),
+                json={"goal": "Edited release question"},
             )
             assert regenerated_console.status_code == 200, regenerated_console.text
             regenerated_console_payload = regenerated_console.json()
             assert regenerated_console_payload["status"] == "succeeded"
-            assert regenerated_console_payload["goal"] == executed["goal"]
+            assert regenerated_console_payload["goal"] == "Edited release question"
             assert regenerated_console_payload["conversation_id"] == executed["conversation_id"]
             assert regenerated_console_payload["regenerated_from_run_id"] == executed["id"]
             assert regenerated_console_payload["feedback"] is None

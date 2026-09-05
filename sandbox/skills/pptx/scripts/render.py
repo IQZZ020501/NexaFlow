@@ -135,8 +135,8 @@ def _resolve_cjk_font() -> str | None:
     if configured:
         return configured
     return {
-        "linux": "Noto Sans CJK SC",
-        "darwin": "PingFang SC",
+        "linux": "Noto Serif CJK SC",
+        "darwin": "Songti SC",
     }.get(sys.platform)
 
 

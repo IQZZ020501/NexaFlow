@@ -20,6 +20,11 @@ import {
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
+import {
+  AgentAttachmentList,
+  appendAttachmentFiles,
+  RunAttachmentCards,
+} from "@/components/agents/agent-attachment-list"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -769,11 +774,17 @@ export function PublicWorkflowChat({
                   className="space-y-3 rounded-lg border bg-background p-4 shadow-xs"
                 >
                   <div className="flex justify-end">
-                    <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
-                      {typeof run.inputs.question === "string" &&
-                      run.inputs.question.trim()
-                        ? run.inputs.question
-                        : t("工作流运行")}
+                    <div className="grid max-w-[85%] justify-items-end gap-1">
+                      <RunAttachmentCards
+                        attachments={run.inputs.files}
+                        t={t}
+                      />
+                      <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
+                        {typeof run.inputs.question === "string" &&
+                        run.inputs.question.trim()
+                          ? run.inputs.question
+                          : t("工作流运行")}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center justify-between gap-3">
@@ -912,25 +923,43 @@ export function PublicWorkflowChat({
                   />
                 </label>
                 {profile.interaction_config.file_upload ? (
-                  <label className="grid gap-1.5 text-sm font-medium">
-                    <span className="flex items-center gap-2">
+                  <div className="grid gap-1.5 text-sm font-medium">
+                    <label
+                      htmlFor="workflow-chat-files"
+                      className="flex items-center gap-2"
+                    >
                       <PaperclipIcon className="size-4" />
                       {t("文件上传")}
-                    </span>
+                    </label>
                     <Input
+                      id="workflow-chat-files"
                       type="file"
                       multiple
                       accept={acceptedUploadExtensions(
                         profile.interaction_config.file_upload_setting
                           .file_upload_type
                       )}
+                      onClick={(event) => {
+                        event.currentTarget.value = ""
+                      }}
                       onChange={(event) => {
                         const selected = Array.from(event.target.files ?? [])
                         setError(null)
-                        setFiles(selected)
+                        setFiles((current) =>
+                          appendAttachmentFiles(current, selected)
+                        )
                       }}
                     />
-                  </label>
+                    <AgentAttachmentList
+                      files={files}
+                      onRemove={(indexToRemove) =>
+                        setFiles((current) =>
+                          current.filter((_, index) => index !== indexToRemove)
+                        )
+                      }
+                      t={t}
+                    />
+                  </div>
                 ) : null}
               </div>
               {error ? (

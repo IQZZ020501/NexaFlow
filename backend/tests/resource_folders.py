@@ -37,6 +37,13 @@ def main() -> None:
         )
         assert knowledge.status_code == 201, knowledge.text
         knowledge_id = knowledge.json()["id"]
+        second_knowledge = client.post(
+            f"{base}/knowledge-bases",
+            headers=headers,
+            json={"name": "薪酬制度", "description": ""},
+        )
+        assert second_knowledge.status_code == 201, second_knowledge.text
+        second_knowledge_id = second_knowledge.json()["id"]
 
         moved = client.put(
             f"{base}/resource-folders/resources/move",
@@ -49,9 +56,49 @@ def main() -> None:
         )
         assert moved.status_code == 204, moved.text
 
+        batch_moved = client.put(
+            f"{base}/resource-folders/resources/move-batch",
+            headers=headers,
+            json={
+                "resource_type": "knowledge",
+                "resource_ids": [knowledge_id, second_knowledge_id],
+                "folder_id": hr_id,
+            },
+        )
+        assert batch_moved.status_code == 204, batch_moved.text
+
+        rejected_batch = client.put(
+            f"{base}/resource-folders/resources/move-batch",
+            headers=headers,
+            json={
+                "resource_type": "knowledge",
+                "resource_ids": [
+                    knowledge_id,
+                    "00000000-0000-0000-0000-000000000000",
+                ],
+                "folder_id": rules_id,
+            },
+        )
+        assert rejected_batch.status_code == 404, rejected_batch.text
+
+        empty_batch = client.put(
+            f"{base}/resource-folders/resources/move-batch",
+            headers=headers,
+            json={
+                "resource_type": "knowledge",
+                "resource_ids": [],
+                "folder_id": hr_id,
+            },
+        )
+        assert empty_batch.status_code == 422, empty_batch.text
+
         listed = client.get(f"{base}/knowledge-bases", headers=headers)
         assert listed.status_code == 200, listed.text
-        assert listed.json()[0]["folder_id"] == hr_id
+        folders_by_knowledge_id = {
+            item["id"]: item["folder_id"] for item in listed.json()
+        }
+        assert folders_by_knowledge_id[knowledge_id] == hr_id
+        assert folders_by_knowledge_id[second_knowledge_id] == hr_id
 
         deleted = client.delete(
             f"{base}/resource-folders/{hr_id}",

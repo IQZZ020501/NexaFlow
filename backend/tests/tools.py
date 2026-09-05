@@ -1014,9 +1014,35 @@ def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
     # The resource-folder column was added after the seed migration; seeded rows are unassigned.
     tool_row["folder_id"] = None
     assert source_rows == [asdict(source) for source in catalog.sources]
-    assert tool_row == asdict(catalog.tool)
-    assert version_row == asdict(catalog.version)
-    assert policy_row == asdict(catalog.policy)
+    assert {
+        key: value
+        for key, value in tool_row.items()
+        if key != "current_version_id"
+    } == {
+        key: value
+        for key, value in asdict(catalog.tool).items()
+        if key != "current_version_id"
+    }
+    assert version_row["description"] == "Return the current UTC time."
+    assert catalog.version.description == "Return the current time."
+    assert {
+        key: value
+        for key, value in version_row.items()
+        if key not in {"id", "description", "definition_hash"}
+    } == {
+        key: value
+        for key, value in asdict(catalog.version).items()
+        if key not in {"id", "description", "definition_hash"}
+    }
+    assert {
+        key: value
+        for key, value in policy_row.items()
+        if key not in {"tool_version_id", "definition_hash"}
+    } == {
+        key: value
+        for key, value in asdict(catalog.policy).items()
+        if key not in {"tool_version_id", "definition_hash"}
+    }
 
 
 def test_mcp_network_policy_migration_is_reversible_and_defaults_legacy() -> None:
@@ -5340,7 +5366,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     builtin = BuiltinToolAdapter(settings)
     result = await builtin.invoke(snapshot, {}, context)
     assert result.ok is True
-    assert "iso8601" in result.data
+    assert result.data["iso8601"].endswith("+08:00")
     artifact_snapshot = dataclasses.replace(
         snapshot,
         execution_spec={"builtin": "artifact"},

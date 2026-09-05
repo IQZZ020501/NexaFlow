@@ -218,7 +218,7 @@ describe("workspace governance settings", () => {
     expect(screen.getByDisplayValue("100000")).toBeTruthy()
     expect(screen.getByDisplayValue("80")).toBeTruthy()
     expect(screen.getByDisplayValue("30")).toBeTruthy()
-    expect(screen.getByDisplayValue("Asia/Shanghai")).toBeTruthy()
+    expect(screen.queryByLabelText("时区")).toBeNull()
     for (const label of [
       "Agent",
       "知识库",
@@ -245,9 +245,6 @@ describe("workspace governance settings", () => {
     fireEvent.change(screen.getByLabelText("数据保留天数"), {
       target: { value: "" },
     })
-    fireEvent.change(screen.getByLabelText("时区"), {
-      target: { value: "America/New_York" },
-    })
     fireEvent.click(screen.getByRole("button", { name: "保存策略" }))
 
     await waitFor(() => expect(patchBody).not.toBeNull())
@@ -256,7 +253,7 @@ describe("workspace governance settings", () => {
       monthly_token_limit: null,
       alert_threshold_percent: 80,
       retention_days: null,
-      timezone: "America/New_York",
+      timezone: "Asia/Shanghai",
     })
     expect(notifications).toContainEqual(["success", "策略已保存"])
   })
@@ -273,9 +270,7 @@ describe("workspace governance settings", () => {
     })
 
     renderPage(<SystemGovernancePage section="governance" />)
-    await waitFor(() =>
-      expect(screen.getByDisplayValue("Asia/Shanghai")).toBeTruthy()
-    )
+    await waitFor(() => expect(screen.getByDisplayValue("10")).toBeTruthy())
     fireEvent.click(screen.getByRole("button", { name: "保存策略" }))
     await waitFor(() =>
       expect(notifications).toContainEqual(["error", "policy rejected"])

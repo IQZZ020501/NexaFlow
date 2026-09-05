@@ -10,6 +10,7 @@ import {
   deleteResourceFolder,
   listResourceFolders,
   moveResourceToFolder,
+  moveResourcesToFolder,
   updateResourceFolder,
   type FolderResourceType,
   type ResourceFolder,
@@ -104,6 +105,16 @@ export function useResourceFolders(resourceType: FolderResourceType) {
     notify("success", t("已移动到文件夹"))
   }
 
+  async function moveMany(resourceIds: string[], folderId: string | null) {
+    if (!token || !selectedWorkspaceId || !resourceIds.length) return
+    await moveResourcesToFolder(token, selectedWorkspaceId, {
+      resource_type: resourceType,
+      resource_ids: resourceIds,
+      folder_id: folderId,
+    })
+    notify("success", t("已移动到文件夹"))
+  }
+
   return {
     folders,
     selectedFolderId,
@@ -113,6 +124,7 @@ export function useResourceFolders(resourceType: FolderResourceType) {
     rename,
     remove,
     move,
+    moveMany,
   }
 }
 

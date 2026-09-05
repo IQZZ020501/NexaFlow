@@ -55,6 +55,7 @@ from app.schemas.agent import (
     AgentPermissionResponse,
     AgentPermissionUpsertRequest,
     AgentRunCreateRequest,
+    AgentRunRegenerateRequest,
     AgentRunResponse,
     RunFeedbackRequest,
     AgentToolCallResponse,
@@ -462,6 +463,7 @@ async def regenerate_workspace_agent_run(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    payload: AgentRunRegenerateRequest | None = None,
 ) -> AgentRunResponse:
     """
     Regenerate a workspace-scoped agent run.
@@ -481,6 +483,7 @@ async def regenerate_workspace_agent_run(
         context.user,
         context.membership_role,
         settings,
+        payload.goal if payload else None,
     )
 
 
@@ -539,7 +542,7 @@ async def stream_workspace_agent_run(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> StreamingResponse:
-    attachment_context = await resolve_workspace_agent_files(
+    attachment_context, attachments = await resolve_workspace_agent_files(
         db,
         context.workspace.id,
         agent_id,
@@ -558,6 +561,7 @@ async def stream_workspace_agent_run(
         persist=True,
         conversation_id=payload.conversation_id,
         attachment_context=attachment_context,
+        attachments=attachments,
     )
     await enqueue_prepared_agent_run(
         run.id,

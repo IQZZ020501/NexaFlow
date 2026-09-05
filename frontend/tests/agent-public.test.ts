@@ -127,6 +127,42 @@ describe("public agent API", () => {
     expect(completed.live_stream_cursor).toBe("1700000000002-0")
   })
 
+  test("keeps optimistic attachments when a run snapshot omits them", () => {
+    const attachments = [
+      {
+        filename: "policy.docx",
+        content_type:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size_bytes: 128,
+        category: "document" as const,
+      },
+    ]
+    const placeholder = {
+      id: "pending-1",
+      conversation_id: "conversation-1",
+      question: "summarize",
+      attachments,
+      status: "running",
+      result: "",
+      error: null,
+      progress: [],
+      created_at: "2026-08-10T00:00:00Z",
+      started_at: null,
+      finished_at: null,
+      updated_at: "2026-08-10T00:00:00Z",
+    }
+    const live = { ...placeholder, id: "run-1", attachments: undefined }
+
+    const merged = mergePublicRunEvent(
+      [placeholder],
+      live.id,
+      { type: "run", sequence: 0, run: live },
+      placeholder.id
+    )
+
+    expect(merged[0].attachments).toEqual(attachments)
+  })
+
   test("updates the sanitized public execution timeline", () => {
     const run = {
       id: "run-1",

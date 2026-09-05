@@ -1,7 +1,7 @@
 import asyncio
 import tempfile
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -14,7 +14,7 @@ from app.entities.workspace import Workspace
 from app.entities.workspace_governance import WorkspaceGovernance
 from app.shareddomain.platform.models import WorkspaceGovernance as WorkspaceGovernanceOrm  # noqa: F401
 from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
+from app.infrastructure.model_utils import APP_TIMEZONE, utc_now
 from app.infrastructure.repositories import governance as governance_repository
 from app.infrastructure.repositories import workspace_governance as workspace_governance_repository
 from app.ports.vector_store import check_vector_store_health
@@ -317,7 +317,12 @@ async def enforce_workspace_run_quota(
     governance = await workspace_governance_repository.get(db, workspace_id)
     if governance is None or governance.daily_run_limit is None:
         return
-    today = utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
-    used = await governance_repository.daily_run_count(db, workspace_id, today)
+    day_start = (
+        utc_now()
+        .astimezone(APP_TIMEZONE)
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .astimezone(UTC)
+    )
+    used = await governance_repository.daily_run_count(db, workspace_id, day_start)
     if used >= governance.daily_run_limit:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Workspace daily run quota exceeded.")

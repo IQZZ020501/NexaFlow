@@ -316,7 +316,7 @@ type HarnessProps = {
     callId: string,
     decision: "approve" | "reject"
   ) => void
-  onRegenerateRun?: (runId: string) => void
+  onRegenerateRun?: (runId: string, goal?: string) => void
   onRunFeedback?: (
     runId: string,
     value: "positive" | "negative" | null
@@ -488,10 +488,10 @@ describe("AgentDetailWorkspace header and navigation", () => {
     fireEvent.click(screen.getByLabelText("新建对话"))
     expect(newConversationCalls).toBe(1)
     fireEvent.click(screen.getByLabelText("预览"))
-    expect(screen.getAllByLabelText("设置").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByLabelText("设置")).toBeTruthy()
   })
 
-  test("more menu only exposes delete", () => {
+  test("exposes delete as a standalone action", () => {
     let deleteCalls = 0
     renderPage(
       <Harness
@@ -500,10 +500,7 @@ describe("AgentDetailWorkspace header and navigation", () => {
         }}
       />
     )
-    fireEvent.pointerDown(screen.getByLabelText("设置"))
-    fireEvent.click(screen.getByLabelText("设置"))
-    expect(screen.queryByRole("menuitem", { name: /资源授权/ })).toBeNull()
-    fireEvent.click(screen.getByRole("menuitem", { name: /删除 Agent/ }))
+    fireEvent.click(screen.getByLabelText("删除 Agent"))
     expect(deleteCalls).toBe(1)
   })
 
@@ -559,15 +556,34 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.getByText("正在加载")).toBeTruthy()
   })
 
-  test("renders a succeeded run with its answer", () => {
+  test("renders a succeeded run and closes its editor after resubmitting", () => {
+    const regenerated: Array<[string, string | undefined]> = []
     const run = makeRun({ status: "succeeded", result: "**bold** summary" })
-    renderPage(<Harness activeView="settings" runs={[run]} />)
+    const { container } = renderPage(
+      <Harness
+        activeView="settings"
+        runs={[run]}
+        onRegenerateRun={(runId, goal) => regenerated.push([runId, goal])}
+      />
+    )
     expect(screen.getByText("Summarize the latest releases")).toBeTruthy()
     expect(screen.getByText("bold")).toBeTruthy()
     expect(screen.getByText("summary")).toBeTruthy()
+
+    fireEvent.click(container.querySelector('button[aria-label="编辑消息"]')!)
+    const editor = container.querySelector('textarea[aria-label="编辑消息"]')!
+    fireEvent.change(editor, {
+      target: { value: "Updated question" },
+    })
+    fireEvent.submit(editor.closest("form")!)
+
+    expect(regenerated).toEqual([["run-1", "Updated question"]])
+    expect(
+      container.querySelector('textarea[aria-label="编辑消息"]')
+    ).toBeNull()
   })
 
-  test("shows the submit and first-token timestamps below the messages", () => {
+  test("shows the first-token timestamp below the answer", () => {
     const run = makeRun({
       created_at: "2026-08-04T00:00:00Z",
       events: [
@@ -593,9 +609,8 @@ describe("AgentDetailWorkspace preview", () => {
     )
     const timestamps = container.querySelectorAll("time")
 
-    expect(timestamps).toHaveLength(2)
-    expect(timestamps[0]?.getAttribute("datetime")).toBe(run.created_at)
-    expect(timestamps[1]?.getAttribute("datetime")).toBe(
+    expect(timestamps).toHaveLength(1)
+    expect(timestamps[0]?.getAttribute("datetime")).toBe(
       "2026-08-04T00:00:01Z"
     )
   })

@@ -19,6 +19,7 @@ import {
   MenuIcon,
   MessageSquarePlusIcon,
   PaperclipIcon,
+  PencilIcon,
   SendIcon,
   ShieldAlertIcon,
   SquareIcon,
@@ -38,7 +39,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { AgentAttachmentList } from "@/components/agents/agent-attachment-list"
+import {
+  appendAttachmentFiles,
+  AgentAttachmentList,
+  RunAttachmentCards,
+  runAttachmentFromFile,
+  transferredFiles,
+} from "@/components/agents/agent-attachment-list"
 import { MessageTimestamp } from "@/components/agents/message-timestamp"
 import { ToolInputPreview } from "@/components/agents/tool-input-preview"
 import {
@@ -518,6 +525,10 @@ export function mergePublicRunEvent(
       run.id === placeholderId || run.id === event.run.id
         ? {
             ...event.run,
+            attachments:
+              event.run.attachments?.length
+                ? event.run.attachments
+                : run.attachments,
             result: event.run.result || run.result,
             live_stream_epoch: event.stream_epoch ?? run.live_stream_epoch,
             live_stream_cursor: event.live_sequence ?? run.live_stream_cursor,
@@ -757,6 +768,10 @@ export function mergePublicRunEvent(
     run.id === event.run.id || run.id === placeholderId
       ? {
           ...event.run,
+          attachments:
+            event.run.attachments?.length
+              ? event.run.attachments
+              : run.attachments,
           result:
             event.run.status === "cancelled"
               ? ""
@@ -985,6 +1000,8 @@ export function PublicAgentChat({
   const [regeneratingRunId, setRegeneratingRunId] = React.useState<
     string | null
   >(null)
+  const [editingRunId, setEditingRunId] = React.useState<string | null>(null)
+  const [editDraft, setEditDraft] = React.useState("")
   const [feedbackPendingRunId, setFeedbackPendingRunId] = React.useState<
     string | null
   >(null)
@@ -1066,20 +1083,10 @@ export function PublicAgentChat({
         if (!current) return
         setProfile(nextProfile)
         setConversations(nextConversations.items)
-        const nextConversationId =
-          initialConversationIdRef.current ??
-          nextConversations.items[0]?.conversation_id ??
-          null
+        const nextConversationId = initialConversationIdRef.current
         setActiveConversationId(nextConversationId)
         setIsRunsLoading(Boolean(nextConversationId))
         setSessionReady(true)
-        if (nextConversationId && !initialConversationIdRef.current) {
-          window.history.replaceState(
-            null,
-            "",
-            `/chat/${agentId}?conversation_id=${encodeURIComponent(nextConversationId)}`
-          )
-        }
       } catch {
         if (current) {
           setFatalError(tRef.current("此 Agent 未发布或不可访问。"))
@@ -1152,6 +1159,8 @@ export function PublicAgentChat({
     activePlaceholderIdRef.current = null
     cancelRequestedRef.current = false
     setIsSending(false)
+    setEditingRunId(null)
+    setEditDraft("")
     setSendError(null)
     setIsRunsLoading(true)
     setActiveConversationId(conversationId)
@@ -1176,6 +1185,8 @@ export function PublicAgentChat({
     setFiles([])
     setSendError(null)
     setIsSending(false)
+    setEditingRunId(null)
+    setEditDraft("")
     setIsRunsLoading(false)
     setIsHistoryOpen(false)
     window.history.replaceState(null, "", `/chat/${agentId}`)
@@ -1333,7 +1344,7 @@ export function PublicAgentChat({
     }
   }
 
-  async function handleRegenerateRun(runId: string) {
+  async function handleRegenerateRun(runId: string, goal?: string) {
     if (
       !token ||
       isSending ||
@@ -1349,8 +1360,17 @@ export function PublicAgentChat({
     const controller = new AbortController()
     streamControllerRef.current = controller
     try {
-      const regenerated = await regeneratePublicAgentRun(agentId, token, runId)
+      const regenerated = await regeneratePublicAgentRun(
+        agentId,
+        token,
+        runId,
+        goal
+      )
       replacementId = regenerated.id
+      if (goal !== undefined) {
+        setEditingRunId(null)
+        setEditDraft("")
+      }
       setRuns((current) =>
         current.map((run) => (run.id === runId ? regenerated : run))
       )
@@ -1494,6 +1514,7 @@ export function PublicAgentChat({
       id: placeholderId,
       conversation_id: activeConversationId ?? "",
       question: nextQuestion,
+      attachments: files.map(runAttachmentFromFile),
       status: "running",
       result: "",
       error: null,
@@ -1684,20 +1705,109 @@ export function PublicAgentChat({
               </div>
             ) : (
               <div className="space-y-8">
-                {visibleRuns.map((run) => {
+                {visibleRuns.map((run, index) => {
                   const answerStartedAt = run.progress.findLast(
                     (event) => event.type === "answer"
                   )?.created_at
+                  const canEdit =
+                    index === visibleRuns.length - 1 &&
+                    run.status === "succeeded"
+                  const isEditing = editingRunId === run.id
                   return (
                     <article key={run.id} className="space-y-4">
                       <div className="flex items-start gap-2">
                         <div className="ml-auto flex max-w-[85%] flex-col items-end gap-1">
-                          <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
-                            {run.question}
-                          </div>
+                          <RunAttachmentCards
+                            attachments={run.attachments}
+                            t={t}
+                          />
+                          {isEditing ? (
+                            <form
+                              className="w-[min(32rem,80vw)] rounded-2xl rounded-tr-md border bg-background p-2 shadow-sm"
+                              onSubmit={(event) => {
+                                event.preventDefault()
+                                const goal = editDraft.trim()
+                                if (
+                                  !goal ||
+                                  isSending ||
+                                  isRunsLoading ||
+                                  regeneratingRunId
+                                ) {
+                                  return
+                                }
+                                void handleRegenerateRun(run.id, goal)
+                              }}
+                            >
+                              <textarea
+                                autoFocus
+                                aria-label={t("编辑消息")}
+                                className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 outline-none"
+                                maxLength={4000}
+                                value={editDraft}
+                                onChange={(event) =>
+                                  setEditDraft(event.target.value)
+                                }
+                              />
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={regeneratingRunId === run.id}
+                                  onClick={() => {
+                                    setEditingRunId(null)
+                                    setEditDraft("")
+                                  }}
+                                >
+                                  {t("取消")}
+                                </Button>
+                                <Button
+                                  type="submit"
+                                  size="sm"
+                                  disabled={
+                                    !editDraft.trim() ||
+                                    isSending ||
+                                    isRunsLoading ||
+                                    Boolean(regeneratingRunId)
+                                  }
+                                >
+                                  {regeneratingRunId === run.id ? (
+                                    <LoaderCircleIcon className="animate-spin" />
+                                  ) : (
+                                    <SendIcon />
+                                  )}
+                                  {t("重新发送")}
+                                </Button>
+                              </div>
+                            </form>
+                          ) : (
+                            <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
+                              {run.question}
+                            </div>
+                          )}
                           <div className="flex items-start gap-1">
-                            <MessageTimestamp value={run.created_at} />
                             <CopyMessageButton value={run.question} />
+                            {canEdit && !isEditing ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                className="text-muted-foreground"
+                                aria-label={t("编辑消息")}
+                                title={t("编辑消息")}
+                                disabled={
+                                  isSending ||
+                                  isRunsLoading ||
+                                  Boolean(regeneratingRunId)
+                                }
+                                onClick={() => {
+                                  setEditingRunId(run.id)
+                                  setEditDraft(run.question)
+                                }}
+                              >
+                                <PencilIcon />
+                              </Button>
+                            ) : null}
                           </div>
                         </div>
                         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
@@ -1799,6 +1909,19 @@ export function PublicAgentChat({
           <form
             className="relative mx-auto max-w-5xl rounded-xl border bg-background p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring/40 2xl:max-w-6xl"
             onSubmit={handleAsk}
+            onDragOver={(event) => {
+              if (event.dataTransfer.types.includes("Files")) {
+                event.preventDefault()
+              }
+            }}
+            onDrop={(event) => {
+              const dropped = transferredFiles(event.dataTransfer)
+              if (!dropped.length) return
+              event.preventDefault()
+              if (isSending) return
+              setSendError(null)
+              setFiles((current) => appendAttachmentFiles(current, dropped))
+            }}
           >
             <input
               ref={fileInputRef}
@@ -1812,12 +1935,21 @@ export function PublicAgentChat({
               onChange={(event) => {
                 const selected = Array.from(event.target.files ?? [])
                 setSendError(null)
-                setFiles(selected)
+                setFiles((current) =>
+                  appendAttachmentFiles(current, selected)
+                )
               }}
             />
             <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
+              onPaste={(event) => {
+                const pasted = transferredFiles(event.clipboardData)
+                if (!pasted.length) return
+                event.preventDefault()
+                setSendError(null)
+                setFiles((current) => appendAttachmentFiles(current, pasted))
+              }}
               onKeyDown={(event) => {
                 if (
                   event.key === "Enter" &&

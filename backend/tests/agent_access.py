@@ -518,6 +518,14 @@ def assert_external_run_to_response() -> None:
         "conversation_id": "c-3",
         "status": "queued",
         "question": "asked",
+        "attachments": [
+            {
+                "filename": "photo.png",
+                "content_type": "image/png",
+                "size_bytes": 8,
+                "category": "image",
+            }
+        ],
         "result": "result text",
         "events": [],
         "created_at": "2026-01-01T00:00:00Z",
@@ -528,6 +536,7 @@ def assert_external_run_to_response() -> None:
     response = external_run_to_response(as_dict)
     assert response.status == "queued"
     assert response.question == "asked"
+    assert response.attachments[0].filename == "photo.png"
     assert response.result == "result text"
     assert response.error is None
 

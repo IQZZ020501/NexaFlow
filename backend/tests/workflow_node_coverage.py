@@ -2354,12 +2354,11 @@ def test_workflow_uploads_resolve_branches() -> None:
                 raise AssertionError("extraction failure was swallowed")
 
         # agent text resolution
-        assert (
-            await _resolve_agent_file_text(
-                db, agent, "user-1", [], _UPLOAD_SETTINGS  # type: ignore[arg-type]
-            )
-            == ""
+        text, attachments = await _resolve_agent_file_text(
+            db, agent, "user-1", [], _UPLOAD_SETTINGS  # type: ignore[arg-type]
         )
+        assert text == ""
+        assert attachments == []
         try:
             await _resolve_agent_file_text(
                 db, agent, "user-1", ["u1", "u1"], _UPLOAD_SETTINGS  # type: ignore[arg-type]
@@ -2393,10 +2392,18 @@ def test_workflow_uploads_resolve_branches() -> None:
             "app.application.workflow_uploads.queue_upload_cleanups",
             new=AsyncMock(),
         ):
-            text = await _resolve_agent_file_text(
+            text, attachments = await _resolve_agent_file_text(
                 db, agent, "user-1", ["u1"], _UPLOAD_SETTINGS  # type: ignore[arg-type]
             )
         assert text == "--- u1.txt ---\nagent text"
+        assert attachments == [
+            {
+                "filename": "u1.txt",
+                "content_type": "text/plain",
+                "size_bytes": 3,
+                "category": "document",
+            }
+        ]
         with patch(
             "app.application.workflow_uploads.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
@@ -2526,14 +2533,27 @@ def test_workflow_uploads_workspace_wrappers() -> None:
             new=AsyncMock(),
         ), patch(
             "app.application.workflow_uploads._resolve_agent_file_text",
-            new=AsyncMock(return_value="--- notes.txt ---\nhello"),
+            new=AsyncMock(
+                return_value=(
+                    "--- notes.txt ---\nhello",
+                    [
+                        {
+                            "filename": "notes.txt",
+                            "content_type": "text/plain",
+                            "size_bytes": 5,
+                            "category": "document",
+                        }
+                    ],
+                )
+            ),
         ):
-            text = await resolve_workspace_agent_files(
+            text, attachments = await resolve_workspace_agent_files(
                 db, "ws-1", "agent-1", actor, "member",  # type: ignore[arg-type]
                 ["u1"],
                 SimpleNamespace(),
             )
         assert text == "--- notes.txt ---\nhello"
+        assert attachments[0]["filename"] == "notes.txt"
 
     asyncio.run(run())
 

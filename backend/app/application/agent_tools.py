@@ -231,6 +231,7 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         conversation_id=run.conversation_id,
         regenerated_from_run_id=run.regenerated_from_run_id,
         goal=run.goal,
+        attachments=run.application_snapshot.get("attachments", []),
         model_id=run.model_id,
         model_name=run.model_name,
         knowledge_query_mode=run.knowledge_query_mode,

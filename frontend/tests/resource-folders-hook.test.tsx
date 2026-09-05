@@ -51,6 +51,12 @@ function Harness() {
       <button type="button" onClick={() => void state.move("kb-1", "folder-2")}>
         move
       </button>
+      <button
+        type="button"
+        onClick={() => void state.moveMany(["kb-1", "kb-2"], "folder-2")}
+      >
+        move many
+      </button>
       <button type="button" onClick={() => state.setSelectedFolderId("folder-2")}>
         select
       </button>
@@ -116,6 +122,13 @@ test("loads folders and manages create, rename, remove, and move", async () => {
     expect(requests).toContain("PUT /api/v1/workspaces/ws-1/resource-folders/resources/move")
   )
   expect(notifications).toContainEqual({ kind: "success", message: "已移动到文件夹" })
+
+  fireEvent.click(screen.getByText("move many"))
+  await waitFor(() =>
+    expect(requests).toContain(
+      "PUT /api/v1/workspaces/ws-1/resource-folders/resources/move-batch"
+    )
+  )
 
   fireEvent.click(screen.getByText("remove"))
   await waitFor(() => expect(screen.queryByText("规章制度")).toBeNull())

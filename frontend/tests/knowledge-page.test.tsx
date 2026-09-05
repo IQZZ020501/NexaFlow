@@ -307,6 +307,60 @@ function sortHeaderButton(name: string) {
 // ---------------------------------------------------------------------------
 
 describe("KnowledgeBasePage list view", () => {
+  test("batch moves selected knowledge bases into a folder", async () => {
+    const moves: unknown[] = []
+    fetchHandler = (url, init) => {
+      if (url.includes("/resource-folders/resources/move-batch")) {
+        moves.push(JSON.parse(String(init?.body)))
+        return new Response(null, { status: 204 })
+      }
+      if (url.includes("/resource-folders")) {
+        return jsonResponse([
+          {
+            id: "folder-1",
+            workspace_id: WS,
+            resource_type: "knowledge",
+            parent_id: null,
+            name: "制度资料",
+            created_by_user_id: "u-admin",
+            created_at: "2026-09-05T00:00:00Z",
+            updated_at: "2026-09-05T00:00:00Z",
+          },
+        ])
+      }
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) {
+        return jsonResponse([
+          makeKnowledgeBase(),
+          makeKnowledgeBase({ id: "kb-2", name: "KB Beta" }),
+        ])
+      }
+      return jsonResponse([])
+    }
+    renderPage(<KnowledgeBasePage />)
+
+    await screen.findByText("KB Alpha")
+    expect(
+      screen.queryByRole("checkbox", { name: "选择 KB Alpha" })
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 KB Alpha" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 KB Beta" }))
+    fireEvent.click(screen.getByRole("button", { name: "移动到文件夹" }))
+    const dialog = await screen.findByRole("dialog", { name: "移动到文件夹" })
+    fireEvent.click(within(dialog).getByRole("button", { name: "制度资料" }))
+
+    await waitFor(() =>
+      expect(moves).toEqual([
+        {
+          resource_type: "knowledge",
+          resource_ids: ["kb-1", "kb-2"],
+          folder_id: "folder-1",
+        },
+      ])
+    )
+  })
+
   test("renders knowledge base cards with stats and badges", async () => {
     renderListPage()
 

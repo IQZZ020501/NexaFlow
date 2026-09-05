@@ -15,7 +15,7 @@ from app.infrastructure.code_sandbox import (
     execute_workflow_code,
 )
 from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
+from app.infrastructure.model_utils import APP_TIMEZONE, utc_now
 from app.infrastructure.session import get_session_factory
 from app.ports.mcp import McpClientError, call_mcp_tool
 from app.ports.tool_runtime import (
@@ -138,8 +138,8 @@ class BuiltinToolAdapter:
         if builtin == "current_time":
             return ToolRuntimeResult(
                 ok=True,
-                data={"iso8601": utc_now().isoformat()},
-                summary="Current UTC time returned.",
+                data={"iso8601": utc_now().astimezone(APP_TIMEZONE).isoformat()},
+                summary="Current time returned.",
                 error_code=None,
                 error_message=None,
                 outcome="confirmed",

@@ -113,7 +113,7 @@ class WorkspaceAnalyticsFrequentQuestion(BaseModel):
 
 class WorkspaceAnalyticsMetadata(BaseModel):
     workspace_id: str
-    timezone: Literal["UTC"]
+    timezone: Literal["Asia/Shanghai"]
     from_date: date
     to_date: date
     previous_from_date: date

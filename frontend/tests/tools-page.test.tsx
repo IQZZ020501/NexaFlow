@@ -115,6 +115,69 @@ beforeEach(() => {
   }) as typeof fetch
 })
 describe("ToolsPage", () => {
+  test("batch moves selected manageable tools into a folder", async () => {
+    const requests: unknown[] = []
+    const secondTool = tool({
+      id: "tool-second",
+      function_name: "second_formatter",
+      display_name: "Second formatter",
+    })
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      const url = String(input)
+      if (url.includes("/resource-folders/resources/move-batch")) {
+        requests.push(JSON.parse(String(init?.body)))
+        return new Response(null, { status: 204 })
+      }
+      if (url.includes("/resource-folders")) {
+        return jsonResponse([
+          {
+            id: "folder-1",
+            workspace_id: "ws-1",
+            resource_type: "tool",
+            parent_id: null,
+            name: "生产工具",
+            created_by_user_id: "u-1",
+            created_at: "2026-09-05T00:00:00Z",
+            updated_at: "2026-09-05T00:00:00Z",
+          },
+        ])
+      }
+      if (url.includes("/tool-sources?")) return jsonResponse([])
+      if (url.includes("/tools?")) return jsonResponse([tool(), secondTool])
+      return jsonResponse([])
+    }) as typeof fetch
+
+    renderPage(<ToolsPage />)
+    await screen.findByText("Owned formatter")
+    expect(
+      screen.queryByRole("checkbox", { name: "选择 Owned formatter" })
+    ).toBeNull()
+    const searchToolbar = screen.getByRole("search")
+    fireEvent.click(
+      within(searchToolbar).getByRole("button", { name: "批量管理" })
+    )
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 Owned formatter" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 Second formatter" }))
+    expect(screen.getByText("已选择 2 项")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "移动到文件夹" }))
+    const dialog = await screen.findByRole("dialog", { name: "移动到文件夹" })
+    fireEvent.click(within(dialog).getByRole("button", { name: "生产工具" }))
+
+    await waitFor(() =>
+      expect(requests).toEqual([
+        {
+          resource_type: "tool",
+          resource_ids: ["tool-owner", "tool-second"],
+          folder_id: "folder-1",
+        },
+      ])
+    )
+  })
+
   test("filters the current catalog with Skills, MCP, and Python tabs", async () => {
     const builtinTool = tool({
       id: "tool-skill",
@@ -493,7 +556,7 @@ describe("ToolsPage", () => {
     await waitFor(() => expect(screen.queryByRole("main")).toBeNull())
   })
 
-  test("shows builtin tools in their own group", async () => {
+  test("shows builtin tools without a group heading", async () => {
     const builtinTool = tool({
       id: "tool-builtin",
       kind: "builtin",
@@ -527,7 +590,7 @@ describe("ToolsPage", () => {
     renderPage(<ToolsPage />)
     await screen.findByText("当前时间")
     expect(screen.getByText("PDF")).toBeTruthy()
-    expect(screen.getByText("内置工具")).toBeTruthy()
+    expect(screen.queryByText("内置工具")).toBeNull()
     const card = screen.getByText("当前时间").closest("article")!
     expect(within(card).getAllByText("内置").length).toBeGreaterThan(0)
     expect(within(card).getByText("可用")).toBeTruthy()

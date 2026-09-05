@@ -493,7 +493,7 @@ describe("workspace governance and invitations", () => {
     monthly_token_limit: null,
     alert_threshold_percent: 80,
     retention_days: 30,
-    timezone: "Asia/Shanghai",
+    timezone: "Asia/Shanghai" as const,
     updated_at: "2026-08-19T00:00:00Z",
   }
   const invitation = {
@@ -545,7 +545,7 @@ describe("workspace governance and invitations", () => {
       monthly_token_limit: 5000,
       alert_threshold_percent: 90,
       retention_days: null,
-      timezone: "UTC",
+      timezone: "Asia/Shanghai" as const,
     }
     install(() => jsonResponse(governance))
     await updateWorkspaceGovernance(TOKEN, "ws-1", payload)

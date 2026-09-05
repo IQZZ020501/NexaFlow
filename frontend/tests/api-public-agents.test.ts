@@ -221,6 +221,12 @@ describe("public agent API", () => {
 
     await getPublicAgentRun("agent-1", "token-1", "run-1")
     await regeneratePublicAgentRun("agent-1", "token-1", "run-1")
+    await regeneratePublicAgentRun(
+      "agent-1",
+      "token-1",
+      "run-1",
+      "edited question"
+    )
     await setPublicAgentRunFeedback("agent-1", "token-1", "run-1", "positive")
     await setPublicAgentRunFeedback("agent-1", "token-1", "run-1", null)
     await listPublicAgentRunToolCalls("agent-1", "token-1", "run-1")
@@ -242,6 +248,7 @@ describe("public agent API", () => {
     expect(requests.map(({ url, method }) => [method, url])).toEqual([
       ["GET", "/api/v1/public/agents/agent-1/runs/run-1"],
       ["POST", "/api/v1/public/agents/agent-1/runs/run-1/regenerate"],
+      ["POST", "/api/v1/public/agents/agent-1/runs/run-1/regenerate"],
       ["POST", "/api/v1/public/agents/agent-1/runs/run-1/feedback"],
       ["POST", "/api/v1/public/agents/agent-1/runs/run-1/feedback"],
       ["GET", "/api/v1/public/agents/agent-1/runs/run-1/tool-calls"],
@@ -254,8 +261,9 @@ describe("public agent API", () => {
         "/api/v1/public/agents/agent-1/runs/run-1/tool-calls/call-1/reject",
       ],
     ])
-    expect(requests[2]?.body).toEqual({ value: "positive" })
-    expect(requests[3]?.body).toEqual({ value: null })
+    expect(requests[2]?.body).toEqual({ goal: "edited question" })
+    expect(requests[3]?.body).toEqual({ value: "positive" })
+    expect(requests[4]?.body).toEqual({ value: null })
   })
 
   test("observes public agent run streams", async () => {

@@ -561,6 +561,66 @@ afterEach(() => {
 })
 
 describe("AgentsPage list view", () => {
+  test("batch moves selected applications into a folder", async () => {
+    const moves: unknown[] = []
+    routes = [
+      {
+        method: "GET",
+        pathname: `/api/v1/workspaces/${WS}/resource-folders`,
+        exact: true,
+        respond: () =>
+          jsonResponse([
+            {
+              id: "folder-1",
+              workspace_id: WS,
+              resource_type: "application",
+              parent_id: null,
+              name: "客服应用",
+              created_by_user_id: "u-1",
+              created_at: "2026-09-05T00:00:00Z",
+              updated_at: "2026-09-05T00:00:00Z",
+            },
+          ]),
+      },
+      {
+        method: "PUT",
+        pathname: `/api/v1/workspaces/${WS}/resource-folders/resources/move-batch`,
+        exact: true,
+        respond: (init) => {
+          moves.push(JSON.parse(String(init?.body)))
+          return new Response(null, { status: 204 })
+        },
+      },
+      ...baseRoutes([makeAgent(), makeWorkflow()]),
+    ]
+    renderPage(<AgentsPage />)
+
+    await screen.findByText("Research Assistant")
+    expect(
+      screen.queryByRole("checkbox", { name: "选择 Research Assistant" })
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "选择 Research Assistant" })
+    )
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "选择 Weekly Digest" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "移动到文件夹" }))
+    const dialog = await screen.findByRole("dialog", { name: "移动到文件夹" })
+    fireEvent.click(within(dialog).getByRole("button", { name: "客服应用" }))
+
+    await waitFor(() =>
+      expect(moves).toEqual([
+        {
+          resource_type: "application",
+          resource_ids: ["agent-1", "agent-2"],
+          folder_id: "folder-1",
+        },
+      ])
+    )
+  })
+
   test("renders agent and workflow cards with badges and counts", async () => {
     routes = baseRoutes([
       makeAgent(),
@@ -1213,7 +1273,7 @@ describe("AgentsPage create flow", () => {
 })
 
 describe("AgentsPage detail view", () => {
-  test("switches Agent detail tabs without returning to the application list", async () => {
+  test("starts a new preview conversation each time settings is entered", async () => {
     const testWindow = window as typeof window & {
       happyDOM: { setURL: (url: string) => void }
     }
@@ -1229,8 +1289,25 @@ describe("AgentsPage detail view", () => {
           respond: () =>
             jsonResponse({ items: [], total: 0, offset: 0, limit: 20 }),
         },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([]),
+        },
       ],
     })
+
+    const settingsNavButton = screen
+      .getAllByRole("button", { name: "设置" })
+      .find((button) => Boolean(button.closest("nav")))
+    expect(settingsNavButton).toBeTruthy()
+    fireEvent.click(settingsNavButton!)
+    await screen.findByLabelText("向 Agent 提问")
+    const firstConversationId = new URLSearchParams(
+      window.location.search
+    ).get("conversation_id")
+    expect(firstConversationId).toBeTruthy()
 
     const logsNavButton = screen
       .getAllByRole("button", { name: "对话日志" })
@@ -1241,14 +1318,22 @@ describe("AgentsPage detail view", () => {
     expect(await screen.findByText("暂无对话日志")).toBeTruthy()
     expect(window.location.pathname).toBe("/app/apps/agent-1/logs")
     expect(screen.queryByRole("heading", { name: "应用" })).toBeNull()
+
+    fireEvent.click(settingsNavButton!)
+    await waitFor(() =>
+      expect(
+        new URLSearchParams(window.location.search).get("conversation_id")
+      ).not.toBe(firstConversationId)
+    )
+    expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
   })
 
-  test("stores the resolved conversation in the URL without leaving Agent detail", async () => {
+  test("starts a fresh conversation without restoring the latest run", async () => {
     const testWindow = window as typeof window & {
       happyDOM: { setURL: (url: string) => void }
     }
     testWindow.happyDOM.setURL(
-      "https://nexaflow.example/app/apps/agent-1/settings"
+      "https://nexaflow.example/app/apps/agent-1/settings?conversation_id=conversation-1"
     )
     await renderDetail({
       initialView: "settings",
@@ -1257,7 +1342,7 @@ describe("AgentsPage detail view", () => {
           method: "GET",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
           exact: true,
-          respond: () => jsonResponse([]),
+          respond: () => jsonResponse([makeRun()]),
         },
       ],
     })
@@ -1267,6 +1352,11 @@ describe("AgentsPage detail view", () => {
         new URLSearchParams(window.location.search).get("conversation_id")
       ).toBeTruthy()
     )
+    expect(
+      new URLSearchParams(window.location.search).get("conversation_id")
+    ).not.toBe("conversation-1")
+    expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    expect(screen.queryByText("Here is the summary.")).toBeNull()
     expect(window.location.pathname).toBe("/app/apps/agent-1/settings")
     expect(screen.queryByRole("heading", { name: "应用" })).toBeNull()
   })
@@ -1618,7 +1708,7 @@ describe("AgentsPage detail view", () => {
     )
   })
 
-  test("deletes the agent from the detail menu", async () => {
+  test("deletes the agent from the detail action", async () => {
     const agent = makeAgent()
     let deleteCount = 0
     await renderDetail({
@@ -1635,9 +1725,7 @@ describe("AgentsPage detail view", () => {
         },
       ],
     })
-    fireEvent.pointerDown(screen.getByLabelText("设置"))
-    fireEvent.click(screen.getByLabelText("设置"))
-    fireEvent.click(await screen.findByRole("menuitem", { name: /删除 Agent/ }))
+    fireEvent.click(screen.getByLabelText("删除 Agent"))
 
     expect(screen.getByText("删除 Agent")).toBeTruthy()
     fireEvent.click(screen.getByText("删除").closest("button")!)
@@ -2429,11 +2517,25 @@ describe("AgentsPage run flows", () => {
 
   test("uploads attachments and streams reasoning deltas", async () => {
     const agent = makeAgent()
-    const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
+    const attachments = [
+      {
+        filename: "report.pdf",
+        content_type: "application/pdf",
+        size_bytes: 10,
+        category: "document" as const,
+      },
+    ]
+    const queuedRun = makeRun({
+      id: "run-1",
+      status: "queued",
+      result: "",
+      attachments,
+    })
     const finishedRun = makeRun({
       id: "run-1",
       status: "succeeded",
       result: "Final answer",
+      attachments,
     })
     let runBody = ""
     await renderDetail({
@@ -2515,6 +2617,50 @@ describe("AgentsPage run flows", () => {
 
     await waitFor(() => expect(screen.getByText("Final answer")).toBeTruthy())
     await waitFor(() => expect(JSON.parse(runBody).file_ids).toEqual(["up-1"]))
+    expect(screen.getByText("report.pdf").closest("li")?.className).toContain(
+      "max-w-[min(22rem,78vw)]"
+    )
+  })
+
+  test("appends pasted, dropped, and separately selected preview attachments", async () => {
+    await renderDetail({ agent: makeAgent(), initialView: "settings" })
+    await screen.findByText("开始和 Agent 对话")
+
+    const textarea = screen.getByLabelText("向 Agent 提问")
+    const pasted = new File(["png"], "pasted.png", { type: "image/png" })
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files: [],
+        items: [{ kind: "file", getAsFile: () => pasted }],
+      },
+    })
+    expect(screen.getByText("pasted.png")).toBeTruthy()
+
+    const dropped = new File(["webp"], "dropped.webp", {
+      type: "image/webp",
+    })
+    const form = textarea.closest("form")!
+    fireEvent.dragOver(form, {
+      dataTransfer: { files: [dropped], types: ["Files"] },
+    })
+    fireEvent.drop(form, { dataTransfer: { files: [dropped] } })
+    expect(screen.getByText("dropped.webp")).toBeTruthy()
+
+    const fileInput = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["jpg"], "selected.jpg", { type: "image/jpeg" })],
+      },
+    })
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["pdf"], "selected.pdf", { type: "application/pdf" })],
+      },
+    })
+    expect(screen.getByText("selected.jpg")).toBeTruthy()
+    expect(screen.getByText("selected.pdf")).toBeTruthy()
   })
 
   test("cancels an in-flight ask and restores the question", async () => {
@@ -2635,6 +2781,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -2715,6 +2862,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -2772,13 +2920,14 @@ describe("AgentsPage run flows", () => {
       happyDOM: { setURL: (url: string) => void }
     }
     testWindow.happyDOM.setURL(
-      "https://nexaflow.example/app/apps/agent-1/settings"
+      "https://nexaflow.example/app/apps/agent-1/settings?conversation_id=conversation-1"
     )
     const agent = makeAgent()
     const succeededRun = makeRun({ status: "succeeded", result: "Old answer" })
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -2839,6 +2988,79 @@ describe("AgentsPage run flows", () => {
     fireEvent.submit(form!)
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(runPosts).toBe(0)
+  })
+
+  test("edits and resends only the latest user message", async () => {
+    const agent = makeAgent()
+    const first = makeRun({
+      id: "run-1",
+      goal: "First question",
+      result: "First answer",
+    })
+    const second = makeRun({
+      id: "run-2",
+      goal: "Second question",
+      result: "Second answer",
+    })
+    let regenerateBody: unknown
+    await renderDetail({
+      agent,
+      initialView: "settings",
+      initialConversationId: "conversation-1",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([second, first]),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-2/regenerate`,
+          exact: true,
+          respond: (init) => {
+            regenerateBody = JSON.parse(String(init?.body))
+            return jsonResponse(
+              makeRun({
+                id: "run-edited",
+                regenerated_from_run_id: "run-2",
+                goal: "Edited second question",
+                result: "Edited answer",
+              })
+            )
+          },
+        },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-edited/stream`,
+          exact: false,
+          respond: () =>
+            ndjson([
+              {
+                type: "complete",
+                sequence: 1,
+                run: makeRun({
+                  id: "run-edited",
+                  regenerated_from_run_id: "run-2",
+                  goal: "Edited second question",
+                  result: "Edited answer",
+                }),
+              },
+            ]),
+        },
+      ],
+    })
+
+    await screen.findByText("Second answer")
+    expect(screen.getAllByRole("button", { name: "编辑消息" })).toHaveLength(1)
+    fireEvent.click(screen.getByRole("button", { name: "编辑消息" }))
+    const editor = screen.getByLabelText("编辑消息") as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: "Edited second question" } })
+    fireEvent.click(screen.getByRole("button", { name: "重新发送" }))
+
+    await screen.findByText("Edited answer")
+    expect(regenerateBody).toEqual({ goal: "Edited second question" })
+    expect(screen.getByText("First question")).toBeTruthy()
   })
 
   test("notifies when the run stream reports an error", async () => {
@@ -3032,6 +3254,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3077,6 +3300,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3119,6 +3343,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3187,6 +3412,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3256,6 +3482,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3291,6 +3518,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3336,6 +3564,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3397,6 +3626,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3443,6 +3673,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",

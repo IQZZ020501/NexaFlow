@@ -13,10 +13,12 @@ from app.application.resource_folders import (
     delete_resource_folder,
     list_resource_folders,
     move_resource,
+    move_resources,
     update_resource_folder,
 )
 from app.infrastructure.session import get_db
 from app.schemas.resource_folder import (
+    ResourceFolderBatchMoveRequest,
     ResourceFolderCreateRequest,
     ResourceFolderMoveRequest,
     ResourceFolderResponse,
@@ -75,6 +77,22 @@ async def move_workspace_resource(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     await move_resource(
+        db,
+        context.workspace.id,
+        payload,
+        context.user,
+        context.membership_role,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/resources/move-batch", status_code=status.HTTP_204_NO_CONTENT)
+async def move_workspace_resources(
+    payload: ResourceFolderBatchMoveRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    await move_resources(
         db,
         context.workspace.id,
         payload,

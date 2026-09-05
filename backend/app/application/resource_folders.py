@@ -7,6 +7,7 @@ from app.entities.user import User
 from app.infrastructure.repositories import resource_folders as repository
 from app.infrastructure.validation import normalize_name
 from app.schemas.resource_folder import (
+    ResourceFolderBatchMoveRequest,
     ResourceFolderCreateRequest,
     ResourceFolderMoveRequest,
     ResourceFolderResponse,
@@ -150,27 +151,72 @@ async def move_resource(
     actor: User,
     workspace_role: str | None,
 ) -> None:
-    await _require_parent(db, workspace_id, payload.resource_type, payload.folder_id)
-    if payload.resource_type == "knowledge":
-        resource = await get_knowledge_base(db, workspace_id, payload.resource_id)
-        await require_knowledge_base_permission(db, resource, actor, workspace_role, {"edit"})
-    elif payload.resource_type == "application":
-        resource = await get_agent(db, workspace_id, payload.resource_id)
-        require_agent_edit(resource, actor, workspace_role)
-    else:
-        await require_managed_tool(
-            db,
-            workspace_id,
-            payload.resource_id,
-            actor,
-            workspace_role,
-            lock=True,
-        )
-    await repository.set_resource_folder(
+    await _move_resources(
         db,
         workspace_id,
         payload.resource_type,
-        payload.resource_id,
+        [payload.resource_id],
         payload.folder_id,
+        actor,
+        workspace_role,
+    )
+
+
+async def move_resources(
+    db: AsyncSession,
+    workspace_id: str,
+    payload: ResourceFolderBatchMoveRequest,
+    actor: User,
+    workspace_role: str | None,
+) -> None:
+    await _move_resources(
+        db,
+        workspace_id,
+        payload.resource_type,
+        payload.resource_ids,
+        payload.folder_id,
+        actor,
+        workspace_role,
+    )
+
+
+async def _move_resources(
+    db: AsyncSession,
+    workspace_id: str,
+    resource_type: ResourceFolderType,
+    resource_ids: list[str],
+    folder_id: str | None,
+    actor: User,
+    workspace_role: str | None,
+) -> None:
+    await _require_parent(db, workspace_id, resource_type, folder_id)
+    for resource_id in resource_ids:
+        if resource_type == "knowledge":
+            resource = await get_knowledge_base(db, workspace_id, resource_id)
+            await require_knowledge_base_permission(
+                db,
+                resource,
+                actor,
+                workspace_role,
+                {"edit"},
+            )
+        elif resource_type == "application":
+            resource = await get_agent(db, workspace_id, resource_id)
+            require_agent_edit(resource, actor, workspace_role)
+        else:
+            await require_managed_tool(
+                db,
+                workspace_id,
+                resource_id,
+                actor,
+                workspace_role,
+                lock=True,
+            )
+    await repository.set_resources_folder(
+        db,
+        workspace_id,
+        resource_type,
+        resource_ids,
+        folder_id,
     )
     await db.commit()

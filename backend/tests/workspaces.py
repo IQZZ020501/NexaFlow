@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -31,6 +31,7 @@ from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphSchema,
 )
 from app.shareddomain.knowledge.services import knowledge_object_storage
+from app.shareddomain.analytics.services import resolve_analytics_period
 from app.shareddomain.tools.models import McpServer, ToolSource
 from app.shareddomain.workflows.models import WorkflowDefinition, WorkflowRunDetail
 from tests.support import (
@@ -606,6 +607,10 @@ def exercise_workspace_analytics() -> None:
     """
     Exercise workspace analytics authorization, aggregation, date-range handling, and audit logging.
     """
+    period = resolve_analytics_period(date(2026, 8, 1), date(2026, 8, 8))
+    assert period.start_at == datetime(2026, 7, 31, 16, tzinfo=UTC)
+    assert period.end_at == datetime(2026, 8, 7, 16, tzinfo=UTC)
+
     with test_client() as client:
         admin_token, workspace_id = activate_admin(client)
         admin_me = client.get(
@@ -743,8 +748,8 @@ def exercise_workspace_analytics() -> None:
         }
         trend_by_date = {item["date"]: item for item in payload["trends"]}
         assert len(trend_by_date) == 7
-        assert trend_by_date["2026-08-05"] == {
-            "date": "2026-08-05",
+        assert trend_by_date["2026-08-06"] == {
+            "date": "2026-08-06",
             "runs": 1,
             "graph_builds": 0,
             "input_tokens": 10,
@@ -766,8 +771,8 @@ def exercise_workspace_analytics() -> None:
         assert len(payload["hourly_runs"]) == 24
         assert [item["hour"] for item in payload["hourly_runs"]] == list(range(24))
         hourly_by_hour = {item["hour"]: item["runs"] for item in payload["hourly_runs"]}
-        assert hourly_by_hour[0] == 3
-        assert hourly_by_hour[23] == 1
+        assert hourly_by_hour[8] == 3
+        assert hourly_by_hour[7] == 1
         assert sum(hourly_by_hour.values()) == 4
         assert {
             item["key"]: item["count"]
@@ -811,7 +816,7 @@ def exercise_workspace_analytics() -> None:
         ]
         assert payload["metadata"] == {
             "workspace_id": workspace_id,
-            "timezone": "UTC",
+            "timezone": "Asia/Shanghai",
             "from_date": "2026-08-01",
             "to_date": "2026-08-08",
             "previous_from_date": "2026-07-25",
@@ -823,7 +828,7 @@ def exercise_workspace_analytics() -> None:
         assert details == {
             "from_date": "2026-08-01",
             "to_date": "2026-08-08",
-            "timezone": "UTC",
+            "timezone": "Asia/Shanghai",
             "interval_days": 7,
         }
         assert "How do I deploy?" not in str(details)

@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
+
+from app.infrastructure.model_utils import APP_TIMEZONE_NAME
 
 
 class WorkspaceGovernanceResponse(BaseModel):
@@ -10,7 +12,7 @@ class WorkspaceGovernanceResponse(BaseModel):
     monthly_token_limit: int | None
     alert_threshold_percent: int
     retention_days: int | None
-    timezone: str
+    timezone: Literal["Asia/Shanghai"]
     updated_at: datetime
 
 
@@ -19,20 +21,7 @@ class WorkspaceGovernanceUpdateRequest(BaseModel):
     monthly_token_limit: int | None = Field(default=None, ge=1, le=10_000_000_000)
     alert_threshold_percent: int = Field(default=80, ge=1, le=100)
     retention_days: int | None = Field(default=None, ge=1, le=3650)
-    timezone: str = Field(default="UTC", min_length=1, max_length=64)
-
-    @field_validator("timezone")
-    @classmethod
-    def normalize_timezone(cls, value: str) -> str:
-        """Normalize a timezone value by removing surrounding whitespace and defaulting blank values to `"UTC"`.
-        
-        Parameters:
-            value (str): The timezone value to normalize.
-        
-        Returns:
-            str: The trimmed timezone value, or `"UTC"` when the value is blank.
-        """
-        return value.strip() or "UTC"
+    timezone: Literal["Asia/Shanghai"] = APP_TIMEZONE_NAME
 
 
 class WorkspaceInventoryResponse(BaseModel):

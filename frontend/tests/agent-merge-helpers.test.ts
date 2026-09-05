@@ -197,6 +197,24 @@ describe("mergeInitialAgentRun", () => {
     expect(merged.result).toBe("Live answer")
   })
 
+  test("keeps pending attachments when the first live snapshot omits them", () => {
+    const attachments = [
+      {
+        filename: "policy.docx",
+        content_type:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size_bytes: 128,
+        category: "document" as const,
+      },
+    ]
+    const merged = mergeInitialAgentRun(
+      { ...pending, attachments },
+      makeRun({ id: "run-1", status: "running", attachments: undefined })
+    )
+
+    expect(merged.attachments).toEqual(attachments)
+  })
+
   test("drops live cursors for terminal statuses", () => {
     for (const status of ["succeeded", "failed", "cancelled"]) {
       const merged = mergeInitialAgentRun(
@@ -265,6 +283,35 @@ describe("mergeAgentRunStreamEvent", () => {
     } as AgentRunStreamEvent, "pending-1")
     expect(merged.map((run) => run.id)).toEqual(["run-1"])
     expect(merged[0].result).toBe("ok")
+  })
+
+  test("marks a queued run as running when reasoning starts", () => {
+    const placeholder = makeRun({
+      id: "pending-1",
+      status: "running",
+      result: "",
+      events: [thoughtEvent()],
+    })
+    const queued = mergeAgentRunStreamEvent(
+      [placeholder],
+      "run-1",
+      {
+        type: "run",
+        sequence: 0,
+        run: makeRun({ id: "run-1", status: "queued", result: "", events: [] }),
+      } as AgentRunStreamEvent,
+      "pending-1"
+    )
+
+    const streamed = mergeAgentRunStreamEvent(queued, "run-1", {
+      type: "reasoning_delta",
+      sequence: 1,
+      turn: 1,
+      delta: "Thinking…",
+    } as AgentRunStreamEvent)
+
+    expect(streamed[0].status).toBe("running")
+    expect(streamed[0].events[0].reasoning).toBe("Thinking…")
   })
 
   test("process events match by call id, by shape, or append", () => {
