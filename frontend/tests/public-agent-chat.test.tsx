@@ -478,7 +478,9 @@ describe("display helpers", () => {
   })
 
   test("formats datetimes for a locale", () => {
-    expect(formatDateTime("2026-08-10T00:00:00Z", "zh-CN")).toContain("2026")
+    expect(formatDateTime("2026-08-10T00:00:00Z", "zh-CN")).toContain(
+      "08:00:00"
+    )
   })
 
   test("translates the default workspace and team names", () => {
@@ -1484,7 +1486,7 @@ describe("PublicAgentChat", () => {
       },
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
 
     const link = await screen.findByRole("link", {
       name: "公司内部管理制度汇编.docx",
@@ -1582,6 +1584,12 @@ describe("PublicAgentChat", () => {
     }
 
     renderPage(<PublicAgentChat agentId="agent-1" />)
+
+    expect(await screen.findByText("开始新对话")).toBeTruthy()
+    expect(screen.queryByText("第一个问题")).toBeNull()
+    expect(window.location.search).toBe("")
+
+    fireEvent.click(screen.getByRole("button", { name: /第一个会话/ }))
 
     expect(await screen.findByRole("heading", { name: "历史回答" })).toBeTruthy()
     expect(screen.getByText("列表")).toBeTruthy()
@@ -1683,7 +1691,7 @@ describe("PublicAgentChat", () => {
       requests
     )
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
     await screen.findByText("开始新对话")
 
     sendMessage("什么是 NexaFlow？")
@@ -1870,7 +1878,7 @@ describe("PublicAgentChat", () => {
       createRun: () => jsonResponse({ detail: "创建失败" }, 500),
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
     await screen.findByText("历史内容")
 
     sendMessage("无法创建")
@@ -2152,7 +2160,7 @@ describe("PublicAgentChat", () => {
       streamResponses: [() => new Response("", { status: 403 })],
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
     expect(await screen.findByText("工具调用需要确认")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
@@ -2198,7 +2206,7 @@ describe("PublicAgentChat", () => {
       ],
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
     expect(await screen.findByText("工具调用需要确认")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
@@ -2239,7 +2247,7 @@ describe("PublicAgentChat", () => {
       ],
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
     expect(await screen.findByText("工具调用需要确认")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
@@ -2283,7 +2291,7 @@ describe("PublicAgentChat", () => {
       return jsonResponse({})
     }
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
     await screen.findByText("历史回答")
 
     const fileInput = document.querySelector('input[type="file"]')
@@ -2310,7 +2318,7 @@ describe("PublicAgentChat", () => {
       history: () => jsonResponse({ detail: "历史加载失败" }, 500),
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
 
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toContain("历史加载失败")
@@ -2337,7 +2345,7 @@ describe("PublicAgentChat", () => {
       toolCalls: () => jsonResponse({ detail: "boom" }, 500),
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
 
     // A failed tool-call fetch is silent: no approval card, no error banner.
     expect(await screen.findByText("你好")).toBeTruthy()
@@ -2484,7 +2492,7 @@ describe("PublicAgentChat", () => {
       configurable: true,
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
     await screen.findByText("可复制的回答")
 
     // Failure keeps the copy label.
@@ -2531,7 +2539,7 @@ describe("PublicAgentChat", () => {
       return jsonResponse({})
     }
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
     await screen.findByText("来自对话的记录")
 
     fireEvent.click(screen.getByLabelText("打开历史记录"))

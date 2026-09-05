@@ -1213,7 +1213,7 @@ describe("AgentsPage create flow", () => {
 })
 
 describe("AgentsPage detail view", () => {
-  test("switches Agent detail tabs without returning to the application list", async () => {
+  test("starts a new preview conversation each time settings is entered", async () => {
     const testWindow = window as typeof window & {
       happyDOM: { setURL: (url: string) => void }
     }
@@ -1229,8 +1229,25 @@ describe("AgentsPage detail view", () => {
           respond: () =>
             jsonResponse({ items: [], total: 0, offset: 0, limit: 20 }),
         },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([]),
+        },
       ],
     })
+
+    const settingsNavButton = screen
+      .getAllByRole("button", { name: "设置" })
+      .find((button) => Boolean(button.closest("nav")))
+    expect(settingsNavButton).toBeTruthy()
+    fireEvent.click(settingsNavButton!)
+    await screen.findByLabelText("向 Agent 提问")
+    const firstConversationId = new URLSearchParams(
+      window.location.search
+    ).get("conversation_id")
+    expect(firstConversationId).toBeTruthy()
 
     const logsNavButton = screen
       .getAllByRole("button", { name: "对话日志" })
@@ -1241,14 +1258,22 @@ describe("AgentsPage detail view", () => {
     expect(await screen.findByText("暂无对话日志")).toBeTruthy()
     expect(window.location.pathname).toBe("/app/apps/agent-1/logs")
     expect(screen.queryByRole("heading", { name: "应用" })).toBeNull()
+
+    fireEvent.click(settingsNavButton!)
+    await waitFor(() =>
+      expect(
+        new URLSearchParams(window.location.search).get("conversation_id")
+      ).not.toBe(firstConversationId)
+    )
+    expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
   })
 
-  test("stores the resolved conversation in the URL without leaving Agent detail", async () => {
+  test("starts a fresh conversation without restoring the latest run", async () => {
     const testWindow = window as typeof window & {
       happyDOM: { setURL: (url: string) => void }
     }
     testWindow.happyDOM.setURL(
-      "https://nexaflow.example/app/apps/agent-1/settings"
+      "https://nexaflow.example/app/apps/agent-1/settings?conversation_id=conversation-1"
     )
     await renderDetail({
       initialView: "settings",
@@ -1257,7 +1282,7 @@ describe("AgentsPage detail view", () => {
           method: "GET",
           pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
           exact: true,
-          respond: () => jsonResponse([]),
+          respond: () => jsonResponse([makeRun()]),
         },
       ],
     })
@@ -1267,6 +1292,11 @@ describe("AgentsPage detail view", () => {
         new URLSearchParams(window.location.search).get("conversation_id")
       ).toBeTruthy()
     )
+    expect(
+      new URLSearchParams(window.location.search).get("conversation_id")
+    ).not.toBe("conversation-1")
+    expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    expect(screen.queryByText("Here is the summary.")).toBeNull()
     expect(window.location.pathname).toBe("/app/apps/agent-1/settings")
     expect(screen.queryByRole("heading", { name: "应用" })).toBeNull()
   })
@@ -2635,6 +2665,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -2715,6 +2746,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -2772,13 +2804,14 @@ describe("AgentsPage run flows", () => {
       happyDOM: { setURL: (url: string) => void }
     }
     testWindow.happyDOM.setURL(
-      "https://nexaflow.example/app/apps/agent-1/settings"
+      "https://nexaflow.example/app/apps/agent-1/settings?conversation_id=conversation-1"
     )
     const agent = makeAgent()
     const succeededRun = makeRun({ status: "succeeded", result: "Old answer" })
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3032,6 +3065,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3077,6 +3111,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3119,6 +3154,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3187,6 +3223,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3256,6 +3293,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3291,6 +3329,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3336,6 +3375,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3397,6 +3437,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",
@@ -3443,6 +3484,7 @@ describe("AgentsPage run flows", () => {
     await renderDetail({
       agent,
       initialView: "settings",
+      initialConversationId: "conversation-1",
       extraRoutes: [
         {
           method: "GET",

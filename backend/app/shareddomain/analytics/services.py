@@ -14,7 +14,7 @@ from app.entities.analytics import (
 )
 from app.entities.user import User
 from app.entities.workspace import Workspace
-from app.infrastructure.model_utils import utc_now
+from app.infrastructure.model_utils import APP_TIMEZONE, APP_TIMEZONE_NAME, utc_now
 from app.infrastructure.repositories import analytics as analytics_repository
 from app.schemas.analytics import (
     AnalyticsCountComparison,
@@ -38,7 +38,7 @@ from app.schemas.analytics import (
 from app.shareddomain.agents.models import agent_run_display_status
 from app.shareddomain.audit.services import record_audit_log
 
-ANALYTICS_TIMEZONE = "UTC"
+ANALYTICS_TIMEZONE = APP_TIMEZONE_NAME
 DEFAULT_ANALYTICS_DAYS = 30
 MAX_ANALYTICS_DAYS = 366
 FREQUENT_QUESTION_MIN_COUNT = 3
@@ -56,15 +56,21 @@ class AnalyticsPeriod:
 
     @property
     def start_at(self) -> datetime:
-        return datetime.combine(self.from_date, time.min, tzinfo=UTC)
+        return datetime.combine(
+            self.from_date, time.min, tzinfo=APP_TIMEZONE
+        ).astimezone(UTC)
 
     @property
     def end_at(self) -> datetime:
-        return datetime.combine(self.to_date, time.min, tzinfo=UTC)
+        return datetime.combine(
+            self.to_date, time.min, tzinfo=APP_TIMEZONE
+        ).astimezone(UTC)
 
     @property
     def previous_start_at(self) -> datetime:
-        return datetime.combine(self.previous_from_date, time.min, tzinfo=UTC)
+        return datetime.combine(
+            self.previous_from_date, time.min, tzinfo=APP_TIMEZONE
+        ).astimezone(UTC)
 
 
 @dataclass(frozen=True)
@@ -98,7 +104,9 @@ def resolve_analytics_period(
             "Analytics from and to dates must be provided together.",
         )
     if from_date is None or to_date is None:
-        current_to = (today or utc_now().date()) + timedelta(days=1)
+        current_to = (
+            today or utc_now().astimezone(APP_TIMEZONE).date()
+        ) + timedelta(days=1)
         current_from = current_to - timedelta(days=DEFAULT_ANALYTICS_DAYS)
     else:
         current_from = from_date
@@ -132,6 +140,10 @@ def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _analytics_time(value: datetime) -> datetime:
+    return _utc(value).astimezone(APP_TIMEZONE)
 
 
 def _number(value: Any) -> int:
@@ -262,11 +274,11 @@ def _build_trends(
     Build daily run and token usage trends for an analytics period.
     
     Parameters:
-    	runs (list[WorkspaceAnalyticsRun]): Runs to aggregate by their UTC creation date.
-    	period (AnalyticsPeriod): Date range for the trend.
-    
+        runs (list[WorkspaceAnalyticsRun]): Runs to aggregate by their local creation date.
+        period (AnalyticsPeriod): Date range for the trend.
+
     Returns:
-    	list[WorkspaceAnalyticsTrendPoint]: One trend point per day in the period, including run count and token totals.
+        list[WorkspaceAnalyticsTrendPoint]: One trend point per day in the period, including run count and token totals.
     """
     days = (period.to_date - period.from_date).days
     values = {
@@ -284,7 +296,7 @@ def _build_trends(
     for run in runs:
         if run.created_at is None:
             continue
-        day = _utc(run.created_at).date()
+        day = _analytics_time(run.created_at).date()
         if day not in values:
             continue
         run_input, run_output, run_total, _ = _run_usage(run)
@@ -296,7 +308,7 @@ def _build_trends(
     for build in graph_builds:
         if build.created_at is None:
             continue
-        day = _utc(build.created_at).date()
+        day = _analytics_time(build.created_at).date()
         if day not in values:
             continue
         graph_tokens, _ = _graph_build_usage(build)
@@ -312,18 +324,18 @@ def _build_trends(
 def _build_hourly_runs(
     runs: list[WorkspaceAnalyticsRun],
 ) -> list[WorkspaceAnalyticsHourlyPoint]:
-    """Count runs by UTC hour across a full 24-hour day.
+    """Count runs by local hour across a full 24-hour day.
     
     Parameters:
-    	runs (list[WorkspaceAnalyticsRun]): Runs to include in the hourly counts.
-    
+        runs (list[WorkspaceAnalyticsRun]): Runs to include in the hourly counts.
+
     Returns:
-    	list[WorkspaceAnalyticsHourlyPoint]: One point for each UTC hour, including hours with no runs.
+        list[WorkspaceAnalyticsHourlyPoint]: One point for each local hour, including hours with no runs.
     """
     values = [0] * 24
     for run in runs:
         if run.created_at is not None:
-            values[_utc(run.created_at).hour] += 1
+            values[_analytics_time(run.created_at).hour] += 1
     return [
         WorkspaceAnalyticsHourlyPoint(hour=hour, runs=count)
         for hour, count in enumerate(values)
@@ -381,7 +393,7 @@ def _build_rankings(
             and run.requested_by_user_id
             and run.created_at is not None
         ):
-            day = _utc(run.created_at).date()
+            day = _analytics_time(run.created_at).date()
             for membership in teams_by_user.get(run.requested_by_user_id, []):
                 team = team_usage.setdefault(
                     membership.team_id,

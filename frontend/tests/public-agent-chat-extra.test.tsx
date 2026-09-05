@@ -606,7 +606,9 @@ describe("PublicAgentChat timestamps", () => {
       history: { items: [historyRun] },
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await screen.findByText("回答内容")
     const article = articleOf("回答内容")
     const timestamps = article.querySelectorAll("time")
@@ -650,7 +652,9 @@ describe("PublicAgentChat regeneration", () => {
       },
       requests
     )
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
@@ -708,7 +712,9 @@ describe("PublicAgentChat regeneration", () => {
           ]),
       ],
     })
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
@@ -734,7 +740,9 @@ describe("PublicAgentChat regeneration", () => {
       },
       streamResponses: [() => jsonResponse({ detail: "stream boom" }, 404)],
     })
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
@@ -769,7 +777,9 @@ describe("PublicAgentChat regeneration", () => {
       }
       return original(url, init)
     }
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
@@ -811,7 +821,9 @@ describe("PublicAgentChat regeneration", () => {
       }
       return original(url, init)
     }
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() => expect(screen.getByText("First answer")).toBeTruthy())
 
     fireEvent.click(
@@ -871,7 +883,9 @@ describe("PublicAgentChat regeneration", () => {
       }
       return original(url, init)
     }
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() =>
       expect(screen.getByText("工具调用需要确认")).toBeTruthy()
     )
@@ -905,7 +919,9 @@ describe("PublicAgentChat feedback", () => {
       },
       requests
     )
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
@@ -948,7 +964,9 @@ describe("PublicAgentChat feedback", () => {
       }
       return original(url, init)
     }
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
@@ -982,7 +1000,9 @@ describe("PublicAgentChat feedback", () => {
       }
       return original(url, init)
     }
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
@@ -1022,7 +1042,9 @@ describe("PublicAgentChat feedback", () => {
       }
       return original(url, init)
     }
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() => expect(screen.getByText("First answer")).toBeTruthy())
 
     fireEvent.click(
@@ -1088,7 +1110,9 @@ describe("PublicAgentChat feedback", () => {
       }
       return original(url, init)
     }
-    renderPage(<PublicAgentChat agentId="agent-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await waitFor(() => expect(screen.getByText("First answer")).toBeTruthy())
 
     fireEvent.click(

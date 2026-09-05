@@ -36,7 +36,7 @@ from app.infrastructure.agent_rate_limit import (
     enforce_external_agent_rate_limit,
 )
 from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
+from app.infrastructure.model_utils import APP_TIMEZONE, utc_now
 from app.infrastructure.repositories import agent as agent_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.validation import normalize_name
@@ -1404,9 +1404,11 @@ async def get_agent_monitoring(
         )
     agent = await get_agent(db, workspace_id, agent_id)
     require_agent_edit(agent, actor, workspace_role)
-    today = utc_now().date()
+    today = utc_now().astimezone(APP_TIMEZONE).date()
     first_day = today - timedelta(days=days - 1)
-    since = datetime.combine(first_day, time.min, tzinfo=UTC)
+    since = datetime.combine(
+        first_day, time.min, tzinfo=APP_TIMEZONE
+    ).astimezone(UTC)
     rows = await agent_repository.list_agent_monitoring_rows(
         db, workspace_id, agent_id, since
     )
@@ -1425,7 +1427,10 @@ async def get_agent_monitoring(
     all_conversations: set[tuple[str, str, str]] = set()
     succeeded = failed = total_tokens = 0
     for row in rows:
-        day = row.created_at.date()
+        created_at = row.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        day = created_at.astimezone(APP_TIMEZONE).date()
         if day not in daily_values:
             continue
         user_key = (row.access_source, row.consumer_id)

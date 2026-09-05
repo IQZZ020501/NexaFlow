@@ -26,6 +26,7 @@ import {
 import { useLanguage } from "@/contexts/language-provider"
 import type { TFunction, TranslationKey } from "@/i18n"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
+import { APP_TIME_ZONE } from "@/lib/display"
 import {
   distributionTotal,
 } from "@/components/system/workspace-analytics-metrics"
@@ -91,7 +92,7 @@ function formatPercent(value: number | null, locale: string) {
 }
 
 /**
- * Formats a date-time value for the specified locale using UTC.
+ * Formats a date-time value for the specified locale.
  *
  * @param value - The date-time value to format
  * @param locale - The locale used for date and time formatting
@@ -101,7 +102,7 @@ function formatDateTime(value: string, locale: string) {
   return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "UTC",
+    timeZone: APP_TIME_ZONE,
   }).format(new Date(value))
 }
 
@@ -519,8 +520,8 @@ export function FrequentQuestionsPanel({
   locale: string
 }) {
   const { t } = useLanguage()
-  const [expanded, setExpanded] = React.useState(false)
-  const visibleItems = expanded ? items.slice(0, 20) : items.slice(0, 5)
+  const [visibleCount, setVisibleCount] = React.useState(10)
+  const visibleItems = items.slice(0, visibleCount)
 
   return (
     <Card className="min-w-0 gap-4 py-5 shadow-none">
@@ -531,7 +532,20 @@ export function FrequentQuestionsPanel({
         </CardTitle>
         <CardDescription>{t("仅展示当前工作空间内出现至少 3 次的问题")}</CardDescription>
       </CardHeader>
-      <CardContent className="min-w-0 px-5">
+      <CardContent
+        role="region"
+        aria-label={t("高频问题")}
+        className="max-h-[37.5rem] min-w-0 overflow-y-auto px-5"
+        onScroll={(event) => {
+          const target = event.currentTarget
+          if (
+            visibleCount < items.length &&
+            target.scrollTop + target.clientHeight >= target.scrollHeight - 24
+          ) {
+            setVisibleCount((count) => Math.min(count + 10, items.length))
+          }
+        }}
+      >
         {visibleItems.length ? (
           <div className="space-y-2">
             {visibleItems.map((item) => (
@@ -548,16 +562,6 @@ export function FrequentQuestionsPanel({
                 </div>
               </div>
             ))}
-            {items.length > 5 ? (
-              <Button
-                variant="outline"
-                size="sm"
-                aria-expanded={expanded}
-                onClick={() => setExpanded((value) => !value)}
-              >
-                {expanded ? t("收起") : t("展开全部")}
-              </Button>
-            ) : null}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">{t("暂无达到阈值的高频问题")}</p>

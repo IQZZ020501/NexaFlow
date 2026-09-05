@@ -6821,8 +6821,39 @@ def test_mcp_server_create_request_transport_matrix() -> None:
         raise AssertionError(f"Invalid MCP server payload accepted: {payload}")
 
 
+def test_workspace_daily_quota_uses_shanghai_day_boundary() -> None:
+    from datetime import UTC, datetime
+
+    from app.application.governance import enforce_workspace_run_quota
+
+    db = object()
+    count_runs = AsyncMock(return_value=0)
+    with (
+        patch(
+            "app.application.governance.utc_now",
+            return_value=datetime(2026, 9, 5, 16, 30, tzinfo=UTC),
+        ),
+        patch(
+            "app.application.governance.workspace_governance_repository.get",
+            new=AsyncMock(return_value=SimpleNamespace(daily_run_limit=10)),
+        ),
+        patch(
+            "app.application.governance.governance_repository.daily_run_count",
+            new=count_runs,
+        ),
+    ):
+        asyncio.run(enforce_workspace_run_quota(db, "workspace-1"))
+
+    count_runs.assert_awaited_once_with(
+        db,
+        "workspace-1",
+        datetime(2026, 9, 5, 16, tzinfo=UTC),
+    )
+
+
 def main() -> None:
     """Run the complete pure-unit test suite and print a success marker when all tests pass."""
+    test_workspace_daily_quota_uses_shanghai_day_boundary()
     test_effective_permission_matrix()
     test_validate_permission_rejects_unknown()
     test_graph_schema_rejects_unknown_relation_endpoint()

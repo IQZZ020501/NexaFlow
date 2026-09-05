@@ -1042,6 +1042,18 @@ export function AgentsPage({
     }
     let isCurrent = true
     const requestedConversationId = activeConversationIdRef.current
+    if (!requestedConversationId) {
+      const conversationId = crypto.randomUUID()
+      activeConversationIdRef.current = conversationId
+      setRuns([])
+      setIsRunsLoading(false)
+      window.history.replaceState(
+        null,
+        "",
+        appViewPath(selectedAgentId, "agent", "settings", conversationId)
+      )
+      return
+    }
     let expectedConversationId = requestedConversationId
     const observers: AbortController[] = []
     setIsRunsLoading(true)
@@ -1061,10 +1073,7 @@ export function AgentsPage({
         ) {
           return
         }
-        const resolvedConversationId =
-          requestedConversationId ??
-          nextRuns[0]?.conversation_id ??
-          crypto.randomUUID()
+        const resolvedConversationId = requestedConversationId
         activeConversationIdRef.current = resolvedConversationId
         expectedConversationId = resolvedConversationId
         const visibleRuns = latestRunVersions(
@@ -1073,18 +1082,6 @@ export function AgentsPage({
           )
         )
         setRuns(visibleRuns)
-        if (!requestedConversationId) {
-          window.history.replaceState(
-            null,
-            "",
-            appViewPath(
-              selectedAgentId,
-              "agent",
-              "settings",
-              resolvedConversationId
-            )
-          )
-        }
         for (const run of visibleRuns) {
           if (run.status === "awaiting_approval") {
             void loadRunToolCalls(
@@ -1317,6 +1314,15 @@ export function AgentsPage({
 
   function handleViewChange(view: AgentDetailView) {
     if (!selectedAgentId || !selectedAgent) return
+    if (
+      selectedAgent.app_type === "agent" &&
+      view === "settings" &&
+      activeView !== "settings"
+    ) {
+      setActiveView(view)
+      resetPreviewConversation("replaceState")
+      return
+    }
     const path = appViewPath(
       selectedAgentId,
       selectedAgent.app_type,
@@ -1801,7 +1807,9 @@ export function AgentsPage({
     }
   }
 
-  function handleNewConversation() {
+  function resetPreviewConversation(
+    historyMethod: "pushState" | "replaceState"
+  ) {
     if (!selectedAgentId) return
     const conversationId = crypto.randomUUID()
     activeConversationIdRef.current = conversationId
@@ -1817,11 +1825,15 @@ export function AgentsPage({
     setRegeneratingRunId(null)
     setFeedbackPendingRunId(null)
     setResolvingCallId(null)
-    window.history.pushState(
+    window.history[historyMethod](
       null,
       "",
       appViewPath(selectedAgentId, "agent", "settings", conversationId)
     )
+  }
+
+  function handleNewConversation() {
+    resetPreviewConversation("pushState")
   }
 
   async function handleToolCallDecision(

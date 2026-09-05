@@ -978,7 +978,7 @@ def build_workspace_system_catalog(
     definition_hash = canonical_definition_hash(
         {
             "name": "current_time",
-            "description": "Return the current UTC time.",
+            "description": "Return the current time.",
             "input_schema": input_schema,
             "output_schema": output_schema,
             "execution_spec": execution_spec,
@@ -1023,7 +1023,7 @@ def build_workspace_system_catalog(
             tool_id=tool_id,
             revision=1,
             display_name="Current time",
-            description="Return the current UTC time.",
+            description="Return the current time.",
             input_schema=input_schema,
             output_schema=output_schema,
             execution_spec=execution_spec,

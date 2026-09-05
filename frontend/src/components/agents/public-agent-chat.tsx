@@ -1066,20 +1066,10 @@ export function PublicAgentChat({
         if (!current) return
         setProfile(nextProfile)
         setConversations(nextConversations.items)
-        const nextConversationId =
-          initialConversationIdRef.current ??
-          nextConversations.items[0]?.conversation_id ??
-          null
+        const nextConversationId = initialConversationIdRef.current
         setActiveConversationId(nextConversationId)
         setIsRunsLoading(Boolean(nextConversationId))
         setSessionReady(true)
-        if (nextConversationId && !initialConversationIdRef.current) {
-          window.history.replaceState(
-            null,
-            "",
-            `/chat/${agentId}?conversation_id=${encodeURIComponent(nextConversationId)}`
-          )
-        }
       } catch {
         if (current) {
           setFatalError(tRef.current("此 Agent 未发布或不可访问。"))

@@ -2,6 +2,8 @@ import { type MeResponse } from "@/lib/api/auth"
 import { type RegisteredModel } from "@/lib/api/llm"
 import { type TFunction } from "@/i18n"
 
+export const APP_TIME_ZONE = "Asia/Shanghai"
+
 /**
  * Gets the registered model's name.
  *
@@ -39,6 +41,7 @@ export function formatDateTime(value: string, locale: string) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
+    timeZone: APP_TIME_ZONE,
   }).format(new Date(value))
 }
 

@@ -48,7 +48,11 @@ import {
   type WorkspaceAnalytics,
 } from "@/lib/api/analytics"
 import type { Workspace } from "@/lib/api/system"
-import { displayWorkspaceName, getMembershipRole } from "@/lib/display"
+import {
+  APP_TIME_ZONE,
+  displayWorkspaceName,
+  getMembershipRole,
+} from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { canAccessWorkspaceAnalytics } from "@/components/system/system-utils"
 import {
@@ -74,47 +78,52 @@ const PRESET_OPTIONS: Array<{
 ]
 
 /**
- * Formats a date as a UTC calendar date.
+ * Formats a date as a calendar date.
  *
  * @param value - The date to format
  * @returns The date in `YYYY-MM-DD` format
  */
-function utcDate(value: Date) {
+function calendarDate(value: Date) {
   return value.toISOString().slice(0, 10)
 }
 
 /**
- * Shifts a UTC calendar date by the specified number of days.
+ * Shifts a calendar date by the specified number of days.
  *
  * @param value - The date to shift in `YYYY-MM-DD` format
  * @param days - The number of days to add; negative values shift the date earlier
  * @returns The shifted date in `YYYY-MM-DD` format
  */
-function shiftUtcDate(value: string, days: number) {
+function shiftCalendarDate(value: string, days: number) {
   const date = new Date(`${value}T00:00:00Z`)
   date.setUTCDate(date.getUTCDate() + days)
-  return utcDate(date)
+  return calendarDate(date)
 }
 
 /**
- * Creates a preset analytics date range ending on the day after the current UTC date.
+ * Creates a preset analytics date range ending on the next calendar day.
  *
  * @param days - The number of preceding days to include.
- * @param now - The date used to determine the current UTC day.
- * @returns An analytics range with UTC date strings for the start and exclusive end dates.
+ * @param now - The date used to determine the current day.
+ * @returns An analytics range with date strings for the start and exclusive end dates.
  */
 export function getPresetAnalyticsRange(
   days: 7 | 30 | 90,
   now = new Date()
 ): AnalyticsRange {
-  const today = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en", {
+      timeZone: APP_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(now)
+      .map(({ type, value }) => [type, value])
   )
-  const to = new Date(today)
-  to.setUTCDate(to.getUTCDate() + 1)
-  const from = new Date(to)
-  from.setUTCDate(from.getUTCDate() - days)
-  return { from: utcDate(from), to: utcDate(to) }
+  const today = `${parts.year}-${parts.month}-${parts.day}`
+  const to = shiftCalendarDate(today, 1)
+  return { from: shiftCalendarDate(to, -days), to }
 }
 
 /**
@@ -370,7 +379,7 @@ export function WorkspaceAnalyticsPage() {
     getPresetAnalyticsRange(30)
   )
   const [customFrom, setCustomFrom] = React.useState(range.from)
-  const [customTo, setCustomTo] = React.useState(() => shiftUtcDate(range.to, -1))
+  const [customTo, setCustomTo] = React.useState(() => shiftCalendarDate(range.to, -1))
   const [data, setData] = React.useState<WorkspaceAnalytics | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(false)
@@ -439,14 +448,14 @@ export function WorkspaceAnalyticsPage() {
     setPreset(days)
     setRange(nextRange)
     setCustomFrom(nextRange.from)
-    setCustomTo(shiftUtcDate(nextRange.to, -1))
+    setCustomTo(shiftCalendarDate(nextRange.to, -1))
   }
   const customRangeValid = Boolean(
     customFrom && customTo && customFrom <= customTo
   )
   const applyCustomRange = () => {
     if (!customRangeValid) return
-    setRange({ from: customFrom, to: shiftUtcDate(customTo, 1) })
+    setRange({ from: customFrom, to: shiftCalendarDate(customTo, 1) })
   }
   const presetLabel =
     preset === "custom"
@@ -612,12 +621,6 @@ export function WorkspaceAnalyticsPage() {
 
           <WorkspaceAnalyticsOverview data={data} locale={locale} />
 
-          <p className="text-xs text-muted-foreground">
-            {t("统计时区为 {timezone}，结束日期不计入统计区间。", {
-              timezone: data.metadata.timezone,
-            })}
-          </p>
-
           {data.summary.runs.value === 0 && data.summary.tokens.graph_total === 0 ? (
             <Card className="border-dashed py-14 shadow-none">
               <CardContent className="flex flex-col items-center gap-2 text-center text-sm text-muted-foreground">
@@ -635,7 +638,7 @@ export function WorkspaceAnalyticsPage() {
               <div className="grid min-w-0 gap-4 xl:grid-cols-2">
                 <TrendChart
                   title={t("每日运行趋势")}
-                  description={t("按 UTC 自然日统计顶层运行")}
+                  description={t("按自然日统计顶层运行")}
                   data={data.trends}
                   dataKey="runs"
                   locale={locale}
@@ -656,9 +659,10 @@ export function WorkspaceAnalyticsPage() {
                 locale={locale}
               />
 
-              <div className="grid min-w-0 gap-4 xl:grid-cols-[3fr_2fr]">
+              <div className="grid min-w-0 gap-4 xl:grid-cols-2">
                 <AnalyticsRankingPanel data={data.rankings} locale={locale} />
                 <FrequentQuestionsPanel
+                  key={`${workspaceId}:${range.from}:${range.to}`}
                   items={data.frequent_questions}
                   locale={locale}
                 />

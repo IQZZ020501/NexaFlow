@@ -71,25 +71,22 @@ function Comparison({
 }
 
 /**
- * Renders a metric card with an icon, label, value, and optional supporting content.
+ * Renders a metric card with an icon, label, value, and optional period comparison.
  *
  * @param icon - Icon component displayed beside the metric
  * @param label - Metric label
  * @param value - Formatted metric value
- * @param detail - Supporting content displayed beneath the value.
- * @param comparison - Period-over-period change displayed when `detail` is not provided.
+ * @param comparison - Period-over-period change displayed beneath the value.
  */
 export function CoreMetricCard({
   icon: Icon,
   label,
   value,
-  detail,
   comparison,
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
   value: string
-  detail?: React.ReactNode
   comparison?: number | null
 }) {
   return (
@@ -102,10 +99,11 @@ export function CoreMetricCard({
           </span>
         </div>
         <strong className="text-2xl font-semibold tracking-tight">{value}</strong>
-        <div className="mt-auto text-xs text-muted-foreground">
-          {detail ??
-            (comparison !== undefined ? <Comparison value={comparison} /> : null)}
-        </div>
+        {comparison !== undefined ? (
+          <div className="mt-auto text-xs text-muted-foreground">
+            <Comparison value={comparison} />
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )
@@ -263,46 +261,6 @@ export function WorkspaceAnalyticsOverview({
           icon={ActivityIcon}
           label={t("Token 消耗")}
           value={formatNumber(data.summary.tokens.total, locale)}
-          detail={
-            <div className="space-y-1">
-              <p>
-                {t("输入 {input} / 输出 {output}", {
-                  input: formatNumber(data.summary.tokens.input, locale),
-                  output: formatNumber(data.summary.tokens.output, locale),
-                })}
-              </p>
-              <p>
-                {t("应用运行 {value}", {
-                  value: formatNumber(
-                    data.summary.tokens.application_total,
-                    locale
-                  ),
-                })}
-              </p>
-              <p>
-                {t("知识整理 {value}", {
-                  value: formatNumber(data.summary.tokens.graph_total, locale),
-                })}
-              </p>
-              <p>
-                <Comparison value={data.summary.tokens.change_percent} />
-              </p>
-              {data.summary.tokens.unreported_runs ? (
-                <p className="text-amber-600 dark:text-amber-400">
-                  {t("{value} 次运行的用量未完整上报", {
-                    value: data.summary.tokens.unreported_runs,
-                  })}
-                </p>
-              ) : null}
-              {data.summary.tokens.unreported_graph_builds ? (
-                <p className="text-amber-600 dark:text-amber-400">
-                  {t("{value} 次知识整理使用估算 Token", {
-                    value: data.summary.tokens.unreported_graph_builds,
-                  })}
-                </p>
-              ) : null}
-            </div>
-          }
         />
         <CoreMetricCard
           icon={CheckCircle2Icon}

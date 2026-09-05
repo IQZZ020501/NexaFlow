@@ -86,6 +86,7 @@ import {
 } from "@/lib/api/workflows"
 import { workflowSpeechText } from "@/lib/browser-tts"
 import { copyText } from "@/lib/clipboard"
+import { APP_TIME_ZONE } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import {
@@ -1557,7 +1558,9 @@ export function WorkflowDetailWorkspace({
                       })}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {new Date(version.created_at).toLocaleString()} ·{" "}
+                      {new Date(version.created_at).toLocaleString(undefined, {
+                        timeZone: APP_TIME_ZONE,
+                      })} ·{" "}
                       {version.graph_hash.slice(0, 12)}
                     </p>
                   </div>

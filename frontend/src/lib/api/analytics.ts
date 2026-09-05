@@ -81,7 +81,7 @@ export type WorkspaceAnalytics = {
   }>
   metadata: {
     workspace_id: string
-    timezone: "UTC"
+    timezone: "Asia/Shanghai"
     from_date: string
     to_date: string
     previous_from_date: string

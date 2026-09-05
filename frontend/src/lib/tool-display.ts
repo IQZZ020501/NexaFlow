@@ -168,7 +168,7 @@ export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
   if (tool.function_name === "inline_python") {
     return t("在工作流沙箱中运行 Python 代码。")
   }
-  if (tool.function_name === "current_time") return t("返回当前 UTC 时间。")
+  if (tool.function_name === "current_time") return t("返回当前时间。")
   if (tool.function_name === "create_artifact") {
     return t(
       "根据文件名和内容创建可下载文件；文本文件直接保存，复杂格式由平台生成。"

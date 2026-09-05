@@ -65,7 +65,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { displayWorkspaceName, formatDateTime } from "@/lib/display"
+import { APP_TIME_ZONE, displayWorkspaceName, formatDateTime } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { copyText } from "@/lib/clipboard"
 import {
@@ -527,7 +527,7 @@ function GovernancePanel() {
   const [confirmAction, confirmDialog] = useConfirmDialog()
   const [inventory, setInventory] = React.useState<WorkspaceInventory | null>(null)
   const [invitations, setInvitations] = React.useState<WorkspaceInvitation[]>([])
-  const [form, setForm] = React.useState({ daily: "", monthly: "", threshold: "80", retention: "", timezone: "UTC" })
+  const [form, setForm] = React.useState({ daily: "", monthly: "", threshold: "80", retention: "" })
   const [invite, setInvite] = React.useState<{
     kind: WorkspaceInvitationKind
     username: string
@@ -548,7 +548,7 @@ function GovernancePanel() {
         listWorkspaceInvitations(session.token, selectedWorkspaceId),
       ])
       setInventory(nextInventory); setInvitations(nextInvitations)
-      setForm({ daily: nextGovernance.daily_run_limit?.toString() ?? "", monthly: nextGovernance.monthly_token_limit?.toString() ?? "", threshold: nextGovernance.alert_threshold_percent.toString(), retention: nextGovernance.retention_days?.toString() ?? "", timezone: nextGovernance.timezone })
+      setForm({ daily: nextGovernance.daily_run_limit?.toString() ?? "", monthly: nextGovernance.monthly_token_limit?.toString() ?? "", threshold: nextGovernance.alert_threshold_percent.toString(), retention: nextGovernance.retention_days?.toString() ?? "" })
     } catch (error) { reportError(error) } finally { setLoading(false) }
   }, [reportError, selectedWorkspaceId, session.token])
 
@@ -560,7 +560,7 @@ function GovernancePanel() {
   async function saveGovernance(event: React.FormEvent) {
     event.preventDefault(); if (!session.token || !selectedWorkspaceId) return
     try {
-      await updateWorkspaceGovernance(session.token, selectedWorkspaceId, { daily_run_limit: form.daily ? Number(form.daily) : null, monthly_token_limit: form.monthly ? Number(form.monthly) : null, alert_threshold_percent: Number(form.threshold), retention_days: form.retention ? Number(form.retention) : null, timezone: form.timezone })
+      await updateWorkspaceGovernance(session.token, selectedWorkspaceId, { daily_run_limit: form.daily ? Number(form.daily) : null, monthly_token_limit: form.monthly ? Number(form.monthly) : null, alert_threshold_percent: Number(form.threshold), retention_days: form.retention ? Number(form.retention) : null, timezone: APP_TIME_ZONE })
       session.notify("success", t("策略已保存"))
     } catch (error) { reportError(error) }
   }
@@ -632,7 +632,7 @@ function GovernancePanel() {
     {confirmDialog}
     <Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><ShieldCheckIcon className="size-4" />{t("工作空间治理")}</CardTitle><CardDescription>{t("系统管理员可治理全部工作空间，工作空间管理员可治理本空间团队与策略")}</CardDescription></div><div className="flex items-center gap-2"><label className="text-sm text-muted-foreground">{t("工作空间")}</label><FilterDropdown className="h-9 w-56" value={selectedWorkspaceId} onChange={session.selectWorkspace} ariaLabel={t("选择工作空间")} options={manageableWorkspaces.map((workspace) => ({ value: workspace.id, label: displayWorkspaceName(workspace, t) }))} /><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{cards.map(([label, value]) => <div key={label} className="rounded-lg border bg-muted/20 p-3"><div className="text-xs text-muted-foreground">{t(label as never)}</div><div className="mt-1 text-2xl font-semibold">{value}</div></div>)}</CardContent></Card>
     <div className="grid gap-4 xl:grid-cols-2">
-      <Card><CardHeader><CardTitle>{t("配额策略")}</CardTitle><CardDescription>{t("先限制运行规模，再根据用量告警调整")}</CardDescription></CardHeader><CardContent><form className="grid gap-3" onSubmit={saveGovernance}><Field label={t("每日运行上限")} value={form.daily} onChange={(value) => setForm((current) => ({ ...current, daily: value }))} placeholder={t("不限制")} type="number" /><Field label={t("月度 Token 上限")} value={form.monthly} onChange={(value) => setForm((current) => ({ ...current, monthly: value }))} placeholder={t("不限制")} type="number" /><Field label={t("告警阈值（百分比）")} value={form.threshold} onChange={(value) => setForm((current) => ({ ...current, threshold: value }))} type="number" /><Field label={t("数据保留天数")} value={form.retention} onChange={(value) => setForm((current) => ({ ...current, retention: value }))} placeholder={t("不限制")} type="number" /><Field label={t("时区")} value={form.timezone} onChange={(value) => setForm((current) => ({ ...current, timezone: value }))} /><div className="flex justify-end"><Button type="submit"><ClipboardIcon className="size-4" />{t("保存策略")}</Button></div></form></CardContent></Card>
+      <Card><CardHeader><CardTitle>{t("配额策略")}</CardTitle><CardDescription>{t("先限制运行规模，再根据用量告警调整")}</CardDescription></CardHeader><CardContent><form className="grid gap-3" onSubmit={saveGovernance}><Field label={t("每日运行上限")} value={form.daily} onChange={(value) => setForm((current) => ({ ...current, daily: value }))} placeholder={t("不限制")} type="number" /><Field label={t("月度 Token 上限")} value={form.monthly} onChange={(value) => setForm((current) => ({ ...current, monthly: value }))} placeholder={t("不限制")} type="number" /><Field label={t("告警阈值（百分比）")} value={form.threshold} onChange={(value) => setForm((current) => ({ ...current, threshold: value }))} type="number" /><Field label={t("数据保留天数")} value={form.retention} onChange={(value) => setForm((current) => ({ ...current, retention: value }))} placeholder={t("不限制")} type="number" /><div className="flex justify-end"><Button type="submit"><ClipboardIcon className="size-4" />{t("保存策略")}</Button></div></form></CardContent></Card>
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><UserPlusIcon className="size-4" />{t("工作空间邀请")}</CardTitle>

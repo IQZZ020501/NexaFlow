@@ -121,7 +121,7 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("返回当前 UTC 时间。")
+    ).toBe("返回当前时间。")
     expect(
       toolDisplayDescription(
         {
