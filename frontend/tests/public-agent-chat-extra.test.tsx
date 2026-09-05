@@ -585,7 +585,7 @@ describe("public chat pure helpers", () => {
 /* ------------------------------------------------------------------ */
 
 describe("PublicAgentChat timestamps", () => {
-  test("shows the submit and first-token timestamps below the messages", async () => {
+  test("shows the first-token timestamp below the answer", async () => {
     const historyRun = run({
       created_at: "2026-08-10T00:00:00Z",
       progress: [
@@ -613,9 +613,8 @@ describe("PublicAgentChat timestamps", () => {
     const article = articleOf("回答内容")
     const timestamps = article.querySelectorAll("time")
 
-    expect(timestamps).toHaveLength(2)
-    expect(timestamps[0]?.getAttribute("datetime")).toBe(historyRun.created_at)
-    expect(timestamps[1]?.getAttribute("datetime")).toBe(
+    expect(timestamps).toHaveLength(1)
+    expect(timestamps[0]?.getAttribute("datetime")).toBe(
       "2026-08-10T00:00:01Z"
     )
   })
