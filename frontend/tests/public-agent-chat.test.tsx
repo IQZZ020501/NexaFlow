@@ -1387,6 +1387,31 @@ describe("PublicWorkflowChat", () => {
     )
     expect(replaced).toEqual([])
   })
+
+  test("shows accumulated attachments and lets users remove them", async () => {
+    fetchHandler = (url) => {
+      if (url.endsWith("/profile")) return jsonResponse(workflowProfile())
+      if (url.includes("/conversations")) return jsonResponse({ items: [] })
+      return jsonResponse({})
+    }
+
+    renderPage(<PublicWorkflowChat workflowId="wf-1" />)
+    await screen.findByRole("heading", { name: "公开流程" })
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(input, {
+      target: { files: [new File(["a"], "a.pdf", { type: "application/pdf" })] },
+    })
+    fireEvent.change(input, {
+      target: { files: [new File(["b"], "b.pdf", { type: "application/pdf" })] },
+    })
+
+    expect(screen.getByText("a.pdf")).toBeTruthy()
+    expect(screen.getByText("b.pdf")).toBeTruthy()
+    fireEvent.click(screen.getByLabelText("移除 a.pdf"))
+    expect(screen.queryByText("a.pdf")).toBeNull()
+    expect(screen.getByText("b.pdf")).toBeTruthy()
+  })
 })
 
 describe("PublicAgentChat", () => {

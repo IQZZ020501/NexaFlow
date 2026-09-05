@@ -21,6 +21,7 @@ import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import {
+  AgentAttachmentList,
   appendAttachmentFiles,
   RunAttachmentCards,
 } from "@/components/agents/agent-attachment-list"
@@ -922,18 +923,25 @@ export function PublicWorkflowChat({
                   />
                 </label>
                 {profile.interaction_config.file_upload ? (
-                  <label className="grid gap-1.5 text-sm font-medium">
-                    <span className="flex items-center gap-2">
+                  <div className="grid gap-1.5 text-sm font-medium">
+                    <label
+                      htmlFor="workflow-chat-files"
+                      className="flex items-center gap-2"
+                    >
                       <PaperclipIcon className="size-4" />
                       {t("文件上传")}
-                    </span>
+                    </label>
                     <Input
+                      id="workflow-chat-files"
                       type="file"
                       multiple
                       accept={acceptedUploadExtensions(
                         profile.interaction_config.file_upload_setting
                           .file_upload_type
                       )}
+                      onClick={(event) => {
+                        event.currentTarget.value = ""
+                      }}
                       onChange={(event) => {
                         const selected = Array.from(event.target.files ?? [])
                         setError(null)
@@ -942,7 +950,16 @@ export function PublicWorkflowChat({
                         )
                       }}
                     />
-                  </label>
+                    <AgentAttachmentList
+                      files={files}
+                      onRemove={(indexToRemove) =>
+                        setFiles((current) =>
+                          current.filter((_, index) => index !== indexToRemove)
+                        )
+                      }
+                      t={t}
+                    />
+                  </div>
                 ) : null}
               </div>
               {error ? (

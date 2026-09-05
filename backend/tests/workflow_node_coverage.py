@@ -2354,12 +2354,11 @@ def test_workflow_uploads_resolve_branches() -> None:
                 raise AssertionError("extraction failure was swallowed")
 
         # agent text resolution
-        assert (
-            await _resolve_agent_file_text(
-                db, agent, "user-1", [], _UPLOAD_SETTINGS  # type: ignore[arg-type]
-            )
-            == ""
+        text, attachments = await _resolve_agent_file_text(
+            db, agent, "user-1", [], _UPLOAD_SETTINGS  # type: ignore[arg-type]
         )
+        assert text == ""
+        assert attachments == []
         try:
             await _resolve_agent_file_text(
                 db, agent, "user-1", ["u1", "u1"], _UPLOAD_SETTINGS  # type: ignore[arg-type]
@@ -2393,10 +2392,18 @@ def test_workflow_uploads_resolve_branches() -> None:
             "app.application.workflow_uploads.queue_upload_cleanups",
             new=AsyncMock(),
         ):
-            text = await _resolve_agent_file_text(
+            text, attachments = await _resolve_agent_file_text(
                 db, agent, "user-1", ["u1"], _UPLOAD_SETTINGS  # type: ignore[arg-type]
             )
         assert text == "--- u1.txt ---\nagent text"
+        assert attachments == [
+            {
+                "filename": "u1.txt",
+                "content_type": "text/plain",
+                "size_bytes": 3,
+                "category": "document",
+            }
+        ]
         with patch(
             "app.application.workflow_uploads.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads([make_upload("u1")])),

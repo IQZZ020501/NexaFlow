@@ -496,7 +496,7 @@ export function FrequentQuestionsPanel({
             {visibleItems.map((item) => (
               <div
                 key={item.question}
-                className="flex min-w-0 flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-start sm:justify-between"
+                className="flex min-h-14 min-w-0 flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-start sm:justify-between"
               >
                 <p className="min-w-0 whitespace-normal break-words">{item.question}</p>
                 <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end sm:gap-1">

@@ -592,6 +592,7 @@ function RunExchange({
                 return
               }
               onRegenerateRun?.(run.id, goal)
+              setEditDraft(null)
             }}
           >
             <textarea

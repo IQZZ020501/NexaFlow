@@ -316,7 +316,7 @@ type HarnessProps = {
     callId: string,
     decision: "approve" | "reject"
   ) => void
-  onRegenerateRun?: (runId: string) => void
+  onRegenerateRun?: (runId: string, goal?: string) => void
   onRunFeedback?: (
     runId: string,
     value: "positive" | "negative" | null
@@ -649,6 +649,26 @@ describe("AgentDetailWorkspace preview", () => {
     expect(message).toBeTruthy()
     expect(message!.className).toContain("whitespace-pre-wrap")
     expect(message!.className).toContain("[overflow-wrap:anywhere]")
+  })
+
+  test("closes the message editor after resubmitting", () => {
+    const regenerated: Array<[string, string | undefined]> = []
+    renderPage(
+      <Harness
+        activeView="settings"
+        runs={[makeRun()]}
+        onRegenerateRun={(runId, goal) => regenerated.push([runId, goal])}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑消息" }))
+    fireEvent.change(screen.getByLabelText("编辑消息"), {
+      target: { value: "Updated question" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "重新发送" }))
+
+    expect(regenerated).toEqual([["run-1", "Updated question"]])
+    expect(screen.queryByLabelText("编辑消息")).toBeNull()
   })
 
   test("renders unified result actions and disables regeneration while busy", () => {
