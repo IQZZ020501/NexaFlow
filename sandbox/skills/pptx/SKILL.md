@@ -38,6 +38,8 @@ animation, speaker notes, and structural verification.
   several unrelated bullets.
 - Prefer a subject-appropriate `theme`; use a built-in template only as a
   fallback. Keep per-slide variations coherent with the deck-level identity.
+- Chinese text defaults to the installed Song-style `Noto Serif CJK SC` on
+  Linux and `Songti SC` on macOS; `NEXAFLOW_CJK_FONT` can override it.
 - Put externally sourced claims in each slide's speaker notes under a
   `[Sources]` block.
 - Keep the cover minimal, use takeaway-style slide titles, and keep body copy

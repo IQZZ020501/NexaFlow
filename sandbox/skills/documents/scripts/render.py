@@ -41,8 +41,8 @@ def _resolve_cjk_font(*, formal: bool = False) -> str | None:
             "darwin": "STFangsong",
         }.get(sys.platform)
     return {
-        "linux": "Noto Sans CJK SC",
-        "darwin": "PingFang SC",
+        "linux": "Noto Serif CJK SC",
+        "darwin": "Songti SC",
     }.get(sys.platform)
 
 

@@ -1017,6 +1017,10 @@ def check_builtin_skill_quality_guards() -> None:
             if name.startswith("word/footer")
         )
     if not os.environ.get("NEXAFLOW_CJK_FONT"):
+        report_cjk_font = (
+            "Noto Serif CJK SC" if sys.platform == "linux" else "Songti SC"
+        )
+        assert report_cjk_font in report_styles_xml
         assert "Microsoft YaHei" not in document_xml
     assert '<w:tblW w:type="dxa" w:w="9071"' in document_xml
     assert '<w:tblLayout w:type="fixed"' in document_xml
@@ -1233,8 +1237,15 @@ def check_builtin_skill_quality_guards() -> None:
         BytesIO(base64.b64decode(math_slide["artifact"]["content_base64"]))
     ) as archive:
         slide_xml = archive.read("ppt/slides/slide2.xml").decode()
+        theme_xml = archive.read("ppt/theme/theme1.xml").decode()
         assert "算式" in slide_xml
         assert "1740" in slide_xml
+        if not os.environ.get("NEXAFLOW_CJK_FONT"):
+            pptx_cjk_font = (
+                "Noto Serif CJK SC" if sys.platform == "linux" else "Songti SC"
+            )
+            assert pptx_cjk_font in slide_xml
+            assert pptx_cjk_font in theme_xml
 
 
 def check_artifact_error_paths() -> None:
