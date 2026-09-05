@@ -559,6 +559,10 @@ describe("ToolsPage", () => {
     renderPage(<ToolsPage />)
     await screen.findByText("SSE tools")
     const sseCard = screen.getByText("SSE tools").closest("article")!
+    const sourceSection = sseCard.closest("section")!
+    expect(sourceSection.parentElement?.previousElementSibling?.tagName).toBe(
+      "ASIDE"
+    )
     expect(within(sseCard).getByText("SSE")).toBeTruthy()
     const stdioCard = screen.getByText("Local stdio").closest("article")!
     expect(

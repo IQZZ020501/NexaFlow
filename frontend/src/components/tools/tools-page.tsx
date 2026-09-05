@@ -590,6 +590,29 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         ) : null}
       </div>
 
+      <ResourceFolderLayout
+        sidebar={
+          <ResourceFolderTree
+            folders={resourceFolders.folders}
+            selectedFolderId={resourceFolders.selectedFolderId}
+            canManage={membershipRole === "admin"}
+            isLoading={resourceFolders.isLoading}
+            onSelect={resourceFolders.setSelectedFolderId}
+            onCreate={resourceFolders.create}
+            onRename={resourceFolders.rename}
+            onDelete={resourceFolders.remove}
+            onFolderDeleted={(folderId, parentId) =>
+              setTools((current) =>
+                current.map((tool) =>
+                  tool.folder_id === folderId
+                    ? { ...tool, folder_id: parentId }
+                    : tool
+                )
+              )
+            }
+          />
+        }
+      >
       {!isLoading && !error && filteredSources.length ? (
         <section aria-labelledby="tool-source-group">
           <div className="mb-3 flex items-center gap-2">
@@ -681,29 +704,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         </section>
       ) : null}
 
-      <ResourceFolderLayout
-        sidebar={
-          <ResourceFolderTree
-            folders={resourceFolders.folders}
-            selectedFolderId={resourceFolders.selectedFolderId}
-            canManage={membershipRole === "admin"}
-            isLoading={resourceFolders.isLoading}
-            onSelect={resourceFolders.setSelectedFolderId}
-            onCreate={resourceFolders.create}
-            onRename={resourceFolders.rename}
-            onDelete={resourceFolders.remove}
-            onFolderDeleted={(folderId, parentId) =>
-              setTools((current) =>
-                current.map((tool) =>
-                  tool.folder_id === folderId
-                    ? { ...tool, folder_id: parentId }
-                    : tool
-                )
-              )
-            }
-          />
-        }
-      >
       {isLoading ? (
         <div className="flex min-h-72 items-center justify-center gap-2 rounded-xl border text-sm text-muted-foreground">
           <LoaderCircleIcon className="size-4 animate-spin" />
