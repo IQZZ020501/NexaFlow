@@ -26,7 +26,7 @@ class RegisteredModel(Base):
             name="ck_model_registry_models_provider_type",
         ),
         CheckConstraint(
-            "model_type IN ('LLM', 'EMBEDDING', 'RERANKER')",
+            "model_type IN ('LLM', 'VISION', 'EMBEDDING', 'RERANKER')",
             name="ck_model_registry_models_type",
         ),
         CheckConstraint(

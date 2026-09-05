@@ -30,6 +30,8 @@ export const en = {
   新密码不能与原密码相同:
     "The new password must differ from the previous password",
   知识库名称已存在: "Knowledge base name already exists",
+  "视觉模型尚未配置，暂时不支持图片解析":
+    "No vision model is configured, so image parsing is not available yet",
   资源不存在或无权访问: "Resource not found or access denied",
   页面不存在: "Page not found",
   请求的页面不存在或已移动: "The requested page does not exist or has moved.",
@@ -752,6 +754,7 @@ export const en = {
   启用: "Activate",
   命中测试: "Hit test",
   大语言模型: "LLM",
+  视觉模型: "Vision model",
   失败: "Failed",
   "已上传 {value} 个文件": "Uploaded {value} files",
   "已上传 {value} 个文件，{value} 个上传失败":

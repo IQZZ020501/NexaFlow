@@ -825,6 +825,8 @@ def test_registry_basics() -> None:
     assert llm_registry.normalize_model_type("LLM") == "LLM"
     assert llm_registry.normalize_model_type("chat") == "LLM"
     assert llm_registry.normalize_model_type("llm") == "LLM"
+    assert llm_registry.normalize_model_type("vision") == "VISION"
+    assert llm_registry.normalize_model_type("vlm") == "VISION"
     assert llm_registry.normalize_model_type("embedding") == "EMBEDDING"
     assert llm_registry.normalize_model_type("embeddings") == "EMBEDDING"
     assert llm_registry.normalize_model_type("rerank") == "RERANKER"
@@ -843,6 +845,10 @@ def test_registry_basics() -> None:
         {"max_tokens": 4096, "extra_body": {"enable_thinking": False}},
         "LLM",
     ) == {"max_tokens": 4096, "extra_body": {"enable_thinking": False}}
+    assert llm_registry.normalize_model_request_params(
+        {"max_tokens": 1024},
+        "VISION",
+    ) == {"max_tokens": 1024}
     expect_http_error(
         lambda: llm_registry.normalize_model_request_params(
             {"max_tokens": 0},
@@ -880,6 +886,7 @@ def test_registry_basics() -> None:
 
     expect_http_error(lambda: llm_registry.validate_provider_support(deepseek, "EMBEDDING"), 422)
     llm_registry.validate_provider_support(deepseek, "LLM")
+    llm_registry.validate_provider_support(deepseek, "VISION")
 
     fields = llm_registry.credential_fields(deepseek)
     assert [field["field"] for field in fields] == ["api_base", "api_key"]
@@ -4401,7 +4408,10 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
     assert all("LLM" in entry.model_types for entry in llm_catalog)
 
     types = app_models.list_model_types("model_deepseek_provider")
-    assert [(item.key, item.value) for item in types] == [("LLM", "LLM")]
+    assert [(item.key, item.value) for item in types] == [
+        ("LLM", "LLM"),
+        ("Vision", "VISION"),
+    ]
     expect_http_error(lambda: app_models.list_model_types("nope"), 422)
 
     base_models = app_models.list_base_models("model_deepseek_provider", "LLM")

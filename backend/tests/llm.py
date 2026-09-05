@@ -22,6 +22,7 @@ from app.capabilities.llm.runtime import (
     build_registered_embeddings,
     build_registered_reranker,
     build_reranker,
+    extract_registered_image_text,
 )
 from app.infrastructure.session import get_session_factory
 from tests.support import (
@@ -289,6 +290,13 @@ async def assert_registered_model_runtime_call(
                 "Hello",
                 ["Hello"],
             ) == [{"index": 0, "relevance_score": 1.0}]
+        elif model_type == "VISION":
+            assert extract_registered_image_text(
+                model,
+                settings(),
+                "image/png",
+                b"image",
+            ) == "ok"
         else:
             raise AssertionError(f"Unexpected model type: {model_type}")
 
@@ -460,6 +468,7 @@ def main() -> None:
         assert catalog_by_provider["model_azure_provider"]["provider_type"] == "azure_openai"
         assert catalog_by_provider["model_gemini_provider"]["provider_type"] == "google_genai"
         assert catalog_by_provider["model_ollama_provider"]["provider_type"] == "ollama"
+        assert "VISION" in catalog_by_provider["model_deepseek_provider"]["model_types"]
 
         provider_model_types = client.get(
             "/api/v1/model-providers/model-types",
@@ -467,7 +476,10 @@ def main() -> None:
             params={"provider": "model_deepseek_provider"},
         )
         assert provider_model_types.status_code == 200, provider_model_types.text
-        assert provider_model_types.json() == [{"key": "LLM", "value": "LLM"}]
+        assert provider_model_types.json() == [
+            {"key": "LLM", "value": "LLM"},
+            {"key": "Vision", "value": "VISION"},
+        ]
 
         provider_form = client.get(
             "/api/v1/model-providers/credential-form",
@@ -520,6 +532,30 @@ def main() -> None:
         empty = client.get(models_url(workspace_id), headers=auth_headers(admin_token))
         assert empty.status_code == 200, empty.text
         assert empty.json() == []
+
+        vision_model = client.post(
+            models_url(workspace_id),
+            headers=auth_headers(admin_token),
+            json={
+                **model_payload(model_base_url),
+                "name": "Vision Model",
+                "model_type": "VISION",
+                "model_name": "vision-test",
+            },
+        )
+        assert vision_model.status_code == 201, vision_model.text
+        vision_model_id = vision_model.json()["id"]
+        vision_content = ModelTestHandler.calls[-1]["body"]["messages"][0]["content"]
+        assert vision_content[0]["type"] == "text"
+        assert vision_content[1]["image_url"]["url"].startswith(
+            "data:image/png;base64,"
+        )
+        asyncio.run(assert_registered_model_runtime_call(vision_model_id, "VISION"))
+        deleted_vision_model = client.delete(
+            models_url(workspace_id, f"/{vision_model_id}"),
+            headers=auth_headers(admin_token),
+        )
+        assert deleted_vision_model.status_code == 204
 
         invalid_url = client.post(
             models_url(workspace_id),

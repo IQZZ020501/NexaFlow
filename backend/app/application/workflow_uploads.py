@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,15 +22,23 @@ from app.infrastructure.repositories import workflow as workflow_repository
 from app.infrastructure.repositories import user as user_repository
 from app.infrastructure.repositories import workspace as workspace_repository
 from app.ports.parsing import (
+    ImageTextExtractor,
     KnowledgePipelineError,
     PLAIN_TEXT_DOCUMENT_EXTENSIONS,
     build_document_parser,
+)
+from app.ports.llm import (
+    VISION_MODEL_REQUIRED_MESSAGE,
+    extract_image_text,
 )
 from app.schemas.agent import AgentInteractionConfig, AgentUploadResponse
 from app.schemas.workflow import WorkflowUploadResponse
 from app.shareddomain.agents.permissions import require_agent_view
 from app.shareddomain.agents.services import get_agent
-from app.shareddomain.knowledge.services import MAX_DOCUMENT_UPLOAD_BYTES
+from app.shareddomain.knowledge.services import (
+    MAX_DOCUMENT_UPLOAD_BYTES,
+    get_default_knowledge_model,
+)
 from app.shareddomain.workflows.services import get_workflow_agent
 from app.shareddomain.workflows.uploads import queue_upload_cleanups
 
@@ -71,6 +80,20 @@ def _upload_category(filename: str) -> str | None:
         (category for category, suffixes in UPLOAD_EXTENSIONS.items() if suffix in suffixes),
         None,
     )
+
+
+async def _vision_text_extractor(
+    db: AsyncSession,
+    workspace_id: str,
+    settings: Settings,
+) -> ImageTextExtractor:
+    model = await get_default_knowledge_model(db, workspace_id, "VISION")
+    if model is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            VISION_MODEL_REQUIRED_MESSAGE,
+        )
+    return partial(extract_image_text, settings, model)
 
 
 async def upload_public_workflow_files(
@@ -216,6 +239,20 @@ async def _upload_files(
             f"Upload at most {MAX_WORKFLOW_UPLOAD_FILES} files per request.",
         )
     upload_config = config.file_upload_setting
+    prepared_uploads: list[tuple[UploadFile, str, str]] = []
+    for upload in uploads:
+        filename = Path(upload.filename or "").name.strip()[:255]
+        category = _upload_category(filename)
+        if (
+            not filename
+            or category not in upload_config.file_upload_type
+            or category not in SUPPORTED_ATTACHMENT_TYPES
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Unsupported {application_type} upload type.",
+            )
+        prepared_uploads.append((upload, filename, category))
 
     if await workspace_repository.lock_workspace(db, agent.workspace_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Upload workspace not found.")
@@ -227,24 +264,15 @@ async def _upload_files(
         agent.id,
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Upload application not found.")
+    if any(category == "image" for _upload, _filename, category in prepared_uploads):
+        await _vision_text_extractor(db, agent.workspace_id, settings)
 
     storage = create_object_storage(settings.knowledge_storage_dir)
     stored: list[WorkflowUpload] = []
     stored_keys: list[str] = []
     total_size = 0
     try:
-        for upload in uploads:
-            filename = Path(upload.filename or "").name.strip()[:255]
-            category = _upload_category(filename)
-            if (
-                not filename
-                or category not in upload_config.file_upload_type
-                or category not in SUPPORTED_ATTACHMENT_TYPES
-            ):
-                raise HTTPException(
-                    status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    f"Unsupported {application_type} upload type.",
-                )
+        for upload, filename, category in prepared_uploads:
             upload_id = new_id()
             object_key = (
                 f"workflow-uploads/{agent.workspace_id}/"
@@ -409,6 +437,11 @@ async def _resolve_workflow_files(
     if extract_text:
         storage = create_object_storage(settings.knowledge_storage_dir)
         parser = build_document_parser()
+        image_text_extractor = (
+            await _vision_text_extractor(db, agent.workspace_id, settings)
+            if any(item.category == "image" for item in ordered)
+            else None
+        )
         # ponytail: reuse the bounded attachment context; move document text to
         # storage if workflows need more than this existing 50k-character ceiling.
         remaining = AGENT_ATTACHMENT_CONTEXT_LIMIT
@@ -419,6 +452,7 @@ async def _resolve_workflow_files(
                     item.filename,
                     item.content_type,
                     storage.path(item.object_key),
+                    image_text_extractor=image_text_extractor,
                 )
                 contents[item.id] = extracted[: min(AGENT_FILE_TEXT_LIMIT, remaining)]
                 remaining -= len(contents[item.id])
@@ -514,6 +548,11 @@ async def _resolve_agent_file_text(
 
     storage = create_object_storage(settings.knowledge_storage_dir)
     parser = build_document_parser()
+    image_text_extractor = (
+        await _vision_text_extractor(db, agent.workspace_id, settings)
+        if any(item.category == "image" for item in ordered)
+        else None
+    )
     sections: list[str] = []
     remaining = AGENT_ATTACHMENT_CONTEXT_LIMIT
     try:
@@ -523,6 +562,7 @@ async def _resolve_agent_file_text(
                 item.filename,
                 item.content_type,
                 storage.path(item.object_key),
+                image_text_extractor=image_text_extractor,
             )
             text = extracted[: min(AGENT_FILE_TEXT_LIMIT, remaining)]
             sections.append(f"--- {item.filename} ---\n{text}")

@@ -3307,10 +3307,16 @@ def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
         path = Path(directory) / "images.docx"
         path.touch()
         with (
-            patch.object(pipeline, "pre_process_docx", lambda stream: stream),
+            patch(
+                "markitdown.converters._docx_converter.pre_process_docx",
+                lambda stream: stream,
+            ),
             patch.object(pipeline.mammoth.images, "img_element", lambda callback: callback),
             patch.object(pipeline.mammoth, "convert_to_html", fake_convert_to_html),
-            patch.object(pipeline.HtmlConverter, "convert_string", fake_convert_string),
+            patch(
+                "markitdown.converters._html_converter.HtmlConverter.convert_string",
+                fake_convert_string,
+            ),
         ):
             text, assets = pipeline.extract_document(
                 path.name,
@@ -3350,12 +3356,14 @@ def test_docx_image_mime_cannot_shape_asset_paths() -> None:
         path = Path(directory) / "image.docx"
         path.touch()
         with (
-            patch.object(pipeline, "pre_process_docx", lambda stream: stream),
+            patch(
+                "markitdown.converters._docx_converter.pre_process_docx",
+                lambda stream: stream,
+            ),
             patch.object(pipeline.mammoth.images, "img_element", lambda callback: callback),
             patch.object(pipeline.mammoth, "convert_to_html", fake_convert_to_html),
-            patch.object(
-                pipeline.HtmlConverter,
-                "convert_string",
+            patch(
+                "markitdown.converters._html_converter.HtmlConverter.convert_string",
                 return_value=SimpleNamespace(text_content="Diagram"),
             ),
         ):
@@ -3383,18 +3391,11 @@ def test_archive_limits_run_before_document_conversion() -> None:
         with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
             archive.writestr("large.txt", b"x" * 9)
 
-        with (
-            patch.object(
-                pipeline,
-                "MAX_ARCHIVE_UNCOMPRESSED_BYTES",
-                8,
-                create=True,
-            ),
-            patch.object(
-                pipeline.MARKITDOWN,
-                "convert_local",
-                return_value=SimpleNamespace(text_content="converted"),
-            ),
+        with patch.object(
+            pipeline,
+            "MAX_ARCHIVE_UNCOMPRESSED_BYTES",
+            8,
+            create=True,
         ):
             try:
                 pipeline.extract_document(path.name, "application/zip", path)
@@ -3476,7 +3477,11 @@ def test_supported_document_formats_are_accepted() -> None:
         }:
             path = Path(directory) / f"document{extension}"
             path.write_bytes(b"content")
-            with patch.object(pipeline.MARKITDOWN, "convert_local", fake_convert_local):
+            with patch.object(
+                pipeline,
+                "markitdown_converter",
+                return_value=SimpleNamespace(convert_local=fake_convert_local),
+            ):
                 text, assets = pipeline.extract_document(
                     path.name,
                     "application/octet-stream",
@@ -3497,7 +3502,7 @@ def test_supported_document_formats_are_accepted() -> None:
             assert assets == []
 
 
-def test_pdf_documents_use_pymupdf_markdown_with_ocr() -> None:
+def test_pdf_documents_extract_only_the_text_layer() -> None:
     from pathlib import Path
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
@@ -3507,111 +3512,68 @@ def test_pdf_documents_use_pymupdf_markdown_with_ocr() -> None:
     with TemporaryDirectory() as directory:
         path = Path(directory) / "通知.pdf"
         path.write_bytes(b"pdf")
-        with (
-            patch.object(
-                pipeline.MARKITDOWN,
-                "convert_local",
-                side_effect=AssertionError("PDF must not use MarkItDown"),
-            ),
-            patch.object(
-                pipeline.pymupdf4llm,
-                "to_markdown",
-                return_value="提 高 思想 认识， 压 实 防 灾 责 任。",
-            ) as convert_pdf,
-        ):
+        page = SimpleNamespace(
+            extract_text=lambda: "提 高 思想 认识， 压 实 防 灾 责 任。"
+        )
+        with patch(
+            "pypdf.PdfReader",
+            return_value=SimpleNamespace(pages=[page]),
+        ) as reader:
             text, assets = pipeline.extract_document(
                 path.name,
                 "application/pdf",
                 path,
             )
 
-    assert text == "# 通知\n\n提高思想认识，压实防灾责任。"
-    assert assets == []
-    convert_pdf.assert_called_once_with(
-        path,
-        use_ocr=True,
-        force_ocr=False,
-        ocr_language="chi_sim+eng",
-        ocr_dpi=300,
-        write_images=False,
-    )
+        assert text == "# 通知\n\n提高思想认识，压实防灾责任。"
+        assert assets == []
+        reader.assert_called_once_with(path)
+
+        empty_page = SimpleNamespace(extract_text=lambda: None)
+        with patch(
+            "pypdf.PdfReader",
+            return_value=SimpleNamespace(pages=[empty_page]),
+        ):
+            try:
+                pipeline.extract_document(path.name, "application/pdf", path)
+            except pipeline.KnowledgePipelineError as exc:
+                assert "no extractable text" in str(exc)
+            else:
+                raise AssertionError("Scanned PDF without a text layer was accepted")
 
 
-def test_image_documents_use_pymupdf_ocr() -> None:
+def test_image_documents_use_the_configured_vision_extractor() -> None:
     from pathlib import Path
     from tempfile import TemporaryDirectory
-    from unittest.mock import patch
 
     from app.capabilities.embedding import pipeline
 
     with TemporaryDirectory() as directory:
         path = Path(directory) / "通知.png"
         path.write_bytes(b"png")
-        with (
-            patch.object(
-                pipeline.MARKITDOWN,
-                "convert_local",
-                side_effect=AssertionError("Images must not use MarkItDown"),
-            ),
-            patch.object(
-                pipeline.pymupdf4llm,
-                "to_markdown",
-                return_value="识 别 文 本",
-            ) as convert_image,
-        ):
-            text, assets = pipeline.extract_document(
-                path.name,
-                "image/png",
-                path,
-            )
+        calls: list[tuple[str, bytes]] = []
 
-    assert text == "# 通知\n\n识别文本"
-    assert assets == []
-    convert_image.assert_called_once_with(
-        path,
-        use_ocr=True,
-        force_ocr=True,
-        ocr_language="chi_sim+eng",
-        ocr_dpi=300,
-        write_images=False,
-    )
+        def extract_image(media_type: str, content: bytes) -> str:
+            calls.append((media_type, content))
+            return "识 别 文 本"
 
+        text, assets = pipeline.extract_document(
+            path.name,
+            "image/png",
+            path,
+            image_text_extractor=extract_image,
+        )
 
-def test_webp_documents_are_normalized_for_pymupdf_ocr() -> None:
-    from pathlib import Path
-    from tempfile import TemporaryDirectory
-    from unittest.mock import patch
+        assert text == "# 通知\n\n识别文本"
+        assert assets == []
+        assert calls == [("image/png", b"png")]
 
-    import pymupdf
-    from PIL import Image
-
-    from app.capabilities.embedding import pipeline
-
-    with TemporaryDirectory() as directory:
-        path = Path(directory) / "通知.webp"
-        Image.new("RGB", (10, 10), "white").save(path, format="WEBP")
-        with patch.object(
-            pipeline.pymupdf4llm,
-            "to_markdown",
-            return_value="识 别 文 本",
-        ) as convert_image:
-            text, assets = pipeline.extract_document(
-                path.name,
-                "image/webp",
-                path,
-            )
-
-    assert text == "# 通知\n\n识别文本"
-    assert assets == []
-    source = convert_image.call_args.args[0]
-    assert isinstance(source, pymupdf.Document)
-    assert convert_image.call_args.kwargs == {
-        "use_ocr": True,
-        "force_ocr": True,
-        "ocr_language": "chi_sim+eng",
-        "ocr_dpi": 300,
-        "write_images": False,
-    }
+        try:
+            pipeline.extract_document(path.name, "image/png", path)
+        except pipeline.KnowledgePipelineError as exc:
+            assert str(exc) == "Vision model is not configured for this workspace."
+        else:
+            raise AssertionError("Image parsing without a vision model was accepted")
 
 
 # ---------------------------------------------------------------- retrieval math
@@ -4948,9 +4910,10 @@ def test_parent_context_windows_around_child_offsets() -> None:
 
 def test_model_type_normalization() -> None:
     assert normalize_model_type("llm") == "LLM"
+    assert normalize_model_type("vision") == "VISION"
     assert normalize_model_type(" embeddings ") == "EMBEDDING"
     assert normalize_model_type("rerank") == "RERANKER"
-    expect_http_error(lambda: normalize_model_type("vision"), 422)
+    expect_http_error(lambda: normalize_model_type("audio"), 422)
 
 
 def test_status_validation() -> None:
@@ -6976,9 +6939,8 @@ def main() -> None:
     test_docx_image_mime_cannot_shape_asset_paths()
     test_archive_limits_run_before_document_conversion()
     test_supported_document_formats_are_accepted()
-    test_pdf_documents_use_pymupdf_markdown_with_ocr()
-    test_image_documents_use_pymupdf_ocr()
-    test_webp_documents_are_normalized_for_pymupdf_ocr()
+    test_pdf_documents_extract_only_the_text_layer()
+    test_image_documents_use_the_configured_vision_extractor()
     test_reciprocal_rank_fusion_merges_and_ranks()
     test_reciprocal_rank_fusion_reports_named_rankings_deterministically()
     test_keyword_repository_uses_scoped_bm25_query()

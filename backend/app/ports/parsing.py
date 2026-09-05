@@ -15,6 +15,8 @@ from app.capabilities.embedding.pipeline import (
     DocumentAssetDraft,
     DocumentChunkDrafts,
     EMBED_BATCH_SIZE,
+    IMAGE_DOCUMENT_EXTENSIONS,
+    ImageTextExtractor,
     KnowledgePipelineError,
     NORMALIZED_TEXT_VERSION,
     PLAIN_TEXT_DOCUMENT_EXTENSIONS,
@@ -39,6 +41,8 @@ __all__ = [
     "DocumentAssetDraft",
     "DocumentChunkDrafts",
     "EMBED_BATCH_SIZE",
+    "IMAGE_DOCUMENT_EXTENSIONS",
+    "ImageTextExtractor",
     "KnowledgePipelineError",
     "NORMALIZED_TEXT_VERSION",
     "PLAIN_TEXT_DOCUMENT_EXTENSIONS",
@@ -61,7 +65,14 @@ __all__ = [
 class DocumentParser(Protocol):
     """Typing-only contract for the parsing pipeline; see module docstring."""
 
-    def extract(self, filename: str, content_type: str, path: Any) -> Any: ...
+    def extract(
+        self,
+        filename: str,
+        content_type: str,
+        path: Any,
+        *,
+        image_text_extractor: ImageTextExtractor | None = None,
+    ) -> Any: ...
 
 
 def build_document_parser() -> DocumentParser:
@@ -72,7 +83,19 @@ def build_document_parser() -> DocumentParser:
     """
 
     class _PipelineParser:
-        def extract(self, filename: str, content_type: str, path: Any) -> Any:
-            return extract_document(filename, content_type, path)
+        def extract(
+            self,
+            filename: str,
+            content_type: str,
+            path: Any,
+            *,
+            image_text_extractor: ImageTextExtractor | None = None,
+        ) -> Any:
+            return extract_document(
+                filename,
+                content_type,
+                path,
+                image_text_extractor=image_text_extractor,
+            )
 
     return _PipelineParser()

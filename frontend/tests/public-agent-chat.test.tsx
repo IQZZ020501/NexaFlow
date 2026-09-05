@@ -599,6 +599,15 @@ describe("getErrorMessage", () => {
       "资源不存在或无权访问"
     )
     expect(getErrorMessage(new ApiError(503, "离线"), t)).toBe("离线")
+    expect(
+      getErrorMessage(
+        new ApiError(
+          422,
+          "Vision model is not configured for this workspace."
+        ),
+        t
+      )
+    ).toBe("视觉模型尚未配置，暂时不支持图片解析")
     expect(getErrorMessage(new TypeError("Failed to fetch"), t)).toBe(
       "网络连接失败，请稍后重试"
     )

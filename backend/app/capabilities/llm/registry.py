@@ -26,7 +26,7 @@ ACTIVE_STATUS = "active"
 DISABLED_STATUS = "disabled"
 STATUSES = {ACTIVE_STATUS, DISABLED_STATUS}
 PROVIDER_TYPES = SUPPORTED_PROVIDER_TYPES
-MODEL_TYPES = {"LLM", "EMBEDDING", "RERANKER"}
+MODEL_TYPES = {"LLM", "VISION", "EMBEDDING", "RERANKER"}
 RESERVED_MODEL_REQUEST_PARAMS = {
     "api_base",
     "api_key",
@@ -79,6 +79,8 @@ DEFAULT_CREDENTIAL_FIELDS = [
 MODEL_TYPE_ALIASES = {
     "chat": "LLM",
     "llm": "LLM",
+    "vision": "VISION",
+    "vlm": "VISION",
     "embedding": "EMBEDDING",
     "embeddings": "EMBEDDING",
     "rerank": "RERANKER",
@@ -120,10 +122,10 @@ def normalize_model_request_params(
     params = dict(value or {})
     if not params:
         return {}
-    if model_type != "LLM":
+    if model_type not in {"LLM", "VISION"}:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "Extra request parameters are only supported for LLM models.",
+            "Extra request parameters are only supported for chat models.",
         )
     if len(params) > MAX_MODEL_REQUEST_PARAM_KEYS:
         raise HTTPException(
@@ -204,8 +206,15 @@ def is_masked_secret(value: str, hint: str | None) -> bool:
     return value == hint or (value.startswith("****") and value.endswith(hint[-4:]))
 
 
+def provider_model_types(entry: dict[str, Any]) -> list[str]:
+    model_types = list(entry["model_types"])
+    if "LLM" in model_types and "VISION" not in model_types:
+        model_types.append("VISION")
+    return model_types
+
+
 def validate_provider_support(entry: dict[str, Any], model_type: str) -> None:
-    if model_type not in entry["model_types"]:
+    if model_type not in provider_model_types(entry):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Model type is not supported by this provider.")
 
 

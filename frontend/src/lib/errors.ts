@@ -19,6 +19,8 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "Password reset link is invalid or expired.": "密码重置链接无效或已过期",
   "New password must be different.": "新密码不能与原密码相同",
   "Knowledge base name already exists.": "知识库名称已存在",
+  "Vision model is not configured for this workspace.":
+    "视觉模型尚未配置，暂时不支持图片解析",
 }
 
 /**

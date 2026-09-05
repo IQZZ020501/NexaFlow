@@ -2,6 +2,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import UTC, timedelta
 import hashlib
+from functools import partial
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -86,7 +87,7 @@ from app.shareddomain.knowledge.services import (
     knowledge_document_path,
     knowledge_object_storage,
 )
-from app.ports.llm import RegisteredModel
+from app.ports.llm import RegisteredModel, extract_image_text
 
 logger = get_logger(__name__)
 
@@ -337,6 +338,7 @@ async def extract_document_chunk_contents(
     document: KnowledgeDocument,
     settings: Settings,
     options: dict[str, Any],
+    vision_model: RegisteredModel | None = None,
 ) -> DocumentChunkDrafts:
     if (document.meta or {}).get("import_mode") == "qa":
         rows = await asyncio.to_thread(
@@ -365,6 +367,11 @@ async def extract_document_chunk_contents(
         document.filename,
         document.content_type,
         knowledge_document_path(settings, document.storage_path),
+        image_text_extractor=(
+            partial(extract_image_text, settings, vision_model)
+            if vision_model is not None
+            else None
+        ),
     )
     text = clean_text(
         text,

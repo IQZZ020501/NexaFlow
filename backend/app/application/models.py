@@ -22,6 +22,7 @@ from app.capabilities.llm.registry import (
     normalize_model_type,
     normalize_provider_credentials,
     provider_catalog_entry,
+    provider_model_types,
     stored_model_credentials,
     test_registered_model,
     validate_provider_support,
@@ -85,7 +86,7 @@ def list_provider_catalog(model_type: str | None = None) -> list[ModelProviderCa
     entries = [
         entry
         for entry in PROVIDER_CATALOG
-        if normalized_type is None or normalized_type in entry["model_types"]
+        if normalized_type is None or normalized_type in provider_model_types(entry)
     ]
     return [
         ModelProviderCatalogResponse(
@@ -93,7 +94,7 @@ def list_provider_catalog(model_type: str | None = None) -> list[ModelProviderCa
             name=entry["name"],
             provider_type=entry["provider_type"],
             icon=entry.get("icon", ""),
-            model_types=entry["model_types"],
+            model_types=provider_model_types(entry),
             default_api_base=entry["default_api_base"],
         )
         for entry in entries
@@ -102,10 +103,15 @@ def list_provider_catalog(model_type: str | None = None) -> list[ModelProviderCa
 
 def list_model_types(provider: str) -> list[ModelTypeOptionResponse]:
     entry = provider_catalog_entry(provider)
-    labels = {"LLM": "LLM", "EMBEDDING": "Embedding", "RERANKER": "Rerank"}
+    labels = {
+        "LLM": "LLM",
+        "VISION": "Vision",
+        "EMBEDDING": "Embedding",
+        "RERANKER": "Rerank",
+    }
     return [
         ModelTypeOptionResponse(key=labels[item], value=item)
-        for item in entry["model_types"]
+        for item in provider_model_types(entry)
     ]
 
 
@@ -175,7 +181,10 @@ async def create_registered_model(
     model_type = normalize_model_type(payload.model_type)
     validate_provider_support(entry, model_type)
     raw_request_params = payload.request_params
-    if "request_params" not in payload.model_fields_set and model_type == "LLM":
+    if (
+        "request_params" not in payload.model_fields_set
+        and model_type in {"LLM", "VISION"}
+    ):
         raw_request_params = DEFAULT_MODEL_REQUEST_PARAMS
     request_params = normalize_model_request_params(
         raw_request_params,
@@ -275,12 +284,16 @@ async def update_registered_model(
     if raw_request_params is None:
         if model_type != model.model_type:
             raw_request_params = (
-                DEFAULT_MODEL_REQUEST_PARAMS if model_type == "LLM" else {}
+                DEFAULT_MODEL_REQUEST_PARAMS
+                if model_type in {"LLM", "VISION"}
+                else {}
             )
         else:
             raw_request_params = (model.meta or {}).get(
                 MODEL_REQUEST_PARAMS_META_KEY,
-                DEFAULT_MODEL_REQUEST_PARAMS if model_type == "LLM" else {},
+                DEFAULT_MODEL_REQUEST_PARAMS
+                if model_type in {"LLM", "VISION"}
+                else {},
             )
     request_params = normalize_model_request_params(
         raw_request_params,

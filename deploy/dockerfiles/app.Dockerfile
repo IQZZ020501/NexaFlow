@@ -64,7 +64,6 @@ FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0
 FROM sandbox-base AS runtime
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata \
     PATH=/app/.venv/bin:$PATH
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -72,10 +71,6 @@ RUN apt-get update \
         libatomic1 \
         libcap2 \
         libstdc++6 \
-        tesseract-ocr \
-        tesseract-ocr-chi-sim \
-        tesseract-ocr-chi-tra \
-        tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=backend-builder /app/.venv /app/.venv

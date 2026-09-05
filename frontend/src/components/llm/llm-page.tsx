@@ -82,6 +82,7 @@ import {
 
 const MODEL_TYPE_LABELS: Record<string, TranslationKey> = {
   LLM: "大语言模型",
+  VISION: "视觉模型",
   EMBEDDING: "向量模型",
   RERANKER: "重排模型",
 }
@@ -514,7 +515,9 @@ export function LlmPage() {
       credential: {},
       credential_hints: {},
       request_params_json:
-        modelType === "LLM" ? DEFAULT_LLM_REQUEST_PARAMS : "{}",
+        modelType === "LLM" || modelType === "VISION"
+          ? DEFAULT_LLM_REQUEST_PARAMS
+          : "{}",
     }))
     setCredentialFields([])
     void loadBaseModels(providerCode, modelType)
@@ -529,7 +532,9 @@ export function LlmPage() {
       model_type: modelType,
       model_name: "",
       request_params_json:
-        modelType === "LLM" ? DEFAULT_LLM_REQUEST_PARAMS : "{}",
+        modelType === "LLM" || modelType === "VISION"
+          ? DEFAULT_LLM_REQUEST_PARAMS
+          : "{}",
     }))
     void loadBaseModels(providerCode, modelType)
   }
@@ -1270,7 +1275,7 @@ function ModelDialog({
               })
             )}
 
-            {form.model_type === "LLM" ? (
+            {form.model_type === "LLM" || form.model_type === "VISION" ? (
               <Field>
                 <FieldLabel htmlFor="model-request-params">
                   {t("额外请求参数")}
