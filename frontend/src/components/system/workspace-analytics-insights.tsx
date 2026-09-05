@@ -10,8 +10,6 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
-  Tooltip,
-  type TooltipContentProps,
 } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -165,39 +163,6 @@ function itemColor(kind: DistributionKind, key: string, index: number) {
   return COLORS.status[index % COLORS.status.length]
 }
 
-function DistributionTooltip({
-  active,
-  payload,
-  items,
-  kind,
-  locale,
-}: Pick<TooltipContentProps, "active" | "payload"> & {
-  items: DistributionItem[]
-  kind: DistributionKind
-  locale: string
-}) {
-  const { t } = useLanguage()
-  const item = payload[0]?.payload as DistributionItem | undefined
-  if (!active || !item) return null
-  const total = distributionTotal(items)
-  const index = items.findIndex((candidate) => candidate.key === item.key)
-
-  return (
-    <div className="flex items-center gap-2 whitespace-nowrap rounded-md border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg">
-      <span
-        aria-hidden="true"
-        className="size-2 rounded-full"
-        style={{ backgroundColor: itemColor(kind, item.key, index) }}
-      />
-      <span className="font-medium">{distributionLabel(item.key, kind, t)}</span>
-      <span className="tabular-nums">{formatNumber(item.count, locale)}</span>
-      <span className="tabular-nums text-muted-foreground">
-        {formatPercent(total ? item.count / total : null, locale)}
-      </span>
-    </div>
-  )
-}
-
 /**
  * Renders a donut chart with localized labels, percentages, and a summary value for distribution data.
  *
@@ -260,26 +225,6 @@ function DonutChart({
                   />
                 ))}
               </Pie>
-              <Tooltip
-                allowEscapeViewBox={{ x: false, y: true }}
-                cursor={false}
-                offset={10}
-                reverseDirection={{ x: false, y: false }}
-                wrapperStyle={{
-                  outline: "none",
-                  pointerEvents: "none",
-                  zIndex: 20,
-                }}
-                content={({ active, payload }) => (
-                  <DistributionTooltip
-                    active={active}
-                    payload={payload}
-                    items={items}
-                    kind={kind}
-                    locale={locale}
-                  />
-                )}
-              />
             </PieChart>
           </ResponsiveContainer>
         ) : null}
